@@ -111,6 +111,14 @@ export interface ReceivedNotice {
   readonly notifierName: string | null;
   readonly notifierEmail: string | null;
   readonly bonaFide: boolean;
+  /**
+   * When the instance erased the notifier's name, email and words — six
+   * months after the decision (#1381), or twelve after the notice arrived
+   * when no decision was recorded by then (#1923) — Unix seconds, or `null`. Once erased, the
+   * explanation is empty and the location, name and email are `null`. An
+   * instance from before #1381 sends none: `null`.
+   */
+  readonly detailsErasedAt: number | null;
   /** When the moderator recorded confirming receipt (#912), Unix seconds, or `null`. */
   readonly acknowledgedAt: number | null;
   /** When the moderator recorded the decision (#912), or `null`. */
@@ -590,6 +598,16 @@ function optionalText(value: unknown, maximum: number): string | null | undefine
   return value === null ? null : text(value, maximum);
 }
 
+/**
+ * An item a stored notice names. A display name (`rider:<athlete id>`) is not
+ * an identifier any more (#1381), but a notice that named one before then is
+ * still the instance's record of what it was told: it is read, not refused,
+ * or one such notice would take the whole queue of notices off the screen.
+ */
+const LEGACY_RIDER_ITEM = /^rider:[A-Za-z0-9_-]{1,128}$/;
+const isStoredItem = (item: string): boolean =>
+  parseModerationItem(item) !== undefined || LEGACY_RIDER_ITEM.test(item.trim());
+
 function noticeFrom(value: unknown): ReceivedNotice | undefined {
   const row = record(value);
   const explanation = text(row?.explanation, NOTICE_LIMITS.explanation);
@@ -608,6 +626,11 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     name === undefined ||
     email === undefined ||
     typeof row.bonaFide !== 'boolean' ||
+    !(
+      row.detailsErasedAt === undefined ||
+      row.detailsErasedAt === null ||
+      isTime(row.detailsErasedAt)
+    ) ||
     !(row.acknowledgedAt === null || isTime(row.acknowledgedAt)) ||
     !(row.decidedAt === null || isTime(row.decidedAt)) ||
     decision === undefined ||
@@ -615,7 +638,7 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     !(row.notifierToldAt === null || isTime(row.notifierToldAt)) ||
     !Array.isArray(items) ||
     items.length > NOTICE_LIMITS.items ||
-    !items.every((item) => typeof item === 'string' && parseModerationItem(item) !== undefined)
+    !items.every((item) => typeof item === 'string' && isStoredItem(item))
   ) {
     return undefined;
   }
@@ -629,6 +652,7 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     notifierName: name,
     notifierEmail: email,
     bonaFide: row.bonaFide,
+    detailsErasedAt: isTime(row.detailsErasedAt) ? row.detailsErasedAt : null,
     acknowledgedAt: row.acknowledgedAt,
     decidedAt: row.decidedAt,
     decision,
@@ -1024,7 +1048,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     hideItem: async (item, reason, statement) => {
       const typed = item.trim();
       const parsed = parseModerationItem(typed);
-      if (parsed === undefined || parsed.kind === 'rider') {
+      if (parsed === undefined) {
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.item };
       }
       const sentStatement = acceptedStatement(statement);

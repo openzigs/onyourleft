@@ -7,7 +7,7 @@ import manifest from '../package.json' with { type: 'json' };
 import { readConfig } from './config.ts';
 import { InstanceRefusal, startInstance } from './instance.ts';
 import { logEvent, type LogSink } from './log.ts';
-import { readServerConfig } from './server-config.ts';
+import { readDiscordTokenFile, readServerConfig } from './server-config.ts';
 
 /**
  * What `main.ts` starts, once the resolve hook is registered (#767, #780).
@@ -76,6 +76,12 @@ const server = readServerConfig(
     metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
     secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
     analysisHeartbeatMs: process.env.OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS,
+    // #2146: from a file, read once here, and never from the environment.
+    discordBotTokenFile: readDiscordTokenFile(
+      process.env.OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE,
+      (path) => readFileSync(path, 'utf8'),
+    ),
+    discordGuildId: process.env.OYL_INSTANCE_DISCORD_GUILD_ID,
   },
   availableParallelism(),
 );

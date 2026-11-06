@@ -39,7 +39,7 @@ import {
   type SideRoadLines,
   type WalkLine,
 } from './people';
-import { NO_LAND_CLASS, type LandClass, type LandClassMask } from './land-class';
+import { landClassMask, NO_LAND_CLASS, type LandClass, type LandClassMask } from './land-class';
 import { QUALITY_LADDER, REALISTIC_LADDER } from './quality';
 import { distanceToDrawnRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
@@ -55,6 +55,7 @@ import {
   type VillageStreet,
 } from './streets';
 import { ROAD_WIDTH_METRES, corridorOrigin, drawnRoadFrame } from './terrain';
+import { REMOVED_LAND_USE_KINDS, TOWN_LAND_USE_CLASSES } from './testing/land-use-fixtures';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** A road along `x = 0`: how far `(x, z)` is from it. */
@@ -816,5 +817,101 @@ describe('the mapped footways, by the land they cross — #1541, through `footwa
     within('residential', PEOPLE_PER_METRE['built-up']);
     within('park', PEOPLE_PER_METRE.park);
     within('field', PEOPLE_PER_METRE.elsewhere);
+  });
+});
+
+describe('a mapped footway on every land-use kind our archive emits — #1946', () => {
+  /**
+   * The density each kind's footways carried before #1946 dropped the dead
+   * `retail` check: a frozen record. Built-up land is read by its kind,
+   * `commercial` the busiest; a park's paths are a park's; every other class,
+   * and every kind #1630 removed (now `other`), is `elsewhere`.
+   */
+  const DENSITY_BEFORE_1946: Readonly<Record<string, keyof typeof PEOPLE_PER_METRE>> = {
+    commercial: 'commercial',
+    residential: 'built-up',
+    industrial: 'built-up',
+    school: 'built-up',
+    college: 'built-up',
+    university: 'built-up',
+    hospital: 'built-up',
+    pedestrian: 'built-up',
+    railway: 'built-up',
+    park: 'park',
+    garden: 'park',
+    golf_course: 'park',
+    nature_reserve: 'park',
+    recreation_ground: 'park',
+    cemetery: 'park',
+    dog_park: 'park',
+    playground: 'park',
+    pitch: 'park',
+    grass: 'park',
+  };
+  const expectedDensity = (kind: string): number =>
+    PEOPLE_PER_METRE[DENSITY_BEFORE_1946[kind] ?? 'elsewhere'];
+
+  const kinds = [...Object.keys(TOWN_LAND_USE_CLASSES), ...REMOVED_LAND_USE_KINDS];
+  const SPACING = 150;
+  const route = northRoute((kinds.length + 2) * SPACING, () => 40);
+  const origin = corridorOrigin(route);
+  /** Each kind's rectangle beside the road, 20 m to 120 m off it and 100 m along. */
+  const boxes = kinds.map((kind, index) => {
+    const road = drawnRoadFrame(route, origin, SPACING * (index + 1));
+    if (road === undefined) throw new Error('no road');
+    return { kind, minX: road.x + 20, maxX: road.x + 120, minZ: road.z - 50, maxZ: road.z + 50 };
+  });
+  const corridor: WorldCorridor = {
+    routeId: 'people-land-use-fixture',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -400, maxX: 400, minZ: -100, maxZ: route.totalDistance + 100 }],
+    landUse: boxes.map((box): LandUseFeature => ({
+      layer: 'landuse',
+      kind: box.kind,
+      rings: [
+        Float32Array.of(
+          box.minX,
+          box.minZ,
+          box.maxX,
+          box.minZ,
+          box.maxX,
+          box.maxZ,
+          box.minX,
+          box.maxZ,
+        ),
+      ],
+    })),
+    buildings: [],
+    // A plain footway 70 m off the road, through the middle of each rectangle.
+    paths: boxes.map((box): PathFeature => ({
+      kind: 'path',
+      kindDetail: 'footway',
+      line: Float32Array.of(box.minX + 50, box.minZ + 20, box.minX + 50, box.maxZ - 20),
+    })),
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const walks = footwayWalks(corridor, route, origin, land);
+  const lineOf = (kind: string): WalkLine => {
+    const box = boxes.find((each) => each.kind === kind);
+    if (box === undefined) throw new Error(`no rectangle for ${kind}`);
+    const found = walks.filter((line) => {
+      const x = line.points[0] as number;
+      const z = line.points[2] as number;
+      return x > box.minX && x < box.maxX && z > box.minZ && z < box.maxZ;
+    });
+    expect(found, kind).toHaveLength(1);
+    return found[0] as WalkLine;
+  };
+
+  it('carries each kind’s footway at the density it did, through the real mask and kindAt', () => {
+    for (const kind of kinds) expect(lineOf(kind).perMetre, kind).toBe(expectedDensity(kind));
+  });
+
+  it('control: the record names only kinds the archive emits, and commercial is the busiest', () => {
+    for (const named of Object.keys(DENSITY_BEFORE_1946)) expect(kinds).toContain(named);
+    expect(lineOf('commercial').perMetre).toBeGreaterThan(lineOf('residential').perMetre);
+    expect(lineOf('residential').perMetre).toBeGreaterThan(lineOf('farmland').perMetre);
   });
 });

@@ -266,7 +266,7 @@ interface BenchOptions {
   /** `two-trainers` adds a second FTMS machine, `NEO 2T`, after the KICKR (#718). */
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   /** #1240: the simulated rider, and a heart rate that answers to load. */
-  readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate' | 'startAt'>;
+  readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate' | 'startAt' | 'traits'>;
   /** #1305: the device's memory of acknowledged targets, as `main.tsx` hands it over. */
   readonly trainerTargets?: TrainerTargetMemory | undefined;
   /** #1244: the rider's instance, goals and saved workouts, as `main.tsx` hands them over. */
@@ -10513,6 +10513,141 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     await flushMicrotasks(20);
     expect(said(rig).workout.trace?.at(-1)?.target).toBe(250);
     rig.controller.dispose();
+  });
+
+  /**
+   * #1313: "a link lost and re-paired was not probed to the end" (#1310's
+   * review). The `0xFF` case above takes control away and gives it back on
+   * the same link; these two drop the LINK, on each transport's way back.
+   */
+  describe('a link lost and brought back, to the end — #1313', () => {
+    const rideOn = async (rig: Bench, forSeconds: number): Promise<void> => {
+      for (let second = 0; second < forSeconds; second += 1) {
+        await ride(rig, 1);
+        await flushMicrotasks(20);
+      }
+    };
+
+    /** 150 W for 6 s, then 250 W, ridden into the second block. */
+    const intoTheSecondBlock = async (rig: Bench): Promise<void> => {
+      rig.controller.startWorkout(
+        savedWorkout([
+          { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+          { kind: 'steady', seconds: seconds(600), target: thresholdShare(1) },
+        ]),
+        watts(250),
+      );
+      await rideOn(rig, 9);
+      expect(said(rig).strip.startsWith('Target 250 W · ')).toBe(true);
+    };
+
+    const states = (rig: Bench) => rig.controller.getSnapshot().sensors.map((each) => each.state);
+
+    it('the shell brings the link back by itself: "No target" until the rider takes control and the trainer acknowledges', async () => {
+      // The Android shell's transport reconnects with no gesture
+      // (`apps/mobile/src/ble/transport.ts`); the simulator does the same
+      // with this trait, and refuses `recoverAfter` without it.
+      const rig = await riding({ simulator: { traits: { canReconnectWithoutUserGesture: true } } });
+      await intoTheSecondBlock(rig);
+      const droppedAt = said(rig).workout.elapsedSeconds;
+
+      rig.bench.device(TRAINER).script({ kind: 'disconnect', recoverAfter: seconds(3) });
+      await rideOn(rig, 1);
+      const dropped = said(rig);
+      // The apparatus: the link is down, and the machine still holds 250 W.
+      expect(states(rig)).toEqual(['reconnecting']);
+      expect(rig.controller.getSnapshot().trainer.lost).toBe('link-lost');
+      expect(rig.targetOnTheTrainer()).toBe(250);
+      expect(dropped.workout.hasControl).toBe(false);
+      // The grid shows no power from a trainer whose link is down, and the
+      // graph says the same: no power, not the last one read.
+      expect(dropped.livePower).toBeUndefined();
+      expect(dropped.caption).toBe('No target · No power reading');
+      expect(dropped.workout.trace?.at(-1)?.power).toBeUndefined();
+      expect(dropped.strip.startsWith('No target · ')).toBe(true);
+      expect(dropped.marked).toBeUndefined();
+
+      // Back by itself. The link is up and control is not: FTMS ends control
+      // with the connection, and nothing here asks for it again unbidden.
+      await rideOn(rig, 4);
+      const back = said(rig);
+      expect(states(rig)).toEqual(['connected']);
+      expect(back.workout.status).toBe('running');
+      expect(back.workout.hasControl).toBe(false);
+      expect(back.caption).toBe(`No target · You ${String(back.livePower)} W`);
+      expect(back.strip.startsWith('No target · ')).toBe(true);
+
+      // The rider takes control back. The session still has the 250 W it
+      // wrote before the drop; nothing has acknowledged it since.
+      await rig.controller.requestTrainerControl();
+      await flushMicrotasks(20);
+      const retaken = said(rig);
+      expect(retaken.workout.hasControl).toBe(true);
+      expect(retaken.workout.holdingWatts).toBe(250);
+      expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
+      expect(retaken.caption).toBe(`No target · You ${String(retaken.livePower)} W`);
+      expect(retaken.strip.startsWith('No target · ')).toBe(true);
+      expect(retaken.marked).toBeUndefined();
+
+      // The next tick writes the block's target again and it is acknowledged.
+      const writes = rig.written.length;
+      await rideOn(rig, 1);
+      expect(rig.written.slice(writes).filter((bytes) => bytes[0] === 0x05)).toEqual([
+        [0x05, 250, 0],
+      ]);
+      expect(said(rig).strip.startsWith('Target 250 W · ')).toBe(true);
+      await rideOn(rig, 1);
+      const confirmed = said(rig);
+      expect(confirmed.caption).toBe(`Target 250 W · You ${String(confirmed.livePower)} W`);
+      const trace = confirmed.workout.trace ?? [];
+      expect(trace.at(-1)?.target).toBe(250);
+      // And no second from the drop to the write's own tick was drawn as a
+      // target the trainer held.
+      const unvouched = trace.filter(
+        (sample) => sample.at > droppedAt && sample.at < trace.at(-1)!.at,
+      );
+      expect(unvouched.length).toBeGreaterThanOrEqual(5);
+      expect(unvouched.filter((sample) => sample.target !== undefined)).toEqual([]);
+      rig.controller.dispose();
+    });
+
+    it('a browser cannot bring it back: the Forget that re-pairing needs ends the workout, and nothing drives the trainer paired again', async () => {
+      // Web Bluetooth has no silent reconnect: the Devices screen says
+      // "forget it and pair it again" (`SensorPairing.tsx`), and a Forget
+      // ends a running workout (#659).
+      const rig = await riding();
+      await intoTheSecondBlock(rig);
+
+      rig.bench.device(TRAINER).script({ kind: 'disconnect' });
+      await rideOn(rig, 2);
+      const dropped = said(rig);
+      expect(states(rig)).toEqual(['disconnected']);
+      expect(dropped.workout.hasControl).toBe(false);
+      expect(dropped.livePower).toBeUndefined();
+      expect(dropped.caption).toBe('No target · No power reading');
+      expect(dropped.strip.startsWith('No target · ')).toBe(true);
+
+      const id = rig.controller.getSnapshot().sensors[0]!.id;
+      await rig.controller.unpair(id);
+      await flushMicrotasks(20);
+      // No graph outlives the workout it drew; the ride goes on recording.
+      expect(rig.controller.getSnapshot().workout).toBeUndefined();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+
+      const writes = rig.written.length;
+      await rig.controller.pair('trainer');
+      await rig.controller.requestTrainerControl();
+      await flushMicrotasks(20);
+      await rideOn(rig, 3);
+      // The apparatus: the new pairing is written to (its Request Control).
+      expect(states(rig)).toEqual(['connected']);
+      expect(rig.written.slice(writes).map((bytes) => bytes[0])).toContain(0x00);
+      expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
+      // The workout did not come back with the trainer, so nothing wrote it a target.
+      expect(rig.controller.getSnapshot().workout).toBeUndefined();
+      expect(rig.written.slice(writes).filter((bytes) => bytes[0] === 0x05)).toEqual([]);
+      rig.controller.dispose();
+    });
   });
 
   it('a block whose target is not sent is drawn as not sent — #1305', async () => {

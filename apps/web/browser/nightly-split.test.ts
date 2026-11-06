@@ -12,7 +12,8 @@
  * this is the browser half and the workflows.
  *
  * Since #1285 the required check is one job over several shards (five since
- * #1720, which split the browser gate in three by spec file), and the same
+ * #1720, which split the browser gate in three by spec file; six since #2154,
+ * which split the Vitest suite in two by project), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -22,7 +23,7 @@
  * assertions are about which commands a file names, which text answers.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +44,47 @@ const ROOT = join(BROWSER, '..', '..', '..');
 const read = (...path: string[]): string => readFileSync(join(...path), 'utf8');
 
 const SPECS = readdirSync(BROWSER).filter((name) => name.endsWith('.browser.spec.ts'));
+
+/** A workflow, or a job of one, with every comment line taken out: what runs, not what is said of it. */
+const uncommented = (text: string): string => text.replace(/^\s*#.*\n/gm, '');
+
+/**
+ * Every command a workflow runs, one a line: each `run:` value, and each line
+ * of a `run: |` block — #2209. Comment lines are out first.
+ */
+function runLines(workflow: string): string[] {
+  const lines = uncommented(workflow).split('\n');
+  const out: string[] = [];
+  for (let at = 0; at < lines.length; at += 1) {
+    const match = /^( *)(?:- )?run: (.*)$/.exec(lines[at] ?? '');
+    if (match === null) continue;
+    const value = String(match[2]).trim();
+    if (!/^[|>][-+]?$/.test(value)) {
+      out.push(value);
+      continue;
+    }
+    const indent = String(match[1]).length;
+    while (at + 1 < lines.length) {
+      const line = lines[at + 1] ?? '';
+      if (line.trim() !== '' && line.length - line.trimStart().length <= indent) break;
+      at += 1;
+      if (line.trim() !== '') out.push(line.trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * A command that asks apt for something — #2207, #2209: Playwright's
+ * `--with-deps` or `install-deps`, or `apt` or `apt-get` in any spelling
+ * (`sudo apt -y install …`, `apt update`). Not a path through `/etc/apt/`,
+ * which the step that drops the Chrome source names.
+ */
+const ASKS_APT = /--with-deps|\binstall-deps\b|\bapt(?:-get)?\b(?!\/)/;
+
+/** Each browser install: the headless shell, with no `--with-deps` (#2207; nightly and demo, #2209). */
+const BROWSER_INSTALL =
+  'pnpm --filter @onyourleft/web exec playwright install --only-shell chromium';
 
 type Project = NonNullable<typeof config.projects>[number];
 const PROJECTS: readonly Project[] = config.projects ?? [];
@@ -116,7 +158,7 @@ function taggedBodies(): Map<string, string> {
  * `jobs:`, which is how both workflows are written.
  */
 function jobsOf(workflow: string): Map<string, string> {
-  const code = workflow.replace(/^\s*#.*\n/gm, '');
+  const code = uncommented(workflow);
   const body = code.slice(code.indexOf('\njobs:\n') + '\njobs:\n'.length);
   const starts = [...body.matchAll(/^ {2}([A-Za-z_][\w-]*):\n/gm)];
   const jobs = new Map<string, string>();
@@ -191,6 +233,18 @@ function measuredShards(table = 'shard-measurements'): (column: string) => numbe
  */
 const AFTER_GATE_S = 4;
 
+/**
+ * The scripts CI runs the required Vitest run as, one per Vitest shard —
+ * #2154. `test:required:shard-1`, `test:required:shard-2`, …, in their order,
+ * from the root package; `check:test-split` holds what each selects.
+ */
+function requiredShardScripts(): string[] {
+  const { scripts } = JSON.parse(read(ROOT, 'package.json')) as { scripts: Record<string, string> };
+  return Object.keys(scripts)
+    .filter((name) => /^test:required:shard-\d+$/.test(name))
+    .sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+}
+
 /** The web package's scripts. */
 const webScripts = (): Record<string, string> =>
   (JSON.parse(read(BROWSER, '..', 'package.json')) as { scripts: Record<string, string> }).scripts;
@@ -247,6 +301,52 @@ const LOADS_OF_THE_PAGE = /\b(?:ride|ridden)\(\s*page\b/g;
  * `/…/flags` literal as written, anything else as a case-insensitive pattern,
  * tested against the file's absolute path.
  */
+/** One browser launch written in a source file: which browser, and its options' text. */
+interface Launch {
+  readonly file: string;
+  readonly browser: string;
+  readonly options: string;
+}
+
+/**
+ * Every `chromium.launch(…)`, `launchPersistentContext(…)` or `launchServer(…)`
+ * — and the same of `firefox` or `webkit` — in the `.ts` files under `dirs`,
+ * with the text of its arguments to the matching parenthesis — #2209.
+ */
+function launchesIn(dirs: readonly string[]): Launch[] {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (name === 'node_modules' || name === 'dist') continue;
+      if (statSync(path).isDirectory()) walk(path);
+      else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) files.push(path);
+    }
+  };
+  for (const dir of dirs) walk(dir);
+  const launches: Launch[] = [];
+  for (const file of files) {
+    const source = read(file);
+    for (const match of source.matchAll(
+      /\b(chromium|firefox|webkit)\.(?:launch|launchPersistentContext|launchServer)\(/g,
+    )) {
+      let depth = 1;
+      let at = match.index + match[0].length;
+      while (at < source.length && depth > 0) {
+        if (source[at] === '(') depth += 1;
+        else if (source[at] === ')') depth -= 1;
+        at += 1;
+      }
+      launches.push({
+        file,
+        browser: String(match[1]),
+        options: source.slice(match.index + match[0].length, at - 1),
+      });
+    }
+  }
+  return launches;
+}
+
 function selects(filter: string, spec: string): boolean {
   const literal = /^\/(.*)\/([gi]*)$/.exec(filter);
   const pattern = literal
@@ -504,6 +604,33 @@ describe('the browser gate is split into a required run and a nightly one — #8
   });
 });
 
+describe('the nightly and demo workflows install the browser as the gate does — #2209', () => {
+  const nightly = read(ROOT, '.github', 'workflows', 'nightly.yml');
+  const demo = read(ROOT, '.github', 'workflows', 'demo-video.yml');
+
+  it('installs the headless shell in every nightly job that runs a browser, and asks apt for nothing', () => {
+    // Five installs, each `--with-deps` until #2209: the slow Ubuntu mirror
+    // #2207 measured could stall any of them, and their fonts made a nightly
+    // frame differ from a required one.
+    const installs = runLines(nightly).filter((line) => line.includes('playwright install'));
+    expect(installs.length).toBeGreaterThanOrEqual(5);
+    for (const install of installs) expect(install).toBe(BROWSER_INSTALL);
+    expect(runLines(nightly).filter((line) => ASKS_APT.test(line))).toEqual([]);
+  });
+
+  it('installs the headless shell for the demo video, and asks apt for ffmpeg alone', () => {
+    const installs = runLines(demo).filter((line) => line.includes('playwright install'));
+    expect(installs).toHaveLength(2);
+    for (const install of installs) expect(install).toBe(BROWSER_INSTALL);
+    // ffmpeg is not on the image, and Playwright's own has no libx264: the
+    // one thing apt is asked for, with no recommended packages (no fonts).
+    expect([...new Set(runLines(demo).filter((line) => ASKS_APT.test(line)))].sort()).toEqual([
+      'sudo apt-get install --yes --no-install-recommends ffmpeg',
+      'sudo apt-get update',
+    ]);
+  });
+});
+
 describe('the nightly workflow runs what left the required job, and cannot pass for it — #866', () => {
   const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
   const nightly = read(ROOT, '.github', 'workflows', 'nightly.yml');
@@ -646,7 +773,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     const commands = runCommands(rules);
     expect(commands).toEqual(
       expect.arrayContaining([
-        'pnpm run test:required',
+        ...requiredShardScripts().map((name) => `pnpm run ${name}`),
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3',
@@ -733,6 +860,14 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(report).toContain('${steps:-(the steps could not be read; open the run)}');
   });
 
+  it('does not run on the merge queue, where it could not block and would report as a red night — #2198', () => {
+    // Not a required check, so a queue run of it decides nothing; and its
+    // `report` job runs on every event but `pull_request`, so a red queue run
+    // would open the nightly issue for a pull request that has not merged.
+    expect(nightly).not.toMatch(/^ {2}merge_group:/m);
+    expect(nightly).toMatch(/^ {2}pull_request:\s*$/m);
+  });
+
   it('reports under a name that is not the required check, on a schedule', () => {
     expect(nightly).not.toMatch(/^\s*name: Repository rules\s*$/m);
     expect(nightly).toMatch(/^\s+schedule:\s*$/m);
@@ -787,6 +922,27 @@ describe('the required check is one job over every shard — #1285', () => {
     expect(on).not.toMatch(/paths(-ignore)?:|branches-ignore:/);
   });
 
+  it('triggers on the merge queue too, and runs there as it does on a pull request — #2198', () => {
+    // The queue merges only once the required check has reported on its own
+    // ref. Without the event it never reports there, and every queued pull
+    // request waits until the queue times it out. Nothing under it either: a
+    // `branches:` filter that left `main` out is the same failure, and the
+    // bare event cannot be narrowed by mistake.
+    const on = /^on:\n((?: {2}.+\n| *#.*\n|\n)+)/m.exec(workflow)?.[1] ?? '';
+    expect(on).toMatch(/^ {2}merge_group:\s*$/m);
+    expect(on).not.toMatch(/^ {2}merge_group:\s*\n {4}\S/m);
+    // A queue run is never cancelled by the next one: cancelled, the required
+    // check fails and the pull request leaves the queue.
+    expect(workflow).toMatch(
+      /^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+    );
+    // Under `merge_group` the pull request's payload is absent, so a step that
+    // read it would run on an empty value in the queue alone.
+    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toMatch(
+      /github\.event\.pull_request|github\.(base|head)_ref|GITHUB_(BASE|HEAD)_REF/,
+    );
+  });
+
   it('waits for every shard: a job it does not need cannot block a merge', () => {
     const needs = (jobField(aggregate, 'needs') ?? '')
       .replace(/^\[|\]$/g, '')
@@ -810,11 +966,10 @@ describe('the required check is one job over every shard — #1285', () => {
     );
     // On a job, this reports a failure to `needs` as success; on a step, it
     // turns a red step green. Neither belongs in a gate.
-    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toContain('continue-on-error');
+    expect(uncommented(workflow)).not.toContain('continue-on-error');
     // The verdict step must run on every event and its exit must reach the
     // job. A step-level `if:` or a `shell:` override (`... || true`) switches
     // it off with every shard red, and the check would pass.
-    const uncommented = (text: string): string => text.replace(/^\s*#.*\n/gm, '');
     const steps = uncommented(aggregate)
       .split(/^ {6}- /m)
       .slice(1);
@@ -875,8 +1030,10 @@ describe('the required check is one job over every shard — #1285', () => {
       'bash scripts/check-capacitor-generated.test.sh',
       'bash scripts/check-third-party-notices.test.sh',
       'pnpm run check:notices',
-      'pnpm run test:required',
-      'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium',
+      // #2154: the one Vitest command is a command per Vitest shard.
+      ...requiredShardScripts().map((name) => `pnpm run ${name}`),
+      // #2207: the headless shell and nothing from apt, @see the case below.
+      BROWSER_INSTALL,
       // #1362: the one gate command is a command per browser shard.
       ...shardScripts().map(([name]) => gateCommand(name)),
     ];
@@ -893,12 +1050,94 @@ describe('the required check is one job over every shard — #1285', () => {
             : 1;
       expect(where, command).toHaveLength(expected);
     }
-    // The Vitest halves `check:test-split` reasons about share a runner with
-    // nothing that would slow a case past its timeout: the same shard, and no
-    // concurrent step in it.
-    const vitest = [...ran].filter(([, commands]) => commands.includes('pnpm run test:required'));
-    expect(vitest[0]?.[1]).toContain('pnpm run test:a11y');
-    expect(vitest[0]?.[1].join('\n')).not.toContain('run-concurrently');
+    // The Vitest runs `check:test-split` reasons about share a runner with
+    // nothing that would slow a case past its timeout: no concurrent step and
+    // no browser in a Vitest shard, one part of the required run to a shard,
+    // and the accessibility gate beside one of them (#2154).
+    const parts = requiredShardScripts().map((name) => `pnpm run ${name}`);
+    expect(parts.length, 'parts of the required run').toBeGreaterThanOrEqual(2);
+    const vitest = [...ran].filter(([, commands]) => parts.some((part) => commands.includes(part)));
+    expect(vitest).toHaveLength(parts.length);
+    for (const [id, commands] of vitest) {
+      expect(
+        commands.filter((command) => parts.includes(command)),
+        id,
+      ).toHaveLength(1);
+      expect(commands.join('\n'), id).not.toMatch(/run-concurrently|playwright|test:browser/);
+    }
+    expect(vitest.filter(([, commands]) => commands.includes('pnpm run test:a11y'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('installs only the browser the gate launches, and nothing from Ubuntu’s archives — #2207', () => {
+    // Every timed-out `Install the pinned Chromium` (three on 2026-11-05) spent
+    // its ten minutes in apt: `--with-deps` downloads 21.9 MB of fonts the
+    // runner image lacks from its Ubuntu mirror, at 30 to 40 kB/s on a bad
+    // day, while Playwright's CDN served the browsers in about 6 s. The image
+    // already carries every shared library a headless Chromium needs, so
+    // the step asks apt for nothing, and a library the image ever drops is
+    // Playwright's "Host system is missing dependencies" at launch, red and
+    // named. docs/agents/ci.md section 4c "The browser install -- #2207".
+    const browserShards = [...shards].filter(([, job]) => job.includes('playwright'));
+    expect(browserShards).toHaveLength(shardScripts().length);
+    for (const [id, job] of browserShards) {
+      expect(
+        commandsOf(job).filter((command) => command.includes('playwright install')),
+        id,
+      ).toEqual([BROWSER_INSTALL]);
+    }
+    expect(runLines(workflow).filter((line) => ASKS_APT.test(line))).toEqual([]);
+  });
+
+  it('reads every spelling of asking apt, and not a path through /etc/apt — #2209', () => {
+    for (const asks of [
+      'pnpm exec playwright install --with-deps chromium',
+      'pnpm exec playwright install-deps chromium',
+      'sudo apt-get install --yes fonts-liberation',
+      'sudo apt -y install fonts-liberation',
+      'sudo apt update',
+      'apt install ffmpeg',
+      '/usr/bin/apt install ffmpeg',
+    ]) {
+      expect(ASKS_APT.test(asks), asks).toBe(true);
+    }
+    for (const not of [
+      'sudo rm -f /etc/apt/sources.list.d/google-chrome.list \\',
+      BROWSER_INSTALL,
+      'pnpm run adapt',
+    ]) {
+      expect(ASKS_APT.test(not), not).toBe(false);
+    }
+    // A `run: |` block is read line by line, and a comment is not a command.
+    expect(
+      runLines(
+        '      - name: x\n        run: |\n          # apt update\n          sudo apt update\n',
+      ),
+    ).toEqual(['sudo apt update']);
+  });
+
+  it('launches only the browser the installs fetch: no channel, no headed run, in the config or in any spec or tool — #2207, #2209', () => {
+    // `--only-shell` is the browser the gate launches: a headless run with no
+    // `channel` is Playwright's headless shell. A project given a channel or a
+    // headed run would launch a browser this step did not install.
+    for (const use of [config.use, ...PROJECTS.map((project) => project.use)]) {
+      expect(use?.channel).toBeUndefined();
+      expect(use?.headless).not.toBe(false);
+    }
+    // #2209: and a launch a spec or a tool makes for itself, which no project
+    // reaches: `offline.browser.spec.ts`' persistent contexts, and the demo's
+    // `render-video.ts`. Every one passes its options inline.
+    const launches = launchesIn([BROWSER, join(BROWSER, '..', 'tools')]);
+    const where = launches.map((launch) => launch.file);
+    expect(where.filter((file) => file.endsWith('offline.browser.spec.ts'))).toHaveLength(2);
+    expect(where.filter((file) => file.endsWith('render-video.ts'))).toHaveLength(1);
+    for (const launch of launches) {
+      expect(launch.browser, launch.file).toBe('chromium');
+      expect(launch.options, launch.file).not.toMatch(
+        /\bchannel\s*:|\bheadless\s*:\s*false|\bexecutablePath\b/,
+      );
+    }
   });
 
   it('runs every job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {

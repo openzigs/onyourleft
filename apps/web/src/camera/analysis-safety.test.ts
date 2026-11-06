@@ -291,9 +291,9 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
   it('still reads a named import from the barrel as only the module that declares it (#1184)', () => {
     // The control: `'whole'` is for the spellings that name no declaration, and
     // a named import of a template is not an import of `model-answer`.
-    const source = "import { ANALYSIS_TEMPLATE_V1 } from '@onyourleft/analysis';\n";
+    const source = "import { ANALYSIS_AGENT_TEMPLATE_V1 } from '@onyourleft/analysis';\n";
     expect(importsIn(source, ANALYSIS_MODULE, 'camera/planted.ts')).toBe(false);
-    expect(importsIn(source, /(?:^|\/)template-v1$/, 'camera/planted.ts')).toBe(true);
+    expect(importsIn(source, /(?:^|\/)agent-v1$/, 'camera/planted.ts')).toBe(true);
   });
 
   it('reads an import after a regex literal holding `/*` (#864)', () => {

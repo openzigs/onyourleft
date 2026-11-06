@@ -51,10 +51,18 @@
  * Each frame's time is the timestamp {@link FrameScheduler.request} hands its
  * callback: `requestAnimationFrame`'s in a browser, a stepped number in a test
  * and in the video render (#1655).
+ *
+ * ## Stepped — the video render, #1655
+ *
+ * Given `stepped`, every tick draws, and no tick's time reaches the quality
+ * ladder: a tick is the render's step (`render-clock.ts`), not a measurement of
+ * the device, and a ladder fed it would change the world at whatever frame
+ * rate the render was asked for. So a render is drawn at the rung the stage
+ * starts on, the realistic world's top unless it could not load.
  */
 
 import type { GameRenderer, GameView, SceneFrame } from '../game/port';
-import { FramePacer } from '../game/frame-pacer';
+import { FramePacer, type PacedFrame } from '../game/frame-pacer';
 import {
   INITIAL_QUALITY,
   INITIAL_REALISTIC_QUALITY,
@@ -98,6 +106,12 @@ export interface DemoSnapshot {
   readonly distance: number;
   /** What the page says about the world, if anything. */
   readonly notice: string | undefined;
+  /**
+   * #1654: whether the realistic world's files are still arriving — from the
+   * stage's start until their load settles, loaded or not. The page shows a
+   * loading line while it is true (the owner's ruling of 2026-10-24 on #1643).
+   */
+  readonly realisticLoading: boolean;
   /**
    * #1652: the baked route the run was given and its corridor's feature
    * counts, or `undefined` on the synthetic road. The browser gate checks the
@@ -179,7 +193,12 @@ export interface DemoStageOptions {
    * §`decorationBeltOf`'s, in the demo (#1653).
    */
   readonly drawnDecorations?: ((view: GameView) => number) | undefined;
+  /** #1655: the video render's clock drives the stage — the header's §"Stepped". */
+  readonly stepped?: boolean | undefined;
 }
+
+/** What a stepped stage makes of every tick: drawn, and no sample for the ladder. */
+const STEPPED_FRAME: PacedFrame = { draw: true, frameMs: undefined };
 
 /** FNV-1a over a frame's scenery kinds: changes when the countryside does. */
 function sceneryDigest(frame: SceneFrame): number {
@@ -230,6 +249,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   const showcase = options.showcase;
   let pass = 1;
   let realisticLoaded = false;
+  let realisticLoading = true;
   let realisticLeft = false;
   let appliedWorld: 'stylised' | 'realistic' | undefined;
   let appliedDate: string | undefined;
@@ -296,6 +316,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
         framesDrawn,
         distance: ride.state.ride.distance,
         notice,
+        realisticLoading,
         mapData: player.mapData,
         mappedBuildings,
         skipped: shown?.skipped ?? [],
@@ -337,7 +358,8 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       pass += 1;
     }
     applyShowcase();
-    const paced = pacer.frame(nowMs, worldRung(quality).frameCap);
+    const paced =
+      options.stepped === true ? STEPPED_FRAME : pacer.frame(nowMs, worldRung(quality).frameCap);
     if (paced.frameMs !== undefined && paced.frameMs <= LONGEST_FRAME_MS) {
       const next = nextWorldQuality(quality, { frameMs: paced.frameMs });
       if (next.realistic !== quality.realistic || next.quality.level !== quality.quality.level) {
@@ -386,15 +408,22 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
 
   void renderer.loadRealisticWorld().then((outcome) => {
     realisticLoaded = outcome.loaded;
+    realisticLoading = false;
+    // The page may have gone while the files arrived.
+    if (destroyed) return;
     // #1653: a showcase in its stylised moment is told only that the world failed.
-    if (!destroyed && showcase !== undefined && !quality.realistic) {
+    if (showcase !== undefined && !quality.realistic) {
       if (!outcome.loaded) notice = realisticWorldNotice(outcome);
       redraw();
       publish();
       return;
     }
-    // The page may have gone, or the ladder left realism, while the files arrived.
-    if (destroyed || !quality.realistic) return;
+    // The ladder may have left realism while the files arrived: the loading
+    // line still goes (#1654), on a paused demo too.
+    if (!quality.realistic) {
+      publish();
+      return;
+    }
     if (outcome.loaded) {
       view.setQuality(worldRung(quality));
     } else {

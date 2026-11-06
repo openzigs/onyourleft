@@ -813,6 +813,30 @@ export function bridgeParts(
     const ground = drawnRoadPosition(profile, origin, wrapped);
     return { x: ground.x, y: elevationAt(profile, wrapped) - origin.elevation, z: ground.z };
   };
+  /**
+   * The top of a block under the road from odometer `from` to `to`: the
+   * straight line between the road at each end, 3 cm down, and sunk by however
+   * far it would otherwise stand over the road DRAWN anywhere between them.
+   *
+   * ⚠️ **The drawn road, not the route's height** — #1997. Until then this
+   * sank a piece by how far its chord stood over the route's own height at
+   * its middle (#501), but the ribbon's rows are not on the profile's own
+   * corners: over one that crests, the DRAWN road is a chord below the
+   * route's height, and the block stood over it — 12 cm on a rough 20 %
+   * valley side (`route-fixtures-testing.ts` §`steepValleyRoute(0.3)`) with
+   * the bridge past the corridor's two-metre rows, where they are a grid step
+   * apart. The rows inside a piece cover what #501's middle did, so it is one
+   * rule rather than two.
+   */
+  const under = (from: number, to: number): BlockTop => {
+    const near = roadAt(from);
+    const far = roadAt(to);
+    const sink = sinkUnderDrawnRoad(corridor.centre, from, near.y, to, far.y);
+    return {
+      near: { x: near.x, y: near.y - sink - 0.03, z: near.z },
+      far: { x: far.x, y: far.y - sink - 0.03, z: far.z },
+    };
+  };
   for (const crossing of ways.crossings) {
     // Once, for the reason `waterSurface` gives: every lap's bridge is the
     // same bridge, and `roadAt` wraps an odometer onto it.
@@ -870,36 +894,22 @@ export function bridgeParts(
         // straight between its two ends; where the valley's slope meets its
         // floor it spans the bend, and its middle stood above the road there —
         // 1.25 cm over the 5 % valley's floor, with the 3 cm clearance spent.
-        // So a piece sinks by however far its chord stands over the road at
-        // its own middle.
-        const sink = Math.max(
-          0,
-          mid.y - roadAt(centre - BRIDGE_HALF_SPAN_METRES + (piece + 0.5) * step).y,
+        // `under` sinks it by however far it stands over the road between.
+        const slab = hung(
+          under(
+            centre - BRIDGE_HALF_SPAN_METRES + piece * step,
+            centre - BRIDGE_HALF_SPAN_METRES + (piece + 1) * step,
+          ),
+          ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 2,
+          DECK_DEPTH_METRES,
         );
-        parts.push({
-          x: mid.x,
-          y: mid.y - sink - DECK_DEPTH_METRES / 2 - 0.03,
-          z: mid.z,
-          axisX: ax,
-          axisY: ay,
-          axisZ: az,
-          length,
-          width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 2,
-          height: DECK_DEPTH_METRES,
-        });
+        if (slab !== undefined) parts.push(slab);
       }
       const bed = crossing.waterElevation - STREAM_DEPTH_METRES - origin.elevation;
+      const bottom = bed - 1;
+      /** From the top of a block under the road down into the bed, at its middle. */
+      const toBed = (top: BlockTop): number => (top.near.y + top.far.y) / 2 - bottom;
       for (const end of [-1, 1]) {
-        const at = roadAt(centre + end * BRIDGE_HALF_SPAN_METRES);
-        const before = roadAt(centre + end * BRIDGE_HALF_SPAN_METRES - 1);
-        const after = roadAt(centre + end * BRIDGE_HALF_SPAN_METRES + 1);
-        const dx = after.x - before.x;
-        const dy = after.y - before.y;
-        const dz = after.z - before.z;
-        const run = Math.hypot(dx, dy, dz);
-        if (!(Math.hypot(dx, dz) > 0)) continue;
-        const top = at.y - 0.03;
-        const bottom = bed - 1;
         // ⚠️ **Along the road's own slope, not level** — #501. This box was
         // level until then, three metres long under a road sloping down into
         // the valley, so its top stood above the road over the downhill half
@@ -907,17 +917,13 @@ export function bridgeParts(
         // stone face through tarmac is the *"light seam across the road where
         // the bridge deck starts"* validation 0002 Z10 found on the tablet.
         // `waterways.test.ts` §"the road is continuous across the bridge".
-        parts.push({
-          x: at.x,
-          y: (top + bottom) / 2,
-          z: at.z,
-          axisX: dx / run,
-          axisY: dy / run,
-          axisZ: dz / run,
-          length: 3,
-          width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4,
-          height: top - bottom,
-        });
+        const abutment = centre + end * BRIDGE_HALF_SPAN_METRES;
+        const top = under(
+          abutment - ABUTMENT_HALF_LENGTH_METRES,
+          abutment + ABUTMENT_HALF_LENGTH_METRES,
+        );
+        const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
+        if (block !== undefined) parts.push(block);
         // ⚠️ **The approach: solid under the road from the abutment to where
         // the bank meets it.** #468's review, B2. The channel lowers the ground
         // at the road's edge for {@link CHANNEL_BANK_METRES} either side of the
@@ -930,34 +936,12 @@ export function bridgeParts(
         const approach = CHANNEL_BANK_METRES - BRIDGE_HALF_SPAN_METRES;
         const steps = Math.ceil(approach / BRIDGE_PIECE_METRES);
         for (let piece = 0; piece < steps; piece += 1) {
-          const near = roadAt(
+          const top = under(
             centre + end * (BRIDGE_HALF_SPAN_METRES + (piece * approach) / steps),
-          );
-          const far = roadAt(
             centre + end * (BRIDGE_HALF_SPAN_METRES + ((piece + 1) * approach) / steps),
           );
-          const ex = far.x - near.x;
-          const ey = far.y - near.y;
-          const ez = far.z - near.z;
-          const length = Math.hypot(ex, ey, ez);
-          if (!(length > 0)) continue;
-          // Sunk under the road at its middle, as the deck's pieces are.
-          const middle = Math.min(
-            (near.y + far.y) / 2,
-            roadAt(centre + end * (BRIDGE_HALF_SPAN_METRES + ((piece + 0.5) * approach) / steps)).y,
-          );
-          const height = middle - 0.03 - bottom;
-          parts.push({
-            x: (near.x + far.x) / 2,
-            y: middle - 0.03 - height / 2,
-            z: (near.z + far.z) / 2,
-            axisX: ex / length,
-            axisY: ey / length,
-            axisZ: ez / length,
-            length,
-            width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4,
-            height,
-          });
+          const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
+          if (block !== undefined) parts.push(block);
         }
       }
       if (parts.length >= MAXIMUM_BRIDGE_PARTS) {
@@ -966,6 +950,90 @@ export function bridgeParts(
     }
   }
   return parts;
+}
+
+/** How long an abutment is along the road, either side of its middle: 1.5 m. */
+const ABUTMENT_HALF_LENGTH_METRES = 1.5;
+
+/** The line a block's top face runs along, from one end of it to the other. */
+interface BlockTop {
+  readonly near: { readonly x: number; readonly y: number; readonly z: number };
+  readonly far: { readonly x: number; readonly y: number; readonly z: number };
+}
+
+/**
+ * A block hung from its top: the top face runs straight along `top`, `width`
+ * across, and the block's bottom face lies `drop` metres below the top face's
+ * middle, square to the face (so plumb below that middle it is `drop` / cos² θ).
+ * `undefined` where the line has no length in plan.
+ *
+ * ⚠️ **Hung from the top, not centred on the middle** — #1997.
+ * `three-renderer.ts` §`BridgeBelt.update` stands a part's `height` square to
+ * its sloping axis, not plumb, so a block centred under the road's middle on a
+ * grade θ has its top face h/2·(sec θ − 1) higher than its middle says. That
+ * is nothing on a 0.8 m deck slab and 8.3 cm on an approach piece, 8.4 m from
+ * the road to the bed, on a 20 % valley side — 5.3 cm over the road once the
+ * 3 cm under it is spent: the stone slab the owner rode through on the tablet.
+ * So the middle is found from the top face, back along the block's own up.
+ */
+function hung(top: BlockTop, width: number, drop: number): BridgePart | undefined {
+  const dx = top.far.x - top.near.x;
+  const dy = top.far.y - top.near.y;
+  const dz = top.far.z - top.near.z;
+  const length = Math.hypot(dx, dy, dz);
+  const flat = Math.hypot(dx, dz);
+  if (!(flat > 0)) return undefined;
+  const cos = flat / length;
+  const sin = dy / length;
+  const height = drop / cos;
+  // The renderer's up, (−sin θ along the road in plan, cos θ), times −h/2.
+  const back = (sin * height) / 2 / flat;
+  return {
+    x: (top.near.x + top.far.x) / 2 + dx * back,
+    y: (top.near.y + top.far.y) / 2 - (cos * height) / 2,
+    z: (top.near.z + top.far.z) / 2 + dz * back,
+    axisX: dx / length,
+    axisY: dy / length,
+    axisZ: dz / length,
+    length,
+    width,
+    height,
+  };
+}
+
+/**
+ * How far the straight line from height `fromY` at odometer `from` to `toY` at
+ * `to` must sink to stand nowhere above the road DRAWN between them — #1997:
+ * the corridor's rows, joined straight, as `terrain.ts` lays the ribbon. The
+ * line and the ribbon are both straight between rows, so the rows inside and
+ * the ribbon at the two ends are every place the line can be highest over it.
+ * Zero where the corridor does not reach.
+ */
+export function sinkUnderDrawnRoad(
+  rows: readonly CorridorPoint[],
+  from: number,
+  fromY: number,
+  to: number,
+  toY: number,
+): number {
+  const lineAt = (along: number): number => fromY + ((toY - fromY) * (along - from)) / (to - from);
+  const low = Math.min(from, to);
+  const high = Math.max(from, to);
+  let sink = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index] as CorridorPoint;
+    if (row.along > low && row.along < high) {
+      sink = Math.max(sink, lineAt(row.along) - row.y);
+    }
+    const next = rows[index + 1];
+    if (next === undefined || !(next.along > row.along)) continue;
+    for (const end of [from, to]) {
+      if (end < row.along || end > next.along) continue;
+      const drawn = row.y + ((next.y - row.y) * (end - row.along)) / (next.along - row.along);
+      sink = Math.max(sink, lineAt(end) - drawn);
+    }
+  }
+  return sink;
 }
 
 /**

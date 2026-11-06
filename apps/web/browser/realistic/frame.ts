@@ -21,12 +21,12 @@
 import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft/domain';
 
 import { simulatedCrankAngle } from '../../src/game/bicycle';
-import type { SceneFrame } from '../../src/game/port';
+import type { RaceHitLook, SceneFrame } from '../../src/game/port';
 import type { CountrysideLever, LandClassMask } from '../../src/game/land-class';
 import type { MappedBuildings } from '../../src/game/mapped-buildings';
 import type { QualitySettings } from '../../src/game/quality';
 import type { MappedTown } from '../../src/game/settlements';
-import { sceneFrame } from '../../src/game/scene';
+import { sceneFrame, type RaceBotInput } from '../../src/game/scene';
 import { atStartLine } from '../../src/game/simulation';
 import type { CorridorOrigin } from '../../src/game/terrain';
 import type { WorldCorridor } from '../../src/game/world-data/corridor';
@@ -50,6 +50,15 @@ export function rideFrame(input: {
   readonly peopleOff?: boolean;
   /** #1542's levers, `levers=-land-planting` and its two siblings: those changes off. */
   readonly countrysideOff?: readonly CountrysideLever[];
+  /**
+   * #1972's `race=worst`: a lap race's bots and the rider's own hit effect,
+   * as `scene.ts` §`SceneInput.raceBots` and §`SceneInput.riderHit` take
+   * them. The pacer gives way to the race's bots.
+   */
+  readonly race?: {
+    readonly bots: readonly RaceBotInput[];
+    readonly riderHit: RaceHitLook | undefined;
+  };
   /**
    * #1581's `town=mixed`: the ride's corridor, its land and its planned
    * buildings, as `GameView` hands a ride's frames them.
@@ -76,7 +85,11 @@ export function rideFrame(input: {
       elapsed: seconds(input.elapsed),
       ridden: seconds(input.elapsed),
     },
-    botDistance: input.distance + PACER_LEAD_METRES,
+    // #1972: a race's bots take the pacer's place.
+    botDistance: input.race === undefined ? input.distance + PACER_LEAD_METRES : undefined,
+    ...(input.race === undefined
+      ? {}
+      : { raceBots: input.race.bots, riderHit: input.race.riderHit }),
     crankAngle: simulatedCrankAngle(input.distance),
     // As `GameView` passes them: the rung's own budgets, so a step down the
     // ladder places less scenery as well as drawing less of it.

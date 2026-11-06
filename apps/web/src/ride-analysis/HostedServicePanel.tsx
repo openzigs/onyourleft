@@ -39,6 +39,7 @@ import {
   HOSTED_ADDRESS_LABEL,
   HOSTED_AGREED,
   HOSTED_AGREED_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_KEY_LABEL,
   HOSTED_KEY_OPERATOR_CAN_READ,
   HOSTED_KEY_REMOVED,
@@ -55,6 +56,7 @@ import {
   HOSTED_REMOVE_BUTTON,
   HOSTED_STORE_BUTTON,
   HOSTED_TEST_BUTTON,
+  HOSTED_TEST_UNREADABLE,
   HOSTED_TESTING,
   HOSTED_UNREADABLE,
   HOSTED_WITHDRAWN,
@@ -115,7 +117,8 @@ export function HostedServicePanel({ port }: { readonly port: HostedSettingsPort
       try {
         outcome = await press();
       } catch {
-        outcome = { kind: 'failed', text: HOSTED_UNREADABLE };
+        // Every press here is a change, and one that threw may have been made (#1796).
+        outcome = { kind: 'failed', text: HOSTED_CHANGE_UNKNOWN };
       }
       setBusy(false);
       if (outcome.kind === 'failed') {
@@ -178,7 +181,8 @@ export function HostedServicePanel({ port }: { readonly port: HostedSettingsPort
         text = hostedTestText(outcome.result, host, { reasoned: outcome.reasoned, allowanceSet });
       }
     } catch {
-      text = HOSTED_UNREADABLE;
+      // The question may have reached the service: never "nothing was sent" (#1796).
+      text = HOSTED_TEST_UNREADABLE;
     }
     setBusy(false);
     setMessage({ tone: answered ? 'success' : 'warning', text });

@@ -50,7 +50,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { paletteColours, THEMES } from '../src/design/tokens';
+import { BAND_TOKENS, paletteColours, THEMES } from '../src/design/tokens';
 import {
   ALL_ROUTES,
   hrefFor,
@@ -1511,7 +1511,14 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           }),
         );
         expect(cards.length, `${route.id}: no card on the page`).toBeGreaterThan(0);
-        const token = route.id === 'routes' ? 'illoHillNear' : 'accent';
+        // A route's climb is the kit's hill; a workout is its block chart, each
+        // block in its zone's colour since the owner's ruling of 2026-11-04 on
+        // #2125 (`zones.browser.spec.ts` reads which zone), and the chart's
+        // free-ride outline and threshold rule are strokes with no fill.
+        const allowed =
+          route.id === 'routes'
+            ? [rgbOf(colours.illoHillNear)]
+            : [...BAND_TOKENS.map((band) => rgbOf(colours[band])), 'none'];
         for (const card of cards) {
           expect(card.svgs).toBe(1);
           expect(card.hidden).toBe('true');
@@ -1520,7 +1527,10 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           expect(card.height, `${route.id}: the drawing's height`).toBeCloseTo(SHAPE_ART_PIXELS, 0);
           expect(card.fills.length).toBeGreaterThan(0);
           for (const fill of card.fills) {
-            expect(fill, `${route.id} in ${theme}`).toBe(rgbOf(colours[token]));
+            expect(allowed, `${route.id} in ${theme}: ${fill}`).toContain(fill);
+          }
+          if (route.id === 'workouts') {
+            expect(card.fills.filter((fill) => fill !== 'none').length).toBeGreaterThan(0);
           }
         }
       }
@@ -1800,6 +1810,183 @@ test.describe('#1072 — a card is not carried under reduced motion', () => {
 });
 
 /**
+ * #2068 — the ride page stacks one chart per recorded channel, and reads a
+ * chart's channel only when its slot scrolls into view.
+ *
+ * jsdom has no `IntersectionObserver`, so the unit suite proves the budget
+ * against a fake (`detail/testing.ts`); this is the one place the real
+ * observer is asked. On a phone the last of the populated ride's charts is
+ * well below the fold: it must not be drawn on arrival, and must be once it is
+ * scrolled to. ⚠️ The control is the first half: a page that read every channel
+ * on mount draws the last chart before anything is scrolled.
+ */
+test.describe('#2068 — a stacked chart is read when it scrolls into view', () => {
+  test(`at ${PHONE.name}, the last chart is drawn only once it is scrolled to`, async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await page.evaluate(() => {
+      window.location.hash = '#/activities/ride-0';
+    });
+    const slots = page.locator('[data-oyl-trace-slot]');
+    await expect(slots.first()).toBeVisible();
+    const count = await slots.count();
+    expect(count, 'the populated ride has several charts').toBeGreaterThan(2);
+    const last = slots.nth(count - 1);
+    // The first chart in view and drawn, so the page has had its chance to
+    // read; the last is three or more slots further down, off screen.
+    await slots.first().scrollIntoViewIfNeeded();
+    await expect(slots.first().locator('.oyl-trace-chart')).toHaveCount(1);
+    // Half a second more: a page that read every channel on mount has drawn
+    // the last by now — each read is milliseconds against the in-memory ports.
+    await page.waitForTimeout(500);
+    expect(await last.locator('.oyl-trace-chart').count(), 'read before it was in view').toBe(0);
+
+    await last.scrollIntoViewIfNeeded();
+    await expect(last.locator('.oyl-trace-chart')).toHaveCount(1);
+    // One time axis: every drawn chart ends where the ride does.
+    const ends = await page
+      .locator('.oyl-trace-chart__times')
+      .evaluateAll((axes) => axes.map((axis) => axis.lastElementChild?.textContent ?? ''));
+    expect(new Set(ends).size, `the charts end at ${ends.join(', ')}`).toBe(1);
+  });
+
+  // ⚠️ A layout claim, so measured here: one time axis means every drawing in
+  // the stack starts and ends at the same x. The value column used to be
+  // sized to each chart's own labels, so "151 bpm" pushed heart rate's 0:00
+  // right of power's.
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, every chart’s drawing spans the same x`, async ({ page }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const slots = page.locator('[data-oyl-trace-slot]');
+      await expect(slots.first()).toBeVisible();
+      const count = await slots.count();
+      for (let index = 0; index < count; index += 1) {
+        await slots.nth(index).scrollIntoViewIfNeeded();
+        await expect(slots.nth(index).locator('svg.oyl-trace')).toHaveCount(1);
+      }
+      const spans = await page.locator('svg.oyl-trace').evaluateAll((drawings) =>
+        drawings.map((drawing) => {
+          const box = drawing.getBoundingClientRect();
+          return { left: box.left, right: box.right };
+        }),
+      );
+      expect(spans).toHaveLength(count);
+      const [first] = spans;
+      for (const span of spans) {
+        expect(Math.abs(span.left - (first?.left ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+        expect(Math.abs(span.right - (first?.right ?? 0)), JSON.stringify(spans)).toBeLessThan(0.5);
+      }
+    });
+  }
+});
+
+/**
+ * #2081 — a tap on a chart moves the ride page's one cursor to the moment
+ * under it, the laps are bands at one x down the stack, and the power curve
+ * is drawn inside the page's column.
+ *
+ * Layout and pointer claims, so measured here: jsdom lays nothing out, so the
+ * unit suite can only hand the drawing a box by hand
+ * (`views/ActivityDetailView.test.tsx` §"#2081 — the tap and hover read-out").
+ * The populated ride is 30:00 with laps starting at 0:00, 10:00 and 20:00.
+ */
+test.describe('#2081 — the tap read-out, the laps and the power curve', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, a tap halfway across a chart moves the cursor halfway through the ride`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const drawing = page.locator('[data-oyl-trace-slot="heartRate"] svg.oyl-trace');
+      await page.locator('[data-oyl-trace-slot="heartRate"]').scrollIntoViewIfNeeded();
+      await expect(drawing).toHaveCount(1);
+      const box = await drawing.boundingBox();
+      if (box === null) throw new Error('the heart-rate chart has no box');
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+      // 1 800 s drawn at 600 points: a step of 3 s, so halfway is 900 s.
+      await expect(page.locator('#oyl-trace-cursor')).toHaveValue('900');
+      await expect(page.locator('output[for="oyl-trace-cursor"]')).toContainText('15:00');
+      // The line is drawn where the tap was, on this chart and every other.
+      const line = await drawing.locator('line.oyl-trace__cursor').boundingBox();
+      expect(Math.abs((line?.x ?? 0) - (box.x + box.width / 2)), JSON.stringify(line)).toBeLessThan(
+        2,
+      );
+      // The control: a tap a quarter of the way across lands a quarter through.
+      await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
+      await expect(page.locator('#oyl-trace-cursor')).toHaveValue('450');
+    });
+  }
+
+  test(`at ${TABLET_IN_THE_SHELL.name}, every lap starts at one x down the stack`, async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    await page.evaluate(() => {
+      window.location.hash = '#/activities/ride-0';
+    });
+    const slots = page.locator('[data-oyl-trace-slot]');
+    await expect(slots.first()).toBeVisible();
+    const count = await slots.count();
+    for (let index = 0; index < count; index += 1) {
+      await slots.nth(index).scrollIntoViewIfNeeded();
+      await expect(slots.nth(index).locator('svg.oyl-trace')).toHaveCount(1);
+    }
+    const edges = await page.locator('svg.oyl-trace').evaluateAll((drawings) =>
+      drawings.map((drawing) => {
+        const frame = drawing.getBoundingClientRect();
+        return [...drawing.querySelectorAll('line.oyl-trace__lap-edge')].map(
+          (edge) => (edge.getBoundingClientRect().left - frame.left) / frame.width,
+        );
+      }),
+    );
+    expect(edges).toHaveLength(count);
+    const [first] = edges;
+    // Laps 2 and 3 start at 10:00 and 20:00 of 30:00.
+    expect(first?.map((at) => Math.round(at * 100))).toEqual([33, 67]);
+    for (const chart of edges) {
+      expect(chart, JSON.stringify(edges)).toEqual(first);
+    }
+  });
+
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, the power curve is drawn inside the page’s column`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const slot = page.locator('[data-oyl-curve-slot]');
+      await slot.scrollIntoViewIfNeeded();
+      const curve = slot.locator('svg.oyl-curve');
+      await expect(curve).toHaveCount(1);
+      await expect(slot.locator('path.oyl-curve__all-time')).toHaveCount(1);
+      const [drawing, column] = await Promise.all([
+        curve.boundingBox(),
+        slot.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return { left: box.left, right: box.right };
+        }),
+      ]);
+      expect(drawing?.height ?? 0, 'the curve has no height').toBeGreaterThan(100);
+      expect(drawing?.x ?? -1).toBeGreaterThanOrEqual(column.left - 0.5);
+      expect((drawing?.x ?? 0) + (drawing?.width ?? 0)).toBeLessThanOrEqual(column.right + 0.5);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        'the page scrolls sideways',
+      ).toBe(true);
+    });
+  }
+});
+
+/**
  * #1312 — the ride page's lap table, scrolled to its last column.
  *
  * A ride with every figure a lap can state has eleven columns, which is wider
@@ -1838,12 +2025,24 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         // 4 and 5 were read off the bottom of the screen — a reading of a
         // layout shift, not of the sticky column. So: every chart drawn
         // first, and the table scrolled to inside the same task that reads
-        // it (`measure`), where nothing can move it in between.
-        const shown = await page
-          .locator('button[aria-pressed="true"]', { hasText: /^Show / })
-          .count();
+        // it (`measure`), where nothing can move it in between. Since #2068
+        // each chart is read when its slot scrolls into view, so every slot
+        // is scrolled to first.
+        const slots = page.locator('[data-oyl-trace-slot]');
+        const shown = await slots.count();
         expect(shown, 'the ride’s page shows no trace').toBeGreaterThan(0);
+        for (let index = 0; index < shown; index += 1) {
+          await slots.nth(index).scrollIntoViewIfNeeded();
+          await expect(slots.nth(index).locator('.oyl-trace-chart')).toHaveCount(1);
+        }
         await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
+        // #2069: and the ride's time in zone above the laps, read the same way.
+        await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
+        await expect(page.locator('[data-oyl-zones-slot] .oyl-zone-chart')).toHaveCount(2);
+        // #2081: and the power curve between them, drawn before anything is measured.
+        await page.locator('[data-oyl-curve-slot]').scrollIntoViewIfNeeded();
+        await expect(page.locator('[data-oyl-curve-slot] svg.oyl-curve')).toHaveCount(1);
+        await page.locator('[data-oyl-zones-slot]').scrollIntoViewIfNeeded();
 
         const measure = async () =>
           table.evaluate((element) => {
@@ -1919,22 +2118,22 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
           `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,
         );
 
-        // The control: without the class the Lap column scrolls away.
+        // The control: without the class the Lap column scrolls away. The
+        // same table, marked before its class goes: since #2069 the ride's
+        // zone tables are `table.oyl-table` too, and come before the laps.
         await table.evaluate((element) => {
+          element.setAttribute('data-oyl-lap-control', '');
           element.classList.remove('oyl-table--laps');
         });
-        const control = await page
-          .locator('table.oyl-table')
-          .first()
-          .evaluate((element) => {
-            const region = element.closest<HTMLElement>('.oyl-scroll-region');
-            if (region === null) return [];
-            region.scrollLeft = region.scrollWidth;
-            const frame = region.getBoundingClientRect();
-            return [...element.querySelectorAll('tbody th')].map(
-              (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
-            );
-          });
+        const control = await page.locator('table[data-oyl-lap-control]').evaluate((element) => {
+          const region = element.closest<HTMLElement>('.oyl-scroll-region');
+          if (region === null) return [];
+          region.scrollLeft = region.scrollWidth;
+          const frame = region.getBoundingClientRect();
+          return [...element.querySelectorAll('tbody th')].map(
+            (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
+          );
+        });
         expect(control).toEqual([false, false, false, false, false]);
       });
     });
@@ -1991,4 +2190,99 @@ test.describe('#1442 — choosing a row does not move the list', () => {
       expect(faults).toEqual([]);
     });
   }
+});
+
+/**
+ * The owner's ruling of 2026-11-04 on #2125, item 3: the "Import a workout"
+ * heading was clipped at the top of its column on Workouts at 1280 × 800.
+ *
+ * The cause: Workouts' detail pane holds *Build a workout* and *Import a
+ * workout* side by side in ONE scroll container (#723, #1014), so scrolling
+ * the builder — to its *Add block* form, or 34 px to bring its chart's zone
+ * key into view — carried the short import column with it, and the pane's top
+ * edge cut through its heading. `theme.css` §`.oyl-sections--pinned` keeps
+ * the short column at the pane's content edge while the long one scrolls.
+ *
+ * Read here with the builder holding blocks (`?builder=blocks`), the pane
+ * scrolled by the sheet's 34 px, by half its travel and to its end: the
+ * heading must lie wholly inside the pane, at every offset. **Control:** the
+ * pinned rule deleted through the CSSOM, after which the 34 px read must find
+ * the heading cut by the pane's top edge — the owner's picture.
+ */
+test.describe('#2125 — the import heading stays whole while the builder scrolls', () => {
+  /** Scroll the detail pane to `offset` (or its end) and read the import heading against it. */
+  async function importHeadingAt(
+    page: Page,
+    offset: number | 'end' | 'half',
+  ): Promise<{ scrolled: number; travel: number; paneTop: number; headingTop: number }> {
+    return page.evaluate((to) => {
+      const pane = document.querySelector<HTMLElement>('[data-oyl-pane="detail"]');
+      const heading = [...(pane?.querySelectorAll('h2') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === 'Import a workout',
+      );
+      if (pane === null || heading === undefined) {
+        throw new Error('no detail pane, or no "Import a workout" heading in it');
+      }
+      const travel = pane.scrollHeight - pane.clientHeight;
+      pane.scrollTop = to === 'end' ? travel : to === 'half' ? travel / 2 : to;
+      return {
+        scrolled: pane.scrollTop,
+        travel,
+        paneTop: pane.getBoundingClientRect().top,
+        headingTop: heading.getBoundingClientRect().top,
+      };
+    }, offset);
+  }
+
+  for (const viewport of TWO_PANES) {
+    test(`at ${viewport.name}, scrolled any distance`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&builder=blocks');
+      const route = LIST_DETAIL.find((candidate) => candidate.id === 'workouts');
+      if (route === undefined) throw new Error('Workouts is not a list–detail route');
+      await visit(page, route, hrefFor(route));
+      const lines: string[] = [];
+      for (const offset of [34, 'half', 'end'] as const) {
+        const read = await importHeadingAt(page, offset);
+        lines.push(
+          `${String(offset)}: scrolled ${read.scrolled.toFixed(0)} of ${read.travel.toFixed(0)}, ` +
+            `heading top ${read.headingTop.toFixed(1)}, pane top ${read.paneTop.toFixed(1)}`,
+        );
+        // The pane must scroll at least the sheet's 34 px, or this read nothing.
+        expect(read.travel, 'the detail pane does not scroll').toBeGreaterThan(34);
+        expect(read.scrolled).toBeGreaterThan(0);
+        expect(
+          read.headingTop,
+          `scrolled ${String(offset)}: the pane's top edge cuts the heading`,
+        ).toBeGreaterThanOrEqual(read.paneTop - 0.5);
+      }
+      console.log(`[#2125] import heading @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+    });
+  }
+
+  test('the control — without the pinned rule, 34 px cuts the heading', async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL, 'data=populated&builder=blocks');
+    const route = LIST_DETAIL.find((candidate) => candidate.id === 'workouts');
+    if (route === undefined) throw new Error('Workouts is not a list–detail route');
+    await visit(page, route, hrefFor(route));
+    const removed = await page.evaluate(() => {
+      let count = 0;
+      const sweep = (rules: CSSRuleList, owner: CSSGroupingRule | CSSStyleSheet): void => {
+        for (let index = rules.length - 1; index >= 0; index -= 1) {
+          const rule = rules[index];
+          if (rule instanceof CSSStyleRule && rule.selectorText.includes('.oyl-sections--pinned')) {
+            owner.deleteRule(index);
+            count += 1;
+          } else if (rule instanceof CSSGroupingRule) {
+            sweep(rule.cssRules, rule);
+          }
+        }
+      };
+      for (const sheet of document.styleSheets) sweep(sheet.cssRules, sheet);
+      return count;
+    });
+    expect(removed, 'the pinned rule was not found to remove').toBe(1);
+    const read = await importHeadingAt(page, 34);
+    expect(read.scrolled).toBeGreaterThan(0);
+    expect(read.headingTop).toBeLessThan(read.paneTop - 0.5);
+  });
 });

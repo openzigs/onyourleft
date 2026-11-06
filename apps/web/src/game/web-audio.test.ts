@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { EVERY_BUS_ON } from './audio-testing';
 import { webAudioOutput, type AudioContextLike } from './web-audio';
 
 interface FakeOscillator {
@@ -93,7 +94,7 @@ describe('the Web Audio output', () => {
     const output = webAudioOutput(() => {
       made += 1;
       return fake.context;
-    });
+    }, EVERY_BUS_ON);
     output.startTone(440, 0.1);
     output.playCue('interval', 0.3);
     output.stopTone();
@@ -112,7 +113,7 @@ describe('the Web Audio output', () => {
     const output = webAudioOutput(() => {
       made += 1;
       return suspended.context;
-    });
+    }, EVERY_BUS_ON);
     // No context yet: not running, and asking does not make one.
     expect(output.isRunning()).toBe(false);
     expect(made).toBe(0);
@@ -122,14 +123,14 @@ describe('the Web Audio output', () => {
     expect(suspended.resumed()).toBe(1);
 
     const running = fakeContext('running');
-    const other = webAudioOutput(() => running.context);
+    const other = webAudioOutput(() => running.context, EVERY_BUS_ON);
     other.resume();
     expect(other.isRunning()).toBe(true);
   });
 
   it('keeps ONE tone: a second start moves it rather than layering another', () => {
     const fake = fakeContext('running');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     output.startTone(440, 0.1);
     output.startTone(494, 0.1);
@@ -140,7 +141,7 @@ describe('the Web Audio output', () => {
 
   it('stops the tone it started, and a new one afterwards is a new oscillator', () => {
     const fake = fakeContext('running');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     output.startTone(440, 0.1);
     output.stopTone();
@@ -152,7 +153,7 @@ describe('the Web Audio output', () => {
 
   it('plays the two short sounds as different numbers of notes', () => {
     const fake = fakeContext('running');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     output.playCue('interval', 0.3);
     expect(fake.oscillators).toHaveLength(2);
@@ -163,7 +164,7 @@ describe('the Web Audio output', () => {
   });
 
   it('is a silent no-op where the platform has no Web Audio at all', () => {
-    const output = webAudioOutput(undefined);
+    const output = webAudioOutput(undefined, EVERY_BUS_ON);
     expect(() => {
       output.resume();
       output.startTone(440, 0.1);
@@ -176,12 +177,12 @@ describe('the Web Audio output', () => {
 
 describe('letting the audio stop after a ride — #447', () => {
   it('suspends a running context, and does nothing without one', () => {
-    const none = webAudioOutput(() => fakeContext('running').context);
+    const none = webAudioOutput(() => fakeContext('running').context, EVERY_BUS_ON);
     none.suspend();
     expect(none.isRunning()).toBe(false);
 
     const fake = fakeContext('running');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     expect(output.isRunning()).toBe(true);
     output.suspend();
@@ -192,7 +193,7 @@ describe('letting the audio stop after a ride — #447', () => {
 
   it('does not suspend a context that is not running', async () => {
     const fake = fakeContext('suspended');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     // ⚠️ Once the resume has been ANSWERED — #455. Before that it is a resume
     // in flight, which a suspend must follow; the case below is that one. The
@@ -221,7 +222,7 @@ describe('letting the audio stop after a ride — #447', () => {
       void resumeOnce();
       return pending;
     };
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     output.suspend();
     expect(fake.suspended(), 'asked for, in the order the platform applies them').toBe(1);
@@ -242,7 +243,7 @@ describe('letting the audio stop after a ride — #447', () => {
     // press in the same breath as the end of a workout finds `running` — and a
     // `resume()` that trusted it would ask for nothing, and ride in silence.
     const fake = fakeContext('running');
-    const output = webAudioOutput(() => fake.context);
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
     output.resume();
     expect(fake.resumed()).toBe(0);
     output.suspend();

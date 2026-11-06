@@ -26,6 +26,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ThermalPlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         super.onCreate(savedInstanceState);
+        // #2127: AppCompat took the window's background from the launch theme in super.onCreate,
+        // and that is the canvas WITH the logo (drawable/oyl_launch_window.xml). Left there it is
+        // behind everything for the whole session, and shows wherever the WebView does not cover,
+        // as on Capacitor's no_webview screen. The splash is its own window on every API level, so
+        // this changes nothing a rider sees at launch. Unguarded on purpose: no_webview needs it.
+        getWindow().setBackgroundDrawableResource(R.color.oyl_canvas);
         // #672: the WebView draws white until the page paints, which in the device's dark mode is a
         // white frame in a dark room. The page's canvas instead, per palette -- res/values and
         // res/values-night colors.xml. Not capacitor.config.ts's backgroundColor, which is ONE colour
@@ -56,24 +62,80 @@ public class MainActivity extends BridgeActivity {
      * before, {@code super.dispatchKeyEvent}, untouched. The script is a constant plus a number
      * from 1 to 16 and a boolean, so nothing a page or a pad holds is ever written into it.
      *
+     * <p>⚠️ Which devices are admitted: a numbered code is forwarded when the event's source or
+     * its device's sources include JOYSTICK or GAMEPAD. The device counts because a generic pad
+     * Android lists as KEYBOARD | JOYSTICK (no GAMEPAD, the spike's Twin USB receiver) raises its
+     * buttons through its keyboard mapper, so the key event's own source is plain KEYBOARD.
+     * Measured on the owner's tablet on 2026-10-30, every press was dropped until the device's
+     * sources were added in {@link #sourcesOf}. So a device that is both a keyboard and a pad is
+     * admitted, as that receiver is; a device that is only a keyboard, or a D-pad, is not.
+     *
+     * <p>⚠️ A release of a button this sent down is always sent (#1893). Unplugging a pad while a
+     * button is held makes Android send a cancelled release, and by then {@code getDevice()} may
+     * no longer find the device, so the release would be judged a keyboard's and kept from the
+     * page, which would hold the button down until a reload. {@link #buttonsDown} remembers each
+     * button sent down, and {@link #sentDown} sends its release whatever the device says.
+     * {@code gamepad-port.ts} also lets go of every forwarded button when a pad disconnects.
+     *
+     * <p>Only KEYCODE_BUTTON_1 to 16 are looked at further: every other key goes to
+     * {@code super.dispatchKeyEvent} before its device is asked for.
+     *
      * <p>CI does not build Android: {@code apps/mobile/src/android/gamepad-button-source.test.ts}
-     * reads this source and runs {@link #forwardedButton} over each class of key event; whether a
-     * pad throws on a device is #1858's tablet step.
+     * reads this source and runs this dispatch, with the methods it calls, over stub key events;
+     * whether a pad throws on a device is #1858's tablet step.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        int button = forwardedButton(event.getKeyCode(), event.getSource());
+        int keyCode = event.getKeyCode();
+        if (!isNumberedButton(keyCode)) {
+            return super.dispatchKeyEvent(event);
+        }
+        int action = event.getAction();
+        int button = forwardedButton(keyCode, sourcesOf(event));
+        if (button == 0 && action == KeyEvent.ACTION_UP) {
+            button = sentDown(buttonsDown, keyCode);
+        }
         Bridge bridge = getBridge();
         if (button == 0 || bridge == null || bridge.getWebView() == null) {
             return super.dispatchKeyEvent(event);
         }
-        int action = event.getAction();
         if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            buttonsDown = buttonsDown | (1 << button);
             forwardButton(bridge.getWebView(), button, true);
         } else if (action == KeyEvent.ACTION_UP) {
+            buttonsDown = buttonsDown & ~(1 << button);
             forwardButton(bridge.getWebView(), button, false);
         }
         return true;
+    }
+
+    /**
+     * The numbered buttons sent to the page as down and not yet as up: bit {@code n} for button
+     * {@code n}.
+     */
+    private int buttonsDown;
+
+    /** Whether a key code is one of KEYCODE_BUTTON_1 to 16. */
+    static boolean isNumberedButton(int keyCode) {
+        return keyCode >= KeyEvent.KEYCODE_BUTTON_1 && keyCode <= KeyEvent.KEYCODE_BUTTON_16;
+    }
+
+    /**
+     * The button a numbered key code is, from 1 to 16, if {@code down} holds it as sent down, or 0:
+     * how a release whose device has gone still reaches the page (#1893).
+     */
+    static int sentDown(int down, int keyCode) {
+        int button = keyCode - KeyEvent.KEYCODE_BUTTON_1 + 1;
+        return (down & (1 << button)) == 0 ? 0 : button;
+    }
+
+    /**
+     * The event's source together with its device's sources: a generic pad's buttons arrive with
+     * the keyboard source alone, and only the device says it is a joystick (see above).
+     */
+    static int sourcesOf(KeyEvent event) {
+        InputDevice device = event.getDevice();
+        return event.getSource() | (device == null ? 0 : device.getSources());
     }
 
     /**

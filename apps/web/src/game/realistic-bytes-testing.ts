@@ -210,3 +210,213 @@ export function fileImageSize(path: string): ImageSize {
 export function fileKtx2Facts(path: string): Ktx2Facts {
   return ktx2Facts(new Uint8Array(readFileSync(path)));
 }
+
+/**
+ * A roadside model, read off its committed bytes — #1274: what
+ * `three-renderer.ts` §`roadsideGeometryOf` copies out of the loader's scene,
+ * read here from glTF 2.0's own accessors, so a test can hand a belt the
+ * committed model without asking the renderer to read it.
+ */
+export interface RoadsideFacts {
+  /** Not indexed: three floats a vertex. */
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  /** Its `COLOR_0`, red, green and blue as the fraction each stands for. */
+  readonly colour: Float32Array;
+  readonly triangles: number;
+  /** The attributes its one primitive names. */
+  readonly attributes: readonly string[];
+  /** How many materials, images and textures the file declares. */
+  readonly materials: number;
+  readonly images: number;
+}
+
+interface AccessorJson {
+  readonly bufferView?: number;
+  readonly byteOffset?: number;
+  readonly componentType: number;
+  readonly count: number;
+  readonly normalized?: boolean;
+  readonly type: string;
+}
+
+const COMPONENTS: Readonly<Record<string, number>> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+
+/** One accessor's values, as numbers — a normalized integer as its fraction. glTF 2.0 §3.6. */
+function accessorValues(
+  json: {
+    readonly accessors?: readonly AccessorJson[];
+    readonly bufferViews?: readonly {
+      readonly byteOffset?: number;
+      readonly byteStride?: number;
+    }[];
+  },
+  binary: Uint8Array,
+  index: number,
+): { readonly values: Float64Array; readonly size: number } {
+  const accessor = json.accessors?.[index];
+  if (accessor === undefined) throw new Error(`no accessor ${String(index)}`);
+  const view = json.bufferViews?.[accessor.bufferView ?? -1];
+  if (view === undefined) throw new Error(`accessor ${String(index)} has no buffer view`);
+  const size = COMPONENTS[accessor.type];
+  if (size === undefined) throw new Error(`accessor ${String(index)}: ${accessor.type}`);
+  const read: Readonly<
+    Record<number, readonly [number, (data: DataView, at: number) => number, number]>
+  > = {
+    5121: [1, (data, at) => data.getUint8(at), 255],
+    5123: [2, (data, at) => data.getUint16(at, true), 65_535],
+    5125: [4, (data, at) => data.getUint32(at, true), 4_294_967_295],
+    5126: [4, (data, at) => data.getFloat32(at, true), 1],
+  };
+  const how = read[accessor.componentType];
+  if (how === undefined)
+    throw new Error(`accessor ${String(index)}: ${String(accessor.componentType)}`);
+  const [bytes, get, scale] = how;
+  const data = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
+  const stride = view.byteStride ?? bytes * size;
+  const start = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+  const values = new Float64Array(accessor.count * size);
+  for (let element = 0; element < accessor.count; element += 1) {
+    for (let component = 0; component < size; component += 1) {
+      const raw = get(data, start + element * stride + component * bytes);
+      values[element * size + component] =
+        accessor.normalized === true && accessor.componentType !== 5126 ? raw / scale : raw;
+    }
+  }
+  return { values, size };
+}
+
+/** Reads a committed roadside model. Refuses a file of more than one primitive. */
+export function roadsideFacts(path: string): RoadsideFacts {
+  const file = readGlb(path);
+  const json = file.json as unknown as {
+    readonly meshes?: readonly {
+      readonly primitives: readonly {
+        readonly indices?: number;
+        readonly attributes: Readonly<Record<string, number>>;
+      }[];
+    }[];
+    readonly accessors?: readonly AccessorJson[];
+    readonly bufferViews?: readonly {
+      readonly byteOffset?: number;
+      readonly byteStride?: number;
+    }[];
+    readonly materials?: readonly unknown[];
+    readonly images?: readonly unknown[];
+  };
+  const primitives = (json.meshes ?? []).flatMap((mesh) => mesh.primitives);
+  const [primitive] = primitives;
+  if (primitive === undefined || primitives.length !== 1) {
+    throw new Error(`${path}: expected one primitive, found ${String(primitives.length)}`);
+  }
+  const of = (name: string): { readonly values: Float64Array; readonly size: number } => {
+    const at = primitive.attributes[name];
+    if (at === undefined) throw new Error(`${path}: no ${name}`);
+    return accessorValues(json, file.binary, at);
+  };
+  const positions = of('POSITION');
+  const normals = of('NORMAL');
+  const colours = of('COLOR_0');
+  const order =
+    primitive.indices === undefined
+      ? Array.from({ length: positions.values.length / 3 }, (_, at) => at)
+      : Array.from(accessorValues(json, file.binary, primitive.indices).values);
+  const position = new Float32Array(order.length * 3);
+  const normal = new Float32Array(order.length * 3);
+  const colour = new Float32Array(order.length * 3);
+  order.forEach((vertex, at) => {
+    for (let axis = 0; axis < 3; axis += 1) {
+      position[at * 3 + axis] = positions.values[vertex * 3 + axis] as number;
+      normal[at * 3 + axis] = normals.values[vertex * 3 + axis] as number;
+      colour[at * 3 + axis] = colours.values[vertex * colours.size + axis] as number;
+    }
+  });
+  return {
+    position,
+    normal,
+    colour,
+    triangles: order.length / 3,
+    attributes: Object.keys(primitive.attributes).sort(),
+    materials: (json.materials ?? []).length,
+    images: (json.images ?? []).length,
+  };
+}
+
+/** The chain-link fence's piece, read off its committed bytes — #1274. @see chainLinkFacts */
+export interface ChainLinkFacts {
+  readonly frame: RoadsideFacts;
+  /** The wire, with its `TEXCOORD_0`: two floats a vertex. */
+  readonly wire: RoadsideFacts & { readonly uv: Float32Array };
+}
+
+/**
+ * Reads the committed chain-link piece — #1274: its node named `frame` and its
+ * node named `wire`, each one primitive, as {@link roadsideFacts} reads a
+ * model, from glTF 2.0's own accessors and with nothing of the renderer's.
+ */
+export function chainLinkFacts(path: string): ChainLinkFacts {
+  const file = readGlb(path);
+  const json = file.json as unknown as {
+    readonly nodes?: readonly { readonly name?: string; readonly mesh?: number }[];
+    readonly meshes?: readonly {
+      readonly primitives: readonly {
+        readonly indices?: number;
+        readonly attributes: Readonly<Record<string, number>>;
+      }[];
+    }[];
+    readonly accessors?: readonly AccessorJson[];
+    readonly bufferViews?: readonly {
+      readonly byteOffset?: number;
+      readonly byteStride?: number;
+    }[];
+    readonly materials?: readonly unknown[];
+    readonly images?: readonly unknown[];
+  };
+  const named = (name: string): RoadsideFacts & { readonly uv: Float32Array } => {
+    const node = (json.nodes ?? []).find((each) => each.name === name);
+    const primitives = json.meshes?.[node?.mesh ?? -1]?.primitives ?? [];
+    const [primitive] = primitives;
+    if (primitive === undefined || primitives.length !== 1) {
+      throw new Error(`${path}: expected one primitive named ${name}`);
+    }
+    const of = (attribute: string): { readonly values: Float64Array; readonly size: number } => {
+      const at = primitive.attributes[attribute];
+      if (at === undefined) return { values: new Float64Array(0), size: 0 };
+      return accessorValues(json, file.binary, at);
+    };
+    const positions = of('POSITION');
+    const normals = of('NORMAL');
+    const colours = of('COLOR_0');
+    const uvs = of('TEXCOORD_0');
+    const order =
+      primitive.indices === undefined
+        ? Array.from({ length: positions.values.length / 3 }, (_, at) => at)
+        : Array.from(accessorValues(json, file.binary, primitive.indices).values);
+    const position = new Float32Array(order.length * 3);
+    const normal = new Float32Array(order.length * 3);
+    const colour = new Float32Array(order.length * 3);
+    const uv = new Float32Array(uvs.size === 0 ? 0 : order.length * 2);
+    order.forEach((vertex, at) => {
+      for (let axis = 0; axis < 3; axis += 1) {
+        position[at * 3 + axis] = positions.values[vertex * 3 + axis] as number;
+        normal[at * 3 + axis] = normals.values[vertex * 3 + axis] as number;
+        colour[at * 3 + axis] = colours.values[vertex * colours.size + axis] as number;
+      }
+      if (uvs.size !== 0) {
+        uv[at * 2] = uvs.values[vertex * 2] as number;
+        uv[at * 2 + 1] = uvs.values[vertex * 2 + 1] as number;
+      }
+    });
+    return {
+      position,
+      normal,
+      colour,
+      uv,
+      triangles: order.length / 3,
+      attributes: Object.keys(primitive.attributes).sort(),
+      materials: (json.materials ?? []).length,
+      images: (json.images ?? []).length,
+    };
+  };
+  return { frame: named('frame'), wire: named('wire') };
+}

@@ -46,8 +46,9 @@
  * between that render and the subscription is applied rather than missed.
  */
 
-import { startTransition, useEffect, useEffectEvent, useState } from 'react';
+import { addTransitionType, startTransition, useEffect, useEffectEvent, useState } from 'react';
 
+import { NAVIGATION_TRANSITION_TYPE, navigationKind } from './route-motion';
 import { matchHash, type RouteMatch } from './routes';
 
 function currentHash(): string {
@@ -120,6 +121,11 @@ export function useRoute(
       mayAnimate(matchHash(hash), matchHash(next))
     ) {
       startTransition(() => {
+        // #2054: which way it goes, for `AppShell`'s `<ViewTransition>` to
+        // choose a slide or the cross-fade by (`route-motion.ts`).
+        addTransitionType(
+          NAVIGATION_TRANSITION_TYPE[navigationKind(matchHash(hash), matchHash(next))],
+        );
         setHash(next);
       });
     } else {

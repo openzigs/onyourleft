@@ -49,11 +49,20 @@ export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'fa
  * Every `landuse` kind this reads, and its class — #1546's table. A `water`
  * feature is `water` whatever its kind. Any other kind is `other`
  * ({@link landClassOfKind}).
+ *
+ * #1630: spike 0031 (`docs/spikes/0031-land-use-kinds-and-urban-density-in-our-archive.md`)
+ * decoded eight corridors of our archive and removed the 13 kinds it counted
+ * zero times in every one that no rule of Protomaps' `Landuse.java` emits:
+ * `retail`, `neighbourhood` (Protomaps writes `place=neighbourhood` as
+ * `other`), `marina`, `protected_area`, `townhall`, `library`,
+ * `post_office`, `supermarket`, `grocery`, `hotel`, `stadium`, and `farmyard`
+ * and `orchard` (written as `farmland`). Each now reads as `other`. A kind
+ * unseen in the spike's corridors that a rule does emit — `forest`,
+ * `national_park`, `zoo`, `military` — stays.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
     wetland: 'water',
-    marina: 'water',
     wood: 'wood',
     forest: 'wood',
     scrub: 'wood',
@@ -62,7 +71,6 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     golf_course: 'park',
     nature_reserve: 'park',
     national_park: 'park',
-    protected_area: 'park',
     recreation_ground: 'park',
     cemetery: 'park',
     zoo: 'park',
@@ -73,25 +81,14 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     residential: 'built-up',
     commercial: 'built-up',
     industrial: 'built-up',
-    retail: 'built-up',
-    neighbourhood: 'built-up',
     school: 'built-up',
     college: 'built-up',
     university: 'built-up',
     hospital: 'built-up',
-    townhall: 'built-up',
-    library: 'built-up',
-    post_office: 'built-up',
-    supermarket: 'built-up',
-    grocery: 'built-up',
-    hotel: 'built-up',
     pedestrian: 'built-up',
     railway: 'built-up',
     military: 'built-up',
-    stadium: 'built-up',
     farmland: 'farmland',
-    farmyard: 'farmland',
-    orchard: 'farmland',
     meadow: 'farmland',
   });
 

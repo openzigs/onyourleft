@@ -55,6 +55,9 @@
  * which is what keeps it out of the tab order rather than sitting in it as an
  * unlabelled stop.
  *
+ * That is a ride's map. A saved route's page asks for a map that moves
+ * instead, and its section below (#2003) is what qualifies this one.
+ *
  * ## In the page's palette, following it (#672)
  *
  * The style is the page's palette's (`basemap.ts` §`MAP_COLOURS`), and a
@@ -66,14 +69,66 @@
  * ⚠️ **The description names no place.** ADR 0004 decision D: a message about a
  * coordinate names the field and the constraint and never the value. The label
  * says how many parts the track has, not where any of them is.
+ *
+ * ## A saved route's map can be moved — #2003
+ *
+ * `explorable` is a saved route's page, where looking along the route and
+ * reading its street names is the point. The map takes a drag and a pinch
+ * (`maplibre.ts` §`EXPLORABLE`), and every one of those has an ordinary
+ * button below the attribution — *Zoom in*, *Zoom out*, four compass moves and
+ * *Whole route* — which is the keyboard's way and a single pointer's way to do
+ * the same (WCAG 2.2 SC 2.1.1 and 2.5.7). That is what #48's third criterion
+ * asked for before a map could move, and why a ride's page still draws the
+ * picture: nothing there asked for a map that moves.
+ *
+ * The surface itself is still `role="img"` and still out of the tab order: a
+ * focusable canvas would be a tab stop with nothing to say, and the buttons are
+ * the named controls.
+ *
+ * ## The route planner draws on one — #2006
+ *
+ * `editing` is the planner's map: explorable, and editable besides
+ * (`port.ts` §`MapCreateOptions.editable`) — a tap places a waypoint, a marker
+ * drags, the line pulls. Three things differ from a saved route's map:
+ *
+ * - **It is drawn with no line.** An empty draft is exactly when a rider needs
+ *   somewhere to tap, so the panel shows the map at the planner's empty view
+ *   rather than nothing.
+ * - **It fits once.** The line changes on every edit and the view does not
+ *   follow it (`MapView.setTrack`'s `fitNow`); *Whole route* still fits.
+ * - **The handlers are read through a ref**, so a new set every render — the
+ *   planner's closures change with its draft — neither recreates the map nor
+ *   leaves an old draft in a handler.
+ *
+ * The markers take no focus, and the map stays `role="img"`: the planner's
+ * list is the keyboard's way to every one of these gestures.
+ *
+ * ## Offline is a fourth state, on a route's page
+ *
+ * `offline` (#2003): the streets come from the archive over the network and
+ * ADR 0024 D-2 does not precache it, so a map drawn offline is the route's
+ * line on a plain box. The page says the map is unavailable instead, and draws
+ * it when the device is back online. A rider who turned map tiles off has no
+ * streets to fetch, so offline changes nothing for them.
  */
 
 import { useEffect, useRef, type JSX } from 'react';
 
+import { Button } from '../design/Button';
 import { basemapStyle, MAP_COLOURS, type BasemapConfig } from './basemap';
-import type { MapPort, MapView } from './port';
+import type { MapPointerHandlers, MapPort, MapView, MapWaypoint } from './port';
 import { createThemedMap } from './themed-map';
-import { trackBounds, trackFeature, type TrackGeometry } from './track';
+import { trackBounds, trackFeature, type TrackBounds, type TrackGeometry } from './track';
+
+/** The route planner's map (#2006). @see MapPanelProps.editing */
+export interface MapEditing {
+  readonly waypoints: readonly MapWaypoint[];
+  readonly pointer: MapPointerHandlers;
+  /** Where the map looks before there is a line to fit. */
+  readonly emptyView: TrackBounds;
+  /** The live map, and `undefined` once it is gone: the planner reads its centre. */
+  readonly onView?: ((view: MapView | undefined) => void) | undefined;
+}
 
 export interface MapPanelProps {
   /**
@@ -107,23 +162,129 @@ export interface MapPanelProps {
    * 2026-09-25 keeps it.
    */
   readonly tiles?: boolean;
+  /** What the line is, for the words around the map: a ride's track or a saved route (#2003). */
+  readonly subject?: MapSubject;
+  /** Whether the rider can move the map, with buttons for every gesture (#2003). Off by default. */
+  readonly explorable?: boolean;
+  /**
+   * The device is offline (#2003): no map is created and the panel says it is
+   * unavailable. `undefined` and `false` both draw it.
+   */
+  readonly offline?: boolean | undefined;
+  /**
+   * The route planner's map (#2006): drawn with no line as well, its
+   * waypoints as markers and the pointer heard. Implies {@link explorable}.
+   */
+  readonly editing?: MapEditing | undefined;
 }
+
+/** @see MapPanelProps.subject */
+export type MapSubject = 'ride' | 'route' | 'draft';
+
+/**
+ * Everything the panel says, per subject.
+ *
+ * A ride's words are the ones that page has always had. A route's say the same
+ * things about a line with no ride behind it — its facts are above the map and
+ * its downloads below, and neither needs the map.
+ */
+const WORDS: Readonly<
+  Record<
+    MapSubject,
+    {
+      readonly label: (parts: number) => string;
+      readonly noRenderer: string;
+      readonly noBasemap: string;
+    }
+  >
+> = {
+  ride: {
+    label: (parts) =>
+      parts === 1
+        ? 'Map of this ride’s route.'
+        : `Map of this ride’s route, drawn in ${String(parts)} separate parts.`,
+    noRenderer:
+      'This browser cannot draw a map — it needs WebGL, which is unavailable here. Everything ' +
+      'about the ride above is unaffected.',
+    noBasemap:
+      'No basemap is configured for this build, so the route is not drawn. The ride’s track is ' +
+      'stored on this device either way, and exporting it gives you the whole thing.',
+  },
+  route: {
+    label: (parts) =>
+      parts === 1
+        ? 'Map of this route.'
+        : `Map of this route, drawn in ${String(parts)} separate parts.`,
+    // Each one short line: the route's page holds every section to one
+    // (`a11y/section-lines.ts`, #1013).
+    noRenderer:
+      'This browser cannot draw a map: it needs WebGL. The route’s facts and downloads are ' +
+      'unaffected.',
+    noBasemap:
+      'This build has no basemap, so the route is not drawn on a map. Its facts and downloads ' +
+      'are unaffected.',
+  },
+  draft: {
+    label: (legs) =>
+      legs === 0
+        ? 'Map for drawing a route.'
+        : `Map of the route being drawn, in ${String(legs)} ${legs === 1 ? 'leg' : 'legs'}.`,
+    noRenderer:
+      'This browser cannot draw a map: it needs WebGL. The waypoint list places and moves every ' +
+      'waypoint.',
+    noBasemap:
+      'This build has no basemap, so there is no map to draw on. The waypoint list places and ' +
+      'moves every waypoint.',
+  },
+};
+
+/** What the panel says offline (#2003), whatever the line is. */
+export const MAP_OFFLINE_TEXT =
+  'The map is unavailable offline: its streets are not stored on this device. It is drawn once ' +
+  'you are online.';
+
+/** The buttons an explorable map is moved with (#2003), in the order they are read. */
+const MOVES: readonly { readonly label: string; readonly move: (view: MapView) => void }[] = [
+  { label: 'Zoom in', move: (view) => view.zoom('in') },
+  { label: 'Zoom out', move: (view) => view.zoom('out') },
+  { label: 'Move north', move: (view) => view.pan('north') },
+  { label: 'Move west', move: (view) => view.pan('west') },
+  { label: 'Move east', move: (view) => view.pan('east') },
+  { label: 'Move south', move: (view) => view.pan('south') },
+  { label: 'Whole route', move: (view) => view.fitTrack() },
+];
 
 export function MapPanel({
   port,
   basemap,
   track,
   tiles = true,
+  subject = 'ride',
+  explorable = false,
+  offline = false,
+  editing,
 }: MapPanelProps): JSX.Element | null {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<MapView | undefined>(undefined);
+  const words = WORDS[subject];
+  const editable = editing !== undefined;
+  const movable = explorable || editable;
+  // The planner's latest handlers and callback, read at the gesture (#2006).
+  const latest = useRef(editing);
+  latest.current = editing;
+  /** Whether this map has been fitted once, which an editable map does only once. */
+  const fittedOnce = useRef(false);
 
-  const drawable = track !== undefined && port !== undefined && basemap !== undefined;
+  // Offline matters only to a map that fetches streets: with the tiles switch
+  // off the style has no source, needs no network, and draws as it does online.
+  const unreachable = offline && tiles;
+  const drawable =
+    (track !== undefined || editable) &&
+    port !== undefined &&
+    basemap !== undefined &&
+    !unreachable;
   const parts = track?.coordinates.length ?? 0;
-  const label =
-    parts === 1
-      ? 'Map of this ride’s route.'
-      : `Map of this ride’s route, drawn in ${String(parts)} separate parts.`;
+  const label = words.label(parts);
 
   /**
    * Create the map — once per basemap, **not** once per track.
@@ -152,13 +313,31 @@ export function MapPanel({
         style: basemapStyle(basemap, { tiles, theme }),
         trackColour: MAP_COLOURS[theme].track,
       }),
+      movable,
+      editable,
     );
     view.current = created;
+    fittedOnce.current = false;
+    if (editable) {
+      created.listen({
+        tap: (position) => {
+          latest.current?.pointer.tap(position);
+        },
+        moveWaypoint: (id, position) => {
+          latest.current?.pointer.moveWaypoint(id, position);
+        },
+        dragLine: (from, to) => {
+          latest.current?.pointer.dragLine(from, to);
+        },
+      });
+      latest.current?.onView?.(created);
+    }
     return () => {
+      if (editable) latest.current?.onView?.(undefined);
       created.destroy();
       view.current = undefined;
     };
-  }, [drawable, port, basemap, tiles]);
+  }, [drawable, port, basemap, tiles, movable, editable]);
 
   /**
    * Put the line on it, and put a different line on it when the rider asks.
@@ -168,31 +347,39 @@ export function MapPanel({
    * makes swapping the owner's track for the shared one cost a `setData` call
    * rather than a map.
    */
+  const emptyView = editing?.emptyView;
   useEffect(() => {
-    view.current?.setTrack(trackFeature(track), trackBounds(track));
-  }, [track]);
+    if (view.current === undefined) return;
+    // An editable map fits once, to its line or to the empty view (#2006).
+    const fitNow = !editable || !fittedOnce.current;
+    view.current.setTrack(trackFeature(track), trackBounds(track) ?? emptyView, fitNow);
+    fittedOnce.current = true;
+    // `drawable` too: a map created when the device comes back online (#2003)
+    // is created after this effect last ran, and needs the line handed again.
+  }, [track, drawable, editable, emptyView]);
 
-  // Nothing to draw. Not an empty map — see the module note.
-  if (track === undefined) {
+  /** The planner's markers, on every change of its waypoints (#2006). */
+  const waypoints = editing?.waypoints;
+  useEffect(() => {
+    if (waypoints !== undefined) view.current?.setWaypoints(waypoints);
+  }, [waypoints, drawable]);
+
+  // Nothing to draw. Not an empty map — see the module note. The planner's
+  // map is the exception: an empty draft is where a rider taps first.
+  if (track === undefined && !editable) {
     return null;
   }
 
   if (port === undefined) {
-    return (
-      <p className="oyl-muted">
-        This browser cannot draw a map — it needs WebGL, which is unavailable here. Everything about
-        the ride above is unaffected.
-      </p>
-    );
+    return <p className="oyl-muted">{words.noRenderer}</p>;
   }
 
   if (basemap === undefined) {
-    return (
-      <p className="oyl-muted">
-        No basemap is configured for this build, so the route is not drawn. The ride’s track is
-        stored on this device either way, and exporting it gives you the whole thing.
-      </p>
-    );
+    return <p className="oyl-muted">{words.noBasemap}</p>;
+  }
+
+  if (unreachable) {
+    return <p className="oyl-muted">{MAP_OFFLINE_TEXT}</p>;
   }
 
   return (
@@ -203,6 +390,22 @@ export function MapPanel({
         than a credit — see the module note and ODbL §4.3.
       */}
       <p className="oyl-map__attribution">{basemap.attribution}</p>
+      {movable && (
+        // After the credit, so the credit stays the map's next sibling.
+        <div className="oyl-map__moves" role="group" aria-label="Move the map">
+          {MOVES.map(({ label: name, move }) => (
+            <Button
+              key={name}
+              variant="secondary"
+              onClick={() => {
+                if (view.current !== undefined) move(view.current);
+              }}
+            >
+              {name}
+            </Button>
+          ))}
+        </div>
+      )}
     </>
   );
 }

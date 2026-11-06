@@ -17,7 +17,7 @@
 import { encodeMessage } from '@onyourleft/protocol';
 
 import { createRoom, type Admit, type Outbound } from './core/room.ts';
-import { helloText, reportText } from './core/room-testing.ts';
+import { helloText, laneText, reportText, useText } from './core/room-testing.ts';
 import type { RoomSettings } from './core/settings.ts';
 
 /** What a transcript records when the ROOM closes a socket. A client's own hang-up records nothing. */
@@ -165,5 +165,80 @@ export async function rideTheScript(room: RoomUnderTest): Promise<Transcript> {
   const afterMs = (SCRIPT_TICKS.at(-1) ?? 0) + 500;
   await room.connect('ann-again');
   await room.send('ann-again', helloText('ticket-ann'), afterMs);
+  return room.transcript();
+}
+
+/** When the lap race's ticks fall due: the first a second after `start`, and enough for three laps. */
+export const LAP_RACE_TICKS = Array.from({ length: 200 }, (_, k) => 1_500 + k * 1_000);
+
+/**
+ * The lap race (#1909) — join → start → three laps with items → finish, over
+ * the same adapters as {@link rideTheScript}: Bea uses whatever she holds
+ * every tick, Ann every third, Ann steers out of the middle lane and back, a
+ * use is replayed, a lane is sent stale, Bea drops for four seconds and comes
+ * back on a new socket, and an outcome a client claims is refused.
+ */
+export async function rideTheLapRace(room: RoomUnderTest): Promise<Transcript> {
+  await room.connect('ann');
+  await room.send('ann', helloText('ticket-ann'), 0);
+  await room.connect('bea');
+  await room.send('bea', helloText('ticket-bea'), 10);
+  await room.start(500);
+
+  let annSequence = 1;
+  let annInput = 1;
+  let beaSequence = 1;
+  let beaInput = 1;
+  let beaSocket: 'bea' | 'bea-again' | undefined = 'bea';
+  for (const [index, tickAtMs] of LAP_RACE_TICKS.entries()) {
+    const reportAtMs = tickAtMs - 500;
+    const power = 240 + ((index * 37) % 80);
+    await room.send('ann', reportText(annSequence, reportAtMs, power), reportAtMs);
+    annSequence += 1;
+    if (index % 3 === 0) {
+      await room.send('ann', useText(annInput, reportAtMs + 10), reportAtMs + 10);
+      annInput += 1;
+    }
+    if (index === 40 || index === 70) {
+      await room.send(
+        'ann',
+        laneText(annInput, reportAtMs + 20, index === 40 ? 0 : 1),
+        reportAtMs + 20,
+      );
+      annInput += 1;
+    }
+    if (index === 41) {
+      // A lane sent with a sequence already spent: not admitted.
+      await room.send('ann', laneText(annInput - 1, reportAtMs + 20, 2), reportAtMs + 20);
+      // An outcome a client claims: refused by the decoder, and Ann is not closed.
+      await room.send(
+        'ann',
+        '{"type":"item-use","sequence":999,"atMs":1,"hit":true}',
+        reportAtMs + 30,
+      );
+    }
+    if (index === 90) {
+      await room.hangUp('bea', reportAtMs + 100);
+      beaSocket = undefined;
+    }
+    if (index === 94) {
+      await room.connect('bea-again');
+      await room.send('bea-again', helloText('ticket-bea'), reportAtMs + 100);
+      beaSocket = 'bea-again';
+      beaSequence = 1;
+      beaInput = 1;
+    }
+    if (beaSocket !== undefined) {
+      await room.send(
+        beaSocket,
+        reportText(beaSequence, reportAtMs + 150, power - 15),
+        reportAtMs + 150,
+      );
+      beaSequence += 1;
+      await room.send(beaSocket, useText(beaInput, reportAtMs + 160), reportAtMs + 160);
+      beaInput += 1;
+    }
+    await room.tick(tickAtMs);
+  }
   return room.transcript();
 }

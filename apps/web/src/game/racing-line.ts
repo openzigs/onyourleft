@@ -138,7 +138,12 @@
  * at 12 m/s calls for more than 60°, which no tyre holds. The drawn lean stops
  * at {@link MAXIMUM_LEAN_RADIANS}. A rider drawn at the cap is NOT cornering
  * legally; they are going faster than the bend allows and the game does not
- * slow them, which is out of scope here.
+ * slow them, which is out of scope here. ⚠️ **Since #1998 the DRAWN rider is
+ * slowed**, and a reviewer who remembers a hairpin drawn at this cap is
+ * reading the old file: `bend-easing.ts` eases each rider's drawn place and
+ * speed off for a bend so this lean stays at or under 25°, and the speed it is
+ * handed here is that drawn speed. The cap still binds where nothing is eased
+ * — a Delivery round and a lap race (`scene.ts` §`easingLine`).
  *
  * Pure: no clock, no `three`, no DOM, no platform API.
  */
@@ -146,7 +151,7 @@
 import { distanceOnRoute, type GeographicPosition, type RouteProfile } from '@onyourleft/domain';
 import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
 
-import { RIDER_HALF_WIDTH_METRES } from './bicycle';
+import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES } from './bicycle';
 import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition } from './terrain';
 
 /**
@@ -452,6 +457,33 @@ export function racingLine(profile: RouteProfile): RacingLine {
 export function lineOffsetAt(line: RacingLine, distance: number): number {
   const value = sampled(line.profile, line.offsets, distance);
   return Math.max(-LINE_LIMIT_METRES, Math.min(LINE_LIMIT_METRES, value));
+}
+
+/**
+ * Over how much road {@link lineSlopeAt} reads the line: one bicycle, rear
+ * wheel to front ({@link BICYCLE_LENGTH_METRES}) — #1995.
+ */
+export const LINE_SLOPE_SPAN_METRES = BICYCLE_LENGTH_METRES;
+
+/**
+ * How fast the line moves across the road, in metres sideways per metre
+ * ridden, positive toward the road's normal — #1995: the line's change from a
+ * bicycle's rear wheel to its front wheel, over {@link LINE_SLOPE_SPAN_METRES}.
+ *
+ * It is what turns a rider to the line rather than to the road
+ * (`scene.ts` §`markerAt`). ⚠️ **A chord, not the curve's own derivative.**
+ * The derivative is nought where {@link lineOffsetAt} is held at the road's
+ * edge and the full slope just outside, so the rider's facing stepped by up to
+ * 9° in one frame where a hairpin's line reached the edge (#1995's review).
+ * The chord is continuous wherever {@link lineOffsetAt} is, held or not, and
+ * is what a bicycle whose wheels both follow the line actually points along.
+ */
+export function lineSlopeAt(line: RacingLine, distance: number): number {
+  const half = LINE_SLOPE_SPAN_METRES / 2;
+  return (
+    (lineOffsetAt(line, distance + half) - lineOffsetAt(line, distance - half)) /
+    LINE_SLOPE_SPAN_METRES
+  );
 }
 
 /**

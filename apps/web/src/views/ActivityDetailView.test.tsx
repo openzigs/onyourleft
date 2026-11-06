@@ -18,6 +18,7 @@ import {
   distanceBetween,
   geographicPosition,
   metres,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
@@ -27,16 +28,34 @@ import {
 import {
   activityId,
   athleteId,
+  openActivityStore,
   privacyZoneId,
   type PrivacyZoneRecord,
   type Samples,
+  type StreamChannel,
   type UnitSystem,
 } from '@onyourleft/store';
-import type { ReactElement } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import {
+  ATHLETE_A,
+  createStoreHarness,
+  resetFixtureIds,
+  seedAthletes,
+  seedRide,
+  streamSetFor,
+} from '@onyourleft/store/testing';
+import { act, type ReactElement } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { stubAnalysis, type StubAnalysis } from '../analysis/testing';
 import { trimRadius } from '../detail/privacy';
-import { stubActivity, stubDetail, stubLap, type StubDetail } from '../detail/testing';
+import {
+  installFakeIntersectionObserver,
+  stubActivity,
+  stubDetail,
+  stubLap,
+  type FakeIntersectionObservers,
+  type StubDetail,
+} from '../detail/testing';
 import { CHART_POINTS } from '../detail/series';
 import {
   OSM_ATTRIBUTION,
@@ -53,10 +72,18 @@ import {
   stubMapPort,
   type StubMapPort,
 } from '../map/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 import { UnitsProvider } from '../units/context';
 
-import { ActivityDetailView } from './ActivityDetailView';
+import { ActivityDetailView, DISTANCE_AXIS_TITLE, READING_RIDE_TEXT } from './ActivityDetailView';
+import { AnalysisView } from './AnalysisView';
 
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
@@ -344,80 +371,338 @@ describe('criterion 2 — a gap renders as a visible discontinuity', () => {
     expect(document.body.textContent).toContain('no reading');
   });
 
-  it('draws one path and no gap language for an unbroken ride', async () => {
+  it('draws one path a chart and no gap language for an unbroken ride', async () => {
     mounted = await open(indoorRide());
-    expect(queryAll(document, 'svg.oyl-trace path')).toHaveLength(2 * 1);
+    // Three channels stored, three charts, one unbroken run each.
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(3);
+    expect(queryAll(document, 'svg.oyl-trace path')).toHaveLength(3 * 1);
     expect(document.body.textContent).not.toContain('no reading');
   });
 });
 
-describe('criterion 3 — toggling a series changes what is rendered', () => {
-  it('adds a trace to the page, not merely to a state store', async () => {
-    // The criterion is explicit that a store-level assertion is a no-op that
-    // passes: client state nothing renders from changes nothing. So this counts
-    // drawings before and after.
+describe('#2069 — the ride’s time in zone, on its own page', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /** The same ride to both ports: 300 s at 100 W (zone 1) and 300 s at 200 W (zone 4). */
+  function bothPorts(): { readonly detail: StubDetail; readonly analysis: StubAnalysis } {
+    const power = [
+      ...Array.from({ length: 300 }, () => watts(100)),
+      ...Array.from({ length: 300 }, () => watts(200)),
+    ];
+    const activity = stubActivity({ hasPosition: false });
+    return {
+      detail: stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      analysis: stubAnalysis(ATHLETE, [{ activity, power }]),
+    };
+  }
+
+  async function openWithZones(
+    detail: StubDetail,
+    analysis: StubAnalysis | undefined,
+  ): Promise<Mounted> {
+    await import('../detail/TraceChart');
+    const result = await mount(
+      <ActivityDetailView port={detail} activityId={RIDE} analysis={analysis} />,
+    );
+    await settle();
+    await settle();
+    return result;
+  }
+
+  it('reads nothing for it until the section scrolls into view, then draws the chart and its table', async () => {
+    observers = installFakeIntersectionObserver();
+    const { detail, analysis } = bothPorts();
+    mounted = await openWithZones(detail, analysis);
+
+    const slot = document.querySelector('[data-oyl-zones-slot]');
+    expect(slot?.querySelector('h3')?.textContent).toBe('Time in zone');
+    expect(slot?.textContent).toContain('Reading time in zone…');
+    expect(analysis.channelReads).toEqual([]);
+
+    await observers.reveal([slot as Element]);
+    await settle();
+    await settle();
+
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+    const shares = queryAll(slot as Element, '.oyl-zone-chart__share').map(
+      (share) => share.textContent,
+    );
+    expect(shares).toEqual(['50%', '0%', '0%', '50%', '0%', '0%', '0%']);
+    const table = queryAll(slot as Element, 'table').find((each) =>
+      (each.querySelector('caption')?.textContent ?? '').startsWith('Power zones'),
+    );
+    expect(
+      queryAll(table as Element, 'tbody tr').map((row) => row.lastElementChild?.textContent),
+    ).toEqual(shares);
+    expect(slot?.querySelector('h4')?.textContent).toBe('Power zones');
+  });
+
+  it('has no such section with no analysis port, nor for a ride with no power or heart rate', async () => {
+    const { detail } = bothPorts();
+    mounted = await openWithZones(detail, undefined);
+    expect(document.querySelector('[data-oyl-zones-slot]')).toBeNull();
+    mounted.unmount();
+
+    const cadenceOnly = stubDetail(ATHLETE, {
+      activity: stubActivity({ hasPosition: false }),
+      channels: { cadence: Array.from({ length: 60 }, () => revolutionsPerMinute(90)) },
+      laps: [],
+    });
+    mounted = await openWithZones(cadenceOnly, bothPorts().analysis);
+    expect(document.querySelector('[data-oyl-zones-slot]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Time in zone');
+  });
+
+  it('forgets one ride’s zones when the page moves to another, and reads the next only once it is in view', async () => {
+    observers = installFakeIntersectionObserver();
+    const power = [
+      ...Array.from({ length: 300 }, () => watts(100)),
+      ...Array.from({ length: 300 }, () => watts(200)),
+    ];
+    const first = stubActivity({ hasPosition: false });
+    const second = stubActivity({ id: activityId('ride-2'), hasPosition: false });
+    const detail = stubDetail(ATHLETE, { activity: first, channels: { power }, laps: [] });
+    const other = stubDetail(ATHLETE, { activity: second, channels: { power }, laps: [] });
+    const analysis = stubAnalysis(ATHLETE, [
+      { activity: first, power },
+      { activity: second, power },
+    ]);
+    await import('../detail/TraceChart');
+    const view = (port: StubDetail, id: string): ReactElement => (
+      <ActivityDetailView port={port} activityId={id} analysis={analysis} />
+    );
+    mounted = await mount(view(detail, 'ride-1'));
+    await settle();
+    await settle();
+    await observers.reveal([document.querySelector('[data-oyl-zones-slot]') as Element]);
+    await settle();
+    await settle();
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+
+    await mounted.rerender(view(other, 'ride-2'));
+    await settle();
+    await settle();
+
+    const slot = document.querySelector('[data-oyl-zones-slot]');
+    expect(analysis.channelReads).toEqual(['ride-1:power']);
+    expect(slot?.querySelector('.oyl-zone-chart')).toBeNull();
+    expect(slot?.textContent).toContain('Reading time in zone…');
+
+    await observers.reveal([slot as Element]);
+    await settle();
+    await settle();
+    expect(analysis.channelReads).toEqual(['ride-1:power', 'ride-2:power']);
+  });
+
+  it('says so when the read fails, rather than drawing nothing', async () => {
+    const { detail, analysis } = bothPorts();
+    const broken: StubAnalysis = {
+      ...analysis,
+      store: {
+        ...analysis.store,
+        getAthlete: () => Promise.reject(new Error('the database is closed')),
+      },
+    };
+    mounted = await openWithZones(detail, broken);
+    expect(document.querySelector('[data-oyl-zones-slot]')?.textContent).toContain(
+      'Could not read this ride’s time in zone. the database is closed',
+    );
+  });
+});
+
+describe('#2068 — every recorded channel is a chart, read when it scrolls into view', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  const slotOf = (channel: string): Element =>
+    document.querySelector(`[data-oyl-trace-slot="${channel}"]`) as Element;
+
+  it('decodes on first render only the charts in view, and the rest as each scrolls in', async () => {
+    observers = installFakeIntersectionObserver();
     const port = indoorRide();
     mounted = await open(port);
+    // Every chart's slot is drawn and watched, and nothing is read until one
+    // is in view: a four-hour ride inflates only what is seen.
+    expect(
+      queryAll(document, '[data-oyl-trace-slot]').map((slot) =>
+        slot.getAttribute('data-oyl-trace-slot'),
+      ),
+    ).toEqual(['power', 'heartRate', 'cadence']);
+    // The three charts' slots, and #2081's power curve section below them.
+    expect(observers.observed()).toHaveLength(4);
+    expect(port.channelReads).toEqual([]);
+
+    // The first two in view, as a page opened at the top shows them.
+    await observers.reveal([slotOf('power'), slotOf('heartRate')]);
+    await settle();
+    await settle();
+    expect(port.channelReads).toEqual(['power', 'heartRate']);
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+    expect(slotOf('cadence').textContent).toBe('Reading cadence…');
 
-    const show = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Show cadence',
-    );
-    expect(show).toBeDefined();
-    await activateWithKeyboard(show as HTMLButtonElement);
+    // Scrolled down: the third arrives, and the first two are not read again.
+    await observers.reveal([slotOf('cadence')]);
     await settle();
     await settle();
-
+    expect(port.channelReads).toEqual(['power', 'heartRate', 'cadence']);
     expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(3);
-    expect(document.body.textContent).toContain('Cadence (rpm)');
-  });
-
-  it('removes a trace from the page when it is switched off', async () => {
-    const port = indoorRide();
-    mounted = await open(port);
-    const showPower = queryAll<HTMLButtonElement>(document, 'button').find(
-      (button) => button.textContent?.trim() === 'Show power',
+    expect(slotOf('cadence').querySelector('.oyl-trace-chart__value-title')?.textContent).toBe(
+      'Cadence (rpm)',
     );
-    // #668: a toggle, whose name is stable and whose state is aria-pressed.
-    expect(showPower?.getAttribute('aria-pressed')).toBe('true');
-    await activateWithKeyboard(showPower as HTMLButtonElement);
-    await settle();
-
-    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(1);
-    expect(document.body.textContent).not.toContain('Power (W)');
   });
 
-  it('reads a channel once even after switching it off and on again', async () => {
+  it('keeps reading the other charts when one channel fails to read', async () => {
+    observers = installFakeIntersectionObserver();
+    const base = indoorRide();
+    const store = Object.create(base.store) as typeof base.store;
+    store.getStreamChannel = async (athlete, id, channel) => {
+      if (channel === 'heartRate') {
+        throw new Error('corrupt blob');
+      }
+      return base.store.getStreamChannel(athlete, id, channel);
+    };
+    mounted = await open({ ...base, store });
+    await observers.reveal([slotOf('power'), slotOf('heartRate'), slotOf('cadence')]);
+    await settle();
+    await settle();
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+    expect(slotOf('cadence').querySelector('svg.oyl-trace')).not.toBeNull();
+  });
+
+  it('reads a chart once, however often it scrolls back into view', async () => {
     // The samples do not change, so a second inflate of the same blob is pure
     // cost — and it is the read this whole module is arranged to avoid.
+    observers = installFakeIntersectionObserver();
     const port = indoorRide();
     mounted = await open(port);
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-
-    const buttonNamed = (text: string): HTMLButtonElement =>
-      queryAll<HTMLButtonElement>(document, 'button').find(
-        (button) => button.textContent?.trim() === text,
-      ) as HTMLButtonElement;
-
-    await activateWithKeyboard(buttonNamed('Show power'));
+    await observers.reveal([slotOf('power')]);
     await settle();
-    expect(buttonNamed('Show power').getAttribute('aria-pressed')).toBe('false');
-    await activateWithKeyboard(buttonNamed('Show power'));
+    // A slot once seen is no longer watched, so a second sighting cannot ask.
+    expect(observers.observed()).not.toContain(slotOf('power'));
+    await observers.reveal([slotOf('power')]);
     await settle();
+    expect(port.channelReads).toEqual(['power']);
+  });
+
+  it('draws every chart on one time axis: the ride’s own start and end', async () => {
+    // Power is 1 200 s long and heart rate only 600 s, so a chart that took its
+    // axis from its own trace would end heart rate's at 10:00.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: {
+          power: powerSeries(1200),
+          heartRate: Array.from({ length: 600 }, () => beatsPerMinute(142)),
+        },
+        laps: [],
+      }),
+    );
+    const times = queryAll(document, '.oyl-trace-chart').map((chart) =>
+      queryAll(chart, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+    );
+    expect(times).toEqual([
+      ['0:00', '10:00', '20:00'],
+      ['0:00', '10:00', '20:00'],
+    ]);
+    // And the shorter trace is drawn over its own half of the width.
+    const xsOf = (path: Element): number[] =>
+      [...(path.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+)/g)].map((match) =>
+        Number(match[1]),
+      );
+    const [power, heartRate] = queryAll(document, 'svg.oyl-trace path');
+    expect(Math.max(...xsOf(power as Element))).toBeCloseTo(600, 0);
+    expect(Math.max(...xsOf(heartRate as Element))).toBeCloseTo(300, 0);
+  });
+
+  it('moves one cursor across every chart, and reads each chart at that time in words', async () => {
+    mounted = await open(indoorRide());
+    const slider = document.querySelector<HTMLInputElement>('input[type="range"]#oyl-trace-cursor');
+    expect(slider).not.toBeNull();
+    expect(document.querySelector('label[for="oyl-trace-cursor"]')?.textContent).toBe(
+      'Read every chart at',
+    );
+    // A 1 200 s ride drawn at 600 points: a step is one point, two seconds.
+    expect(slider?.max).toBe('1200');
+    expect(slider?.step).toBe('2');
+
+    await typeInto(slider as HTMLInputElement, '600');
     await settle();
 
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(2);
+    expect(slider?.getAttribute('aria-valuetext')).toBe('10:00');
+    // Power's point 300 is samples 600 and 601 averaged: 150 W and 151 W.
+    // #2081: and the lap being ridden then — the second lap starts at 10:00.
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      '10:00, lap 2: Power 151 W, Heart rate 142 bpm, Cadence 88 rpm',
+    );
+    // Halfway along the ride, on every chart: x = 300 of the 600-unit drawing.
+    const lines = queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor');
+    expect(lines).toHaveLength(3);
+    expect(lines.map((line) => line.getAttribute('x1'))).toEqual(['300.00', '300.00', '300.00']);
+  });
+
+  it('says "no reading" at the cursor in a gap, never a zero', async () => {
+    mounted = await open(indoorRide(powerSeries(1200, 400, 300)));
+    await typeInto(
+      document.querySelector<HTMLInputElement>('#oyl-trace-cursor') as HTMLInputElement,
+      '500',
+    );
+    await settle();
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      '8:20, lap 1: Power no reading, Heart rate 142 bpm, Cadence 88 rpm',
+    );
+  });
+
+  it('labels a speed chart and its table in km/h once converted, not twice', async () => {
+    // 10 m/s is 36 km/h. Before #2068 the axis and the table converted the
+    // already-converted points again, and read 129.6.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { speed: Array.from({ length: 600 }, () => metresPerSecond(10)) },
+        laps: [],
+      }),
+    );
+    const chart = document.querySelector('[data-oyl-trace-slot="speed"]');
+    expect(
+      queryAll(chart as Element, '.oyl-trace-chart__values > div').map((each) => each.textContent),
+    ).toEqual(['', '36.0 km/h', '']);
+    const cells = queryAll(chart as Element, 'table.oyl-data-table tbody tr > :nth-child(2)').map(
+      (cell) => cell.textContent,
+    );
+    expect(cells.length).toBeGreaterThan(0);
+    expect(new Set(cells)).toEqual(new Set(['36.0']));
+  });
+
+  it('charts no coordinate: an outdoor ride’s latitude and longitude are neither read nor drawn', async () => {
+    const port = outdoorRide([]);
+    mounted = await open(port);
+    expect(
+      queryAll(document, '[data-oyl-trace-slot]').map((slot) =>
+        slot.getAttribute('data-oyl-trace-slot'),
+      ),
+    ).toEqual(['power']);
+    expect(port.channelReads).toEqual(['power']);
+    expect(document.body.textContent).not.toMatch(/latitude|longitude/i);
+    expect(document.body.textContent).not.toContain('51.5');
   });
 });
 
 describe('criterion 4 — the view does not load a full 1 Hz stream', () => {
-  it('reads only the series it opens with, and never the ones it does not draw', async () => {
+  it('reads each chart’s channel once and never one it does not draw', async () => {
+    // No observer in jsdom, so every slot counts as in view (`detail/visibility.ts`).
     const port = indoorRide();
     mounted = await open(port);
-    // Cadence is stored and is not read, because it is not switched on.
-    expect(port.channelReads).toEqual(['power', 'heartRate']);
-    expect(port.channelReads).not.toContain('cadence');
+    expect(port.channelReads).toEqual(['power', 'heartRate', 'cadence']);
+    expect(port.channelReads).not.toContain('latitude');
   });
 
   it('states the reduction on the page, so the budget is visible rather than assumed', async () => {
@@ -598,15 +883,19 @@ describe('#63 — the map on the detail screen', () => {
 describe('criterion 6 — every chart has a non-visual equivalent', () => {
   it('renders a table of the same series beside the drawing', async () => {
     mounted = await open(indoorRide());
-    const tables = queryAll(document, 'table.oyl-data-table');
-    expect(tables.length).toBe(2);
+    // The three traces' tables; the power curve's is #2081's, below them.
+    const tables = queryAll(document, '[data-oyl-trace-slot] table.oyl-data-table');
+    expect(tables.length).toBe(3);
     expect(tables[0]?.querySelector('caption')?.textContent).toBe('Power (W)');
   });
 
   it('puts each table behind a closed disclosure under its chart, named for its readings — #1439', async () => {
     mounted = await open(indoorRide());
-    const disclosures = queryAll<HTMLDetailsElement>(document, 'details.oyl-chart-table');
-    expect(disclosures).toHaveLength(2);
+    const disclosures = queryAll<HTMLDetailsElement>(
+      document,
+      '[data-oyl-trace-slot] details.oyl-chart-table',
+    );
+    expect(disclosures).toHaveLength(3);
     for (const disclosure of disclosures) {
       expect(disclosure.open).toBe(false);
       expect(disclosure.querySelector('table.oyl-data-table')).not.toBeNull();
@@ -769,13 +1058,13 @@ describe('a trace is not left converted into the units the rider has left (#238)
     mounted = view;
 
     const before = [...port.channelReads];
-    expect(before).toEqual(['power', 'heartRate']);
+    expect(before).toEqual(['power', 'heartRate', 'cadence']);
 
     await view.rerender(reading(port, 'imperial'));
     await settle();
     await settle();
 
-    expect(port.channelReads).toEqual([...before, 'power', 'heartRate']);
+    expect(port.channelReads).toEqual([...before, 'power', 'heartRate', 'cadence']);
   });
 
   it('renders the ride summary in the rider\u2019s units', async () => {
@@ -791,5 +1080,633 @@ describe('a trace is not left converted into the units the rider has left (#238)
     const summary = document.querySelector('.oyl-ride-summary')?.textContent ?? '';
     expect(summary).toContain('mi');
     expect(summary).not.toContain('km');
+  });
+});
+
+describe('#2068 — the stacked charts, read back from the real store (docs/agents/quality-gate.md §5)', () => {
+  /** Turns of the event loop a real-store read may take before the test gives up (#575's bound). */
+  const READ_TURNS = 200;
+  const SAMPLES = 1800;
+
+  async function until(done: () => boolean, what: string): Promise<void> {
+    for (let turn = 0; !done(); turn += 1) {
+      if (turn >= READ_TURNS) {
+        throw new Error(`${what} after ${String(READ_TURNS)} turns`);
+      }
+      await settle();
+    }
+  }
+
+  interface DrawnChart {
+    readonly channel: string | null;
+    readonly paths: number;
+    readonly times: readonly (string | null)[];
+  }
+
+  /**
+   * Record a ride with `channels` through the store's public writes, open its
+   * page on a connection nothing wrote on, scroll every chart into view, and
+   * read what each one drew.
+   */
+  async function chartsOf(channels: readonly StreamChannel[]): Promise<readonly DrawnChart[]> {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    const observers = installFakeIntersectionObserver();
+    try {
+      await seedAthletes(harness);
+      const ride = await seedRide(harness, ATHLETE_A);
+      await harness.write(async (store) =>
+        store.putStreamSet(streamSetFor(ride, { sampleCount: SAMPLES, channels })),
+      );
+      await harness.discard();
+      const store = openActivityStore(harness.databaseName);
+      try {
+        await import('../detail/TraceChart');
+        mounted = await mount(
+          <ActivityDetailView port={{ athleteId: ATHLETE_A, store }} activityId={ride.id} />,
+        );
+        await until(
+          () => !(document.body.textContent ?? '').includes(READING_RIDE_TEXT),
+          'the ride’s page was still reading its ride',
+        );
+        // Scrolled from the top to the bottom, one slot at a time.
+        const slots = queryAll(document, '[data-oyl-trace-slot]');
+        for (const slot of slots) {
+          await observers.reveal([slot]);
+          await until(
+            () => slot.querySelector('svg.oyl-trace') !== null,
+            `the ${slot.getAttribute('data-oyl-trace-slot') ?? ''} chart was still not drawn`,
+          );
+        }
+        return slots.map((slot) => ({
+          channel: slot.getAttribute('data-oyl-trace-slot'),
+          paths: queryAll(slot, 'svg.oyl-trace path').length,
+          times: queryAll(slot, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+        }));
+      } finally {
+        mounted?.unmount();
+        mounted = undefined;
+        store.close();
+      }
+    } finally {
+      observers.restore();
+      await harness.destroy();
+    }
+  }
+
+  it('draws five charts for a ride with all five channels, each on the ride’s own time axis', async () => {
+    const charts = await chartsOf(['power', 'heartRate', 'cadence', 'speed', 'altitude']);
+    expect(charts.map((chart) => chart.channel)).toEqual([
+      'power',
+      'heartRate',
+      'cadence',
+      'speed',
+      'altitude',
+    ]);
+    for (const chart of charts) {
+      expect(chart.paths, `${chart.channel ?? ''} drew no line`).toBeGreaterThanOrEqual(1);
+      // 1 800 samples a second apart: the ride starts at 0:00 and ends at 30:00.
+      expect(chart.times[0]).toBe('0:00');
+      expect(chart.times.at(-1)).toBe('30:00');
+    }
+  });
+
+  it('draws four for the same ride with no cadence — the control', async () => {
+    const charts = await chartsOf(['power', 'heartRate', 'speed', 'altitude']);
+    expect(charts.map((chart) => chart.channel)).toEqual([
+      'power',
+      'heartRate',
+      'speed',
+      'altitude',
+    ]);
+  });
+});
+
+describe('#2081 — the ride’s power curve, beside the all-time one', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /** A ride with a sprint in it: 30 s at 600 W, then 1 170 s at 150–209 W. */
+  function sprintPower(): Samples<'power'> {
+    return [...Array.from({ length: 30 }, () => watts(600)), ...powerSeries(1170)];
+  }
+
+  /** The curve's table, as rows of cells. */
+  function curveTable(): string[][] {
+    const table = document.querySelector('[data-oyl-curve-slot] table');
+    return queryAll(table as Element, 'tbody tr').map((row) =>
+      queryAll(row, 'td').map((cell) => cell.textContent ?? ''),
+    );
+  }
+
+  async function openBoth(detail: StubDetail, analysis: StubAnalysis | undefined): Promise<void> {
+    await import('../detail/TraceChart');
+    await import('../detail/PowerCurveChart');
+    mounted = await mount(
+      <ActivityDetailView port={detail} activityId={RIDE} analysis={analysis} />,
+    );
+    await settle();
+    await settle();
+  }
+
+  it('draws the ride’s curve from the power chart’s own read, and reads the library only once it is in view', async () => {
+    observers = installFakeIntersectionObserver();
+    const power = sprintPower();
+    const activity = stubActivity({ hasPosition: false });
+    const detail = stubDetail(ATHLETE, { activity, channels: { power }, laps: [] });
+    const other = stubActivity({ id: activityId('ride-2'), hasPosition: false });
+    const analysis = stubAnalysis(ATHLETE, [
+      { activity, power },
+      { activity: other, power: Array.from({ length: 4000 }, () => watts(260)) },
+    ]);
+    await openBoth(detail, analysis);
+
+    const slot = document.querySelector('[data-oyl-curve-slot]');
+    expect(slot?.querySelector('h3')?.textContent).toBe('Power curve');
+    await observers.reveal([document.querySelector('[data-oyl-trace-slot="power"]') as Element]);
+    await settle();
+    expect(slot?.textContent).toContain('Reading the power curve…');
+    expect(analysis.channelReads).toEqual([]);
+
+    await observers.reveal([slot as Element]);
+    await settle();
+    await settle();
+    // One decode of this ride's power, by its chart, and none more for the curve.
+    expect(detail.channelReads).toEqual(['power']);
+    expect([...analysis.channelReads].sort()).toEqual(['ride-1:power', 'ride-2:power']);
+    expect(slot?.querySelector('svg.oyl-curve')).not.toBeNull();
+    const rows = curveTable();
+    expect(rows[0]).toEqual(['5s', '600', '600']);
+    expect(rows.find((row) => row[0] === '30s')).toEqual(['30s', '600', '600']);
+    // The other ride held 260 W for an hour; this one is only twenty minutes long.
+    expect(rows.find((row) => row[0] === '20min')?.slice(2)).toEqual(['260']);
+    expect(rows.at(-1)).toEqual(['1h', '—', '260']);
+    expect(queryAll(slot as Element, 'thead th').map((cell) => cell.textContent)).toEqual([
+      'Duration',
+      'This ride (W)',
+      'All-time best (W)',
+    ]);
+  });
+
+  it('says the all-time line rests on the most recent rides only, when the library is longer than the read', async () => {
+    const power = sprintPower();
+    const activity = stubActivity({ hasPosition: false });
+    const rides = Array.from({ length: 201 }, (_, index) => ({
+      activity: stubActivity({ id: activityId(`old-${String(index)}`), hasPosition: false }),
+      power: Array.from({ length: 10 }, () => watts(100)),
+    }));
+    await openBoth(
+      stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      stubAnalysis(ATHLETE, [{ activity, power }, ...rides]),
+    );
+    const slot = document.querySelector('[data-oyl-curve-slot]');
+    expect(slot?.textContent).toContain(
+      'The all-time line is your best across the 200 most recent rides',
+    );
+  });
+
+  it('says nothing of a cut-short library when every ride was read', async () => {
+    const power = sprintPower();
+    const activity = stubActivity({ hasPosition: false });
+    await openBoth(
+      stubDetail(ATHLETE, { activity, channels: { power }, laps: [] }),
+      stubAnalysis(ATHLETE, [{ activity, power }]),
+    );
+    expect(document.querySelector('[data-oyl-curve-slot]')?.textContent).not.toContain(
+      'most recent rides',
+    );
+  });
+
+  it('asks for the power chart too when the curve is scrolled to first', async () => {
+    observers = installFakeIntersectionObserver();
+    const detail = stubDetail(ATHLETE, {
+      activity: stubActivity({ hasPosition: false }),
+      channels: {
+        power: sprintPower(),
+        heartRate: Array.from({ length: 1200 }, () => beatsPerMinute(140)),
+      },
+      laps: [],
+    });
+    await openBoth(detail, undefined);
+    await observers.reveal([document.querySelector('[data-oyl-curve-slot]') as Element]);
+    await settle();
+    await settle();
+    expect(detail.channelReads).toEqual(['power']);
+    expect(document.querySelector('[data-oyl-curve-slot] svg.oyl-curve')).not.toBeNull();
+  });
+
+  it('draws the ride’s line alone with no analysis port, and no section for a ride with no power', async () => {
+    await openBoth(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { power: sprintPower() },
+        laps: [],
+      }),
+      undefined,
+    );
+    expect(curveTable()[0]).toEqual(['5s', '600']);
+    expect(queryAll(document, '[data-oyl-curve-slot] svg path')).toHaveLength(1);
+    mounted?.unmount();
+
+    await openBoth(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { heartRate: Array.from({ length: 600 }, () => beatsPerMinute(140)) },
+        laps: [],
+      }),
+      stubAnalysis(ATHLETE, []),
+    );
+    expect(document.querySelector('[data-oyl-curve-slot]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Power curve');
+  });
+
+  it('still draws the ride’s line, and says why, when the library will not read', async () => {
+    const activity = stubActivity({ hasPosition: false });
+    const analysis = stubAnalysis(ATHLETE, [{ activity, power: sprintPower() }]);
+    const broken: StubAnalysis = {
+      ...analysis,
+      store: {
+        ...analysis.store,
+        listActivitySummaries: () => Promise.reject(new Error('the database is closed')),
+      },
+    };
+    await openBoth(
+      stubDetail(ATHLETE, { activity, channels: { power: sprintPower() }, laps: [] }),
+      broken,
+    );
+    const slot = document.querySelector('[data-oyl-curve-slot]');
+    expect(slot?.textContent).toContain(
+      'Could not read your all-time bests, so only this ride’s line is drawn. the database is closed',
+    );
+    expect(curveTable()[0]).toEqual(['5s', '600']);
+  });
+});
+
+describe('#2081 — the curve equals Analysis’ bests table, read back from the real store', () => {
+  const READ_TURNS = 200;
+
+  async function until(done: () => boolean, what: string): Promise<void> {
+    for (let turn = 0; !done(); turn += 1) {
+      if (turn >= READ_TURNS) {
+        throw new Error(`${what} after ${String(READ_TURNS)} turns`);
+      }
+      await settle();
+    }
+  }
+
+  /** Analysis' bests table as `[duration label, watts]`, its hidden clock reading taken off. */
+  async function bestsTable(port: Parameters<typeof AnalysisView>[0]['port']): Promise<string[][]> {
+    mounted = await mount(<AnalysisView port={port} />);
+    const table = (): HTMLTableElement | undefined =>
+      queryAll<HTMLTableElement>(document, 'table').find((each) =>
+        (each.querySelector('caption')?.textContent ?? '').startsWith('Best average power over'),
+      );
+    await until(() => table() !== undefined, 'Analysis drew no bests table');
+    const rows = queryAll(table() as Element, 'tbody tr').map((row) => [
+      (row.querySelector('th')?.textContent ?? '').replace(/ \(.*\)$/, ''),
+      row.querySelector('td')?.textContent ?? '',
+    ]);
+    mounted.unmount();
+    mounted = undefined;
+    return rows;
+  }
+
+  /** The ride page's curve table as `[duration label, this ride, all-time]`. */
+  async function curveOf(
+    port: Parameters<typeof ActivityDetailView>[0]['port'],
+    id: string,
+  ): Promise<string[][]> {
+    await import('../detail/PowerCurveChart');
+    mounted = await mount(
+      <ActivityDetailView
+        port={port}
+        activityId={id}
+        analysis={port as Parameters<typeof ActivityDetailView>[0]['analysis']}
+      />,
+    );
+    const table = (): Element | null =>
+      document.querySelector('[data-oyl-curve-slot] table thead th:nth-child(3)') === null
+        ? null
+        : document.querySelector('[data-oyl-curve-slot] table');
+    await until(() => table() !== null, 'the ride’s page drew no curve with an all-time column');
+    const rows = queryAll(table() as Element, 'tbody tr').map((row) =>
+      queryAll(row, 'td').map((cell) => cell.textContent ?? ''),
+    );
+    mounted.unmount();
+    mounted = undefined;
+    return rows;
+  }
+
+  it('this ride’s line is the table for a library of that ride, and the all-time line is the library’s', async () => {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    try {
+      await seedAthletes(harness);
+      // An hour and two minutes of power that rises and falls, so every
+      // duration from five seconds to an hour has its own best.
+      const first = await seedRide(harness, ATHLETE_A);
+      const firstPower = Array.from({ length: 3720 }, (_unused, index) =>
+        watts(150 + ((index * 37) % 211) + Math.round(80 * Math.sin(index / 300))),
+      );
+      await harness.write(async (store) =>
+        store.putStreamSet({
+          ...streamSetFor(first, { sampleCount: firstPower.length, channels: [] }),
+          channels: { power: firstPower },
+        }),
+      );
+      await harness.discard();
+      let store = openActivityStore(harness.databaseName);
+      const port = { athleteId: ATHLETE_A, store };
+      const alone = await bestsTable(port);
+      const before = await curveOf(port, first.id);
+      store.close();
+
+      const within = alone.filter(([label]) =>
+        [
+          '5s',
+          '10s',
+          '15s',
+          '30s',
+          '1min',
+          '2min',
+          '3min',
+          '5min',
+          '8min',
+          '10min',
+          '15min',
+          '20min',
+          '30min',
+          '45min',
+          '1h',
+        ].includes(label ?? ''),
+      );
+      expect(within).toHaveLength(15);
+      expect(before.map((row) => [row[0], row[1]])).toEqual(within);
+      expect(before.map((row) => [row[0], row[2]])).toEqual(within);
+
+      // A second ride, harder over the short durations: the ride's own line
+      // stays, and the all-time line is the library's table again.
+      const second = await seedRide(harness, ATHLETE_A);
+      const secondPower = Array.from({ length: 900 }, () => watts(420));
+      await harness.write(async (s) =>
+        s.putStreamSet({
+          ...streamSetFor(second, { sampleCount: secondPower.length, channels: [] }),
+          channels: { power: secondPower },
+        }),
+      );
+      await harness.discard();
+      store = openActivityStore(harness.databaseName);
+      const library = await bestsTable({ athleteId: ATHLETE_A, store });
+      const after = await curveOf({ athleteId: ATHLETE_A, store }, first.id);
+      store.close();
+      const libraryWithin = library.filter(([label]) => within.some(([each]) => each === label));
+      expect(after.map((row) => [row[0], row[1]])).toEqual(within);
+      expect(after.map((row) => [row[0], row[2]])).toEqual(libraryWithin);
+      expect(after.find((row) => row[0] === '5min')?.[2]).toBe('420');
+    } finally {
+      mounted?.unmount();
+      mounted = undefined;
+      await harness.destroy();
+    }
+  });
+});
+
+describe('#2081 — laps marked on every trace', () => {
+  it('draws the ride’s laps as bands on each chart, at the same places', async () => {
+    // Two ten-minute laps on a twenty-minute ride.
+    mounted = await open(indoorRide());
+    const charts = queryAll(document, 'svg.oyl-trace');
+    expect(charts).toHaveLength(3);
+    for (const chart of charts) {
+      expect(
+        queryAll(chart, 'rect.oyl-trace__lap').map((rect) => [
+          rect.getAttribute('x'),
+          rect.getAttribute('width'),
+        ]),
+      ).toEqual([['0.00', '300.00']]);
+      expect(
+        queryAll(chart, 'line.oyl-trace__lap-edge').map((line) => line.getAttribute('x1')),
+      ).toEqual(['300.00']);
+      expect(chart.getAttribute('aria-label')).toContain('2 laps are marked as bands.');
+    }
+  });
+
+  it('draws no band on a ride with no laps', async () => {
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    expect(queryAll(document, 'svg.oyl-trace rect')).toHaveLength(0);
+  });
+});
+
+describe('#2081 — the tap and hover read-out', () => {
+  function laidOut(svg: Element): void {
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      width: 600,
+      right: 600,
+      top: 0,
+      bottom: 96,
+      height: 96,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+  }
+
+  it('moves the one cursor to a tap on any chart, and says every chart’s reading there', async () => {
+    mounted = await open(indoorRide());
+    const [, heartRate] = queryAll(document, 'svg.oyl-trace');
+    laidOut(heartRate as Element);
+    await act(async () => {
+      heartRate?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 151, pointerType: 'touch' }),
+      );
+      await Promise.resolve();
+    });
+    await settle();
+    // A quarter of a 1 200 s ride is 300 s, already on a 2 s step.
+    const slider = document.querySelector<HTMLInputElement>('#oyl-trace-cursor');
+    expect(slider?.value).toBe('302');
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      // Power's point 151 is samples 302 and 303 averaged: 152 W and 153 W.
+      '5:02, lap 1: Power 153 W, Heart rate 142 bpm, Cadence 88 rpm',
+    );
+    expect(
+      queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor').map((line) =>
+        line.getAttribute('x1'),
+      ),
+    ).toEqual(['151.00', '151.00', '151.00']);
+    // Each chart's own reading, beside its title.
+    expect(
+      queryAll(document, '.oyl-trace-chart__reading').map((reading) => reading.textContent),
+    ).toEqual(['153 W', '142 bpm', '88 rpm']);
+  });
+
+  it('snaps a tap between two steps to the slider’s step, so the slider and the line agree', async () => {
+    mounted = await open(indoorRide());
+    const [, heartRate] = queryAll(document, 'svg.oyl-trace');
+    laidOut(heartRate as Element);
+    await act(async () => {
+      heartRate?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 150.6, pointerType: 'touch' }),
+      );
+      await Promise.resolve();
+    });
+    await settle();
+    // 150.6 of 600 units is 301.2 s of 1 200; the nearest 2 s step is 302.
+    expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
+  });
+
+  it('announces the read-out politely and whole, so a keyboard or screen-reader user hears it', async () => {
+    mounted = await open(indoorRide());
+    const output = document.querySelector('output[for="oyl-trace-cursor"]');
+    expect(output?.getAttribute('aria-live')).toBe('polite');
+    expect(output?.getAttribute('aria-atomic')).toBe('true');
+    // The slider says the time alone; the output says the readings.
+    await typeInto(document.querySelector('#oyl-trace-cursor') as HTMLInputElement, '700');
+    await settle();
+    expect(document.querySelector('#oyl-trace-cursor')?.getAttribute('aria-valuetext')).toBe(
+      '11:40',
+    );
+  });
+
+  it('shows a dash, never a number, for a chart whose sensor gave nothing at the cursor', async () => {
+    mounted = await open(indoorRide(powerSeries(1200, 400, 300)));
+    await typeInto(document.querySelector('#oyl-trace-cursor') as HTMLInputElement, '500');
+    await settle();
+    expect(
+      queryAll(document, '.oyl-trace-chart__reading').map((reading) => reading.textContent),
+    ).toEqual(['—', '142 bpm', '88 rpm']);
+  });
+});
+
+describe('#2081 — a distance axis beside time', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /** Ten minutes at 10 m/s, then ten at 5 m/s: 9 km, two thirds of it in the first half. */
+  function speedRide(): StubDetail {
+    return stubDetail(ATHLETE, {
+      activity: stubActivity({ hasPosition: false }),
+      channels: {
+        power: powerSeries(1200),
+        speed: [
+          ...Array.from({ length: 600 }, () => metresPerSecond(10)),
+          ...Array.from({ length: 600 }, () => metresPerSecond(5)),
+        ],
+      },
+      laps: [stubLap(0), stubLap(1)],
+    });
+  }
+
+  const radio = (value: string): HTMLInputElement =>
+    document.querySelector(`input[name="oyl-trace-axis"][value="${value}"]`) as HTMLInputElement;
+
+  async function choose(value: string): Promise<void> {
+    await act(async () => {
+      radio(value).click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+  }
+
+  it('is offered only for a ride with a speed channel, and time is the default', async () => {
+    mounted = await open(indoorRide());
+    expect(document.querySelector('input[name="oyl-trace-axis"]')).toBeNull();
+    mounted.unmount();
+    mounted = await open(speedRide());
+    expect(document.querySelector('fieldset.oyl-segmented legend')?.textContent).toBe(
+      'Draw the charts against',
+    );
+    expect(radio('time').checked).toBe(true);
+    expect(radio('distance').closest('label')?.textContent).toBe(' Distance (km)');
+  });
+
+  it('redraws every chart against the distance ridden, its laps and cursor with it', async () => {
+    mounted = await open(speedRide());
+    await choose('distance');
+    expect(radio('distance').checked).toBe(true);
+    for (const chart of queryAll(document, '.oyl-trace-chart')) {
+      expect(
+        queryAll(chart, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+      ).toEqual(['0.0 km', '4.5 km', '9.0 km']);
+      expect(chart.querySelector('.oyl-trace-chart__time-title')?.textContent).toBe(
+        DISTANCE_AXIS_TITLE,
+      );
+      // The second lap starts at 10:00, 6 km in: two thirds of the way across.
+      expect(chart.querySelector('line.oyl-trace__lap-edge')?.getAttribute('x1')).toBe('400.00');
+    }
+    await typeInto(document.querySelector('#oyl-trace-cursor') as HTMLInputElement, '600');
+    await settle();
+    expect(
+      queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor').map((line) =>
+        line.getAttribute('x1'),
+      ),
+    ).toEqual(['400.00', '400.00']);
+    expect(document.querySelector('output[for="oyl-trace-cursor"]')?.textContent).toBe(
+      // The second half's 5 m/s starts at 10:00.
+      '10:00, 6.0 km, lap 2: Power 151 W, Speed 18.0 km/h',
+    );
+
+    // And back.
+    await choose('time');
+    expect(
+      queryAll(document, '.oyl-trace-chart__times > div')
+        .map((each) => each.textContent)
+        .slice(0, 3),
+    ).toEqual(['0:00', '10:00', '20:00']);
+  });
+
+  it('reads nothing for it until it is chosen, and then only the speed chart’s own channel', async () => {
+    observers = installFakeIntersectionObserver();
+    const port = speedRide();
+    mounted = await open(port);
+    await observers.reveal([document.querySelector('[data-oyl-trace-slot="power"]') as Element]);
+    await settle();
+    expect(port.channelReads).toEqual(['power']);
+
+    await choose('distance');
+    // The speed chart, asked for by the choice although it is not yet in view, read once.
+    expect(port.channelReads).toEqual(['power', 'speed']);
+    expect(
+      queryAll(
+        document.querySelector('[data-oyl-trace-slot="power"]') as Element,
+        '.oyl-trace-chart__times > div',
+      ).map((each) => each.textContent),
+    ).toEqual(['0.0 km', '4.5 km', '9.0 km']);
+    await observers.reveal([document.querySelector('[data-oyl-trace-slot="speed"]') as Element]);
+    await settle();
+    expect(port.channelReads).toEqual(['power', 'speed']);
+  });
+
+  it('stays on time, and says why, for a ride whose speed covers no ground', async () => {
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: { speed: Array.from({ length: 600 }, () => metresPerSecond(0)) },
+        laps: [],
+      }),
+    );
+    await choose('distance');
+    expect(document.body.textContent).toContain(
+      'This ride’s speed covers no distance, so its charts stay drawn against time.',
+    );
+    expect(
+      queryAll(document, '.oyl-trace-chart__times > div').map((each) => each.textContent),
+    ).toEqual(['0:00', '5:00', '10:00']);
   });
 });

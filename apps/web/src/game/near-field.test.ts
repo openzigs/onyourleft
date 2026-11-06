@@ -13,7 +13,9 @@
  * 2. **The tests are right.** The box and the triangle tests are held to cases
  *    worked by hand and to an independent sampling of the same solid.
  * 3. **A ride cuts nothing**, with the camera on the racing line, on the
- *    fixture routes, a metre at a time, at every aspect from an upright phone
+ *    fixture routes, a metre at a time — the camera `GameView` draws, its
+ *    heading damped between those metres as a screen's frames damp it
+ *    (`chase-camera-testing.ts`, since #1994) — at every aspect from an upright phone
  *    to 6 : 1, in both worlds — and at 8 : 1 the frame as built DOES meet the
  *    plane, which is the control that makes the first half mean something.
  *    What the cull drops is held, item for item, to `referenceShapeMeets`,
@@ -43,6 +45,7 @@ import {
   type CameraRig,
   type RigPoint,
 } from './camera';
+import { drawnCamera } from './chase-camera-testing';
 import {
   clearOfTheCamera,
   intrudes,
@@ -77,7 +80,7 @@ import {
   plannerRoute,
   sBendRoute,
 } from './route-fixtures-testing';
-import { sceneFrame } from './scene';
+import { sceneFrame, type SceneInput } from './scene';
 import { SCENERY_MODELS } from './scenery-models';
 import { SCATTER_KINDS, STRUCTURE_KINDS, type SceneryKind, type ScatterItem } from './scatter';
 import { atStartLine } from './simulation';
@@ -700,6 +703,11 @@ const RIDES: Readonly<Record<string, () => RouteProfile>> = {
   // pair keeps the control able to find one, and both hands measured.
   "a planner's route, mirrored": () => plannerRoute({ mirrored: true }),
   'a 300 m right-hand circuit': () => circuitRoute(300, () => 20, 'right'),
+  // #1994: the far end of an out-and-back course, where `GameView`'s damped
+  // camera swings round the rider (`camera.ts` §`turnedPose`) and its eye
+  // leaves the line `scene.ts` keeps it on furthest of any ride here.
+  'a turnaround, the legs 4 m apart': () => hairpinRoute(2),
+  'a left-hand turnaround, the legs 4 m apart': () => hairpinRoute(2, 'left'),
 };
 
 /**
@@ -727,7 +735,10 @@ const ASPECTS: Readonly<Record<string, number>> = {
 };
 
 interface RideFrame {
+  /** The camera `GameView` draws: `sceneFrame`'s, turned to the damped heading — #1994. */
   readonly rig: CameraRig;
+  /** The camera `sceneFrame` built, before the damping: the control that the damping was ridden. */
+  readonly undamped: CameraRig;
   readonly scatter: readonly ScatterItem[];
 }
 
@@ -740,13 +751,21 @@ function ride(name: string): readonly RideFrame[] {
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
   const frames: RideFrame[] = [];
+  const inputAt = (distance: number): SceneInput => ({
+    profile,
+    origin,
+    state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+  });
+  // Since #1994 the camera drawn is `GameView`'s, its heading damped from
+  // frame to frame, and not the undamped one `sceneFrame` builds.
+  const drawn = drawnCamera(inputAt, 8);
   for (let distance = 0; distance < profile.totalDistance; distance += 1) {
-    const frame = sceneFrame({
-      profile,
-      origin,
-      state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+    const frame = sceneFrame(inputAt(distance));
+    frames.push({
+      rig: cameraRig(drawn(distance, frame.camera)),
+      undamped: cameraRig(frame.camera),
+      scatter: frame.scatter,
     });
-    frames.push({ rig: cameraRig(frame.camera), scatter: frame.scatter });
   }
   rides.set(name, frames);
   return frames;
@@ -808,8 +827,8 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
   // so a ride that slows past it is red. ⚠️ It is NOT a hang guard, and it bounds nothing about
   // the file: each ride is synchronous, and Vitest cannot interrupt a synchronous case — its timer
   // is only read once the case returns — so a ride that never returns is caught only by the job's
-  // own stop. And the nine rides run one after another, so a cull that slows every ride can cost
-  // up to 9 × 230 s before the last one goes red.
+  // own stop. And the eleven rides run one after another, so a cull that slows every ride can cost
+  // up to 11 × 230 s before the last one goes red.
   for (const name of Object.keys(RIDES)) {
     it(`${name}: what the renderer draws, every aspect, both worlds`, () => {
       for (const { rig, scatter } of ride(name)) {
@@ -842,6 +861,31 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
       }
     }, 230_000);
   }
+
+  it('rides the camera GameView draws, whose eye leaves sceneFrame’s in a bend (#1994)', () => {
+    // The control that the damping was ridden at all: were the rides handed
+    // `sceneFrame`'s undamped camera, as they were until #545's last lane, the
+    // two eyes would be one on every frame. Measured: up to 0.17 m off in the
+    // 20 m hairpins, 0.11 m in the S-bends, 0.16 m on the planner's routes and
+    // 0.73 m at the turnarounds; none on the level road, which never bends.
+    const most = (name: string): number => {
+      let off = 0;
+      for (const { rig, undamped } of ride(name)) {
+        off = Math.max(off, Math.hypot(rig.eye.x - undamped.eye.x, rig.eye.z - undamped.eye.z));
+      }
+      return off;
+    };
+    expect(most('a level road through villages')).toBeLessThan(1e-6);
+    for (const name of ['a 20 m hairpin', 'a 20 m left-hand hairpin', "a planner's route"]) {
+      expect(most(name), name).toBeGreaterThan(0.1);
+    }
+    for (const name of [
+      'a turnaround, the legs 4 m apart',
+      'a left-hand turnaround, the legs 4 m apart',
+    ]) {
+      expect(most(name), name).toBeGreaterThan(0.5);
+    }
+  }, 600_000);
 
   it('cuts nothing a device draws even before the cull — the owner’s tablet among them', () => {
     // The finding, pinned: on these routes the camera on its line never comes

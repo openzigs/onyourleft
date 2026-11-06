@@ -100,6 +100,11 @@ import {
   type HeartRateResponse,
   type HeartRateResponseOptions,
 } from './heart-rate-response';
+import {
+  createControllerMachine,
+  type ControllerMachine,
+  type SimulatedController,
+} from './controller';
 import { listenerList, type ListenerList } from './listeners';
 import { DEFAULT_RIDER, type RiderProfile } from './rider';
 import type { Scenario } from './scenario';
@@ -189,6 +194,11 @@ export interface SimulatedDevice {
    */
   readonly supportedRanges: FtmsSupportedRanges | undefined;
   /**
+   * The steering and button controller, on a device that serves `obc`
+   * (#1823). Its script plays as the clock advances, while the link is up.
+   */
+  readonly controller: SimulatedController | undefined;
+  /**
    * @throws {SensorError} `capability-unsupported` when the scenario needs a
    * service this device does not serve; `not-connected` for a link scenario on
    * a device with no link.
@@ -256,6 +266,8 @@ interface DeviceRecord {
   readonly cps: CyclingPowerService | undefined;
   readonly cscs: CscService | undefined;
   readonly hrs: HeartRateService | undefined;
+  /** The steering and button controller, on a device that serves `obc`. */
+  readonly controller: ControllerMachine | undefined;
   /**
    * One reader per capability, from the first service in the spec that carries
    * it. Fixed at construction, as an adapter's source assignment is — so a
@@ -284,6 +296,8 @@ export function createSimulator(options: SimulatorOptions): Simulator {
   let availability: TransportAvailability = options.availability ?? { kind: 'available' };
   let rider: RiderProfile = { ...DEFAULT_RIDER, ...options.rider };
   let now: number = options.startAt ?? DEFAULT_START;
+  /** Where the clock started: a controller's script counts from here. */
+  const start = now;
 
   const heartModel: HeartRateResponse | undefined =
     options.heartRate?.kind === 'responsive'
@@ -329,6 +343,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     let cps: CyclingPowerService | undefined;
     let cscs: CscService | undefined;
     let hrs: HeartRateService | undefined;
+    let controller: ControllerMachine | undefined;
     // A trainer's power is the ERG target while one is held; every service on
     // the same device reports the same physical power.
     const power = (): Watts => ftms?.effectivePower(rider) ?? rider.power;
@@ -413,6 +428,12 @@ export function createSimulator(options: SimulatorOptions): Simulator {
           vendorControl = createVendorControlPoint('Wahoo');
           break;
         }
+        case 'obc': {
+          // No reader either: a controller's presses are not measurements.
+          // They reach a client through the bridge's notifications only.
+          controller = createControllerMachine(spec.controller ?? {});
+          break;
+        }
         case 'hrs': {
           const strap = createHeartRateService();
           hrs = strap;
@@ -438,6 +459,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       cps,
       cscs,
       hrs,
+      controller,
       readers,
       resetClient: () => client.clear(),
       notifications: listenerList<DeviceFrames>(),
@@ -522,6 +544,28 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     record.dropoutRemaining = 0;
     record.recoverAt = undefined;
     record.ftms?.onLinkLost();
+    record.controller?.onLinkLost();
+  };
+
+  /**
+   * Play the controller's steps due on this tick. A step that falls after the
+   * link has gone, in this tick or an earlier one, is lost: nobody is
+   * subscribed to it.
+   */
+  const playController = (record: DeviceRecord, machine: ControllerMachine): void => {
+    for (const step of machine.due(now - start)) {
+      if (record.session.state !== 'connected') {
+        return;
+      }
+      if (step.kind === 'disconnect') {
+        record.session.transitionTo('disconnected');
+        linkLost(record);
+      } else if (step.kind === 'malformed') {
+        machine.notify({ kind: 'malformed', shape: step.shape });
+      } else {
+        machine.notify({ kind: 'changes', changes: step.changes });
+      }
+    }
   };
 
   const frames = (record: DeviceRecord): DeviceFrames => {
@@ -593,6 +637,12 @@ export function createSimulator(options: SimulatorOptions): Simulator {
         record.dropoutRemaining -= 1;
         continue;
       }
+      if (record.controller !== undefined) {
+        playController(record, record.controller);
+        if (record.session.state !== 'connected') {
+          continue;
+        }
+      }
       deliver(record);
     }
   };
@@ -632,6 +682,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       controlPoint: record.ftms?.controlPoint,
       vendorControlPoint: record.vendorControl,
       supportedRanges: record.ftms?.supportedRanges(),
+      controller: record.controller?.controller,
 
       script(scenario) {
         switch (scenario.kind) {

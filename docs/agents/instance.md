@@ -71,7 +71,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         with no account, migration 0026's append-only
                         `notice` table, and `GET /v1/moderation/notices`;
                         `moderation/notices.ts` says what it keeps. Since
-                        #910 a suspension or a hidden name needs a
+                        #1381 a notice's notifier details are erased six
+                        months after its decision (twelve after receipt
+                        with none recorded, #1923), on the hour
+                        (`moderation/notice-retention.ts`, migration
+                        0036: the ONE update the `notice` table allows).
+                        Since #910 a suspension or a hidden name needs a
                         statement of reasons (migration 0027, append-only,
                         `moderation/statements.ts`), and `GET
                         /v1/statements` is the THIRD route a way-out
@@ -217,6 +222,19 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `k` from the distances the room holds, before the
                         tick re-simulates; a room's maker may turn it off
                         (migration 0024), and off is `k = 1` for everybody.
+                        ⚠️ **And runs a lap race with items since #1909**
+                        (ADR 0060, protocol 3): settings' `lapRace` (laps,
+                        items, the room's own seed) runs `@onyourleft/domain`'s
+                        `stepRace` each tick from the room's effort distances
+                        and the riders' `lane` and `item-use` INPUTS (one use a
+                        tick, never queued); frames carry each rider's offset,
+                        lane, held item and laps and the tick's item events.
+                        A frame's `decimetres` stays the EFFORT distance.
+                        `lap-race-conformance.test.ts` holds both adapters to it.
+                        Since #1910 a rider makes one, private, on their own
+                        loop (`rooms/rooms.ts` §`lapRace`): migration 0037's
+                        `room_course.lap_laps`, `lap_items` and `lap_seed`
+                        (drawn from the CSPRNG, never sent), read by `planFor`.
                         ⚠️ **Mounted by two adapters since #780**, and a
                         reviewer who remembers "not by the instance" is
                         reading the old file: the Node adapter
@@ -303,5 +321,32 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         are NOT signed by the instance (no ADR gives it a key);
                         `docs/architecture.md` §"A rider's room" says why.
                         Migration 0013 holds it, after #926's 0012
+    src/voice/          a Discord voice channel per private room (#874,
+                        spike 0017 option A): `discord.ts` the ONE module
+                        that talks to Discord — REST over the platform's
+                        `fetch`, no dependency, rate limits from the headers,
+                        a `401` turns it off for good, an error kept by NAME
+                        only — and `room-voice.ts` the channel, invite,
+                        rotation and close, held in MEMORY only (no Discord
+                        data at rest). Off unless the operator set
+                        `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` (a file, never
+                        the token in the environment, #2146) and `…_GUILD_ID`;
+                        `rooms.ts` §`over` deletes a room's channel, and the
+                        room sweep deletes leftovers. Since #875 a rider's
+                        PRIVATE room's link goes to its riders in the
+                        welcome (protocol 4): `instance.ts`'s lookup asks
+                        `inviteFor` for each socket, waiting at most 2 s,
+                        and puts it in the plan; the worker sets it on the
+                        core (`setVoiceInvite`), which says it in every
+                        welcome and nowhere else. Never a public room.
+                        Since #876 a removal from a room and a suspension
+                        ROTATE the channel (`voice/voice-moderation.ts`),
+                        after the action is logged and the rider's socket
+                        closed: the riders who stay are told the new link
+                        in a `voice` message (the router's
+                        `setVoiceInvite`), the athlete it was about never,
+                        and `rotate_voice` is appended to the log
+                        (`SqlStore.logVoiceAction`). A linked rider's role
+                        and disconnect wait for #877
 
 ```

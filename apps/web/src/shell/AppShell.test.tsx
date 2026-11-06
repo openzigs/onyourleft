@@ -17,6 +17,7 @@ import {
   geographicPosition,
   kilograms,
   routeProfile,
+  unixSeconds,
   watts,
   type Kilograms,
   type RoutePoint,
@@ -39,6 +40,9 @@ import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
 import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
+import { OSM_ATTRIBUTION } from '../map/basemap';
+import { stubMapPort } from '../map/testing';
+import { routeStub, stubRouteId } from '../routes/testing';
 
 import { AppShell } from './AppShell';
 import {
@@ -267,6 +271,47 @@ describe('the router', () => {
     expect(text).toContain('clearing its storage in Android’s settings');
   });
 
+  it('hands a chosen route the map engine and the basemap, so it is drawn on the map — #2003', async () => {
+    // Two optional props passed through the shell: left out, the route's page
+    // says the browser cannot draw a map, and nothing else would notice.
+    const points: RoutePoint[] = Array.from({ length: 20 }, (_unused, index) => ({
+      position: geographicPosition(degreesLatitude(51.5 + index * 0.001), degreesLongitude(-0.1)),
+      elevation: altitudeMetres(30),
+    }));
+    const owner = athleteId('local');
+    const engine = stubMapPort();
+    globalThis.location.hash = '#/routes/selected/route-1';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        routes={routeStub(owner, [
+          {
+            id: stubRouteId('route-1'),
+            createdBy: owner,
+            name: 'Box Hill loop',
+            profile: routeProfile(points),
+            visibility: 'private',
+            createdAt: unixSeconds(1),
+            updatedAt: unixSeconds(1),
+          },
+        ])}
+        map={() => Promise.resolve(engine)}
+        basemap={{
+          archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+          attribution: OSM_ATTRIBUTION,
+        }}
+      />,
+    );
+    await settle();
+    await settle();
+    await settle();
+    expect(engine.created).toHaveLength(1);
+    expect(engine.created[0]?.options.style.sources.basemap?.url).toBe(
+      'pmtiles://https://tiles.example.org/basemap.pmtiles',
+    );
+    expect(document.querySelector('main .oyl-map')).not.toBeNull();
+  });
+
   it('hands About the platform and the rider’s instance, for where the rides are — #1450', async () => {
     globalThis.location.hash = '#/about';
     mounted = await mount(
@@ -346,6 +391,20 @@ describe('the header', () => {
     expect(new Set(icons.map((svg) => svg?.getAttribute('stroke-width')))).toEqual(
       new Set(['1.8']),
     );
+  });
+
+  it('heads the navigation with the app’s mark, as decoration — #2066', async () => {
+    await open('/');
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    const marks = [...(nav?.querySelectorAll('img') ?? [])];
+    expect(marks).toHaveLength(1);
+    const [mark] = marks;
+    // Before the destinations, so a rail draws it at the top.
+    expect(nav?.firstElementChild).toBe(mark);
+    expect(mark?.getAttribute('src')).toBe(`${import.meta.env.BASE_URL}icon-192.png`);
+    // Named nowhere: the header's wordmark and label name the app once.
+    expect(mark?.getAttribute('alt')).toBe('');
+    expect(mark?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('lists the current group’s pages, and only that group’s', async () => {
@@ -454,8 +513,10 @@ describe('the line under the title, its help and its notes (#993)', () => {
     const route = routeById('workouts');
     await open(route.path);
     const main = document.querySelector('main');
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).toBe(route.summary);
-    const help = main?.querySelector(':scope > h1 + p + details.oyl-help');
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).toBe(
+      route.summary,
+    );
+    const help = main?.querySelector(':scope > .oyl-view-head > h1 + p + details.oyl-help');
     expect(help, 'the help disclosure is not straight after the line').not.toBeNull();
     expect(help?.hasAttribute('open')).toBe(false);
     const summary = help?.querySelector('summary');
@@ -470,7 +531,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
 
   it('opens from the keyboard', async () => {
     await open(routeById('segments').path);
-    const help = document.querySelector<HTMLDetailsElement>('main > details.oyl-help');
+    const help = document.querySelector<HTMLDetailsElement>(
+      'main > .oyl-view-head > details.oyl-help',
+    );
     const summary = help?.querySelector('summary');
     if (summary === null || summary === undefined) throw new Error('no help summary');
     await activateWithKeyboard(summary);
@@ -495,7 +558,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
     expect(main?.lastElementChild).toBe(notes);
     expect(notes?.closest('details')).toBeNull();
     // And not in the line under the title any more.
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).not.toContain(route.notes?.[0]);
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).not.toContain(
+      route.notes?.[0],
+    );
   });
 });
 

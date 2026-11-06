@@ -104,8 +104,8 @@ function modulesUnder(directory: string): string[] {
 
 /**
  * The app's half of the history index (#835, ADR 0040 D-2 item 1): the sync
- * that pushes a ride's summary to the rider's instance. Its retrieval half is
- * `ride-analysis/history.ts`, walked with the rest of that directory; the
+ * that pushes a ride's summary to the rider's instance. Retrieval is the
+ * instance's own since #1103 (the device's `history.ts` went in #1797); the
  * instance's half is `apps/instance/src/history/no-picture.test.ts`.
  */
 const HISTORY_ENTRIES = ['instance/sync.ts'] as const;
@@ -143,8 +143,9 @@ describe('the module graph (#799)', () => {
 
   it('walks the entries it names, so it is not a walk over nothing', () => {
     expect(ENTRIES).toContain(`${ANALYSIS_ROOT}/input.ts`);
-    // #835: the history's retrieval, its summary builder, and the sync that pushes it.
-    expect(ENTRIES).toContain(`${ANALYSIS_ROOT}/history.ts`);
+    // #835: the history's summary builder, and the sync that pushes it. Its
+    // retrieval half on the device (`history.ts`) went in #1797: the
+    // instance's agent searches the index itself (#1099).
     expect(ENTRIES).toContain('ride-analysis/ride-summary.ts');
     expect(ENTRIES).toContain('instance/sync.ts');
     // #1102: the job request to the rider's instance, and its controller.

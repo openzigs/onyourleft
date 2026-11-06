@@ -49,6 +49,7 @@ import { landClassMask } from './land-class';
 import {
   FAR_ROLES,
   mappedBuildingsOf,
+  mappedChunk,
   NEAR_ROLES,
   type MappedBuildings,
   type MappedBuildingsInView,
@@ -68,7 +69,7 @@ import {
   surfaceRepeat,
 } from './realistic-assets';
 import type { ScatterItem } from './scatter';
-import { sceneFrame } from './scene';
+import { drawnRiderDistance, sceneFrame } from './scene';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { atStartLine } from './simulation';
 import { drawnRoadFrame } from './terrain';
@@ -77,6 +78,7 @@ import {
   GROUNDED_SHADE,
   GROUNDING_METRES,
   isConstructedMaterial,
+  laysRoofSnow,
   MappedBuildingBelt,
   readsInstanceTint,
   readsTextureLodBias,
@@ -194,8 +196,9 @@ describe('the mapped buildings’ materials — #1549', () => {
     expect(shader.fragmentShader).toContain('if (oylTop > 0.0)');
     expect(shader.fragmentShader).toContain(`const float oylWinL = ${String(WINDOW_IN_BAY.left)};`);
     expect(shader.fragmentShader).toContain('roughnessFactor = mix(mix(roughnessFactor');
+    // Since #1662 a pane is a dielectric, its reflection three's Fresnel's.
     expect(shader.fragmentShader).toContain(
-      'metalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+      'metalnessFactor = mix(metalnessFactor, 0.0, oylGlass);',
     );
     expect(shader.fragmentShader).toContain('normal = normalize(mix(normal, nonPerturbedNormal');
     expect(shader.fragmentShader.indexOf('varying vec3 vOylTint;')).toBeLessThan(
@@ -641,32 +644,48 @@ describe('what the buffers hold — #1549', () => {
 
 describe('refilled only at a chunk, and nothing allocated between — #1549, #240 NFR-3', () => {
   it('refills 2 000 / MAPPED_CHUNK_METRES ± 1 times over a 2 km ride, frame by frame', () => {
+    // #2145: a whole `sceneFrame` (scenery, ground, side roads) is built only
+    // where the rider's chunk changes, about 21 of the 401 frames. On any
+    // other frame `refillMappedBuildings` reads `view.chunk` and returns, so
+    // that frame passes the last built frame's view, scatter and billboards
+    // under its own chunk — the frame's: `sceneFrame` takes it from
+    // `mappedChunk(drawnRiderDistance(input))`, as each built frame asserts.
     const belt = aBelt();
     const start = atStartLine(town.profile);
     const frames = Array.from({ length: 401 }, (_, index) => 500 + index * 5);
+    let built: ReturnType<typeof sceneFrame> | undefined;
+    let builtView: MappedBuildingsInView | undefined;
+    let frameBuilds = 0;
     for (const along of frames) {
-      const frame = sceneFrame({
+      const input = {
         profile: town.profile,
         origin: town.origin,
         state: { ...start, ride: { ...start.ride, distance: metres(along) } },
         mappedBuildings: buildings,
-      });
-      const view = frame.mappedBuildings;
-      if (view === undefined) throw new Error('the frame carries no mapped buildings');
-      expect(view.buildings).toBe(buildings);
+      };
+      const chunk = mappedChunk(drawnRiderDistance(input));
+      if (built === undefined || builtView === undefined || builtView.chunk !== chunk) {
+        built = sceneFrame(input);
+        frameBuilds += 1;
+        builtView = built.mappedBuildings;
+        if (builtView === undefined) throw new Error('the frame carries no mapped buildings');
+        expect(builtView.buildings).toBe(buildings);
+        expect(builtView.chunk).toBe(chunk);
+      }
       refillMappedBuildings(
         belt,
-        view,
-        frame.scatter,
-        frame.billboards.length,
+        { ...builtView, chunk },
+        built.scatter,
+        built.billboards.length,
         REALISTIC_STRUCTURE_ITEMS,
       );
     }
     const expected = 2_000 / MAPPED_CHUNK_METRES;
     expect(belt.refills).toBeGreaterThanOrEqual(expected - 1);
     expect(belt.refills).toBeLessThanOrEqual(expected + 1);
-    // Non-vacuity: far more frames than refills.
+    // Non-vacuity: far more frames than refills, and a frame built for each.
     expect(frames.length).toBeGreaterThan(10 * belt.refills);
+    expect(frameBuilds).toBeGreaterThanOrEqual(belt.refills);
     // And a new rung refills at once, whatever the chunk.
     const last = viewAt(2_500);
     const before = belt.refills;
@@ -1012,6 +1031,79 @@ describe('a roof under snow, and a wall without it — #1623', () => {
 
   it('draws every roof exactly as before with no snow — the season-free picture', () => {
     for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(TILE);
+  });
+});
+
+/**
+ * Snow on the house models' roofs — #1686: #1585's models are not drawn
+ * through the facade, so their one material is taught the roofs' snow on its
+ * own (`three-renderer.ts` §`withRoofSnow`), the same function by the same
+ * uniform as a mapped roof beside them. Evaluated from the program three is
+ * handed, as #1623's describe above does for the facade.
+ */
+describe('a house model’s roof under snow, and its wall without it — #1686', () => {
+  const programOf = (
+    material: unknown,
+  ): { fragment: string; uniforms: Record<string, unknown> } => {
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    (material as { onBeforeCompile(shader: unknown, renderer: unknown): void }).onBeforeCompile(
+      shader,
+      undefined,
+    );
+    return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+  };
+  const linear = (packed: number): readonly number[] =>
+    [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff].map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+  /** An atlas texel of a model's roof, linear. */
+  const SHINGLE: readonly [number, number, number] = [0.22, 0.2, 0.19];
+  const snowed = (up: number, snow: number): readonly number[] => {
+    const drawn = glslFunction(programOf(aBelt().modelMesh.material).fragment, 'oylSnowedRoof')(
+      SHINGLE,
+      up,
+      snow,
+    );
+    if (typeof drawn === 'number') throw new Error('oylSnowedRoof returned a float');
+    return drawn;
+  };
+  const apart = (a: readonly number[], b: readonly number[]): number =>
+    Math.hypot(...a.map((each, at) => each - (b[at] ?? 0)));
+
+  it('is taught the roofs’ snow, after the normals, reading the very uniform a mapped roof reads', () => {
+    const belt = aBelt();
+    expect(laysRoofSnow(belt.modelMesh.material as never)).toBe(true);
+    const model = programOf(belt.modelMesh.material);
+    const at = model.fragment.indexOf(
+      'diffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);',
+    );
+    expect(at).toBeGreaterThan(model.fragment.indexOf('#include <normal_fragment_maps>'));
+    expect(model.fragment).toContain('uniform float oylRoofSnow;');
+    // One uniform, the season's: what the view writes for a mapped roof reaches the models.
+    const mapped = programOf(belt.materialOf('roof-tiles'));
+    expect(model.uniforms['oylRoofSnow']).toBeDefined();
+    expect(model.uniforms['oylRoofSnow']).toBe(mapped.uniforms['oylRoofSnow']);
+  });
+
+  it('shades a model roof’s up-facing fragment toward the snow on a snowy day, and a wall not at all', () => {
+    const snow = linear(ROOF_SNOW);
+    const roof = snowed(Math.cos(Math.PI / 6), 1);
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(roof[channel]).toBeCloseTo(snow[channel] ?? 0, 5);
+    }
+    expect(apart(roof, snow)).toBeLessThan(apart(SHINGLE, snow));
+    expect(snowed(0, 1)).toEqual(SHINGLE);
+  });
+
+  it('draws every model exactly as before with no snow — the season-free picture', () => {
+    for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(SHINGLE);
   });
 });
 

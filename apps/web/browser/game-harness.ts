@@ -59,14 +59,17 @@
 
 import {
   altitudeMetres,
+  createItemRace,
   elevationAt,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
   metres,
   metresPerSecond,
+  raceCourse,
   routeProfile,
   seconds,
+  type Hazard,
   type RouteProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -75,16 +78,19 @@ import type { KitColour } from '@onyourleft/store';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
   type RigPoint,
 } from '../src/game/camera';
 import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
+import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { drawnCamera } from '../src/game/chase-camera-testing';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -138,6 +144,7 @@ import {
   COMMERCIAL_WINDOW_IN_BAY,
   facadePartAt,
   OVERHANG_SHADOW,
+  PAIR_MIN_BAY_METRES,
   REVEAL_DEPTH_METRES,
   REVEAL_GRAZE,
   SASH,
@@ -188,9 +195,10 @@ import {
   type LinearColour,
 } from '../src/game/realistic-light';
 import { srgbByteToLinear } from '../src/game/scenery-palette';
-import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
+import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   bicycleTreadOf,
+  lapRaceDrawnOf,
   riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
@@ -207,6 +215,7 @@ import {
   horizonFromSkyOf,
   drawOrderOf,
   firDepthPrepassOf,
+  nearTreeFadeOf,
   foliageOrderedOf,
   sceneMaterialsOf,
   type DrawnPiece,
@@ -265,6 +274,8 @@ import {
   waterReflectsOf,
   remoteRiderControlOf,
   windowRevealsOf,
+  windowRoomsOf,
+  lotRealismOf,
   overhangShadowsOf,
   weatheringOf,
   facadeTrimsOf,
@@ -275,6 +286,8 @@ import {
   parseConfig,
   weatheringWithLevers,
   windowRevealsWithLevers,
+  windowRoomsWithLevers,
+  lotRealismWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { nameTags } from '../src/game/name-tags';
@@ -326,6 +339,7 @@ import {
   REALISTIC_TREE_LEVELS,
 } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
+import type { NearTreeFade } from '../src/game/near-tree-fade';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
@@ -361,6 +375,29 @@ import { observePair, PRESENCE_PAIR_GAP_MILLISECONDS } from '../src/camera/prese
  */
 function sceneFrame(input: Parameters<typeof builtSceneFrame>[0]): SceneFrame {
   return retainedFrame(builtSceneFrame(input));
+}
+
+/**
+ * `frame`'s camera aimed as the chase camera was before #1994: from behind the
+ * rider at `distance` (on the centreline), straight on along the road there.
+ *
+ * #1994's camera looks at the road up the ROUTE, so in a bend it is turned
+ * toward the bend and the rider is off the middle of the frame. A probe that
+ * holds the camera still to read something ELSE in a bend — the line's offset
+ * ({@link lineProbe}), which way a bend turns on the screen ({@link
+ * bendProbe}) — uses this one, so its reading is of what it measures and not
+ * of where #1994 points the camera.
+ */
+function straightOnCamera(frame: SceneFrame, distance: number): CameraPose {
+  const rider = chaseRider(frame.corridor, distance, 0);
+  return {
+    ...frame.camera,
+    x: rider.x,
+    z: rider.z,
+    headingX: rider.tangent.headingX,
+    headingZ: rider.tangent.headingZ,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
 }
 
 /** How a frame is built: {@link sceneFrame}'s copy, or {@link lentSceneFrame}. */
@@ -728,6 +765,16 @@ declare global {
       readonly roomDrawCallsEachOwnMesh: number;
       /** How many remote markers that frame carried — so the room was really there. */
       readonly remoteRidersInRoom: number;
+      /**
+       * #1903: the same scenery-free frame carrying a lap race — the rider
+       * and seven bots, five of the eight hit, every pick-up point of a
+       * three-lap race and ten puddles — and the draw calls it cost, held to
+       * `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`.
+       */
+      readonly lapRaceDrawCalls: number;
+      /** How many racers that frame carried, and what the view's belt drew: the controls. */
+      readonly lapRaceRacers: number;
+      readonly lapRaceDrawn: Readonly<Record<'pickUps' | 'hazards' | 'hits', number>>;
       /**
        * How many pixels beside the road changed when the scenery was added.
        *
@@ -1369,14 +1416,18 @@ function lineProbe(
   const origin = corridorOrigin(profile);
   const onTheLine = sceneFrame({ profile, origin, state });
   const onTheCentre = sceneFrame({ profile, origin, state, centreline: true });
-  const still = onTheCentre.camera;
+  // #1994: aimed straight on, as it was. Through the product's camera, which
+  // now looks at the road round the bend, the CENTRELINE rider read 14.4 % of
+  // the width off the middle on #1994's pull request — the control below
+  // would be reading the camera, not the line. @see straightOnCamera
+  const still = straightOnCamera(onTheCentre, apex);
   const riderOnly = (frame: SceneFrame): SceneFrame => ({
     ...frame,
     camera: still,
     scatter: [],
     markers: frame.markers.filter((marker) => marker.kind === 'rider'),
   });
-  const nobody: SceneFrame = { ...onTheCentre, scatter: [], markers: [] };
+  const nobody: SceneFrame = { ...onTheCentre, camera: still, scatter: [], markers: [] };
   const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
   if (gl === null) {
     view.destroy();
@@ -1538,12 +1589,15 @@ function bendProbe(
       ...atStartLine(profile),
       ride: { speed: metresPerSecond(9), distance: metres(395) },
     };
-    const frame = sceneFrame({
+    const built = sceneFrame({
       profile,
       origin: corridorOrigin(profile),
       state,
       centreline: true,
     });
+    // #1994: aimed straight on, as it was, so the far road is where the bend
+    // takes it and not where the camera has turned to. @see straightOnCamera
+    const frame = { ...built, camera: straightOnCamera(built, 395) };
     const road: SceneFrame = { ...frame, scatter: [], markers: [] };
     const present = drawn(road);
     const absent = drawn({ ...road, corridor: { ...road.corridor, indices: new Uint32Array(0) } });
@@ -1674,10 +1728,15 @@ function nearFieldProbe(
     origin,
     state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
   });
-  let chosen: { distance: number; pivot: number; cut: readonly string[] } | undefined;
+  let chosen:
+    { distance: number; pivot: number; cut: readonly string[]; camera: CameraPose } | undefined;
+  // #545: the camera `GameView` draws, its heading damped from frame to frame
+  // (#1994), so the closest pass is the one a screen shows. @see drawnCamera
+  const drawnAt = drawnCamera(inputAt, 8);
   for (let distance = 0; distance < profile.totalDistance; distance += 1) {
     const lent = lentSceneFrame(inputAt(distance));
-    const rig = cameraRig(lent.camera);
+    const camera = drawnAt(distance, lent.camera);
+    const rig = cameraRig(camera);
     const kept = new Set(clearOfTheCamera(lent.scatter, rig, width / height, world, shapes));
     const dropped = lent.scatter.filter((item) => !kept.has(item));
     if (dropped.length === 0) continue;
@@ -1685,7 +1744,7 @@ function nearFieldProbe(
       ...dropped.map((item) => Math.hypot(item.x - rig.eye.x, item.z - rig.eye.z)),
     );
     if (chosen === undefined || pivot < chosen.pivot) {
-      chosen = { distance, pivot, cut: dropped.map((item) => item.kind) };
+      chosen = { distance, pivot, cut: dropped.map((item) => item.kind), camera };
     }
   }
   if (chosen === undefined) {
@@ -1698,7 +1757,7 @@ function nearFieldProbe(
   // to this measure: moving the near plane moves the depth buffer's precision
   // everywhere, and a far tree's foot against the ground changes by a few
   // pixels — eight, on the frame this probe picks, with nothing near the eye.
-  const built = sceneFrame(inputAt(chosen.distance));
+  const built = { ...sceneFrame(inputAt(chosen.distance)), camera: chosen.camera };
   const rig = cameraRig(built.camera);
   const pyramid = nearPyramid(rig, width / height);
   const frame: SceneFrame = {
@@ -1898,25 +1957,35 @@ function nearFieldStreetProbe(
     return { cut, pivot };
   };
   let chosen:
-    { ride: StreetRide; distance: number; pivot: number; cut: readonly string[] } | undefined;
+    | {
+        ride: StreetRide;
+        distance: number;
+        pivot: number;
+        cut: readonly string[];
+        camera: CameraPose;
+      }
+    | undefined;
   for (const ride of streetRides(pass)) {
+    // #545: the camera `GameView` draws, as {@link nearFieldProbe} rides it.
+    const drawnAt = drawnCamera((distance) => inputAt(ride, distance), 8);
     for (let distance = 0; distance < ride.profile.totalDistance; distance += 1) {
       const lent = lentSceneFrame(inputAt(ride, distance));
-      const dropped = droppedFrom(ride, lent, nearPyramid(cameraRig(lent.camera), aspect));
+      const camera = drawnAt(distance, lent.camera);
+      const dropped = droppedFrom(ride, lent, nearPyramid(cameraRig(camera), aspect));
       if (dropped.cut.length === 0) continue;
       // A person's closest pass is the nearest; a wall's, the frame that drops
       // the most, since a building's middle says little of where its wall is.
       const closer =
         chosen === undefined ||
         (pass === 'person' ? dropped.pivot < chosen.pivot : dropped.cut.length > chosen.cut.length);
-      if (closer) chosen = { ride, distance, ...dropped };
+      if (closer) chosen = { ride, distance, ...dropped, camera };
     }
   }
   if (chosen === undefined) {
     view.destroy();
     return NO_STREET_NEAR_FIELD;
   }
-  const built = sceneFrame(inputAt(chosen.ride, chosen.distance));
+  const built = { ...sceneFrame(inputAt(chosen.ride, chosen.distance)), camera: chosen.camera };
   const rig = cameraRig(built.camera);
   const pyramid = nearPyramid(rig, aspect);
   const { buildings } = chosen.ride;
@@ -4444,6 +4513,213 @@ function windowRevealProbe(
   }
 }
 
+/** What {@link windowRoomsProbe} publishes — #1662. */
+interface WindowRoomsMeasurement {
+  /** Whether two neighbouring sashes facing the road were found, and matched with the rooms out. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, square on, metres; and how many pairs were read to find one. */
+  readonly metres: number;
+  readonly pairsTried: number;
+  /** The two lower sashes' middles, with the rooms built: RGB, 0 to 255. */
+  readonly left: readonly number[];
+  readonly right: readonly number[];
+  /** The same two places with `-window-rooms`: #1581's flat room, the control. */
+  readonly leftOff: readonly number[];
+  readonly rightOff: readonly number[];
+}
+
+/** How far {@link windowRoomsProbe}'s camera is from the wall, square on: **15 m**, the issue's. */
+const ROOMS_PROBE_METRES = 15;
+
+/** The gate's tolerance two places are held to as the same colour: **4**, #1659's control's. */
+const ROOMS_PROBE_TOLERANCE = 4;
+
+const NO_WINDOW_ROOMS: WindowRoomsMeasurement = {
+  aimed: false,
+  metres: 0,
+  pairsTried: 0,
+  left: [],
+  right: [],
+  leftOff: [],
+  rightOff: [],
+};
+
+/**
+ * #1662: two neighbouring rooms behind a mapped wall's glass differ, and
+ * with `-window-rooms` they are #1581's same flat room. #1581's mixed town
+ * (`?town=mixed`'s): of the single sashes on its walls' first floors that face
+ * the road, 8 to 40 m from it somewhere from 1 000 m along, two in
+ * neighbouring bays, and a camera {@link ROOMS_PROBE_METRES} out from the
+ * wall, square on to the point between them and level with their lower
+ * sashes. #1581's flat room is lit one window in five, so a pair is read
+ * first with the rooms taken out as the owner's `&levers=-window-rooms`
+ * takes them (`windowRoomsOf`) and kept where the two match within
+ * {@link ROOMS_PROBE_TOLERANCE} — both unlit, or both lit, as on `main` —
+ * then read again with the rooms built.
+ */
+function windowRoomsProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): WindowRoomsMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Pair {
+    readonly a: Point3;
+    readonly ux: number;
+    readonly uz: number;
+    readonly nx: number;
+    readonly nz: number;
+    readonly bay: number;
+    readonly k: number;
+    readonly floor: number;
+  }
+  // Every pair of neighbouring single sashes on a first floor, by its wall's corner and its left bay.
+  const pairs: Pair[] = [];
+  for (const plan of plans) {
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const flags = f(0, STYLE_OFFSET + 1);
+      const bayWidth = f(0, STYLE_OFFSET + 2);
+      if ((flags & STYLE_SASH) === 0 || top < 1 + SASH_TOP_SHARE) continue;
+      if (!(bayWidth < PAIR_MIN_BAY_METRES)) continue;
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 2) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let k = 0; k + 1 < bays; k += 1) {
+        pairs.push({
+          a,
+          ux: (b.x - a.x) / length,
+          uz: (b.z - a.z) / length,
+          nx: f(0, 3),
+          nz: f(0, 5),
+          bay: length / bays,
+          k,
+          floor: floor + STOREY_METRES,
+        });
+      }
+    }
+  }
+  // The lower sash's middle, between the sill's frame and the meeting rail, metres above its floor.
+  const paneUp = WINDOW_SILL_METRES + SASH.frame + (SASH.height / 2 - SASH.frame) / 2;
+  const on = (p: Pair, m: number): Point3 => ({
+    x: p.a.x + p.ux * m + p.nx * 0.01,
+    y: p.floor + paneUp,
+    z: p.a.z + p.uz * m + p.nz * 0.01,
+  });
+  const start = atStartLine(profile);
+  // The pairs facing the road from 1 000 m on, nearest first.
+  const facing: { readonly along: number; readonly pair: Pair; readonly distance: number }[] = [];
+  for (let along = 1_000; along <= 2_000; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    for (const p of pairs) {
+      const middle = on(p, (p.k + 1) * p.bay);
+      const distance = Math.hypot(road.x - middle.x, road.z - middle.z);
+      const toward = ((road.x - middle.x) * p.nx + (road.z - middle.z) * p.nz) / distance;
+      if (distance < 8 || distance > 40 || toward < 0.5) continue;
+      facing.push({ along, pair: p, distance });
+    }
+    if (facing.length >= 24) break;
+  }
+  facing.sort((x, y) => x.distance - y.distance);
+  const frameFor = (along: number, p: Pair): SceneFrame => {
+    const middle = on(p, (p.k + 1) * p.bay);
+    const eye = {
+      x: middle.x + p.nx * ROOMS_PROBE_METRES,
+      y: middle.y,
+      z: middle.z + p.nz * ROOMS_PROBE_METRES,
+    };
+    const base = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(along) } },
+      worldCorridor: corridor,
+      landClass: land,
+      mappedBuildings,
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+    return {
+      ...base,
+      scatter: [],
+      markers: [],
+      camera: {
+        ...base.camera,
+        x: eye.x - p.nx * CAMERA_BEHIND_METRES,
+        z: eye.z - p.nz * CAMERA_BEHIND_METRES,
+        headingX: -p.nx,
+        headingZ: -p.nz,
+        eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+        targetRoadY: eye.y,
+      },
+    };
+  };
+  const meanAt = (frame: SceneFrame, point: Point3): number[] => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  const apart = (x: readonly number[], y: readonly number[]): number =>
+    Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+  // The owner's lever, read as the page reads it: the rooms out, the control first.
+  windowRoomsOf(view, windowRoomsWithLevers(parseConfig('?levers=-window-rooms').leversOff));
+  try {
+    let tried = 0;
+    for (const { along, pair } of facing.slice(0, 8)) {
+      tried += 1;
+      const frame = frameFor(along, pair);
+      view.render(frame);
+      view.render(frame);
+      const leftAt = on(pair, (pair.k + 0.5) * pair.bay);
+      const rightAt = on(pair, (pair.k + 1.5) * pair.bay);
+      const leftOff = meanAt(frame, leftAt);
+      const rightOff = meanAt(frame, rightAt);
+      if (apart(leftOff, rightOff) >= ROOMS_PROBE_TOLERANCE) continue;
+      windowRoomsOf(view, true);
+      view.render(frame);
+      view.render(frame);
+      return {
+        aimed: true,
+        metres: ROOMS_PROBE_METRES,
+        pairsTried: tried,
+        left: meanAt(frame, leftAt),
+        right: meanAt(frame, rightAt),
+        leftOff,
+        rightOff,
+      };
+    }
+    return { ...NO_WINDOW_ROOMS, pairsTried: tried };
+  } finally {
+    windowRoomsOf(view, true);
+  }
+}
+
 /** What {@link overhangShadowProbe} publishes — #1658. */
 interface OverhangShadowMeasurement {
   /** Whether a mapped wall under eaves was found facing the road, with plain wall at both heights. */
@@ -5909,44 +6185,9 @@ function lotsProbe(
   gl: WebGL2RenderingContext,
   canvas: HTMLCanvasElement,
 ): LotsMeasurement {
-  const profile = northRouteForHarness();
-  const origin = corridorOrigin(profile);
-  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
-    const road = drawnRoadFrame(profile, origin, along);
-    return road === undefined
-      ? undefined
-      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
-  };
-  const corners = [at(1_000, -60), at(1_400, -60), at(1_400, 60), at(1_000, 60)];
-  if (corners.some((point) => point === undefined)) return NO_LOTS;
-  const xs = corners.map((point) => point?.[0] ?? 0);
-  const zs = corners.map((point) => point?.[1] ?? 0);
-  const corridor: WorldCorridor = {
-    routeId: 'harness-1550',
-    origin,
-    covered: () => true,
-    // Only the town's own stretch is read: the procedural world decides the rest.
-    coveredBoxes: [
-      {
-        minX: Math.min(...xs) - 100,
-        maxX: Math.max(...xs) + 100,
-        minZ: Math.min(...zs) - 100,
-        maxZ: Math.max(...zs) + 100,
-      },
-    ],
-    landUse: [
-      {
-        layer: 'landuse',
-        kind: 'residential',
-        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
-      },
-    ],
-    buildings: [],
-    paths: [],
-    streets: [],
-  };
-  const land = landClassMask(corridor);
-  const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
+  const lotsTown = lotsTownForHarness();
+  if (lotsTown === undefined) return NO_LOTS;
+  const { profile, origin, corridor, land, town } = lotsTown;
   const start = atStartLine(profile);
   const frameWith = (lotsOff: boolean): SceneFrame =>
     sceneFrame({
@@ -6011,6 +6252,355 @@ function lotsProbe(
     onRgb: meanAt(lots),
     offRgb: meanAt(off),
   };
+}
+
+/**
+ * #1550's mapped town with no footprints, which `structuresAt` fills with
+ * procedural lots — a residential polygon 60 m either side of the level road
+ * from 1 000 m to 1 400 m along, every tile there read, no buildings in it:
+ * {@link lotsProbe}'s, and since #1665 {@link lotRealismProbe}'s.
+ *
+ * ⚠️ The corridor is built here rather than read from `?corridor=archive`, as
+ * #1547's and #1551's probes build theirs: #1539's archive fixture holds no
+ * residential land within a lot's reach of the road (its block is ~70 m off
+ * it), and what is measured is a lot on a known stretch.
+ */
+function lotsTownForHarness():
+  | {
+      readonly profile: ReturnType<typeof routeProfile>;
+      readonly origin: ReturnType<typeof corridorOrigin>;
+      readonly corridor: WorldCorridor;
+      readonly land: ReturnType<typeof landClassMask>;
+      readonly town: ReturnType<typeof mappedTown>;
+    }
+  | undefined {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
+    const road = drawnRoadFrame(profile, origin, along);
+    return road === undefined
+      ? undefined
+      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
+  };
+  const corners = [at(1_000, -60), at(1_400, -60), at(1_400, 60), at(1_000, 60)];
+  if (corners.some((point) => point === undefined)) return undefined;
+  const xs = corners.map((point) => point?.[0] ?? 0);
+  const zs = corners.map((point) => point?.[1] ?? 0);
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1550',
+    origin,
+    covered: () => true,
+    // Only the town's own stretch is read: the procedural world decides the rest.
+    coveredBoxes: [
+      {
+        minX: Math.min(...xs) - 100,
+        maxX: Math.max(...xs) + 100,
+        minZ: Math.min(...zs) - 100,
+        maxZ: Math.max(...zs) + 100,
+      },
+    ],
+    landUse: [
+      {
+        layer: 'landuse',
+        kind: 'residential',
+        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
+      },
+    ],
+    buildings: [],
+    paths: [],
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
+  return { profile, origin, corridor, land, town };
+}
+
+/** What {@link lotRealismProbe} publishes — #1665. */
+interface LotRealismMeasurement {
+  /** Whether a lot house was found with a plain side wall and a row of front windows to aim at. */
+  readonly aimed: boolean;
+  /** A lot's side wall {@link WEATHERING_PROBE_UP} above its ground: with the realism, and with `-lot-realism`. */
+  readonly near: readonly number[];
+  readonly far: readonly number[];
+  readonly nearOff: readonly number[];
+  readonly farOff: readonly number[];
+  /** Two neighbouring panes of its front's upper row: with the realism, and with `-lot-realism`. */
+  readonly left: readonly number[];
+  readonly right: readonly number[];
+  readonly leftOff: readonly number[];
+  readonly rightOff: readonly number[];
+  /** How many pane pairs were read to find two that match with the realism out. */
+  readonly pairsTried: number;
+}
+
+const NO_LOT_REALISM: LotRealismMeasurement = {
+  aimed: false,
+  near: [],
+  far: [],
+  nearOff: [],
+  farOff: [],
+  left: [],
+  right: [],
+  leftOff: [],
+  rightOff: [],
+  pairsTried: 0,
+};
+
+/** How far {@link lotRealismProbe}'s camera stands from a lot's panes: **8 m**, square on. */
+const LOT_PANES_PROBE_METRES = 8;
+
+/**
+ * #1665: a procedural lot's wall is weathered, and two neighbouring lot panes
+ * show two rooms. #1550's lot town ({@link lotsTownForHarness}), its houses
+ * drawn as lots (`building`, painted, no model), the nearest first:
+ *
+ * - **the wall**: the house's `+x` side wall, `buildings.ts` §`buildingPlan`'s,
+ *   at a place no opening comes within 0.4 m of, read
+ *   {@link WEATHERING_PROBE_UP} above the lot's ground — 0.3 m in the splash
+ *   grime and 1.5 m above it — from {@link WEATHERING_PROBE_METRES} out,
+ *   level, the sun square to the wall at #1658's 60°, as #1661's probe reads
+ *   a mapped wall;
+ * - **the panes**: two windows side by side in the front's upper row
+ *   (`glassPanesOf`, one apart, so an even and an odd), each read a little
+ *   off its middle, clear of any bar, from {@link LOT_PANES_PROBE_METRES} out,
+ *   square on to the point between them. #1550's glass is one flat pane, so a
+ *   pair is kept where the two read the same within
+ *   {@link ROOMS_PROBE_TOLERANCE} with the realism out.
+ *
+ * Each read with the realism built and with it taken out as the owner's
+ * `&levers=-lot-realism` takes it (`lotRealismOf`).
+ */
+function lotRealismProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): LotRealismMeasurement {
+  const lotsTown = lotsTownForHarness();
+  if (lotsTown === undefined) return NO_LOT_REALISM;
+  const { profile, origin, corridor, land, town } = lotsTown;
+  const start = atStartLine(profile);
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(1_060) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedTown: town,
+  });
+  // Only the buildings: no tree, hedge or post between a camera and its wall.
+  const buildings = base.scatter.filter((item) => item.kind === 'building');
+  const houses = buildings
+    .filter(
+      (item) =>
+        item.paint !== undefined &&
+        item.house === undefined &&
+        land.classAt(item.x, item.z) === 'built-up',
+    )
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - base.camera.x, a.z - base.camera.z) -
+        Math.hypot(b.x - base.camera.x, b.z - base.camera.z),
+    );
+  /** A house-local point and direction in the world, as the structure belt places its instance. */
+  const toWorld = (house: ScatterItem, p: readonly [number, number, number]): Point3 => {
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    const [x, y, z] = p.map((value) => value * house.scale) as [number, number, number];
+    return { x: house.x + cos * x + sin * z, y: house.y + y, z: house.z - sin * x + cos * z };
+  };
+  const turned = (house: ScatterItem, n: readonly number[]): { x: number; z: number } => {
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    const [x = 0, , z = 0] = n;
+    return { x: cos * x + sin * z, z: -sin * x + cos * z };
+  };
+  const frameFor = (
+    eye: Point3,
+    headingX: number,
+    headingZ: number,
+    sunNormal?: { x: number; z: number },
+  ): SceneFrame => {
+    const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+    return {
+      ...base,
+      scatter: buildings,
+      markers: [],
+      world:
+        sunNormal === undefined
+          ? base.world
+          : {
+              ...base.world,
+              sun: {
+                ...base.world.sun,
+                x: sunNormal.x * Math.cos(elevation),
+                y: Math.sin(elevation),
+                z: sunNormal.z * Math.cos(elevation),
+              },
+            },
+      camera: {
+        ...base.camera,
+        x: eye.x + headingX * CAMERA_BEHIND_METRES,
+        z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+        headingX,
+        headingZ,
+        eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+        targetRoadY: eye.y,
+      },
+    };
+  };
+  const patchAt = (frame: SceneFrame, point: Point3, rows: number, columns: number): number[] => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - Math.floor(columns / 2),
+      Math.round(centre.y) - Math.floor(rows / 2),
+      columns,
+      rows,
+    );
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  const apart = (x: readonly number[], y: readonly number[]): number =>
+    Math.max(...x.map((value, channel) => Math.abs(value - (y[channel] ?? 0))));
+  const lever = (): void =>
+    lotRealismOf(view, lotRealismWithLevers(parseConfig('?levers=-lot-realism').leversOff));
+  const [nearUp, farUp] = WEATHERING_PROBE_UP;
+  let tried = 0;
+  try {
+    // The control first: the realism out, until a pair matches.
+    lever();
+    for (const house of houses.slice(0, 6)) {
+      const plan = buildingPlan('building', house.variant);
+      const side = plan.openings.find((opening) => opening.face.normal[0] > 0.99);
+      if (side === undefined) continue;
+      const { face, wall } = side;
+      // A place on the side wall no opening comes within 0.4 m of.
+      const clear = (u: number): boolean =>
+        plan.openings.every((opening) => {
+          if (opening.face.normal[0] < 0.99) return true;
+          const us = opening.outline.map(([value]) => value);
+          return u < Math.min(...us) - 0.4 || u > Math.max(...us) + 0.4;
+        });
+      let u: number | undefined;
+      for (let at = wall.uMin + 0.5; at <= wall.uMax - 0.5; at += 0.1) {
+        if (clear(at)) {
+          u = at;
+          break;
+        }
+      }
+      // The front's upper row: two windows side by side, numbered one apart.
+      const panes = glassPanesOf(plan);
+      const row = panes
+        .map((pane, index) => ({ pane, index }))
+        .filter(({ pane }) => pane.face.normal[2] > 0.99)
+        .map(({ pane, index }) => {
+          const us = pane.outline.map(([value]) => value);
+          const vs = pane.outline.map(([, value]) => value);
+          return {
+            index,
+            face: pane.face,
+            u0: Math.min(...us),
+            u1: Math.max(...us),
+            v0: Math.min(...vs),
+            v1: Math.max(...vs),
+          };
+        });
+      const top = Math.max(...row.map((pane) => pane.v0));
+      const upper = row
+        .filter((pane) => Math.abs(pane.v0 - top) < 0.01)
+        .sort((a, b) => a.u0 - b.u0);
+      if (u === undefined || upper.length < 2) continue;
+      // The wall, 5 m out from its plain place, the sun square to it.
+      const wallNormal = turned(house, face.normal);
+      const onWall = (up: number): Point3 =>
+        toWorld(house, [
+          face.origin[0] + face.right[0] * (u ?? 0) + face.normal[0] * 0.01,
+          up,
+          face.origin[2] + face.right[2] * (u ?? 0) + face.normal[2] * 0.01,
+        ]);
+      const wallFoot = onWall(0);
+      const wallFrame = frameFor(
+        {
+          x: wallFoot.x + wallNormal.x * WEATHERING_PROBE_METRES,
+          y: house.y + ((nearUp + farUp) / 2) * house.scale,
+          z: wallFoot.z + wallNormal.z * WEATHERING_PROBE_METRES,
+        },
+        -wallNormal.x,
+        -wallNormal.z,
+        wallNormal,
+      );
+      // The panes: a little off each middle, toward its lower outer corner, clear of a bar.
+      const pairs = upper.slice(1).map((pane, at) => [upper[at], pane] as const);
+      for (const [a, b] of pairs) {
+        if (a === undefined) continue;
+        tried += 1;
+        const paneAt = (pane: typeof a): Point3 =>
+          toWorld(house, [
+            pane.face.origin[0] +
+              pane.face.right[0] * (pane.u0 + (pane.u1 - pane.u0) * 0.3) +
+              pane.face.normal[0] * 0.02,
+            pane.v0 + (pane.v1 - pane.v0) * 0.3,
+            pane.face.origin[2] +
+              pane.face.right[2] * (pane.u0 + (pane.u1 - pane.u0) * 0.3) +
+              pane.face.normal[2] * 0.02,
+          ]);
+        const leftAt = paneAt(a);
+        const rightAt = paneAt(b);
+        const frontNormal = turned(house, a.face.normal);
+        const middle = {
+          x: (leftAt.x + rightAt.x) / 2,
+          y: leftAt.y,
+          z: (leftAt.z + rightAt.z) / 2,
+        };
+        const paneFrame = frameFor(
+          {
+            x: middle.x + frontNormal.x * LOT_PANES_PROBE_METRES,
+            y: middle.y,
+            z: middle.z + frontNormal.z * LOT_PANES_PROBE_METRES,
+          },
+          -frontNormal.x,
+          -frontNormal.z,
+        );
+        view.render(paneFrame);
+        view.render(paneFrame);
+        const leftOff = patchAt(paneFrame, leftAt, 3, 3);
+        const rightOff = patchAt(paneFrame, rightAt, 3, 3);
+        if (apart(leftOff, rightOff) >= ROOMS_PROBE_TOLERANCE) continue;
+        view.render(wallFrame);
+        view.render(wallFrame);
+        const nearOff = patchAt(wallFrame, onWall(nearUp), 5, 5);
+        const farOff = patchAt(wallFrame, onWall(farUp), 5, 5);
+        lotRealismOf(view, true);
+        view.render(paneFrame);
+        view.render(paneFrame);
+        const left = patchAt(paneFrame, leftAt, 3, 3);
+        const right = patchAt(paneFrame, rightAt, 3, 3);
+        view.render(wallFrame);
+        view.render(wallFrame);
+        return {
+          aimed: true,
+          near: patchAt(wallFrame, onWall(nearUp), 5, 5),
+          far: patchAt(wallFrame, onWall(farUp), 5, 5),
+          nearOff,
+          farOff,
+          left,
+          right,
+          leftOff,
+          rightOff,
+          pairsTried: tried,
+        };
+      }
+    }
+    return { ...NO_LOT_REALISM, pairsTried: tried };
+  } finally {
+    lotRealismOf(view, true);
+  }
 }
 
 /** Six kilometres of level, low farmland — somewhere a village stands. */
@@ -8220,6 +8810,8 @@ export interface RealisticMeasurement {
   readonly mappedFacade: MappedFacadeMeasurement;
   /** #1659: a mapped casement's jamb from the side, with its reveal and without. @see windowRevealProbe */
   readonly windowReveal: WindowRevealMeasurement;
+  /** #1662: two neighbouring rooms behind mapped glass, with the rooms and without. @see windowRoomsProbe */
+  readonly windowRooms: WindowRoomsMeasurement;
   /** #1658: a sunlit mapped wall under its eaves, with the overhang's shadow and without. @see overhangShadowProbe */
   readonly overhangShadow: OverhangShadowMeasurement;
   /** #1679: a sunlit mapped wall under a cornice, with the cornice's shadow and without. @see overhangPairProbes */
@@ -8234,6 +8826,8 @@ export interface RealisticMeasurement {
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
   readonly lots: LotsMeasurement;
+  /** #1665: a lot wall's grime and two lot panes' rooms, with the realism and without. @see lotRealismProbe */
+  readonly lotRealism: LotRealismMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -8350,7 +8944,38 @@ export interface TreeLevelMeasurement {
     readonly triangles: number;
     readonly calls: number;
   };
+  /** #545: a tree near the camera, faded and the controls. @see nearFadeProbe */
+  readonly nearFade: NearFadeMeasurement;
 }
+
+/**
+ * A tree brought toward the camera's eye, as the product draws it and as its
+ * two controls do — #545, the owner's ruling of 2026-11-02. @see nearFadeProbe
+ */
+export interface NearFadeMeasurement {
+  /** How far the tree's trunk stands from the eye in plan at each step, far to near, in metres. */
+  readonly distances: readonly number[];
+  /**
+   * How much colour the tree moves at each step, against the frame without
+   * it (`colourMoved`, summed over every pixel and channel): the product,
+   * faded. ⚠️ Colour, not a count of pixels: the tree's ground blob fades with
+   * it, and at 4.6 m from the eye its 7 % darkening still changes four
+   * thousand pixels by a level or two — measured, a count reads that as a pop
+   * the eye cannot see.
+   */
+  readonly colour: readonly number[];
+  /** The same, the tree dropped whole at the middle of the fade — the pop the fade replaces. */
+  readonly colourCut: readonly number[];
+  /** The same, the tree drawn whole however near — as before the ruling. */
+  readonly colourOff: readonly number[];
+}
+
+const NO_NEAR_FADE: NearFadeMeasurement = {
+  distances: [],
+  colour: [],
+  colourCut: [],
+  colourOff: [],
+};
 
 /**
  * One still tree across both its hand-overs, frame by frame — #617. The trees
@@ -10352,6 +10977,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
   windowReveal: NO_WINDOW_REVEAL,
+  windowRooms: NO_WINDOW_ROOMS,
   overhangShadow: NO_OVERHANG_SHADOW,
   corniceShadow: NO_OVERHANG_PAIR,
   awningShadow: NO_OVERHANG_PAIR,
@@ -10359,6 +10985,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   facadeTrim: NO_FACADE_TRIM,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
+  lotRealism: NO_LOT_REALISM,
   tint: {
     trees: [],
     treesControl: [],
@@ -10396,6 +11023,7 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
   scanned: { triangles: 0, calls: 0 },
+  nearFade: NO_NEAR_FADE,
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -11700,6 +12328,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
         headingZ: SHADOW_HEADING_SHARE * rider.headingZ,
         eyeRoadY: rider.y + SHADOW_ALTITUDE_METRES - CAMERA_ABOVE_METRES,
         targetRoadY: rider.y,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
       },
     };
     // `inTheFrame`'s projection, with the right-hand vector normalised: it
@@ -11914,42 +12543,6 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   // #1547, on the same view: the ground under a mapped town, levelled.
   const levelling = levellingProbe(view);
   phaseEnds('realistic: a town on the flat — #1547');
-
-  // #1549, on the same view: a town from map data, merged, and nothing in the wood.
-  const mappedTown = mappedTownProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped town — #1549');
-
-  // #1581, on the same view: a mapped house's windows, drawn and switched off.
-  const mappedFacade = mappedFacadeProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped house’s windows — #1581');
-
-  // #1659, on the same view: a mapped casement's jamb from the side, with its reveal and without.
-  const windowReveal = windowRevealProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped window’s reveal — #1659');
-
-  // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
-  const overhangShadow = overhangShadowProbe(view, gl, canvas);
-  phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
-
-  // #1679, on the same view: a sunlit wall under a cornice and a shop front under an awning.
-  const { cornice: corniceShadow, awning: awningShadow } = overhangPairProbes(view, gl, canvas);
-  phaseEnds('realistic: the shadows under a cornice and an awning — #1679');
-
-  // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
-  const weathering = weatheringProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped wall’s weathering — #1661');
-
-  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
-  const facadeTrim = facadeTrimProbe(view, gl, canvas);
-  phaseEnds('realistic: a mapped window’s lintel — #1663');
-
-  // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
-  const townEdge = townEdgeProbe(view);
-  phaseEnds('realistic: a town’s edge — #1586');
-
-  // #1550, on the same view: procedural lots in a mapped town with no footprints.
-  const lots = lotsProbe(view, gl, canvas);
-  phaseEnds('realistic: lots in an unmapped town — #1550');
 
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
@@ -12192,16 +12785,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedPavement,
     people,
     levelling,
-    mappedTown,
-    mappedFacade,
-    windowReveal,
-    overhangShadow,
-    corniceShadow,
-    awningShadow,
-    weathering,
-    facadeTrim,
-    townEdge,
-    lots,
+    // #1947: measured by the `?realistic&town` load, not this one. @see realisticTownRun
+    ...NO_TOWN,
     tint,
     grounding,
     tread,
@@ -12246,6 +12831,82 @@ function woodedFrameOf(
     calls,
     ...(size === undefined ? {} : { pixels: readRegion(gl, 0, 0, size.width, size.height) }),
   };
+}
+
+/** How far to the side of the eye's axis {@link nearFadeProbe}'s tree stands, in metres. */
+const NEAR_FADE_ACROSS_METRES = 3;
+
+/**
+ * The frame {@link nearFadeProbe} draws: a quarter of the load's pixels, at
+ * its 16 : 9, for the load's budget — #644's reason. What it reads is a share
+ * of one tree's pixels, which the frame's size does not change.
+ */
+const NEAR_FADE_SIZE = { width: 320, height: 180 } as const;
+
+/**
+ * A tree near the camera, read off the drawing buffer — #545, the owner's
+ * ruling of 2026-11-02 (`near-tree-fade.ts`).
+ *
+ * One broadleaf, standing {@link NEAR_FADE_ACROSS_METRES} to the side of the
+ * camera's axis on the bare level road, is placed a tenth of a metre nearer
+ * the eye each step, from 6.6 m to 4 m — through the whole fade, which runs
+ * from 6 m to 4.5 m. Each step is the frame without it and then the frame with
+ * it: a tree that follows a frame with no tree is drawn at its level at once
+ * (`tree-levels.ts` §`TreeHandOver`), so what is read is the fade alone and
+ * never a hand-over. What is read is the colour it moves against the empty
+ * frame ({@link NearFadeMeasurement.colour} says why not a count of pixels).
+ *
+ * **Two controls**, on the same view: the tree dropped whole at the middle of
+ * the fade, in one step — the pop the fade replaces, whose largest one-step
+ * change is the scale the product's is held under; and the tree drawn whole —
+ * as before the ruling, which shows the tree is in the picture at the steps
+ * where the product draws none of it.
+ */
+function nearFadeProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  level: SceneFrame,
+): NearFadeMeasurement {
+  const pose = level.camera;
+  const { eye } = cameraRig(pose);
+  const ground = onTheRoad(level, 0, 0).y;
+  const across = NEAR_FADE_ACROSS_METRES;
+  const distances = Array.from({ length: 27 }, (_, step) => 6.6 - step * 0.1);
+  const treeAt = (distance: number): ScatterItem => {
+    const ahead = Math.sqrt(distance ** 2 - across ** 2);
+    return {
+      kind: 'tree-broadleaf',
+      x: eye.x + ahead * pose.headingX - across * pose.headingZ,
+      y: ground,
+      z: eye.z + ahead * pose.headingZ + across * pose.headingX,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    };
+  };
+  const { width, height } = NEAR_FADE_SIZE;
+  const bare: SceneFrame = { ...level, scatter: [] };
+  view.render(bare);
+  view.render(bare);
+  const nothing = readRegion(gl, 0, 0, width, height);
+  const walk = (fade: NearTreeFade): number[] => {
+    nearTreeFadeOf(view, fade);
+    return distances.map((distance) => {
+      view.render(bare);
+      view.render({ ...level, scatter: [treeAt(distance)] });
+      return colourMoved(nothing, readRegion(gl, 0, 0, width, height));
+    });
+  };
+  try {
+    return {
+      distances,
+      colour: walk('fade'),
+      colourCut: walk('cut'),
+      colourOff: walk('off'),
+    };
+  } finally {
+    nearTreeFadeOf(view, 'fade');
+  }
 }
 
 /**
@@ -12296,6 +12957,7 @@ function treeLevelProbe(
   | 'nearestVisibleTriangles'
   | 'nearestVisibleTrianglesControl'
   | 'foliage'
+  | 'nearFade'
 > & { readonly woodedPicture: Uint8Array } {
   const build = (levels: TreeLevels): { view: GameView; gl: WebGL2RenderingContext } => {
     setTreeLevels(levels);
@@ -12457,6 +13119,13 @@ function treeLevelProbe(
     rankOnly: 'in-view',
   });
   phaseEnds('trees: nearest visible');
+  // #545, on the product's view at a quarter of the pixels.
+  const nearFade = withLevels(
+    REALISTIC_TREE_LEVELS,
+    (view, gl) => nearFadeProbe(view, gl, level),
+    NEAR_FADE_SIZE,
+  );
+  phaseEnds('trees: near-camera fade — #545');
   // #630, last, on the product's view: nothing after it reads that view.
   const foliageMeasured = withLevels(REALISTIC_TREE_LEVELS, foliage);
   phaseEnds('trees: foliage — #630');
@@ -12479,6 +13148,7 @@ function treeLevelProbe(
     nearestVisibleTriangles,
     nearestVisibleTrianglesControl,
     foliage: foliageMeasured,
+    nearFade,
   };
 }
 
@@ -12645,6 +13315,9 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roomDrawCalls: 0,
     roomDrawCallsEachOwnMesh: 0,
     remoteRidersInRoom: 0,
+    lapRaceDrawCalls: 0,
+    lapRaceRacers: 0,
+    lapRaceDrawn: { pickUps: 0, hazards: 0, hits: 0 },
     sceneryPixelsChanged: 0,
     sceneryPixelWith: NOWHERE,
     sceneryPixelWithout: NOWHERE,
@@ -12703,6 +13376,174 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
 }
 
 /**
+ * What the `?realistic&town` load measures of {@link RealisticMeasurement} — #1947.
+ * @see realisticTownRun
+ */
+type TownMeasurement = Pick<
+  RealisticMeasurement,
+  | 'mappedTown'
+  | 'mappedFacade'
+  | 'windowReveal'
+  | 'windowRooms'
+  | 'overhangShadow'
+  | 'corniceShadow'
+  | 'awningShadow'
+  | 'weathering'
+  | 'facadeTrim'
+  | 'townEdge'
+  | 'lots'
+  | 'lotRealism'
+>;
+
+/** {@link TownMeasurement} unmeasured — what the `?realistic` load publishes for it since #1947. */
+const NO_TOWN: TownMeasurement = {
+  mappedTown: NO_MAPPED_TOWN,
+  mappedFacade: NO_MAPPED_FACADE,
+  windowReveal: NO_WINDOW_REVEAL,
+  windowRooms: NO_WINDOW_ROOMS,
+  overhangShadow: NO_OVERHANG_SHADOW,
+  corniceShadow: NO_OVERHANG_PAIR,
+  awningShadow: NO_OVERHANG_PAIR,
+  weathering: NO_WEATHERING,
+  facadeTrim: NO_FACADE_TRIM,
+  townEdge: NO_TOWN_EDGE,
+  lots: NO_LOTS,
+  lotRealism: NO_LOT_REALISM,
+};
+
+/**
+ * The mapped town's probes on the one view they are handed — #1549 to #1665,
+ * in the order `realisticProbe` ran them until #1947. Each restores in a
+ * `finally` what it switched off, so none reads another's switches.
+ */
+function townProbes(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): TownMeasurement {
+  // #1549, on the same view: a town from map data, merged, and nothing in the wood.
+  const mappedTown = mappedTownProbe(view, gl, canvas);
+  phaseEnds('town: a mapped town — #1549');
+
+  // #1581, on the same view: a mapped house's windows, drawn and switched off.
+  const mappedFacade = mappedFacadeProbe(view, gl, canvas);
+  phaseEnds('town: a mapped house’s windows — #1581');
+
+  // #1659, on the same view: a mapped casement's jamb from the side, with its reveal and without.
+  const windowReveal = windowRevealProbe(view, gl, canvas);
+  phaseEnds('town: a mapped window’s reveal — #1659');
+
+  // #1662, on the same view: two neighbouring rooms behind a mapped wall's glass, with the rooms and without.
+  const windowRooms = windowRoomsProbe(view, gl, canvas);
+  phaseEnds('town: the rooms behind mapped glass — #1662');
+
+  // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
+  const overhangShadow = overhangShadowProbe(view, gl, canvas);
+  phaseEnds('town: the shadow under a mapped wall’s eaves — #1658');
+
+  // #1679, on the same view: a sunlit wall under a cornice and a shop front under an awning.
+  const { cornice: corniceShadow, awning: awningShadow } = overhangPairProbes(view, gl, canvas);
+  phaseEnds('town: the shadows under a cornice and an awning — #1679');
+
+  // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
+  const weathering = weatheringProbe(view, gl, canvas);
+  phaseEnds('town: a mapped wall’s weathering — #1661');
+
+  // #1663, on the same view: a mapped brick wall over a window's head, trimmed and not.
+  const facadeTrim = facadeTrimProbe(view, gl, canvas);
+  phaseEnds('town: a mapped window’s lintel — #1663');
+
+  // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
+  const townEdge = townEdgeProbe(view);
+  phaseEnds('town: a town’s edge — #1586');
+
+  // #1550, on the same view: procedural lots in a mapped town with no footprints.
+  const lots = lotsProbe(view, gl, canvas);
+  phaseEnds('town: lots in an unmapped town — #1550');
+
+  // #1665, on the same view: a lot wall's grime and two lot panes' rooms, with the realism and without.
+  const lotRealism = lotRealismProbe(view, gl, canvas);
+  phaseEnds('town: the lots’ weathering and rooms — #1665');
+  return {
+    mappedTown,
+    mappedFacade,
+    windowReveal,
+    windowRooms,
+    overhangShadow,
+    corniceShadow,
+    awningShadow,
+    weathering,
+    facadeTrim,
+    townEdge,
+    lots,
+    lotRealism,
+  };
+}
+
+/** What the `?realistic&town` load publishes — #1947. @see realisticTownRun */
+interface TownRun {
+  readonly realistic: RealisticMeasurement;
+  readonly nearField: NearFieldMeasurement;
+  readonly nearFieldWall: StreetNearFieldMeasurement;
+  readonly nearFieldPerson: StreetNearFieldMeasurement;
+}
+
+/**
+ * The `?realistic&town` load — #1947, for #644's reason. The `?realistic` load
+ * reached its budget on the AMD EPYC 7763 (run 41132248051, killed with
+ * #1835's street still to draw), and what had grown in it was the town:
+ * #1549 to #1665's probes, about 78 s on that runner, and #545 and #1835's
+ * near field after the world, about 50 s. Each needs only the realistic world
+ * loaded and a view of its own, so they are a load of their own, on the view
+ * size and rung they were drawn on before. The realistic world is loaded
+ * first, through the renderer the product ships, exactly as `realisticProbe`
+ * does.
+ */
+async function realisticTownRun(): Promise<TownRun> {
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  const outcome = await threeGameRenderer.loadRealisticWorld();
+  phaseEnds('town: loadRealisticWorld');
+  const canvas = document.createElement('canvas');
+  const view = threeGameRenderer.create(canvas, top);
+  // `realisticProbe`'s 640 × 360, sized through the view for its reason.
+  view.resize(640, 360);
+  const gl = canvas.getContext('webgl2');
+  let town = NO_TOWN;
+  // #1947's review, for #644's reason: the world this load's view drew in, which
+  // the spec asserts is the realistic one. The `?realistic` load asserted it for
+  // these probes when they shared it; a load of their own has to assert its own,
+  // or a case whose numbers the stylised world also meets passes on a fallback.
+  let drawnWorld = '';
+  try {
+    if (gl !== null) {
+      drawnWorld = drawnWorldOf(view);
+      town = townProbes(view, gl, canvas);
+    }
+  } finally {
+    view.destroy();
+  }
+  // #545, in the world the owner saw it in. @see nearFieldProbe
+  const nearField = nearFieldProbe(1_600, 200, top);
+  phaseEnds('near field');
+  // #1835: and the street's, at the widest frame the stylesheet allows.
+  const nearFieldWall = nearFieldStreetProbe(1_200, 200, top, 'mapped building');
+  const nearFieldPerson = nearFieldStreetProbe(1_200, 200, top, 'person');
+  phaseEnds('near field, the street');
+  return {
+    realistic: {
+      ...NO_REALISTIC,
+      ...town,
+      measured: gl !== null,
+      loaded: outcome.loaded,
+      drawnWorld,
+    },
+    nearField,
+    nearFieldWall,
+    nearFieldPerson,
+  };
+}
+
+/**
  * `frame` with `count` other real riders on the road ahead of the rider — #783:
  * the rider's own marker copied, as a room's `remote` kind, a few metres apart
  * along the road's heading, the shape `scene.ts` gives a room's drawn set.
@@ -12722,6 +13563,71 @@ function withRoom(frame: SceneFrame, count: number): SceneFrame {
     };
   });
   return { ...frame, markers: [...frame.markers, ...remote] };
+}
+
+/**
+ * #1903: `frame` carrying a lap race at its worst case for #1902 — seven bots
+ * ahead of the rider in place of the pacer, a lane each in turn, the rider and every other bot hit,
+ * every pick-up point of a three-lap race of 40 m laps from the rider's
+ * place, and ten puddles across the three lanes. The bots are `bot` markers,
+ * as `scene.ts` §`SceneInput.raceBots` makes them; the race's pieces are
+ * placed by the product's own `lapRaceInView`.
+ */
+function withLapRace(frame: SceneFrame): SceneFrame {
+  const rider = frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) return frame;
+  const hit = hitLook([{ rateMetresPerSecond: -2, fromMs: 0, untilMs: 4_000 }], 500, false);
+  const bots: RiderMarker[] = Array.from({ length: 7 }, (_, index) => {
+    const ahead = 6 + index * 4;
+    const across = laneLateral(index % 3);
+    return {
+      ...rider,
+      kind: 'bot',
+      x: rider.x + rider.headingX * ahead - rider.headingZ * across,
+      z: rider.z + rider.headingZ * ahead + rider.headingX * across,
+      ...(index % 2 === 0 ? { hit } : {}),
+    };
+  });
+  // The race starts where the rider is: the corridor point nearest them.
+  let start = frame.corridor.centre[0];
+  for (const point of frame.corridor.centre) {
+    if (
+      start === undefined ||
+      Math.hypot(point.x - rider.x, point.z - rider.z) <
+        Math.hypot(start.x - rider.x, start.z - rider.z)
+    ) {
+      start = point;
+    }
+  }
+  const race = createItemRace({
+    course: raceCourse(40, 3),
+    seed: 1,
+    itemsOn: true,
+    racerIds: ['rider', ...bots.map((_, index) => `bot-${String(index + 1)}`)],
+    startMs: 0,
+  });
+  const hazards: Hazard[] = Array.from({ length: 10 }, (_, index) => ({
+    position: 10 + index,
+    lane: index % 3,
+    ownerId: 'bot-1',
+    untilMs: 30_000,
+    hitIds: [],
+  }));
+  return {
+    ...frame,
+    markers: [
+      // The pacer gives way to the race's seven: eight racers, as #1902's frame.
+      ...frame.markers
+        .filter((marker) => marker.kind !== 'bot')
+        .map((marker) => (marker === rider && hit !== undefined ? { ...marker, hit } : marker)),
+      ...bots,
+    ],
+    lapRace: lapRaceInView({
+      corridor: frame.corridor,
+      race: { ...race, hazards },
+      startAlong: start?.along ?? 0,
+    }),
+  };
 }
 
 async function run(): Promise<void> {
@@ -12754,25 +13660,21 @@ async function run(): Promise<void> {
     }
     return;
   }
+  // #1947: the mapped town and the near field, a load of their own.
+  if (new URLSearchParams(location.search).has('town')) {
+    try {
+      const town = await realisticTownRun();
+      window.__oylGameHarness = { ...emptyHarness(errors), ...town };
+    } catch (error: unknown) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      window.__oylGameHarness = emptyHarness(errors);
+    }
+    return;
+  }
   if (new URLSearchParams(location.search).has('realistic')) {
     try {
       const realistic = await realisticProbe();
-      // #545, in the world the owner saw it in — after `realisticProbe`, which
-      // is what loaded that world. @see nearFieldProbe
-      const nearField = nearFieldProbe(1_600, 200, REALISTIC_LADDER[0] as QualitySettings);
-      phaseEnds('near field');
-      // #1835: and the street's, at the widest frame the stylesheet allows.
-      const rung = REALISTIC_LADDER[0] as QualitySettings;
-      const nearFieldWall = nearFieldStreetProbe(1_200, 200, rung, 'mapped building');
-      const nearFieldPerson = nearFieldStreetProbe(1_200, 200, rung, 'person');
-      phaseEnds('near field, the street');
-      window.__oylGameHarness = {
-        ...emptyHarness(errors),
-        realistic,
-        nearField,
-        nearFieldWall,
-        nearFieldPerson,
-      };
+      window.__oylGameHarness = { ...emptyHarness(errors), realistic };
     } catch (error: unknown) {
       errors.push(error instanceof Error ? error.message : String(error));
       window.__oylGameHarness = emptyHarness(errors);
@@ -12841,6 +13743,9 @@ async function run(): Promise<void> {
   let roomDrawCalls = 0;
   let roomDrawCallsEachOwnMesh = 0;
   let remoteRidersInRoom = 0;
+  let lapRaceDrawCalls = 0;
+  let lapRaceRacers = 0;
+  let lapRaceDrawn = { pickUps: 0, hazards: 0, hits: 0 };
   let sceneryPixelsChanged = 0;
   let sceneryPixelWith: Pixel = NOWHERE;
   let sceneryPixelWithout: Pixel = NOWHERE;
@@ -13134,6 +14039,24 @@ async function run(): Promise<void> {
           remoteRiderControlOf(view, 'none');
           view.render(withoutScenery);
           phaseEnds('default: a room of other riders');
+
+          // #1903: and a lap race in the same scenery-free frame, drawn twice
+          // and the second read, so an upload is not counted as a draw.
+          const raced = withLapRace(withoutScenery);
+          lapRaceRacers = raced.markers.filter(
+            (marker) => marker.kind === 'rider' || marker.kind === 'bot',
+          ).length;
+          view.render(raced);
+          const beforeRace = calls();
+          view.render(raced);
+          lapRaceDrawCalls = calls() - beforeRace;
+          lapRaceDrawn = {
+            pickUps: lapRaceDrawnOf(view, 'pickUps').length,
+            hazards: lapRaceDrawnOf(view, 'hazards').length,
+            hits: lapRaceDrawnOf(view, 'hits').length,
+          };
+          view.render(withoutScenery);
+          phaseEnds('default: a lap race');
         }
 
         // ------------------------------------------------ the light — #286
@@ -13511,6 +14434,9 @@ async function run(): Promise<void> {
     roomDrawCalls,
     roomDrawCallsEachOwnMesh,
     remoteRidersInRoom,
+    lapRaceDrawCalls,
+    lapRaceRacers,
+    lapRaceDrawn,
     sceneryPixelsChanged,
     sceneryPixelWith,
     sceneryPixelWithout,

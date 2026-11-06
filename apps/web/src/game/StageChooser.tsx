@@ -60,9 +60,12 @@ import { Check, Info } from 'lucide-react';
 import { useId, useRef, useState, type JSX, type RefObject } from 'react';
 
 import {
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  BOT_TIERS,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   type BotPacerPlan,
+  type BotTier,
   type Metres,
   type RouteProfile,
   type Wind,
@@ -83,6 +86,18 @@ import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
+import { BOT_TIER_TEXT } from './hud/lap-race-hud';
+import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
+import {
+  PREVIEW_DEFAULT_WATTS,
+  PREVIEW_MAXIMUM_WATTS,
+  PREVIEW_MINIMUM_WATTS,
+  PREVIEW_SPEEDUPS,
+  previewPower,
+  previewRider,
+  type PreviewSpeedup,
+  type SimulatedRider,
+} from './simulated-rider';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -186,6 +201,27 @@ export interface DeliveryOffer {
   readonly week: Pick<WeekProgress, 'day' | 'houses'>;
 }
 
+/**
+ * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
+ * LOOP route only, because a race is laps of one (D-11.1); on any other the
+ * chooser says why in words and asks for no race. Offered in either world,
+ * and since #1971 ridden in the one Settings chose.
+ */
+export interface LapRaceOffer {
+  /** Whether the rider switched the race on. */
+  readonly chosen: boolean;
+  readonly onChoose: (value: boolean) => void;
+  /** The race's laps, field, tier and items. */
+  readonly choice: LapRaceChoice;
+  readonly onChoice: (choice: LapRaceChoice) => void;
+  /**
+   * Whether any part of the assisted race setting is on, on this device
+   * (#1905). The setting is changed in Settings; the chooser says which way
+   * it stands and links there.
+   */
+  readonly assisted: boolean;
+}
+
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
   readonly routes: readonly RidableRoute[] | undefined;
@@ -267,6 +303,15 @@ interface RoutePickerProps {
    * (DL6); `undefined` draws nothing. @see DeliveryOffer
    */
   readonly delivery?: DeliveryOffer | undefined;
+  /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
+  readonly lapRace?: LapRaceOffer | undefined;
+  /**
+   * *Preview without a trainer* — #1992, the owner's ruling on PR #2113: the
+   * chosen route ridden by the simulated rider. `undefined` draws nothing.
+   * @see PreviewControl
+   */
+  readonly onPreview?:
+    ((route: RidableRoute, rider: SimulatedRider, position: RidingPosition) => void) | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -277,6 +322,8 @@ interface RoutePickerProps {
     riderGhost?: boolean,
     /** #1818: ride a Delivery round. Never without the realistic world (DL6). */
     delivery?: boolean,
+    /** #1907: ride this lap race. A route that is not a loop rides none (the press decides). */
+    lapRace?: LapRaceChoice,
   ) => Promise<void>;
 }
 
@@ -364,7 +411,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           <ButtonLink variant="secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
             Draw one on this device
           </ButtonLink>{' '}
-          — place waypoints and have the roads between them worked out.
+          — place waypoints on a map or from a list, and save the route here.
         </p>
       </div>
     );
@@ -442,6 +489,10 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       </StatusMessage>
     ),
   ].filter((each) => each !== undefined);
+  const lapRace =
+    props.lapRace === undefined ? undefined : (
+      <LapRaceControl offer={props.lapRace} route={chosen} idPrefix={ids} />
+    );
   return (
     <div className="oyl-game__picker oyl-chooser">
       {/*
@@ -500,6 +551,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
                 props.position,
                 riderGhost,
                 deliveryOffer?.chosen === true,
+                // #1907: the race switched on. The press decides on the
+                // route: one that is not a loop rides no race (`GameView`).
+                props.lapRace?.chosen === true ? props.lapRace.choice : undefined,
               );
             }}
           >
@@ -539,6 +593,15 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       <div className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card">
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
         <LoadoutHelp />
+        {/*
+          #1970: on a loop the race comes FIRST in the loadout, so on a
+          1280×800 tablet its switch is on the screen under Ride without a
+          scroll (`pre-ride.browser.spec.ts` §"#1970"); last, it was under the
+          pacer, the position and the wind, and below the fold. On any other
+          route its one line saying why there is no race stays last, under
+          every control a rider can use.
+        */}
+        {lapRace === undefined || !chosen.profile.loop ? null : lapRace}
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         {props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
           <RiderGhostControl
@@ -567,8 +630,130 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           field={props.air.field}
         />
         {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
+        {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
+      {props.onPreview === undefined ? null : (
+        <PreviewControl
+          route={chosen}
+          asking={props.asking}
+          onPreview={(rider) => {
+            props.onPreview?.(chosen, rider, props.position);
+          }}
+          idPrefix={ids}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * *Preview without a trainer* — #1992, the owner's ruling on PR #2113 ("Add a
+ * button"): the address switch (`simulated-rider.ts`) cannot be typed in the
+ * tablet app, so the same simulated ride is offered here, for the chosen route.
+ *
+ * ⚠️ **Its own tile, after the loadout and outside it**, because it is not
+ * a way of riding: it is a look at the route with nothing paired, and none of
+ * the loadout applies to it but the riding position. Its button names what it
+ * does, and the sentence above it says what it does not — the trainer, the
+ * recording and sharing — before the press, as #503's promise does for *Ride*.
+ *
+ * Every control in it is a 48 px target (`theme.css` §`.oyl-chooser__preview`;
+ * the button is on `RIDE_TIME_CONTROLS`), held by `ride-targets.browser.spec.ts`:
+ * the button by the list, and the stepper, the power box and the speed-ups by
+ * its *Preview without a trainer* case. A power the box cannot make refuses the
+ * press, as the pacer's box does (#237).
+ *
+ * ⚠️ **Unavailable while the trainer is being asked for control**, as *Ride*
+ * is (#509, PR #2113's review). A preview mounts a new screen, and a control
+ * granted to the old one in that window would be kept with nothing to release
+ * it (#372). As with *Ride*, `aria-disabled` is what the rider is told; the
+ * refusal is `GameView` §`startingRef`, which holds for a press that lands
+ * before this re-renders.
+ */
+function PreviewControl(props: {
+  readonly route: RidableRoute;
+  readonly asking: boolean;
+  readonly onPreview: (rider: SimulatedRider) => void;
+  readonly idPrefix: string;
+}): JSX.Element {
+  const [power, setPower] = useState(String(PREVIEW_DEFAULT_WATTS));
+  const [speedup, setSpeedup] = useState<PreviewSpeedup>(1);
+  const read = previewPower(power);
+  const headingId = `${props.idPrefix}-preview`;
+  const powerId = `${props.idPrefix}-preview-power`;
+  const problemId = `${props.idPrefix}-preview-problem`;
+  return (
+    <section
+      className="oyl-chooser__preview tw:mb-md tw:bg-surface-raised tw:rounded-card"
+      aria-labelledby={headingId}
+    >
+      <h3 id={headingId} className="tw:mt-0">
+        Preview without a trainer
+      </h3>
+      <p>Ride this route at a steady power with nothing paired. Not recorded or shared.</p>
+      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+        <label htmlFor={powerId}>Power, watts</label>
+        <Stepper
+          name="preview power"
+          step={10}
+          min={PREVIEW_MINIMUM_WATTS}
+          max={PREVIEW_MAXIMUM_WATTS}
+        >
+          <input
+            id={powerId}
+            className="oyl-input"
+            type="number"
+            inputMode="numeric"
+            min={PREVIEW_MINIMUM_WATTS}
+            max={PREVIEW_MAXIMUM_WATTS}
+            step={10}
+            value={power}
+            aria-invalid={read.problem === undefined ? undefined : true}
+            aria-describedby={read.problem === undefined ? undefined : problemId}
+            onChange={(event) => {
+              setPower(event.target.value);
+            }}
+          />
+        </Stepper>
+        {read.problem === undefined ? null : (
+          <p className="oyl-game__problem tw:m-0" id={problemId} role="alert">
+            {read.problem}
+          </p>
+        )}
+      </div>
+      <fieldset className="oyl-segmented">
+        <legend>Speed-up</legend>
+        <div className="oyl-segmented__options">
+          {PREVIEW_SPEEDUPS.map((each) => (
+            <label key={each} htmlFor={`${props.idPrefix}-preview-speedup-${String(each)}`}>
+              <input
+                type="radio"
+                id={`${props.idPrefix}-preview-speedup-${String(each)}`}
+                name={`${props.idPrefix}-preview-speedup`}
+                value={each}
+                checked={speedup === each}
+                onChange={() => {
+                  setSpeedup(each);
+                }}
+              />
+              {`${String(each)}×`}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <Button
+        variant="secondary"
+        size="ride"
+        unavailable={read.problem !== undefined || props.asking}
+        describedBy={read.problem === undefined ? undefined : problemId}
+        onClick={() => {
+          if (read.watts === undefined) return;
+          props.onPreview(previewRider(read.watts, speedup));
+        }}
+      >
+        <span className="oyl-chooser__ride-label">Preview {props.route.name}</span>
+      </Button>
+    </section>
   );
 }
 
@@ -633,7 +818,7 @@ function RouteCards(props: {
               */}
               {chosen ? (
                 <span
-                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent"
+                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent-text"
                   aria-hidden="true"
                 >
                   <Check focusable="false" />
@@ -976,6 +1161,152 @@ function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element 
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
         {DELIVERY_CHOICE_TEXT.hint}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #1907's choice, for the owner's approval: the
+ * project's own, naming no other game (ADR 0060 D-1.5). "Lap race" is the
+ * mode's name (the owner, 2026-10-31); the tiers' names are #1904's.
+ */
+export const LAP_RACE_CHOICE_TEXT = {
+  label: 'Ride a lap race',
+  hint:
+    'Race laps of this loop against bots, picking up items round the lap. ' +
+    'Nothing in the race changes what your trainer is sent.',
+  notALoop:
+    'No lap race on this route: a lap race needs a loop, a route that ends where it starts.',
+  laps: 'Laps',
+  bots: 'Bots',
+  tier: 'How fast the bots ride',
+  tierHint: (): string =>
+    `${BOT_TIERS.map(
+      (tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`,
+    ).join(', ')} watts per kilogram.`,
+  items: 'Race with items',
+  assistedOn: 'Your assisted race setting is on.',
+  assistedOff: 'An assisted race setting can make a race easier.',
+  assistedLink: 'Change in Settings',
+} as const;
+
+/**
+ * Whether this ride runs a lap race, and which — #1907. A switch, as the
+ * Delivery round's above it, described by what a race is; once on, its laps
+ * and field (native `<select>`s: more than three options each, `theme.css`
+ * §`.oyl-segmented`), its tier (chips, four options) and its items (a switch),
+ * each labelled, and a line saying how the assisted setting stands with the
+ * way to Settings. On a route that is not a loop, none of it: the reason, in
+ * words.
+ */
+function LapRaceControl(props: {
+  readonly offer: LapRaceOffer;
+  readonly route: RidableRoute;
+  readonly idPrefix: string;
+}): JSX.Element {
+  const { offer } = props;
+  const id = (part: string): string => `${props.idPrefix}-lap-race-${part}`;
+  const change = (next: Partial<LapRaceChoice>): void => {
+    offer.onChoice({ ...offer.choice, ...next });
+  };
+  if (!props.route.profile.loop) {
+    return (
+      <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+        <p className="tw:m-0">{LAP_RACE_CHOICE_TEXT.notALoop}</p>
+      </div>
+    );
+  }
+  const counts = (most: number): number[] => Array.from({ length: most }, (_, index) => index + 1);
+  return (
+    <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={offer.chosen}
+          aria-describedby={id('hint')}
+          onChange={(event) => {
+            offer.onChoose(event.target.checked);
+          }}
+        />
+        {LAP_RACE_CHOICE_TEXT.label}
+      </label>
+      <p id={id('hint')} className="tw:m-0">
+        {LAP_RACE_CHOICE_TEXT.hint}
+      </p>
+      {offer.chosen ? (
+        <>
+          <label htmlFor={id('laps')}>{LAP_RACE_CHOICE_TEXT.laps}</label>
+          <select
+            id={id('laps')}
+            className="oyl-input"
+            value={String(offer.choice.laps)}
+            onChange={(event) => {
+              change({ laps: Number(event.target.value) });
+            }}
+          >
+            {counts(LAP_RACE_MOST_LAPS).map((count) => (
+              <option key={count} value={String(count)}>
+                {String(count)}
+              </option>
+            ))}
+          </select>
+          <label htmlFor={id('bots')}>{LAP_RACE_CHOICE_TEXT.bots}</label>
+          <select
+            id={id('bots')}
+            className="oyl-input"
+            value={String(offer.choice.bots)}
+            onChange={(event) => {
+              change({ bots: Number(event.target.value) });
+            }}
+          >
+            {counts(LAP_RACE_MOST_BOTS).map((count) => (
+              <option key={count} value={String(count)}>
+                {String(count)}
+              </option>
+            ))}
+          </select>
+          <fieldset className="oyl-chips tw:mb-0">
+            <legend>{LAP_RACE_CHOICE_TEXT.tier}</legend>
+            <div className="oyl-chips__options">
+              {BOT_TIERS.map((tier: BotTier) => (
+                <label key={tier} htmlFor={id(`tier-${tier}`)}>
+                  <input
+                    type="radio"
+                    id={id(`tier-${tier}`)}
+                    name={id('tier')}
+                    value={tier}
+                    checked={offer.choice.tier === tier}
+                    aria-describedby={id('tiers')}
+                    onChange={() => {
+                      change({ tier });
+                    }}
+                  />
+                  {BOT_TIER_TEXT[tier]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p id={id('tiers')} className="tw:m-0">
+            {LAP_RACE_CHOICE_TEXT.tierHint()}
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={offer.choice.itemsOn}
+              onChange={(event) => {
+                change({ itemsOn: event.target.checked });
+              }}
+            />
+            {LAP_RACE_CHOICE_TEXT.items}
+          </label>
+          <p className="tw:m-0">
+            {offer.assisted ? LAP_RACE_CHOICE_TEXT.assistedOn : LAP_RACE_CHOICE_TEXT.assistedOff}{' '}
+            <a href={hrefFor(routeById('settings'))}>{LAP_RACE_CHOICE_TEXT.assistedLink}</a>
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -82,6 +82,23 @@ describe('the demo page is accessible — #1647', () => {
     expect(names).toEqual(['Pause', 'Stop']);
   });
 
+  it.each([
+    ['playing', 'Pause', '?preset=sprint&controls=0', false],
+    ['paused for reduced motion', 'Play', '?preset=climb&controls=0', true],
+    ['started still', 'Play', '?preset=climb&controls=0&autoplay=0', false],
+  ])(
+    'with ?controls=0 while %s, still offers %s from the keyboard (SC 2.2.2, #1654)',
+    async (_what, name, search, reducedMotion) => {
+      await show(search, reducedMotion);
+      const names = tabbableElements(document)
+        .filter((element) => element.tagName === 'BUTTON')
+        .map((element) => accessibleName(element));
+      expect(names).toEqual([name]);
+      const violations = auditAccessibility(document);
+      expect(violations, formatViolations(violations)).toEqual([]);
+    },
+  );
+
   it('offers Play, and Stop, from the keyboard when reduced motion starts it paused', async () => {
     await show('?preset=climb', true);
     const names = tabbableElements(document)

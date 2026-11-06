@@ -32,16 +32,21 @@ import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
+  CAMERA_MAXIMUM_YAW_RATE,
   CAMERA_TARGET_AHEAD_METRES,
+  CAMERA_YAW_SETTLE_SECONDS,
   FRUSTUM_SPREAD,
   MAXIMUM_FIELD_OF_VIEW_DEGREES,
   MINIMUM_HORIZONTAL_SPREAD,
   MINIMUM_RIDER_FRAME_SHARE,
   NARROWEST_ASPECT,
+  REDUCED_MOTION_MAXIMUM_YAW_RATE,
   REFERENCE_ASPECT,
   WORST_CASE_ASPECT,
   NEAR_PLANE_METRES,
   cameraRig,
+  dampedHeading,
+  turnedPose,
   horizontalSpread,
   projectToFrame,
   riderFrameBox,
@@ -49,6 +54,7 @@ import {
   verticalFieldOfViewDegrees,
   verticalHalfTangent,
   type CameraRig,
+  type GroundHeading,
 } from './camera';
 import type { CameraPose } from './port';
 import { MAXIMUM_LEAN_RADIANS } from './racing-line';
@@ -69,6 +75,7 @@ function poseOn(grade: number): CameraPose {
     headingZ: 1,
     eyeRoadY: grade * -CAMERA_BEHIND_METRES,
     targetRoadY: grade * CAMERA_TARGET_AHEAD_METRES,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
   };
 }
 
@@ -649,5 +656,115 @@ describe('a point projected into the frame, for the names over other riders — 
         z: eyeZ + NEAR_PLANE_METRES * 2,
       }),
     ).toBeDefined();
+  });
+});
+
+/**
+ * The chase camera's heading, damped — #1994.
+ *
+ * `chase-camera-bend.test.ts` rides bends with it; this holds the rule itself:
+ * a cap on the turn rate, an exponential under the cap, the short way round,
+ * and a step that does not care how many frames it is cut into.
+ */
+describe('the camera’s heading is damped — #1994', () => {
+  /** A heading `degrees` clockwise from +z, toward +x. */
+  const toward = (degrees: number): GroundHeading => ({
+    headingX: Math.sin((degrees * Math.PI) / 180),
+    headingZ: Math.cos((degrees * Math.PI) / 180),
+  });
+  /** A heading's angle, as {@link toward} takes it. */
+  const degreesOf = (heading: GroundHeading): number =>
+    (Math.atan2(heading.headingX, heading.headingZ) * 180) / Math.PI;
+  const step = (
+    from: GroundHeading,
+    to: GroundHeading,
+    seconds: number,
+    frames: number,
+    reducedMotion = false,
+  ): GroundHeading => {
+    let held = from;
+    for (let frame = 0; frame < frames; frame += 1) {
+      held = dampedHeading(held, to, seconds / frames, reducedMotion);
+    }
+    return held;
+  };
+
+  it('takes the road’s own heading on a ride’s first frame', () => {
+    expect(degreesOf(dampedHeading(undefined, toward(73), 0.016, false))).toBeCloseTo(73, 9);
+  });
+
+  it('lands in the same place however many frames the same time is cut into', () => {
+    // Inside the capped stretch, across the knee, and inside the exponential:
+    // each is the closed form, so 1, 8, 60 and 240 frames agree to rounding.
+    for (const seconds of [0.3, 1, 1.6]) {
+      const one = degreesOf(step(toward(0), toward(150), seconds, 1));
+      for (const frames of [8, 60, 240]) {
+        expect(degreesOf(step(toward(0), toward(150), seconds, frames))).toBeCloseTo(one, 9);
+      }
+    }
+  });
+
+  it('never turns faster than the cap, and turns at it while far off', () => {
+    const dt = 1 / 60;
+    for (const off of [0.5, 5, 13.5, 30, 90, 179]) {
+      const moved = Math.abs(degreesOf(dampedHeading(toward(0), toward(off), dt, false)));
+      expect(moved).toBeLessThanOrEqual((CAMERA_MAXIMUM_YAW_RATE * dt * 180) / Math.PI + 1e-9);
+    }
+    // Far off, the cap is what binds, exactly.
+    expect(degreesOf(dampedHeading(toward(0), toward(120), dt, false))).toBeCloseTo(
+      (CAMERA_MAXIMUM_YAW_RATE * dt * 180) / Math.PI,
+      9,
+    );
+  });
+
+  it('turns more gently for a rider who asked for reduced motion', () => {
+    const dt = 1 / 60;
+    expect(REDUCED_MOTION_MAXIMUM_YAW_RATE).toBeLessThan(CAMERA_MAXIMUM_YAW_RATE);
+    expect(degreesOf(dampedHeading(toward(0), toward(120), dt, true))).toBeCloseTo(
+      (REDUCED_MOTION_MAXIMUM_YAW_RATE * dt * 180) / Math.PI,
+      9,
+    );
+  });
+
+  it('closes a small error exponentially, with the stated time constant', () => {
+    // 5° is under the knee (90°/s × 0.1 s = 9°), so it is all exponential.
+    const after = degreesOf(step(toward(0), toward(5), CAMERA_YAW_SETTLE_SECONDS, 30));
+    expect(5 - after).toBeCloseTo(5 * Math.exp(-1), 9);
+  });
+
+  it('turns the short way round across the back', () => {
+    const turned = degreesOf(dampedHeading(toward(170), toward(-170), 0.05, false));
+    // Through 180°, not back through 0°.
+    expect(Math.abs(turned)).toBeGreaterThan(170);
+  });
+
+  it('settles on the road ahead, and stays there', () => {
+    expect(degreesOf(step(toward(0), toward(-120), 5, 300))).toBeCloseTo(-120, 6);
+    expect(degreesOf(dampedHeading(toward(42), toward(42), 0.016, false))).toBeCloseTo(42, 12);
+  });
+
+  it('turns the camera about the point it stands behind, which keeps a rider there in shot', () => {
+    const pose = { ...poseOn(0), x: 3, z: 4, targetAheadMetres: 12 };
+    const after = cameraRig(turnedPose(pose, toward(30)));
+    // The eye swings round that point, CAMERA_BEHIND_METRES off it ...
+    expect(Math.hypot(after.eye.x - 3, after.eye.z - 4)).toBeCloseTo(CAMERA_BEHIND_METRES, 9);
+    // ... and the eye, that point and the target stay on one line at 30°.
+    expect(degreesOf({ headingX: 3 - after.eye.x, headingZ: 4 - after.eye.z })).toBeCloseTo(30, 9);
+    expect(degreesOf({ headingX: after.target.x - 3, headingZ: after.target.z - 4 })).toBeCloseTo(
+      30,
+      9,
+    );
+    expect(Math.hypot(after.target.x - 3, after.target.z - 4)).toBeCloseTo(12, 9);
+  });
+
+  it('puts the target the pose’s own distance out along the heading', () => {
+    // #1994: in a bend the road 25 m up the route is nearer than 25 m.
+    const rig = cameraRig({ ...poseOn(0), headingX: 0.6, headingZ: 0.8, targetAheadMetres: 12 });
+    expect(rig.target.x).toBeCloseTo(0.6 * 12, 9);
+    expect(rig.target.z).toBeCloseTo(0.8 * 12, 9);
+    // And the eye stays behind the rider on the same line, so the rider is in
+    // the middle of the frame however the camera has turned.
+    expect(rig.eye.x).toBeCloseTo(-0.6 * CAMERA_BEHIND_METRES, 9);
+    expect(rig.eye.z).toBeCloseTo(-0.8 * CAMERA_BEHIND_METRES, 9);
   });
 });

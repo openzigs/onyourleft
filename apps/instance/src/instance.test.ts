@@ -11,8 +11,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ import type { SweepTimers } from './node-listener.ts';
 import { freeLoopbackPort, testConfig } from './instance-testing.ts';
 import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
-import { readServerConfig, type ServerConfig } from './server-config.ts';
+import { readDiscordTokenFile, readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
 import type { SyncItemWrite } from './store/sql-store.ts';
 import { deviceKeyFixture, migrateAllBut, registrationFixture } from './store/testing/index.ts';
@@ -46,10 +46,23 @@ import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
+import {
+  noticeDetailsDueAt,
+  undecidedNoticeDetailsDueAt,
+  NOTICE_RETENTION_SWEEP_PERIOD_MS,
+} from './moderation/notice-retention.ts';
+import { openSqlStore } from './store/open-sql-store.ts';
 import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts';
 import { sealedAt } from './sealed/sealed-testing.ts';
 import { openDatabase } from './store/node-sqlite.ts';
 import { corpusFile, uploadBody } from './sync/sync-testing.ts';
+import {
+  fakeDiscord,
+  TEST_BOT_TOKEN,
+  TEST_GUILD_ID,
+  type SentRequest,
+} from './voice/discord-testing.ts';
+import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -89,12 +102,14 @@ async function start(
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
     hosted?: Pick<InstanceOptions, 'hostedFetch'>;
+    voice?: Pick<InstanceOptions, 'discordFetch' | 'voiceInviteWaitMs'>;
   } = {},
 ) {
   const lines: string[] = [];
   running = await startInstance({
     ...extra.timing,
     ...extra.hosted,
+    ...extra.voice,
     config: testConfig({ bodyLimitBytes: 16_384, registration: 'open', ...extra.config }),
     ...(extra.resolve === undefined ? {} : { resolve: extra.resolve }),
     server: serverConfig(databasePath, overrides),
@@ -193,7 +208,7 @@ describe('the running instance forgets every rate-limited address when its windo
     // #784: the rooms' sweep is armed beside it, on the next ten-minute
     // boundary, through the same timers. Held apart here, so what follows
     // reads the rate limits' alone.
-    expect(pending).toHaveLength(3);
+    expect(pending).toHaveLength(4);
     const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
     expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
     pending.splice(pending.indexOf(roomsSweep!), 1);
@@ -203,6 +218,12 @@ describe('the running instance forgets every rate-limited address when its windo
       Math.ceil(clock.ms / ANALYSIS_SWEEP_PERIOD_MS) * ANALYSIS_SWEEP_PERIOD_MS,
     );
     pending.splice(pending.indexOf(jobsSweep!), 1);
+    // #1381: and the notices' hourly erasure, on the next hour too.
+    const noticeSweep = pending.find((entry) => entry.at % NOTICE_RETENTION_SWEEP_PERIOD_MS === 0);
+    expect(noticeSweep?.at).toBe(
+      Math.ceil(clock.ms / NOTICE_RETENTION_SWEEP_PERIOD_MS) * NOTICE_RETENTION_SWEEP_PERIOD_MS,
+    );
+    pending.splice(pending.indexOf(noticeSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -225,9 +246,115 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    // Every sweep is stopped: the rate limits', the rooms' and the jobs'.
-    expect(cleared).toBe(3);
+    // Every sweep is stopped: the rate limits', the rooms', the jobs' and the notices'.
+    expect(cleared).toBe(4);
     expect(pending).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('the running instance erases a notice’s notifier details when they are due — #1381, #1923', () => {
+  it('erases what fell due while it was stopped as it starts, and what falls due later on the hour', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const decided = 1_790_000_000;
+    const store = await openSqlStore(path);
+    const notice = async (
+      marker: string,
+      decidedAt: number | null,
+      receivedAt = decided - 60,
+    ): Promise<number> => {
+      const noticeId = await store.putNotice({
+        receivedAt,
+        kind: 'illegal_content',
+        explanation: `${marker}-explanation`,
+        items: [],
+        location: `${marker}-location`,
+        notifierName: `${marker}-name`,
+        notifierEmail: `${marker}-email@example.com`,
+        bonaFide: true,
+      });
+      if (decidedAt === null) return noticeId;
+      expect(
+        await store.putNoticeStep({
+          noticeId,
+          step: 'decided',
+          actorAthleteId: 'moderator',
+          decision: 'Not illegal.',
+          logId: null,
+          at: decidedAt,
+        }),
+      ).toBe('recorded');
+      return noticeId;
+    };
+    const due = noticeDetailsDueAt(decided);
+    // Due as the instance starts, and due ten minutes later.
+    const first = await notice('first', decided);
+    const second = await notice('second', decided + 10 * 60);
+    // #1923: undecided, received long enough ago to be due as it starts —
+    // and undecided, received with the others, so not due for months.
+    const undecidedReceived = decided - 200 * 24 * 60 * 60;
+    expect(undecidedNoticeDetailsDueAt(undecidedReceived)).toBeLessThanOrEqual(due);
+    const undecided = await notice('undecided', null, undecidedReceived);
+    const open = await notice('open', null);
+    await store.close();
+
+    const clock = { ms: due * 1000 };
+    const pending: { at: number; run: () => void }[] = [];
+    const timers: SweepTimers = {
+      now: () => clock.ms,
+      setTimeout: (run, delayMs) => {
+        const entry = { at: clock.ms + delayMs, run };
+        pending.push(entry);
+        return entry;
+      },
+      clearTimeout: (handle) => {
+        const at = pending.indexOf(handle as { at: number; run: () => void });
+        if (at >= 0) pending.splice(at, 1);
+      },
+    };
+    const { instance } = await start(
+      path,
+      {},
+      { timing: { now: () => clock.ms, sweepTimers: timers } },
+    );
+    await instance.opened;
+    const erasedOf = async () => {
+      const reading = await openSqlStore(path);
+      try {
+        return new Map(
+          (await reading.listNotices()).map((each) => [each.id, each.erased?.at ?? null]),
+        );
+      } finally {
+        await reading.close();
+      }
+    };
+    /** The erasure runs off the request path: read until `noticeId`'s has landed. */
+    const erasedOnceOf = async (noticeId: number) => {
+      for (let tries = 0; tries < 500; tries += 1) {
+        const read = await erasedOf();
+        if (read.get(noticeId) !== null) return read;
+        await new Promise((done) => setTimeout(done, 10));
+      }
+      throw new Error(`notice ${String(noticeId)} was never erased`);
+    };
+    let erased = await erasedOnceOf(first);
+    expect(erased.get(first)).toBe(due);
+    expect(erased.get(second)).toBeNull();
+    erased = await erasedOnceOf(undecided);
+    expect(erased.get(undecided)).toBe(due);
+    expect(erased.get(open)).toBeNull();
+
+    // The next hour's boundary, by the notices' own sweep.
+    const hourly = pending.filter((entry) => entry.at % NOTICE_RETENTION_SWEEP_PERIOD_MS === 0);
+    expect(hourly.length).toBeGreaterThan(0);
+    clock.ms = hourly[0]!.at;
+    for (const entry of hourly) {
+      pending.splice(pending.indexOf(entry), 1);
+      entry.run();
+    }
+    erased = await erasedOnceOf(second);
+    expect(erased.get(second)).toBe(Math.floor(clock.ms / 1000));
+    expect(erased.get(open)).toBeNull();
   }, 30_000);
 });
 
@@ -1447,6 +1574,8 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     readonly key?: 'operator' | 'own';
     /** Whose job it is: the operator's unless said. */
     readonly athleteId?: string;
+    /** The service the start names (#1796): the key's own origin unless said. */
+    readonly endpoint?: string;
   }) {
     const model = await startFakeModelServer([
       { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
@@ -1521,8 +1650,23 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       const jobs = instance.analysisJobs();
       if (jobs === undefined) throw new Error('no analysis jobs');
       const caller = { athleteId } as Caller;
-      const started = await jobs.start(caller, { ...jobBody(), source: 'instance-hosted' });
-      if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+      const started = await jobs.start(caller, {
+        ...jobBody(),
+        source: 'instance-hosted',
+        endpoint: options.endpoint ?? HOSTED.origin,
+      });
+      if (!started.ok) {
+        if (options.endpoint === undefined)
+          throw new Error(`not started: ${JSON.stringify(started)}`);
+        return {
+          refused: started,
+          events: [],
+          bodies: [...bodies],
+          requests: [...model.requests],
+          tested: undefined,
+          testRequests: [],
+        };
+      }
       await jobs.idle();
       const stream = await jobs.events(caller, started.value.jobId, null);
       const events = parseStream((await stream?.text()) ?? '').events;
@@ -1530,7 +1674,13 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       // #1251: then the test question, through the running instance's own
       // settings — which must pass the gate that job just did.
       const tested = await instance.hostedSettings()?.testQuestion(caller);
-      return { events, ...sent, tested, testRequests: model.requests.slice(sent.requests.length) };
+      return {
+        refused: undefined,
+        events,
+        ...sent,
+        tested,
+        testRequests: model.requests.slice(sent.requests.length),
+      };
     } finally {
       await model.close();
     }
@@ -1566,6 +1716,23 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     expect(JSON.stringify(testRequests[0])).not.toContain(PLANTED_TEXT);
   });
 
+  it('refuses a start that names another service than the rider’s consent, and the hosted server is sent nothing (#1796)', async () => {
+    const outcome = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+      endpoint: 'https://another-service.example',
+    });
+    expect(outcome.refused).toEqual({
+      ok: false,
+      code: 'validation_failed',
+      fields: [{ field: 'endpoint', problem: 'must be the service your recorded consent names' }],
+    });
+    expect(outcome.bodies).toStrictEqual([]);
+    expect(outcome.requests).toStrictEqual([]);
+  });
+
   it('runs a rider’s job on the key THEY stored, with their own consent, masked (#1199)', async () => {
     const { events, bodies, requests } = await hostedJob({
       consent: true,
@@ -1578,6 +1745,70 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
       expect(personalDetailFaults(body)).toStrictEqual([]);
     }
+  });
+
+  it('ends a test question that is out when the instance stops, rather than leaving it for its 30 s (#1796)', async () => {
+    // The service never answers: the request ends only when its signal does.
+    let reached: (signal: AbortSignal) => void = () => undefined;
+    const sent = new Promise<AbortSignal>((resolve) => {
+      reached = resolve;
+    });
+    const hostedFetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal ?? new AbortController().signal;
+      reached(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason as Error);
+        });
+      });
+    }) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const write = openServingStore(path);
+    try {
+      await write.registerAthlete(registrationFixture(RIDER));
+      await write.putSyncItem({
+        athleteId: RIDER,
+        kind: 'masking',
+        key: MASKING_ITEM_KEY,
+        body: new TextEncoder().encode(GUARD_BODY),
+        digest: '1'.padStart(64, '0'),
+        now: 1_790_000_000,
+      });
+      await write.putHostedConsent({ athleteId: RIDER, origin: HOSTED.origin, recordedAt: 1 });
+      const secret = await importSecretKey(new Uint8Array(32).fill(SECRET_FILL));
+      await write.putAthleteHostedKey(RIDER, {
+        url: HOSTED.href,
+        model: 'hosted-model',
+        ...(await sealHostedKey(secret, {
+          athleteId: RIDER,
+          url: HOSTED.href,
+          model: 'hosted-model',
+          key: 'sk-own-0123456789abcdef',
+        })),
+        setAt: 1,
+      });
+    } finally {
+      await write.close();
+    }
+    const { instance } = await start(
+      path,
+      { secretKey: new Uint8Array(32).fill(SECRET_FILL) },
+      { hosted: { hostedFetch } },
+    );
+    await instance.jobsRecovered;
+    const settings = instance.hostedSettings();
+    if (settings === undefined) throw new Error('no hosted settings');
+    const caller = { athleteId: RIDER } as Caller;
+    const tested = settings.testQuestion(caller);
+    const signal = await sent;
+    expect(signal.aborted, 'the control: it is out, and waiting').toBe(false);
+    await instance.stop();
+    running = undefined;
+    expect(signal.aborted).toBe(true);
+    expect(await tested).toEqual({ result: 'failed', reasoned: false });
+    // And none is sent after it.
+    expect(await settings.testQuestion(caller)).toEqual({ result: 'not-ready', reasoned: false });
   });
 
   it.each([
@@ -1605,4 +1836,585 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       expect(testRequests).toStrictEqual([]);
     },
   );
+});
+
+describe('voice on Discord, as the running instance starts it (#874)', () => {
+  it('is off — no voice at all, no request, no line — unless the operator configured a bot', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(path, {}, { voice: { discordFetch: discord.fetch } });
+    await instance.opened;
+    await instance.voiceReady;
+    expect(instance.voice()).toBeUndefined();
+    expect(discord.requests).toEqual([]);
+    expect(lines.some((line) => line.includes('"voice'))).toBe(false);
+  });
+
+  it('configured: asks Discord about the server, says voice is on, sweeps what an earlier run left — and never logs the token', async () => {
+    const discord = fakeDiscord();
+    const leftover = discord.addChannel({ name: 'oyl-ride-0123456789ab', type: 2 });
+    const general = discord.addChannel({ name: 'General', type: 2 });
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(
+      path,
+      { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } },
+      { voice: { discordFetch: discord.fetch } },
+    );
+    await instance.opened;
+    await instance.voiceReady;
+    expect(discord.channels.has(leftover.id)).toBe(false);
+    expect(discord.channels.has(general.id)).toBe(true);
+    const said = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(said).toContainEqual({ event: 'voice', state: 'on' });
+    expect(said).toContainEqual({ event: 'voice-swept', deleted: 1 });
+    // Its token went to Discord, in the header, and nowhere else.
+    expect(discord.requests[0]?.headers.authorization).toBe(`Bot ${TEST_BOT_TOKEN}`);
+    expect(discord.requests[0]?.headers['user-agent']).toContain('9.8.7');
+    for (const line of lines) expect(line).not.toContain(TEST_BOT_TOKEN);
+    // And a room asked for voice is given a link that opens a channel Discord holds.
+    const link = await instance.voice()?.inviteFor('a1b2c3d4e5f60718293a4b5c6d7e8f90', 4);
+    expect(link).toMatch(/^https:\/\/discord\.gg\//);
+    expect(discord.ourChannels()).toHaveLength(1);
+  });
+
+  it('takes the token from the file it is named by, and puts it in no log line, no error and no stored byte — #2146', async () => {
+    const discord = fakeDiscord();
+    const directory = await freshDirectory();
+    const path = join(directory, 'instance.sqlite');
+    await migrateForDeploy(path);
+    // Where the deployment's secret store mounts it: beside the data, not in it.
+    const secrets = await mkdtemp(join(tmpdir(), 'oyl-2146-secrets-'));
+    const tokenPath = join(secrets, 'discord-bot-token');
+    await writeFile(tokenPath, `${TEST_BOT_TOKEN}\n`, { mode: 0o600 });
+    const read = readServerConfig(
+      {
+        discordBotTokenFile: readDiscordTokenFile(tokenPath, (named) =>
+          readFileSync(named, 'utf8'),
+        ),
+        discordGuildId: TEST_GUILD_ID,
+      },
+      1,
+    );
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    const { instance, lines } = await start(
+      path,
+      { discord: read.config.discord },
+      { voice: { discordFetch: discord.fetch } },
+    );
+    await instance.opened;
+    await instance.voiceReady;
+    expect(discord.requests[0]?.headers.authorization).toBe(`Bot ${TEST_BOT_TOKEN}`);
+    // A request that fails with the token in its error, then one that works.
+    discord.failNext(/^POST .*\/channels$/, {
+      throws: new TypeError(`fetch failed for Bot ${TEST_BOT_TOKEN}`),
+    });
+    expect(
+      await instance.voice()?.inviteFor('a1b2c3d4e5f60718293a4b5c6d7e8f90', 4),
+    ).toBeUndefined();
+    expect(await instance.voice()?.inviteFor('b1b2c3d4e5f60718293a4b5c6d7e8f90', 4)).toMatch(
+      /^https:\/\/discord\.gg\//,
+    );
+    await running?.stop();
+    running = undefined;
+
+    expect(lines.some((line) => line.includes('"voice-failed"'))).toBe(true);
+    for (const line of lines) expect(line).not.toContain(TEST_BOT_TOKEN);
+    // Every byte the instance stored — the database, its WAL, the blobs.
+    const stored = await filesUnder(directory);
+    expect(stored.map((file) => file.slice(directory.length))).toContain('/instance.sqlite');
+    for (const file of stored) {
+      expect(readFileSync(file).includes(TEST_BOT_TOKEN), file).toBe(false);
+    }
+  });
+});
+
+/** Every file under `root`, at any depth. */
+async function filesUnder(root: string): Promise<string[]> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name));
+}
+
+describe('a rider’s private room says its voice link in the welcome, and only there (#875)', () => {
+  const VOICE_SERVER = { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } };
+
+  async function post(url: string, path: string, token: string, body: unknown) {
+    const response = await fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  /** Discord was asked for an invite: the channel it is for was made. */
+  const madeInvite = (request: SentRequest): boolean =>
+    request.method === 'POST' && /^\/channels\/[0-9]+\/invites$/.test(request.path);
+
+  async function welcomeOf(url: string, token: string, roomId: string) {
+    const client = await joinRoom(wsUrl(url), roomId, await ticket(url, token, roomId));
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'a welcome');
+    const [first] = client.messages;
+    if (first?.type !== 'welcome') throw new Error(`no welcome: ${JSON.stringify(first)}`);
+    return first;
+  }
+
+  it('the welcome carries the link to the channel Discord holds for the room, the same for every rider', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const bob = await signIn(instance.url, 'Bob');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    expect(made.status).toBe(200);
+    const roomId = made.body.roomId as string;
+    expect(
+      (await post(instance.url, '/v1/rooms/join', bob.sessionToken, { code: made.body.code }))
+        .status,
+    ).toBe(200);
+
+    const annWelcome = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    const bobWelcome = await welcomeOf(instance.url, bob.sessionToken, roomId);
+    const [invite] = [...discord.invites.values()];
+    expect(discord.ourChannels().map((each) => each.name)).toEqual([
+      `oyl-ride-${roomId.slice(0, 12)}`,
+    ]);
+    expect(annWelcome.voiceInvite).toBe(`https://discord.gg/${String(invite?.code)}`);
+    expect(bobWelcome.voiceInvite).toBe(annWelcome.voiceInvite);
+    // The room's capacity, not one invite per rider.
+    expect(invite?.max_uses).toBe(50);
+  });
+
+  it('a socket refused at its hello is told no link', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    const stranger = await joinRoom(wsUrl(instance.url), roomId, 'not-a-ticket');
+    clients.push(stranger);
+    await until(() => stranger.messages.length > 0, 'a refusal');
+    expect(stranger.messages).toEqual([{ type: 'refuse', reason: 'ticket-refused' }]);
+  });
+
+  it('a welcome sent before Discord answered has no link, and the next socket’s has it', async () => {
+    const discord = fakeDiscord();
+    let letDiscordAnswer = (): void => undefined;
+    const held = new Promise<void>((resolve) => (letDiscordAnswer = resolve));
+    const slowed = ((input: string | URL, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? held.then(() => discord.fetch(input, init))
+        : discord.fetch(input, init)) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: slowed, voiceInviteWaitMs: 100 },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+
+    const early = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    expect(early).not.toHaveProperty('voiceInvite');
+    letDiscordAnswer();
+    await until(() => discord.invites.size === 1, 'the invite made');
+    const later = await welcomeOf(instance.url, ann.sessionToken, roomId);
+    expect(later.voiceInvite).toBe(`https://discord.gg/${String([...discord.invites.keys()][0])}`);
+  });
+
+  it('a room over between the lookup and its channel being made holds no channel, and its socket is told it ended', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    // The room is over after the lookup read it open and before its channel
+    // is asked for: its close commits, and the close of its voice finds
+    // nothing held yet — `rooms.ts` §`over`, in that order.
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const other = openServingStore(path);
+      try {
+        expect(await other.closePrivateRoom(id, Math.floor(Date.now() / 1000))).toBe(true);
+      } finally {
+        await other.close();
+      }
+      await voice.close(id);
+      return inviteFor(id, riders);
+    };
+
+    const client = await joinRoom(
+      wsUrl(instance.url),
+      roomId,
+      await ticket(instance.url, ann.sessionToken, roomId),
+    );
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'an answer');
+    // The sweep deletes every channel of ours that no room holds: one left
+    // after it is one held for a room that is over.
+    await voice.sweep();
+    expect(discord.ourChannels()).toEqual([]);
+    expect(client.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+  });
+
+  it('a room over before its channel is made, whose socket stopped waiting for Discord, holds no channel and welcomes nobody (#2168)', async () => {
+    const discord = fakeDiscord();
+    let letDiscordAnswer = (): void => undefined;
+    const held = new Promise<void>((resolve) => (letDiscordAnswer = resolve));
+    const slowed = ((input: string | URL, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? held.then(() => discord.fetch(input, init))
+        : discord.fetch(input, init)) as typeof globalThis.fetch;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: slowed, voiceInviteWaitMs: 100 },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    // As above — the room is over, and its voice closed with nothing held,
+    // before its channel is asked for — but Discord answers only after the
+    // socket's wait has given up: the order where the wait times out first.
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const other = openServingStore(path);
+      try {
+        expect(await other.closePrivateRoom(id, Math.floor(Date.now() / 1000))).toBe(true);
+      } finally {
+        await other.close();
+      }
+      await voice.close(id);
+      return inviteFor(id, riders);
+    };
+
+    const client = await joinRoom(
+      wsUrl(instance.url),
+      roomId,
+      await ticket(instance.url, ann.sessionToken, roomId),
+    );
+    clients.push(client);
+    await until(() => client.messages.length > 0, 'an answer');
+    expect(client.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+
+    letDiscordAnswer();
+    await until(() => discord.requests.some(madeInvite), 'the late channel made');
+    // Nobody waits for this channel now: unless the lookup closes it, it is
+    // held for good, and the sweep skips a held channel.
+    await until(() => discord.ourChannels().length === 0, 'the late channel deleted', 2000);
+    expect(voice.rooms()).toEqual([]);
+  });
+
+  it('a room whose read after Discord answered failed holds no channel (#2168)', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const voice = instance.voice();
+    if (voice === undefined) throw new Error('no voice');
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    const roomTicket = await ticket(instance.url, ann.sessionToken, roomId);
+    // The channel is made, and then the room cannot be read: its table is
+    // out of reach until the test puts it back.
+    const database = openDatabase(path);
+    const inviteFor = voice.inviteFor.bind(voice);
+    voice.inviteFor = async (id, riders) => {
+      const link = await inviteFor(id, riders);
+      database.exec('ALTER TABLE private_room RENAME TO private_room_away');
+      return link;
+    };
+    try {
+      await expect(joinRoom(wsUrl(instance.url), roomId, roomTicket)).rejects.toThrow(
+        'upgrade answered 500',
+      );
+      expect(discord.requests.filter(madeInvite)).toHaveLength(1);
+      expect(voice.rooms()).toEqual([]);
+      expect(discord.ourChannels()).toEqual([]);
+    } finally {
+      database.exec('ALTER TABLE private_room_away RENAME TO private_room');
+      database.close();
+    }
+  });
+
+  it('a room the operator opened is offered no voice: no link, no channel Discord holds', async () => {
+    // A room id of the shape the voice module accepts, or it would refuse for that reason.
+    const OPERATOR_ROOM = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    expect(
+      cli(
+        path,
+        'room-open',
+        OPERATOR_ROOM,
+        '--kind',
+        'ride',
+        '--length',
+        '10000',
+        '--countdown',
+        '0',
+      ).status,
+    ).toBe(0);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const welcome = await welcomeOf(instance.url, ann.sessionToken, OPERATOR_ROOM);
+    expect(welcome).not.toHaveProperty('voiceInvite');
+    // Nothing would ever close such a channel, so none may be made.
+    expect(discord.ourChannels()).toEqual([]);
+    expect(discord.invites.size).toBe(0);
+  });
+
+  it('an instance with no bot says no link, and asks Discord nothing', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, {}, { voice: { discordFetch: discord.fetch } });
+    await instance.opened;
+    const ann = await signIn(instance.url, 'Ann');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const welcome = await welcomeOf(instance.url, ann.sessionToken, made.body.roomId as string);
+    expect(welcome).not.toHaveProperty('voiceInvite');
+    expect(discord.requests).toEqual([]);
+  });
+});
+
+describe('a removal and a ban reach the room’s Discord voice (#876)', () => {
+  const VOICE_SERVER = { discord: { botToken: TEST_BOT_TOKEN, guildId: TEST_GUILD_ID } };
+
+  async function post(url: string, path: string, token: string, body: unknown) {
+    const response = await fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    return {
+      status: response.status,
+      body: (text === '' ? {} : JSON.parse(text)) as Record<string, unknown>,
+    };
+  }
+
+  /** A rider signed in with `device`: the owner's, where the operator named its key. */
+  async function signInWith(url: string, device: Awaited<ReturnType<typeof testDevice>>) {
+    const challenge = (await (
+      await fetch(`${url}/v1/auth/challenge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ publicKey: device.publicKey }),
+      })
+    ).json()) as { nonce: string };
+    return (await (
+      await fetch(`${url}/v1/auth/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(await device.statement(challenge.nonce)),
+          displayName: 'Owner',
+        }),
+      })
+    ).json()) as { sessionToken: string; athleteId: string };
+  }
+
+  async function seated(url: string, token: string, roomId: string): Promise<RoomClient> {
+    const client = await joinRoom(wsUrl(url), roomId, await ticket(url, token, roomId));
+    clients.push(client);
+    await until(() => client.messages.some((m) => m.type === 'welcome'), 'a welcome');
+    return client;
+  }
+
+  const welcomeOf = (client: RoomClient) => {
+    const welcome = client.messages.find((m) => m.type === 'welcome');
+    if (welcome?.type !== 'welcome') throw new Error('no welcome');
+    return welcome;
+  };
+
+  const voiceMessages = (client: RoomClient) => client.messages.filter((m) => m.type === 'voice');
+
+  async function logOf(path: string) {
+    const store = await openSqlStore(path);
+    try {
+      return await store.listModerationLogPage(undefined, 100);
+    } finally {
+      await store.close();
+    }
+  }
+
+  it('a host removes a rider: the channel is replaced, the riders who stay are told the new link, the removed rider is not, and the log says so', async () => {
+    const discord = fakeDiscord();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+    });
+    await instance.voiceReady;
+    const ann = await signIn(instance.url, 'Ann');
+    const bob = await signIn(instance.url, 'Bob');
+    const cat = await signIn(instance.url, 'Cat');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    for (const rider of [bob, cat]) {
+      expect(
+        (await post(instance.url, '/v1/rooms/join', rider.sessionToken, { code: made.body.code }))
+          .status,
+      ).toBe(200);
+    }
+    const annSocket = await seated(instance.url, ann.sessionToken, roomId);
+    const bobSocket = await seated(instance.url, bob.sessionToken, roomId);
+    const catSocket = await seated(instance.url, cat.sessionToken, roomId);
+    const first = welcomeOf(annSocket).voiceInvite;
+    const firstChannel = discord.ourChannels()[0]?.id;
+    expect(first).toBeDefined();
+
+    const removed = await post(instance.url, `/v1/rooms/${roomId}/remove`, ann.sessionToken, {
+      riderId: welcomeOf(bobSocket).riderId,
+      reason: 'Abusive in the room',
+    });
+    expect(removed.status).toBe(200);
+    await until(
+      () => voiceMessages(annSocket).length > 0 && voiceMessages(catSocket).length > 0,
+      'the new link',
+    );
+
+    // Discord: the channel Bob may be in is gone; one new one.
+    expect(discord.channels.has(firstChannel ?? '')).toBe(false);
+    expect(discord.ourChannels()).toHaveLength(1);
+    const newer = `https://discord.gg/${String([...discord.invites.keys()][0])}`;
+    expect(newer).not.toBe(first);
+    expect(voiceMessages(annSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    expect(voiceMessages(catSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    // Bob is out of the room, and was told nothing.
+    await bobSocket.closed;
+    expect(voiceMessages(bobSocket)).toEqual([]);
+    // The log: the removal, then what was done to voice, naming it.
+    const log = await logOf(path);
+    const removal = log.find((entry) => entry.action === 'host_remove_from_room');
+    const voice = log.find((entry) => entry.action === 'rotate_voice');
+    expect(removal?.id).toBe(removed.body.logId);
+    expect(voice).toMatchObject({
+      actorAthleteId: ann.athleteId,
+      targetAthleteId: bob.athleteId,
+      reason: expect.stringContaining(`after log entry ${String(removed.body.logId)}`) as unknown,
+    });
+    expect((voice?.id ?? 0) > (removal?.id ?? 0)).toBe(true);
+  });
+
+  it('a moderator suspends a rider who is still connected: the channel is replaced and she is not told the new link', async () => {
+    const discord = fakeDiscord();
+    const ownerDevice = await testDevice();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, VOICE_SERVER, {
+      voice: { discordFetch: discord.fetch },
+      config: { moderators: { owner: ownerDevice.publicKey } },
+    });
+    await instance.voiceReady;
+    const owner = await signInWith(instance.url, ownerDevice);
+    const ann = await signIn(instance.url, 'Ann');
+    const cat = await signIn(instance.url, 'Cat');
+    const made = await post(
+      instance.url,
+      '/v1/rooms',
+      ann.sessionToken,
+      roomBody({ kind: 'group' }),
+    );
+    const roomId = made.body.roomId as string;
+    expect(
+      (await post(instance.url, '/v1/rooms/join', cat.sessionToken, { code: made.body.code }))
+        .status,
+    ).toBe(200);
+    const annSocket = await seated(instance.url, ann.sessionToken, roomId);
+    const catSocket = await seated(instance.url, cat.sessionToken, roomId);
+
+    const suspended = await post(
+      instance.url,
+      `/v1/moderation/athletes/${cat.athleteId}/suspend`,
+      owner.sessionToken,
+      { reason: 'Repeated abuse', statement: TEST_STATEMENT },
+    );
+    expect(suspended.status).toBe(200);
+    await until(() => voiceMessages(annSocket).length > 0, 'the new link');
+    const newer = `https://discord.gg/${String([...discord.invites.keys()][0])}`;
+    expect(voiceMessages(annSocket)).toEqual([{ type: 'voice', voiceInvite: newer }]);
+    expect(newer).not.toBe(welcomeOf(catSocket).voiceInvite);
+    // A ban closes no socket: Cat is still connected, and is not told.
+    expect(voiceMessages(catSocket)).toEqual([]);
+    const voice = (await logOf(path)).find((entry) => entry.action === 'rotate_voice');
+    expect(voice).toMatchObject({
+      actorAthleteId: owner.athleteId,
+      targetAthleteId: cat.athleteId,
+      reason: expect.stringContaining(`after log entry ${String(suspended.body.logId)}`) as unknown,
+    });
+  });
 });

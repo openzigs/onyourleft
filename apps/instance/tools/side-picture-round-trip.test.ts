@@ -108,9 +108,12 @@ describe('the picture measurement’s arithmetic — #1106', () => {
     expect(picture).toHaveLength(4_096);
     expect([...picture.slice(0, 4)]).toStrictEqual([0xff, 0xd8, 0xff, 0xe0]);
     expect([...picture.slice(-2)]).toStrictEqual([0xff, 0xd9]);
-    // No stray marker in the filler.
-    expect(picture.slice(20, -2).includes(0xff)).toBe(false);
+    // A scan header after APP0, and no stray marker in the filler after it.
+    expect([...picture.slice(20, 22)]).toStrictEqual([0xff, 0xda]);
+    expect(picture.slice(30, -2).includes(0xff)).toBe(false);
     expect(syntheticPicture(4_096, 2)).not.toStrictEqual(picture);
+    // #2175: the instance walks every segment, and takes this one.
+    expect(pictureFrom(Buffer.from(picture).toString('base64'))).toMatchObject({ ok: true });
   });
 
   it('sends one at a time, and drops unsent every picture that falls due meanwhile', async () => {

@@ -248,6 +248,14 @@ interface PlanMeasurement {
   readonly roadWidth: number;
   readonly roadHeight: number;
   readonly roads: number;
+  readonly mark: { readonly width: number; readonly height: number } | undefined;
+  readonly minimumMarkPixels: number;
+  readonly lines: readonly {
+    readonly part: string;
+    readonly strokeWidth: string;
+    readonly dash: string;
+    readonly stroke: string;
+  }[];
 }
 
 /**
@@ -514,6 +522,66 @@ test.describe('the plan view is drawn at a size a rider can see', () => {
     expect(plan?.roadHeight ?? 0).toBeLessThanOrEqual((plan?.height ?? 0) + 1);
   });
 });
+
+/**
+ * #2070 — the plan view, readable at arm's length, as an engine draws it.
+ *
+ * `PlanTrace.a11y.test.tsx` reads the attributes and the paint table; only a
+ * browser can say how many pixels the mark is once the viewBox is scaled into
+ * the box `theme.css` gives it, and what width and dash a `non-scaling-stroke`
+ * line resolves to. Measured at every viewport this file renders.
+ *
+ * ⚠️ **The landscape tablet's box is held to what it was before #2070**,
+ * measured through this harness on `main` on 2026-11-04: 270 × 80 px at
+ * 1280×800, a 5 rem square in an 18 rem panel. The owner's *"hard to see"* was
+ * about that box, so the floor is that it may not get smaller, and the size it
+ * is now is published on every run.
+ */
+const TABLET_PLAN_BEFORE_2070 = { width: 270, height: 80 } as const;
+
+for (const viewport of VIEWPORTS) {
+  test(`#2070 the plan view's road and mark are sized for arm's length — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const plan = (await measure(page, viewport)).plan;
+    expect(plan, 'the HUD has no plan view at all').toBeDefined();
+    console.log(
+      `#2070 the plan view at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
+        `${(plan?.width ?? 0).toFixed(1)} × ${(plan?.height ?? 0).toFixed(1)} px; the mark ` +
+        `${(plan?.mark?.width ?? 0).toFixed(1)} px across; lines ` +
+        (plan?.lines ?? [])
+          .map((line) => `${line.part} ${line.strokeWidth} dash ${line.dash}`)
+          .join(', '),
+    );
+
+    // The mark: its disc, at least the size `plan.ts` states, on every screen.
+    expect(plan?.mark?.width ?? 0).toBeGreaterThanOrEqual(plan?.minimumMarkPixels ?? Infinity);
+    expect(plan?.mark?.height ?? 0).toBeGreaterThanOrEqual(plan?.minimumMarkPixels ?? Infinity);
+
+    // The harness rides 5 km of 40, so both parts are drawn, and they differ
+    // by dash and by width as the engine resolved them, not only by colour.
+    const ridden = plan?.lines.filter((line) => line.part === 'ridden') ?? [];
+    const ahead = plan?.lines.filter((line) => line.part === 'ahead') ?? [];
+    expect(ridden.length).toBeGreaterThan(0);
+    expect(ahead.length).toBeGreaterThan(0);
+    for (const line of ridden) {
+      expect(line.dash).not.toBe('none');
+      expect(parseFloat(line.strokeWidth)).toBeGreaterThanOrEqual(2);
+    }
+    for (const line of ahead) {
+      expect(line.dash).toBe('none');
+      expect(parseFloat(line.strokeWidth)).toBeGreaterThanOrEqual(3);
+    }
+    expect(new Set(ridden.map((line) => line.stroke))).not.toEqual(
+      new Set(ahead.map((line) => line.stroke)),
+    );
+
+    if (viewport.width === 1280 && viewport.height === 800) {
+      expect(plan?.height ?? 0).toBeGreaterThan(TABLET_PLAN_BEFORE_2070.height);
+      expect(plan?.width ?? 0).toBeGreaterThanOrEqual(TABLET_PLAN_BEFORE_2070.width);
+    }
+  });
+}
 
 /**
  * #401 — the announcement region is NOT hidden, and moves nothing.
@@ -975,3 +1043,51 @@ test.describe('#1812 — the Delivery measurement can see a field on a ride cont
     );
   });
 });
+
+/**
+ * #2071 — the gradient at the PRIMARY size, read off Chromium: its value's
+ * computed font size equal to power's, cadence's and heart rate's, in the
+ * primary panel, inside its own track, on the owner's tablet and the owner's
+ * phone. `theme.css` §"THE GRADIENT, PRIMARY" is where four tracks fit and
+ * where they do not.
+ */
+for (const viewport of [
+  { name: 'the owner’s tablet — 1280×800', width: 1280, height: 800 },
+  { name: 'the owner’s phone upright — 412×915', width: 412, height: 915 },
+] as const) {
+  test(`#2071 — the gradient is drawn at the primary size — ${viewport.name}`, async ({ page }) => {
+    await measure(page, viewport);
+    const primary = await page.evaluate(() => {
+      const panel = document.querySelector('[data-oyl-control="false"] .oyl-hud__fields--primary');
+      if (panel === null) throw new Error('no shipping primary panel');
+      const box = panel.getBoundingClientRect();
+      return [...panel.querySelectorAll('.oyl-hud__field')].map((field) => {
+        const value = field.querySelector('.oyl-hud__value');
+        const rect = field.getBoundingClientRect();
+        return {
+          label: field.querySelector('dt')?.textContent ?? '',
+          text: (value?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          fontSize: value === null ? 0 : Number.parseFloat(getComputedStyle(value).fontSize),
+          inPanel: rect.left >= box.left && rect.right <= box.right && rect.bottom <= box.bottom,
+          fits: value === null ? false : value.scrollWidth <= value.clientWidth,
+        };
+      });
+    });
+    expect(primary.map((each) => each.label)).toEqual([
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Gradient',
+    ]);
+    const gradient = primary[3];
+    // Signed, with its unit (the harness's road climbs here).
+    expect(gradient?.text).toMatch(/^[+-]?\d+\.\d %$/);
+    for (const each of primary) {
+      expect(each.fontSize, `${each.label} "${each.text}"`).toBe(primary[0]?.fontSize);
+      expect(each.inPanel, `${each.label} inside the primary panel`).toBe(true);
+      expect(each.fits, `${each.label} "${each.text}" inside its track`).toBe(true);
+    }
+    // Non-vacuity: the primary size, not the secondary one.
+    expect(primary[0]?.fontSize).toBeGreaterThanOrEqual(40);
+  });
+}

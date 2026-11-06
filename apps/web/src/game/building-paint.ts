@@ -266,6 +266,94 @@ export function paintsOf(surface: StructureSurface): readonly Rgb[] | undefined 
   return WALL_PAINTS[surface] ?? ROOF_PAINTS[surface];
 }
 
+/**
+ * The basemap profile's building palette — #1792: each entry of
+ * `tools/basemap/profile/…/BuildingPalette.java` §`ENTRIES`, its sRGB here
+ * linear, in its index order. That order is the archive's schema: a mapped
+ * `building:colour` or `roof:colour` reaches the plan as an index into it
+ * (#1789, `@onyourleft/map-features` §`BUILDING_PALETTE_SIZE`), never as a
+ * colour, and the profile appends and never reorders. `mapped-paint.test.ts`
+ * holds this list to the Java one, entry for entry.
+ */
+export const MAPPED_PALETTE: readonly Rgb[] = [
+  linear(0xf4_f4_ef), // white
+  linear(0xc6_c6_c2), // light grey
+  linear(0x8c_8c_8a), // grey
+  linear(0x4a_4a_4a), // dark grey
+  linear(0x1e_1e_1e), // black
+  linear(0xed_e3_c8), // cream
+  linear(0xd8_c4_9a), // beige
+  linear(0xb8_95_6a), // tan
+  linear(0x7a_52_30), // brown
+  linear(0x45_30_1e), // dark brown
+  linear(0x9c_3b_2a), // brick red
+  linear(0xc8_38_2e), // red
+  linear(0xe6_a9_a4), // pink
+  linear(0xde_7a_2e), // orange
+  linear(0xe9_cf_5a), // yellow
+  linear(0x5e_8c_4e), // green
+  linear(0x2f_4f_31), // dark green
+  linear(0xa9_c6_df), // light blue
+  linear(0x4a_6e_a8), // blue
+  linear(0x23_34_5a), // dark blue
+];
+
+/**
+ * The albedo a surface's multipliers are laid over, as this file writes them
+ * — #1792: `render`'s (and so clapboard's) white paint, 0.89, and
+ * `corrugated`'s galvanised sheet, 0.4 ({@link WALL_PAINTS}). Every other
+ * list is a photograph's shift, whose albedo is not written down here, or
+ * since #1588 an albedo itself ({@link SHINGLE_PAINTS}): those are compared
+ * as written, over 1.
+ */
+const PAINT_GROUNDS: Readonly<Partial<Record<StructureSurface, number>>> = {
+  render: 0.89,
+  corrugated: 0.4,
+};
+
+/**
+ * The entry of a surface's paints a mapped colour is painted in — #1792: the
+ * one whose colour, its multiplier over its ground ({@link PAINT_GROUNDS}),
+ * is nearest `colour` in linear RGB, by squared distance; a tie goes to the
+ * lower entry. So a tagged colour only ever picks a paint the list already
+ * has, inside {@link PAINT_LIMITS}, and no new colour reaches the shader.
+ * `paints` is the list the plan's surface wears — {@link roofPaintsOf}'s for a
+ * roof, which is a shingled roof's albedos — and `ground` is 1 for an albedo.
+ */
+export function nearestPaint(paints: readonly Rgb[], colour: Rgb, ground = 1): number {
+  let best = 0;
+  let least = Number.POSITIVE_INFINITY;
+  paints.forEach((paint, entry) => {
+    const r = paint[0] * ground - colour[0];
+    const g = paint[1] * ground - colour[1];
+    const b = paint[2] * ground - colour[2];
+    const distance = r * r + g * g + b * b;
+    if (distance < least) {
+      least = distance;
+      best = entry;
+    }
+  });
+  return best;
+}
+
+/**
+ * The entry a plan's wall or roof is painted for a mapped palette index —
+ * #1792: {@link nearestPaint} over `surface`'s paints, shingles' where
+ * `shingled`, against {@link MAPPED_PALETTE}'s colour; `undefined` where the
+ * index is outside the palette or the surface is not painted, and the plan
+ * keeps its seeded entry.
+ */
+export function mappedPaintEntry(
+  surface: StructureSurface,
+  shingled: boolean,
+  index: number,
+): number | undefined {
+  const colour = MAPPED_PALETTE[index];
+  const paints = roofPaintsOf(surface, shingled);
+  if (colour === undefined || paints === undefined) return undefined;
+  return nearestPaint(paints, colour, shingled ? 1 : (PAINT_GROUNDS[surface] ?? 1));
+}
+
 /** Which instance channel a painted surface reads its lot's choice from. @see lotPaint */
 export function paintChannelOf(surface: StructureSurface): 'wall' | 'roof' | undefined {
   if (WALL_PAINTS[surface] !== undefined) return 'wall';

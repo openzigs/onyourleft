@@ -27,7 +27,15 @@
  * its own could not be rendered there at all.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+} from 'react';
 
 import type { KitColour } from '@onyourleft/store';
 
@@ -53,7 +61,7 @@ import {
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
 import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
-import { advanceCrank, cadenceTurns } from './bicycle';
+import { advanceCrank, cadenceTurns, turningCadence } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
@@ -90,12 +98,19 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
+import { dampedHeading, turnedPose, type GroundHeading } from './camera';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
 import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
 import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
+import {
+  voiceLinkShown,
+  voiceNoticeAfter,
+  type VoiceNotice as RoomVoiceNotice,
+} from './room-voice';
+import { VoiceButton, VoiceNotice } from './hud/VoiceNotice';
 import {
   acrossTheRoomsLine,
   heldOnTheLine,
@@ -119,6 +134,15 @@ import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } f
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
+import {
+  simulatedClock,
+  simulatedRideSentences,
+  simulatedRiderFromHash,
+  simulatedRiderKey,
+  simulatedSensors,
+  simulatedStartMetres,
+  type SimulatedRider,
+} from './simulated-rider';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
 import {
   EASED_SPOKEN_PREFIX,
@@ -194,10 +218,40 @@ import {
   stepDeliveryRide,
   type DeliveryRide,
 } from './delivery/ride-round';
-import { steeredLateralFor, steerToward } from './delivery/steer';
+import { steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import type { ControllerPort } from './delivery/controller-port';
+import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
 import { throwSideFor, type ThrowSide } from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
+import type { ItemInputPort } from './lap-race/item-input-port';
+import {
+  askRaceItem,
+  askRaceLane,
+  lapRaceDrawing,
+  lapRaceFrame,
+  lapRaceHeard,
+  lapRaceHud,
+  lapRaceBotConditions,
+  lapRaceChoiceRaceable,
+  lapRaceSaid,
+  startLapRaceRide,
+  lapRaceAssisted,
+  stepLapRaceRide,
+  type LapRaceRide,
+} from './lap-race/ride-race';
+import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
+import {
+  askRoomItem,
+  askRoomLane,
+  roomLapRaceDrawing,
+  roomLapRaceState,
+  startRoomLapRace,
+  stepRoomLapRace,
+  type RoomLapRaceRide,
+} from './lap-race/room-race';
+import { lapRaceInView } from './lap-race/in-view';
+import { lapRaceStandings, type LapRaceHud } from './hud/lap-race-hud';
 import {
   deliveryEvents,
   deliverySpoken,
@@ -326,6 +380,14 @@ export interface GameViewProps {
    */
   readonly thermal?: ThermalPort | undefined;
   /**
+   * A steering controller paired on the Devices screen — #1826, #1827. A
+   * Delivery round's HUD hands its lane changes, lanes and throws to the
+   * round's ports (`hud/ControllerIntents.tsx`); no other ride reads it, and
+   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX, as
+   * {@link thermal} is: `delivery-wiring.test.tsx` §"#1827" drives it.
+   */
+  readonly controller?: ControllerPort | undefined;
+  /**
    * Loads the renderer, lazily.
    *
    * ⚠️ A loader rather than the renderer itself, following `map={loadMapPort}`
@@ -383,6 +445,13 @@ export interface GameViewProps {
   readonly trainer?: GameTrainerPort | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
+  /**
+   * The wall clock the frame pacer and the quality ladder are timed on, when
+   * `now` is not it. Only a simulated ride (#1992) sets one: its `now` runs
+   * faster than the wall, and a 16.7 ms frame read on it is 16.7k ms, which
+   * the ladder would count as a hot frame and drop the world for.
+   */
+  readonly frameNow?: (() => number) | undefined;
   /**
    * The rider's local calendar day — #1622. Read ONCE, when a live ride
    * starts, for the ride's holiday (`season.ts`). Absent, it is this device's
@@ -495,6 +564,25 @@ export interface GameViewProps {
    * power trace with and without a round and holds the trainer's writes equal.
    */
   readonly delivery?: boolean | undefined;
+  /**
+   * Run a solo lap race against bots in the ride — #1906, ADR 0060 (epic
+   * #1894): its laps, field, tier and items. Read at the press, and only for
+   * a solo ride on a loop route (D-7.3, D-11.1): a ride in a room, on a route
+   * that is not a loop, or running a Delivery round, runs none. Since #1971
+   * a race rides the world Settings chose, as Delivery does (ADR 0060 D-10,
+   * ADR 0059 D-3): stylised first (D-14 Q5), and now the realistic world
+   * too, held there to `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
+   * and never to the village's frozen 50 (D-10.3). A race rides without the
+   * pacer a rider chose. Absent — the product — the chooser's *Ride a lap
+   * race* decides (#1907), offered on a loop only. A test sets it.
+   *
+   * ⚠️ **Nothing of a race reaches the trainer** (ADR 0060 D-2): the race
+   * reads the simulation's odometer as the rider's effort distance and writes
+   * to nothing but itself, the HUD and the frame. `lap-race-wiring.test.tsx`
+   * rides one power trace as an ordinary ride and as a race with items off
+   * and on, and holds every grade written, and its time, equal.
+   */
+  readonly lapRace?: LapRaceChoice | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -590,6 +678,22 @@ function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | un
 }
 
 /**
+ * The recorder's ELAPSED time, kept current — #2072. Subscribed for
+ * {@link useRideMovingSeconds}'s reason: a paused game does not re-render, and
+ * the elapsed time goes on counting through every pause, the game's and the
+ * recording's alike. Still the recorder's figure: never the simulation's
+ * `elapsed`.
+ */
+function useRideElapsedSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideElapsedSeconds?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * The moving time of the lap in progress, kept current — #1312. The
  * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
  * paused GAME does not pause the recording, and the lap's clock is the
@@ -662,7 +766,120 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
   return world.realistic ? worldRung(world) : rungFor(world.quality.level, shadowMap);
 }
 
+/**
+ * The game screen — and, when the fragment asks for one (#1992), the same
+ * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
+ * asked for. Keyed on the choice, so changing it is a new screen and a ride
+ * in progress is never switched between a real rider and a simulated one.
+ */
 export function GameView(props: GameViewProps): JSX.Element {
+  // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
+  // for the same simulated ride as the address switch, for one route.
+  const [preview, setPreview] = useState<PreviewAsked | undefined>(undefined);
+  // The route a preview rode, chosen again on the picker it returns to.
+  const [returnTo, setReturnTo] = useState<string | undefined>(undefined);
+  const fromHash = simulatedRiderFromHash(globalThis.location.hash);
+  const simulated = preview?.rider ?? fromHash;
+  const onPreview = useCallback((asked: PreviewAsked) => {
+    setReturnTo(asked.routeId);
+    setPreview(asked);
+  }, []);
+  const onPreviewEnd = useCallback(() => {
+    setPreview(undefined);
+  }, []);
+  return (
+    <GameScreen
+      // ⚠️ A preview is a NEW screen, mounted with no trainer port, room or
+      // rooms from its first render (`useSimulatedRide`), and ending it mounts
+      // a new ordinary one: the screen that held the trainer never rides it.
+      key={
+        preview === undefined
+          ? simulatedRiderKey(simulated)
+          : `preview:${simulatedRiderKey(preview.rider)}:${preview.routeId}`
+      }
+      given={props}
+      asked={simulated}
+      preview={preview}
+      returnTo={returnTo}
+      // Offered only on an ordinary screen: the address switch already
+      // rides every press of *Ride* simulated.
+      onPreview={simulated === undefined ? onPreview : undefined}
+      onPreviewEnd={onPreviewEnd}
+    />
+  );
+}
+
+/** What the picker's *Preview without a trainer* asked for — PR #2113. */
+interface PreviewAsked {
+  readonly rider: SimulatedRider;
+  readonly routeId: string;
+  readonly position: RidingPosition;
+}
+
+/**
+ * What a simulated ride is given in place of the shell's props — #1992.
+ *
+ * ⚠️ **No trainer port, no room and no rooms, and no Delivery round**, and
+ * that is the whole of the mode's safety and its "no fake records". The
+ * trainer port is the game's only way to a trainer AND to the recording
+ * (`trainer-port.ts` §`recordGameRide`, §`gameRideEnded`, §`courseLine`), so
+ * without it nothing is written to a machine and nothing reaches the store,
+ * an export or sync; without the room ports nothing is posted to a room; and
+ * a round would keep the week's counts on this device (`delivery-progress.ts`).
+ * The sensors are the simulated rider's, and the clock runs at its speed-up.
+ */
+function useSimulatedRide(
+  given: GameViewProps,
+  simulated: SimulatedRider | undefined,
+): GameViewProps {
+  const givenPort = given.port;
+  const port = useMemo((): GamePort | undefined => {
+    if (simulated === undefined || givenPort === undefined) return givenPort;
+    const sensors = simulatedSensors(simulated);
+    return { ...givenPort, readSensors: () => sensors };
+  }, [givenPort, simulated]);
+  const givenNow = given.now;
+  const now = useMemo(
+    () =>
+      simulated === undefined
+        ? givenNow
+        : simulatedClock(givenNow ?? (() => performance.now()), simulated.speedup),
+    [givenNow, simulated],
+  );
+  if (simulated === undefined) return given;
+  return {
+    ...given,
+    port,
+    now,
+    frameNow: givenNow ?? (() => performance.now()),
+    trainer: undefined,
+    room: undefined,
+    roomId: undefined,
+    madeTheRoom: undefined,
+    rooms: undefined,
+    delivery: false,
+  };
+}
+
+function GameScreen({
+  given,
+  asked,
+  preview,
+  returnTo,
+  onPreview,
+  onPreviewEnd,
+}: {
+  readonly given: GameViewProps;
+  readonly asked: SimulatedRider | undefined;
+  /** A preview to ride on mount, then hand back with {@link onPreviewEnd}. */
+  readonly preview: PreviewAsked | undefined;
+  readonly returnTo: string | undefined;
+  readonly onPreview: ((asked: PreviewAsked) => void) | undefined;
+  readonly onPreviewEnd: () => void;
+}): JSX.Element {
+  // #1992: held for this screen's life — the key above makes a new screen of a new choice.
+  const [simulated] = useState(asked);
+  const props = useSimulatedRide(given, simulated);
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
   // the control that shows the refusal and the button the refusal blocks.
@@ -672,8 +889,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
   // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
-  const [picked, setPicked] = useState<string | undefined>(() =>
-    gameRouteFromHash(globalThis.location.hash),
+  const [picked, setPicked] = useState<string | undefined>(
+    () => returnTo ?? gameRouteFromHash(globalThis.location.hash),
   );
   const [withGhost, setWithGhost] = useState(false);
   // #331: another rider's ghost, which REPLACES the rider's own — one ghost at
@@ -696,6 +913,21 @@ export function GameView(props: GameViewProps): JSX.Element {
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
   const [withDelivery, setWithDelivery] = useState(false);
+  /**
+   * Whether the rider switched on a lap race in the chooser, and which race
+   * — #1907. Per ride, like the round beside it; one mode a ride, so turning
+   * either on turns the other off, as the two ghosts do.
+   */
+  const [withLapRace, setWithLapRace] = useState(false);
+  const [lapRaceChoice, setLapRaceChoice] = useState<LapRaceChoice>(DEFAULT_LAP_RACE_CHOICE);
+  const chooseDelivery = useCallback((value: boolean) => {
+    setWithDelivery(value);
+    if (value) setWithLapRace(false);
+  }, []);
+  const chooseLapRace = useCallback((value: boolean) => {
+    setWithLapRace(value);
+    if (value) setWithDelivery(false);
+  }, []);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
   /**
    * Where the rider said their hands are — #365.
@@ -978,6 +1210,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const sideCamera = useSideCamera(props.sidePairing);
   /** @see useRideMovingSeconds */
   const movingSeconds = useRideMovingSeconds(props.trainer);
+  /** @see useRideElapsedSeconds */
+  const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
   /** @see useRecordingPaused */
@@ -1081,6 +1315,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   const crankRef = useRef<number>(0);
   /** Whether a cadence reading turned {@link crankRef} on the last frame — #625. */
   const pedallingRef = useRef<boolean>(false);
+  /**
+   * The cadence that turned {@link crankRef} on the last frame, or `undefined`
+   * when the HUD shows none — #1999, what the rider's drawn position is chosen
+   * from (`posture.ts`).
+   */
+  const cadenceRef = useRef<number | undefined>(undefined);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
   /**
    * Whether a press on *Ride* is still on its way to a ride — #509.
@@ -1138,6 +1378,27 @@ export function GameView(props: GameViewProps): JSX.Element {
   const deliveryRef = useRef<DeliveryRide | undefined>(undefined);
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
+  /**
+   * The lap race this ride runs, while it runs one — #1906. A ref for
+   * {@link deliveryRef}'s reason. Set at the press and held for the ride;
+   * `undefined` on every other ride. A ride that ends mid-race has nothing of
+   * it to settle (ADR 0060 D-12.2: nothing of a race is kept), and the next
+   * press replaces it.
+   */
+  const lapRaceRef = useRef<LapRaceRide | undefined>(undefined);
+  /**
+   * The lap race this ride runs IN A ROOM, while it runs one — #1911: from
+   * the room's first frame of a room whose welcome says it is a lap race, to
+   * the end of the ride. The room decides it (`lap-race/room-race.ts`); this
+   * holds the rider's inputs, what is predicted of them and the drawn offset.
+   */
+  const roomLapRaceRef = useRef<RoomLapRaceRide | undefined>(undefined);
+  /**
+   * Whether the rider asked for reduced motion, read at the press: a race's
+   * hit is then drawn steady (`lap-race/in-view.ts` §`hitLook`, WCAG 2.3.1),
+   * and the chase camera turns more gently (`camera.ts` §`dampedHeading`, #1994).
+   */
+  const reducedMotionRef = useRef(false);
   /** The throw the rider asked for since the last step that ran, already resolved to a side. */
   const throwAskedRef = useRef<ThrowSide | undefined>(undefined);
   /** Whether the loop is running: a throw asked for while the ride is paused is not taken. */
@@ -1167,9 +1428,55 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const steerPortRef = useRef<SteerInputPort>({
     steer: (intent) => {
+      if (!loopRunningRef.current) return;
+      // #1911: a room's lap race's lane, sent by its next step (`room-race.ts`).
+      const inRoom = roomLapRaceRef.current;
+      if (inRoom !== undefined) {
+        roomLapRaceRef.current = askRoomLane(inRoom, intent);
+        return;
+      }
+      // #1906: a lap race's lane, taken by its next tick (`race-input.ts`).
+      const race = lapRaceRef.current;
+      if (race !== undefined) {
+        lapRaceRef.current = askRaceLane(race, intent);
+        return;
+      }
       const ride = deliveryRef.current;
-      if (ride === undefined || !loopRunningRef.current) return;
+      if (ride === undefined) return;
       deliveryRef.current = { ...ride, steer: steerToward(ride.steer, intent) };
+    },
+  });
+  /**
+   * A steering controller's handlebar angle hands the round the lane the bars
+   * point at here — #1827. Delivery's alone: a lap race steers by lane steps
+   * (`steerPortRef`), and the angle is not handed to one. Not taken while
+   * paused, as a lane key's press is not.
+   */
+  const lanePortRef = useRef<LaneInputPort>({
+    steerToLane: (lane) => {
+      if (!loopRunningRef.current) return;
+      const ride = deliveryRef.current;
+      if (ride === undefined) return;
+      deliveryRef.current = { ...ride, steer: steerToLane(ride.steer, lane) };
+    },
+  });
+  /**
+   * The HUD's item control, its key and a pad hand the ride an item use here
+   * — #1901, #1906, ADR 0060 D-5.4: "use the held item", and nothing more.
+   * The race's next tick takes it; a press while paused is not taken.
+   */
+  const itemPortRef = useRef<ItemInputPort>({
+    useItem: () => {
+      if (!loopRunningRef.current) return;
+      // #1911: in a room's lap race, an input the next step sends (`room-race.ts`).
+      const inRoom = roomLapRaceRef.current;
+      if (inRoom !== undefined) {
+        roomLapRaceRef.current = askRoomItem(inRoom);
+        return;
+      }
+      const race = lapRaceRef.current;
+      if (race === undefined) return;
+      lapRaceRef.current = askRaceItem(race);
     },
   });
   /**
@@ -1180,6 +1487,15 @@ export function GameView(props: GameViewProps): JSX.Element {
   const roomRef = useRef<RoomConnection | undefined>(undefined);
   /** What the room frame remembers between frames. @see room-ride.ts */
   const roomStateRef = useRef<RoomRideState>(roomRideState());
+  /**
+   * The room's Discord voice link and when it came (#875), as the tick last
+   * read it. ⚠️ **Mirrored in {@link voiceNotice}, state**, because a race
+   * holding its rider on the line renders nothing new from the tick (the
+   * simulation's state does not change), so a link the room replaced there
+   * (#876) would never be drawn from a ref alone. `room-voice.ts`.
+   */
+  const voiceNoticeRef = useRef<RoomVoiceNotice | undefined>(undefined);
+  const [voiceNotice, setVoiceNotice] = useState<RoomVoiceNotice | undefined>(undefined);
   /** The last room frame, for the render the tick schedules. */
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
@@ -1309,11 +1625,22 @@ export function GameView(props: GameViewProps): JSX.Element {
       // ADR 0028 D-2: the room's position wins).
       // #1364: and, for that rider, their place among the riders the room's
       // newest standings have across the line — the room's word again.
+      // #1912: a lap race's line is its last lap's, and the room says when a
+      // rider has ridden it — its frame's laps, at the drawn distance (#1909)
+      // — rather than one lap of the route's length.
+      const lapRoom = roomRef.current?.lapRace();
+      const lapsDone = lapRoom?.newest?.riders.get(lapRoom.riderId)?.lapsDone;
+      // ⚠️ The standings are the room's word too, and they outlast the lap
+      // frame, which a rejoin clears until the next one: a rider they have
+      // across the line is across, whatever the frame says.
+      const placeAcross = placeAcrossOf(roomRef.current?.standings());
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
-        acrossTheRoomsLine(roomRef.current, course?.totalDistance),
-        placeAcrossOf(roomRef.current?.standings()),
+        lapRoom === undefined
+          ? acrossTheRoomsLine(roomRef.current, course?.totalDistance)
+          : (lapsDone ?? 0) >= lapRoom.config.laps || placeAcross !== undefined,
+        placeAcross,
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
       // #1816: a round the ride ends first is ended here, counting only the
@@ -1331,6 +1658,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     roomRef.current?.leave();
     roomRef.current = undefined;
     roomFrameRef.current = undefined;
+    roomLapRaceRef.current = undefined;
     // #447: the ride is over, so the audio may stop running — unless a workout
     // is still running on the Ride screen's session, whose tone `rejoin`
     // expects to find awake. Read NOW, not at the start of the ride: the
@@ -1404,6 +1732,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       sitting: RidingPosition,
       riderGhost = false,
       delivery = false,
+      lapRace: LapRaceChoice | undefined = undefined,
     ): Promise<void> => {
       const profile = route.profile;
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
@@ -1473,6 +1802,34 @@ export function GameView(props: GameViewProps): JSX.Element {
       // the contact blob: its rider is `RealisticRiderBelt`, which casts into
       // no map, and ADR 0026 D-6's budget and Part Z's soak were both taken
       // with the blob. Giving it the map is its own measurement.
+      // #1906: a lap race is asked for on a loop with no Delivery round. Since
+      // #1971 it rides the world the rider chose, the realistic one included,
+      // where its frame has its own ceiling (`realistic-budget.ts`
+      // §`LAP_RACE_VILLAGE_DRAW_CALLS`, ADR 0060 D-10.2) and the village's 50
+      // stays frozen (D-10.3). A ride in a room runs no race (D-7.3, D-8);
+      // and nor does a choice that cannot be raced, which is refused
+      // HERE, before the trainer is asked or a session made, as an ordinary
+      // ride rather than a throw from a ride already begun.
+      const deliveryWanted =
+        props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
+      // #784: the room entered on the picker's panel — but only for a ride
+      // started from the panel, on the room's own road: a rider in a room who
+      // presses *Ride* on one of their own routes rides it alone. Else the
+      // shell's room, which only a test and the browser gate name.
+      const entered = enteredRef.current;
+      const roomId =
+        entered !== undefined && route.id === roomRouteId(entered.roomId)
+          ? entered.roomId
+          : props.roomId;
+      const raceAsked = props.lapRace ?? lapRace;
+      const raceChoice =
+        raceAsked !== undefined &&
+        profile.loop &&
+        !deliveryWanted &&
+        roomId === undefined &&
+        lapRaceChoiceRaceable(raceAsked)
+          ? raceAsked
+          : undefined;
       const realistic = readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
@@ -1521,7 +1878,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         // about 2.3 mph optimistic at 150 W on the flat. `rider.ts` holds the
         // three positions and the arithmetic.
         conditions: rideConditionsFor(riderMassFor(props.riderMass).mass, sitting),
-        ...(pacer === undefined ? {} : { pacer }),
+        // #1971: a race rides without the pacer. The race's own bots are the
+        // field, and `LAP_RACE_VILLAGE_DRAW_CALLS` was measured on a frame
+        // without one: a pacer kept beside them would be a non-racer `bot`
+        // marker the realistic world draws as a body of its own (`scene.ts`,
+        // `three-renderer.ts` §`realisticRemoteSplit`), one call over the ceiling.
+        ...(pacer === undefined || raceChoice !== undefined ? {} : { pacer }),
         // ⚠️ #326: the line that makes `packages/physics`'s entire wind model
         // reachable from a ride. `RideConditions.headwindMetresPerSecond` was
         // plumbed through three packages, spread into the bot's course, and
@@ -1529,6 +1891,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // term written specifically so a tailwind could exceed the ground
         // speed had, between them, never seen a value other than zero.
         ...(air === undefined ? {} : { wind: air }),
+        // #1992: a simulated ride may start along the road — the same
+        // odometer start the demo's group preset uses (#1647), so the world
+        // drawn there is the one this ride would have drawn on arriving.
+        ...startOf(simulated, profile.totalDistance),
       });
       simulationRef.current = simulation;
       // #1312: the rider is on the line of this course, so a lap begins here
@@ -1602,6 +1968,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       roomRef.current?.leave();
       roomRef.current = undefined;
       roomFrameRef.current = undefined;
+      roomLapRaceRef.current = undefined;
       roomLostSaidRef.current = false;
       roomRecordAskedRef.current = false;
       raceSaidRef.current = undefined;
@@ -1610,15 +1977,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
-      // #784: the room entered on the picker's panel — but only for a ride
-      // started from the panel, on the room's own road: a rider in a room who
-      // presses *Ride* on one of their own routes rides it alone. Else the
-      // shell's room, which only a test and the browser gate name.
-      const entered = enteredRef.current;
-      const roomId =
-        entered !== undefined && route.id === roomRouteId(entered.roomId)
-          ? entered.roomId
-          : props.roomId;
+      // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
       // The panel's room says whether this rider made it — made here, or as
       // the instance answered their join by its code (#948,
@@ -1630,6 +1989,8 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
+        voiceNoticeRef.current = undefined;
+        setVoiceNotice(undefined);
         roomRef.current = props.room.join({
           roomId,
           // #784: the room's `welcome.routeRef` must be the route this device
@@ -1710,8 +2071,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // The HUD says which: the houses were read and too few are in reach,
       // or there were no houses to count (the map still being read, a read
       // that failed, offline, the tiles off), which is never "too few".
-      const deliveryAsked =
-        props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
+      const deliveryAsked = deliveryWanted;
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current =
@@ -1739,6 +2099,24 @@ export function GameView(props: GameViewProps): JSX.Element {
           ? undefined
           : { text: noRoundText, from: simulation.state.elapsed },
       );
+      // #1906: a solo lap race, on the line at the press — never in a room
+      // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
+      // the rider's mass; its seed is drawn inside and kept by nothing.
+      reducedMotionRef.current =
+        typeof globalThis.matchMedia === 'function' &&
+        globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const raced = rideConditionsFor(riderMassFor(props.riderMass).mass, sitting);
+      lapRaceRef.current =
+        raceChoice === undefined
+          ? undefined
+          : startLapRaceRide({
+              choice: raceChoice,
+              profile,
+              conditions: lapRaceBotConditions(profile, raced),
+              riderDistance: simulation.state.ride.distance,
+              lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
+              storage: deviceStorage(),
+            });
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -1762,7 +2140,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       props.room,
       props.roomId,
       props.delivery,
+      props.lapRace,
       soundsOut,
+      simulated,
     ],
   );
 
@@ -1775,6 +2155,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       sitting: RidingPosition,
       riderGhost?: boolean,
       delivery?: boolean,
+      lapRace?: LapRaceChoice,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -1782,13 +2163,33 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       startingRef.current = true;
       try {
-        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery);
+        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery, lapRace);
       } finally {
         startingRef.current = false;
       }
     },
     [begin],
   );
+
+  // PR #2113: a preview starts itself once the routes are read, on the route
+  // the picker had chosen — with no ghost, pacer, wind, round or race, and the
+  // riding position the picker had. A route gone since is no preview: the
+  // ordinary picker comes back.
+  const previewStartedRef = useRef(false);
+  useEffect(() => {
+    if (preview === undefined || routes === undefined || previewStartedRef.current) return;
+    previewStartedRef.current = true;
+    const route = routes.find((each) => each.id === preview.routeId);
+    if (route === undefined) {
+      onPreviewEnd();
+      return;
+    }
+    // PR #2113's review: a start that throws hands back the picker, rather
+    // than leaving *Starting the preview…* with no way off it.
+    start(route, false, undefined, undefined, preview.position).catch(() => {
+      onPreviewEnd();
+    });
+  }, [preview, routes, start, onPreviewEnd]);
 
   // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
   //
@@ -1816,6 +2217,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       return;
     }
     const clock = props.now ?? (() => performance.now());
+    const wallClock = props.frameNow ?? clock;
     let frame = 0;
     let lastFrameAt = clock();
     loopRunningRef.current = true;
@@ -1829,6 +2231,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
     // spent reading is neutral rather than absent.
     let spentReading = 0;
+    // #1994: the chase camera's heading on the last DRAWN frame, and when it
+    // was drawn, which `camera.ts` §`dampedHeading` turns from. Undefined until
+    // the first, which takes the road's own: a resumed ride starts afresh.
+    let cameraHeading: GroundHeading | undefined;
+    let cameraHeadingAt = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -1942,7 +2349,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // settled, the announcer listens and the gradient is sampled — so what is
       // written to a trainer, and when, does not depend on the rung. What a cap
       // skips is the picture: the HUD's re-render and the world's draw.
-      const paced = pacer.frame(at, frameCapRef.current);
+      const paced = pacer.frame(wallClock(), frameCapRef.current);
       // ⚠️ **Read once**, and both halves used: the rider's power drives the
       // simulation and the cadence drives the cranks. Two calls would be two
       // samples of a live sensor on one frame, which is a HUD and a pair of
@@ -1981,9 +2388,35 @@ export function GameView(props: GameViewProps): JSX.Element {
         roomRecordAskedRef.current = true;
         void trainerPortRef.current?.recordRoomRide?.();
       }
+      // #875: the room's voice link, from its welcome, and when it came — a
+      // render scheduled whenever it changes (#876), held on the line or not.
+      const voiceNow = voiceNoticeAfter(
+        voiceNoticeRef.current,
+        room?.status(),
+        simulation.state.elapsed,
+      );
+      if (voiceNow !== voiceNoticeRef.current) {
+        voiceNoticeRef.current = voiceNow;
+        setVoiceNotice(voiceNow);
+      }
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
       roomFrameRef.current = roomNow;
+      // #1911: a room that is a lap race, from its first frame — the rider
+      // was held on the line until then, so where they stand is the line.
+      const roomLap = room?.lapRace();
+      if (
+        roomLap !== undefined &&
+        roomLapRaceRef.current === undefined &&
+        race?.kind === 'running'
+      ) {
+        roomLapRaceRef.current = startRoomLapRace({
+          race: roomLap,
+          lapLengthMetres: chosen.profile.totalDistance,
+          lineOffset: lineOffsetAt(racingLine(chosen.profile), simulation.state.ride.distance),
+          nowLocalMs: at,
+        });
+      }
       // ⚠️ **Before the render and from the same `at`**, so the cranks the
       // frame draws are the cranks that belong to it. `bicycle.ts` holds the
       // rule: they turn exactly when the HUD shows a cadence number, at exactly
@@ -1992,6 +2425,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       const sinceLastFrame = at - lastFrameAt;
       crankRef.current = advanceCrank(crankRef.current, sensors.cadence, sinceLastFrame / 1000);
       pedallingRef.current = cadenceTurns(sensors.cadence);
+      cadenceRef.current = turningCadence(sensors.cadence);
       // ⚠️ Before `setState`, so the render it schedules already has the answer.
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
@@ -2243,6 +2677,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // #1812: the round's sentences, owed until said (`hud/delivery-announce.ts`);
       // and #1818's one sentence on a ride that asked for a round and has none.
       events.push(...deliveryEvents(deliveryOwedRef.current));
+      // #1906: the lap race's laps, hits, items, place and finish, owed until said.
+      const raceAnnounced = lapRaceRef.current;
+      if (raceAnnounced !== undefined) {
+        events.push(...lapRaceSaid(raceAnnounced, simulation.state.elapsed));
+      }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -2261,6 +2700,9 @@ export function GameView(props: GameViewProps): JSX.Element {
         lapOwedRef.current = undefined;
       }
       deliveryOwedRef.current = deliverySpoken(deliveryOwedRef.current, heard.kind);
+      if (raceAnnounced !== undefined) {
+        lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, simulation.state.elapsed);
+      }
       if (heard.sentence === REPLANS_OFF_SAID) {
         replansOffOwedRef.current = false;
       }
@@ -2338,6 +2780,31 @@ export function GameView(props: GameViewProps): JSX.Element {
         }
         deliveryOwedRef.current = owed;
       }
+      // #1906: the lap race, stepped on exactly the simulation steps that ran,
+      // as the round above: AFTER the grade is sampled, from the simulation's
+      // odometer, which is the rider's effort distance (ADR 0060 D-3.1). It
+      // writes to itself, the HUD and the frame, never to the trainer (D-2).
+      const lapRace = lapRaceRef.current;
+      if (lapRace !== undefined && stepsRun > 0) {
+        lapRaceRef.current = stepLapRaceRide(lapRace, {
+          ticks: stepsRun,
+          along: simulation.state.ride.distance,
+        });
+      }
+      // #1911: a room's lap race, on the same steps and after the same grade:
+      // the rider's inputs sent, what the room's newest frame covers dropped,
+      // and the drawn offset eased toward the room's. It reads the room and
+      // the rider's presses, and writes nothing the trainer is sent.
+      const roomRace = roomLapRaceRef.current;
+      if (roomRace !== undefined && room !== undefined) {
+        roomLapRaceRef.current = stepRoomLapRace(roomRace, {
+          ticks: stepsRun,
+          nowLocalMs: at,
+          race: room.lapRace(),
+          sendLane: (lane) => room.changeLane(lane),
+          sendUse: () => room.useItem(),
+        });
+      }
 
       // #323's interpolation, on the frames that are drawn: `drawnAt` blends the
       // last two simulation steps at THIS instant, so a frame drawn at 20 fps
@@ -2353,13 +2820,36 @@ export function GameView(props: GameViewProps): JSX.Element {
       const prepared = view !== undefined && view === preparedViewRef.current;
       const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
       if (drawn !== undefined && view !== undefined && !waiting) {
-        const scene = sceneFrame({
+        // #1906: a lap race draws the rider at their race position, effort
+        // distance plus race offset (ADR 0060 D-3.3), and its bots beside
+        // them. The drawing only: the grade above was read at the odometer.
+        const racing = lapRaceRef.current;
+        const raceDrawn =
+          racing === undefined
+            ? undefined
+            : lapRaceDrawing(
+                racing,
+                drawn.riderDistance,
+                SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
+                reducedMotionRef.current,
+              );
+        // #1911: a room's lap race draws the rider at their effort distance
+        // plus the offset the room gave them (eased), and every other rider at
+        // theirs. The drawing only: the grade above was read at the odometer.
+        const roomRacing = roomLapRaceRef.current;
+        const roomLapNow = roomRacing === undefined ? undefined : room?.lapRace();
+        const roomRaceDrawn =
+          roomRacing === undefined
+            ? undefined
+            : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
           // #679: the board before a line reads in the rider's own units.
           units: unitsRef.current,
           state: simulation.state,
-          riderDistance: drawn.riderDistance,
+          riderDistance:
+            raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? drawn.riderDistance,
           // #237: the bot's odometer, from the state the simulation just
           // advanced. `SceneInput.botDistance` was declared and optional and
           // never supplied, which is why a built, tested and green pacer drew
@@ -2383,8 +2873,24 @@ export function GameView(props: GameViewProps): JSX.Element {
           // #625: whether that angle is being turned by a reading — the body
           // rocks exactly while the HUD shows a cadence. @see cadenceTurns
           pedalling: pedallingRef.current,
+          // #1999: the cadence the rider's position on the bicycle is chosen
+          // from, beside their power, grade and speed. @see turningCadence
+          cadence: cadenceRef.current,
           // #783: the room's drawn riders — where they are, and nothing else.
-          ...(roomNow === undefined ? {} : { remoteRiders: roomNow.remoteRiders }),
+          // #1911: in a lap race, each at their effort distance plus the
+          // room's race offset for them.
+          ...(roomNow === undefined
+            ? {}
+            : {
+                remoteRiders:
+                  roomRaceDrawn === undefined
+                    ? roomNow.remoteRiders
+                    : roomNow.remoteRiders.map((rider) => ({
+                        ...rider,
+                        distanceMetres:
+                          rider.distanceMetres + roomRaceDrawn.offsetOf(rider.riderId),
+                      })),
+              }),
           // #1539: the corridor fixed at the start of the ride, or none.
           ...(worldCorridorRef.current === undefined
             ? {}
@@ -2398,10 +2904,32 @@ export function GameView(props: GameViewProps): JSX.Element {
           // obstacles meet them; none on a ride with no round, or in a room
           // (DL9). Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads it back off every frame's input.
-          steeredLateral: steeredLateralFor(deliveryRef.current?.steer, {
-            inRoom: roomRef.current !== undefined,
-          }),
+          steeredLateral:
+            raceDrawn?.steeredLateral ??
+            roomRaceDrawn?.steeredLateral ??
+            steeredLateralFor(deliveryRef.current?.steer, {
+              inRoom: roomRef.current !== undefined,
+            }),
+          ...(raceDrawn === undefined
+            ? {}
+            : {
+                raceBots: raceDrawn.raceBots,
+                ...(raceDrawn.riderHit === undefined ? {} : { riderHit: raceDrawn.riderHit }),
+              }),
         });
+        // #1994: the camera's heading, damped from the last drawn frame's, by
+        // the wall clock between them, so a corridor that jumps turns the view
+        // rather than cutting it, at a rate no frame rate changes — and more
+        // gently for a rider who asked for reduced motion (§4e).
+        // `GameView.test.tsx` reads it back off the frames the renderer was handed.
+        cameraHeading = dampedHeading(
+          cameraHeading,
+          unturned.camera,
+          (at - cameraHeadingAt) / 1000,
+          reducedMotionRef.current,
+        );
+        cameraHeadingAt = at;
+        const scene = { ...unturned, camera: turnedPose(unturned.camera, cameraHeading) };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
@@ -2413,7 +2941,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         // before a step, and a parcel drawn behind its throw would be worse.
         // Where a parcel lands is the step's either way (`throw.ts`).
         const round = deliveryRef.current;
-        const frame =
+        const rounded =
           round === undefined
             ? scene
             : {
@@ -2428,6 +2956,23 @@ export function GameView(props: GameViewProps): JSX.Element {
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                 }),
               };
+        // #1902, #1906: a lap race's pick-ups and puddles, on the frame's own corridor.
+        // #1911: a room's, its pick-up points; the room sends no puddle's place.
+        const roomRaceState =
+          roomRacing === undefined ? undefined : roomLapRaceState(roomRacing, roomLapNow);
+        const frame =
+          racing !== undefined
+            ? { ...rounded, lapRace: lapRaceFrame(racing, scene.corridor) }
+            : roomRaceState !== undefined && roomRaceState.itemsOn
+              ? {
+                  ...rounded,
+                  lapRace: lapRaceInView({
+                    corridor: scene.corridor,
+                    race: roomRaceState,
+                    startAlong: 0,
+                  }),
+                }
+              : rounded;
         if (prepared) {
           view.render(frame);
           // #783: the other riders' names over the frame just drawn — DOM,
@@ -2524,7 +3069,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
     // updater form until then), and the level is applied to the live renderer
     // by the effect below instead.
-  }, [phase, chosen, port, props.renderer, props.now, props.thermal]);
+  }, [phase, chosen, port, props.renderer, props.now, props.frameNow, props.thermal]);
 
   useEffect(() => {
     // #426, the latch: a step down takes the shadow map away for the rest of
@@ -2571,6 +3116,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     };
   }, [props.camera]);
 
+  if (!onTheStage && preview !== undefined) {
+    // PR #2113: the preview's own screen, between the press and its first
+    // frame — never a picker, whose Ride this screen has no trainer for.
+    return <p role="status">Starting the preview…</p>;
+  }
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.
     const trainerNow = props.trainer?.readTrainer();
@@ -2632,10 +3182,32 @@ export function GameView(props: GameViewProps): JSX.Element {
           // here for `worldChosen`'s reason: a round ridden since is seen at once.
           delivery={{
             chosen: withDelivery,
-            onChoose: setWithDelivery,
+            onChoose: chooseDelivery,
             week: readDeliveryProgress(deviceStorage()),
           }}
+          // #1907: a lap race, offered on a loop; the assisted setting read
+          // here, as the week is, so one changed in Settings is seen at once.
+          lapRace={{
+            chosen: withLapRace,
+            onChoose: chooseLapRace,
+            choice: lapRaceChoice,
+            onChoice: setLapRaceChoice,
+            assisted: lapRaceAssisted(deviceStorage()),
+          }}
           onStart={start}
+          // PR #2113: *Preview without a trainer*, on an ordinary screen only.
+          onPreview={
+            onPreview === undefined
+              ? undefined
+              : (route, rider, sitting) => {
+                  // PR #2113's review: never while a press of *Ride* is
+                  // still starting — the trainer may be being asked for
+                  // control, and the preview's new screen would leave a
+                  // control granted to this one with nothing to release it.
+                  if (startingRef.current) return;
+                  onPreview({ rider, routeId: route.id, position: sitting });
+                }
+          }
           // #1221: whether this ride will be saved, said under Ride. The
           // recorder's moving time is subscribed (`useRideMovingSeconds`), so
           // a recording started here or on the Ride screen is seen at once.
@@ -2677,6 +3249,30 @@ export function GameView(props: GameViewProps): JSX.Element {
   // #785: where the race is, read during render like `sensors` — the tick's
   // `setState` is what schedules this render.
   const race = roomRef.current?.race();
+  // #875: the room's voice link, while it is shown (`room-voice.ts`).
+  const voiceLink = voiceLinkShown(voiceNotice, race, state?.elapsed ?? 0, STANDING_NOTICE_SECONDS);
+  // #785: *Start the race*, offered to the rider who made the room and to
+  // nobody else (the owner's ruling of 2026-09-30), while the race waits.
+  const startRace =
+    race?.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
+      <Button
+        size="ride"
+        unavailable={starting === 'asking'}
+        onClick={() => {
+          const rooms = props.rooms;
+          const roomId = roomIdRef.current;
+          if (starting === 'asking' || rooms === undefined || roomId === undefined) {
+            return;
+          }
+          setStarting('asking');
+          void rooms.start(roomId).then((answer) => {
+            setStarting(answer.kind === 'started' ? undefined : 'refused');
+          });
+        }}
+      >
+        Start the race
+      </Button>
+    ) : undefined;
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
@@ -2725,6 +3321,35 @@ export function GameView(props: GameViewProps): JSX.Element {
   const noticeOpen =
     noticeChoice === 'open' ||
     (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
+  // #1906: a lap race as the HUD reads it, from the state this render draws:
+  // the rider's W/kg at their own mass (never watts, ADR 0060 D-12.2).
+  /**
+   * #1911: a room's lap race on the HUD, from the room's newest frame — its
+   * standings panel is the room's own (`roomFrame`), so no entrant is named
+   * here — or `undefined` before the room's first frame.
+   */
+  const roomRaceStateNow =
+    roomLapRaceRef.current === undefined
+      ? undefined
+      : roomLapRaceState(roomLapRaceRef.current, roomRef.current?.lapRace());
+  const roomLapRaceHud: LapRaceHud | undefined =
+    roomRaceStateNow === undefined || roomLapRaceRef.current === undefined
+      ? undefined
+      : {
+          race: roomRaceStateNow,
+          riderId: String(roomLapRaceRef.current.riderId),
+          entrants: {},
+          riderWattsPerKilogram: undefined,
+          speedMetresPerSecond: state?.ride.speed ?? 0,
+        };
+  const riderLapRaceHud = (race: LapRaceRide): LapRaceHud => {
+    const power = state?.input.live === true ? (state.input.power as number) : undefined;
+    const mass = riderMassFor(props.riderMass).mass as number;
+    return lapRaceHud(race, {
+      wattsPerKilogram: power === undefined ? undefined : power / mass,
+      speed: state?.ride.speed ?? 0,
+    });
+  };
   return (
     // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
     // the viewport and lays the HUD over the world. It is a modifier rather
@@ -2755,6 +3380,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
         movingSeconds={movingSeconds}
+        // #2072: and the elapsed time, the recorder's again — pauses included.
+        elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
@@ -2783,7 +3410,12 @@ export function GameView(props: GameViewProps): JSX.Element {
                 draftShown: draftShownRef.current,
               },
             })}
-        standings={roomFrameRef.current?.standings}
+        standings={
+          roomFrameRef.current?.standings ??
+          (lapRaceRef.current === undefined
+            ? undefined
+            : lapRaceStandings(riderLapRaceHud(lapRaceRef.current)))
+        }
         // #1816: the round on the HUD — its houses and its score, crashes in
         // it — and the throw control and the lane keys (#1853), only on a
         // ride running a round.
@@ -2797,7 +3429,28 @@ export function GameView(props: GameViewProps): JSX.Element {
               },
               throwing: throwPortRef.current,
               steering: steerPortRef.current,
+              // #1827: a paired controller, and the lane its angle asks for.
+              ...(props.controller === undefined
+                ? {}
+                : { controller: props.controller, lanes: lanePortRef.current }),
             })}
+        // #1906: the lap race on the HUD — place, lap, item, standings — and
+        // its lane keys and item control, only on a ride running one.
+        // #1911: and a room's, read from the room's newest frame, with the
+        // rider's lane and item as predicted until the room answers.
+        {...(lapRaceRef.current !== undefined
+          ? {
+              lapRace: riderLapRaceHud(lapRaceRef.current),
+              steering: steerPortRef.current,
+              items: itemPortRef.current,
+            }
+          : roomLapRaceHud === undefined
+            ? {}
+            : {
+                lapRace: roomLapRaceHud,
+                steering: steerPortRef.current,
+                items: itemPortRef.current,
+              })}
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
             ? undefined
@@ -2895,6 +3548,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // here (#577's review, finding 1): `ride/side-camera.ts`
         // §`sideCameraLostNotice`.
         sideCamera={sideCameraOnHud(sideCamera)}
+        // #1992: a simulated ride says so on the stage, for every frame of it.
+        simulated={simulated === undefined ? undefined : simulatedRideSentences(simulated)}
         // #1552, ADR 0054 D-3.6: the OpenStreetMap credit, for the WHOLE ride
         // whose world was given a corridor at the start — never per frame,
         // because the notice is for the work, not for what is in view. Keyed
@@ -2927,6 +3582,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           teardown();
           setPhase('choosing');
           setChosen(undefined);
+          // PR #2113: a preview ends back on an ordinary picker, a new screen.
+          if (preview !== undefined) onPreviewEnd();
         }}
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices
@@ -3026,27 +3683,28 @@ export function GameView(props: GameViewProps): JSX.Element {
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}
               </StatusMessage>
-              {race.kind === 'waiting' && props.rooms !== undefined && madeTheRoomRef.current ? (
-                <Button
-                  size="ride"
-                  unavailable={starting === 'asking'}
-                  onClick={() => {
-                    const rooms = props.rooms;
-                    const roomId = roomIdRef.current;
-                    if (starting === 'asking' || rooms === undefined || roomId === undefined) {
-                      return;
-                    }
-                    setStarting('asking');
-                    void rooms.start(roomId).then((answer) => {
-                      setStarting(answer.kind === 'started' ? undefined : 'refused');
-                    });
-                  }}
-                >
-                  Start the race
-                </Button>
-              ) : undefined}
+              {/* #875: the room's voice link, while the race waits on its line, is a
+                  button beside *Start the race*, the two on a row of their own
+                  (`theme.css` §"A RACE'S VOICE BUTTON, ON ITS LINE"). Without it
+                  the race's notice is exactly what it was. */}
+              {voiceLink?.place === 'race' ? (
+                <div className="oyl-hud__race-actions">
+                  {startRace}
+                  <VoiceButton invite={voiceLink.invite} />
+                </div>
+              ) : (
+                startRace
+              )}
             </div>
           ),
+          // #875: the room's Discord voice link, only after the room let the
+          // rider in (its welcome), while a race holds them on the line and
+          // for a standing notice's span of ride (`room-voice.ts`). Not
+          // `live`: a link to press, not a fault to hear. It says it opens
+          // Discord; `target="_blank"` hands it to the system in the shell.
+          voiceLink?.place === 'notice' ? (
+            <VoiceNotice key="voice" invite={voiceLink.invite} />
+          ) : undefined,
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.
@@ -3107,6 +3765,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       />
     </section>
   );
+}
+
+/** The simulation's start for a simulated ride, or nothing: the start line. */
+function startOf(
+  simulated: SimulatedRider | undefined,
+  totalMetres: number,
+): { readonly startMetres?: number } {
+  const startMetres =
+    simulated === undefined ? undefined : simulatedStartMetres(simulated, totalMetres);
+  return startMetres === undefined ? {} : { startMetres };
 }
 
 /**

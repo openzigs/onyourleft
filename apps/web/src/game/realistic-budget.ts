@@ -252,7 +252,10 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
-  Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
+  Record<
+    RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure' | 'roadside' | 'chain-link',
+    number
+  >
 > = {
   'tree-broadleaf': 28_000,
   'tree-conifer': 24_000,
@@ -296,6 +299,37 @@ export const REALISTIC_TRIANGLES: Readonly<
    * 4 314 of room. {@link REALISTIC_STRUCTURE_ITEMS} is what bounds them now.
    */
   structure: 640,
+  /**
+   * One roadside model — #1274: **240**, what `tools/realistic/sources.ts`
+   * §`ROADSIDE_MODEL_SOURCES` asks the pipeline to cut Poly Haven's street
+   * lamp to (it stops at 223); the barrier is asked for 48 and is 48. A lamp
+   * post is seen at 5 to 120 m (`streets.ts` §`FURNITURE_DRAW_METRES`), as a
+   * column a few pixels wide and a lantern; 240 keeps the lantern's four
+   * panes, its cap and the post's mouldings, and the stylised post is 88.
+   * Neither carries a picture: each is coloured a vertex at a time and drawn
+   * inside the call its stylised shape makes, so what this class costs is
+   * these triangles and nothing else — {@link REALISTIC_STREET_TRIANGLES}
+   * counts the lamps and {@link REALISTIC_GANTRY_TRIANGLES} the barriers.
+   *
+   * Since the owner's ruling of 2026-11-05 a village's litter is in this
+   * class too: Poly Haven's `trashbag` at 60 and `old_tyre` at 64, which
+   * {@link REALISTIC_STREET_TRIANGLES} counts at `litter.ts`
+   * §`LITTER_CAPACITY`.
+   */
+  roadside: 240,
+  /**
+   * One piece of chain-link fence — #1274, the owner's ruling of 2026-11-05:
+   * **180**. `tools/realistic/sources.ts` §`CHAIN_LINK_SOURCE` cuts Poly
+   * Haven's kit to five posts and four panels' tubes, which the committed
+   * file holds as 143 triangles, and its wire to its four planes faced both
+   * ways, 16: 159. It carries no picture but the wire's opacity, and it is
+   * drawn folded into the field fence's own instanced mesh
+   * (`three-renderer.ts` §`RealisticStructureBelts`), so EVERY realistic
+   * fence instance submits the field fence's 84 and these: 243, under the
+   * 580 of the heaviest structure that {@link REALISTIC_STRUCTURE_ITEMS}'
+   * term prices every structure slot at — the frame's sum does not move.
+   */
+  'chain-link': 180,
 };
 
 /**
@@ -534,17 +568,135 @@ export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
 export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
 
 /**
+ * The most draw calls the realistic village frame may make **while a lap
+ * race runs** — #1971, ADR 0060 D-10.2: **approved by the owner on
+ * 2026-11-01**. The tablet read it on 2026-11-01 (village frame held, 30 s
+ * soak, 5 min sampled): 58 calls, p99 16.72 ms, 0.21 % of frames over 20 ms,
+ * GPU mean 736 MHz, against the same frame with no race at 50 calls, p99
+ * 16.74 ms, 0.27 %, 736 MHz — the race costs nothing the tablet can measure.
+ *
+ * ⚠️ **A third village ceiling, not a reuse.** {@link REALISTIC_VILLAGE_DRAW_CALLS}
+ * stays frozen at 50 (D-10.3) and {@link DELIVERY_VILLAGE_DRAW_CALLS} at 53;
+ * this neither reuses nor changes either, and it is never the stylised
+ * world's {@link LAP_RACE_SCENE_DRAW_CALLS}. It applies only while a
+ * realistic frame carries a lap race (`port.ts` §`SceneFrame.lapRace`);
+ * {@link villageDrawCallCeiling} is the one place that choice is made.
+ *
+ * ## Where the number comes from
+ *
+ * #1689's frame — the village road's hold on Halloween, the top rung held —
+ * carrying #1972's worst case: the rider and seven bots, five of the eight
+ * hit, every pick-up point of a three-lap race of 40 m laps and ten puddles
+ * (`browser/realistic/lap-race.ts`): **58** calls and 187 212 triangles, on
+ * a Mac in the pinned Chromium, 2026-11-01, against 50 and 164 474 on the
+ * same frame with no race. The eight it adds are the belt's three instanced
+ * calls (#1902); one realistic body, because the ordinary frame's pacer
+ * gives way to the two bots nearest the rider, which wear the realistic body
+ * as a room's two nearest riders do (`three-renderer.ts`
+ * §`realisticRemoteSplit`, #783); and the stylised riders' four instanced
+ * meshes, which draw the other five bots. ⚠️ **The pacer gives way in the
+ * product too**: a race starts without the pacer a rider chose
+ * (`GameView.tsx`, held by `lap-race-wiring.test.tsx`), because a pacer kept
+ * would be a fourth realistic body and one call over this figure. Nothing is rounded up past it, for
+ * {@link DELIVERY_VILLAGE_DRAW_CALLS}' reason: none of the eight moves with
+ * the pieces' number or place. Counted at the WebGL entry points by
+ * `realistic-lap-race.browser.spec.ts` §"#1971".
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the calls COST
+ * there is the tablet step, which the owner reads against this number.
+ *
+ * @test-facing held by `realistic-lap-race.browser.spec.ts` §"#1971", which
+ * counts the race's village frame at the WebGL entry points, and by
+ * `realistic-budget-lap-race.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const LAP_RACE_VILLAGE_DRAW_CALLS = 58;
+
+/**
  * Which village ceiling a frame is held to — #1815, DL6b: the Delivery
- * ceiling while the frame carries a round, and the frozen one on every
- * other frame. A round with nothing in view is still a round running.
+ * ceiling while the frame carries a round, since #1971 the lap race's while
+ * it carries a race, and the frozen one on every other frame. A round or a
+ * race with nothing in view is still running. A frame never carries both: a
+ * ride runs one mode (`GameView`).
  *
  * @test-facing the owner's page publishes it for the frame it drew
- * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` holds
- * that frame to it; `realistic-budget-village.test.ts` holds an ordinary
- * frame one call over 50 to be over it
+ * (`realistic-harness.ts`), and `realistic-delivery.browser.spec.ts` and
+ * `realistic-lap-race.browser.spec.ts` §"#1971" hold that frame to it;
+ * `realistic-budget-village.test.ts` holds an ordinary frame one call over
+ * 50 to be over it
  */
-export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery'>): number {
+export function villageDrawCallCeiling(frame: Pick<SceneFrame, 'delivery' | 'lapRace'>): number {
+  if (frame.lapRace !== undefined) return LAP_RACE_VILLAGE_DRAW_CALLS;
   return frame.delivery === undefined ? REALISTIC_VILLAGE_DRAW_CALLS : DELIVERY_VILLAGE_DRAW_CALLS;
+}
+
+/**
+ * The stylised world's own draw-call budget — #240's NFR-2: the scenery-free
+ * frame `game-harness.ts` draws at the start line at the contact rung,
+ * **11** calls. `game.browser.spec.ts` §`SCENE_DRAW_CALLS` writes it out as
+ * the sum of its terms, so a red run says which term moved, and holds that
+ * sum equal to this; it is restated here only so that
+ * {@link stylisedSceneDrawCallCeiling} can choose between it and
+ * {@link LAP_RACE_SCENE_DRAW_CALLS}.
+ *
+ * @test-facing held equal to the spec's sum by `game.browser.spec.ts`, and
+ * read by `realistic-budget-lap-race.test.ts`
+ */
+export const STYLISED_SCENE_DRAW_CALLS = 11;
+
+/**
+ * The most draw calls the stylised world's scenery-free frame may make
+ * **while a lap race runs** — #1903, ADR 0060 D-10.2: **14**, approved by
+ * the owner, 2026-10-31 (desktop measurement; tablet reading after #1906).
+ *
+ * ⚠️ **The stylised world's, not the village's.** ADR 0060 D-14 Q5 chose the
+ * stylised world first, so the ceiling sits beside that world's own budget,
+ * {@link STYLISED_SCENE_DRAW_CALLS}, as Delivery's sits beside the village's.
+ * {@link REALISTIC_VILLAGE_DRAW_CALLS} stays frozen at 50 and
+ * {@link DELIVERY_VILLAGE_DRAW_CALLS} at 53: this neither reuses nor
+ * changes either, and {@link villageDrawCallCeiling} never returns it.
+ *
+ * ⚠️ **It applies only while a frame carries a lap race**
+ * (`port.ts` §`SceneFrame.lapRace`); every other stylised frame is held to
+ * {@link STYLISED_SCENE_DRAW_CALLS}. {@link stylisedSceneDrawCallCeiling} is
+ * the one place that choice is made.
+ *
+ * ## Where 14 comes from
+ *
+ * The scenery-free frame's 11, plus the three calls `three-renderer.ts`
+ * §`LapRaceBelt` adds (#1902): one instanced call each for the pick-up
+ * points, the puddles and the hit effects, whatever their count. The race's
+ * seven bots add none: they are instances of the riders' four meshes (#368).
+ * Measured by `game.browser.spec.ts` §"#1903" on that frame carrying the rider
+ * and seven bots, five hit, every pick-up point of a three-lap race and ten
+ * puddles. Nothing is rounded up past it, for {@link DELIVERY_VILLAGE_DRAW_CALLS}'
+ * reason: the belt's count does not move with the pieces' number or place.
+ *
+ * ⚠️ **The call count is the desktop half.** It does not depend on the GPU,
+ * so the pinned Chromium counts what the tablet would; what the three calls
+ * COST there is the tablet step for #733, which the owner reads against
+ * this number while #1523 holds the tablet's GPU at its ceiling.
+ *
+ * @test-facing held by `game.browser.spec.ts` §"#1903", which counts the lap
+ * race's frame at the WebGL entry points, and by
+ * `realistic-budget-lap-race.test.ts`; nothing in the product applies a
+ * draw-call ceiling at run time
+ */
+export const LAP_RACE_SCENE_DRAW_CALLS = 14;
+
+/**
+ * Which ceiling a stylised scenery-free frame is held to — #1903: the lap
+ * race's while the frame carries one, and the stylised world's own on every
+ * other frame, Delivery's included. A race with nothing in view is still a
+ * race running.
+ *
+ * @test-facing `game.browser.spec.ts` holds the lap race's frame and the
+ * ordinary one to it, and `realistic-budget-lap-race.test.ts` holds an
+ * ordinary frame one call over 11 to be over it
+ */
+export function stylisedSceneDrawCallCeiling(frame: Pick<SceneFrame, 'lapRace'>): number {
+  return frame.lapRace === undefined ? STYLISED_SCENE_DRAW_CALLS : LAP_RACE_SCENE_DRAW_CALLS;
 }
 
 /**
@@ -845,14 +997,33 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,
- * #1564's paths to the front doors and #1536's street furniture: **25 024**,
- * in either world.
+ * #1564's paths to the front doors and #1536's street furniture: **34 304**
+ * in the realistic world since the owner's ruling of 2026-11-05 on #1274
+ * (33 664 before it, since #1274's lamp), and 25 024 in the stylised one.
  *
  * | | triangles |
  * |---|--:|
  * | Pavements: two villages in view at most, each at `streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE` | 2 × 1 184 = 2 368 |
  * | Front paths: the same two villages, each at `streets.ts` §`DOOR_PATH_TRIANGLES_PER_VILLAGE` | 2 × 960 = 1 920 |
- * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (lamp post 88, bollard 64, bench 108, bin 64) | 64 × 324 = 20 736 |
+ * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (the realistic lamp post 223, bollard 64, bench 108, bin 64) | 64 × 459 = 29 376 |
+ * | Litter, the realistic world's only: `litter.ts` §`LITTER_CAPACITY` pieces, each at the heavier model's triangles (the tyre's 64; the bag is 60) | 10 × 64 = 640 |
+ *
+ * ⚠️ **The litter is in the painted mesh** with the bins and the lamp posts
+ * it lies beside (`three-renderer.ts` §`FurnitureBelt`), and only on a frame
+ * that draws them, so the street's calls did not move; its **640** is the
+ * realistic world's alone and is counted inside
+ * {@link REALISTIC_FRAME_TRIANGLES} as the lamps' 8 640 is.
+ *
+ * ⚠️ **#1274 made the realistic lamp post Poly Haven's `street_lamp_01`**,
+ * 223 triangles where the stylised post is 88, so the two worlds' streets
+ * are no longer the same triangles, and a reviewer who remembers 25 024
+ * "in either world" is reading the old file. The stylised street is still
+ * 25 024 (64 × 324 of furniture). The realistic world's **8 640** over it,
+ * 64 lamps at 135 more each, is the realistic world's alone, and
+ * `realistic-budget.test.ts` counts it INSIDE {@link REALISTIC_FRAME_TRIANGLES}
+ * by that constant's own rule, below. The lamp is merged into the painted
+ * mesh with the bollards and bins (`three-renderer.ts` §`FurnitureBelt`), so
+ * the street's calls did not move.
  *
  * The furniture's row is the CAPACITY, a hard bound the belt cannot pass; a
  * village at its fullest has 16 lamp posts, 8 bollards, 2 benches and 2 bins
@@ -864,8 +1035,9 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * in a frame: 3 504, inside the two rows above. Not raised.
  *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
- * rule**: a street is the SAME triangles in both worlds, as the corridor, the
- * terrain and the water are, so it does not change with the world. It adds
+ * rule, all but the lamps' 8 640 and the litter's 640**: what a street is in BOTH worlds — the
+ * stylised street's 25 024 — does not change with the world, as the
+ * corridor, the terrain and the water do not. It adds
  * no texture: the pavement's 512 px paving pair (0.5 MiB estimated) is
  * #1535's, counted with the rest of the set, the front paths wear the same
  * paving in the pavements' own draw call, and the bench wears `planks`,
@@ -875,7 +1047,7 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * which counts the belt's own meshes, and by `streets.test.ts` §"a path to
  * each front door"
  */
-export const REALISTIC_STREET_TRIANGLES = 25_024;
+export const REALISTIC_STREET_TRIANGLES = 34_304;
 
 /**
  * The most triangles a frame's holiday decorations may add — #1624:
@@ -953,8 +1125,8 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
 /**
  * The most triangles the start and finish gantries may add to a frame:
- * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
- * worst frame before #617 freed more. Spent only within
+ * **4 400** since #1274 — #679's ceiling was **1 000**, against the 1 350 its
+ * research found spare in the worst frame before #617 freed more. Spent only within
  * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
  * The worst a frame carries is two gantries and a board — a point-to-point
  * route shorter than the reach, whose start and finish are both in view —
@@ -967,11 +1139,37 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
  * which is exactly the two the sum already priced. A billboard's board spends
  * a STRUCTURE's slot (`scene.ts`), not this ceiling.
  *
+ * ## ⚠️ Raised by #1274, and the draw calls were not
+ *
+ * Since #1274 a realistic barrier piece is Poly Haven's
+ * `concrete_road_barrier`, 48 triangles, where it was a 12-triangle box. The
+ * owner's ruling of 2026-11-04 holds every draw-call ceiling where it is, so
+ * the gantry is still the two calls #679 measured: its one instanced mesh
+ * carries the box AND the barrier, and the vertex shader folds away the shape
+ * an instance is not (`three-renderer.ts` §`GantryBelt`). Every instance
+ * therefore submits both, 60 triangles, legs and beam and board post as much
+ * as a barrier:
+ *
+ * | The worst frame: two gantries and a board, two wordmark boards | triangles |
+ * |---|--:|
+ * | Before: 71 boxes at 12, three banners at 2, two boards' 36 | 930 |
+ * | After: 71 instances at 12 + 48, three banners at 2, two boards' 36 | **4 338** |
+ *
+ * — 3 408 more, every one of them inside {@link REALISTIC_FRAME_TRIANGLES},
+ * which was not raised: `realistic-budget.test.ts` sums the frame with them.
+ * Held a gantry's width over 4 338, as #679 held 1 000 over 930. Two meshes
+ * a frame where it is a separate barrier mesh's three would have cost 1 104
+ * fewer triangles and a call; the calls are the ruling's.
+ *
+ * ⚠️ **62 triangles of headroom.** When a new gantry box or a re-cut barrier
+ * turns the test red, do not raise this number: move the new part to a third
+ * mesh, or cut the barrier lighter, as the trade above weighs.
+ *
  * @test-facing held by `realistic-budget.test.ts`, and by
  * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the
  * WebGL entry points
  */
-export const REALISTIC_GANTRY_TRIANGLES = 1_000;
+export const REALISTIC_GANTRY_TRIANGLES = 4_400;
 
 /**
  * The most GPU texture memory the realistic set may hold, estimated: **160 MiB**,

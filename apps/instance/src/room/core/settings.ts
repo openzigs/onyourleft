@@ -16,6 +16,7 @@ import {
 } from '@onyourleft/physics';
 import {
   FRAME_INTERVAL_MS,
+  MAXIMUM_LAPS,
   MAXIMUM_REPORTED_POWER_WATTS,
   MAXIMUM_RIDERS,
   REPORT_INTERVAL_MS,
@@ -61,6 +62,23 @@ export interface RoomCourse {
   readonly gradePercentAt: (metres: number) => number;
 }
 
+/**
+ * A lap race's settings — #1909, ADR 0060. Fixed for the room's life, and said
+ * in the welcome (`roomConfig.lapRace`), bar the seed, which only the room holds.
+ */
+export interface LapRaceSettings {
+  /** How many laps of the course: the course's `lengthMetres` is ONE lap. 1 to `MAXIMUM_LAPS`. */
+  readonly laps: number;
+  /** Items on or off (#1899 item 6: off is the race with no pick-ups and no effects). */
+  readonly items: boolean;
+  /**
+   * The room's own seed: every item draw comes from it (`@onyourleft/domain`
+   * §`raceRandom`). A whole number from 0 to 2³² − 1. Never sent: a client
+   * that knew it would know every draw before the pick-up.
+   */
+  readonly seed: number;
+}
+
 /** What an operator, or whoever opens a room, supplies. */
 export interface RoomSettingsInput {
   readonly kind: RoomKind;
@@ -78,6 +96,8 @@ export interface RoomSettingsInput {
    * the room's life, so it is fixed before any race in it starts.
    */
   readonly drafting?: boolean;
+  /** Present for a lap race only, which is a `race` (#1909). */
+  readonly lapRace?: LapRaceSettings;
 }
 
 /** A room's settings, every default filled and every value checked. */
@@ -95,6 +115,8 @@ export interface RoomSettings {
   readonly frameIntervalMs: number;
   /** @see RoomSettingsInput.drafting */
   readonly drafting: boolean;
+  /** @see RoomSettingsInput.lapRace */
+  readonly lapRace?: LapRaceSettings;
 }
 
 /** A setting a room cannot be built with. The message names the setting and the rule, never the value. */
@@ -113,7 +135,8 @@ function wholeAtLeast(value: number, minimum: number, what: string): number {
  * Every default filled and every value checked.
  *
  * @throws RoomSettingsError for a capacity outside 1–100, a negative or
- * fractional duration, a course with no length or no SHA-256, or a power limit
+ * fractional duration, a course with no length or no SHA-256, a lap race that
+ * is not a race or whose laps or seed are out of range, or a power limit
  * above what the wire can carry (`MAXIMUM_REPORTED_POWER_WATTS` — a room may
  * lower rule 1's ceiling and never raise it; `@onyourleft/protocol`'s
  * `schema.ts` says why).
@@ -139,6 +162,7 @@ export function roomSettings(input: RoomSettingsInput): RoomSettings {
     throw new RoomSettingsError('a course’s length must be a finite distance above 0 m');
   }
   const slack = input.reportSlack ?? DEFAULT_REPORT_SLACK;
+  const lapRace = input.lapRace === undefined ? undefined : checkedLapRace(input);
   return {
     kind: input.kind,
     ridingPosition: input.ridingPosition,
@@ -159,5 +183,22 @@ export function roomSettings(input: RoomSettingsInput): RoomSettings {
     reportIntervalMs: REPORT_INTERVAL_MS,
     frameIntervalMs: FRAME_INTERVAL_MS,
     drafting: input.drafting ?? true,
+    ...(lapRace === undefined ? {} : { lapRace }),
   };
+}
+
+function checkedLapRace(input: RoomSettingsInput): LapRaceSettings {
+  const lapRace = input.lapRace as LapRaceSettings;
+  if (input.kind !== 'race') {
+    throw new RoomSettingsError('a lap race is a race, never a group ride');
+  }
+  const laps = wholeAtLeast(lapRace.laps, 1, 'a lap race’s laps');
+  if (laps > MAXIMUM_LAPS) {
+    throw new RoomSettingsError(`a lap race is at most ${String(MAXIMUM_LAPS)} laps`);
+  }
+  const seed = wholeAtLeast(lapRace.seed, 0, 'a lap race’s seed');
+  if (seed > 0xffff_ffff) {
+    throw new RoomSettingsError('a lap race’s seed is at most 2³² − 1');
+  }
+  return { laps, items: lapRace.items, seed };
 }

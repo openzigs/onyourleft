@@ -13,6 +13,7 @@
 import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
 import { DEFAULT_HEARTBEAT_MS, MAXIMUM_HEARTBEAT_MS } from './analysis/jobs.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
+import type { DiscordSettings } from './voice/discord.ts';
 
 export interface RawServerConfig {
   readonly database?: string | undefined;
@@ -25,6 +26,38 @@ export interface RawServerConfig {
   readonly metricsToken?: string | undefined;
   readonly secretKey?: string | undefined;
   readonly analysisHeartbeatMs?: string | undefined;
+  /** The file `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` names, as {@link readDiscordTokenFile} read it. */
+  readonly discordBotTokenFile?: DiscordTokenFile | undefined;
+  readonly discordGuildId?: string | undefined;
+}
+
+/**
+ * The Discord bot token's file, read once at start (#2146): never set, read,
+ * or named and not readable. The token reaches the instance only this way —
+ * from a file the deployment's secret store mounts (`deploy/home/compose.yaml`
+ * mounts `secrets/` beside it), never from the environment, where every child
+ * process and `docker inspect` would see it — and the instance never writes it.
+ */
+export type DiscordTokenFile =
+  | { readonly kind: 'unset' }
+  | { readonly kind: 'read'; readonly text: string }
+  | { readonly kind: 'unreadable' };
+
+/**
+ * Reads the file `path` names with `read` (`serve.ts` passes `readFileSync`):
+ * `unset` for no path. A read that throws is `unreadable`, and its error is
+ * dropped, so nothing it said reaches a problem or a log.
+ */
+export function readDiscordTokenFile(
+  path: string | undefined,
+  read: (path: string) => string,
+): DiscordTokenFile {
+  if (!present(path)) return { kind: 'unset' };
+  try {
+    return { kind: 'read', text: read(path.trim()) };
+  } catch {
+    return { kind: 'unreadable' };
+  }
 }
 
 export interface ServerConfig {
@@ -57,6 +90,12 @@ export interface ServerConfig {
    * which measures the tunnel cutting a stream that has none.
    */
   readonly analysisHeartbeatMs: number;
+  /**
+   * The operator's own Discord bot and server, for a voice channel per private
+   * room (#874, spike 0017 §3.5): `undefined` — voice off — unless both
+   * `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` (#2146) and `OYL_INSTANCE_DISCORD_GUILD_ID` are set.
+   */
+  readonly discord: DiscordSettings | undefined;
 }
 
 export type ServerConfigResult =
@@ -172,6 +211,35 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
   const secret = readSecretKey(raw.secretKey);
   if (secret.kind === 'malformed') problems.push(SECRET_KEY_MALFORMED);
 
+  // #874: voice is optional, so unset is OFF, not a problem — the reverse of
+  // the source URL's rule (spike 0017 §3.5). Half of it set is a mistake, and
+  // a problem names the variable, never what it holds: one of them is a secret.
+  // #2146: the token comes from a file, never the environment. A file named
+  // and not readable is a refusal, as the terms file's is (#909).
+  let discord: DiscordSettings | undefined;
+  const tokenFile = raw.discordBotTokenFile ?? { kind: 'unset' };
+  const tokenText = tokenFile.kind === 'read' ? tokenFile.text : undefined;
+  if (tokenFile.kind === 'unreadable') {
+    problems.push(
+      'OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE is set, and the file could not be read: mount it inside the container, readable by the user the instance runs as (docs/operating-an-instance.md, "Voice on Discord").',
+    );
+  } else if (present(tokenText) || present(raw.discordGuildId)) {
+    const token = tokenText?.trim() ?? '';
+    const guildId = raw.discordGuildId?.trim() ?? '';
+    const before = problems.length;
+    if (!/^[A-Za-z0-9._-]{20,200}$/.test(token)) {
+      problems.push(
+        "OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE must name a file holding your Discord bot's token, and nothing else (letters, digits, dots, dashes and underscores), whenever OYL_INSTANCE_DISCORD_GUILD_ID is set. Empty both to leave voice off.",
+      );
+    }
+    if (!/^[0-9]{17,20}$/.test(guildId)) {
+      problems.push(
+        "OYL_INSTANCE_DISCORD_GUILD_ID must be your Discord server's id (17 to 20 digits) whenever OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE is set. Empty both to leave voice off.",
+      );
+    }
+    if (problems.length === before) discord = { botToken: token, guildId };
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -187,6 +255,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       metricsToken,
       secretKey: secret.kind === 'ok' ? secret.bytes : undefined,
       analysisHeartbeatMs,
+      discord,
     },
   };
 }

@@ -60,9 +60,19 @@ interface ModerationInstance {
   ): Promise<{ status: number; body: Record<string, unknown> }>;
   nonceFor(device: TestDevice): Promise<string>;
   close(): Promise<void>;
-  /** A second connection to the instance's file (#789: a room's flag is written straight in). */
+  /**
+   * A second connection to the instance's file (#789: a room's flag is written
+   * straight in; #1381: a notice's notifier details erased with no six months' wait).
+   */
   freshRead<T>(
-    read: (store: { putReport(report: Record<string, unknown>): Promise<number> }) => Promise<T>,
+    read: (store: {
+      putReport(report: Record<string, unknown>): Promise<number>;
+      eraseNoticeDetails(
+        noticeId: number,
+        at: number,
+        after: 'decision' | 'receipt',
+      ): Promise<string>;
+    }) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -903,6 +913,7 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: 'notifier@example.com',
         bonaFide: true,
+        detailsErasedAt: null,
         acknowledgedAt: null,
         decidedAt: null,
         decision: null,
@@ -947,6 +958,41 @@ describe('the notices — #907', () => {
     }
   });
 
+  it('reads back a notice whose notifier details the instance erased, and when (#1381)', async () => {
+    const world = await moderatedWorld();
+    await sendNotice(world, {
+      kind: 'illegal_content',
+      explanation: 'explanation-marker',
+      items: `route:${ROOM}`,
+      location: 'location-marker',
+      name: 'name-marker',
+      email: 'email-marker@example.com',
+      bona_fide: 'on',
+    });
+    const [notice] = asModerator(await world.moderator.read()).notices ?? [];
+    const id = notice?.noticeId ?? 0;
+    expect(notice?.detailsErasedAt).toBeNull();
+    expect(await world.moderator.recordNoticeStep(id, 'decided', 'Not illegal.')).toEqual({
+      kind: 'done',
+    });
+    const at = Math.floor(world.world.clock.ms / 1000);
+    expect(
+      await world.world.freshRead((store) => store.eraseNoticeDetails(id, at, 'decision')),
+    ).toBe('erased');
+    const [after] = asModerator(await world.moderator.read()).notices ?? [];
+    expect(after).toMatchObject({
+      noticeId: id,
+      explanation: '',
+      items: [`route:${ROOM}`],
+      location: null,
+      notifierName: null,
+      notifierEmail: null,
+      bonaFide: true,
+      detailsErasedAt: at,
+      decision: 'Not illegal.',
+    });
+  });
+
   it('sends nothing for a decision with no words (#912)', async () => {
     const { moderator, send } = await moderatedWorld();
     const sent = send.mock.calls.length;
@@ -955,6 +1001,36 @@ describe('the notices — #907', () => {
       text: MODERATION_REFUSAL_TEXT['notice-decision'],
     });
     expect(send.mock.calls.length).toBe(sent);
+  });
+
+  it('still reads a notice stored before the instance stopped accepting a display name as an item (#1381)', async () => {
+    const world = await moderatedWorld();
+    const read = asModerator(
+      await answeredAt(world, '/v1/moderation/notices', () =>
+        Response.json({
+          notices: [
+            {
+              noticeId: 1,
+              receivedAt: 1,
+              kind: 'illegal_content',
+              explanation: 'x',
+              items: [`route:${ROOM}`, 'rider:athlete_A-1'],
+              location: null,
+              notifierName: null,
+              notifierEmail: null,
+              bonaFide: false,
+              detailsErasedAt: null,
+              acknowledgedAt: null,
+              decidedAt: null,
+              decision: null,
+              logId: null,
+              notifierToldAt: null,
+            },
+          ],
+        }),
+      ).read(),
+    );
+    expect(read.notices?.[0]?.items).toEqual([`route:${ROOM}`, 'rider:athlete_A-1']);
   });
 
   it('still gives the queues when the notices cannot be read, or hold a row this client does not accept', async () => {
@@ -973,6 +1049,12 @@ describe('the notices — #907', () => {
               notifierName: null,
               notifierEmail: null,
               bonaFide: false,
+              detailsErasedAt: null,
+              acknowledgedAt: null,
+              decidedAt: null,
+              decision: null,
+              logId: null,
+              notifierToldAt: null,
             },
           ],
         }),

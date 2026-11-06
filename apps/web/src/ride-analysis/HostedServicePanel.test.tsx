@@ -27,6 +27,7 @@ import {
 import {
   HOSTED_AGREED,
   HOSTED_AGREED_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_KEY_OPERATOR_CAN_READ,
   HOSTED_KEY_REMOVED,
   HOSTED_KEY_SEALED_ONLY,
@@ -37,6 +38,8 @@ import {
   HOSTED_REMOVE_BUTTON,
   HOSTED_STORE_BUTTON,
   HOSTED_TEST_BUTTON,
+  HOSTED_TEST_UNREADABLE,
+  HOSTED_UNREADABLE,
   HOSTED_WITHDRAWN,
   hostedAgreeLabel,
   hostedConsentElsewhere,
@@ -245,6 +248,27 @@ describe('agreeing', () => {
     );
   });
 
+  // #1935, the owner's ruling of 2026-11-03: removing the rider's key does not
+  // delete the masking list while the operator's command still serves the
+  // account (`apps/instance` §`hosted-settings.ts` `clearKey`), so the consent
+  // says so, whichever key the instance holds. Literal on purpose: this reads
+  // the words a rider is shown, not the constant they came from.
+  it.each(['app', 'operator-command'] as const)(
+    'says when the masking list is deleted, true where the operator’s command set the key too (key set by %s)',
+    async (setBy) => {
+      await open(scriptedHostedSettings({ key: { ...SCRIPTED_HOSTED_KEY, setBy }, consent: null }));
+      const box = agreeBox();
+      const described = document.getElementById(box?.getAttribute('aria-describedby') ?? '');
+      const shown = described?.textContent ?? '';
+      expect(shown).toContain(
+        'Your instance deletes them when you withdraw your agreement. It also deletes them when ' +
+          "you remove your key, unless the operator's command set a key for your account: then " +
+          'they stay until you withdraw.',
+      );
+      expect(shown).not.toContain('deletes them when you withdraw or remove your key');
+    },
+  );
+
   it('records the consent for the service the INSTANCE named, and withdraws it', async () => {
     const scripted = scriptedHostedSettings({ key: SCRIPTED_HOSTED_KEY, consent: null });
     await open(scripted);
@@ -340,6 +364,27 @@ describe('the test question', () => {
     await settle();
     expect(text()).toContain('models.example answered the test question.');
     expect(text()).not.toContain('store your key again');
+  });
+
+  // #1796: a press that threw may have reached the instance, and a test
+  // question that threw may have reached the service.
+  it('says it cannot tell whether a change was made when a press threw, never that nothing changed', async () => {
+    const scripted = scriptedHostedSettings();
+    scripted.port.storeHostedKey = () => Promise.reject(new Error('the answer was lost'));
+    await open(scripted);
+    await storeKey();
+    expect(text()).toContain(HOSTED_CHANGE_UNKNOWN);
+    expect(text()).not.toContain(HOSTED_UNREADABLE);
+  });
+
+  it('never says nothing was sent when the test question threw', async () => {
+    const scripted = scriptedHostedSettings(AGREED);
+    scripted.port.sendHostedTestQuestion = () => Promise.reject(new Error('the answer was lost'));
+    await open(scripted);
+    await activateWithKeyboard(button(HOSTED_TEST_BUTTON));
+    await settle();
+    expect(text()).toContain(HOSTED_TEST_UNREADABLE);
+    expect(text()).not.toContain('nothing was sent to a service');
   });
 
   it('shows the sentence when the test could not be asked', async () => {

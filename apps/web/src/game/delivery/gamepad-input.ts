@@ -18,7 +18,7 @@
  * A pad's buttons are read by index only when the browser reports it with
  * `mapping: 'standard'`, because only then are the indices known (W3C
  * Gamepad, §"Remapping"); a pad with any other mapping gets no guess at its
- * buttons (but see #1858, below). Approved in #1821's pull request:
+ * buttons (but see #1858, below). Approved by the owner on 2026-10-29 (#1821):
  *
  * - **Lanes**: the d-pad's left and right (buttons 14 and 15), and the left
  *   stick pushed past {@link STICK_PRESS} to a side (axis 0).
@@ -43,14 +43,14 @@
  * - **The numbered buttons**, which `MainActivity` forwards to the page and
  *   `gamepad-port.ts` lists as one pad of its own with
  *   {@link FORWARDED_MAPPING} (button `n` at index `n − 1`), throw, by
- *   {@link NUMBERED_BUTTONS}. Proposed in #1858's pull request, for the
- *   owner's approval, from where a PlayStation-style generic pad's face
- *   buttons commonly sit (1 top, 2 right, 3 bottom, 4 left): **4 throws
- *   left, 2 throws right and 3 throws toward the next house**, the same
- *   left, right and bottom as a standard pad's X, B and A. ⚠️ Unmeasured:
- *   spike 0027 recorded which numbers the owner's pad sent, not which
- *   physical button each was, and the numbering is the pad maker's, so it
- *   will vary between pads. #1858's tablet step checks it on the owner's.
+ *   {@link NUMBERED_BUTTONS}. Approved by the owner on 2026-10-29 (#1858),
+ *   from where a PlayStation-style generic pad's face buttons commonly sit
+ *   (1 top, 2 right, 3 bottom, 4 left): **4 throws left, 2 throws right and
+ *   3 throws toward the next house**, the same left, right and bottom as a
+ *   standard pad's X, B and A. ⚠️ The numbering is the pad maker's, so it
+ *   will vary between pads: #1892 measured the owner's generic pad's
+ *   buttons 4, 2, 3 and 1 reaching the page once a press and once a release
+ *   (2026-10-30), which says nothing of another maker's.
  *
  * ## One press, one intent
  *
@@ -87,7 +87,7 @@ import { FORWARDED_MAPPING, type PadSnapshot } from '../gamepad-port';
 /** Everything a pad can ask for: a throw (#1810) or a lane change (#1820). */
 export type GamepadIntent = ThrowIntent | SteerIntent;
 
-/** The standard mapping's buttons that ask for something, by W3C index. Proposed in #1821's pull request. */
+/** The standard mapping's buttons that ask for something, by W3C index. Approved by the owner on 2026-10-29 (#1821). */
 export const STANDARD_BUTTONS: Readonly<Record<number, GamepadIntent>> = Object.freeze({
   0: 'next-house',
   1: 'right',
@@ -98,7 +98,7 @@ export const STANDARD_BUTTONS: Readonly<Record<number, GamepadIntent>> = Object.
 
 /**
  * The numbered buttons the Android shell forwards that ask for something, by
- * button number (KEYCODE_BUTTON_1 is 1). Proposed in #1858's pull request.
+ * button number (KEYCODE_BUTTON_1 is 1). Approved by the owner on 2026-10-29 (#1858).
  */
 export const NUMBERED_BUTTONS: Readonly<Record<number, ThrowIntent>> = Object.freeze({
   2: 'right',

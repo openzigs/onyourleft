@@ -77,7 +77,12 @@ export const TONE_CENTRE_HZ = 440;
 export const TONE_DEAD_BAND = 0.03;
 /** This share off the target is a whole octave from the centre, and the most it moves. */
 export const TONE_FULL_SCALE = 0.25;
-/** The tone's level at full volume — quiet under the short sounds, on purpose. */
+/**
+ * The tone's level at full volume — quiet under the short sounds, on purpose.
+ * ⚠️ The rider's volume is NOT multiplied in here or below since #2055: it is
+ * the cue bus's gain in `web-audio.ts`, and a second multiplication would
+ * square it.
+ */
 const TONE_LEVEL = 0.12;
 /**
  * The short sounds' level at full volume. Exported because the menus' sounds
@@ -118,8 +123,8 @@ export class RideCues {
   readonly #output: CueOutput;
   #preference: CuePreference;
   #begun = false;
-  /** What the tone was last set to, or `undefined` when none is sounding. */
-  #tone: { readonly step: number; readonly gain: number } | undefined;
+  /** The step the tone was last set to, or `undefined` when none is sounding. */
+  #tone: number | undefined;
 
   constructor(output: CueOutput, preference: CuePreference) {
     this.#output = output;
@@ -150,23 +155,20 @@ export class RideCues {
     if (this.#output.isRunning()) this.#begun = true;
   }
 
-  /** The rider moved the mute or the volume. */
+  /**
+   * The rider moved the mute or the volume.
+   *
+   * ⚠️ A new volume must reach a tone that is ALREADY sounding, not wait for
+   * the next power reading — a steady rider on target sends the same step for
+   * minutes, and "I moved the slider and nothing happened" is SC 1.4.2 failing
+   * in the one case it exists for (found by `sounds.a11y.test.tsx`). Since
+   * #2055 the volume is the cue bus's gain, which `writeCuePreference` keeps
+   * stored and `web-audio.ts` sets at the {@link begin} every caller makes in
+   * the same press — so nothing here touches the tone for it.
+   */
   set(preference: CuePreference): void {
     this.#preference = preference;
-    if (!this.#audible()) {
-      this.#silence();
-      return;
-    }
-    // ⚠️ A new volume reaches a tone that is ALREADY sounding now, not on the
-    // next power reading — a steady rider on target sends the same step for
-    // minutes, and "I moved the slider and nothing happened" is SC 1.4.2
-    // failing in the one case it exists for. Found by `sounds.a11y.test.tsx`.
-    const tone = this.#tone;
-    const gain = TONE_LEVEL * preference.volume;
-    if (tone !== undefined && tone.gain !== gain) {
-      this.#output.setTone(hertz(tone.step), gain);
-      this.#tone = { step: tone.step, gain };
-    }
+    if (!this.#audible()) this.#silence();
   }
 
   /** Track power against target. Call as often as readings arrive. */
@@ -183,21 +185,20 @@ export class RideCues {
       return;
     }
     const step = toneStep(watts, target);
-    const gain = TONE_LEVEL * this.#preference.volume;
     if (this.#tone === undefined) {
-      this.#output.startTone(hertz(step), gain);
-    } else if (this.#tone.step !== step || this.#tone.gain !== gain) {
-      this.#output.setTone(hertz(step), gain);
+      this.#output.startTone(hertz(step), TONE_LEVEL);
+    } else if (this.#tone !== step) {
+      this.#output.setTone(hertz(step), TONE_LEVEL);
     } else {
       return;
     }
-    this.#tone = { step, gain };
+    this.#tone = step;
   }
 
   /** One short sound — only alongside its sentence. @see the module note */
   cue(name: CueName): void {
     if (!this.#audible()) return;
-    this.#output.playCue(name, RIDE_CUE_LEVEL * this.#preference.volume);
+    this.#output.playCue(name, RIDE_CUE_LEVEL);
   }
 
   /** The ride ended, or the screen went away: nothing is left sounding. */

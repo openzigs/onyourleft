@@ -55,22 +55,26 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { Fragment, type JSX, type ReactNode } from 'react';
 
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
 import { useUnits } from '../../units/context';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { useTimeOfDay } from '../../design/time-of-day';
 
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
+import type { ControllerPort } from '../delivery/controller-port';
+import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
-import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
+import type { ItemInputPort } from '../lap-race/item-input-port';
+import type { SteerInputPort } from '../steer-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
@@ -82,9 +86,10 @@ import type { WorkoutGraphInput } from '../../workout/workout-graph';
  * function takes it as a parameter, so there is exactly one way in on each
  * side of the seam. A prop as well would be a second source for the same
  * answer, and the two could disagree on the screen a rider stares at for an
- * hour — which is the failure #238 is about.
+ * hour — which is the failure #238 is about. `timeOfDay` is omitted for the
+ * same reason (#2072): this component reads the device's clock itself.
  */
-export interface HudPanelProps extends Omit<HudInput, 'units'> {
+export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
   /** Ends it. Same. */
@@ -170,6 +175,15 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    */
   readonly sideCamera?:
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
+  /**
+   * The simulated rider's mark — #1992: the sentence that says this ride is
+   * simulated, in the actions panel (after Pause and End ride) for every frame of the ride, so a
+   * screenshot of it cannot pass for a real effort. Absent on every real ride.
+   * One string a sentence: each is set as its own inline box
+   * (`theme.css` §`.oyl-hud__simulated`), so a line breaks between the
+   * sentences rather than inside one.
+   */
+  readonly simulated?: readonly string[] | undefined;
   /**
    * Another rider's ghost — #331: whose it is, and *Stop ghost*, which takes
    * it off the road and the HUD for the rest of the ride. `undefined` for the
@@ -280,12 +294,29 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    */
   readonly throwing?: ThrowInputPort | undefined;
   /**
-   * A Delivery round's steering — #1820: where a lane key hands the lane
-   * change the rider asked for. With it the HUD listens for
-   * `steer.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing; `undefined`
-   * on every ride that runs no round (#1853).
+   * A Delivery round's or a lap race's steering — #1820, #1901: where a lane
+   * key hands the lane change the rider asked for. With it the HUD listens
+   * for `lanes.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing;
+   * `undefined` on every ride that runs neither (#1853, #1906).
    */
   readonly steering?: SteerInputPort | undefined;
+  /**
+   * A lap race's item use — #1901, ADR 0060 D-13: where a press on the HUD's
+   * item control, the item key or a pad's button asks to use the held item.
+   * With it the HUD shows `ItemControl` in its actions panel, inside the
+   * touch lock and exempt from none of it; `undefined` on every ride that
+   * runs no lap race (#1906).
+   */
+  readonly items?: ItemInputPort | undefined;
+  /**
+   * A paired steering controller — #1827. With it, and a round's ports, the
+   * HUD hands the controller's lane changes, lanes and throws to them
+   * (`ControllerIntents.tsx`), and draws nothing; `undefined` on every ride
+   * that runs no round, and wherever no controller is paired.
+   */
+  readonly controller?: ControllerPort | undefined;
+  /** A Delivery round's lane, as a controller's handlebar angle asks for one — #1827. */
+  readonly lanes?: LaneInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
@@ -298,10 +329,14 @@ const RIDE_LABELS = { resume: 'Resume', end: 'End ride' } as const;
  */
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
+  // #2072: the time of day, read here rather than handed in, so every ride's
+  // HUD has its clock and the demo's (which renders `HudCore` alone) has none.
+  const timeOfDay = useTimeOfDay();
   const {
     workout,
     sound,
     sideCamera,
+    simulated,
     ghostStop,
     onFollowNext,
     report,
@@ -314,6 +349,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     <HudCore
       {...shared}
       units={units}
+      timeOfDay={timeOfDay}
       labels={RIDE_LABELS}
       touchLock
       routeFigure={
@@ -344,6 +380,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       }
       moreActions={
         <>
+          {simulated === undefined ? null : (
+            <p className="oyl-hud__simulated">
+              {simulated.map((sentence, index) => (
+                <Fragment key={sentence}>
+                  {index === 0 ? null : ' '}
+                  <span>{sentence}</span>
+                </Fragment>
+              ))}
+            </p>
+          )}
           {/*
               #1244: *Keep the plan*, on a row of its own under Pause and End ride
               and only while a re-plan waits. ⚠️ **Not a third control in the row

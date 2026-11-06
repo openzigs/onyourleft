@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { encodeMessage, MAXIMUM_MESSAGE_BYTES } from '@onyourleft/protocol';
+import { encodeMessage, MAXIMUM_MESSAGE_BYTES, type ItemEvent } from '@onyourleft/protocol';
 import type { WebSocket } from 'ws';
 
 import { closeFrames, REFUSAL_CLOSE, TOO_SLOW, type CloseFrame } from '../close-codes.ts';
@@ -119,6 +119,12 @@ export interface HostOptions {
    * so far, this one included. Counts only: no athlete, no name, no ticket.
    */
   readonly onProtocolClose?: (roomId: string, reason: string, count: number) => void;
+  /**
+   * A lap race's item event on a tick (#1909), once for the room — the event
+   * every connected rider's frame carries: a rider id, what happened and an
+   * item key. Nothing else about a rider, and never a place.
+   */
+  readonly onItemEvent?: (roomId: string, event: ItemEvent) => void;
   /** A socket this host held has closed, however it closed. */
   readonly onSocketClosed?: (socketId: string) => void;
   /** Unsent bytes past which a client is terminated. {@link DEFAULT_MAXIMUM_BUFFERED_BYTES}. */
@@ -326,6 +332,7 @@ export class RoomHost {
     socketId: string,
     started = false,
     startedBy: RaceStarter = 'any-seated-rider',
+    voiceInvite?: string,
   ): void {
     if (this.#stopping) {
       socket.close(1001, 'server-stopping');
@@ -341,6 +348,9 @@ export class RoomHost {
       return;
     }
     const hosted = this.#rooms.get(roomId) ?? this.#open(roomId, settings, startedBy);
+    // #875: the newest plan's voice link, which this socket's welcome says —
+    // and, if it changed, the riders already here are told it (#876).
+    this.#apply(hosted, hosted.room.setVoiceInvite(voiceInvite));
     const connection: Connection = {
       id: hosted.nextConnection,
       socketId,
@@ -403,6 +413,17 @@ export class RoomHost {
     const hosted = this.#rooms.get(roomId);
     if (hosted === undefined) return false;
     this.#call(hosted, (room) => room.remove(athleteId, this.#options.now()));
+    return true;
+  }
+
+  /**
+   * `roomId`'s voice link is now `invite` (#876): every rider connected to it
+   * is told, but `withheldFrom`. `false` when this host does not hold the room.
+   */
+  setVoiceInvite(roomId: string, invite: string | undefined, withheldFrom?: string): boolean {
+    const hosted = this.#rooms.get(roomId);
+    if (hosted === undefined) return false;
+    this.#apply(hosted, hosted.room.setVoiceInvite(invite, withheldFrom));
     return true;
   }
 
@@ -673,7 +694,17 @@ export class RoomHost {
       this.#lateness.push(Math.max(0, now - dueAtMs));
       if (this.#lateness.length > LATENESS_SAMPLES) this.#lateness.shift();
     }
-    this.#call(hosted, (room) => room.tick(now));
+    this.#call(hosted, (room) => {
+      const out = room.tick(now);
+      // Every frame of a tick carries the same events: read them from the first.
+      const frame = out.find((o) => o.kind === 'send' && o.message.type === 'frame');
+      if (frame?.kind === 'send' && frame.message.type === 'frame') {
+        for (const event of frame.message.itemEvents ?? []) {
+          this.#options.onItemEvent?.(hosted.roomId, event);
+        }
+      }
+      return out;
+    });
   }
 
   #closeIfDone(hosted: HostedRoom): void {

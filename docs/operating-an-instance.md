@@ -223,7 +223,7 @@ and no other — never yours — and sends the service the picture and one fixed
 | `"event":"picture-model","state":"off","code":"not-set"` | none is named: a rider who asks for the local model is answered `pictures_off` |
 | `…"code":"no-server"`, `"bad-model"` | `OYL_INSTANCE_PICTURE_MODEL` is set and unusable; standard error says why (`instance: pictures are off: …`) |
 | a rider reports *"The model answered that it does not take pictures"* | the model's server refused the picture (`model_without_pictures`): name a model that reads images |
-| a rider's pictures are refused `rate_limited` | one of theirs was still with the model, or their session passed 120 sealed requests a minute; the app sends at most one a second |
+| a rider's pictures are refused `rate_limited` | one of theirs was still with the model, their session passed 120 sealed requests a minute, or they have held the local picture model for half of this clock hour (#2175; a hosted model on their own key is not counted). The app sends at most one a second, waits longer after each refusal, up to 30 s, and counts the refused pictures on its screen |
 
 ## Analysis jobs
 
@@ -297,7 +297,13 @@ is beside the key box.
 (`POST /v1/analysis/hosted/test`, sealed only). Your instance sends the service two fixed sentences
 on the rider's key — no ride, nothing the rider wrote — and tells the app only whether it answered.
 It passes the same checks as a job, so it sends nothing where a job would be refused. It is an
-outbound request from your machine to an address a rider chose, as every hosted job is.
+outbound request from your machine to an address a rider chose, as every hosted job is. Since #1796
+stopping the instance ends a test question that is out at once, rather than leaving it for its 30 s.
+
+**A hosted job names its service** (#1796). The app sends the origin of the service it showed the
+rider beside the press, and your instance refuses the job (`validation_failed` on `endpoint`) unless
+the rider's recorded consent names that origin, so a key replaced on the rider's other device never
+sends a ride to a service the pressing device did not name.
 
 **Yours is held for you, the operator, and for nobody else.** The instance also hosts group rides
 and races, so it has other riders, and holding a key changes nothing about them: they register and
@@ -366,7 +372,13 @@ leaves the key unreadable, and the instance says so and carries on with its loca
 **What clearing leaves.** `model-key clear`, replacing a key with `set`, and erasing the account all
 run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
 database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
-which held copies of the old pages. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+which held copies of the old pages. Since #1796 every sync delete does the same — a rider's masking
+list when they withdraw, a ride, a note — because an item can hold a place. Since #1944 so does every
+sync write that **replaces** a held item with a different one, of any kind: the app sends its
+masking list again before every hosted job, so a privacy zone the rider removed is scrubbed from the
+file and the log by the next job. The cost is one truncating checkpoint per replaced item, which
+can wait up to the busy timeout (5 s) while another connection reads; a first write, a write of an
+unchanged item and a write over a deleted one replace no body and pay nothing. ⚠️ Two copies are beyond that: **a snapshot taken while the key
 was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
 rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
 that moment, the truncation does not happen and the log's old pages stay until SQLite next writes
@@ -563,6 +575,76 @@ address, and a mailed code is refused `address_unbound` at redemption if its add
 cleared. Clearing an established address (`POST /v1/auth/recovery-email/clear`) and the full reset
 (`POST /v1/auth/recovery/reset`) each need a recovery code or a code mailed to an established address.
 
+## Voice on Discord
+
+With `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` and `OYL_INSTANCE_DISCORD_GUILD_ID` set, the instance's bot
+makes a temporary voice channel in your Discord server for a private room, and deletes it when the
+room is over (#874; [spike 0017](spikes/0017-voice-chat-for-rooms.md),
+[spike 0018](spikes/0018-discord-terms-for-a-self-hosted-voice-bot.md)). It is REST only, through
+Node's own `fetch`, with no gateway connection and no dependency. Leave both empty and there is no
+voice: nothing else changes.
+
+- **You are the developer under Discord's terms.** Register your own Application in the Discord
+  Developer Portal, add its bot to a server of its own, and give it **Manage Channels** and **Create
+  Instant Invite**. Turn **Membership Screening off** in that server: with it on, riders would join
+  unable to speak, so the instance turns voice off.
+- **Who is given the link.** A rider a **private** room admits, in the room's welcome (#875), and
+  nobody else: a rider the room refuses is never told it. A public room has no voice until account
+  linking exists (#877), because a link alone cannot remove a banned rider from a channel they are
+  already in. The app shows it while a race waits on its line (on a tablet) and for the first
+  seconds of a group ride.
+- **What reaches Discord.** A channel named `oyl-ride-` and the first twelve hex digits of the
+  room's random id; a temporary, single-room invite for at most the room's riders, for a day. No
+  topic, no category, no audit-log reason, no ride data and nothing a rider typed.
+- **What the instance keeps.** Which channel is which room's is held in memory only: nothing about
+  Discord is in the database or a backup. After a restart, or when Discord refused a delete, the
+  room sweep (at start and every ten minutes) deletes every `oyl-ride-…` voice channel this instance
+  process does not hold. That is why the bot needs a server of its own.
+- **The token is a file, never an environment variable** (#2146). Put the token, and nothing else,
+  in a file your deployment's secret store holds, and name its path in
+  `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE`. The instance reads it once at start and never writes it
+  anywhere: not to the database, a backup, a blob or a log. A file that is named but cannot be read
+  refuses to start, naming the variable and nothing the file holds. The environment is not used
+  because every child process inherits it and `docker inspect` prints it.
+  - **The home deploy** (`apps/instance/deploy/home/compose.yaml`) mounts `secrets/` beside the
+    compose file, read-only, at `/run/secrets/onyourleft/`, on the instance only (the `backup`
+    service does not mount it). Git ignores the directory. On the box, beside the compose file
+    (the token is typed at a prompt that does not echo it, so it is in no shell history, and the
+    file is made readable by you alone before anything is written to it):
+
+    ```
+    mkdir -p secrets
+    (umask 077; read -rs -p 'Bot token: ' t && printf '%s\n' "$t" > secrets/discord-bot-token)
+    sudo chown 1000 secrets/discord-bot-token   # Linux only: the image runs as uid 1000
+    ```
+
+    Then set `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE=/run/secrets/onyourleft/discord-bot-token` and
+    `OYL_INSTANCE_DISCORD_GUILD_ID` in `.env`, and deploy. Docker Desktop (macOS, Windows) maps
+    the file's owner itself, so skip the `chown` there.
+  - **Elsewhere**, mount the file from your platform's secret store (a Compose or Kubernetes secret,
+    or a file readable only by the user the instance runs as) and name the path it is mounted at.
+- **Keep the token encrypted at rest.** Discord's terms treat the bot token as API Data that must be
+  encrypted at rest (Developer Terms §5(c), §13). The instance does not encrypt the token itself:
+  doing that would put it in the database and in every backup, and nothing about Discord is in
+  either. So the duty is yours. Keep the token file on an encrypted disk or volume (FileVault,
+  BitLocker, LUKS), and keep it out of copies that are not encrypted.
+- **The token** is sent only to `discord.com`, in the `Authorization` header, and is never logged:
+  an error is logged by its name alone. Rate limits are honoured from Discord's headers, as its
+  terms require; a `401` turns voice off until the next start, so a dead token never loops.
+
+| You see | It means |
+|---|---|
+| `"event":"voice","state":"on"` at start | the bot's token and server answered; rooms may have voice |
+| `"event":"voice","state":"off","code":"token-refused"` | Discord refused the token, at start or later. Nothing more is sent. Reset the token in the Developer Portal, set it, and restart |
+| `…"code":"guild-unreachable"` | the server could not be read: a wrong id, or the bot is not in it (a `403` or `404`), or Discord or the network was briefly down (no status, or a `5xx`). A `voice-failed` line before it has the status. A brief failure is retried by the room sweep every ten minutes; a refusal is not, so fix the id or the bot's membership and restart |
+| `…"code":"membership-screening"` | the server has Membership Screening on. Turn it off and restart |
+| `"event":"voice-failed","code":<step>,"status":n` (or `"error":<name>`) | one request failed: `channel`, `invite`, `delete-invite`, `delete-channel`, `list` or `guild`. A channel that was not deleted is swept later |
+| `"event":"voice-swept","deleted":n` | the sweep deleted `n` channels no open room held |
+| `"event":"voice-failed","code":"log"` (or `"member"`) | after a removal or a suspension, writing the `rotate_voice` log entry (or reading who is in a room) failed. The removal or suspension itself was applied |
+
+**A removal or a ban replaces the room's channel** (#876): see `docs/moderation.md`, "Moderation
+in a room". What was done is a `rotate_voice` entry in the moderation log, not a line here.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),
@@ -598,6 +680,18 @@ the blob count, and the database's SHA-256). `--keep N` removes all but the newe
 copies the snapshot to a second place — the off-box copy. The home deployment runs this on a
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
+
+⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
+the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
+account that was erased. The privacy policy tells riders and notifiers that the project's own
+instance keeps no backup for longer than 30 days, so that is the limit. The home deployment's
+defaults keep the newest fourteen of one every six hours, which is 3.5 days, and are well inside it.
+If you change `OYL_BACKUP_KEEP` or `OYL_BACKUP_INTERVAL_SECONDS`, keep their product under 30 days
+(`OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` ≤ 2 592 000 seconds). Nothing enforces that: it is
+yours to check. Count the other places a snapshot lands too: `OYL_OFFBOX_DIR` keeps the same number,
+the `pre-deploy` folder keeps the last three deploys' snapshots however old they are, and a copy you
+make by hand or with `rclone` is yours to delete. Restoring one needs no extra step for notifier
+details: the instance erases whatever is due again when it starts.
 
 ⚠️ **A backup kept only on the box it backs up is not a backup** of the box. `OYL_OFFBOX_DIR` is a
 drive or a share that survives the machine: a USB drive that is unplugged and kept elsewhere, or a

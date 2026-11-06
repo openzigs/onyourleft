@@ -295,6 +295,82 @@ describe('naming the synced ride (#1229)', () => {
   });
 });
 
+describe('naming the hosted service (#1796)', () => {
+  const SERVICE = 'https://models.example';
+
+  /** A world whose riders' recorded consents are `consents`, read as `instance.ts` reads them. */
+  async function consentWorld() {
+    const consents = new Map<string, string>();
+    const setup = await jobsWorld(2, {
+      analysis: { hostedConsent: (athleteId) => Promise.resolve(consents.get(athleteId)) },
+    });
+    return { ...setup, consents };
+  }
+
+  it('queues a hosted start that names the service the rider’s consent names, however the URL is spelled', async () => {
+    const { world: w, engine, riders, consents } = await consentWorld();
+    const [anna] = riders;
+    consents.set(anna!.athleteId, `${SERVICE}/v1/`);
+    const answer = await startJob(w, anna!.token, {
+      ...jobBody(),
+      source: 'instance-hosted',
+      endpoint: SERVICE,
+    });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(202);
+    const run = await engine.next();
+    expect(run.job.source).toBe('instance-hosted');
+    run.finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+  });
+
+  it('refuses a hosted start naming another service, or none, or one that is not https — and queues nothing', async () => {
+    const { world: w, engine, riders, consents } = await consentWorld();
+    const [anna, ben] = riders;
+    // Anna replaced her key on another device and agreed again: her consent moved.
+    consents.set(anna!.athleteId, 'https://another-service.example');
+    // Ben's consent is the service this device names: his own does not let Anna's through.
+    consents.set(ben!.athleteId, SERVICE);
+    for (const endpoint of [SERVICE, undefined, 'http://models.example', 7, '']) {
+      const answer = await startJob(w, anna!.token, {
+        ...jobBody(),
+        source: 'instance-hosted',
+        ...(endpoint === undefined ? {} : { endpoint }),
+      });
+      expect(answer.status, String(endpoint)).toBe(400);
+      expect((answer.body as { error: { fields: unknown[] } }).error.fields).toEqual([
+        { field: 'endpoint', problem: 'must be the service your recorded consent names' },
+      ]);
+    }
+    expect(engine.runs).toEqual([]);
+    // Nothing was queued: a local start is not refused `job_running`.
+    expect((await startJob(w, anna!.token)).status).toBe(202);
+    (await engine.next()).finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+  });
+
+  it('lets a hosted start with no consent recorded through to the run’s own gate, as before', async () => {
+    const { world: w, engine, riders } = await consentWorld();
+    const answer = await startJob(w, riders[0]!.token, {
+      ...jobBody(),
+      source: 'instance-hosted',
+      endpoint: SERVICE,
+    });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(202);
+    (await engine.next()).finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+  });
+
+  it('refuses an endpoint on a job for the instance’s own model', async () => {
+    const { world: w, engine, riders } = await consentWorld();
+    const answer = await startJob(w, riders[0]!.token, { ...jobBody(), endpoint: SERVICE });
+    expect(answer.status).toBe(400);
+    expect((answer.body as { error: { fields: { field: string }[] } }).error.fields[0]?.field).toBe(
+      'endpoint',
+    );
+    expect(engine.runs).toEqual([]);
+  });
+});
+
 describe('resume', () => {
   it('reads 1–3, drops the connection, and gets 4… on Last-Event-ID: 3 — no duplicate, no gap', async () => {
     const { world: w, engine, riders } = await jobsWorld(1);

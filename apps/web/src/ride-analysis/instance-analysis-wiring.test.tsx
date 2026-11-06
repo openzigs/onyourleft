@@ -543,4 +543,50 @@ describe('the hosted source on the real page, offered from the note main.tsx rea
     expect(scripted.requests).toStrictEqual([]);
     expect(await saved(id)).toBeUndefined();
   });
+
+  it('names to the instance the service the page showed, and sends nothing when another tab has since noted another (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const storage = noteStorage();
+    storage.setItem(
+      HOSTED_OFFER_STORAGE_KEY,
+      JSON.stringify({ instance: INSTANCE, endpoint: ENDPOINT }),
+    );
+    const built = builtWithHosted(scripted, storage);
+    await openShell(id, built.port);
+    await until(() => hostedButton() !== undefined, 'the hosted press appears');
+    expect(document.body.textContent).toContain(ENDPOINT);
+    // Settings, in another tab, read a consent the rider gave on another
+    // device to another service, and noted it. This page still names ENDPOINT.
+    const OTHER = 'https://other-models.example';
+    storage.setItem(
+      HOSTED_OFFER_STORAGE_KEY,
+      JSON.stringify({ instance: INSTANCE, endpoint: OTHER }),
+    );
+    expect(document.body.textContent).not.toContain(OTHER);
+    await activateWithKeyboard(hostedButton()!);
+    await until(
+      () => document.body.textContent.includes(INSTANCE_ASK_TEXT['service-moved']),
+      'the page says the service changed',
+    );
+    expect(built.guards()).toBe(0);
+    expect(scripted.requests).toStrictEqual([]);
+    expect(await saved(id)).toBeUndefined();
+  });
+
+  it('a hosted start names the service the page showed (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const storage = noteStorage();
+    storage.setItem(
+      HOSTED_OFFER_STORAGE_KEY,
+      JSON.stringify({ instance: INSTANCE, endpoint: ENDPOINT }),
+    );
+    const built = builtWithHosted(scripted, storage);
+    await openShell(id, built.port);
+    await until(() => hostedButton() !== undefined, 'the hosted press appears');
+    await activateWithKeyboard(hostedButton()!);
+    await until(() => liveRegion() === WRITE_UP_SAVED, 'the write-up is saved');
+    expect(startedWith(scripted)?.endpoint).toBe(ENDPOINT);
+  });
 });

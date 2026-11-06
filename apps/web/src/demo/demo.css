@@ -1,0 +1,222 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/*
+ * The demo page's own rules — #1945. Imported by the demo's entry (`main.tsx`)
+ * after `theme.css`, and by nothing the rider app loads, so the product's own
+ * layout cannot change with it: `tools/demo/demo-stays-out.ts` fails the
+ * product build if a module from `src/demo/` reaches it.
+ */
+
+/* The page is its iframe's whole box (#1654): a column, the stage taking what
+   the lines above and below it leave. These were inline styles until #1945. */
+.oyl-demo {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  margin: 0;
+}
+
+/* #1654: small, as the source offer is, so a small frame keeps its stage. */
+.oyl-demo__status {
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.3;
+  margin: 0;
+  padding: 0 var(--oyl-space-sm);
+}
+
+/*
+ * THE DEMO IN A SMALL FRAME — #1945.
+ *
+ * The product's HUD overlays the world only from 46 rem × 22.5 rem; below that
+ * it stacks under the world and the stage scrolls within itself (#1654,
+ * accepted then). In the demo the stage is the frame less the label above it
+ * and the source offer below it, so even a 736 × 360 frame scrolled. This
+ * COMPACT layout lays a few readings and the controls over a world that fills
+ * the stage, in every frame shorter than 27 rem (432 px: 768 × 432 is the
+ * smallest 16 : 9 frame the corners layout fits, measured) and every frame
+ * narrower than 46 rem that the product's upright `column` layout (47 rem tall
+ * and more) does not take.
+ *
+ * - **Fewer readings**, in one row along the bottom: power, cadence and heart
+ *   rate, the primary panel's three without its moving time, and in a frame
+ *   under 30 rem wide the first two, so the row still fits beside the
+ *   controls at 320 px. The secondary and route panels are not drawn.
+ * - **Pause and Play always**, in the bottom corner at every size (WCAG 2.2
+ *   SC 2.2.2). The controls are 44 px, SC 2.5.5's target, rather than the
+ *   72 px `HudCore.tsx` §`CONTROL_MINIMUM_PIXELS` sets inline for a gloved
+ *   rider on a moving bike: nobody rides the demo, and two 72 px controls
+ *   left a 320 × 180 frame no world. `!important` because that minimum is an
+ *   inline style.
+ * - **The status line is laid over the top of the stage**, on the HUD's own
+ *   surface, rather than taking a row of the frame: the realistic world's
+ *   two-line notice took a 320 × 180 frame's stage to 81 px. Empty, it is a
+ *   box of no height, and it stays rendered so that it still announces.
+ * - **The source offer keeps its three links** and gives its sentence to a
+ *   screen reader only: the links name the source and the licence,
+ *   AGPL-3.0 §6's offer (`SourceOffer.tsx`).
+ *
+ * `shell-demo.browser.spec.ts` §"#1945" measures it: no scroll anywhere at
+ * 320 × 180, 480 × 270 and 640 × 360, the stage at least half the frame,
+ * every panel on the stage and none over another, Pause in the frame.
+ */
+@media (height < 27rem), (width < 46rem) and (height < 47rem) {
+  .oyl-demo {
+    display: grid;
+    grid-template-areas:
+      'label'
+      'caption'
+      'stage'
+      'map'
+      'offer';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  }
+
+  .oyl-demo__label {
+    font-size: var(--oyl-font-size-sm);
+    grid-area: label;
+    line-height: 1.3;
+  }
+
+  .oyl-demo__caption {
+    grid-area: caption;
+  }
+
+  .oyl-demo__stage-box {
+    grid-area: stage;
+  }
+
+  /* Over the stage, which is `.oyl-game--riding`'s z-index 20. */
+  .oyl-demo__status {
+    align-self: start;
+    background: var(--oyl-color-hud-surface);
+    color: var(--oyl-color-hud-ink);
+    grid-area: stage;
+    padding: var(--oyl-space-xs) var(--oyl-space-sm);
+    z-index: 21;
+  }
+
+  .oyl-demo__status:empty {
+    padding: 0;
+  }
+
+  .oyl-demo__map-data {
+    grid-area: map;
+  }
+
+  .oyl-demo__offer {
+    grid-area: offer;
+  }
+
+  .oyl-demo__offer-sentence {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .oyl-game--riding.oyl-demo__stage {
+    overflow: hidden;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-game__world {
+    aspect-ratio: auto;
+    height: 100%;
+    inset: 0;
+    max-height: none;
+    max-width: 600vh;
+    position: absolute;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud {
+    display: grid;
+    gap: var(--oyl-space-xs);
+    grid-template-areas:
+      'notices notices'
+      'credit credit'
+      'primary actions';
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    inset: 0;
+    padding: var(--oyl-space-xs);
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud > * {
+    pointer-events: auto;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__fields--secondary,
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__route,
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__field--moving {
+    display: none;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__fields--primary {
+    align-self: end;
+    gap: var(--oyl-space-sm);
+    grid-area: primary;
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    justify-self: start;
+    padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__label {
+    font-size: var(--oyl-font-size-sm);
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__value {
+    font-size: var(--oyl-font-size-lg);
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__actions {
+    align-self: end;
+    grid-area: actions;
+    justify-self: end;
+    padding: var(--oyl-space-xs);
+    position: static;
+    width: auto;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__control {
+    font-size: var(--oyl-font-size-md);
+    min-height: 44px !important;
+    min-width: 44px !important;
+    padding-inline: var(--oyl-space-sm);
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__attribution {
+    align-self: end;
+    grid-area: credit;
+    justify-self: start;
+    left: auto;
+    max-width: none;
+    position: static;
+    text-align: start;
+    transform: none;
+  }
+
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__notices {
+    grid-area: notices;
+  }
+}
+
+@media (width < 30rem) and (height < 47rem) {
+  .oyl-game--riding.oyl-demo__stage .oyl-hud__fields--primary > .oyl-hud__field:nth-child(n + 3) {
+    display: none;
+  }
+}

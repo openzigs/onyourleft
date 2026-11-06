@@ -17,8 +17,17 @@ import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
 import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
-import { northRoute } from './route-fixtures-testing';
-import { cameraPose, ghostFinished, sceneFrame } from './scene';
+import { easedPlace, GIVE_BACK_SHARE } from './bend-easing';
+import { racingLine } from './racing-line';
+import { hairpinRoute, northRoute } from './route-fixtures-testing';
+import {
+  cameraPose,
+  drawnRiderDistance,
+  ghostFinished,
+  placedRiders,
+  sceneFrame,
+  type SceneInput,
+} from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
   GameSimulation,
@@ -35,8 +44,11 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradeAt,
+  gradePercent,
   kilograms,
   metres,
+  metresPerSecond,
   pacerGap,
   routeProfile,
   seconds,
@@ -412,6 +424,7 @@ describe('the chase camera', () => {
       colours: new Float32Array(6),
       indices: new Uint32Array(0),
       quadCount: 0,
+      retraced: new Uint8Array(1),
     };
     const pose = cameraPose(corridor, 0, 0);
 
@@ -817,10 +830,51 @@ describe('a marker that has a front — #349', () => {
     for (const marker of frame.markers) {
       expect(Math.hypot(marker.headingX, marker.headingZ)).toBeCloseTo(1, 9);
     }
-    // The rider faces the way the camera does, by construction: both are read
-    // at the rider's own distance.
-    expect(rider?.headingX).toBeCloseTo(frame.camera.headingX, 9);
-    expect(rider?.headingZ).toBeCloseTo(frame.camera.headingZ, 9);
+    // The rider faces the ROAD at its own distance: the tangent of the
+    // corridor segment it is on, read here from the frame's own corridor.
+    // ⚠️ To within a degree, not exactly, since #1995: a marker points from
+    // its rear wheel to its front wheel, a bicycle's length of road, which
+    // near a corner spans more than the one segment the road's heading is read
+    // from. Until #1994 this compared the rider with the camera, because the
+    // camera's heading WAS that tangent; it no longer is (below).
+    const angle = (
+      a: { headingX: number; headingZ: number } | undefined,
+      b: { headingX: number; headingZ: number },
+    ): number =>
+      Math.acos(Math.min(1, (a?.headingX ?? 0) * b.headingX + (a?.headingZ ?? 0) * b.headingZ));
+    const centre = frame.corridor.centre;
+    let nearest = 0;
+    for (let index = 1; index < centre.length; index += 1) {
+      const here = centre[index];
+      const best = centre[nearest];
+      if (
+        here !== undefined &&
+        best !== undefined &&
+        Math.hypot(here.x - (rider?.x ?? 0), here.z - (rider?.z ?? 0)) <
+          Math.hypot(best.x - (rider?.x ?? 0), best.z - (rider?.z ?? 0))
+      ) {
+        nearest = index;
+      }
+    }
+    const before = centre[nearest - 1];
+    const after = centre[nearest + 1];
+    expect(before).toBeDefined();
+    expect(after).toBeDefined();
+    const roadDx = (after?.x ?? 0) - (before?.x ?? 0);
+    const roadDz = (after?.z ?? 0) - (before?.z ?? 0);
+    const road = {
+      headingX: roadDx / Math.hypot(roadDx, roadDz),
+      headingZ: roadDz / Math.hypot(roadDx, roadDz),
+    };
+    expect(angle(rider, road)).toBeLessThan((1 * Math.PI) / 180);
+    // ⚠️ **The rider no longer faces the way the camera does — #1994.** Until
+    // then both were the road's tangent at the rider; the camera now looks at
+    // the road up the route, which here is round the corner, so it is turned
+    // from the rider's heading TOWARD the bot's side of the corner.
+    const cross = (a: { headingX: number; headingZ: number } | undefined, b: typeof a): number =>
+      (a?.headingX ?? 0) * (b?.headingZ ?? 0) - (a?.headingZ ?? 0) * (b?.headingX ?? 0);
+    expect(Math.abs(cross(rider, frame.camera))).toBeGreaterThan(0.1);
+    expect(Math.sign(cross(rider, frame.camera))).toBe(Math.sign(cross(rider, bot)));
     // The bot is round the corner and faces ninety degrees away.
     const between =
       (rider?.headingX ?? 0) * (bot?.headingX ?? 0) + (rider?.headingZ ?? 0) * (bot?.headingZ ?? 0);
@@ -984,5 +1038,279 @@ describe('other real riders on the road — #783', () => {
     expect('followed' in (unnamed ?? {})).toBe(false);
     expect('label' in (unnamed ?? {})).toBe(false);
     expect('label' in (frame.markers[0] ?? {})).toBe(false);
+  });
+});
+
+describe('a lap race’s bots on the road — #1902', () => {
+  const setup = straightRoute();
+  const RIDER = 400;
+  const input = (extra: Partial<SceneInput>): SceneInput => ({
+    profile: setup.profile,
+    origin: corridorOrigin(setup.profile),
+    state: {
+      ...atStartLine(setup.profile),
+      ride: { ...atStartLine(setup.profile).ride, distance: metres(RIDER) },
+    },
+    ...extra,
+  });
+  const HIT = { glow: 0.8, scale: 1, spin: 0 } as const;
+
+  it('draws each as a bot marker, after the rider, and none past the road it built', () => {
+    const frame = sceneFrame(
+      input({
+        raceBots: [
+          { distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: -1.75 },
+          { distanceMetres: 380, speedMetresPerSecond: 9, lateralMetres: 0 },
+          { distanceMetres: 1_900, speedMetresPerSecond: 9, lateralMetres: 1.75 },
+        ],
+      }),
+    );
+    expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider', 'bot', 'bot']);
+  });
+
+  it('marks a race’s bots as racers and the pacer as none, for the realistic world’s split (#1971)', () => {
+    const frame = sceneFrame(
+      input({
+        botDistance: 420,
+        raceBots: [{ distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: -1.75 }],
+      }),
+    );
+    expect(frame.markers.map((marker) => [marker.kind, marker.racer])).toEqual([
+      ['rider', undefined],
+      ['bot', undefined],
+      ['bot', true],
+    ]);
+  });
+
+  it('draws a bot in its lane away from the rider, its cranks turned from its own odometer', () => {
+    const lanes = [-1.75, 0, 1.75];
+    const placed = (bots: SceneInput['raceBots']) => {
+      const made = input({ raceBots: bots });
+      return placedRiders(made, sceneFrame(made).corridor);
+    };
+    const far = placed(
+      lanes.map((lateralMetres, index) => ({
+        distanceMetres: 440 + 20 * index,
+        speedMetresPerSecond: 9,
+        lateralMetres,
+      })),
+    );
+    expect(far.slice(1).map((rider) => rider.lateral)).toEqual(lanes);
+    expect(far[1]?.marker.crankAngle).toBeCloseTo(simulatedCrankAngle(440), 9);
+    const stopped = placed([{ distanceMetres: 440, speedMetresPerSecond: 0, lateralMetres: 0 }]);
+    expect(stopped[1]?.marker.pedalling).toBe(0);
+  });
+
+  it('moves a bot level with the rider aside of them, never inside them, and never off the road', () => {
+    for (const lateralMetres of [-1.75, 0, 1.75]) {
+      for (const steeredLateral of [undefined, -1.75, 0, 1.75]) {
+        const made = input({
+          steeredLateral,
+          raceBots: [{ distanceMetres: RIDER, speedMetresPerSecond: 9, lateralMetres }],
+        });
+        const [rider, bot] = placedRiders(made, sceneFrame(made).corridor);
+        const label = `lane ${lateralMetres}, steered ${String(steeredLateral)}`;
+        const apart = Math.abs((bot?.lateral ?? 0) - (rider?.lateral ?? 0));
+        expect(apart, label).toBeGreaterThanOrEqual(1.2 - 1e-9);
+        expect(Math.abs(bot?.lateral ?? 0), label).toBeLessThanOrEqual(3.2);
+      }
+    }
+  });
+
+  it('moves a bot continuously as the rider steers across its lane, never jumping across them', () => {
+    // #1963: the corridor is the road at the rider's distance, which neither the steering nor the
+    // bots change, so it is built once. Building the whole scene for each of these 1,203 placings
+    // timed out under the nightly coverage report; `placedRiders` is what is under test.
+    const corridor = sceneFrame(input({})).corridor;
+    for (const lateralMetres of [-1.75, 0, 1.75]) {
+      let before: number | undefined;
+      for (let step = -200; step <= 200; step += 1) {
+        const made = input({
+          steeredLateral: step / 100,
+          raceBots: [{ distanceMetres: RIDER, speedMetresPerSecond: 9, lateralMetres }],
+        });
+        const bot = placedRiders(made, corridor)[1]?.lateral ?? 0;
+        if (before !== undefined) {
+          expect(
+            Math.abs(bot - before),
+            `lane ${lateralMetres}, steered ${step / 100}`,
+          ).toBeLessThan(0.1);
+        }
+        before = bot;
+      }
+    }
+  });
+
+  it('carries each racer’s hit effect to its own marker, and none to a racer nothing hit', () => {
+    const frame = sceneFrame(
+      input({
+        riderHit: HIT,
+        raceBots: [
+          { distanceMetres: 430, speedMetresPerSecond: 9, lateralMetres: 0, hit: HIT },
+          { distanceMetres: 450, speedMetresPerSecond: 9, lateralMetres: 0 },
+        ],
+      }),
+    );
+    expect(frame.markers.map((marker) => marker.hit)).toEqual([HIT, HIT, undefined]);
+    expect('hit' in (frame.markers[2] ?? {})).toBe(false);
+    const ordinary = sceneFrame(input({}));
+    expect('hit' in (ordinary.markers[0] ?? {})).toBe(false);
+  });
+});
+
+/**
+ * What each rider is doing reaches its marker — #1999: the inputs its drawn
+ * position on the bicycle is chosen from (`posture.ts`). ⚠️ `RiderMarker.riding`
+ * is optional the UNSAFE way round (absent draws the hoods), so this reads it
+ * back off every kind of marker `sceneFrame` builds.
+ */
+describe('what each rider is doing, for the position it is drawn in — #1999', () => {
+  const climb = hairpinRoute(20);
+  const origin = corridorOrigin(climb);
+  const start = atStartLine(climb);
+  const ridingAt = (frame: SceneFrame, kind: RiderMarker['kind']) =>
+    frame.markers.find((marker) => marker.kind === kind)?.riding;
+
+  it('gives the rider their cadence, live power, grade and speed, and the pacer its own', () => {
+    const state: GameState = {
+      ...start,
+      ride: { speed: metresPerSecond(6), distance: metres(200) },
+      grade: gradePercent(4),
+      input: { ...start.input, power: watts(320), live: true },
+      ridden: seconds(20),
+      bot: {
+        state: { speed: metresPerSecond(5), distance: metres(230) },
+        distanceOnRoute: metres(230),
+        grade: gradePercent(4),
+        power: watts(180),
+      },
+    };
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state,
+      cadence: 62,
+      botDistance: 230,
+      ghost: GHOST,
+      remoteRiders: [{ riderId: 3, distanceMetres: 220, speedMetresPerSecond: 7 }],
+    });
+    expect(ridingAt(frame, 'rider')).toEqual({ cadence: 62, power: 320, grade: 4, speed: 6 });
+    expect(ridingAt(frame, 'bot')).toEqual({ cadence: undefined, power: 180, grade: 4, speed: 5 });
+    // The ghost and a room's rider have their speed and the route's grade.
+    for (const kind of ['ghost', 'remote'] as const) {
+      const riding = ridingAt(frame, kind);
+      expect(riding?.cadence, kind).toBeUndefined();
+      expect(riding?.power, kind).toBeUndefined();
+      expect(riding?.speed, kind).toBeGreaterThan(0);
+      expect(riding?.grade, kind).toBeCloseTo(gradeAt(climb, metres(200)), 6);
+    }
+  });
+
+  it('gives a rider whose power reading has dropped no power, which is not a power of nought', () => {
+    const state: GameState = {
+      ...start,
+      ride: { speed: metresPerSecond(6), distance: metres(200) },
+      input: { ...start.input, power: watts(0), live: false },
+    };
+    const frame = sceneFrame({ profile: climb, origin, state });
+    expect(ridingAt(frame, 'rider')?.power).toBeUndefined();
+    expect(ridingAt(frame, 'rider')?.cadence).toBeUndefined();
+  });
+
+  it('gives the rider their own speed, not the drawn one hurrying out of a bend', () => {
+    // The owner fed 55 km/h in and the marker said about 63: 55 × 1.15, the
+    // drawn rider giving a hairpin's lag back (`bend-easing.ts`). Found here
+    // rather than typed: the first place past the hairpin where it does.
+    const own = 55 / 3.6;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const input: SceneInput = {
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        grade: gradePercent(-5),
+      },
+    };
+    // Non-vacuity: the rider IS drawn behind their odometer, catching up.
+    expect(drawnRiderDistance(input)).toBeLessThan(past);
+    expect(ridingAt(sceneFrame(input), 'rider')?.speed).toBe(own);
+  });
+
+  it('gives the pacer and a room’s rider their own speeds too', () => {
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        bot: {
+          state: { speed: metresPerSecond(own), distance: metres(past) },
+          distanceOnRoute: metres(past),
+          grade: gradePercent(-5),
+          power: watts(180),
+        },
+      },
+      botDistance: past,
+      remoteRiders: [{ riderId: 3, distanceMetres: past, speedMetresPerSecond: own }],
+    });
+    expect(ridingAt(frame, 'bot')?.speed).toBe(own);
+    expect(ridingAt(frame, 'remote')?.speed).toBe(own);
+  });
+
+  it('gives the ghost its own replayed speed too — #2148', () => {
+    // Refs #2148: the ghost's `ownSpeed` set back to its drawn speed passed
+    // every test. A ghost that rode `own` m/s throughout, `ridden` seconds in,
+    // is at the first place past the hairpin where the drawn one hurries.
+    const own = 15;
+    const line = racingLine(climb);
+    let past = Number.NaN;
+    for (let at = 0; at < 1_500 && Number.isNaN(past); at += 1) {
+      if (easedPlace(line, at, own).speed > own * (1 + GIVE_BACK_SHARE / 2)) past = at;
+    }
+    expect(past).not.toBeNaN();
+    const span = (2 * past) / own;
+    const ghost = buildGhostTrack({
+      elapsedSeconds: [0, span],
+      distanceMetres: [0, own * span],
+    });
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(own), distance: metres(past) },
+        ridden: seconds(past / own),
+      },
+      ghost,
+    });
+    expect(ridingAt(frame, 'ghost')?.speed).toBeCloseTo(own, 9);
+  });
+
+  it('gives a lap race’s bots their speed and grade', () => {
+    const frame = sceneFrame({
+      profile: climb,
+      origin,
+      state: { ...start, ride: { speed: metresPerSecond(6), distance: metres(200) } },
+      raceBots: [{ distanceMetres: 230, speedMetresPerSecond: 8, lateralMetres: 1 }],
+    });
+    expect(ridingAt(frame, 'bot')).toEqual({
+      cadence: undefined,
+      power: undefined,
+      grade: gradeAt(climb, metres(230)),
+      speed: 8,
+    });
   });
 });

@@ -34,11 +34,14 @@
  * effort, which is the reading a rider would take from it.
  */
 
-import type { JSX } from 'react';
+import type { JSX, PointerEvent } from 'react';
 
 import { formatDuration } from '../format';
 
+import { TIME_AXIS_TITLE, timeAxis, type LapBand, type RideAxis } from './axis';
 import { traceExtent, traceMean, traceSegments } from './series';
+
+export { TIME_AXIS_TITLE };
 
 /**
  * The drawing's coordinate space.
@@ -64,6 +67,57 @@ export interface TraceChartProps {
   readonly format: (value: number) => string;
   /** Missing samples in the **stored** series, which is more than the drawing shows. */
   readonly missingSamples: number;
+  /**
+   * The ride time the time axis spans, in seconds — #2068's shared axis.
+   *
+   * The activity page stacks one chart per channel and hands every one the
+   * ride's own length (the stream summary's samples times their interval), so
+   * a minute is at the same place across the stack. A trace covering less of
+   * the ride than that is drawn over its share of the width rather than
+   * stretched to all of it. Without it the axis spans the trace itself.
+   */
+  readonly timeSpan?: number | undefined;
+  /**
+   * The shared cursor, in seconds into the ride — #2068. Drawn as one
+   * vertical line at that time on every chart in the stack; the values it
+   * crosses are read out in words by the slider that moves it
+   * (`views/ActivityDetailView.tsx` §`TraceCursor`). None, no line.
+   */
+  readonly cursor?: number | undefined;
+  /**
+   * The x axis the stack shares — #2081: time (the default, over
+   * {@link timeSpan}) or the distance ridden. Every point, the cursor and the
+   * lap bands are placed through it.
+   */
+  readonly axis?: RideAxis | undefined;
+  /**
+   * The ride's laps, drawn as bands behind the trace — #2081: every other lap
+   * shaded, and an edge where each lap after the first begins. Named in the
+   * description, so the bands are not only a picture.
+   */
+  readonly laps?: readonly LapBand[] | undefined;
+  /**
+   * The chart's own reading at {@link cursor}, beside its title — #2081's
+   * read-out, next to the line it reads. `—` where the sensor gave nothing.
+   * The words for a screen reader are the cursor's `<output>`, not this.
+   */
+  readonly cursorReading?: string | undefined;
+  /**
+   * A tap or a hover on the drawing, as seconds into the ride — #2081. The
+   * page moves its one cursor there. A keyboard moves the same cursor with
+   * the slider (`views/ActivityDetailView.tsx` §`TraceCursor`).
+   */
+  readonly onPick?: ((seconds: number) => void) | undefined;
+}
+
+/** The seconds the time axis covers: the shared span when one is given, else the trace's own. */
+function spanOf(props: TraceChartProps): number {
+  return props.timeSpan ?? props.points.length * props.secondsPerPoint;
+}
+
+/** The axis the chart is drawn on: the one it is handed, else time over {@link spanOf}. */
+function axisOf(props: TraceChartProps): RideAxis {
+  return props.axis ?? timeAxis(spanOf(props));
 }
 
 /**
@@ -96,9 +150,14 @@ export function describeTrace(props: TraceChartProps): string {
     missingSamples === 0
       ? ''
       : ` ${String(missingSamples)} seconds of the ride have no ${label.toLowerCase()} reading.`;
+  const laps = props.laps ?? [];
+  const lapsSaid =
+    laps.length === 0
+      ? ''
+      : ` ${String(laps.length)} ${laps.length === 1 ? 'lap is' : 'laps are'} marked as bands.`;
   return (
     `${label} over ${duration}. Average ${format(mean)} ${unit}, ` +
-    `from ${format(extent.low)} to ${format(extent.high)} ${unit}.${breaks}${missing}`
+    `from ${format(extent.low)} to ${format(extent.high)} ${unit}.${breaks}${missing}${lapsSaid}`
   );
 }
 
@@ -109,13 +168,19 @@ function pathFor(
   totalPoints: number,
   low: number,
   high: number,
+  /** The seconds of ride the whole trace covers, first point to last. */
+  covered: number,
+  axis: RideAxis,
 ): string {
   // A flat trace — every reading identical, which a stopped trainer produces —
   // would divide by zero. Drawn down the middle instead of at the top, because
   // "constant" is a shape and pinning it to an edge reads as a maximum.
   const span = high - low;
+  // A point's moment: the first at the start, the last at the trace's end.
   const xOf = (index: number): number =>
-    totalPoints <= 1 ? CHART_WIDTH / 2 : ((from + index) / (totalPoints - 1)) * CHART_WIDTH;
+    axis.fractionAt(
+      totalPoints <= 1 ? covered / 2 : ((from + index) / (totalPoints - 1)) * covered,
+    ) * CHART_WIDTH;
   const yOf = (value: number): number =>
     span === 0 ? CHART_HEIGHT / 2 : CHART_HEIGHT - ((value - low) / span) * CHART_HEIGHT;
 
@@ -139,9 +204,6 @@ export interface TraceAxes {
   readonly times: readonly string[];
 }
 
-/** The time axis' title. Ride time, as the table's "From" column counts it. */
-export const TIME_AXIS_TITLE = 'Time into the ride';
-
 /**
  * The axes' labels — #1439: the chart had no scale at all, so a rider could
  * not read a watt or a minute off it. The value labels are the ends of the
@@ -150,9 +212,9 @@ export const TIME_AXIS_TITLE = 'Time into the ride';
  * trace, drawn down the middle, has its one value there.
  */
 export function traceAxes(props: TraceChartProps): TraceAxes {
-  const { label, unit, points, secondsPerPoint, format } = props;
+  const { label, unit, points, format } = props;
   const extent = traceExtent(points);
-  const total = points.length * secondsPerPoint;
+  const axis = axisOf(props);
   const withUnit = (value: number): string => `${format(value)} ${unit}`;
   const values =
     extent === undefined
@@ -163,8 +225,8 @@ export function traceAxes(props: TraceChartProps): TraceAxes {
   return {
     valueTitle: `${label} (${unit})`,
     values,
-    timeTitle: TIME_AXIS_TITLE,
-    times: [formatDuration(0), formatDuration(total / 2), formatDuration(total)],
+    timeTitle: axis.title,
+    times: axis.ticks,
   };
 }
 
@@ -185,17 +247,41 @@ export function traceAxes(props: TraceChartProps): TraceAxes {
  * nine bare numbers between them.
  */
 export default function TraceChart(props: TraceChartProps): JSX.Element {
-  const { points } = props;
+  const { points, secondsPerPoint, cursor, laps = [], cursorReading, onPick } = props;
   const extent = traceExtent(points);
   const segments = traceSegments(points);
   const description = describeTrace(props);
   const axes = traceAxes(props);
+  const axis = axisOf(props);
+  const covered = points.length * secondsPerPoint;
+  const cursorX = cursor === undefined ? undefined : axis.fractionAt(cursor) * CHART_WIDTH;
+  const xAt = (seconds: number): number => axis.fractionAt(seconds) * CHART_WIDTH;
+
+  /**
+   * A tap, or a hover with a mouse, moves the page's cursor to the moment
+   * under the pointer. A touch that drags is left to scroll the page.
+   */
+  const pick = (event: PointerEvent<SVGSVGElement>, always: boolean): void => {
+    if (onPick === undefined || (!always && event.pointerType !== 'mouse')) {
+      return;
+    }
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width <= 0) {
+      return;
+    }
+    onPick(axis.secondsAt((event.clientX - box.left) / box.width));
+  };
 
   return (
     <div className="oyl-trace-chart">
       <div className="oyl-trace-chart__value-title" aria-hidden="true">
         {axes.valueTitle}
       </div>
+      {cursorReading === undefined ? null : (
+        <div className="oyl-trace-chart__reading" aria-hidden="true">
+          {cursorReading}
+        </div>
+      )}
       <div className="oyl-trace-chart__values" aria-hidden="true">
         {axes.values.map((value, index) => (
           <div key={index}>{value}</div>
@@ -207,8 +293,37 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
         role="img"
         aria-label={description}
         preserveAspectRatio="none"
+        onPointerDown={(event) => {
+          pick(event, true);
+        }}
+        onPointerMove={(event) => {
+          pick(event, false);
+        }}
       >
         <g aria-hidden="true">
+          {laps.map((lap, index) => (
+            <g key={lap.number}>
+              {/* Every other lap shaded, so two laps side by side are two bands. */}
+              {index % 2 === 0 ? (
+                <rect
+                  className="oyl-trace__lap"
+                  x={xAt(lap.from).toFixed(2)}
+                  y="0"
+                  width={Math.max(0, xAt(lap.to) - xAt(lap.from)).toFixed(2)}
+                  height={String(CHART_HEIGHT)}
+                />
+              ) : null}
+              {lap.from <= 0 ? null : (
+                <line
+                  className="oyl-trace__lap-edge"
+                  x1={xAt(lap.from).toFixed(2)}
+                  x2={xAt(lap.from).toFixed(2)}
+                  y1="0"
+                  y2={String(CHART_HEIGHT)}
+                />
+              )}
+            </g>
+          ))}
           {segments.map((segment) => (
             <path
               key={segment.from}
@@ -226,9 +341,20 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
                 points.length,
                 extent?.low ?? 0,
                 extent?.high ?? 0,
+                covered,
+                axis,
               )}
             />
           ))}
+          {cursorX === undefined ? null : (
+            <line
+              className="oyl-trace__cursor"
+              x1={cursorX.toFixed(2)}
+              x2={cursorX.toFixed(2)}
+              y1="0"
+              y2={String(CHART_HEIGHT)}
+            />
+          )}
         </g>
       </svg>
       <div className="oyl-trace-chart__times" aria-hidden="true">

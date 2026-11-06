@@ -151,6 +151,15 @@ pnpm run test:coverage
 # slower runner. `check:test-split` fails the two if their excludes differ.
 pnpm run test:required
 
+# The same run as CI runs it since #2154, in two parts (§4c §"Two Vitest
+# shards"): each is `test:required` with a `--project` filter, the `web`
+# project in the first and every other project in the second, one per job.
+# `check:test-split` fails a part that is not that shape, a part over no
+# file, and a file in no part or in two; a NEW Vitest project is in the
+# second part without an edit. Locally `test:required` is the whole of both.
+pnpm run test:required:shard-1
+pnpm run test:required:shard-2
+
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
 # about three times. They gate exactly as before; the coverage report stops
@@ -174,7 +183,7 @@ pnpm run test:uninstrumented
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 60 cases on 2026-10-12 (51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 80 cases on 2026-11-04 (60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -353,10 +362,13 @@ OYL_HOSTED_BASEMAP_URL=https://…/basemap.pmtiles pnpm run test:browser
 
 # Fetch the browser the lockfile pins. @playwright/test 1.63.0 ships Chromium
 # revision 1243 and this fetches exactly that, so the browser is as
-# reproducible as the toolchain. ~170 MB, and `--with-deps` uses sudo to add
-# the shared libraries a headless Chromium needs. Skip it where a matching
-# browser is already installed.
-pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+# reproducible as the toolchain. `--only-shell` because the gate runs headless
+# with no `channel`, which launches the headless shell and never the full
+# Chromium. No `--with-deps` since #2207: CI's runner image already has every
+# shared library it needs, and apt's mirror is what timed the step out. On a
+# bare Linux machine without them, add `--with-deps` once (it uses sudo). Skip
+# it where a matching browser is already installed.
+pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
 # One package at a time, which is how you check a single package's harness.
 # `@onyourleft/sensors`' and `@onyourleft/fit`'s typechecks each run TWO
@@ -705,6 +717,12 @@ bash scripts/check-instance-image.test.sh
 # `skopeo` and needs neither; it runs in the required `checks` shard.
 bash scripts/mirror-base-image.sh
 bash scripts/mirror-base-image.test.sh
+
+# The basemap build's suite (#1557). build.sh itself is run by hand on the
+# owner's machine (apps/web/tools/basemap/README.md); its suite fakes `curl`,
+# `git`, `java` and `mvn`, downloads nothing and builds no tile, and runs in the
+# required `checks` shard.
+bash apps/web/tools/basemap/build.test.sh
 
 # The same image by hand. The commit is a REQUIRED build argument: the build
 # fails without it, rather than an instance that cannot say which source it

@@ -10,13 +10,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { distanceOnRoute, metres, type RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature } from '@onyourleft/map-features';
+import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 
 import { DOOR_PAINTS, paintsOf, roofPaintsOf, TRIM_PAINTS } from './building-paint';
 import {
   CHIMNEY,
   CHIMNEY_SHARE,
   EAVES_OVERHANG_METRES,
+  eavePitchOf,
   FACADE_DOOR,
   FACADE_OFFSET,
   FOOTPRINT_MAX_FAR_TRIANGLES,
@@ -46,6 +47,7 @@ import {
   FOOTPRINT_FIXTURE_VERDICTS,
   besideRoad,
   buildingBeside,
+  eavesOverhangOf,
   denseTownFixture,
   footprintFixture,
   mixedTownFixture,
@@ -55,7 +57,7 @@ import {
   type FootprintFixtureName,
 } from './footprint-fixtures-testing';
 import { FOUNDATION_METRES } from './buildings';
-import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
+import { kindAt, landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf } from './rectilinear-roofs';
@@ -65,6 +67,11 @@ import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadPosition, type CorridorOrigin } from './terrain';
+import {
+  landUseCorridor,
+  REMOVED_LAND_USE_KINDS,
+  TOWN_LAND_USE_CLASSES,
+} from './testing/land-use-fixtures';
 import type { WorldCorridor } from './world-data/corridor';
 
 const fixture = footprintFixture();
@@ -248,6 +255,7 @@ describe('a road wholly inside the footprint — rule 3', () => {
     kind: 'building',
     heightMetres: null,
     minHeightMetres: null,
+    ...NO_BUILDING_FIELDS,
     rings: [
       Float32Array.of(mx - 60, mz - 60, mx + 60, mz - 60, mx + 60, mz + 60, mx - 60, mz + 60),
     ],
@@ -651,7 +659,7 @@ describe('the surfaces — #1540’s table, with #1548’s swap', () => {
     expect(roofSurfaceOf('flat', 0.1)).toBe('flat-roof');
     expect(roofSurfaceOf('gable', 0.1)).toBe('roof-tiles');
     expect(roofSurfaceOf('gable', 0.9)).toBe('slate');
-    expect(footprintUse('built-up', 'retail')).toBe('commercial');
+    expect(footprintUse('built-up', 'commercial')).toBe('commercial');
     expect(footprintUse('built-up', 'railway')).toBe('industrial');
     expect(footprintUse('farmland', undefined)).toBe('farmland');
     expect(footprintUse('other', undefined)).toBe('residential');
@@ -671,6 +679,47 @@ describe('the surfaces — #1540’s table, with #1548’s swap', () => {
       expect(FOOTPRINT_SURFACES).toContain(plan.surfaces.wall);
       expect(FOOTPRINT_SURFACES).toContain(plan.surfaces.roof);
     }
+  });
+});
+
+describe('every land-use kind our archive emits keeps its footprint use — #1946', () => {
+  /**
+   * The use each kind read as before #1946 removed `neighbourhood` from the
+   * residential kinds: a frozen record, not derived from the planner. Only
+   * built-up land is read by its kind; farmland is farmland; every other class,
+   * and every kind #1630 removed (now `other`), is residential.
+   */
+  const USE_BEFORE_1946 = {
+    residential: ['residential'],
+    industrial: ['industrial', 'railway'],
+    commercial: ['commercial', 'school', 'college', 'university', 'hospital', 'pedestrian'],
+    farmland: ['farmland', 'meadow'],
+  } as const;
+  const kinds = [...Object.keys(TOWN_LAND_USE_CLASSES), ...REMOVED_LAND_USE_KINDS];
+  const expectedUse = (kind: string): string =>
+    Object.entries(USE_BEFORE_1946).find(([, of]) =>
+      (of as readonly string[]).includes(kind),
+    )?.[0] ?? 'residential';
+  const fixture = landUseCorridor(kinds);
+  const mask = landClassMask(fixture.corridor);
+
+  it('reads each kind through the planner’s own path — classAt, kindAt, footprintUse — as it did', () => {
+    for (const kind of kinds) {
+      const [x, z] = fixture.centreOf(kind);
+      expect(footprintUse(mask.classAt(x, z), kindAt(fixture.corridor, x, z)), kind).toBe(
+        expectedUse(kind),
+      );
+    }
+  });
+
+  it('control: the record names only kinds the archive emits, and the uses differ between them', () => {
+    for (const named of Object.values(USE_BEFORE_1946).flat()) expect(kinds).toContain(named);
+    const [rx, rz] = fixture.centreOf('residential');
+    const [cx, cz] = fixture.centreOf('commercial');
+    expect(footprintUse(mask.classAt(rx, rz), kindAt(fixture.corridor, rx, rz))).toBe(
+      'residential',
+    );
+    expect(footprintUse(mask.classAt(cx, cz), kindAt(fixture.corridor, cx, cz))).toBe('commercial');
   });
 });
 
@@ -839,8 +888,9 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     const hips = pitched.filter((plan) => plan.roof === 'hip').length;
     expect(hips / pitched.length).toBeGreaterThan(HIP_SHARE - 0.15);
     expect(hips / pitched.length).toBeLessThan(HIP_SHARE + 0.15);
-    // Every slope is at the plan's pitch: a roof normal's rise is its cosine.
-    for (const plan of pitched) {
+    // Every slope is at the plan's pitch: a roof normal's rise is its cosine. A #1785
+    // variant's slopes are at its own: `roof-variants.test.ts`.
+    for (const plan of pitched.filter((each) => each.roofVariant === 'plain')) {
       const floats = plan.triangles.roof;
       const cos = Math.cos((plan.pitchDegrees * Math.PI) / 180);
       for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
@@ -863,9 +913,12 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     for (const plan of pitched) {
       const roof = verticesOf(plan, 'roof');
       const eaves = eavesOf(plan);
-      // The lowest edge of the roof is the overhang's, its fall below the wall top.
+      // The lowest edge of the roof is the overhang's, its fall below the wall top — since
+      // #1785 at a gambrel's lower pitch; a saltbox's two eaves are level, at the plan's.
       const low = Math.min(...roof.map(([, y]) => y as number));
-      const fall = EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
+      const pitch = eavePitchOf(plan.roofVariant, plan.pitchDegrees);
+      // #1784: by its archetype's own overhang.
+      const fall = eavesOverhangOf(plan) * Math.tan((pitch * Math.PI) / 180);
       expect(low).toBeCloseTo(eaves - fall, 3);
       // #1660's split roofs reach past their own rectangles, not this one: `split-roofs.test.ts`.
       if ((rectanglesOf(plan.footprint)?.length ?? 1) > 1) continue;
@@ -878,7 +931,7 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
         const across = Math.abs(-dx * rectangle.uz + dz * rectangle.ux);
         reach = Math.max(reach, across - rectangle.halfShort);
       }
-      expect(reach).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
+      expect(reach).toBeCloseTo(eavesOverhangOf(plan), 3);
       // Its underside is painted trim: the soffit is there to be seen from the road.
       expect(plan.triangles.trim.length).toBeGreaterThan(0);
     }
@@ -980,7 +1033,16 @@ describe('a door canopy keeps the road’s clearance — #1581', () => {
       paths: [],
       streets: [],
     };
-    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    // #2023: a 2.4 m by 8 m footprint is under 20 m², which is inferred a shed; these are houses.
+    const { plans } = footprintPlans(
+      corridor,
+      landClassMask(corridor),
+      profile,
+      origin,
+      undefined,
+      undefined,
+      { inferredOutbuildings: false },
+    );
     expect(plans).toHaveLength(buildings.length);
     // A canopy is trim standing out over the door: anything nearer the road
     // than the wall by more than the eaves and, since #1588, their gutter.

@@ -16,7 +16,7 @@
  * work the way ADR 0011 divided the storage: {@link DetailStore.getStreamSetSummary}
  * answers "what is in this ride" without inflating a byte, and
  * {@link DetailStore.getStreamChannel} inflates exactly one channel, only for a
- * series the rider has switched on.
+ * chart the rider has scrolled to (#2068).
  */
 
 import type {

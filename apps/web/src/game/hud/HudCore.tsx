@@ -33,6 +33,9 @@ import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
+  CLOCK_KEY,
+  GRADIENT_KEY,
+  ELAPSED_TIME_KEY,
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
@@ -48,7 +51,10 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
+import { isLapRaceReading, riderHolds } from './lap-race-hud';
+import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
+import { ItemControl } from './ItemControl';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -84,6 +90,11 @@ export interface HudCoreProps extends SharedProps {
    */
   readonly units: UnitSystem;
   /**
+   * The time of day — #2072, `fields.ts` §`HudInput.timeOfDay`. `HudPanel`
+   * reads it from the device; the demo passes none, and has no clock.
+   */
+  readonly timeOfDay?: Date | undefined;
+  /**
    * Whether the HUD offers #1482's touch lock: a rider's every ride does; the
    * demo, which nobody rides with wet gloves, does not.
    */
@@ -106,6 +117,20 @@ export interface HudCoreProps extends SharedProps {
    * because there a pacer is one choice away. A chased rider's gap still shows.
    */
   readonly withoutPacer?: boolean;
+  /**
+   * Leaves out the second control, *End ride* (*Stop* on the demo), and keeps
+   * *Pause*. The demo's `?controls=0` (#1654, owner ruling of 2026-10-30): an
+   * embedding site may drop *Stop*, but *Pause* and *Play* always stay, so the
+   * demo meets WCAG 2.2 SC 2.2.2 on its own. A rider's ride never passes it.
+   */
+  readonly withoutEnd?: boolean;
+  /**
+   * Leaves out *Elapsed* (#2072). The demo's: its clock stops while it is
+   * paused, so it has no elapsed time apart from the moving time it shows,
+   * and the same figure under two labels would say it had never paused. A
+   * rider's ride keeps it.
+   */
+  readonly withoutElapsed?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -118,15 +143,18 @@ export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
  * named image and its plan says where the rider is (`PlanTrace.tsx`).
  */
 export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
-  primary: 'Power, cadence and heart rate',
+  primary: 'Power, cadence, heart rate and gradient',
   secondary: 'Ride readings',
 };
 
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
-  const readings =
-    props.withoutPacer === true ? all.filter((reading) => reading.key !== EMPTY_GAP_KEY) : all;
+  const readings = all.filter(
+    (reading) =>
+      !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
+      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY),
+  );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
@@ -203,20 +231,22 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           >
             {props.paused ? props.labels.resume : 'Pause'}
           </button>
-          <button
-            type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-            onClick={props.onEnd}
-            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-            // #1482: never stopped by the touch lock. It ends the game's
-            // gradient session — what the app asks of the trainer — and a
-            // rider who wants that gone must not first have to unlock, the
-            // rule `End ERG` and `End workout` follow on the Ride screen. It
-            // does not end the recording (`GameView.tsx` §`teardown`).
-            {...{ [TOUCH_LOCK_EXEMPT]: '' }}
-          >
-            {props.labels.end}
-          </button>
+          {props.withoutEnd === true ? null : (
+            <button
+              type="button"
+              className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+              onClick={props.onEnd}
+              style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+              // #1482: never stopped by the touch lock. It ends the game's
+              // gradient session — what the app asks of the trainer — and a
+              // rider who wants that gone must not first have to unlock, the
+              // rule `End ERG` and `End workout` follow on the Ride screen. It
+              // does not end the recording (`GameView.tsx` §`teardown`).
+              {...{ [TOUCH_LOCK_EXEMPT]: '' }}
+            >
+              {props.labels.end}
+            </button>
+          )}
           {props.touchLock ? (
             <TouchLockButton
               locked={touchLocked}
@@ -257,11 +287,37 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.throwing === undefined ? null : (
           <ThrowControl port={props.throwing} touchLocked={touchLocked} />
         )}
-        {/* #1820: a Delivery round's lane keys. Nothing drawn, so nothing the lock refuses. */}
+        {/*
+          #1901: a lap race's item use, where the throws stand on a round.
+          Inside this region, so the lock refuses a tap on it as on Pause: it
+          is not exempt (ADR 0060 D-13), and a key or a pad still uses the item.
+        */}
+        {props.items === undefined ? null : (
+          <ItemControl
+            port={props.items}
+            touchLocked={touchLocked}
+            // #1968: unavailable while the race says nothing is held. A HUD
+            // handed an item port and no race cannot know, and refuses nothing.
+            held={props.lapRace === undefined || riderHolds(props.lapRace)}
+          />
+        )}
+        {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
-        {/* #1821: a gamepad's throws and lane changes, to the same two ports. Nothing drawn. */}
-        {props.throwing === undefined && props.steering === undefined ? null : (
-          <GamepadIntents throwing={props.throwing} steering={props.steering} />
+        {/* #1821: a gamepad's throws, items and lane changes, to the same ports. Nothing drawn. */}
+        {props.throwing === undefined &&
+        props.steering === undefined &&
+        props.items === undefined ? null : (
+          <GamepadIntents throwing={props.throwing} steering={props.steering} items={props.items} />
+        )}
+        {/* #1827: a paired steering controller's lane changes, lanes and throws, to a round's ports. Nothing drawn. */}
+        {props.controller === undefined ||
+        (props.throwing === undefined && props.steering === undefined) ? null : (
+          <ControllerIntents
+            controller={props.controller}
+            throwing={props.throwing}
+            steering={props.steering}
+            lanes={props.lanes}
+          />
         )}
         {props.moreActions}
       </div>
@@ -367,10 +423,21 @@ function fieldClass(reading: HudReading): string {
     'oyl-hud__field',
     ...(reading.stale ? ['oyl-hud__field--stale'] : []),
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
+    // #2071: the gradient, which an upright phone with no room for a fourth
+    // primary track draws in the secondary panel (`theme.css`
+    // §"THE GRADIENT, PRIMARY").
+    ...(reading.key === GRADIENT_KEY ? ['oyl-hud__field--gradient'] : []),
+    // #2072: the clock row's two (`theme.css` §"THE CLOCK ROW").
+    ...(reading.key === ELAPSED_TIME_KEY ? ['oyl-hud__field--elapsed'] : []),
+    ...(reading.key === CLOCK_KEY ? ['oyl-hud__field--clock'] : []),
     // #1356: on a phone a room's readings take the places of these.
     ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
     // #1812: and a Delivery round's, the same way (`theme.css` §"A ROOM RIDE ON A PHONE").
     ...(isDeliveryReading(reading) ? ['oyl-hud__field--delivery'] : []),
+    // #1904: and a lap race's, the same way; and a field warning of a hit
+    // coming is outlined (`theme.css` §"A LAP RACE ON THE HUD").
+    ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
+    ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
   ].join(' ');
 }
@@ -397,8 +464,14 @@ function FieldList(props: {
               reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
             }
           >
-            {reading.value}
-            {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
+            <Value reading={reading} />
+            {reading.unit === '' ? null : (
+              <span className="oyl-hud__unit">
+                {' '}
+                {reading.unit}
+                {reading.slope === undefined ? null : <SlopeGlyph slope={reading.slope} />}
+              </span>
+            )}
             {reading.detail === undefined ? null : (
               // ⚠️ Inside the `dd`, not beside it. A screen reader announces
               // one definition per term, so a phrase in a sibling element
@@ -425,6 +498,53 @@ function FieldList(props: {
     </dl>
   );
 }
+
+/**
+ * A reading's value — and, for a signed one (#2071, the gradient's), its sign
+ * in a span of its own: `theme.css` §"THE GRADIENT, PRIMARY" sets the sign
+ * smaller than the digits, which is what lets `+12.5` fit a primary track on
+ * a phone on its side. The text is the value's own, so a reader of the `dd`
+ * reads `+4.5` exactly as `fields.ts` formatted it.
+ */
+function Value(props: { readonly reading: HudReading }): JSX.Element {
+  const { value, slope } = props.reading;
+  const sign = value.charAt(0);
+  if (slope === undefined || (sign !== '+' && sign !== '-')) return <>{value}</>;
+  return (
+    <>
+      <span className="oyl-hud__sign">{sign}</span>
+      {value.slice(1)}
+    </>
+  );
+}
+
+/**
+ * The gradient's slope glyph — #2071: a short stroke beside its unit, rising
+ * for a climb, falling for a descent, flat for level road, so the sign is
+ * read as a shape as well as a character (`fields.ts`
+ * §`HudReading.slope`). ⚠️ `aria-hidden`: the signed value says it in text.
+ */
+function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Element {
+  const [from, to] = SLOPE_ENDS[props.slope];
+  return (
+    <svg
+      className="oyl-hud__slope"
+      viewBox="0 0 16 12"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-slope={props.slope}
+    >
+      <line x1="1" y1={from} x2="15" y2={to} />
+    </svg>
+  );
+}
+
+/** Where the slope glyph's stroke starts and ends, top-down, in its 16 × 12 box. */
+const SLOPE_ENDS: Readonly<Record<'up' | 'down' | 'level', readonly [number, number]>> = {
+  up: [11, 1],
+  down: [1, 11],
+  level: [6, 6],
+};
 
 /**
  * A field's gauge — #787, the draft's (#327's indicator criteria): a bar

@@ -42,6 +42,12 @@
  *   whose own page states CC0 or CC-BY-4.0 was found (spike 0005).
  * - {@link REALISTIC_BICYCLE_MAPS} are that bicycle's surfaces since #624:
  *   four small maps this repository draws, on the geometry it already had.
+ * - {@link REALISTIC_ROADSIDE_MODELS} are a street's lamp post and a
+ *   gantry's barrier since #1274: Poly Haven's, coloured a vertex at a time —
+ *   and, since the owner's ruling of 2026-11-05 on it, a village's litter.
+ * - {@link REALISTIC_CHAIN_LINK} is the chain-link fence beside industrial,
+ *   school and sports grounds (#1274): Poly Haven's, its frame coloured a
+ *   vertex at a time and its wire a cut-out picture.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -716,6 +722,53 @@ export function houseModelFile(id: HouseModelId): string {
 export const REALISTIC_HOUSE_ATLAS = 'house_models_atlas.ktx2';
 
 /**
+ * The roadside models — #1274: Poly Haven's CC0 `street_lamp_01`, which a
+ * village street's lamp posts are drawn as, and `concrete_road_barrier`,
+ * which the gantries' barriers are. Each a GLB of geometry and a colour a
+ * vertex, with no picture and no material (`tools/realistic/blender/
+ * process_roadside_model.py`), so each is drawn inside the draw call the
+ * shape it replaces already made: the lamp in the street furniture's painted
+ * mesh (`three-renderer.ts` §`FurnitureBelt`), the barrier in the gantries'
+ * boxes (§`GantryBelt`). The stylised world draws its own shapes as before.
+ */
+export const REALISTIC_ROADSIDE_MODELS = {
+  lamp: 'street_lamp_01.glb',
+  barrier: 'concrete_road_barrier.glb',
+  // The owner's ruling of 2026-11-05 on #1274: a village's litter, Poly
+  // Haven's CC0 `trashbag` and `old_tyre`, merged into the street
+  // furniture's painted mesh as the lamp is (`litter.ts`).
+  bag: 'trashbag.glb',
+  tyre: 'old_tyre.glb',
+} as const;
+
+/** One of {@link REALISTIC_ROADSIDE_MODELS}. */
+export type RoadsideModel = keyof typeof REALISTIC_ROADSIDE_MODELS;
+
+/** Every {@link RoadsideModel}, in a fixed order. */
+export const REALISTIC_ROADSIDE_MODEL_NAMES: readonly RoadsideModel[] = [
+  'lamp',
+  'barrier',
+  'bag',
+  'tyre',
+];
+
+/**
+ * The chain-link fence — #1274, the owner's ruling of 2026-11-05: Poly
+ * Haven's CC0 `modular_chainlink_fence`, beside industrial, school and sports
+ * grounds only (`chain-link.ts`). `model` is one 8 m piece, four of the kit's
+ * double panels between five of its posts (`tools/realistic/blender/
+ * process_chain_link.py`): its `frame`, the posts and the panels' tubes, a
+ * colour a vertex, and its `wire`, the panels' planes with their texture
+ * coordinates. `wire` is the kit's own wire opacity map, which the wire is cut
+ * out by. It is drawn inside the field fence's own instanced draw
+ * (`three-renderer.ts` §`RealisticStructureBelts`), so it adds no call.
+ */
+export const REALISTIC_CHAIN_LINK = {
+  model: 'modular_chainlink_fence.glb',
+  wire: 'modular_chainlink_fence_wire_opacity_1k.ktx2',
+} as const;
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -757,6 +810,9 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_WORDMARK,
     ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
     REALISTIC_HOUSE_ATLAS,
+    ...REALISTIC_ROADSIDE_MODEL_NAMES.map((model) => REALISTIC_ROADSIDE_MODELS[model]),
+    REALISTIC_CHAIN_LINK.model,
+    REALISTIC_CHAIN_LINK.wire,
   ];
 }
 

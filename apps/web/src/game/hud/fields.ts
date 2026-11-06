@@ -46,13 +46,14 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { formatDuration } from '../../format';
+import { formatDuration, formatTimeOfDay } from '../../format';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
 import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
+import { lapRaceReadings, type LapRaceHud } from './lap-race-hud';
 import { planLap, planProgress } from './plan';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -142,6 +143,23 @@ export interface HudReading {
    * cannot see it loses nothing. Absent on every other field.
    */
   readonly gauge?: number | undefined;
+  /**
+   * That the field is warning of something — #1904, a lap race's hit coming
+   * (`lap-race-hud.ts` §`incomingHit`). It draws the field with a thick dashed
+   * outline (`theme.css` §"A LAP RACE ON THE HUD"), a shape rather than a
+   * tint, so the warning is never carried by colour alone (SC 1.4.1).
+   * ⚠️ **Never the only carrier**: {@link detail} says what is coming in
+   * words. Absent on every other field.
+   */
+  readonly alert?: boolean | undefined;
+  /**
+   * Which way the road goes — #2071, the gradient's alone: a small slope glyph
+   * drawn beside its unit, rising for `up`, falling for `down`, flat for
+   * `level` (`HudCore.tsx` §`SlopeGlyph`). ⚠️ **Never the only carrier**: the
+   * value's own sign says it (`gradientReading`), so the glyph is
+   * `aria-hidden`. Absent on every other field.
+   */
+  readonly slope?: 'up' | 'down' | 'level' | undefined;
 }
 
 /**
@@ -156,21 +174,32 @@ export interface HudReading {
  *
  * | tier | fields | why |
  * |---|---|---|
- * | `primary` | power, cadence, heart rate | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to |
- * | `secondary` | speed, gradient, to go, moving time, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the moving time, the gaps and the wind change slowly |
+ * | `primary` | power, cadence, heart rate, gradient | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to — and, since #2071, the road they are steering it ON |
+ * | `secondary` | speed, to go, moving time, elapsed time, clock, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; to-go, the two ride times, the clock, the gaps and the wind change slowly |
+ *
+ * ⚠️ **The gradient is primary since #2071, and a reviewer who remembers it
+ * secondary — "felt through the pedals before it is read" — is reading the
+ * old file.** The owner, 2026-11-03: *the grade is hard to see*. It is the
+ * number that says why the same effort is suddenly slower and what the next
+ * minute will ask, so it is drawn at the primary size, SIGNED (`+4.5`,
+ * `-2.0`), with a slope glyph beside its unit ({@link HudReading.slope}).
+ * Where it is drawn on each layout is `theme.css` §"THE GRADIENT, PRIMARY":
+ * on an upright phone too narrow or too short for four primary readings it
+ * keeps the secondary size, in the secondary panel's first cell.
  *
  * ⚠️ **Moving time is secondary, decided for #1111.** It is not a sensor and
  * nothing is ridden TO it second by second: it climbs at one second a second,
  * and a rider reads it the way they read the distance to go — now and then,
  * to know how far into the ride they are. A primary slot would also cost the
- * road the most: the primary tier is three 2.5 rem readings across the top,
- * and a fourth there would widen the corner a rider's eye goes to first for
- * the one number on the HUD that tells them nothing about the effort.
+ * road the most: the primary tier is four 2.5 rem readings across the top
+ * since #2071, and a fifth there would widen the corner a rider's eye goes to
+ * first for the one number on the HUD that tells them nothing about the
+ * effort.
  *
- * ⚠️ **The order {@link hudReadings} returns is untouched**, and the primary
- * three were already its first three — so a field is still found by position
- * (#94), within a tier and across the pair. The tier decides a size and which
- * corner; it moves no field relative to its neighbours.
+ * ⚠️ **The order {@link hudReadings} returns** puts the four primary
+ * readings first, then the rest; since #2071 the gradient is fourth and speed
+ * fifth. Nothing reads it by position: the view and the announcer look a
+ * reading up by key. The tier decides a size and which corner.
  *
  * ⚠️ **This is NOT a statement about which readings are SPOKEN.**
  * [#395](https://github.com/openzigs/onyourleft/issues/395) asks that question
@@ -191,7 +220,15 @@ export type ReadingTier = 'primary' | 'secondary';
  * otherwise, which is the cheap direction to be wrong in: a secondary reading
  * costs the road less.
  */
-const PRIMARY_READING_KEYS: ReadonlySet<string> = new Set(['power', 'cadence', 'heartRate']);
+const PRIMARY_READING_KEYS: ReadonlySet<string> = new Set([
+  'power',
+  'cadence',
+  'heartRate',
+  'gradient',
+]);
+
+/** The key of the gradient field — #2071. @see gradientReading */
+export const GRADIENT_KEY = 'gradient';
 
 /** Which tier a reading is drawn in. @see ReadingTier */
 export function readingTier(reading: HudReading): ReadingTier {
@@ -333,6 +370,12 @@ export interface HudInput {
    */
   readonly delivery?: DeliveryHud | undefined;
   /**
+   * A solo lap race, on a ride running one — #1904 (ADR 0060). Absent on every
+   * other ride, so an ordinary ride's HUD reads exactly as it did, and chosen
+   * at the start of the ride and held for it, as {@link delivery} is.
+   */
+  readonly lapRace?: LapRaceHud | undefined;
+  /**
    * Which units the rider reads in (#238).
    *
    * ⚠️ **An ordinary parameter, not a React context.** This file is pure —
@@ -365,6 +408,37 @@ export interface HudInput {
    * the rider has not moved.
    */
   readonly movingSeconds?: number | undefined;
+  /**
+   * The ride's elapsed time, in seconds, pauses INCLUDED — #2072. **The
+   * recorder's again** ({@link movingSeconds} says why there is no other
+   * clock): `RideSnapshot.elapsedSeconds`, the recorder session's
+   * `elapsedTime`, read through `trainer-port.ts`
+   * §`GameTrainerPort.rideElapsedSeconds`. It is worked out from the
+   * instants the recording was told about (`domain/recording/session.ts`
+   * §`elapsedTime`), so a timer that fires while no reading arrives moves it
+   * no more than it moves the moving time — and it is the figure the saved
+   * activity's `elapsedTime` is written from.
+   *
+   * ⚠️ **Never derived from {@link movingSeconds}**, nor the other way round:
+   * the two differ by exactly the time paused, which is the whole of what a
+   * rider reading both is told.
+   *
+   * `undefined` where nothing is being recorded, and then the field shows
+   * {@link NO_READING}, as the moving time does.
+   */
+  readonly elapsedSeconds?: number | undefined;
+  /**
+   * The device's own time, now — #2072: the time of day, shown `HH:MM` under
+   * the label *Clock* ({@link clockReading}). Not a ride figure and not a
+   * clock of the ride's: what a rider with the phone's own status bar hidden
+   * under a full-bleed ride (`shell/immersive.ts`) cannot otherwise see.
+   *
+   * ⚠️ **Absent means the field is absent**, not a dash: the demo (#1650)
+   * passes none, and a ride's HUD always does (`HudPanel.tsx`). The choice is
+   * made by the caller and never changes mid-ride, so no field moves under a
+   * rider ({@link hudReadings}).
+   */
+  readonly timeOfDay?: Date | undefined;
   /**
    * The moving time of the lap in progress, in seconds — #1312. **The
    * recorder's again** ({@link movingSeconds} says why there is no other
@@ -461,22 +535,61 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
       0,
       input.heartRate.paired,
     ),
-    // Speed, gradient and distance come from the simulation, which cannot drop
-    // out: it is computation, not a sensor. They are never stale.
+    // #2071: the gradient, primary, so it moved from after the speed to here:
+    // the primary readings come first, so splitting the list at the tier
+    // boundary moves nothing (`ReadingTier`). Speed went from index 3 to 4;
+    // every field from the distance to go on keeps its index.
+    gradientReading(state.grade),
+    // Speed and distance, like the gradient, come from the simulation, which
+    // cannot drop out: it is computation, not a sensor. They are never stale.
     measured('speed', 'Speed', speed),
-    reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
     // #1111: beside the distance to go, the other "how far into it am I". It
     // is always present, so its index is the same on every ride; it moved
     // every gap, room and wind field one place along, once, for every ride.
     movingTimeReading(input.movingSeconds),
+    // #2072: the elapsed time beside the moving time, and the time of day
+    // beside both. Each is present on every ride (the clock on every ride's
+    // HUD), so their indices are the same on every ride; they moved every
+    // gap, room and wind field two places along, once.
+    elapsedTimeReading(input.elapsedSeconds),
+    ...clockReading(input.timeOfDay),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
     ...deliveryReadings(input.delivery),
+    // #1904: a lap race's, last for the same reason. A ride runs one mode.
+    ...lapRaceReadings(input.lapRace),
   ];
+}
+
+/**
+ * The gradient — #2071: signed, one decimal, at the primary size.
+ *
+ * ⚠️ **Signed with `+` as well as `-`**, unlike the gap and the wind, which
+ * carry their direction in a word because *"a minus sign is one glyph wide at
+ * arm's length and is the first thing lost"* ({@link timeGap}). Here a word
+ * would be a sentence in a primary track, so the sign stays, and it is never
+ * the only carrier: {@link HudReading.slope} draws a slope glyph whose angle
+ * follows it, and a climb's `+` and a descent's `-` are two different
+ * shapes, not one glyph present or absent.
+ *
+ * ⚠️ **Judged on the ROUNDED value**, as the gap's `Level` is: a grade of
+ * -0.04 % displays as `0.0` with a flat glyph, never `-0.0` or `+0.0`, which
+ * would claim a direction the digits do not support.
+ */
+function gradientReading(grade: number): HudReading {
+  // The state's `GradePercent` is finite by construction
+  // (`@onyourleft/domain` §`gradePercent`), so there is no dash to show.
+  // Round the magnitude, so a half rounds away from zero both ways: Math.round
+  // alone sends -0.05 to level while +0.05 is +0.1.
+  const shown = (Math.sign(grade) * Math.round(Math.abs(grade) * 10)) / 10;
+  const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
+  const magnitude = Math.abs(shown).toFixed(1);
+  const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
+  return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */
@@ -522,13 +635,36 @@ export function givesWayToTheRoom(reading: HudReading): boolean {
  * 1.5 rem on the CI runner's fonts it would be wider than a 93 px track.
  */
 function movingTimeReading(movingSeconds: number | undefined): HudReading {
+  return rideTimeReading(MOVING_TIME_KEY, 'Moving', movingSeconds);
+}
+
+/** The key of the elapsed-time field — #2072. @see elapsedTimeReading */
+export const ELAPSED_TIME_KEY = 'elapsedTime';
+
+/**
+ * The elapsed-time field — #2072: the ride's time with its pauses, beside
+ * {@link movingTimeReading}'s without them, in the same `h:mm:ss`, never
+ * stale, and set at the word size past ten hours for the same reason.
+ *
+ * ⚠️ **Labelled `Elapsed`, one word, as the Ride screen's clock labels the
+ * same figure** (`views/RideView.tsx` §`RideClock`), so the two times on the
+ * HUD are told apart by their labels, and `Moving` is not `Moving time` for
+ * {@link movingTimeReading}'s reason. Where each is drawn is `theme.css`
+ * §"THE CLOCK ROW".
+ */
+function elapsedTimeReading(elapsedSeconds: number | undefined): HudReading {
+  return rideTimeReading(ELAPSED_TIME_KEY, 'Elapsed', elapsedSeconds);
+}
+
+/** One of the ride's two times, `h:mm:ss`, or a dash with nothing recorded. */
+function rideTimeReading(key: string, label: string, seconds: number | undefined): HudReading {
   const value =
-    movingSeconds === undefined || !Number.isFinite(movingSeconds)
+    seconds === undefined || !Number.isFinite(seconds)
       ? NO_READING
-      : formatDuration(movingSeconds, 'always');
+      : formatDuration(seconds, 'always');
   return {
-    key: MOVING_TIME_KEY,
-    label: 'Moving',
+    key,
+    label,
     value,
     unit: '',
     stale: false,
@@ -538,6 +674,24 @@ function movingTimeReading(movingSeconds: number | undefined): HudReading {
 
 /** The widest moving time the HUD's layout is measured at — #1111. @see movingTimeReading */
 const WIDEST_MEASURED_MOVING_TIME = '9:59:59';
+
+/** The key of the time-of-day field — #2072. @see clockReading */
+export const CLOCK_KEY = 'clock';
+
+/**
+ * The time of day — #2072: `HH:MM` on the device's own clock
+ * (`format.ts` §`formatTimeOfDay`), labelled `Clock` — a word that cannot be
+ * read as a third ride time beside `Moving` and `Elapsed`. No seconds: it is
+ * read the way a wall clock is, and a digit that changes every second is one
+ * a glance has to settle on. Absent with no time handed in
+ * ({@link HudInput.timeOfDay}).
+ */
+function clockReading(timeOfDay: Date | undefined): readonly HudReading[] {
+  if (timeOfDay === undefined) return [];
+  return [
+    { key: CLOCK_KEY, label: 'Clock', value: formatTimeOfDay(timeOfDay), unit: '', stale: false },
+  ];
+}
 
 /**
  * The room's two fields — #783: the one chosen rider's gap, and how many are

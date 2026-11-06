@@ -15,7 +15,10 @@
  * - drawn through the real `RiderBelt`, the rider in it is told from the
  *   pacer and the ghost by #368's measure (`kit-palette-testing.ts`), each of
  *   the three held to its OWN hue in both directions;
- * - and a jersey equal to the bot's tint fails that measure — the control.
+ * - and a jersey equal to the bot's tint fails that measure — the control;
+ * - its jersey is held 40 degrees of hue from every other entry's jersey, so
+ *   no two choices are near-duplicates (#2123). One pair is short of it and
+ *   is named, with why, in {@link SHORT_PAIRS}.
  */
 
 import { KIT_COLOURS } from '@onyourleft/store';
@@ -31,15 +34,38 @@ import {
 } from './bicycle';
 import {
   albedoBytes,
+  hueApart,
   linearOf,
+  TOLD_APART,
   toldApartFaults,
   toldApartFigures,
+  type Bytes,
   type ThreeJerseys,
 } from './kit-palette-testing';
 import type { RiderMarker } from './port';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
 import { qualitySettings } from './quality';
 import { LIT_COLOURS, RiderBelt, riderKitsOf, threeGameRenderer } from './three-renderer';
+
+/**
+ * The pairs of entries whose jerseys are closer than
+ * `TOLD_APART.HUE_APART_DEGREES`, each named with its gap and the issue that
+ * owns it. ⚠️ **Not a place to put a new entry that fails**: the test below
+ * also fails a pair listed here that is no longer short, so the list can only
+ * shrink. The house kit is in no pair, which is #2123's ruling: it is its own
+ * colour.
+ */
+const SHORT_PAIRS: ReadonlySet<string> = new Set([
+  // 31.0 apart. Both predate #2123's measure, and moving either changes what
+  // a rider who chose it wears, which is the owner's to rule on; #2123's pull
+  // request records it as deferred.
+  'green–lime',
+]);
+
+/** A colour's three 8-bit channels, from `0xrrggbb`. */
+function bytesOf(hex: number): Bytes {
+  return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
+}
 
 /** WCAG's relative luminance, from the linear channels. */
 function luminance(hex: number): number {
@@ -133,6 +159,26 @@ describe('the kit palette — #623', () => {
       const { jersey, limb } = KIT_PALETTE[key].kit;
       expect(luminance(limb), key).toBeLessThan(luminance(jersey));
     }
+  });
+
+  it('holds every entry’s jersey 40 degrees of hue from every other entry’s — #2123', () => {
+    // The owner's ruling of 2026-11-05: the house kit stays teal, its own
+    // colour, and is not the page's Hi-Vis accent, an olive 13 degrees from
+    // the Lime kit. So no entry may sit beside another, the house kit included.
+    const short: string[] = [];
+    for (const [i, a] of KIT_COLOURS.entries()) {
+      for (const b of KIT_COLOURS.slice(i + 1)) {
+        const degrees = hueApart(
+          bytesOf(KIT_PALETTE[a].kit.jersey),
+          bytesOf(KIT_PALETTE[b].kit.jersey),
+        );
+        console.log(`#2123 ${a}–${b}: ${degrees.toFixed(1)} of hue apart`);
+        if (!(degrees >= TOLD_APART.HUE_APART_DEGREES)) short.push(`${a}–${b}`);
+      }
+    }
+    expect(short.filter((pair) => pair.includes('house'))).toEqual([]);
+    // Both ways: no new pair is short, and no listed pair has stopped being.
+    expect(new Set(short)).toEqual(SHORT_PAIRS);
   });
 
   it('tells the rider in every entry from the pacer and the ghost, each in its own hue — the stylised belt', () => {

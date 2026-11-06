@@ -284,7 +284,15 @@ describe('the arrangement a route produces — #341', () => {
     // structures are as many: what moved is which kind stands on four plots a
     // village, and where. `settlements-variety.test.ts` asserts the layout and
     // names no coordinate.
-    expect(digest(placed.map(serialise))).toBe('31116546');
+    //
+    // ⚠️ **And regenerated for #2101, and ONLY the heights moved** —
+    // `31116546` before it. Every item stands at the height of the drawn
+    // ground's highest triangle under it (`landform.ts` §`standingOnGround`)
+    // rather than at `terrainHeightAt`'s, which can differ from the triangles
+    // by millimetres on this fixture's gentle arc and by metres beside a very
+    // sharp bend. The plan digest below is unmoved by it, and so are the
+    // counts: nothing here stands over no ground, so nothing was dropped.
+    expect(digest(placed.map(serialise))).toBe('c227601d');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -334,7 +342,9 @@ describe('the arrangement a route produces — #341', () => {
     const natural = wooded.filter((item) =>
       (SCATTER_KINDS as readonly string[]).includes(item.kind),
     );
-    expect(digest(wooded.map(serialise))).toBe('01218942');
+    // ⚠️ #2101 moved its heights, as above, and nothing else: `01218942`
+    // until then, the plan digest and the counts unmoved.
+    expect(digest(wooded.map(serialise))).toBe('f3e6a32b');
     expect(digest(wooded.map(serialisePlan))).toBe('37f179e3');
     expect(natural.length).toBe(6968);
     expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1021);
@@ -476,7 +486,7 @@ describe('the arrangement a route produces — #341', () => {
     // item is a different one, because the tree a garden no longer clears
     // (above) makes the sweep six items longer and moves where its middle is.
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'building 32.895 -0.280 193.409 2.058 1.000',
+      'building 32.895 -0.284 193.409 2.058 1.000',
     );
     // ⚠️ Since #1534 the middle item is a different one again, for #571's
     // reason the other way round: the cleared village makes the sweep 291
@@ -484,10 +494,15 @@ describe('the arrangement a route produces — #341', () => {
     // ⚠️ And since #1565, 16 structures shorter (the crossroads), so the
     // middle is a different item once more; the first and last did not move.
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 779.333 23.185 173.764 5.459 0.741',
+      'tree-conifer 779.333 23.179 173.764 5.459 0.741',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 696.874 42.982 -291.754 0.240 1.178',
+      'tree-conifer 696.874 42.979 -291.754 0.240 1.178',
     );
+    // ⚠️ #2101 moved all three heights and nothing else: `-0.280`, `23.185`
+    // and `42.982` until then. Each item stands at the height of the drawn
+    // ground's highest triangle under it (`landform.ts` §`standingOnGround`)
+    // rather than at `terrainHeightAt`'s, which the rows the mesh is built
+    // from cut a few millimetres under or over.
   });
 });

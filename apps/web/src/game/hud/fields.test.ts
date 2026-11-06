@@ -12,8 +12,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLOCK_KEY,
   DELIVERY_HOUSES_KEY,
   DELIVERY_SCORE_KEY,
+  ELAPSED_TIME_KEY,
+  GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
@@ -36,6 +39,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradePercent,
   metres,
   metresPerSecond,
   pacerGap,
@@ -944,22 +948,25 @@ describe('which readings are drawn large (#423)', () => {
     };
   }
 
-  it('draws power, cadence and heart rate large, and nothing else', () => {
+  it('draws power, cadence, heart rate and — since #2071 — the gradient large, and nothing else', () => {
     const tiers = hudReadings(everyField()).map((each) => [each.key, readingTier(each)]);
 
     expect(tiers.filter(([, tier]) => tier === 'primary').map(([key]) => key)).toEqual([
       'power',
       'cadence',
       'heartRate',
+      // #2071: the owner's "the grade is hard to see". @see ReadingTier
+      'gradient',
     ]);
     // Non-vacuity: the fixture really does carry the fields a secondary tier
     // would be wrong about — both gaps and the wind.
     expect(tiers.filter(([, tier]) => tier === 'secondary').map(([key]) => key)).toEqual([
       'speed',
-      'gradient',
       'remaining',
       // #1111: secondary, beside the distance to go. @see ReadingTier
       'movingTime',
+      // #2072: and the elapsed time beside it (this ride has no clock).
+      'elapsedTime',
       'gap-bot',
       'gap-ghost',
       'wind',
@@ -1159,6 +1166,71 @@ describe('the ride’s moving time — #1111', () => {
   });
 });
 
+/**
+ * #2072: the elapsed time and the time of day beside the moving time.
+ * `HudPanel.test.tsx` reads them off the rendered HUD and
+ * `trainer-wiring.test.tsx` over the real recorder; this is the model.
+ */
+describe('the ride’s elapsed time and the time of day — #2072', () => {
+  const field = (input: HudInput, key: string) =>
+    hudReadings(input).find((reading) => reading.key === key);
+
+  it('shows the recorder’s elapsed time as h:mm:ss, labelled Elapsed, beside Moving', () => {
+    expect(field({ ...baseInput(), elapsedSeconds: 125 }, ELAPSED_TIME_KEY)).toEqual({
+      key: ELAPSED_TIME_KEY,
+      label: 'Elapsed',
+      value: '0:02:05',
+      unit: '',
+      stale: false,
+    });
+    const keys = hudReadings(baseInput()).map((reading) => reading.key);
+    expect(keys.indexOf(ELAPSED_TIME_KEY)).toBe(keys.indexOf(MOVING_TIME_KEY) + 1);
+  });
+
+  it('is its own figure, never the moving time, nor anything the simulation counted', () => {
+    // A minute paused: the recorder says 65 s moving and 125 s elapsed, and
+    // the simulation has been running for ten minutes.
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      movingSeconds: 65,
+      elapsedSeconds: 125,
+    };
+    expect(field(input, MOVING_TIME_KEY)?.value).toBe('0:01:05');
+    expect(field(input, ELAPSED_TIME_KEY)?.value).toBe('0:02:05');
+  });
+
+  it('shows a dash with nothing recorded, and the word size past ten hours', () => {
+    for (const elapsedSeconds of [undefined, Number.NaN]) {
+      expect(field({ ...baseInput(), elapsedSeconds }, ELAPSED_TIME_KEY)?.value).toBe(NO_READING);
+    }
+    expect(field({ ...baseInput(), elapsedSeconds: 35_999 }, ELAPSED_TIME_KEY)?.word).toBe(
+      undefined,
+    );
+    expect(field({ ...baseInput(), elapsedSeconds: 36_000 }, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  it('shows the time of day it is handed as HH:MM, labelled Clock, after the elapsed time', () => {
+    const input: HudInput = { ...baseInput(), timeOfDay: new Date(2026, 10, 4, 7, 5, 59) };
+    expect(field(input, CLOCK_KEY)).toEqual({
+      key: CLOCK_KEY,
+      label: 'Clock',
+      value: '07:05',
+      unit: '',
+      stale: false,
+    });
+    const keys = hudReadings(input).map((reading) => reading.key);
+    expect(keys.indexOf(CLOCK_KEY)).toBe(keys.indexOf(ELAPSED_TIME_KEY) + 1);
+    const clock = field(input, CLOCK_KEY);
+    expect(clock === undefined ? undefined : readingTier(clock)).toBe('secondary');
+  });
+
+  it('has no clock field at all when no time is handed in — the demo', () => {
+    expect(field(baseInput(), CLOCK_KEY)).toBeUndefined();
+  });
+});
+
 describe('the lap in progress — #1312', () => {
   const onLap = (lap: number): HudInput => {
     const input = loopInput();
@@ -1200,6 +1272,18 @@ describe('the lap in progress — #1312', () => {
   });
 });
 
+/**
+ * What a phone draws OUTSIDE the secondary grid: the moving time beside the
+ * controls upright, or in the primary panel's clock row on its side (#1111),
+ * and the elapsed time and the clock in that row (#2072, `theme.css`
+ * §"THE CLOCK ROW").
+ */
+const LIFTED_ON_A_PHONE: ReadonlySet<string> = new Set([
+  MOVING_TIME_KEY,
+  ELAPSED_TIME_KEY,
+  CLOCK_KEY,
+]);
+
 describe('what gives way to a room’s readings on a phone — #1356', () => {
   const gap = pacerGap({
     botDistance: metres(200),
@@ -1231,21 +1315,17 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
     ]);
   });
 
-  it('leaves a phone six secondary readings beside the moving time, the room’s among them', () => {
+  it('leaves a phone six secondary cells beside the moving time, the room’s readings among them', () => {
     // A phone's secondary tier is three tracks wide, and two rows of it are
     // all the height there is (`theme.css` §"A ROOM RIDE ON A PHONE").
     const shown = hudReadings(widestRoomRide)
       .filter((each) => readingTier(each) === 'secondary')
-      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .filter((each) => !givesWayToTheRoom(each) && !LIFTED_ON_A_PHONE.has(each.key))
       .map((each) => each.key);
-    expect(shown).toEqual([
-      'speed',
-      'gradient',
-      'remaining',
-      'room-rider',
-      'room-nearby',
-      'room-draft',
-    ]);
+    // #2071: the gradient is primary; on the phones that draw it in this
+    // panel it takes the first cell, which `theme.css` holds for it, so the
+    // panel has as many cells as before (§"THE GRADIENT, PRIMARY").
+    expect(shown).toEqual(['speed', 'remaining', 'room-rider', 'room-nearby', 'room-draft']);
   });
 
   it('gives way with the dashed field that stands in for a pacer, on a room ride with nobody chased', () => {
@@ -1338,18 +1418,75 @@ describe('a Delivery round on the HUD — #1812', () => {
     ]);
   });
 
-  it('leaves a phone six secondary readings beside the moving time, the round’s among them', () => {
+  it('leaves a phone six secondary cells beside the moving time, the round’s readings among them', () => {
     // `theme.css` §"A ROOM RIDE ON A PHONE": the pacer's dashed field gives way.
     const shown = hudReadings({ ...base, delivery })
       .filter((each) => readingTier(each) === 'secondary')
-      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .filter((each) => !givesWayToTheRoom(each) && !LIFTED_ON_A_PHONE.has(each.key))
       .map((each) => each.key);
-    expect(shown).toEqual([
+    // #2071: the gradient is primary; on the phones that draw it in this
+    // panel it takes the first cell, which `theme.css` holds for it, so the
+    // panel has as many cells as before (§"THE GRADIENT, PRIMARY").
+    expect(shown).toEqual(['speed', 'remaining', DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+  });
+});
+
+/**
+ * #2071: the gradient, readable at a glance — primary, signed, with a slope
+ * glyph. `HudPanel.test.tsx` reads it off the rendered primary row; this is
+ * the model.
+ */
+describe('the gradient, signed and primary — #2071', () => {
+  const at = (grade: number) => {
+    const base = baseInput();
+    return hudReadings({ ...base, state: { ...base.state, grade: gradePercent(grade) } }).find(
+      (reading) => reading.key === GRADIENT_KEY,
+    );
+  };
+
+  it('signs a climb with a plus and a descent with a minus, one decimal, in per cent', () => {
+    expect(at(4.5)).toEqual({
+      key: GRADIENT_KEY,
+      label: 'Gradient',
+      value: '+4.5',
+      unit: '%',
+      stale: false,
+      slope: 'up',
+    });
+    expect(at(-2)).toMatchObject({ value: '-2.0', unit: '%', slope: 'down' });
+    expect(at(12.46)?.value).toBe('+12.5');
+  });
+
+  it('claims no direction the digits do not show: what rounds to nought is level, unsigned', () => {
+    for (const grade of [0, 0.04, -0.04, -0]) {
+      expect(at(grade)).toMatchObject({ value: '0.0', slope: 'level' });
+    }
+    expect(at(0.05)).toMatchObject({ value: '+0.1', slope: 'up' });
+    // A half rounds away from zero on a descent as on a climb.
+    expect(at(-0.05)).toMatchObject({ value: '-0.1', slope: 'down' });
+    expect(at(2.25)?.value).toBe('+2.3');
+    expect(at(-2.25)?.value).toBe('-2.3');
+  });
+
+  it('is the fourth primary reading, after heart rate and before speed', () => {
+    const readings = hudReadings(baseInput());
+    expect(readings.slice(0, 5).map((reading) => reading.key)).toEqual([
+      'power',
+      'cadence',
+      'heartRate',
+      GRADIENT_KEY,
       'speed',
-      'gradient',
-      'remaining',
-      DELIVERY_HOUSES_KEY,
-      DELIVERY_SCORE_KEY,
     ]);
+    const gradient = readings.find((reading) => reading.key === GRADIENT_KEY);
+    expect(gradient === undefined ? undefined : readingTier(gradient)).toBe('primary');
+  });
+
+  it('is never stale: it is the simulation’s, not a sensor’s', () => {
+    const base = baseInput();
+    const dropped: HudInput = {
+      ...base,
+      state: { ...base.state, grade: gradePercent(3), input: { ...base.state.input, live: false } },
+    };
+    expect(hudReadings(dropped).find((reading) => reading.key === GRADIENT_KEY)?.stale).toBe(false);
   });
 });

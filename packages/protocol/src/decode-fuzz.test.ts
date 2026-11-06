@@ -9,13 +9,15 @@
  * For every input: the decoder **returns** — it never throws — and what it
  * returns is either a refusal with a reason in `REFUSAL_REASONS`, or a message
  * that re-encodes to text the same decoder accepts as the same message. So an
- * accepted input is a real message, not merely a non-throw.
+ * accepted input is a real message, not merely a non-throw — and, since #1908,
+ * one inside every bound the schema states (`withinBounds`), from text no
+ * longer than `MAXIMUM_MESSAGE_BYTES`.
  *
  * ## What it feeds
  *
  * Mutations of every valid message — a character replaced, inserted, deleted,
  * a span duplicated, the text truncated, a number swapped for an extreme, a
- * bracket run spliced in — plus random printable and random unicode strings.
+ * bracket run spliced in, an outcome key added (#1908) — plus random printable and random unicode strings.
  * Seeded, so a failure names its seed and case and reproduces.
  *
  * Budget: {@link CASES} cases, well under the five seconds #768 allows. The
@@ -33,9 +35,18 @@ import {
   decodeRoomMessage,
   encodeMessage,
   REFUSAL_REASONS,
+  utf8ByteLength,
   type Decoded,
 } from './codec';
 import { PROTOCOL_VERSION, type ProtocolMessage } from './messages';
+import {
+  CLIENT_MESSAGE_TYPES,
+  MAXIMUM_ITEM_EVENTS,
+  MAXIMUM_MESSAGE_BYTES,
+  MESSAGE_FIELDS,
+  type Field,
+  type Shape,
+} from './schema';
 
 const SEED = 0x0768_2026;
 const CASES = 10_000;
@@ -57,6 +68,66 @@ const SEEDS: readonly string[] = (
   [
     { type: 'hello', protocol: PROTOCOL_VERSION, physicsVersion: 1, ticket: 'abc.DEF-123' },
     { type: 'report', sequence: 7, atMs: 1_727_600_000_000, powerWatts: 250.5, cadenceRpm: 88 },
+    { type: 'item-use', sequence: 8, atMs: 1_727_600_000_100 },
+    { type: 'lane', sequence: 9, atMs: 1_727_600_000_200, lane: 2 },
+    {
+      type: 'welcome',
+      riderId: 5,
+      routeRef: { sha256: 'fedcba9876543210'.repeat(4) },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+        lapRace: { laps: 3, items: 'on' },
+      },
+    },
+    {
+      type: 'frame',
+      tick: 40,
+      ackSequence: 79,
+      riders: [
+        {
+          riderId: 1,
+          decimetres: 4_100,
+          centimetresPerSecond: 980,
+          draftPercent: 0,
+          flags: 0,
+          raceOffsetCentimetres: -350,
+          lane: 0,
+          held: 'tow',
+          lapsDone: 1,
+        },
+        {
+          riderId: 2,
+          decimetres: 4_090,
+          centimetresPerSecond: 990,
+          draftPercent: 18,
+          flags: 1,
+          raceOffsetCentimetres: 1_000,
+          lane: 2,
+          held: 'none',
+          lapsDone: 1,
+        },
+      ],
+      itemEvents: [
+        { riderId: 1, event: 'pick-up', item: 'tow' },
+        { riderId: 2, event: 'hit', item: 'crosswind-gust' },
+      ],
+    },
+    // A lap race's frame with its event list at the bound, so a mutation that
+    // adds one reaches `too-long`.
+    {
+      type: 'frame',
+      tick: 41,
+      riders: [],
+      itemEvents: Array.from({ length: MAXIMUM_ITEM_EVENTS }, () => ({
+        riderId: 1,
+        event: 'use' as const,
+        item: 'tow' as const,
+      })),
+    },
     {
       type: 'welcome',
       riderId: 2,
@@ -113,7 +184,7 @@ const EXTREMES = [
 
 function mutate(text: string, rng: { below(limit: number): number }): string {
   const at = rng.below(text.length + 1);
-  switch (rng.below(9)) {
+  switch (rng.below(10)) {
     case 0:
       return text.slice(0, at) + String.fromCharCode(32 + rng.below(95)) + text.slice(at + 1);
     case 1:
@@ -131,7 +202,15 @@ function mutate(text: string, rng: { below(limit: number): number }): string {
     case 6:
       return text.slice(0, at) + '['.repeat(1 + rng.below(6)) + text.slice(at);
     case 7:
-      return text.slice(0, at) + 'x'.repeat(rng.below(9000)) + text.slice(at);
+      // Up to past the byte limit, so `too-large` is reached.
+      return (
+        text.slice(0, at) + 'x'.repeat(rng.below(MAXIMUM_MESSAGE_BYTES + 1_000)) + text.slice(at)
+      );
+    case 8: {
+      // An outcome a client must never send, added beside its type (#1908).
+      const keys = ['hit', 'raceOffset', 'position', 'held'];
+      return text.replace(/^\{/, `{"${keys[rng.below(keys.length)] ?? ''}":1,`);
+    }
     default:
       return text.replace(
         /"[a-zA-Z]+":/,
@@ -150,6 +229,69 @@ function randomText(rng: { below(limit: number): number }): string {
   return out;
 }
 
+/**
+ * Whether a decoded value is inside every bound its shape states: no list
+ * past its length, no string past its length, no number out of its range and
+ * no enum value it does not name (#1908). Walked independently of the decoder,
+ * so a check the decoder dropped is a red run here rather than an accepted
+ * message holding more than the format allows.
+ */
+function withinBounds(value: unknown, shape: Shape): boolean {
+  switch (shape.kind) {
+    case 'integer':
+    case 'number':
+      return (
+        typeof value === 'number' &&
+        value >= shape.minimum &&
+        value <= shape.maximum &&
+        (shape.kind === 'number' || Number.isInteger(value))
+      );
+    case 'string':
+      return typeof value === 'string' && value.length <= shape.maximumLength;
+    case 'enum':
+      return typeof value === 'string' && shape.values.includes(value);
+    case 'object':
+      return fieldsWithinBounds(value as Record<string, unknown>, shape.fields);
+    case 'array':
+      return (
+        Array.isArray(value) &&
+        value.length <= shape.maximumLength &&
+        value.every((item) => withinBounds(item, shape.items))
+      );
+    case 'rows':
+      return (
+        Array.isArray(value) &&
+        value.length <= shape.maximumLength &&
+        value.every((row) => withinBounds(row, shape.row))
+      );
+    case 'tuple': {
+      const record = value as Record<string, unknown>;
+      const tail = shape.tail ?? [];
+      const set = tail.filter((slot) => record[slot.name] !== undefined).length;
+      return (
+        (set === 0 || set === tail.length) &&
+        [...shape.slots, ...tail].every(
+          (slot) =>
+            (record[slot.name] === undefined && tail.includes(slot)) ||
+            withinBounds(record[slot.name], slot.shape),
+        )
+      );
+    }
+  }
+}
+
+function fieldsWithinBounds(
+  record: Record<string, unknown>,
+  fields: Readonly<Record<string, Field>>,
+): boolean {
+  return (
+    Object.keys(record).every((key) => key === 'type' || Object.hasOwn(fields, key)) &&
+    Object.entries(fields).every(([key, field]) =>
+      record[key] === undefined ? field.optional === true : withinBounds(record[key], field.shape),
+    )
+  );
+}
+
 function holds(decoded: Decoded<ProtocolMessage>, text: string): void {
   if (!decoded.ok) {
     if (!REFUSAL_REASONS.includes(decoded.refusal.reason)) {
@@ -157,11 +299,16 @@ function holds(decoded: Decoded<ProtocolMessage>, text: string): void {
     }
     return;
   }
+  // Nothing past the byte limit was accepted, and what was is inside every bound.
+  expect(utf8ByteLength(text)).toBeLessThanOrEqual(MAXIMUM_MESSAGE_BYTES);
+  const fields = MESSAGE_FIELDS[decoded.message.type] as Readonly<Record<string, Field>>;
+  if (!fieldsWithinBounds(decoded.message as unknown as Record<string, unknown>, fields)) {
+    throw new Error(`accepted past a bound: ${JSON.stringify(text)}`);
+  }
   const again = encodeMessage(decoded.message);
-  const round =
-    decoded.message.type === 'hello' || decoded.message.type === 'report'
-      ? decodeClientMessage(again, PHYSICS)
-      : decodeRoomMessage(again);
+  const round = (CLIENT_MESSAGE_TYPES as readonly string[]).includes(decoded.message.type)
+    ? decodeClientMessage(again, PHYSICS)
+    : decodeRoomMessage(again);
   expect(round).toEqual(decoded);
 }
 
@@ -206,7 +353,9 @@ describe('the decoder under a seeded fuzz — #768', () => {
         'not-json',
         'not-an-object',
         'unknown-type',
+        'outcome-from-client',
         'unknown-key',
+        'too-long',
         'bad-value',
       ]),
     );

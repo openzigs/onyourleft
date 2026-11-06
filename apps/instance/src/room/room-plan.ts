@@ -16,7 +16,12 @@ import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
 import type { RoomKind } from '@onyourleft/protocol';
 
 import type { Room, RoomCourse } from '../store/sql-store.ts';
-import { roomSettings, RoomSettingsError, type RoomSettings } from './core/settings.ts';
+import {
+  roomSettings,
+  RoomSettingsError,
+  type LapRaceSettings,
+  type RoomSettings,
+} from './core/settings.ts';
 
 /**
  * Who may start a race — **the owner's ruling of 2026-09-30: its creator.**
@@ -49,6 +54,20 @@ export interface RoomPlan {
   readonly drafting: boolean;
   /** Who may start it, if it is a race: {@link RaceStarter}. */
   readonly startedBy: RaceStarter;
+  /**
+   * A lap race's laps, items and seed (#1909): the room core runs the lap race
+   * from them, on either adapter. Absent for every other room. Read from the
+   * room's course (migration 0037, #1910) by {@link planFor}.
+   */
+  readonly lapRace?: LapRaceSettings;
+  /**
+   * The room's Discord voice link (#875), where the operator turned voice on
+   * and this is a rider's private room: what the room says in a welcome. Not
+   * from the store — `instance.ts` asks `voice/room-voice.ts` for it as it
+   * looks the room up for each socket, so a later socket carries the newest
+   * link. Absent is no voice.
+   */
+  readonly voiceInvite?: string;
 }
 
 /**
@@ -74,6 +93,8 @@ export function planFor(
     rejoinWindowMs: course.rejoinWindowMs,
     drafting: course.drafting !== false,
     startedBy,
+    // #1910: a lap race's laps, items and seed, as the room was made with them.
+    ...(course.lapRace === undefined ? {} : { lapRace: course.lapRace }),
   };
 }
 
@@ -119,5 +140,6 @@ export function settingsFromPlan(plan: RoomPlan): RoomSettings {
     ...(plan.countdownMs === null ? {} : { countdownMs: plan.countdownMs }),
     ...(plan.rejoinWindowMs === null ? {} : { rejoinWindowMs: plan.rejoinWindowMs }),
     drafting: plan.drafting,
+    ...(plan.lapRace === undefined ? {} : { lapRace: plan.lapRace }),
   });
 }

@@ -209,21 +209,21 @@ describe('one press: start, follow, screen, save, acknowledge', () => {
   });
 });
 
-describe('naming the ride, only when it is synced (#1229)', () => {
-  /** This device's record that the ride was synced, as a sync writes it. */
-  async function synced(id: ActivityId): Promise<void> {
-    await harness.write(async (store) =>
-      store.putSyncBase({
-        athleteId: ATHLETE_A,
-        kind: 'activity',
-        key: 'c'.repeat(64),
-        activityId: id,
-        localDigest: 'a'.repeat(64),
-        remoteDigest: 'b'.repeat(64),
-      }),
-    );
-  }
+/** This device's record that the ride was synced, as a sync writes it. */
+async function synced(id: ActivityId): Promise<void> {
+  await harness.write(async (store) =>
+    store.putSyncBase({
+      athleteId: ATHLETE_A,
+      kind: 'activity',
+      key: 'c'.repeat(64),
+      activityId: id,
+      localDigest: 'a'.repeat(64),
+      remoteDigest: 'b'.repeat(64),
+    }),
+  );
+}
 
+describe('naming the ride, only when it is synced (#1229)', () => {
   it('names a ride this device has synced, by its own id, read from the store’s sync base', async () => {
     const id = await seededRide();
     await synced(id);
@@ -832,6 +832,196 @@ describe('the hosted source (#1251)', () => {
       expect(await saved(id)).toBeUndefined();
     },
   );
+
+  it('names the service the press named in a hosted start, and none in a local one (#1796)', async () => {
+    const id = await seededRide();
+    const hosted = scriptedJobs([succeeded(WRITE_UP)]);
+    await controller(hosted, {
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-hosted', () => undefined, live());
+    expect(startedWith(hosted)?.endpoint).toBe(ENDPOINT);
+    const local = scriptedJobs([succeeded(WRITE_UP)]);
+    await controller(local, {
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-local', () => undefined, live());
+    expect(startedWith(local)).not.toHaveProperty('endpoint');
+  });
+
+  it('says the service changed, and keeps nothing, when the instance’s consent names another (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    scripted.startAnswer = {
+      status: 400,
+      body: {
+        error: {
+          code: 'validation_failed',
+          fields: [
+            { field: 'endpoint', problem: 'must be the service your recorded consent names' },
+          ],
+        },
+      },
+    };
+    const outcome = await controller(scripted, {
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-hosted', () => undefined, live());
+    expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_ASK_TEXT['service-moved'] });
+    expect(
+      scripted.requests.filter((request) => request.path === '/v1/analysis/jobs'),
+    ).toHaveLength(1);
+    expect(await saved(id)).toBeUndefined();
+  });
+
+  /**
+   * An instance older than #1796, as `jobs.ts` on `main` before it was: every
+   * body key it does not know is refused with these exact words, and the
+   * service is never checked.
+   */
+  function olderInstance(
+    scripted: ScriptedJobs,
+    known: readonly string[] = ['input', 'templateVersion', 'source', 'rideId'],
+  ): ScriptedJobs['session'] {
+    const channel = scripted.session.channel;
+    return {
+      ...scripted.session,
+      channel: {
+        ...channel,
+        call: async (method, path, options) => {
+          const unknown =
+            path === '/v1/analysis/jobs'
+              ? Object.keys((options.body ?? {}) as object).find((key) => !known.includes(key))
+              : undefined;
+          if (unknown !== undefined) {
+            scripted.requests.push({ method, path, body: options.body });
+            return Promise.resolve({
+              status: 400,
+              body: {
+                error: {
+                  code: 'validation_failed',
+                  fields: [{ field: unknown, problem: 'is not a field of a job' }],
+                },
+              },
+            });
+          }
+          return channel.call(method, path, options);
+        },
+      },
+    };
+  }
+
+  it('starts a hosted job on an instance older than #1796 by sending it again without the service it does not know', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const outcome = await controller(scripted, {
+      session: async () => Promise.resolve(olderInstance(scripted)),
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-hosted', () => undefined, live(), ENDPOINT);
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    const starts = scripted.requests.filter((request) => request.path === '/v1/analysis/jobs');
+    expect(starts.map((request) => (request.body as { endpoint?: string }).endpoint)).toStrictEqual(
+      [ENDPOINT, undefined],
+    );
+    expect((await saved(id))?.source).toBe('instance-hosted');
+  });
+
+  it('on an instance older than #1229 too, drops the ride and the service it does not know, each once', async () => {
+    const id = await seededRide();
+    await synced(id);
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const outcome = await controller(scripted, {
+      syncBase: writer,
+      session: async () =>
+        Promise.resolve(olderInstance(scripted, ['input', 'templateVersion', 'source'])),
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-hosted', () => undefined, live(), ENDPOINT);
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    const starts = scripted.requests.filter((request) => request.path === '/v1/analysis/jobs');
+    expect(
+      starts.map((request) => {
+        const body = request.body as { rideId?: string; endpoint?: string };
+        return [body.rideId, body.endpoint];
+      }),
+    ).toStrictEqual([
+      [id, ENDPOINT],
+      [undefined, ENDPOINT],
+      [undefined, undefined],
+    ]);
+  });
+
+  it('never sends a start again without the service when the instance refused the service itself (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    let starts = 0;
+    const channel = scripted.session.channel;
+    const outcome = await controller(scripted, {
+      session: async () =>
+        Promise.resolve({
+          ...scripted.session,
+          channel: {
+            ...channel,
+            call: async (method, path, options) => {
+              if (path !== '/v1/analysis/jobs') return channel.call(method, path, options);
+              starts += 1;
+              // Refuses any start: with the service named, that it is another;
+              // without it, that it is missing — as `jobs.ts` does since #1796.
+              return Promise.resolve({
+                status: 400,
+                body: {
+                  error: {
+                    code: 'validation_failed',
+                    fields: [
+                      {
+                        field: 'endpoint',
+                        problem: 'must be the service your recorded consent names',
+                      },
+                    ],
+                  },
+                },
+              });
+            },
+          },
+        }),
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    }).ask(id, 'instance-hosted', () => undefined, live(), ENDPOINT);
+    expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_ASK_TEXT['service-moved'] });
+    expect(starts).toBe(1);
+    expect(await saved(id)).toBeUndefined();
+  });
+
+  it('names the service the page showed, not one this device noted after the press (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    let held = ENDPOINT;
+    await controller(scripted, {
+      hosted: {
+        endpoint: () => held,
+        sendGuard: async () => {
+          // Another tab notes another service while the list is being sent.
+          held = 'https://other-models.example';
+          return Promise.resolve(true);
+        },
+      },
+    }).ask(id, 'instance-hosted', () => undefined, live(), ENDPOINT);
+    expect(startedWith(scripted)?.endpoint).toBe(ENDPOINT);
+  });
+
+  it('sends nothing, and says the service changed, when the page showed another service than this device now holds (#1796)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    let guards = 0;
+    const outcome = await controller(scripted, {
+      hosted: {
+        endpoint: () => 'https://other-models.example',
+        sendGuard: async () => {
+          guards += 1;
+          return Promise.resolve(true);
+        },
+      },
+    }).ask(id, 'instance-hosted', () => undefined, live(), ENDPOINT);
+    expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_ASK_TEXT['service-moved'] });
+    expect(guards).toBe(0);
+    expect(scripted.requests).toStrictEqual([]);
+    expect(await saved(id)).toBeUndefined();
+  });
 
   it('does not send the list for a job on the instance’s own model', async () => {
     const id = await seededRide();

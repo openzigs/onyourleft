@@ -10,7 +10,10 @@ import {
   heartRateProfile,
   type GattProfile,
 } from '@onyourleft/sensors/protocol';
-import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
+import {
+  createOpenBikeControlClient,
+  createWebBluetoothTransport,
+} from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
@@ -36,6 +39,11 @@ import {
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
 import {
+  createSteeringController,
+  STEERING_CONTROLLER_BUTTONS,
+  type SteeringController,
+} from './ride/steering-controller';
+import {
   createTrainerTargetMemory,
   trainerTargetStorage,
   type TrainerTargetMemory,
@@ -51,10 +59,16 @@ import {
 } from './offline/update';
 import { AppShell, VIEW_GROUPS } from './shell/AppShell';
 import { createMenuSounds } from './shell/menu-sounds';
+import { createMenuMusic, MENU_MUSIC_TRACK } from './shell/menu-music';
+import { readMusicAndMaster } from './game/audio-mix';
 import { readMenuSoundPreference } from './shell/menu-sound-preference';
 import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
+import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
+import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
+import { matchHash } from './shell/routes';
+import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
@@ -99,6 +113,7 @@ import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-an
 import {
   instancePoseEstimator,
   readSideInstanceChoice,
+  sideInstanceHostedService,
   sidePictureSessionOf,
 } from './camera/instance-pose';
 import type { SideInstancePicturesPort } from './camera/side-instance-port';
@@ -282,6 +297,17 @@ interface ClientPlatform {
    */
   readonly bluetoothAsk: BluetoothAskPort | undefined;
   readonly systemSettings: SystemSettingsPort | undefined;
+  /**
+   * #2051: the shell's launch splash, released once the first route has
+   * painted. {@link NO_LAUNCH} in a browser, which holds no splash.
+   */
+  readonly launch: LaunchPort;
+  /**
+   * The steering controller paired on Devices — #1826. Its own client beside
+   * the transport, on the same platform choice: the shell's on the same
+   * `plugin`, a browser's on the same `navigator.bluetooth`.
+   */
+  readonly steering: SteeringController | undefined;
 }
 
 /**
@@ -418,6 +444,17 @@ async function buildPlatform(
     const systemSettings: SystemSettingsPort = {
       openSystemSettings: async (page) => mobile.openCapacitorSettings(plugin, page),
     };
+    // #2051. `@capacitor/splash-screen`'s own plugin, which #2050 configured
+    // to hold the launch splash until this is called or 3 s pass.
+    const splashScreen = mobile.capacitorSplashScreenPlugin();
+    const launch: LaunchPort = {
+      releaseSplash: async () => mobile.hideCapacitorSplashScreen(splashScreen),
+    };
+    // #1826. The same `plugin`, so the controller's link is one of the
+    // links this object holds, against the same connection budget.
+    const steering = createSteeringController(
+      mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
+    );
     return {
       rideController,
       shell,
@@ -425,6 +462,8 @@ async function buildPlatform(
       signal,
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
+      launch,
+      steering,
     };
   }
 
@@ -436,6 +475,8 @@ async function buildPlatform(
       signal: undefined,
       bluetoothAsk: undefined,
       systemSettings: undefined,
+      launch: NO_LAUNCH,
+      steering: undefined,
     };
   }
   const browserTransport = createWebBluetoothTransport({
@@ -456,6 +497,15 @@ async function buildPlatform(
     signal: undefined,
     bluetoothAsk: undefined,
     systemSettings: undefined,
+    launch: NO_LAUNCH,
+    // #1826. Its own client on the same `navigator.bluetooth`: each pairing
+    // is the rider's press, as every device's is in a browser.
+    steering: createSteeringController(
+      createOpenBikeControlClient({
+        bluetooth: probe.bluetooth,
+        buttons: STEERING_CONTROLLER_BUTTONS,
+      }),
+    ),
   };
 }
 
@@ -1508,6 +1558,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
             control,
             estimator: analyser.estimator,
             place: analyser.place,
+            // #2175: the screen names the hosted service pictures go on to.
+            hostedService:
+              analyser.place === 'instance'
+                ? () =>
+                    sideInstanceHostedService(
+                      readSideInstanceChoice(sidePictures?.port.sideInstanceOrigin()),
+                    )
+                : undefined,
             references: { store: localStore(), athleteId: LOCAL_ATHLETE },
             reports: sideReports,
           });
@@ -1538,7 +1596,42 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const menuSounds = createMenuSounds(sharedCueOutput(), () =>
     readMenuSoundPreference(deviceStorage()),
   );
-  const root = createRoot(container);
+  // #2058: the menus' music, over the same one output — its bus, its fade,
+  // its mute. Silent until #2057 commits the loop (`MENU_MUSIC_TRACK`).
+  const menuMusic = createMenuMusic({
+    output: sharedCueOutput(),
+    track: MENU_MUSIC_TRACK,
+    mix: () => readMusicAndMaster(deviceStorage()),
+    createElement: () => new Audio(),
+    schedule: (callback, ms) => {
+      const timer = window.setTimeout(callback, ms);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    },
+    hidden: () => document.hidden,
+  });
+  // #2051: the Android launch splash is released two frames after the first
+  // route commits, or at once if the first render throws (`shell/launch.tsx`).
+  // #2053: the first-paint intro takes over from it in the same frame, and
+  // animates out unless the first route is a ride route or the rider asked for
+  // less motion (`shell/intro.ts`). Read then, from the route on screen.
+  const launch = launchRelease(
+    platform.launch,
+    (callback) => {
+      window.requestAnimationFrame(() => {
+        callback();
+      });
+    },
+    (failed) => {
+      endIntro(document.getElementById(INTRO_ID), {
+        firstRoute: matchHash(window.location.hash).route.id,
+        lessMotion: window.matchMedia(LESS_MOTION_QUERY).matches,
+        failed,
+      });
+    },
+  );
+  const root = createRoot(container, launchRootOptions(launch));
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
       <StrictMode>
@@ -1552,6 +1645,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(platform.systemSettings === undefined
             ? {}
             : { systemSettings: platform.systemSettings })}
+          {...(platform.steering === undefined ? {} : { steering: platform.steering })}
           nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
@@ -1585,6 +1679,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
           menuSounds={menuSounds}
+          menuMusic={menuMusic}
           transfer={buildTransferPort(worldCorridorPort)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
@@ -1602,6 +1697,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           map={loadMapPort}
           basemap={browserBasemapConfig()}
         />
+        {/* #2051: after `AppShell`, so its effect runs once the route has committed. */}
+        <FirstRender onRendered={launch.rendered} />
       </StrictMode>,
     );
   };

@@ -26,9 +26,16 @@ import {
   type FeatureSpec,
   type TagValue,
 } from '../testing/mvt-encoder';
+import {
+  BUILDING_FIELD_NAMES,
+  BUILDING_FIELD_RULES,
+  MAX_START_YEAR,
+  MIN_START_YEAR,
+  type BuildingFieldName,
+} from '../schema';
 import type { DecodeRefusal, PlaceFeature } from '../types';
 import { tileOverLimit } from './limits';
-import { EARTH } from './tiles';
+import { BUILDING_FIELDS_SET, EARTH, SIDEWALK_LINE } from './tiles';
 
 export interface HostileFixture {
   readonly name: string;
@@ -498,6 +505,191 @@ export const HOSTILE_FIXTURES: readonly HostileFixture[] = [
     refusal: { reason: 'too-many-rings', layer: 'landuse', limit: MAX_RINGS_PER_POLYGON },
   },
 ];
+
+/**
+ * One hostile value under one building field's key (#1789), and what the
+ * decoder must make of it: `null`, or the value its rule clamps it to.
+ */
+export interface BuildingFieldCase {
+  /** Names the field and the value's shape; never a 64 KiB value itself. */
+  readonly name: string;
+  readonly field: BuildingFieldName;
+  readonly value: TagValue;
+  readonly expected: string | number | null;
+}
+
+/** 64 KiB of one letter: a value no whitelist entry or number is. */
+const LONG_STRING = 'w'.repeat(64 * 1024);
+const MARKUP = '<img src=x onerror="alert(1)">';
+const URL_SHAPED = 'https://example.invalid/building.png?colour=red';
+
+/** What every field gets: values of no field's shape, all `null`. */
+function commonCases(field: BuildingFieldName): BuildingFieldCase[] {
+  return [
+    { name: `${field}: a 64 KiB string`, field, value: LONG_STRING, expected: null },
+    { name: `${field}: a value shaped like markup`, field, value: MARKUP, expected: null },
+    { name: `${field}: a value shaped like a URL`, field, value: URL_SHAPED, expected: null },
+    { name: `${field}: an empty string`, field, value: '', expected: null },
+    { name: `${field}: a bool`, field, value: true, expected: null },
+  ];
+}
+
+/** Each field's own cases: outside its whitelist or range, and the wrong type. */
+function fieldCases(field: BuildingFieldName): BuildingFieldCase[] {
+  const rule = BUILDING_FIELD_RULES[field];
+  const at = (label: string, value: TagValue, expected: string | number | null) => ({
+    name: `${field}: ${label}`,
+    field,
+    value,
+    expected,
+  });
+  switch (rule.kind) {
+    case 'enum': {
+      const first = rule.values[0] as string;
+      return [
+        at('a value outside the whitelist', 'zz_not_listed', null),
+        at('a whitelisted word in capitals (no case folding)', first.toUpperCase(), null),
+        at('a whitelisted word with a space after it', `${first} `, null),
+        at('a number where a string is expected', 3, null),
+        at('a fraction where a string is expected', 2.5, null),
+      ];
+    }
+    case 'clamped':
+      return [
+        at('below its range, clamped to the least', rule.min - 3, rule.min),
+        at('far above its range, clamped to the most', 1e9, rule.max),
+        at('a fraction, rounded down', rule.min + 1.7, rule.min + 1),
+        at('a number as a string (the reverse: never parsed)', String(rule.min + 1), null),
+        at('a negative fraction far below', -1e12 - 0.5, rule.min),
+      ];
+    case 'index':
+      return [
+        at('an index one past the palette', rule.size, null),
+        at('an index far outside the palette', 255, null),
+        at('a negative index', -1, null),
+        at('a fraction', 2.5, null),
+        at('a colour as a string where an index is expected', '#ff0000', null),
+        at('a colour word', 'red', null),
+      ];
+    case 'direction':
+      return [
+        at('400, wrapped', 400, 45),
+        at('-15, wrapped', -15, 345),
+        at('a compass word (never parsed)', 'NNE', null),
+        at('a number as a string (never parsed)', '90', null),
+        at('7, rounded to the step below', 7, 0),
+        at('8, rounded to the step above', 8, 15),
+        at('360, a whole turn', 360, 0),
+        at('1e15, wrapped in whole steps', 1e15, 285),
+      ];
+  }
+}
+
+/**
+ * The values #1789's criteria name for one key in particular. `start_year`'s
+ * dates are strings: a string where a number belongs is `null` **on purpose**
+ * (`schema.ts` §`BuildingFieldRule`), so `"2999"` is refused, not clamped —
+ * the decoder never parses a tile's string. The same year as a number is
+ * clamped to {@link MAX_START_YEAR}, as the revision of 2026-11-01 asks.
+ */
+const NAMED_CASES: readonly BuildingFieldCase[] = [
+  { name: 'levels: -3', field: 'levels', value: -3, expected: 1 },
+  { name: 'levels: 0', field: 'levels', value: 0, expected: 1 },
+  { name: 'levels: 1e9', field: 'levels', value: 1e9, expected: 100 },
+  { name: 'levels: "two"', field: 'levels', value: 'two', expected: null },
+  { name: 'levels: "2;3"', field: 'levels', value: '2;3', expected: null },
+  { name: 'roofLevels: 9', field: 'roofLevels', value: 9, expected: 5 },
+  { name: 'roofDirectionDegrees: 400', field: 'roofDirectionDegrees', value: 400, expected: 45 },
+  { name: 'roofDirectionDegrees: -15', field: 'roofDirectionDegrees', value: -15, expected: 345 },
+  {
+    name: 'roofDirectionDegrees: "NNE"',
+    field: 'roofDirectionDegrees',
+    value: 'NNE',
+    expected: null,
+  },
+  ...['c. 1890', '1890s', '~1890', '2999', '0', ''].map((value) => ({
+    name: `startYear: "${value}" (a string: refused, never parsed)`,
+    field: 'startYear' as const,
+    value,
+    expected: null,
+  })),
+  { name: 'startYear: 2999, clamped', field: 'startYear', value: 2999, expected: MAX_START_YEAR },
+  { name: 'startYear: 0, clamped', field: 'startYear', value: 0, expected: MIN_START_YEAR },
+  { name: 'startYear: 1066, clamped', field: 'startYear', value: 1066, expected: MIN_START_YEAR },
+  { name: 'startYear: 1890, kept', field: 'startYear', value: 1890, expected: 1890 },
+  { name: 'wallColour: 20, outside the palette', field: 'wallColour', value: 20, expected: null },
+  { name: 'roofColour: 20, outside the palette', field: 'roofColour', value: 20, expected: null },
+  { name: 'wallColour: 0, kept', field: 'wallColour', value: 0, expected: 0 },
+  { name: 'roofColour: 19, kept', field: 'roofColour', value: 19, expected: 19 },
+];
+
+/** Every hostile building-field case: each field's own, the ones every field gets, and the named. */
+export const HOSTILE_BUILDING_FIELD_CASES: readonly BuildingFieldCase[] = [
+  ...BUILDING_FIELD_NAMES.flatMap((field) => [...fieldCases(field), ...commonCases(field)]),
+  ...NAMED_CASES,
+];
+
+/** The land use, the footway and the control footprint every case's tile carries. */
+function buildingFieldTileWith(hostile: FeatureSpec | undefined): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'landuse',
+      features: [
+        {
+          type: 3,
+          tags: { kind: 'residential' },
+          geometry: polygon([outerRing(rectangle(600, 600, 3000, 3000))]),
+        },
+      ],
+    },
+    {
+      name: 'buildings',
+      features: [
+        {
+          type: 3,
+          tags: { kind: 'building', height: 9, ...BUILDING_FIELDS_SET },
+          geometry: polygon([outerRing(rectangle(800, 800, 1000, 1000))]),
+        },
+        ...(hostile === undefined ? [] : [hostile]),
+        {
+          type: 3,
+          tags: { kind: 'building', height: 6 },
+          geometry: polygon([outerRing(rectangle(2000, 800, 2200, 1000))]),
+        },
+      ],
+    },
+    {
+      name: 'roads',
+      features: [
+        {
+          type: 2,
+          tags: { kind: 'path', kind_detail: 'sidewalk' },
+          geometry: line([SIDEWALK_LINE]),
+        },
+      ],
+    },
+  ]);
+}
+
+/**
+ * The tile a case is decoded from: a control footprint with every field set,
+ * the case's footprint carrying only the hostile value under its key, a plain
+ * footprint, a land-use polygon and a footway. The case's footprint is the
+ * second building.
+ */
+export function buildingFieldCaseTile(fieldCase: BuildingFieldCase): Uint8Array {
+  return buildingFieldTileWith({
+    type: 3,
+    tags: { kind: 'building', [BUILDING_FIELD_RULES[fieldCase.field].key]: fieldCase.value },
+    geometry: polygon([outerRing(rectangle(1400, 800, 1600, 1000))]),
+  });
+}
+
+/** {@link buildingFieldCaseTile}'s tile without the case's footprint: what the rest must decode to. */
+export function buildingFieldControlTile(): Uint8Array {
+  return buildingFieldTileWith(undefined);
+}
 
 function indexOfSequence(haystack: Uint8Array, needle: Uint8Array): number {
   outer: for (let i = 0; i + needle.length <= haystack.length; i++) {

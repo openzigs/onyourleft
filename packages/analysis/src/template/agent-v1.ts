@@ -6,10 +6,10 @@
  * are: a change to any word is a version 2 in a file of its own, and
  * `agent-v1.test.ts` holds a digest of what this file builds.
  *
- * Where the chain's templates (`template-v1.ts`, `template-v2.ts`) decide
- * every step, this one decides what the agent is TOLD: the rules every reply
- * keeps (the chain's own words, copied rather than imported so neither file
- * moves the other), what the figures mean, which tools there are, that a tool
+ * Where the chain's templates (`template-v1.ts`, `template-v2.ts`, removed by
+ * #1797 once #1103 left them no caller) decided every step, this one decides
+ * what the agent is TOLD: the rules every reply keeps (the chain's own words,
+ * copied rather than imported), what the figures mean, which tools there are, that a tool
  * result is data, the shape of the write-up, and what a rewrite is told. The
  * model chooses its tools; the budgets, the screen and the tools themselves
  * are the instance's walls (`apps/instance/src/analysis/agent.ts`).
@@ -17,8 +17,8 @@
  * ## A tool result is data, inside ADR 0040 D-8's fence
  *
  * {@link fenceData} puts a tool result between {@link HISTORY_FENCE_BEGIN} and
- * {@link HISTORY_FENCE_END} — the history step's markers, one fence for every
- * kind of retrieved text — with every square bracket written as a round one,
+ * {@link HISTORY_FENCE_END} — the chain's history-step markers, one fence for
+ * every kind of retrieved text — with every square bracket written as a round one,
  * so no result can spell either marker and close the fence early, and every
  * line break written as a space. The instructions say the fenced text is data.
  *
@@ -31,7 +31,15 @@
 
 import type { ChannelSummary, MetricSummary, RideAnalysisInput } from '../input';
 import type { ScreenReason } from '../screen/write-up-screen';
-import { HISTORY_FENCE_BEGIN, HISTORY_FENCE_END } from './template-v2';
+
+/**
+ * The line before fenced data. ⚠️ No fenced text can spell it: see
+ * {@link fenceData}. Spelled as `template-v2.ts` spelled it (#835), where it
+ * was declared until #1797, so the words this version sends did not move.
+ */
+export const HISTORY_FENCE_BEGIN = '[history-data-begin]';
+/** The line after it. */
+export const HISTORY_FENCE_END = '[history-data-end]';
 
 /**
  * The rules every reply keeps: the chain's `COMMON`, word for word, but for its

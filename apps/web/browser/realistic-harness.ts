@@ -58,20 +58,34 @@ import {
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { mappedTown } from '../src/game/footprint-buildings';
 import {
+  // #1794's street of mapped churches, which `town=churches` rides.
+  churchStreetFixture,
+  // #1795's street of mapped town halls and schools, which `town=civic` rides.
+  civicStreetFixture,
   // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
   // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
   cityStreetscapeFixture,
   countrysideFixture,
+  datedStreetFixture,
   houseStreetFixture,
+  commercialStreetFixture,
+  mappedPaintStreetFixture,
+  mappedRoofStreetFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
+  // #1791's street of every mapped building type, which `town=typed` rides.
+  typedStreetFixture,
+  // #2023's street of untagged garages and sheds, which `town=untagged` rides.
+  untaggedStreetFixture,
+  // #1274's industrial estate, school and pitches, which `town=grounds` rides.
+  fencedGroundsFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
-import { villageDrawCallCeiling } from '../src/game/realistic-budget';
-import type { SceneFrame } from '../src/game/port';
+import { stylisedSceneDrawCallCeiling, villageDrawCallCeiling } from '../src/game/realistic-budget';
+import type { GameView, SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
@@ -85,20 +99,27 @@ import {
   facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
+  nearTreeFadeOf,
   foliageOrderedOf,
   groundBlendOf,
+  lapRaceDrawnOf,
   loadRealisticWorld,
   loadSceneryModels,
   mappedBlobsShownOf,
   overhangShadowsOf,
   realisticSurfacesOf,
   realisticTextureReport,
+  setRealisticRoadside,
+  setRealisticLitter,
+  setRealisticChainLink,
   setRealisticTrees,
   threeGameRenderer,
   villageHouseStatsOf,
   villageModelsShownOf,
   weatheringOf,
   windowRevealsOf,
+  windowRoomsOf,
+  lotRealismOf,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
@@ -110,11 +131,18 @@ import {
   rungWithLevers,
   seasonWithLevers,
   firPrepassWithLevers,
+  nearTreeFadeWithLevers,
   surfacesWithLevers,
+  roadsideWithLevers,
+  litterWithLevers,
+  chainLinkWithLevers,
+  townWithChainLink,
   treesWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
   weatheringWithLevers,
+  windowRoomsWithLevers,
+  lotRealismWithLevers,
   facadeTrimsWithLevers,
   countrysideWithLevers,
   type Layer,
@@ -123,6 +151,7 @@ import {
 } from './realistic/config';
 import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
+import { RACE_HIT, lapRaceAhead, raceBotsAhead } from './realistic/lap-race';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
@@ -133,6 +162,7 @@ import {
   routeDigest,
   villageRoute,
 } from '../src/demo/synthetic-road';
+import { outAndBackRoute } from '../src/game/route-fixtures-testing';
 import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
@@ -142,6 +172,8 @@ const VILLAGE_TREE_KIND = HOLIDAY_DECORATIONS['winter-lights']?.find(
 );
 const VILLAGE_TREE_TRIANGLES =
   VILLAGE_TREE_KIND === undefined ? 0 : decorationKindTriangles(VILLAGE_TREE_KIND);
+/** #1972: the rung's scenery budgets with nothing in them, for `race=worst`'s frame. */
+const SCENERY_FREE = { scatterItems: 0, structureItems: 0, people: 0 } as const;
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
@@ -324,12 +356,51 @@ declare global {
       /**
        * #1815: the village ceiling that same frame is held to,
        * `realistic-budget.ts` §`villageDrawCallCeiling` of the frame the page
-       * drew — the Delivery one while it carries a round, the frozen 50
-       * otherwise. Absent with the result.
+       * drew — the Delivery one while it carries a round, since #1971 the
+       * lap race's while it carries a race in the realistic world, the
+       * frozen 50 otherwise. Absent with the result, and on a stylised race.
        */
       readonly villageCeiling?: number;
+      /**
+       * #1972: what a lap race was on the last frame before the result was
+       * published — the racers the frame carried and what the view's belt
+       * drew of each piece, read back off its instances
+       * (`three-renderer.ts` §`lapRaceDrawnOf`). Absent unless `?race=` asked
+       * for a race. @see realistic/lap-race.ts
+       */
+      readonly race?: LapRaceDrawn;
+      /**
+       * #1972: the scene ceiling that same frame is held to,
+       * `realistic-budget.ts` §`stylisedSceneDrawCallCeiling` of the frame the
+       * page drew — the lap race's 14 while it carries a race. Absent unless
+       * `?race=` asked for one in the stylised world, because the stylised
+       * world's own 11 is the scenery-free frame's and this page's ordinary
+       * frames carry scenery; a realistic race's is `villageCeiling` (#1971).
+       */
+      readonly raceCeiling?: number;
     };
   }
+}
+
+/** What a lap race drew — #1972. @see Window.__oylRealistic */
+export interface LapRaceDrawn {
+  /** The racers the frame carried: the rider and the bots. */
+  readonly racers: number;
+  /** What the view's belt drew of the pick-up points, puddles and hit effects. */
+  readonly pickUps: number;
+  readonly hazards: number;
+  readonly hits: number;
+}
+
+/** The race the view drew on its last frame, read back off the belt's own instances. */
+function raceDrawnOf(view: GameView, frame: SceneFrame): LapRaceDrawn {
+  return {
+    racers: frame.markers.filter((marker) => marker.kind === 'rider' || marker.kind === 'bot')
+      .length,
+    pickUps: lapRaceDrawnOf(view, 'pickUps').length,
+    hazards: lapRaceDrawnOf(view, 'hazards').length,
+    hits: lapRaceDrawnOf(view, 'hits').length,
+  };
 }
 
 const errors: string[] = [];
@@ -402,6 +473,11 @@ async function run(): Promise<void> {
     // #1283: the generated broadleaves, or the scans with that lever off —
     // chosen before the load, because it decides which files are fetched.
     setRealisticTrees(treesWithLevers(config.leversOff));
+    // #1274: the roadside models, or the shapes before them, likewise.
+    setRealisticRoadside(roadsideWithLevers(config.leversOff));
+    // #1274: a village's litter and the chain-link fence, or neither, likewise.
+    setRealisticLitter(litterWithLevers(config.leversOff));
+    setRealisticChainLink(chainLinkWithLevers(config.leversOff));
     outcome = await loadRealisticWorld();
   }
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
@@ -428,13 +504,34 @@ async function run(): Promise<void> {
                 ? cityStreetscapeFixture(latitude)
                 : config.town === 'houses'
                   ? houseStreetFixture(latitude)
-                  : undefined;
+                  : config.town === 'commercial'
+                    ? commercialStreetFixture(latitude)
+                    : config.town === 'typed'
+                      ? typedStreetFixture(latitude)
+                      : config.town === 'roofs'
+                        ? mappedRoofStreetFixture(latitude)
+                        : config.town === 'untagged'
+                          ? untaggedStreetFixture(latitude)
+                          : config.town === 'painted'
+                            ? mappedPaintStreetFixture(latitude)
+                            : config.town === 'dated'
+                              ? datedStreetFixture(latitude)
+                              : config.town === 'churches'
+                                ? churchStreetFixture(latitude)
+                                : config.town === 'civic'
+                                  ? civicStreetFixture(latitude)
+                                  : config.town === 'grounds'
+                                    ? fencedGroundsFixture(latitude)
+                                    : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
     (config.route === 'village'
       ? villageRoute(config.facing, config.place)
-      : realisticRoute(config.facing, config.place));
+      : // #1996: the turning point the owner's course showed, for its frames.
+        config.route === 'out-and-back'
+        ? outAndBackRoute()
+        : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
@@ -445,7 +542,8 @@ async function run(): Promise<void> {
       corridor: mixed.corridor,
       land,
       buildings: mappedBuildingsOf(plans),
-      lots: mappedTown(mixed.corridor, plans, urban),
+      // #1274: and its chain-link fence, unless that lever is off.
+      lots: townWithChainLink(mappedTown(mixed.corridor, plans, urban), config.leversOff),
     };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
@@ -484,6 +582,11 @@ async function run(): Promise<void> {
   // rung change.
   const firPrepass = firPrepassWithLevers(config.leversOff);
   firDepthPrepassOf(view, firPrepass);
+  // #545's before/after pair for the trees' fade near the camera, on one
+  // build. The vegetation is the realistic belts', so it is applied again
+  // after a rung change too.
+  const nearTreeFade = nearTreeFadeWithLevers(config.leversOff);
+  nearTreeFadeOf(view, nearTreeFade);
   // #1523's cost pairs: the ground without #627's blend, the road without
   // #628's wear — the code out of the program, not a uniform at zero. A
   // setting of the view's, so it survives a rung change; and set BEFORE the
@@ -501,6 +604,12 @@ async function run(): Promise<void> {
   // #1663's cost pair: the mapped facades without their lintels, quoins and
   // string courses, the term out of the facade's program, as the weathering's is.
   facadeTrimsOf(view, facadeTrimsWithLevers(config.leversOff));
+  // #1662's cost pair: the mapped panes without the rooms behind them and
+  // their Fresnel, the term out of the facade's program, as the weathering's is.
+  windowRoomsOf(view, windowRoomsWithLevers(config.leversOff));
+  // #1665's cost pair: the procedural lots without their weathering and the
+  // rooms behind their glass, the terms out of the lots' programs.
+  lotRealismOf(view, lotRealismWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.
@@ -581,6 +690,7 @@ async function run(): Promise<void> {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
         firDepthPrepassOf(view, firPrepass);
+        nearTreeFadeOf(view, nearTreeFade);
         groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;
@@ -609,19 +719,29 @@ async function run(): Promise<void> {
       origin,
       distance,
       elapsed: config.at === undefined ? elapsed : 0,
-      rung: worldRung(state),
+      // #1972: a stylised race is held to the SCENERY-FREE frame's ceiling, so
+      // it carries none; #1971: a realistic one is held on the village's frame.
+      rung:
+        config.race === undefined || config.world === 'realistic' ? worldRung(state) : SCENERY_FREE,
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
       // #1541's pair: the people off.
       peopleOff: config.leversOff.includes('people'),
       // #1542's three, each off on its own.
       countrysideOff: countrysideWithLevers(config.leversOff),
+      // #1972: a lap race's bots in the pacer's place, on the scenery-free
+      // frame `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of.
+      ...(config.race === undefined
+        ? {}
+        : { race: { bots: raceBotsAhead(distance), riderHit: RACE_HIT } }),
       ...(town === undefined ? {} : { town }),
     });
     // #1815: a Delivery round's worst case on the road ahead, or no round at all.
     if (config.delivery !== undefined) {
       drawn = { ...drawn, delivery: deliveryAhead(drawn, distance, config.delivery) };
     }
+    // #1972: a lap race's pieces on the road ahead, or no race at all.
+    if (config.race !== undefined) drawn = lapRaceAhead(drawn, distance);
     view.render(drawn);
     lastFrameCalls = counter.takeCalls();
     callsInWindow += lastFrameCalls;
@@ -669,6 +789,8 @@ async function run(): Promise<void> {
               markers: deliveryDrawnOf(view, 'markers').length,
               obstacles: deliveryDrawnOf(view, 'obstacles').length,
             };
+      const race =
+        config.race === undefined || drawn === undefined ? undefined : raceDrawnOf(view, drawn);
       publish({
         result,
         layers,
@@ -676,11 +798,24 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(delivery === undefined ? {} : { delivery }),
-        ...(drawn === undefined ? {} : { villageCeiling: villageDrawCallCeiling(drawn) }),
+        // A stylised race is the scenery-free frame's; the village's ceiling is
+        // no part of it. #1971: a realistic race's frame is the village's.
+        ...(drawn === undefined || (config.race !== undefined && config.world !== 'realistic')
+          ? {}
+          : { villageCeiling: villageDrawCallCeiling(drawn) }),
+        ...(race === undefined || drawn === undefined
+          ? {}
+          : config.world === 'realistic'
+            ? { race }
+            : { race, raceCeiling: stylisedSceneDrawCallCeiling(drawn) }),
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
-      console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
+      // #1972: a race run says so on this line too, and what its belt drew, so the
+      // reading taken off `adb logcat` alone cannot be of a frame with no race in it.
+      console.log(
+        `OYL-REALISTIC ${JSON.stringify(race === undefined ? result : { ...result, race })}`,
+      );
       // #616: a share read with something the switch could not place still on
       // is a share of an unknown thing, so a run that switched a layer off says so.
       if (config.layersOff.length > 0 && layers.unplaced.length > 0) {
@@ -721,6 +856,9 @@ async function run(): Promise<void> {
         clock,
         buffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
         notice,
+        ...(config.race === undefined || drawn === undefined
+          ? {}
+          : { race: raceDrawnOf(view, drawn) }),
       });
     }
   };

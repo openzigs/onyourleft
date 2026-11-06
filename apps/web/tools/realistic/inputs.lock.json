@@ -1700,6 +1700,230 @@
           "sha256": "3ec4da772e94f235cbd40ec730e51d5562b3fa0897865ce997b726adab758fb9"
         }
       ]
+    },
+    {
+      "id": "street_lamp_01",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/street_lamp_01",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-11-04",
+      "authors": "Josh Dean (All)",
+      "files": [
+        {
+          "path": "street_lamp_01_1k.gltf",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/street_lamp_01/street_lamp_01_1k.gltf",
+          "bytes": 6419,
+          "sha256": "5d0358ede168b5e04547780b99d8e6d651cbe644e468e67cb505019047cbd5c8"
+        },
+        {
+          "path": "textures/street_lamp_01_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_arm_1k.jpg",
+          "bytes": 664324,
+          "sha256": "4b5487a6c7ee300c3cf5449629e01c35409e5c7ac1695edb9fe69d4821853c7c"
+        },
+        {
+          "path": "textures/street_lamp_01_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_diff_1k.jpg",
+          "bytes": 307889,
+          "sha256": "3e9d3471b33eb1f8075ed741c2b1932103598626d057ca12ef38005ea5fcb165"
+        },
+        {
+          "path": "textures/street_lamp_01_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_nor_gl_1k.jpg",
+          "bytes": 438623,
+          "sha256": "172af0fd7ed4999e9f520b9f56e1f357a6dba87adbd7b8aa87e0a0b95840c63d"
+        },
+        {
+          "path": "street_lamp_01.bin",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/street_lamp_01/street_lamp_01.bin",
+          "bytes": 748908,
+          "sha256": "c283db9b6d95835d9e8fc1692829acadcb21a0623b2daaa7231cec1440488401"
+        }
+      ]
+    },
+    {
+      "id": "concrete_road_barrier",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/concrete_road_barrier",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-11-04",
+      "authors": "Amal Kumar (All)",
+      "files": [
+        {
+          "path": "concrete_road_barrier_1k.gltf",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/concrete_road_barrier/concrete_road_barrier_1k.gltf",
+          "bytes": 2868,
+          "sha256": "c371e87d303fff3f0c9fbe88520f7837514364e5c66aac3244e115ffa673d061"
+        },
+        {
+          "path": "textures/concrete_road_barrier_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_nor_gl_1k.jpg",
+          "bytes": 961760,
+          "sha256": "c1072f51ff5c3d7158f0fbb0aa26e82b816b745b9f03639c4816832af2b37c52"
+        },
+        {
+          "path": "textures/concrete_road_barrier_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_arm_1k.jpg",
+          "bytes": 619502,
+          "sha256": "b940847648012f2db8c24b16e07ad1e39b3bd33ea493203364deca209606e4b4"
+        },
+        {
+          "path": "textures/concrete_road_barrier_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_diff_1k.jpg",
+          "bytes": 792641,
+          "sha256": "88b2d79829ffec7b11ac4d9c8554328f30b665d2c17f634197fde4f1ca8696fe"
+        },
+        {
+          "path": "concrete_road_barrier.bin",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/concrete_road_barrier/concrete_road_barrier.bin",
+          "bytes": 1374016,
+          "sha256": "64a4f9bc6e4af64d714a252c3c13428c430a60569deba3d52ca6b7dd3aa70d8c"
+        }
+      ]
+    },
+    {
+      "id": "trashbag",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/trashbag",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-11-05",
+      "authors": "Benny Weimer (All)",
+      "files": [
+        {
+          "path": "trashbag_1k.gltf",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/trashbag/trashbag_1k.gltf",
+          "bytes": 2738,
+          "sha256": "22202e1ec48d924577584dce6751d5ab198fd7c0aee44602e9a7317b5b60a4a7"
+        },
+        {
+          "path": "textures/trashbag_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_nor_gl_1k.jpg",
+          "bytes": 573449,
+          "sha256": "33ddb9711bb3ab2ff1ed19fa361a4251909643fada7e5579a28f6346a58b4daf"
+        },
+        {
+          "path": "textures/trashbag_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_diff_1k.jpg",
+          "bytes": 332301,
+          "sha256": "676e01cbeef39b51c9ecd67315c952a605c8db9c11544fbe11e14dcbd00be27f"
+        },
+        {
+          "path": "textures/trashbag_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_arm_1k.jpg",
+          "bytes": 684660,
+          "sha256": "95e69ba47bc7b84f342cdbe4385cfab670295827740fb09407b967ea2114c0aa"
+        },
+        {
+          "path": "trashbag.bin",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/trashbag/trashbag.bin",
+          "bytes": 106316,
+          "sha256": "7bfac5b9c39a058af347944b437f712718ec129ec883c16339179862cc155fe2"
+        }
+      ]
+    },
+    {
+      "id": "old_tyre",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/old_tyre",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-11-05",
+      "authors": "MP (All)",
+      "files": [
+        {
+          "path": "old_tyre_1k.gltf",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/old_tyre/old_tyre_1k.gltf",
+          "bytes": 2734,
+          "sha256": "ba7b417eb3dc747c356ac3cd1f125754755684eb664737a9f1fc9e490c0b766e"
+        },
+        {
+          "path": "textures/old_tyre_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/old_tyre/old_tyre_diff_1k.jpg",
+          "bytes": 650708,
+          "sha256": "0e34ce658c0844c0c94022233226d495930d514c917a5fa15ffee4760567439e"
+        },
+        {
+          "path": "textures/old_tyre_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/old_tyre/old_tyre_arm_1k.jpg",
+          "bytes": 776823,
+          "sha256": "3bcf192f5b99a7a574f9e21e75927043e6726c601a5da15e3210a31db05e12d4"
+        },
+        {
+          "path": "old_tyre.bin",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/old_tyre/old_tyre.bin",
+          "bytes": 84160,
+          "sha256": "659e7982c2de92ca1d13194c97bf112b6dec22d91daecc88e3912d37ce1b7252"
+        },
+        {
+          "path": "textures/old_tyre_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/old_tyre/old_tyre_nor_gl_1k.jpg",
+          "bytes": 722778,
+          "sha256": "34b716e140408985ddbab7d4bf1d8d430edf834cd2fd4639d82b14cb393fa73e"
+        }
+      ]
+    },
+    {
+      "id": "modular_chainlink_fence",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/modular_chainlink_fence",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-11-05",
+      "authors": "James Ray Cock (All); Amal Kumar (Fence Wire Material)",
+      "files": [
+        {
+          "path": "modular_chainlink_fence_1k.gltf",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modular_chainlink_fence/modular_chainlink_fence_1k.gltf",
+          "bytes": 41838,
+          "sha256": "4204f151f809b4abd41ea0b18b1b6a5d9c23e6bcc0b6a81e44d03690f26604e9"
+        },
+        {
+          "path": "modular_chainlink_fence.bin",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modular_chainlink_fence/modular_chainlink_fence.bin",
+          "bytes": 3168016,
+          "sha256": "be9ea1817089fd35b0927a8271358f6abd2ec80b306a085de435613d936fcb9a"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_posts_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_posts_nor_gl_1k.jpg",
+          "bytes": 505743,
+          "sha256": "b43b8214c90a55bb84222d2a27430b31080d68dc14879632b86dbd316cb5f060"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_wire_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_wire_arm_1k.jpg",
+          "bytes": 694743,
+          "sha256": "88af8364890b0645cd730eca11b30e6cd1c7578ad3aa1f012bb84915b9be5a03"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_wire_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_wire_nor_gl_1k.jpg",
+          "bytes": 664165,
+          "sha256": "5cbf280f80e948de2422f0bb2fe2223a3b6f8e6fc75f54b00cd8d3e070938230"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_wire_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_wire_diff_1k.jpg",
+          "bytes": 670536,
+          "sha256": "79253847a00b67a616148d753df8f4e44ba4615f848b82310426618b5a8dd79b"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_posts_arm_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_posts_arm_1k.jpg",
+          "bytes": 839858,
+          "sha256": "1694ecc2746ddaa93951ea5d2f2b830f544adf929f7ac9fae855f8b8fdfbad50"
+        },
+        {
+          "path": "textures/modular_chainlink_fence_posts_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_posts_diff_1k.jpg",
+          "bytes": 707116,
+          "sha256": "ec273fedef04fbcac26460b996beeeceeff3f91c1bea73ed2c6db1d0fdb30b73"
+        },
+        {
+          "path": "modular_chainlink_fence_wire_opacity_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_chainlink_fence/modular_chainlink_fence_wire_opacity_1k.jpg",
+          "bytes": 710798,
+          "sha256": "fb85792551e86ceefcb49f681d3717894c976002cfebdc27b2d362b9844477b5"
+        }
+      ]
     }
   ]
 }

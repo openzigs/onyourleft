@@ -80,12 +80,19 @@ export interface InstanceAnalysisPort {
   hostedEndpoint(): string | undefined;
   /** Whether a job for this ride was started and has not ended here — so the page resumes it. */
   pendingJob(activityId: ActivityId): boolean;
-  /** Start a job for this ride and follow it. Settles; never rejects. */
+  /**
+   * Start a job for this ride and follow it. Settles; never rejects.
+   * `shownEndpoint` is the service the page named beside the hosted press
+   * ({@link hostedEndpoint} as the page read it, #1796): a hosted job names
+   * that one to the instance, and is not started when this device now holds
+   * another. Absent, the service this device holds at the press is named.
+   */
   ask(
     activityId: ActivityId,
     source: InstanceJobSource,
     view: (view: InstanceJobView) => void,
     signal: AbortSignal,
+    shownEndpoint?: string,
   ): Promise<InstanceAskOutcome>;
   /** Follow this ride's pending job again, from where this tab left it. Settles; never rejects. */
   followAgain(

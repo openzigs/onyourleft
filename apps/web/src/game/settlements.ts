@@ -114,6 +114,7 @@ import {
   type ScatterItem,
   type StructureKind,
 } from './scatter';
+import type { ChainLinkPiece } from './chain-link';
 import { slotHash, uniformFrom } from './seeded';
 import { leastSquaredNearRoad, squaredToSegment } from './road-grid';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -251,6 +252,9 @@ export function structuresAt(
   if (town !== null) lotsAt(profile, origin, seed, fromMetres, toMetres, land, town, found);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
   fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land, countryside);
+  // #1274: and the chain-link beside the mapped grounds, as boundaries are.
+  const fenced = town?.chainLinkAt?.(profile, origin, seed, land);
+  if (fenced !== undefined) chainLinkEdgesAt(profile, fromMetres, toMetres, fenced, found, edges);
   edges.sort(
     (first, second) =>
       Math.abs(first.along - budget.riderMetres) - Math.abs(second.along - budget.riderMetres),
@@ -274,6 +278,49 @@ export function structuresAt(
     if (structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES) kept.push(item);
   }
   return kept;
+}
+
+/**
+ * How near a building's middle no chain-link piece stands, in metres: **6** —
+ * #1274: a procedural lot or a village's house is never fenced through.
+ */
+export const CHAIN_LINK_BUILDING_CLEARANCE_METRES = 6;
+
+/**
+ * The chain-link pieces `fenced` (`chain-link.ts`, on the route's first lap)
+ * that stand between two odometer readings, on whichever lap of a loop they
+ * do, each with that odometer — and none within
+ * {@link CHAIN_LINK_BUILDING_CLEARANCE_METRES} of a building `found` holds.
+ */
+function chainLinkEdgesAt(
+  profile: RouteProfile,
+  fromMetres: number,
+  toMetres: number,
+  fenced: readonly ChainLinkPiece[],
+  found: readonly ScatterItem[],
+  edges: { item: ScatterItem; along: number }[],
+): void {
+  const total = profile.totalDistance;
+  const buildings = found.filter((item) => BUILDINGS.has(item.kind as StructureKind));
+  for (const piece of fenced) {
+    const along = profile.loop
+      ? piece.along + Math.ceil((fromMetres - piece.along) / total) * total
+      : piece.along;
+    if (along < fromMetres || along >= toMetres) continue;
+    const { x, z, rotation } = piece.item;
+    // Its length runs along its own +z: (sin, cos) of its rotation.
+    const ux = Math.sin(rotation);
+    const uz = Math.cos(rotation);
+    const half = BOUNDARY_PIECE_METRES / 2;
+    const clear = buildings.every((building) => {
+      const t = Math.max(-half, Math.min(half, (building.x - x) * ux + (building.z - z) * uz));
+      return (
+        Math.hypot(building.x - (x + ux * t), building.z - (z + uz * t)) >=
+        CHAIN_LINK_BUILDING_CLEARANCE_METRES
+      );
+    });
+    if (clear) edges.push({ item: piece.item, along });
+  }
 }
 
 /**
@@ -1077,6 +1124,18 @@ export interface MappedTown extends MappedFootprintIndex {
    * stretch is today's.
    */
   readonly urban?: UrbanClassMap | undefined;
+  /**
+   * The chain-link fence beside the corridor's industrial, school and sports
+   * grounds — #1274, `chain-link.ts` §`chainLinkPieces` — for a route, built
+   * on its first ask and kept. Absent is none: a ride with no corridor, and
+   * the owner's page's `-chain-link` before.
+   */
+  readonly chainLinkAt?: (
+    profile: RouteProfile,
+    origin: CorridorOrigin,
+    seed: number,
+    land: LandClassMask,
+  ) => readonly ChainLinkPiece[];
 }
 
 /** No footprints and no commercial land: what a ride with no corridor is handed. */

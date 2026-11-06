@@ -25,6 +25,7 @@ import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import {
   blobCasters,
@@ -69,6 +70,7 @@ import {
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
+import { nearTreeKeep } from './near-tree-fade';
 import {
   FOLIAGE_TINT,
   MASONRY_TINT,
@@ -97,6 +99,7 @@ import {
   REALISTIC_CONIFERS,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_CHAIN_LINK,
   REALISTIC_BUILDING_SURFACES,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
@@ -294,6 +297,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 function item(kind: SceneryKind, z: number, x = 12): ScatterItem {
@@ -586,21 +590,26 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
 
   it('ranks only the trees the camera can see — #617’s review', () => {
     // Two trees BEHIND the camera, which is 4.5 m behind the rider, and one
-    // ahead: the one ahead is the nearest tree in the picture.
-    const passed = [item('tree-broadleaf', -8, 0), item('tree-conifer', -12, 0)];
+    // ahead: the one ahead is the nearest tree in the picture. ⚠️ At 11 m and
+    // 14 m behind the rider since #545, where they were 8 m and 12 m: a tree
+    // within 4.5 m of the eye is faded to nothing (`near-tree-fade.ts`), and
+    // 8 m behind the rider is 3.5 m behind the eye — not drawn at all, as the
+    // impostor or otherwise. 11 m is 6.5 m from the eye, which the fade leaves
+    // whole, so what this holds is the ranking and nothing of the fade's.
+    const passed = [item('tree-broadleaf', -11, 0), item('tree-conifer', -14, 0)];
     const ahead = item('tree-broadleaf', 15, 2);
     const belt = beltWith();
     belt.update([...passed, ahead], POSE);
     expect(levelsOfZ(belt, 15)).toEqual(['full']);
     // Still drawn, as the impostor nothing sees — the cull is `inView`'s.
-    expect(levelsOfZ(belt, -8)).toEqual(['impostor']);
+    expect(levelsOfZ(belt, -11)).toEqual(['impostor']);
     expect(belt.drawnItems).toBe(3);
     // The control is the ranking before the review: the two passed trees take
     // the full slot and the band, and the tree in the picture is middle.
     const before = beltWith({ ...REALISTIC_TREE_LEVELS, rankOnly: 'in-view' });
     before.update([...passed, ahead], POSE);
     expect(levelsOfZ(before, 15)).toEqual(['middle']);
-    expect(levelsOfZ(before, -8)).toEqual(['full']);
+    expect(levelsOfZ(before, -11)).toEqual(['full']);
   });
 
   it('changes no tree’s shape in one frame as the rider passes trees — #617’s review', () => {
@@ -615,12 +624,21 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
       let largest = 0;
       for (let at = 0; at <= 140; at += 1) {
         const riderZ = at * 0.1;
-        belt.update(road, { ...POSE, z: riderZ });
+        const pose = { ...POSE, z: riderZ };
+        belt.update(road, pose);
         const now = new Map<number, readonly [number, number]>();
         // Only trees still well ahead of the camera: one that has left the
-        // picture may go to its impostor at once.
+        // picture may go to its impostor at once. ⚠️ And since #545 only trees
+        // the fade near the camera leaves whole: a fading tree's split is
+        // scaled by its keep and it goes when that reaches nothing, which
+        // `near-tree-fade.test.ts` holds to its own pace. Every OTHER tree's
+        // split is still read, so a fading tree ranked out moving the rest
+        // up a rank at once would be red here.
         for (const tree of road) {
-          if (tree.z - riderZ > -CAMERA_BEHIND_METRES + 1.5)
+          if (
+            tree.z - riderZ > -CAMERA_BEHIND_METRES + 1.5 &&
+            nearTreeKeep(tree.x, tree.z, pose, 'fade') === 1
+          )
             now.set(tree.z, splitOfZ(belt, tree.z));
         }
         for (const [z, [low, high]] of now) {
@@ -1991,7 +2009,11 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const late = held.filter((one) => one.url.includes('_1k.ktx2'));
-    // The town's six, and the road's and the grass's four, which are 1K too.
+    // The town's six, and the road's and the grass's four, which are 1K too,
+    // and since #1274 the chain-link's wire.
+    expect(late.map((one) => one.url)).toContainEqual(
+      expect.stringContaining(REALISTIC_CHAIN_LINK.wire),
+    );
     for (const surface of TOWN_STRUCTURE_SURFACES) {
       const maps = REALISTIC_STRUCTURE_SURFACES[surface];
       for (const file of [maps.colour, maps.normal]) {
@@ -2001,7 +2023,7 @@ describe('a failed load releases everything it loaded, including what arrives la
         ).toContainEqual(expect.stringContaining(file));
       }
     }
-    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4);
+    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4 + 1);
     expect(late.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });
 
@@ -2207,8 +2229,15 @@ describe('what the realistic world costs the GPU, lever by lever — #619', () =
   });
 });
 
-/** The realistic bicycle as built when #624 gave it surfaces: 5 308 triangles. */
-const BICYCLE_TRIANGLES_BEFORE_SURFACES = 5_308;
+/**
+ * The realistic bicycle as built when #624 gave it surfaces, 5 308 triangles,
+ * and the two brake hoods PR #2116's second pass drew (Refs #1999): two boxes
+ * of 12, so 5 332. The frame's sum counts the bicycle as built
+ * (`realistic-budget.test.ts`), so the 24 come out of its spare and are held
+ * there. Named `…_BEFORE_SURFACES` until PR #2116's third pass, which no
+ * longer described it once the hoods were in it.
+ */
+const BICYCLE_TRIANGLES_AS_BUILT = 5_308 + 2 * 12;
 
 describe('the realistic bicycle — #369', () => {
   it('is built from bicycle.ts’s own parts inside its budget', () => {
@@ -2230,7 +2259,7 @@ describe('the realistic bicycle — #369', () => {
     // the 5 308 #506's frame sum counts, or under it. The ceiling above is
     // 12 000 and would let 6 000 more through, every one of them out of the
     // frame's 1 350 spare.
-    expect(triangles).toBeLessThanOrEqual(BICYCLE_TRIANGLES_BEFORE_SURFACES);
+    expect(triangles).toBeLessThanOrEqual(BICYCLE_TRIANGLES_AS_BUILT);
   });
 });
 
@@ -2319,14 +2348,14 @@ describe('the realistic bicycle’s surfaces — #624', () => {
     // Along the bar the tape repeats: a coordinate that ran 0 to 1 would
     // stretch one tile over every part.
     expect(Math.max(...tape.map((vertex) => vertex.u))).toBeGreaterThan(2);
-    const saddle = RIDER_BICYCLE_PARTS.find((part) => part.solid.shape === 'box');
+    // The saddle and, since PR #2116's second pass, the two brake hoods: the
+    // bicycle's three rubber boxes, 36 vertices each, none of them taped.
+    const boxes = RIDER_BICYCLE_PARTS.filter((part) => part.solid.shape === 'box');
+    expect(boxes.map((part) => part.name).sort()).toEqual(['bar hood -1', 'bar hood 1', 'saddle']);
     const onSaddle = rubber.filter(
-      (vertex) =>
-        saddle !== undefined &&
-        close(vertex.u, PLAIN_RUBBER_UV[0]) &&
-        close(vertex.v, PLAIN_RUBBER_UV[1]),
+      (vertex) => close(vertex.u, PLAIN_RUBBER_UV[0]) && close(vertex.v, PLAIN_RUBBER_UV[1]),
     );
-    expect(onSaddle.length).toBe(36);
+    expect(onSaddle.length).toBe(36 * boxes.length);
   });
 
   it('puts the chainring’s teeth at its crown and the cassette across the REAR hub only, drive side out', () => {
@@ -3791,10 +3820,14 @@ describe('the street furniture — #1536', () => {
       (sum, kind) => sum + FURNITURE_CAPACITY * (triangles[kind] as number),
       0,
     );
+    // #1274: the stylised street. The realistic one stands Poly Haven's lamp
+    // and is `REALISTIC_STREET_TRIANGLES` (`realistic-roadside.test.ts`); a
+    // realistic world loaded with no lamp model, as this one, draws these.
     expect(2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + furniture).toBe(
-      REALISTIC_STREET_TRIANGLES,
+      25_024,
     );
-    // The SAME triangles in both worlds: why the frame's figure leaves them out.
+    expect(REALISTIC_STREET_TRIANGLES).toBeGreaterThan(25_024);
+    // The same shapes in both worlds but the lamp: what the frame's figure leaves out.
     const stylised = new FurnitureBelt('stylised');
     for (const kind of FURNITURE_KINDS) {
       expect(trianglesOf({ geometry: stylised.shapeOf(kind) }), kind).toBe(triangles[kind]);

@@ -236,6 +236,17 @@ export interface ReflowMeasurement {
     readonly mostReadingLines: number;
     readonly readingSpill: number;
   } | null;
+  /**
+   * The route planner's legs table and *Name* (#2006's owner review): each
+   * leg's "N to M" and routed distance, with the most lines any of them is
+   * laid out on — 1 unless one wraps — and the name field's width; `null` on
+   * any other route, or before the planner has legs.
+   */
+  readonly planner: {
+    readonly legCells: readonly string[];
+    readonly mostLegCellLines: number;
+    readonly nameWidth: number | null;
+  } | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
   /**
@@ -848,6 +859,38 @@ function readingFit(values: readonly Element[]): {
   };
 }
 
+/** How many lines an element's text is laid out on: one per distinct line box. */
+function textLines(element: Element): number {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  const tops = new Set(
+    [...range.getClientRects()]
+      .filter((rect) => rect.width > 0)
+      .map((rect) => Math.round(rect.top)),
+  );
+  return tops.size;
+}
+
+/** The route planner's legs and name field, as {@link ReflowMeasurement.planner} says. */
+function plannerLegs(): ReflowMeasurement['planner'] {
+  const rows = [...document.querySelectorAll('.oyl-main tbody tr')].filter((row) =>
+    /^\d+ to \d+$/.test((row.querySelector('th[scope="row"]')?.textContent ?? '').trim()),
+  );
+  if (rows.length === 0) return null;
+  // The row's heading, and the State cell: the fourth, after Drawn and Surface.
+  const cells = rows.flatMap((row) =>
+    [row.querySelector('th[scope="row"]'), row.children[3]].filter(
+      (cell): cell is Element => cell !== null && cell !== undefined,
+    ),
+  );
+  const name = document.querySelector('.oyl-main form input[name="name"]');
+  return {
+    legCells: cells.map((cell) => (cell.textContent ?? '').trim()),
+    mostLegCellLines: Math.max(...cells.map(textLines)),
+    nameWidth: name === null ? null : name.getBoundingClientRect().width,
+  };
+}
+
 /** Home's facts, as {@link ReflowMeasurement.homeFacts} says. */
 function homeFacts(): ReflowMeasurement['homeFacts'] {
   if (document.querySelector('.oyl-home') === null) return null;
@@ -1120,7 +1163,7 @@ function keptBeforeFirstControl(): string[] {
     return [];
   }
   const control = laidOutControls(main)[0] ?? null;
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return [...main.querySelectorAll('[data-oyl-kept-visible]')]
     .filter(
       (element) =>
@@ -1134,7 +1177,7 @@ function keptBeforeFirstControl(): string[] {
 
 /** The route's summary under its `h1`, and how many lines it lays out on — #993. */
 function summaryLines(): { readonly text: string; readonly lines: number } | null {
-  const summary = document.querySelector('main > h1 + p');
+  const summary = document.querySelector('main > .oyl-view-head > h1 + p');
   if (summary === null || !laidOut(summary)) {
     return null;
   }
@@ -1153,7 +1196,7 @@ function summaryLines(): { readonly text: string; readonly lines: number } | nul
 
 /** The help control under a screen's title, and what it holds — #993. */
 function helpControl(): HelpControl | null {
-  const toggle = document.querySelector('main > .oyl-help > summary');
+  const toggle = document.querySelector('main > .oyl-view-head > .oyl-help > summary');
   if (toggle === null) {
     return null;
   }
@@ -1180,7 +1223,7 @@ function proseBeforeFirstControl(): string[] {
   const control = laidOutControls(main)[0] ?? null;
   // The route's own summary is the shell's (#48), under its `h1`, and is the
   // one sentence every route keeps.
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return proseBetween(main, summary, control).map((element) =>
     (proseWords(element) ?? '').slice(0, 80),
   );
@@ -1317,7 +1360,7 @@ function inlineDisclosureCopies(): void {
  */
 function putTheLineBack(route: RouteDefinition): void {
   const main = document.querySelector('main');
-  const title = main?.querySelector(':scope > h1');
+  const title = main?.querySelector(':scope > .oyl-view-head > h1');
   if (main === null || main === undefined || title === null || title === undefined) {
     return;
   }
@@ -1478,6 +1521,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     scrollBoxes: scrollBoxes(),
     library: libraryCards(),
     homeFacts: homeFacts(),
+    planner: route.id === 'route-builder' ? plannerLegs() : null,
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
     expectation,
@@ -1550,13 +1594,16 @@ function applyPanesControl(): void {
  * first column and on into the next. `?sections=columns` deletes the shipped
  * grid's rules through the CSSOM and puts these back, so
  * `sections.browser.spec.ts`' row-major check has the layout it replaced to
- * fail on, and the heights it publishes have a "before".
+ * fail on, and the heights it publishes have a "before". The one change to
+ * it is #2195's: a section the shipped page keeps in a column
+ * (`.oyl-sections__fits-column`) is kept in one here too, so the control
+ * differs from the page in the columns and in nothing else.
  */
 const FIRST_CUT_COLUMNS = `
 .oyl-sections > * { break-inside: avoid; }
 .oyl-sections :is(h2, h3) { break-after: avoid; }
 .oyl-sections > .oyl-sections__title,
-.oyl-sections > :has(.oyl-scroll-region) { column-span: all; }
+.oyl-sections > :has(.oyl-scroll-region):not(.oyl-sections__fits-column) { column-span: all; }
 @container oyl-pane (min-width: 40rem) {
   .oyl-sections:not(.oyl-sections--broad) { columns: 2; column-gap: var(--oyl-space-lg); }
   .oyl-sections > .oyl-panel + .oyl-panel { margin-block-start: var(--oyl-space-md); }

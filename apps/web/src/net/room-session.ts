@@ -47,6 +47,19 @@
  * road for its rejoin window (#779, 60 s by default) and coasts them at 0 W
  * meanwhile; past {@link REJOIN_GIVE_UP_MS} this stops trying, because the
  * room would seat a rider who came back later as somebody new at 0 m.
+ *
+ * ## A lap race — #1911, ADR 0060 D-5.4
+ *
+ * A welcome whose `roomConfig.lapRace` is set makes the room a lap race. The
+ * session then keeps the newest frame's lap slots — every rider's race
+ * offset, lane, held item and laps — and its item events ({@link
+ * RoomSession.lapRace}), and sends the rider's two INPUTS when the game asks
+ * ({@link RoomSession.useItem}, {@link RoomSession.changeLane}): never an
+ * outcome, which the protocol would refuse anyway. An input takes the next
+ * number of the one sequence the reports count on, so a frame's
+ * `ackSequence` past it says the room had the input before that tick.
+ * A rejoin forgets the lap slots, as it forgets the standings: what the game
+ * shows after one is the room's own word again, from its next frame.
  */
 
 import { fieldDraftFactors } from '@onyourleft/physics';
@@ -56,6 +69,10 @@ import {
   PROTOCOL_VERSION,
   type ClientMessage,
   type Finish,
+  type Frame,
+  type HeldItem,
+  type ItemEvent,
+  type LapRaceConfig,
   type RefuseReason,
   type RoomConfig,
   type Standings,
@@ -227,10 +244,58 @@ export interface RoomStandings {
   readonly rows: readonly RoomStandingsRow[];
 }
 
+/** One rider's lap-race slots in a frame, as the room sent them (#1911). */
+export interface RoomLapRider {
+  /** Effort distance along the route, metres: the frame's `decimetres`. */
+  readonly effortMetres: number;
+  /** How far items have moved them, metres, within ±10 m. Drawn only (ADR 0060 D-3.3). */
+  readonly raceOffsetMetres: number;
+  readonly lane: number;
+  readonly held: HeldItem;
+  readonly lapsDone: number;
+}
+
+/** A lap race's newest frame, as this client keeps it (#1911). */
+export interface RoomLapFrame {
+  readonly tick: number;
+  /** The local instant the frame arrived. */
+  readonly atLocalMs: number;
+  /**
+   * The last report sequence the room had admitted from this rider at that
+   * tick: an input sent with a smaller sequence than it reached the room
+   * before the tick. Absent before the first report.
+   */
+  readonly ackSequence: number | undefined;
+  readonly riders: ReadonlyMap<number, RoomLapRider>;
+  /** The tick's item events, in the room's order. */
+  readonly events: readonly ItemEvent[];
+}
+
+/** A lap race as the room has said it (#1911): its settings, and its newest frame. */
+export interface RoomLapRace {
+  readonly config: LapRaceConfig;
+  readonly frameIntervalMs: number;
+  /** This rider's seat. */
+  readonly riderId: number;
+  /** `undefined` before the first frame, and after a rejoin until the room's next. */
+  readonly newest: RoomLapFrame | undefined;
+}
+
 /** Where a session is. */
 export type RoomSessionStatus =
   | { readonly kind: 'connecting' }
-  | { readonly kind: 'joined'; readonly riderId: number; readonly config: RoomConfig }
+  | {
+      readonly kind: 'joined';
+      readonly riderId: number;
+      readonly config: RoomConfig;
+      /**
+       * The room's Discord voice link, from its welcome (#875): only where the
+       * instance offers voice for this room, and only once the room let the
+       * rider in. Held to Discord's invite host by the decoder
+       * (`@onyourleft/protocol` §`VOICE_INVITE_PATTERN`). `game/room-voice.ts`.
+       */
+      readonly voiceInvite?: string;
+    }
   /** Connection lost; reconnecting by itself. `since` is the local instant it went. */
   | { readonly kind: 'lost'; readonly since: number }
   /** The room said no, and will keep saying it. */
@@ -309,6 +374,10 @@ export class RoomSession {
   /** Whether the room has sent a frame: a race is on from its first (#785). */
   #framed = false;
   #kind: 'race' | 'ride' | undefined;
+  /** A lap race's settings, from the last welcome (#1911); `undefined` in any other room. */
+  #lapConfig: { readonly config: LapRaceConfig; readonly frameIntervalMs: number } | undefined;
+  /** A lap race's newest frame (#1911). */
+  #lapFrame: RoomLapFrame | undefined;
   /** How many times a welcome has arrived: 1 is the join, more are rejoins. */
   #welcomes = 0;
   #riderId: number | undefined;
@@ -400,6 +469,48 @@ export class RoomSession {
     const index = riders.findIndex((rider) => rider.riderId === own);
     if (index === -1) return 1;
     return fieldDraftFactors(riders.map((rider) => rider.distanceMetres))[index] as number;
+  }
+
+  /**
+   * A lap race, as the room has said it — #1911: its laps and items, and its
+   * newest frame's lap slots and item events. `undefined` in a room that is
+   * not a lap race, and before the welcome.
+   */
+  lapRace(): RoomLapRace | undefined {
+    const lap = this.#lapConfig;
+    const riderId = this.#riderId;
+    if (lap === undefined || riderId === undefined) return undefined;
+    return { ...lap, riderId, newest: this.#lapFrame };
+  }
+
+  /**
+   * Ask the room to use the item it holds for this rider — #1911. Sent only
+   * while joined to a lap race with items on; answers the input's sequence,
+   * or `undefined` when nothing was sent. Which item, and what it did, are the
+   * room's: the input names none.
+   */
+  useItem(): number | undefined {
+    if (this.#lapConfig?.config.items !== 'on') return undefined;
+    return this.#input({ type: 'item-use' });
+  }
+
+  /** Ask the room for lane `lane` — #1911. As {@link useItem}, in any lap race. */
+  changeLane(lane: number): number | undefined {
+    if (this.#lapConfig === undefined) return undefined;
+    return this.#input({ type: 'lane', lane });
+  }
+
+  #input(input: { readonly type: 'item-use' } | { readonly type: 'lane'; readonly lane: number }) {
+    if (this.#status.kind !== 'joined' || this.#socket === undefined) return undefined;
+    this.#sequence += 1;
+    const sequence = this.#sequence;
+    const atMs = Math.max(0, Math.round(this.#options.now()));
+    const sent = this.#send(
+      input.type === 'lane'
+        ? { type: 'lane', sequence, atMs, lane: input.lane }
+        : { type: 'item-use', sequence, atMs },
+    );
+    return sent ? sequence : undefined;
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */
@@ -516,11 +627,19 @@ export class RoomSession {
             // #1347: standings from before a loss are gaps that stopped
             // moving; the room's next ones replace them within a tick.
             this.#standings = undefined;
+            // #1911: and a lap race's slots are the room's again from its next frame.
+            this.#lapFrame = undefined;
+            const lapRace = message.roomConfig.lapRace;
+            this.#lapConfig =
+              lapRace === undefined
+                ? undefined
+                : { config: lapRace, frameIntervalMs: message.roomConfig.frameIntervalMs };
             this.#startReporting(message.roomConfig.reportIntervalMs);
             this.#setStatus({
               kind: 'joined',
               riderId: message.riderId,
               config: message.roomConfig,
+              ...(message.voiceInvite === undefined ? {} : { voiceInvite: message.voiceInvite }),
             });
             return;
           }
@@ -531,6 +650,7 @@ export class RoomSession {
             if (this.#options.acceptFrame?.() === false) return;
             this.#framed = true;
             this.#snapshots?.push(message, this.#options.now());
+            if (this.#lapConfig !== undefined) this.#keepLapFrame(message);
             return;
           case 'countdown':
             this.#countdown = { startsInMs: message.startsInMs, atLocalMs: this.#options.now() };
@@ -548,6 +668,20 @@ export class RoomSession {
             this.#finish = message;
             this.#options.onChange?.();
             return;
+          case 'voice': {
+            // #876: the room's voice link changed under this rider — the
+            // channel was replaced after a removal or a ban. Only a rider the
+            // room has welcomed is told; absent is no voice any more.
+            const status = this.#status;
+            if (status.kind !== 'joined') return;
+            this.#setStatus({
+              kind: 'joined',
+              riderId: status.riderId,
+              config: status.config,
+              ...(message.voiceInvite === undefined ? {} : { voiceInvite: message.voiceInvite }),
+            });
+            return;
+          }
         }
       },
       onClose: (code) => {
@@ -641,12 +775,46 @@ export class RoomSession {
     });
   }
 
-  #send(message: ClientMessage): void {
+  /** A lap race's frame, kept for {@link lapRace}: only the riders that carry the four slots. */
+  #keepLapFrame(frame: Frame): void {
+    const riders = new Map<number, RoomLapRider>();
+    for (const rider of frame.riders) {
+      if (
+        rider.raceOffsetCentimetres === undefined ||
+        rider.lane === undefined ||
+        rider.held === undefined ||
+        rider.lapsDone === undefined
+      ) {
+        continue;
+      }
+      riders.set(rider.riderId, {
+        effortMetres: rider.decimetres / 10,
+        raceOffsetMetres: rider.raceOffsetCentimetres / 100,
+        lane: rider.lane,
+        held: rider.held,
+        lapsDone: rider.lapsDone,
+      });
+    }
+    this.#lapFrame = {
+      tick: frame.tick,
+      atLocalMs: this.#options.now(),
+      ackSequence: frame.ackSequence,
+      riders,
+      events: frame.itemEvents ?? [],
+    };
+  }
+
+  /** Send `message`; `false` when nothing went (no socket, or the encoder refused it). */
+  #send(message: ClientMessage): boolean {
+    const socket = this.#socket;
+    if (socket === undefined) return false;
     try {
-      this.#socket?.send(encodeMessage(message));
+      socket.send(encodeMessage(message));
+      return true;
     } catch {
       // A value the encoder refuses (a power past the protocol's bound): the
       // room coasts the rider for that report, which is rule 1 anyway.
+      return false;
     }
   }
 }

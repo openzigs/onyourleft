@@ -48,8 +48,16 @@ import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { seconds, watts } from '@onyourleft/domain';
+import { openSimulatedController } from '@onyourleft/sensors/protocol/testing';
+import { createOpenBikeControlClient } from '@onyourleft/sensors/web-bluetooth';
+import { bluetoothOverSimulatedController } from '@onyourleft/sensors/web-bluetooth/testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
-import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
+import {
+  createSimulator,
+  ftmsTrainer,
+  steeringController,
+  type ControllerStep,
+} from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
@@ -57,10 +65,12 @@ import { riderMassFor } from '../athlete/mass';
 import { roomPortOver } from '../net/room-port';
 import { ManualClock, ScriptedRoom } from '../net/testing';
 import { createRideController } from '../ride/controller';
+import { createSteeringController, STEERING_CONTROLLER_BUTTONS } from '../ride/steering-controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/assist-preference';
+import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { pickRoundTargets } from './delivery/targets';
@@ -73,13 +83,14 @@ import {
   type ThrowSide,
 } from './delivery/throw';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
+import type { PadSnapshot } from './gamepad-port';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameRenderer, SceneFrame } from './port';
-import { lineOffsetAt, racingLine } from './racing-line';
+import { LINE_LIMIT_METRES, lineOffsetAt, racingLine } from './racing-line';
 import { DELIVERY_VILLAGE_DRAW_CALLS, villageDrawCallCeiling } from './realistic-budget';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { GameSimulation, type RiderInput } from './simulation';
@@ -511,12 +522,15 @@ async function rideTheTrace(options: {
   readonly frames?: number | undefined;
   /** Filled with the `steeredLateral` each drawn frame's input carried, by frame index. */
   readonly steered?: Map<number, number | undefined> | undefined;
+  /** A paired steering controller (#1827). */
+  readonly controller?: ControllerPort | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
     <GameView
       port={port()}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
+      {...(options.controller === undefined ? {} : { controller: options.controller })}
       renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
       delivery={options.delivery}
@@ -940,6 +954,372 @@ describe('lane steering inside a game ride — #1853', () => {
     await pressSteer('lane-left');
     for (let index = 0; index < 5; index += 1) await pump();
     expect(steeredInputs.at(-1)).toBeLessThan(before as number);
+  });
+});
+
+/**
+ * A gamepad inside a game ride — #1821, read through the ride a rider rides:
+ * the real `GameView` hands the HUD its throw and steer ports, the HUD's
+ * `GamepadIntents` polls `navigator.getGamepads()` on the same animation
+ * frames as the ride, and what is read back is where each drawn frame put the
+ * rider and which parcels it drew in the air. `hud/HudPanel.gamepad.test.tsx`
+ * holds the HUD to stand-in ports; this holds the ports to the round.
+ */
+describe('a gamepad inside a game ride — #1821', () => {
+  /** What `navigator.getGamepads()` lists now. */
+  let pads: (PadSnapshot | null)[] = [];
+
+  beforeEach(() => {
+    pads = [];
+    Object.defineProperty(window.navigator, 'getGamepads', {
+      configurable: true,
+      value: () => pads,
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, 'getGamepads');
+  });
+
+  /** A pad in the W3C standard mapping, holding `down` by button index. */
+  function standardPad(down: readonly number[], connected = true): PadSnapshot {
+    return {
+      connected,
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, (_, index) => ({ pressed: down.includes(index) })),
+    };
+  }
+
+  async function padEvent(type: 'gamepadconnected' | 'gamepaddisconnected'): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(new Event(type));
+      await Promise.resolve();
+    });
+  }
+
+  async function frames(count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) await pump();
+  }
+
+  /** Mount the game with a round on, press Ride, and ride 20 frames with no pad. */
+  async function rideARound(drawn: SceneFrame[]): Promise<void> {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await frames(20);
+  }
+
+  /** The most parcels any of `drawn` showed in the air. */
+  const mostInTheAir = (drawn: readonly SceneFrame[]): number =>
+    Math.max(0, ...drawn.map((frame) => frame.delivery?.parcels.length ?? 0));
+
+  it('changes lane once for a d-pad held over many frames, and again for the next press', async () => {
+    await rideARound([]);
+    const start = startSteer(lineOffsetAt(racingLine(town.profile), 0));
+    // Fixture: a lane with two more beside it, so a second press has somewhere to go.
+    expect(start.lane === 0 || start.lane === LANE_OFFSETS_METRES.length - 1).toBe(true);
+    const toward = start.lane === 0 ? 1 : -1;
+    const button = toward < 0 ? 14 : 15;
+    const laneAt = (steps: number): number =>
+      LANE_OFFSETS_METRES[start.lane + toward * steps] as number;
+    expect(steeredInputs.at(-1)).toBe(laneAt(0));
+
+    // Held across 15 frames, 3 s — seven lane changes' worth: one lane.
+    pads = [standardPad([button])];
+    await padEvent('gamepadconnected');
+    await frames(15);
+    expect(steeredInputs.at(-1)).toBe(laneAt(1));
+
+    // Let go, then pressed again: the next lane.
+    pads = [standardPad([])];
+    await frames(3);
+    expect(steeredInputs.at(-1)).toBe(laneAt(1));
+    pads = [standardPad([button])];
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(laneAt(2));
+  });
+
+  it('throws one parcel for a face button held over many frames, and another for the next press', async () => {
+    const drawn: SceneFrame[] = [];
+    await rideARound(drawn);
+    expect(mostInTheAir(drawn)).toBe(0);
+
+    // X, held 1 s: past the throw's 0.5 s cooldown, inside a parcel's 1.2 s
+    // flight, so a second throw from the same press would be two in the air.
+    pads = [standardPad([2])];
+    await padEvent('gamepadconnected');
+    const held = drawn.length;
+    await frames(5);
+    expect(mostInTheAir(drawn.slice(held))).toBe(1);
+
+    // Let go until it has landed, then pressed again: a parcel in the air again.
+    pads = [standardPad([])];
+    await frames(10);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(0);
+    pads = [standardPad([2])];
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+  });
+
+  it('asks nothing of the round once its pad goes, and the round goes on: its keys still throw', async () => {
+    const drawn: SceneFrame[] = [];
+    await rideARound(drawn);
+    pads = [standardPad([])];
+    await padEvent('gamepadconnected');
+    await frames(2);
+
+    // The pad goes mid-round: first listed as no longer connected, its X still
+    // reading down, then not listed at all.
+    pads = [standardPad([2], false)];
+    await padEvent('gamepaddisconnected');
+    const gone = drawn.length;
+    await frames(5);
+    pads = [null];
+    await frames(10);
+    expect(drawn.length - gone).toBe(15);
+    expect(mostInTheAir(drawn.slice(gone))).toBe(0);
+
+    // The round went on: the key throws, as it did before any pad.
+    await pressThrow('left');
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+  });
+});
+
+/**
+ * A steering controller inside a game ride — #1827, read through the ride a
+ * rider rides: the simulated controller (#1823) paired by the real Web
+ * Bluetooth client (#1824) and held by the Devices screen's controller
+ * (#1826), handed to the real `GameView` as its controller port, and its
+ * scripted presses, angles and throws read back off the drawn frames. The
+ * simulated controller's clock is advanced by hand between frames.
+ */
+describe('a steering controller inside a game ride — #1827', () => {
+  /** The simulated controller, playing `steps`, paired; and its clock. */
+  async function paired(steps: readonly ControllerStep[]) {
+    const rig = openSimulatedController({ spec: steeringController({ script: steps }) });
+    const steering = createSteeringController(
+      createOpenBikeControlClient({
+        bluetooth: bluetoothOverSimulatedController(rig.gatt),
+        buttons: STEERING_CONTROLLER_BUTTONS,
+      }),
+    );
+    await steering.pair();
+    expect(steering.state.kind).toBe('connected');
+    return { ...rig, steering };
+  }
+
+  async function frames(count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) await pump();
+  }
+
+  /** Mount the game with a round on and `controller`, press Ride, and ride 20 frames. */
+  async function rideARound(drawn: SceneFrame[], controller: ControllerPort): Promise<void> {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+        controller={controller}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await frames(20);
+  }
+
+  /** The lane the round starts in, and the way two more lanes lie from it. */
+  function startLane(): { readonly lane: number; readonly toward: 1 | -1 } {
+    const start = startSteer(lineOffsetAt(racingLine(town.profile), 0));
+    expect(start.lane === 0 || start.lane === LANE_OFFSETS_METRES.length - 1).toBe(true);
+    return { lane: start.lane, toward: start.lane === 0 ? 1 : -1 };
+  }
+
+  const at = (second: number) => seconds(second);
+
+  it('moves one lane for each steer press, and none for a release', async () => {
+    const { lane, toward } = startLane();
+    const button = toward < 0 ? 0x18 : 0x19;
+    const rig = await paired([
+      { at: at(1), kind: 'changes', changes: [{ kind: 'press', button }] },
+      { at: at(2), kind: 'changes', changes: [{ kind: 'release', button }] },
+      { at: at(3), kind: 'changes', changes: [{ kind: 'press', button }] },
+    ]);
+    await rideARound([], rig.steering);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane]);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane + toward]);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane + toward]);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane + 2 * toward]);
+  });
+
+  it('steers to the lane the bars point at, at the angle’s extremes and straight ahead', async () => {
+    const { lane, toward } = startLane();
+    // Full lock away from the start lane, then straight ahead, then full lock back.
+    const rig = await paired([
+      { at: at(1), kind: 'changes', changes: [{ kind: 'angle', degrees: 63 * toward }] },
+      { at: at(2), kind: 'changes', changes: [{ kind: 'angle', degrees: 0 }] },
+      { at: at(3), kind: 'changes', changes: [{ kind: 'angle', degrees: -63 * toward }] },
+    ]);
+    await rideARound([], rig.steering);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane + 2 * toward]);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[1]);
+    rig.bench.advance(seconds(1));
+    await frames(10);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane]);
+    // Never past the outer lanes, so never past the line's limit.
+    for (const offset of steeredInputs) {
+      if (offset !== undefined) expect(Math.abs(offset)).toBeLessThanOrEqual(LINE_LIMIT_METRES);
+    }
+  });
+
+  it('moves the rider by the angle alone when a steer is sent beside it', async () => {
+    const { lane, toward } = startLane();
+    // A steer press back toward the start, with the bars at full lock the other way.
+    const button = toward < 0 ? 0x19 : 0x18;
+    const rig = await paired([
+      {
+        at: at(1),
+        kind: 'changes',
+        changes: [
+          { kind: 'press', button },
+          { kind: 'angle', degrees: 63 * toward },
+        ],
+      },
+      { at: at(2), kind: 'changes', changes: [{ kind: 'press', button }] },
+    ]);
+    await rideARound([], rig.steering);
+    rig.bench.advance(seconds(2));
+    await frames(15);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[lane + 2 * toward]);
+  });
+
+  it('throws from Power-up 1 and Power-up 2, once a press', async () => {
+    const drawn: SceneFrame[] = [];
+    const rig = await paired([
+      { at: at(1), kind: 'changes', changes: [{ kind: 'press', button: 0x50 }] },
+      { at: at(4), kind: 'changes', changes: [{ kind: 'press', button: 0x51 }] },
+    ]);
+    await rideARound(drawn, rig.steering);
+    expect(drawn.every((frame) => frame.delivery?.parcels.length === 0)).toBe(true);
+    rig.bench.advance(seconds(1));
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+    await frames(10);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(0);
+    rig.bench.advance(seconds(3));
+    await frames(2);
+    expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+  });
+
+  it(
+    'sends the trainer the same writes as the plain ride, driven by presses, angles and a malformed burst (DL5)',
+    SHARED_RIDE,
+    async () => {
+      const plain = await without();
+      const burst: ControllerStep[] = Array.from({ length: 40 }, () => ({
+        at: at(6),
+        kind: 'malformed',
+        shape: 'odd-length',
+      }));
+      const rig = await paired([
+        { at: at(2), kind: 'changes', changes: [{ kind: 'press', button: 0x18 }] },
+        { at: at(3), kind: 'changes', changes: [{ kind: 'angle', degrees: 40 }] },
+        { at: at(4), kind: 'changes', changes: [{ kind: 'press', button: 0x50 }] },
+        { at: at(5), kind: 'changes', changes: [{ kind: 'angle', degrees: -40 }] },
+        ...burst,
+        { at: at(7), kind: 'changes', changes: [{ kind: 'angle-unavailable' }] },
+        { at: at(8), kind: 'changes', changes: [{ kind: 'press', button: 0x19 }] },
+        { at: at(9), kind: 'changes', changes: [{ kind: 'press', button: 0x51 }] },
+      ]);
+      pending = [];
+      nowMs = START_MS;
+      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK));
+      const writes: Write[] = [];
+      const steered = new Map<number, number | undefined>();
+      await rideTheTrace({
+        delivery: true,
+        trainer: trainerPort(writes),
+        steered,
+        controller: rig.steering,
+        // The controller's clock: a second every five frames, a frame being 0.2 s.
+        onFrame: (index) => {
+          if (index % 5 === 4) rig.bench.advance(seconds(1));
+          return Promise.resolve();
+        },
+      });
+      await clickThrough(buttonStarting('End ride'));
+      // Non-vacuity: the whole script played, its burst included, and the
+      // controller moved the rider off the shadow's lanes.
+      expect(rig.controller.sent()).toHaveLength(47);
+      expect([...steered].some(([index, offset]) => offset !== script.steered[index])).toBe(true);
+      expect(plain.writes.length).toBeGreaterThan(20);
+      expect(writes).toStrictEqual(plain.writes);
+    },
+  );
+
+  it('ignores the controller on a ride in a room, where no round runs (DL9)', async () => {
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    let listening = 0;
+    const handed: ControllerPort = {
+      onControllerEvents: () => {
+        listening += 1;
+        return () => {
+          listening -= 1;
+        };
+      },
+    };
+    const steered = new Map<number, number | undefined>();
+    await rideTheTrace({
+      delivery: true,
+      frames: 40,
+      steered,
+      controller: handed,
+      room: {
+        room: roomPortOver(() => room.link(), { timers: clock, now: () => nowMs }),
+        roomId: 'room-1',
+      },
+    });
+    expect(steered.size).toBeGreaterThan(30);
+    expect([...steered.values()].every((each) => each === undefined)).toBe(true);
+    expect(listening).toBe(0);
+  });
+
+  it('listens to the controller on a solo round, and lets it go when the ride ends', async () => {
+    let listening = 0;
+    const handed: ControllerPort = {
+      onControllerEvents: () => {
+        listening += 1;
+        return () => {
+          listening -= 1;
+        };
+      },
+    };
+    await rideARound([], handed);
+    expect(listening).toBe(1);
+    await clickThrough(buttonStarting('End ride'));
+    expect(listening).toBe(0);
   });
 });
 
