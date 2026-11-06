@@ -69,6 +69,20 @@ export {
   workoutShapeText,
 } from './describe';
 
+export type {
+  ChoiceRange,
+  ChoiceRangeWithDefault,
+  FixedMainSet,
+  MainSet,
+  Recovery,
+  RepeatMainSet,
+  TailorChoices,
+  TemplateParameters,
+  WorkoutCategory,
+  WorkoutTemplate,
+} from './template';
+export { MAXIMUM_INTENSITY_PERCENT, MINIMUM_INTENSITY_PERCENT, tailorWorkout } from './template';
+
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
 
