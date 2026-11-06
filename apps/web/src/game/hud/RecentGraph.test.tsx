@@ -103,4 +103,13 @@ describe('the graph on the HUD (#2078)', () => {
     expect(svg()?.getAttribute('data-oyl-graph-written')).toBe('5');
     expect(svg()?.querySelectorAll('.oyl-hud__recent-power').length).toBe(1);
   });
+
+  it('is redrawn when the threshold arrives, with no new second written', async () => {
+    // PR #2231's review: `useOwnThresholdPower` answers after the graph's
+    // first render, so the bands must not wait for the next second.
+    mounted = await mount(<RecentGraph samples={samples} written={4} threshold={undefined} />);
+    expect(queryAll(mounted.container, '.oyl-hud__recent-band')).toEqual([]);
+    await mounted.rerender(<RecentGraph samples={samples} written={4} threshold={watts(250)} />);
+    expect(queryAll(mounted.container, '.oyl-hud__recent-band')).toHaveLength(7);
+  });
 });

@@ -287,8 +287,10 @@ image — apt reported each one `already the newest version` — so the step now
 - **Not a cache**: the slow half was apt, never the CDN, and a step-level `if:` to skip a cache hit
   is something `nightly-split.test.ts` forbids in this workflow. No stop moved: the step keeps its
   `timeout-minutes: 10`, now only a stop on a hung CDN.
-- `nightly.yml` and `demo-video.yml` still run `--with-deps` and still need the apt-source step;
-  they cannot block a merge, and moving them is a change of their own.
+- `nightly.yml` and `demo-video.yml` install the same way since
+  [#2209](https://github.com/openzigs/onyourleft/issues/2209) (§"The nightly and demo installs —
+  #2209" below). Until then they ran `--with-deps`, so a nightly frame was drawn with fonts the
+  required gate's frame was not.
 
 **Measured.** Before: 57 readings of the step over 19 runs of 2026-11-05 (16 completed runs and the
 first attempts of the three that timed out), **13 to 35 s on 50 of them**, a median of 19 s, then
@@ -305,6 +307,46 @@ step, `completed_at` less `started_at`):
 which is where all five readings of 563 s and over spent their time. Every shard of all three
 attempts was green. A slow day on Playwright's CDN is still possible and still
 inside the ten-minute stop; nothing here measured one.
+
+#### The nightly and demo installs — #2209
+
+⚠️ **`nightly.yml`'s five browser installs and `demo-video.yml`'s two are `playwright install
+--only-shell chromium` since [#2209](https://github.com/openzigs/onyourleft/issues/2209)**, as the
+required shards' are since #2207, and a reviewer who remembers `--with-deps` there is reading the
+old file. Every nightly project and the demo's `render-video.ts` launch the headless shell, and
+neither workflow now asks apt for the fonts the required gate draws without, so a nightly frame and
+a required one are drawn with the same fonts. `demo-video.yml` still asks apt for **ffmpeg**: the
+image has none, and Playwright's own is built to record a page's video as WebM, with no libx264 for
+the render's MP4. It is installed with `--no-install-recommends`, so it brings no fonts, and the
+apt-source step stays load-bearing in that workflow alone.
+
+`nightly-split.test.ts` holds each of them to the one install command, the nightly workflow to no
+command that asks apt, and the demo's to ffmpeg's two. Since #2209 its apt rule reads each command a
+workflow runs, a `run: |` block line by line, for `apt` or `apt-get` in any spelling (`sudo apt -y
+install …`, `apt update`) as well as `--with-deps` and `install-deps`, and not a path through
+`/etc/apt/`. Its channel and headed-run rule covers the launches a spec or a tool makes for itself
+(`offline.browser.spec.ts`' persistent contexts, `tools/demo/render-video.ts`) as well as the
+Playwright config.
+
+**Measured.** Before, the step (`completed_at` less `started_at`) on the four scheduled nightly runs
+of 2026-11-02 to 05 ([41434484136](https://github.com/openzigs/onyourleft/actions/runs/41434484136),
+[41623071258](https://github.com/openzigs/onyourleft/actions/runs/41623071258),
+[41817542650](https://github.com/openzigs/onyourleft/actions/runs/41817542650),
+[42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562)): **16 to 30 s on all
+20**, a median of 19 s. On the demo's last five `Demo video checks`: 18, 20, 23 and 32 s, and
+**684 s** on run [42121778580](https://github.com/openzigs/onyourleft/actions/runs/42121778580),
+the stall #2207 measured. After, on this change's pull request, three attempts of each:
+
+| Run | `2 of 5` | `3 of 5` | `4 of 5` | `5 of 5` | heavy | Run | `Demo video checks` |
+|---|--:|--:|--:|--:|--:|---|--:|
+| [42129669442](https://github.com/openzigs/onyourleft/actions/runs/42129669442) attempt 1 | 3 s | 5 s | 4 s | 5 s | 4 s | [42129669303](https://github.com/openzigs/onyourleft/actions/runs/42129669303) attempt 1 | 3 s |
+| attempt 2 | 5 s | 4 s | 4 s | 6 s | 4 s | attempt 2 | 3 s |
+| attempt 3 | 5 s | 5 s | 4 s | 3 s | 3 s | attempt 3 | 4 s |
+
+**3 to 6 s on all 18**, against 16 to 30 s and one 684 s before. Every nightly browser job and the
+demo check was green on every attempt. The nightly coverage report, which installs no browser, reached
+its 30-minute stop on attempt 1 as the scheduled runs of 2026-11-04 and 05 did; it is not this
+change's.
 
 #### Where the time comes from next — owed before B9 and B12
 
@@ -1606,8 +1648,8 @@ own CDN, and `--with-deps` takes its shared libraries from Ubuntu's archives. Re
 therefore makes CI trust **less** than it did, which is why it is a safe answer to an outage and
 not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
 deleting the step is a one-line revert if the trade is ever judged wrong. ⚠️ Since #2207 no step in
-`rules.yml` runs apt (§"The browser install — #2207"), so there it is a no-op kept as a guard;
-`nightly.yml` and `demo-video.yml` still run `--with-deps` and still need it.
+`rules.yml` runs apt (§"The browser install — #2207"), and since #2209 none in `nightly.yml`, so
+there it is a no-op kept as a guard; `demo-video.yml` still asks apt for ffmpeg and still needs it.
 
 From #1231's stop-gap of 2026-10-09 to its GHCR mirror there was a third, `Log in to Docker Hub`
 (with a `Log out of Docker Hub` at the end of the job), reading a read-only Docker Hub token, the

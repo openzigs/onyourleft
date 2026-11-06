@@ -41,7 +41,9 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { PRODUCT_ORIGIN } from '../playwright.config';
 import { MOTION_DURATION_MS } from '../src/design/tokens';
+import { INTRO_ID } from '../src/shell/intro';
 import { hrefFor, routeById, type RouteId } from '../src/shell/routes';
 
 import { NIGHTLY } from './nightly';
@@ -51,6 +53,14 @@ interface TransitionLog {
   settled: number;
   /** The longest animation `document.getAnimations()` held at each `ready`, in ms. */
   longest: number[];
+  /**
+   * #2054: at each `ready`, every `view-transition-class` an element of the
+   * page carried — what React's `<ViewTransition>` applied — sorted, and the
+   * keyframes each `::view-transition-old`/`-new` other than the root's ran,
+   * so the class is read both where it was set and where it took effect.
+   */
+  classes: string[][];
+  keyframes: string[][];
 }
 
 declare global {
@@ -63,7 +73,7 @@ declare global {
 
 /** Runs before any page script: wraps the one call React makes to start a transition. */
 function recordViewTransitions(): void {
-  const log: TransitionLog = { started: 0, settled: 0, longest: [] };
+  const log: TransitionLog = { started: 0, settled: 0, longest: [], classes: [], keyframes: [] };
   window.__oylViewTransitions = log;
   // eslint-disable-next-line @typescript-eslint/unbound-method -- called with `apply` below, on the document it was called on.
   const original = Document.prototype.startViewTransition;
@@ -87,6 +97,25 @@ function recordViewTransitions(): void {
           return typeof duration === 'number' ? duration : 0;
         });
         log.longest.push(Math.max(0, ...durations));
+        const classes = new Set<string>();
+        for (const element of document.querySelectorAll('*')) {
+          const value = getComputedStyle(element).getPropertyValue('view-transition-class').trim();
+          if (value !== '' && value !== 'none') classes.add(value);
+        }
+        log.classes.push([...classes].sort());
+        log.keyframes.push(
+          document
+            .getAnimations()
+            .filter(
+              (animation) =>
+                // Not the root's snapshot, which keeps the browser's own fade.
+                /^::view-transition-(old|new)\((?!root\))/.test(
+                  (animation.effect as KeyframeEffect | null)?.pseudoElement ?? '',
+                ) && animation instanceof CSSAnimation,
+            )
+            .map((animation) => (animation as CSSAnimation).animationName)
+            .sort(),
+        );
       },
       () => undefined,
     );
@@ -681,5 +710,227 @@ test.describe('the route cross-fade — #945', () => {
     console.log(
       `#945: a failed chunk started ${String(started)} transition(s), ${String(settled)} settled`,
     );
+  });
+});
+
+/** What the first-paint intro did on one cold load, recorded by {@link recordIntro}. */
+interface IntroLog {
+  /** Whether `#oyl-intro` was in the document as it loaded. */
+  present: boolean;
+  /** Every animation on the intro or inside it once its way out began, by name, with its duration in ms. */
+  animations: { name: string; ms: number }[];
+}
+
+declare global {
+  interface Window {
+    __oylIntro?: IntroLog;
+  }
+}
+
+/**
+ * Runs before any page script: when anything sets the intro's
+ * `data-oyl-intro`, reads every animation on it and inside it from
+ * `getAnimations()`. Read there, in the observer's microtask straight after
+ * the attribute is set, rather than from `animationstart`: an animation the
+ * reduced-motion block collapses to 0.01 ms finishes, and the intro is
+ * removed, before the browser dispatches that event, so a listener would see
+ * nothing and pass. With `slowerMs`, also lays a rule over the intro's that
+ * runs its way out at that duration: the control that says a slow intro is
+ * seen.
+ */
+function recordIntro({ id, slowerMs }: { id: string; slowerMs: number | null }): void {
+  const log: IntroLog = { present: false, animations: [] };
+  window.__oylIntro = log;
+  document.addEventListener('DOMContentLoaded', () => {
+    log.present = document.getElementById(id) !== null;
+    if (slowerMs !== null) {
+      const style = document.createElement('style');
+      style.textContent = `#${id}[data-oyl-intro], #${id}[data-oyl-intro] * { animation-duration: ${String(slowerMs)}ms !important; }`;
+      document.head.append(style);
+    }
+  });
+  new MutationObserver((records) => {
+    for (const record of records) {
+      const target = record.target;
+      if (!(target instanceof HTMLElement) || target.id !== id) continue;
+      for (const animation of target.getAnimations({ subtree: true })) {
+        const duration = animation.effect?.getComputedTiming().duration;
+        log.animations.push({
+          name: animation instanceof CSSAnimation ? animation.animationName : 'not a CSS animation',
+          ms: typeof duration === 'number' ? duration : Number.NaN,
+        });
+      }
+    }
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-oyl-intro'] });
+}
+
+/** A cold load of the product on `id`, through to the intro having left the page. */
+async function coldLoad(
+  page: Page,
+  id: RouteId,
+  slowerMs: number | null = null,
+): Promise<IntroLog> {
+  await page.addInitScript(recordIntro, { id: INTRO_ID, slowerMs });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const response = await page.goto(`${PRODUCT_ORIGIN}/${hrefFor(routeById(id))}`);
+  expect(response?.status()).toBe(200);
+  await page.waitForFunction((intro) => document.getElementById(intro) === null, INTRO_ID);
+  const read = await page.evaluate(() => window.__oylIntro);
+  if (read === undefined) throw new Error('the init script did not run: no intro log on the page');
+  // ⚠️ Every case below needs the intro to have been THERE: a page without
+  // one animates nothing, and would pass the "none runs" cases for that reason.
+  expect(read.present, 'index.html carried no intro').toBe(true);
+  return read;
+}
+
+/** The intro's animations that ran longer than the motion ceiling. */
+function overCeiling(log: IntroLog): { name: string; ms: number }[] {
+  return log.animations.filter((animation) => !(animation.ms <= MOTION_DURATION_MS.medium));
+}
+
+/*
+ * The first-paint intro — #2053. Against the PRODUCT build: the intro is in
+ * `index.html`, which no harness page carries. `shell/intro.ts` and
+ * `theme.css` §"THE FIRST-PAINT INTRO" are the code; these read what the
+ * browser actually ran, from `getAnimations()` as each animation started.
+ */
+test.describe('the first-paint intro — #2053', () => {
+  test('a cold load of Home runs it, and every animation is at most 200 ms', async ({ page }) => {
+    const log = await coldLoad(page, 'home');
+    console.log('#2053: the intro ran', log.animations);
+    // The canvas fading and the mark growing: both, so neither goes unmeasured.
+    expect(log.animations.map((animation) => animation.name).sort()).toEqual([
+      'oyl-intro-mark-out',
+      'oyl-intro-out',
+    ]);
+    expect(log.animations.every((animation) => animation.ms > 0)).toBe(true);
+    expect(overCeiling(log)).toEqual([]);
+    await expect(page.locator('h1')).toHaveText(routeById('home').title);
+  });
+
+  test('control: run at 400 ms, the same reading finds it over the ceiling', async ({ page }) => {
+    const log = await coldLoad(page, 'home', 400);
+    expect(overCeiling(log).map((animation) => animation.ms)).toEqual([400, 400]);
+  });
+
+  test('a cold load of a ride route runs none', async ({ page }) => {
+    // The intro was there (`coldLoad`) and has gone, and nothing animated it out.
+    expect((await coldLoad(page, 'ride')).animations).toEqual([]);
+  });
+
+  test('a cold load of the game runs none', async ({ page }) => {
+    expect((await coldLoad(page, 'game')).animations).toEqual([]);
+  });
+
+  test('under prefers-reduced-motion: reduce, none runs', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect((await coldLoad(page, 'home')).animations).toEqual([]);
+    await expect(page.locator('h1')).toHaveText(routeById('home').title);
+  });
+});
+
+/** The populated harness's one segment (`testing/populated-shell.tsx`). */
+const SEGMENT = hrefFor(routeById('segment-detail'), 'the-drag');
+
+/** Navigates to `hash`, waits for `title` in the `h1`, and for any transition to end. */
+async function goTo(page: Page, hash: string, title: string): Promise<TransitionLog> {
+  await page.evaluate((next) => {
+    window.location.hash = next;
+  }, hash);
+  await expect(page.locator('h1')).toHaveText(title);
+  await expect
+    .poll(async () => {
+      const now = await log(page);
+      return now.settled === now.started;
+    })
+    .toBe(true);
+  return log(page);
+}
+
+/** What the transition each navigation started applied: its classes and its keyframes. */
+async function applied(
+  page: Page,
+  hash: string,
+  title: string,
+): Promise<{ started: number; classes: string[]; keyframes: string[]; longest: number }> {
+  const before = (await log(page)).started;
+  const after = await goTo(page, hash, title);
+  return {
+    started: after.started - before,
+    classes: after.classes.at(-1) ?? [],
+    keyframes: after.keyframes.at(-1) ?? [],
+    longest: after.longest.at(-1) ?? Number.NaN,
+  };
+}
+
+/*
+ * Directional route transitions — #2054. Into a page below and back out of it
+ * is a short slide; one tab to another stays #945's cross-fade.
+ * `shell/route-motion.ts` §`navigationKind` decides, `useRoute.ts` announces
+ * it with `addTransitionType`, `AppShell`'s `<ViewTransition>` sets the class
+ * and `theme.css` §"THE ROUTE SLIDE" names the keyframes. Read here at each
+ * transition's `ready`, both as the class an element carried and as the
+ * keyframes the pseudo-elements ran.
+ */
+test.describe('directional route transitions — #2054', () => {
+  test('list to detail, detail back, and tab to tab each apply their own class', async ({
+    page,
+  }) => {
+    await open(page, '');
+    const segments = routeById('segments');
+    const detail = routeById('segment-detail');
+    await goTo(page, hrefFor(segments), segments.title);
+    const deeper = await applied(page, SEGMENT, detail.title);
+    const back = await applied(page, hrefFor(segments), segments.title);
+    const across = await applied(page, hrefFor(routeById('routes')), routeById('routes').title);
+    console.log('#2054: deeper, back, across', deeper, back, across);
+    for (const navigation of [deeper, back, across]) {
+      expect(navigation.started).toBe(1);
+      expect(navigation.longest).toBeLessThanOrEqual(MOTION_DURATION_MS.medium);
+    }
+    expect(deeper.classes).toEqual(['oyl-route-deeper']);
+    expect(back.classes).toEqual(['oyl-route-back']);
+    expect(across.classes).toEqual(['oyl-route']);
+    expect(deeper.keyframes).toEqual(['oyl-route-in-from-end', 'oyl-route-out-to-start']);
+    expect(back.keyframes).toEqual(['oyl-route-in-from-start', 'oyl-route-out-to-end']);
+    // The cross-fade is the browser's own: none of the slide's keyframes.
+    expect(across.keyframes.filter((name) => name.startsWith('oyl-route-'))).toEqual([]);
+  });
+
+  test('reduced motion collapses the slide too', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page, '');
+    await goTo(page, hrefFor(routeById('segments')), routeById('segments').title);
+    const deeper = await applied(page, SEGMENT, routeById('segment-detail').title);
+    expect(deeper.started).toBe(1);
+    expect(deeper.classes).toEqual(['oyl-route-deeper']);
+    expect(deeper.longest).toBeLessThanOrEqual(1);
+  });
+
+  test('where the engine has no View Transition API, the swap is instant and nothing breaks', async ({
+    page,
+  }) => {
+    // An old, un-updated WebView on minSdk 24. Taken away before any page
+    // script runs, as such a WebView would never have had it.
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Document.prototype, 'startViewTransition');
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const response = await page.goto('/reflow.html?data=populated&motion=on#/');
+    expect(response?.status()).toBe(200);
+    await page.waitForFunction(() => window.__oylReflow !== undefined);
+    expect(await page.evaluate(() => typeof document.startViewTransition)).toBe('undefined');
+    for (const [hash, title] of [
+      [hrefFor(routeById('segments')), routeById('segments').title],
+      [SEGMENT, routeById('segment-detail').title],
+      [hrefFor(routeById('segments')), routeById('segments').title],
+      [hrefFor(routeById('routes')), routeById('routes').title],
+    ] as const) {
+      await page.evaluate((next) => {
+        window.location.hash = next;
+      }, hash);
+      await expect(page.locator('h1')).toHaveText(title);
+    }
+    expect(await page.evaluate(() => window.__oylReflow?.errors)).toEqual([]);
   });
 });
