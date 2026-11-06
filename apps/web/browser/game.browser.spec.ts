@@ -4722,6 +4722,8 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       console.log(
         `#1523 ${name}: bounded against unbounded, largest channel step ${String(frame.largest)}, ` +
           `${String(frame.differing)} of ${String(frame.pixels)} pixels differ; ` +
+          `against -blend-skip, largest step ${String(frame.skipLargest)}, ` +
+          `${String(frame.skipDiffering)} differ; ` +
           `-road-wear moves ${String(frame.wearOff)}, -ground-blend ${String(frame.blendOff)}`,
       );
     }
@@ -4741,6 +4743,17 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // left out: not one pixel may move, on the road or on the bank.
     expect(road.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
     expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+    // #1523, 2026-11-06: the ground's blend skipped on bare grass, against
+    // the same build without the skip — the owner's `-blend-skip` pair. The
+    // verge beside the road and the crag on the bank are both in these
+    // frames (the `-ground-blend` controls above), and neither moves.
+    // Two programs, not one drawn twice: the product's skips, the lever's not.
+    for (const frame of [road, bank]) {
+      expect(frame.skips).toBe(true);
+      expect(frame.skipsWithout).toBe(false);
+    }
+    expect(road.skipLargest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+    expect(bank.skipLargest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
   });
 
   test('draws the firs the same after their depth pre-pass as without it — and draws none with the EQUAL test alone — #1523', async ({

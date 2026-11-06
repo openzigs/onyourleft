@@ -13281,6 +13281,21 @@ vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
 `;
 
 /**
+ * The vertex's part of the blend where it is skipped on bare grass — #1523,
+ * the owner's ruling of 2026-11-06: the ground normal's vertical alone. The
+ * world position is the surface detail's `vDetailWorld`, the same point by
+ * the same expression (`withSurfaceDetail`), so the blend interpolates one
+ * `vec3` fewer on every pixel of ground. @see groundBlendFragmentPars
+ */
+const GROUND_SKIP_VERTEX_PARS = /* glsl */ `
+varying float vOylGroundUp;
+`;
+
+const GROUND_SKIP_VERTEX = /* glsl */ `
+vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
+`;
+
+/**
  * The verge's colour in a winter, in GLSL — #1692: the world's colour there
  * (the ground's snow, in a snowy winter) mixed toward `ground-blend.ts`
  * §`VERGE_SLUSH` by `slush` (`world.ts` §`vergeSlushIn`), so the road's white
@@ -13312,8 +13327,18 @@ vec3 oylSlushedVerge(vec3 world, float slush) {
  * the same three pairs again: six derivatives where there were twelve.
  * Unbounded — the browser gate's reference — is the twelve as #627 and #1274
  * took them. @see groundDerivatives
+ *
+ * ⚠️ **#1523, 2026-11-06: skipped on bare grass** (`skip`, bounded only).
+ * Where every share is nought — about five pixels of ground in six at the
+ * owner's three holds — the normal's blend and the colour's mix add exactly
+ * nothing: the normal is the grass's times one plus nought, and the colour
+ * the patchwork's times one plus nought. {@link oylBlended} says where they
+ * add something, and only there are they run. The derivatives stay outside
+ * every branch, as above, and the shares are computed everywhere, because
+ * they are what says where a surface is.
  */
-function groundBlendFragmentPars(bounded: boolean): string {
+function groundBlendFragmentPars(bounded: boolean, skip: boolean): string {
+  const at = skip ? 'vDetailWorld' : 'vOylGround';
   return /* glsl */ `
 uniform sampler2D vergeMap;
 uniform sampler2D vergeNormalMap;
@@ -13324,8 +13349,7 @@ uniform sampler2D cragNormalMap;
 uniform float treeLine;
 uniform vec4 groundShares;
 uniform float oylVergeSlush;
-varying vec3 vOylGround;
-varying float vOylGroundUp;
+${skip ? '' : 'varying vec3 vOylGround;\n'}varying float vOylGroundUp;
 float oylVergeShare = 0.0;
 float oylRockShare = 0.0;
 float oylCragShare = 0.0;
@@ -13333,14 +13357,14 @@ vec3 oylVergeTexel = vec3(1.0);
 vec3 oylRockTexel = vec3(1.0);
 vec3 oylCragTexel = vec3(1.0);
 vec3 oylGroundWorld = vec3(1.0);
-${bounded ? GROUND_DERIVATIVE_GLOBALS : ''}
-vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
-vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
-vec2 oylCragUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
+${skip ? GROUND_BLENDED_GLSL : ''}${bounded ? GROUND_DERIVATIVE_GLOBALS : ''}
+vec2 oylVergeUv() { return ${at}.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
+vec2 oylRockUv() { return ${at}.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
+vec2 oylCragUv() { return ${at}.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
 ${VERGE_SLUSH_GLSL}
 vec3 oylGroundNormal(vec2 grassUv) {
   vec3 grass = texture2D(normalMap, grassUv).xyz;
-${groundDerivatives(bounded, false)}
+${skip ? '  if (!oylBlended()) return grass;\n' : ''}${groundDerivatives(bounded, false)}
   vec3 texel = grass;
   if (oylVergeShare > 0.0) {
     texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
@@ -13358,6 +13382,15 @@ ${groundDerivatives(bounded, false)}
 }
 `;
 }
+
+/**
+ * Whether any surface has a share at this fragment — #1523. The crag's share
+ * is part of the rock's (`groundBlendShares`), so the two sum to nought only
+ * where all four are. Read after the map block, which writes the shares,
+ * and only by the normal's blend and the mix. @see groundBlendFragmentPars
+ */
+const GROUND_BLENDED_GLSL = /* glsl */ `bool oylBlended() { return oylVergeShare + oylRockShare > 0.0; }
+`;
 
 /** The surfaces' coordinates' names, and the functions that give them. */
 const GROUND_BLEND_SURFACES = [
@@ -13407,7 +13440,7 @@ function groundDerivatives(bounded: boolean, first: boolean): string {
  * photograph over its own mean times the world's colour (#627: the world's
  * per-route colour still leads).
  */
-function groundBlendShares(bounded: boolean): string {
+function groundBlendShares(bounded: boolean, skip: boolean): string {
   return /* glsl */ `
   oylGroundWorld = diffuseColor.rgb;
   float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
@@ -13415,7 +13448,7 @@ function groundBlendShares(bounded: boolean): string {
   // The slope, as the cosine the normal's vertical already is: steeper is a
   // SMALLER cosine, so the step runs from the steep end's cosine to the gentle one's.
   float oylRock = (1.0 - smoothstep(${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[1] * Math.PI) / 180))}, ${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[0] * Math.PI) / 180))}, vOylGroundUp)) * groundShares.y;
-  float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, vOylGround.y) * groundShares.z;
+  float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, ${skip ? 'vDetailWorld' : 'vOylGround'}.y) * groundShares.z;
   oylRockShare = max(oylRock, oylScree);
   // #1274: of that stone, the slope's part is the crag — a rock face — and
   // what is left is the scree's loose stones. Never more than the stone there
@@ -13477,6 +13510,12 @@ export function photographicGroundMaterial(
   blend: GroundBlendMaps = { treeLine: { value: NO_TREE_LINE } },
   /** #1523: the derivatives once (the product) or as before. @see groundBlendFragmentPars */
   bounded = true,
+  /**
+   * #1523, 2026-11-06: the normal's blend and the mix skipped where no surface
+   * has a share (the product), or run everywhere as before. Bounded only.
+   * @see groundBlendFragmentPars
+   */
+  blendSkip = true,
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -13494,16 +13533,17 @@ export function photographicGroundMaterial(
   const shares = new Vector4(1, 1, 1, 1);
   GROUND_BLEND_SHARES.set(material, shares);
   const blended = blend.verge !== undefined && blend.rock !== undefined && blend.crag !== undefined;
+  const skip = blended && bounded && blendSkip;
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float tileMetres;\n${blended ? GROUND_BLEND_VERTEX_PARS : ''}`,
+        `#include <common>\nuniform float tileMetres;\n${skip ? GROUND_SKIP_VERTEX_PARS : blended ? GROUND_BLEND_VERTEX_PARS : ''}`,
       )
       .replace(
         '#include <uv_vertex>',
-        `#include <uv_vertex>\n${PLANAR_UV}\n${blended ? GROUND_BLEND_VERTEX : ''}`,
+        `#include <uv_vertex>\n${PLANAR_UV}\n${skip ? GROUND_SKIP_VERTEX : blended ? GROUND_BLEND_VERTEX : ''}`,
       );
     if (blended) {
       shader.uniforms['vergeMap'] = { value: blend.verge?.colour };
@@ -13519,7 +13559,7 @@ export function photographicGroundMaterial(
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
-          `#include <normalmap_pars_fragment>\n${groundBlendFragmentPars(bounded)}`,
+          `#include <normalmap_pars_fragment>\n${groundBlendFragmentPars(bounded, skip)}`,
         )
         .replace(
           '#include <normal_fragment_maps>',
@@ -13533,7 +13573,7 @@ export function photographicGroundMaterial(
         // over the patchwork, so the field pattern shows where the grass does.
         .replace(
           '#include <alphamap_fragment>',
-          `${GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
+          `${skip ? `if (oylBlended())${GROUND_BLEND_MIX}` : GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
         );
     }
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -13541,7 +13581,7 @@ export function photographicGroundMaterial(
       /* glsl */ `
 #ifdef USE_MAP
 {
-${blended ? groundBlendShares(bounded) : ''}
+${blended ? groundBlendShares(bounded, skip) : ''}
   vec3 oylNear = texture2D(map, vMapUv).rgb;
   vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
   float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
@@ -13555,9 +13595,11 @@ ${blended ? groundBlendShares(bounded) : ''}
   };
   material.customProgramCacheKey = () =>
     blended
-      ? bounded
-        ? 'oyl-photographic-ground-blended'
-        : 'oyl-photographic-ground-blended-unbounded'
+      ? skip
+        ? 'oyl-photographic-ground-blended-skipped'
+        : bounded
+          ? 'oyl-photographic-ground-blended'
+          : 'oyl-photographic-ground-blended-unbounded'
       : 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
@@ -20549,7 +20591,11 @@ class RealisticDrawing {
       this.#road.dispose();
       this.#road = this.#roadMaterial();
     }
-    if (surfaces.groundBlend !== was.groundBlend || rebound) {
+    if (
+      surfaces.groundBlend !== was.groundBlend ||
+      surfaces.blendSkip !== was.blendSkip ||
+      rebound
+    ) {
       this.#ground.dispose();
       this.#ground = this.#groundMaterial();
     }
@@ -20581,6 +20627,7 @@ class RealisticDrawing {
         ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
         : { treeLine: fields.treeLine },
       this.#surfaces.bounded,
+      this.#surfaces.blendSkip,
     );
   }
 
@@ -21629,18 +21676,27 @@ export function groundBlendOf(
  * they were before it: the browser gate's reference for "the same picture",
  * and the owner's `-surface-bounds` before/after pair on the tablet.
  * @see photographicRoadMaterial @see photographicGroundMaterial
+ *
+ * `blendSkip` is #1523's second bound on the ground, of 2026-11-06, and not
+ * a layer either: `true`, the product, runs the blend's normal and its mix
+ * only where a surface has a share, and reads the surface detail's world
+ * position rather than a varying of the blend's own. `false` builds the
+ * ground as `bounded` alone does — the owner's `-blend-skip` pair. Bounded
+ * only. @see groundBlendFragmentPars
  */
 export interface RealisticSurfaces {
   readonly groundBlend: boolean;
   readonly roadWear: boolean;
   readonly bounded: boolean;
+  readonly blendSkip: boolean;
 }
 
-/** What the product draws: both, bounded. */
+/** What the product draws: both, bounded, the ground's blend skipped on bare grass. */
 const REALISTIC_SURFACES_DRAWN: RealisticSurfaces = {
   groundBlend: true,
   roadWear: true,
   bounded: true,
+  blendSkip: true,
 };
 
 /**
@@ -21674,6 +21730,19 @@ export function realisticSurfaceUniformsOf(
   view: GameView,
 ): { readonly road: readonly string[]; readonly ground: readonly string[] } | undefined {
   return view instanceof ThreeGameView ? view.realisticSurfaceUniforms() : undefined;
+}
+
+/**
+ * Whether the realistic ground's program as last drawn skips its blend on bare
+ * grass — #1523, 2026-11-06: read from the fragment shader WebGL compiled and
+ * linked, not from the material. `undefined` where the view has no realistic
+ * drawing or the ground is not yet drawn.
+ *
+ * @test-facing the browser gate's check that `-blend-skip` builds another
+ * program (`game-harness.ts`); the product never reads it.
+ */
+export function realisticGroundSkipsOf(view: GameView): boolean | undefined {
+  return view instanceof ThreeGameView ? view.realisticGroundSkips() : undefined;
 }
 
 /**
@@ -22933,6 +23002,23 @@ class ThreeGameView implements GameView {
       return names.sort();
     };
     return { road: uniformsOf(drawing.road), ground: uniformsOf(drawing.ground) };
+  }
+
+  /** @see realisticGroundSkipsOf */
+  realisticGroundSkips(): boolean | undefined {
+    const renderer = this.#renderer;
+    const drawing = this.#realistic;
+    if (renderer === undefined || drawing === undefined) return undefined;
+    const gl = renderer.getContext();
+    const { currentProgram } = renderer.properties.get(drawing.ground) as {
+      currentProgram?: { readonly program: WebGLProgram };
+    };
+    if (currentProgram === undefined) return undefined;
+    return (gl.getAttachedShaders(currentProgram.program) ?? []).some(
+      (shader) =>
+        gl.getShaderParameter(shader, gl.SHADER_TYPE) === gl.FRAGMENT_SHADER &&
+        (gl.getShaderSource(shader) ?? '').includes('bool oylBlended()'),
+    );
   }
 
   /** @see roadWearOf */

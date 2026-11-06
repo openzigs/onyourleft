@@ -242,6 +242,7 @@ import {
   roadWearOf,
   groundBlendOf,
   realisticSurfacesOf,
+  realisticGroundSkipsOf,
   realisticSurfaceUniformsOf,
   impostorsLitOf,
   foliageStillOf,
@@ -9444,7 +9445,7 @@ const NO_SURFACE_PROGRAMS: SurfaceProgramMeasurement = {
 /** @see SurfaceProgramMeasurement */
 function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramMeasurement {
   const read = (groundBlend: boolean, roadWear: boolean): SurfaceUniforms => {
-    realisticSurfacesOf(view, { groundBlend, roadWear, bounded: true });
+    realisticSurfacesOf(view, { groundBlend, roadWear, bounded: true, blendSkip: true });
     view.render(frame);
     return realisticSurfaceUniformsOf(view) ?? NO_SURFACES;
   };
@@ -9457,9 +9458,10 @@ function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramM
 }
 
 /**
- * #1523 — one frame drawn four ways, each read back whole: as the product
- * draws it (bounded), as it was drawn before the bounds (the reference), and
- * the two controls, with `-road-wear` and with `-ground-blend`.
+ * #1523 — one frame drawn five ways, each read back whole: as the product
+ * draws it (bounded), as it was drawn before the bounds (the reference), the
+ * ground with its blend run on bare grass too (`-blend-skip`, 2026-11-06), and the two
+ * controls, with `-road-wear` and with `-ground-blend`.
  */
 export interface SurfaceBoundsFrame {
   /** Whether the frame could be built at all. */
@@ -9468,6 +9470,20 @@ export interface SurfaceBoundsFrame {
   readonly largest: number;
   /** How many pixels differ from the reference in any channel at all, bounded. */
   readonly differing: number;
+  /**
+   * #1523, 2026-11-06: the largest channel difference and the pixels that
+   * differ at all, the product against the ground built without the blend's
+   * skip on bare grass (`-blend-skip`).
+   */
+  readonly skipLargest: number;
+  readonly skipDiffering: number;
+  /**
+   * Whether the ground's linked program skips the blend on bare grass, in the
+   * product and with `-blend-skip` — so the comparison above is of two
+   * programs, and not of one drawn twice.
+   */
+  readonly skips: boolean;
+  readonly skipsWithout: boolean;
   /** How many pixels each control moves past {@link SURFACE_CONTROL_STEP} from the reference. */
   readonly wearOff: number;
   readonly blendOff: number;
@@ -9512,6 +9528,10 @@ const NO_BOUNDS_FRAME: SurfaceBoundsFrame = {
   drawn: false,
   largest: 0,
   differing: 0,
+  skipLargest: 0,
+  skipDiffering: 0,
+  skips: false,
+  skipsWithout: true,
   wearOff: 0,
   blendOff: 0,
   pixels: 0,
@@ -9538,16 +9558,29 @@ function surfaceBoundsProbe(
     view.render(frame);
     return readRegion(gl, 0, 0, canvas.width, canvas.height);
   };
-  const product: RealisticSurfaces = { groundBlend: true, roadWear: true, bounded: true };
+  const product: RealisticSurfaces = {
+    groundBlend: true,
+    roadWear: true,
+    bounded: true,
+    blendSkip: true,
+  };
   const read = (frame: SceneFrame | undefined): SurfaceBoundsFrame => {
     if (frame === undefined) return NO_BOUNDS_FRAME;
+    // `-blend-skip` straight from the product, so the skip's own switch is
+    // what rebuilds the ground — not a change of `bounded` beside it.
+    realisticSurfacesOf(view, product);
+    const unskipped = whole(frame, { ...product, blendSkip: false });
+    const skipsWithout = realisticGroundSkipsOf(view) ?? true;
     const reference = whole(frame, { ...product, bounded: false });
     const wearOff = whole(frame, { ...product, roadWear: false });
     const blendOff = whole(frame, { ...product, groundBlend: false });
     // Last, so every probe after this one draws the product's surfaces.
     const bounded = whole(frame, product);
+    const skips = realisticGroundSkipsOf(view) ?? false;
     let largest = 0;
     let differing = 0;
+    let skipLargest = 0;
+    let skipDiffering = 0;
     let wearMoved = 0;
     let blendMoved = 0;
     const moved = (other: Uint8Array, at: number): boolean =>
@@ -9565,6 +9598,15 @@ function surfaceBoundsProbe(
       }
       largest = Math.max(largest, here);
       if (here > 0) differing += 1;
+      let skipped = 0;
+      for (let channel = 0; channel < 3; channel += 1) {
+        skipped = Math.max(
+          skipped,
+          Math.abs((bounded[at + channel] ?? 0) - (unskipped[at + channel] ?? 0)),
+        );
+      }
+      skipLargest = Math.max(skipLargest, skipped);
+      if (skipped > 0) skipDiffering += 1;
       if (moved(wearOff, at)) wearMoved += 1;
       if (moved(blendOff, at)) blendMoved += 1;
     }
@@ -9572,6 +9614,10 @@ function surfaceBoundsProbe(
       drawn: true,
       largest,
       differing,
+      skipLargest,
+      skipDiffering,
+      skips,
+      skipsWithout,
       wearOff: wearMoved,
       blendOff: blendMoved,
       pixels: reference.length / 4,

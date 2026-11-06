@@ -661,7 +661,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(LEVERS).toContain('ground-blend');
     expect(LEVERS).toContain('road-wear');
     expect(LEVERS).toContain('surface-bounds');
-    const drawn = { groundBlend: true, roadWear: true, bounded: true };
+    expect(LEVERS).toContain('blend-skip');
+    const drawn = { groundBlend: true, roadWear: true, bounded: true, blendSkip: true };
     // No lever is the product, and no OTHER lever touches either surface.
     expect(surfacesWithLevers([])).toEqual(drawn);
     expect(surfacesWithLevers(parseConfig('?levers=-air,-crag,-texture-bias').leversOff)).toEqual(
@@ -680,6 +681,15 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       ...drawn,
       bounded: false,
     });
+    // #1523, 2026-11-06: the blend skipped on bare grass, its own pair, touching nothing else.
+    expect(surfacesWithLevers(parseConfig('?levers=-blend-skip').leversOff)).toEqual({
+      ...drawn,
+      blendSkip: false,
+    });
+    expect(
+      surfacesWithLevers(parseConfig('?levers=-fir-prepass,-crag,-surface-bounds').leversOff)
+        .blendSkip,
+    ).toBe(true);
     expect(surfacesWithLevers(parseConfig('?levers=-road-wear,-ground-blend').leversOff)).toEqual({
       ...drawn,
       groundBlend: false,
@@ -691,6 +701,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(configQuery(parseConfig('?levers=-surface-bounds'))).toBe(
       `?levers=${encodeURIComponent('-surface-bounds')}`,
+    );
+    expect(configQuery(parseConfig('?levers=-blend-skip'))).toBe(
+      `?levers=${encodeURIComponent('-blend-skip')}`,
     );
   });
 

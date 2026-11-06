@@ -123,6 +123,7 @@ const ALL_SURFACES = {
 function compiledGround(
   blend: GroundBlend,
   bounded = true,
+  skip = true,
 ): {
   readonly shader: {
     vertexShader: string;
@@ -138,6 +139,7 @@ function compiledGround(
     { value: 1 },
     blend,
     bounded,
+    skip,
   );
   {
     const shader = {
@@ -212,7 +214,8 @@ describe('the bare rock a steep bank wears — #1274', () => {
     expect(fragment).toContain('float oylScreeShare = oylRockShare - oylCragShare;');
     // At 3 m a repeat: this repository's figure, the scan's page stating none.
     expect(REALISTIC_SURFACES.crag.tileMetres).toBe(3);
-    expect(fragment).toContain('vec2 oylCragUv() { return vOylGround.xz / 3.0; }');
+    // Since #1523's reach, read off the surface detail's world position.
+    expect(fragment).toContain('vec2 oylCragUv() { return vDetailWorld.xz / 3.0; }');
     material.dispose();
   });
 
@@ -271,6 +274,84 @@ describe('the ground blend’s derivatives, taken once — #1523', () => {
     );
     bounded.material.dispose();
     before.material.dispose();
+  });
+});
+
+/**
+ * The ground blend skipped on bare grass — #1523, the owner's ruling of
+ * 2026-11-06 (the blend was the largest single GPU share measured on the
+ * tablet that day). Where every share is nought the normal's blend and the
+ * colour's mix add exactly nothing, so the product runs them only where a
+ * surface has a share; the browser gate (`game.browser.spec.ts` §"#1523")
+ * holds the two pictures to one, pixel for pixel. This holds the program.
+ */
+describe('the ground blend, skipped on bare grass — #1523', () => {
+  it('runs the normal’s blend and the mix only where a surface has a share', () => {
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    material.dispose();
+    const fragment = shader.fragmentShader;
+    // Some share positive: the crag's is part of the rock's, so these two
+    // sum to nought only where all four are.
+    expect(fragment).toContain('bool oylBlended() { return oylVergeShare + oylRockShare > 0.0; }');
+    // The normal: the grass's, sampled in uniform control flow as before,
+    // and nothing more where no surface is.
+    const normal = fragment.indexOf('vec3 oylGroundNormal(vec2 grassUv) {');
+    const grass = fragment.indexOf('vec3 grass = texture2D(normalMap, grassUv).xyz;', normal);
+    const early = fragment.indexOf('if (!oylBlended()) return grass;', normal);
+    expect(grass).toBeGreaterThan(normal);
+    expect(early).toBeGreaterThan(grass);
+    expect(early).toBeLessThan(fragment.indexOf('vec3 texel = grass;', normal));
+    // The mix, whole, behind the same test.
+    expect(fragment).toMatch(
+      /if \(oylBlended\(\)\)\s*\{\s*float oylOther = oylVergeShare \+ oylRockShare;/,
+    );
+    // The shares are what says where a surface is, so they run everywhere:
+    // before the map block's first branch, in `main`.
+    const shares = fragment.indexOf('oylVergeShare = oylVerge * (1.0 - oylRockShare);');
+    expect(shares).toBeGreaterThan(fragment.indexOf('void main()'));
+    expect(shares).toBeLessThan(fragment.indexOf('if (oylVergeShare > 0.0)', shares));
+  });
+
+  it('reads the surface detail’s world position, the same point, and no varying of its own', () => {
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    material.dispose();
+    // As the blend wrote its own until 2026-11-06, from the same position
+    // (three's `begin_vertex` makes `transformed` the `position`, unmoved).
+    const before = compiledGround(ALL_SURFACES, true, false);
+    before.material.dispose();
+    expect(before.shader.vertexShader).toContain(
+      'vOylGround = (modelMatrix * vec4(position, 1.0)).xyz;',
+    );
+    expect(shader.vertexShader).toContain(
+      'vDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+    );
+    expect(shader.vertexShader).not.toMatch(/vOylGround\b/);
+    expect(shader.fragmentShader).not.toContain('vOylGround;');
+    expect(shader.fragmentShader).toContain('vec2 oylVergeUv() { return vDetailWorld.xz / 2.5; }');
+    expect(shader.fragmentShader).toContain(
+      `smoothstep(treeLine - ${String(SCREE_BAND_METRES)}.0, treeLine + ${String(SCREE_BAND_METRES)}.0, vDetailWorld.y)`,
+    );
+    // The vertical the rock reads is still the blend's own.
+    expect(shader.vertexShader).toContain(
+      'vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;',
+    );
+  });
+
+  it('builds the ground as before with the skip off, and unbounded without it too', () => {
+    const skipped = compiledGround(ALL_SURFACES);
+    const without = compiledGround(ALL_SURFACES, true, false);
+    const unbounded = compiledGround(ALL_SURFACES, false, true);
+    for (const { shader } of [without, unbounded]) {
+      expect(shader.fragmentShader).not.toContain('oylBlended');
+      expect(shader.fragmentShader).toContain('varying vec3 vOylGround;');
+      expect(shader.fragmentShader).toContain('vec2 oylVergeUv() { return vOylGround.xz / 2.5; }');
+    }
+    // Each its own program, so three cannot hand one ground another's.
+    const keys = new Set(
+      [skipped, without, unbounded].map(({ material }) => material.customProgramCacheKey()),
+    );
+    expect(keys.size).toBe(3);
+    for (const { material } of [skipped, without, unbounded]) material.dispose();
   });
 });
 

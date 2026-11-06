@@ -3334,6 +3334,8 @@ published figures (its run predates `oyl.txt`).
 | #1523 | bounds after (the product) | the same build | — | | | | | | | | |
 | #1523 | fir pre-pass before (the firs as #1294 drew them) | `main` with #1523's fir pre-pass | — ; `levers=-fir-prepass` | | | | | | | | |
 | #1523 | fir pre-pass after (the product) | the same build | — | | | | | | | | |
+| #1523 | blend skip before (the ground's blend run on bare grass, as before 2026-11-06) | `main` with #1523's blend skip | — ; `levers=-blend-skip` | | | | | | | | |
+| #1523 | blend skip after (the product) | the same build | — | | | | | | | | |
 | #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
 | #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
 | #1537 | before phase A (AE2's village, 5 min) | the build AH-1537-1 names | — ; `route=village&at=820` | | | | | | | | |
@@ -3973,6 +3975,40 @@ moved) (`game.browser.spec.ts` §"#1523", nightly).
 | AH-1523-8 | **Before**: build `main` with #1523's fir pre-pass, owner's page staged, AH1–AH7 with `&levers=-fir-prepass` added to AH4's URL. `RUN=1523-firs-before` |
 | AH-1523-9 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-firs-after` |
 | AH-1523-10 | Write both rows. Draw calls should rise by up to four and triangles by the firs' own. The after row's GPU mean should fall towards triage 1's `-generated-conifers` row, and its frames over 20 ms towards 0.2 %, without a change to the firs a rider can see |
+
+#### The ground blend skipped on bare grass — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), the owner's ruling of 2026-11-06)
+
+The run of 2026-11-06 on `main` `38139f2e` put `-ground-blend` (#627 with #1274's crag) at about
+**−21 MHz**, the largest single share of the three switches measured, and the owner ruled that it be
+made cheaper first, keeping its look. Most of the ground has no share of any surface: at the
+owner's three holds on a desktop at the tablet's 2560 × 1600, **84–85 %** of the ground's pixels
+(1045: 730 764 of 854 428; 1650: 502 305 of 600 643; 2550: 612 794 of 722 031). The blend's
+normal and its colour mix added exactly nothing there, and ran anyway.
+
+The fix (`three-renderer.ts` §`groundBlendFragmentPars`) runs them only where a surface has a
+share, and reads the blend's world position from the surface detail's `vDetailWorld`, the same
+point by the same expression, so every pixel of ground interpolates one `vec3` fewer. The shares
+and the derivatives still run everywhere: the shares say where a surface is, and a derivative
+inside a branch is undefined. Draw calls and triangles do not move (39 / 132 973, 32 / 153 025 and
+34 / 153 490 at the three holds, both ways).
+
+`levers=-blend-skip` builds the ground as it was before, on the same build. The browser gate draws
+the road frame and the steep bank both ways and requires **every pixel identical** (0 of 230 400 on
+2026-11-06, SwiftShader), and reads the linked program to check the two are different programs
+(`game.browser.spec.ts` §"#1523", nightly). On a desktop GPU (Apple M4 Pro, ANGLE Metal) the
+three holds' screenshots differ by one step in 23, 5 and 10 of 4 096 000 pixels.
+
+⚠️ **A desktop GPU did not resolve the gain.** GPU time per frame read with
+`EXT_disjoint_timer_query_webgl2` on that desktop moved by less than its own run-to-run spread
+(about ±0.1 ms on 1.4–1.7 ms) either way. On Mali the texture fetches the skip does not touch
+may be most of the blend's cost, so only these rows can say whether it is worth keeping; if they
+show no gain, revert it.
+
+| Step | What to do |
+|---|---|
+| AH-1523-11 | **Before**: build `main` with #1523's blend skip, owner's page staged, AH1–AH7 with `&levers=-blend-skip` added to AH4's URL. `RUN=1523-skip-before` |
+| AH-1523-12 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-skip-after` |
+| AH-1523-13 | Write both rows. Draw calls and triangles should not move. The after row's GPU mean should fall towards the 2026-11-06 `-ground-blend` row (772.2 MHz against 793.3), without a change to the ground a rider can see |
 
 ### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
 
