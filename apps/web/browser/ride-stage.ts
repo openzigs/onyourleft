@@ -291,7 +291,11 @@ export function rideTotalsDrawn(viewport: Viewport): boolean {
 export function gradientInPrimary(viewport: Viewport): boolean {
   const corners = viewport.width >= 736 && viewport.height >= 360;
   const roomyUpright = viewport.width >= 408 && viewport.height >= 848;
-  return corners || roomyUpright;
+  // #2130: a 4:3 tablet draws it in the secondary panel's first cell, at the
+  // secondary size (`theme.css` Â§"THE TABLET'S READINGS AT ARM'S LENGTH").
+  const fourByThreeTablet =
+    viewport.width >= 736 && viewport.height >= 752 && viewport.height < 800;
+  return (corners && !fourByThreeTablet) || roomyUpright;
 }
 
 /**
@@ -300,16 +304,17 @@ export function gradientInPrimary(viewport: Viewport): boolean {
  * side-camera row on a phone on its side, #1111's moving time below 802 px on
  * its side, #1111's moving time upright, #2072's clock row on every overlay
  * layout, and #2071's gradient in the secondary panel on an upright phone with
- * no room for four primary tracks. A block added or taken away changes these,
+ * no room for four primary tracks — and, since #2130, the same gradient in the
+ * secondary panel on a 4:3 tablet. A block added or taken away changes these,
  * and the case that reads them says which.
  *
  * Plus one anchor block with NO fallback: #2056's header mute drawn beside the
  * title on a phone, on a menu route only. Without anchor positioning it is the
  * header's own row, which is what the stylesheet lays out with no rule at all.
  */
-export const ANCHOR_BLOCKS = 6;
+export const ANCHOR_BLOCKS = 7;
 
-export const ANCHOR_FALLBACK_BLOCKS = 5;
+export const ANCHOR_FALLBACK_BLOCKS = 6;
 
 /**
  * #1120 — the stage measured as an engine with NO anchor positioning lays it
