@@ -2034,6 +2034,17 @@ artefact. On a pull request it runs only when the video tooling or the demo code
 checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
 check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
 
+[`.github/workflows/demo-release.yml`](../../.github/workflows/demo-release.yml) — **`Demo route release`**
+([#1932](https://github.com/openzigs/onyourleft/issues/1932), ADR 0056 D-4.2) — on `workflow_dispatch`
+from `main` only, it bakes the demo's preset routes from the published archive, builds the demo, and
+publishes a GitHub release of each route's `.bin`, `routes.json` and `LICENCE-ODbL.txt`
+(`tools/demo/demo-release.ts`). ⚠️ **It has no pull-request trigger, on purpose**: it bakes
+OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `bake` job holds
+`contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
+`GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
+holds its trigger, runners, pins and permissions in the required suite.
+[`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs.
+
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs
 [`scripts/sync-roadmap.py`](../../scripts/sync-roadmap.py) at 04:41 UTC nightly and on
