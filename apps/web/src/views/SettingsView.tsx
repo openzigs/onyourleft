@@ -130,6 +130,9 @@ import {
   writeCuePreference,
   type CuePreference,
 } from '../game/cue-preference';
+import { readMusicAndMaster, writeAudioBus, type BusSetting } from '../game/audio-mix';
+import type { CueOutput } from '../game/audio-port';
+import { sharedCueOutput } from '../game/web-audio';
 import {
   menuVolumeFromSlider,
   readMenuSoundPreference,
@@ -461,6 +464,13 @@ export interface SettingsViewProps {
    * so and offers no control.
    */
   readonly workoutGoals?: WorkoutGoalsPort | undefined;
+  /**
+   * The output whose buses follow a volume or a switch moved here — #2056, so
+   * a sound already playing follows at once. The app's shared one when absent
+   * (`game/web-audio.ts` §`sharedCueOutput`), which makes no audio context
+   * until a press asks for sound; a test hands in one over a fake context.
+   */
+  readonly soundOutput?: CueOutput | undefined;
 }
 
 export function SettingsView({
@@ -480,6 +490,7 @@ export function SettingsView({
   maskedWords,
   riderText,
   workoutGoals,
+  soundOutput,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -659,7 +670,19 @@ export function SettingsView({
           this one on the CI runner, over #1026's balance rule
           (`sections.browser.spec.ts` §`ROW_BALANCE_LIMIT`).
         */}
-        <MenuSoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+        <MenuSoundsPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+          output={soundOutput}
+        />
+
+        {/*
+          #2056: the music's own switch and volume, beside the menus' sounds —
+          music plays in the menus and nowhere else (#2058).
+        */}
+        <MusicPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+          output={soundOutput}
+        />
       </SettingsCard>
 
       <SettingsCard id="oyl-settings-look" title={SETTINGS_CARD_TITLES.look} picture={<Sky />}>
@@ -678,7 +701,10 @@ export function SettingsView({
           storage={announcements === undefined ? deviceStorage() : announcements}
         />
 
-        <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+        <SoundsPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+          output={soundOutput}
+        />
       </SettingsCard>
 
       <SettingsCard
@@ -1133,8 +1159,10 @@ function AnnouncementsPanel({
  */
 function SoundsPanel({
   storage,
+  output,
 }: {
   readonly storage: PreferenceStorage | undefined;
+  readonly output: CueOutput | undefined;
 }): JSX.Element {
   const [preference, setPreference] = useState<CuePreference>(() => readCuePreference(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
@@ -1146,6 +1174,8 @@ function SoundsPanel({
         ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
         : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
     );
+    // #2056: the cue bus follows at once, on a graph already built.
+    (output ?? sharedCueOutput()).applyMix();
   }
 
   return (
@@ -1215,8 +1245,10 @@ function SoundsPanel({
  */
 function MenuSoundsPanel({
   storage,
+  output,
 }: {
   readonly storage: PreferenceStorage | undefined;
+  readonly output: CueOutput | undefined;
 }): JSX.Element {
   const [preference, setPreference] = useState<MenuSoundPreference>(() =>
     readMenuSoundPreference(storage),
@@ -1230,6 +1262,8 @@ function MenuSoundsPanel({
         ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
         : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
     );
+    // #2056: the effects bus follows at once, on a graph already built.
+    (output ?? sharedCueOutput()).applyMix();
   }
 
   return (
@@ -1288,6 +1322,88 @@ function MenuSoundsPanel({
           />
         </p>
       ) : null}
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Music in the menus — #2056. On by default (owner ruling 2 of 2026-11-03),
+ * kept on this device in the mix itself (`game/audio-mix.ts`), because music
+ * has no older key of its own. Its switch is the music bus's mute and its
+ * slider the bus's volume: a rider who switches it off keeps the volume for
+ * when they switch it back, as the two panels of sounds do.
+ *
+ * The header's *Mute all sound* silences it with everything else; this is the
+ * way to silence music alone. It never plays during a ride (#2058).
+ */
+function MusicPanel({
+  storage,
+  output,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+  readonly output: CueOutput | undefined;
+}): JSX.Element {
+  const [music, setMusic] = useState<BusSetting>(() => readMusicAndMaster(storage).music);
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function save(next: BusSetting): void {
+    setMusic(next);
+    setMessage(
+      writeAudioBus(storage, 'music', next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+    // A loop already playing follows at once; with no graph yet, nothing starts.
+    (output ?? sharedCueOutput()).applyMix();
+  }
+
+  return (
+    <section className="oyl-panel oyl-music" aria-labelledby="oyl-music-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-music-heading"
+        help={
+          <p className="oyl-muted">
+            A music loop in the menus, from your first press. It never plays during a ride, and Mute
+            all sound at the top of every menu screen silences it with every other sound.
+          </p>
+        }
+      >
+        Music
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={!music.muted}
+            onChange={(event) => {
+              save({ ...music, muted: !event.currentTarget.checked });
+            }}
+          />{' '}
+          Play music in the menus
+        </label>
+      </p>
+      <p>
+        <label htmlFor="oyl-music-volume">Music volume</label>{' '}
+        <input
+          id="oyl-music-volume"
+          type="range"
+          min={0}
+          max={100}
+          step={10}
+          value={Math.round(music.volume * 100)}
+          onChange={(event) => {
+            const volume = steppedVolume(Number(event.currentTarget.value) / 100);
+            if (volume !== undefined) save({ ...music, volume });
+          }}
+        />
+      </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}
