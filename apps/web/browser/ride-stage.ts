@@ -288,16 +288,17 @@ export function rideTotalsDrawn(viewport: Viewport): boolean {
  * Whether, in a room, the pacer's and the ghost's gaps and the wind give way
  * at this viewport — `theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH", the
  * owner's second ruling of 2026-11-06: where space runs out — a phone, the
- * 4:3 tablet, the upright tablet, a window under 45 rem tall, and every tablet
+ * 4:3 tablet, the upright tablet, a window under 40 rem tall, and every tablet
  * at #2079's large text sizes. They stay where they fit: 1280×800 at the
- * normal size, and a window 45 to 47 rem tall (1280×720).
+ * normal size, and a window 40 to 47 rem tall (1280×720, 1366×657) — but for
+ * a side camera's row there (`ride-room.browser.spec.ts` §"#1409").
  */
 export function roomGivesWay(viewport: Viewport, largeText = false): boolean {
   const corners = viewport.width >= 736 && viewport.height > 480;
   const tablet = corners && viewport.height >= 752;
   if (largeText && tablet) return true;
   const roomyTablet = viewport.width >= 816 && viewport.height >= 800;
-  const roomyWindow = corners && viewport.height >= 720 && viewport.height < 752;
+  const roomyWindow = corners && viewport.height >= 640 && viewport.height < 752;
   return !(roomyTablet || roomyWindow);
 }
 

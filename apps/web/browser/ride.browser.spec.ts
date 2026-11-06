@@ -2137,6 +2137,9 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
  * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
  * FAR AT ARM'S LENGTH").
  */
+/** A room with *Report*'s reasons open, sounds on and a side camera filming. */
+const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
+
 /** Two notices drawn: *Keep the screen on* and the road notice. */
 const TWO_NOTICES = '?keepalive=failed&trainer=workout';
 
@@ -2148,9 +2151,22 @@ const RIDE_SO_FAR: readonly string[] = [
 ];
 
 for (const viewport of LAPTOP_VIEWPORTS) {
-  for (const query of ['', '?room=following', TWO_NOTICES]) {
+  for (const query of [
+    '',
+    '?room=following',
+    TWO_NOTICES,
+    // A room at its fullest with a side camera's row: `main` itself runs it
+    // off a 1024×600 stage, so it is held where `main` holds it.
+    ...(viewport.height >= 640 ? [SIDE_CAMERA_ROOM] : []),
+  ]) {
     const state =
-      query === '' ? '' : query === TWO_NOTICES ? ', with two notices drawn' : ', in a room';
+      query === ''
+        ? ''
+        : query === TWO_NOTICES
+          ? ', with two notices drawn'
+          : query === SIDE_CAMERA_ROOM
+            ? ', in a room with Report open and a side camera'
+            : ', in a room';
     test(`#2034 a laptop's window draws the ride so far${state} — ${viewport.name}`, async ({
       browser,
     }) => {
@@ -2171,10 +2187,14 @@ for (const viewport of LAPTOP_VIEWPORTS) {
         const clipped = seen.items
           .filter((each) => each.box.width * each.box.height <= 1)
           .map((each) => each.name);
+        // In a room the pacer, the ghost and the wind give way only where
+        // they do not fit: under 40 rem tall, and under 45 rem with a side
+        // camera's row (1366×657).
+        const givesWay =
+          (query === '?room=following' && roomGivesWay(viewport)) ||
+          (query === SIDE_CAMERA_ROOM && viewport.height < 720);
         expect(clipped, how).toEqual(
-          query === '?room=following' && roomGivesWay(viewport)
-            ? ['reading: Pacer', 'reading: Your best', 'reading: Wind']
-            : [],
+          givesWay ? ['reading: Pacer', 'reading: Your best', 'reading: Wind'] : [],
         );
         const lost = seen.items
           .filter((each) => !clipped.includes(each.name))
@@ -2195,3 +2215,27 @@ for (const viewport of LAPTOP_VIEWPORTS) {
     });
   }
 }
+
+/**
+ * PR #2220's review: the 1024×600 rule counts only DRAWN notices. Folding the
+ * road notice away leaves its wrapper in the cell, visually hidden; with only
+ * *Keep the screen on* drawn, the ride so far is drawn again.
+ */
+test('#2034 the folded road notice does not count — the ride so far comes back — a small laptop window — 1024×600', async ({
+  page,
+}) => {
+  const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
+  await openRide(page, viewport, TWO_NOTICES);
+  await expect.poll(async () => (await measure(page)).givenWay).toContain('reading: Distance');
+  await page.getByRole('button', { name: 'Trainer notice' }).click();
+  await expect.poll(async () => (await measure(page)).givenWay).not.toContain('reading: Distance');
+  for (const [how, seen] of await bothWays(page)) {
+    for (const name of RIDE_SO_FAR) {
+      const reading = named(seen.items, name);
+      expect(
+        inside(reading.box, viewport) && reading.onTop,
+        `${how}: ${describeItem(reading)}`,
+      ).toBe(true);
+    }
+  }
+});
