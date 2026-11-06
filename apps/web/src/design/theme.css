@@ -675,6 +675,12 @@ html {
       right: calc(anchor(right) + 2.75rem + var(--oyl-space-sm));
     }
 
+    /* #2073: the mute has left the row, so the music controls take its auto
+       margin. In this block, not one of its own: `ride-stage.ts` counts them. */
+    .oyl-header__mute + .oyl-other-player {
+      margin-inline-start: auto;
+    }
+
     .oyl-header__mute-words {
       position: absolute;
       width: 1px;
@@ -726,8 +732,9 @@ html {
 /*
  * On a phone each control shows its first word, the rest of its name folded
  * off the screen and still its name (`OtherPlayerControls.tsx` §`Name`): three
- * full names took two rows of a header that is otherwise zero tall. The mute
- * has left the row for the `h1` there, so the controls take the auto margin.
+ * full names took two rows of a header that is otherwise zero tall. Where the
+ * mute has left the row for the `h1`, the controls take its auto margin: that
+ * rule is in the mute's own `@supports` block above.
  */
 @media (max-width: 37.49rem) {
   .oyl-other-player__rest {
@@ -740,12 +747,6 @@ html {
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
-  }
-
-  @supports (anchor-name: --oyl-view-title) {
-    .oyl-header__mute + .oyl-other-player {
-      margin-inline-start: auto;
-    }
   }
 }
 
