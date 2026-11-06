@@ -523,6 +523,8 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
       },
       isRunning: () => false,
       applyMix: () => undefined,
+      attachMusic: () => undefined,
+      setMusicOn: () => undefined,
       suspend: () => undefined,
       startTone: () => undefined,
       setTone: () => undefined,

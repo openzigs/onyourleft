@@ -3832,6 +3832,17 @@ const AUDIO_GRAPH_PROBE = `(() => {
     edges.set(this, list);
     return connect.call(this, to, ...rest);
   };
+  const sources = [];
+  const createSource = AudioContext.prototype.createMediaElementSource;
+  AudioContext.prototype.createMediaElementSource = function (...args) {
+    const node = createSource.apply(this, args);
+    sources.push(node);
+    return node;
+  };
+  window.__oylMusicBus = () => {
+    const bus = (edges.get(sources[0]) ?? [])[0];
+    return bus === undefined ? null : bus.gain.value;
+  };
   window.__oylMaster = () => {
     const master = gains.filter((node) => (edges.get(node) ?? []).includes(node.context.destination));
     if (master.length !== 1) return { masters: master.length, gain: null, state: null };
@@ -3984,5 +3995,83 @@ test.describe('#2056 — the header mute', () => {
     await pressSomethingElse(page);
     await expect.poll(async () => (await readMaster(page)).masters).toBe(1);
     expect((await readMaster(page)).gain).toBe(0);
+  });
+});
+
+/**
+ * #2058 — the menus' music, in a real engine.
+ *
+ * The page is the real `AppShell` with the real player (`shell/menu-music.ts`)
+ * over the shared output, and a loop the harness makes (`?music=fixture`: a
+ * second of tone as a WAV, because #2057's loop is not committed yet). The
+ * music bus is read from the page's own graph — the gain the element's
+ * `MediaElementAudioSourceNode` is connected to, recorded by
+ * {@link AUDIO_GRAPH_PROBE} — and "playing" from the element itself, its
+ * `paused` and a `currentTime` that moves.
+ *
+ * The rules that need a ride controller, a hidden page or a stored mute are
+ * `src/shell/menu-music.test.tsx`'s, over the same graph code.
+ */
+interface MusicReading {
+  readonly elements: number;
+  readonly playing: boolean;
+  readonly time: number;
+  readonly bus: number | null;
+}
+
+async function readMusic(page: Page): Promise<MusicReading> {
+  return page.evaluate(() => {
+    const seen = window as unknown as {
+      __oylMusicElements: HTMLMediaElement[];
+      __oylMusicBus: () => number | null;
+    };
+    const [element] = seen.__oylMusicElements;
+    return {
+      elements: seen.__oylMusicElements.length,
+      playing: element !== undefined && !element.paused,
+      time: element?.currentTime ?? 0,
+      bus: seen.__oylMusicBus(),
+    };
+  });
+}
+
+test.describe('#2058 — the menus’ music, in a real engine', () => {
+  test('nothing before a press; then the loop plays through the music bus, and stops on each ride route', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?music=fixture');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    expect(await readMusic(page), 'something was made or played before a press').toEqual({
+      elements: 0,
+      playing: false,
+      time: 0,
+      bus: null,
+    });
+
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMusic(page)).playing).toBe(true);
+    // The default level, 0.5, reached by a ramp rather than set.
+    await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    const started = (await readMusic(page)).time;
+    await expect.poll(async () => (await readMusic(page)).time).toBeGreaterThan(started);
+
+    for (const ride of ['#/ride', '#/game']) {
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, ride);
+      await expect.poll(async () => (await readMusic(page)).bus ?? 1, ride).toBeLessThan(0.01);
+      await expect.poll(async () => (await readMusic(page)).playing, ride).toBe(false);
+
+      await page.evaluate(() => {
+        window.location.hash = '#/';
+      });
+      await expect
+        .poll(async () => (await readMusic(page)).playing, `back from ${ride}`)
+        .toBe(true);
+      await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    }
+    expect((await readMusic(page)).elements, 'one element for the visit').toBe(1);
   });
 });

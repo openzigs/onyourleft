@@ -1128,7 +1128,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         first time): ⚠️ the volume is the BUS's gain and is
                         multiplied nowhere else, or it would be squared.
                         #2056 adds `applyMix()` to the port: it sets the buses
-                        on a graph that exists and never makes a context.
+                        on a graph that exists and never makes a context;
+                        #2058 adds `attachMusic()` (one media element source
+                        per element, into the music bus) and `setMusicOn()`,
+                        a ramp: the music bus is 0 whenever music is not playing.
+                        #2059: every short sound while music plays ramps the
+                        duck to `MUSIC_DUCK_LEVEL` and back after it ends
+                        (`setTargetAtTime`, never a step; `music-duck.test.ts`).
                         Since #2219 *Mute sounds* is pressed while the master
                         mute (the header's, menu routes only) is on, and its
                         unmuting press clears the master before `begin()`
