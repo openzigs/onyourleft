@@ -23,7 +23,7 @@
  * assertions are about which commands a file names, which text answers.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,6 +44,47 @@ const ROOT = join(BROWSER, '..', '..', '..');
 const read = (...path: string[]): string => readFileSync(join(...path), 'utf8');
 
 const SPECS = readdirSync(BROWSER).filter((name) => name.endsWith('.browser.spec.ts'));
+
+/** A workflow, or a job of one, with every comment line taken out: what runs, not what is said of it. */
+const uncommented = (text: string): string => text.replace(/^\s*#.*\n/gm, '');
+
+/**
+ * Every command a workflow runs, one a line: each `run:` value, and each line
+ * of a `run: |` block — #2209. Comment lines are out first.
+ */
+function runLines(workflow: string): string[] {
+  const lines = uncommented(workflow).split('\n');
+  const out: string[] = [];
+  for (let at = 0; at < lines.length; at += 1) {
+    const match = /^( *)(?:- )?run: (.*)$/.exec(lines[at] ?? '');
+    if (match === null) continue;
+    const value = String(match[2]).trim();
+    if (!/^[|>][-+]?$/.test(value)) {
+      out.push(value);
+      continue;
+    }
+    const indent = String(match[1]).length;
+    while (at + 1 < lines.length) {
+      const line = lines[at + 1] ?? '';
+      if (line.trim() !== '' && line.length - line.trimStart().length <= indent) break;
+      at += 1;
+      if (line.trim() !== '') out.push(line.trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * A command that asks apt for something — #2207, #2209: Playwright's
+ * `--with-deps` or `install-deps`, or `apt` or `apt-get` in any spelling
+ * (`sudo apt -y install …`, `apt update`). Not a path through `/etc/apt/`,
+ * which the step that drops the Chrome source names.
+ */
+const ASKS_APT = /--with-deps|\binstall-deps\b|\bapt(?:-get)?\b(?!\/)/;
+
+/** Each browser install: the headless shell, with no `--with-deps` (#2207; nightly and demo, #2209). */
+const BROWSER_INSTALL =
+  'pnpm --filter @onyourleft/web exec playwright install --only-shell chromium';
 
 type Project = NonNullable<typeof config.projects>[number];
 const PROJECTS: readonly Project[] = config.projects ?? [];
@@ -117,7 +158,7 @@ function taggedBodies(): Map<string, string> {
  * `jobs:`, which is how both workflows are written.
  */
 function jobsOf(workflow: string): Map<string, string> {
-  const code = workflow.replace(/^\s*#.*\n/gm, '');
+  const code = uncommented(workflow);
   const body = code.slice(code.indexOf('\njobs:\n') + '\njobs:\n'.length);
   const starts = [...body.matchAll(/^ {2}([A-Za-z_][\w-]*):\n/gm)];
   const jobs = new Map<string, string>();
@@ -260,6 +301,52 @@ const LOADS_OF_THE_PAGE = /\b(?:ride|ridden)\(\s*page\b/g;
  * `/…/flags` literal as written, anything else as a case-insensitive pattern,
  * tested against the file's absolute path.
  */
+/** One browser launch written in a source file: which browser, and its options' text. */
+interface Launch {
+  readonly file: string;
+  readonly browser: string;
+  readonly options: string;
+}
+
+/**
+ * Every `chromium.launch(…)`, `launchPersistentContext(…)` or `launchServer(…)`
+ * — and the same of `firefox` or `webkit` — in the `.ts` files under `dirs`,
+ * with the text of its arguments to the matching parenthesis — #2209.
+ */
+function launchesIn(dirs: readonly string[]): Launch[] {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (name === 'node_modules' || name === 'dist') continue;
+      if (statSync(path).isDirectory()) walk(path);
+      else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) files.push(path);
+    }
+  };
+  for (const dir of dirs) walk(dir);
+  const launches: Launch[] = [];
+  for (const file of files) {
+    const source = read(file);
+    for (const match of source.matchAll(
+      /\b(chromium|firefox|webkit)\.(?:launch|launchPersistentContext|launchServer)\(/g,
+    )) {
+      let depth = 1;
+      let at = match.index + match[0].length;
+      while (at < source.length && depth > 0) {
+        if (source[at] === '(') depth += 1;
+        else if (source[at] === ')') depth -= 1;
+        at += 1;
+      }
+      launches.push({
+        file,
+        browser: String(match[1]),
+        options: source.slice(match.index + match[0].length, at - 1),
+      });
+    }
+  }
+  return launches;
+}
+
 function selects(filter: string, spec: string): boolean {
   const literal = /^\/(.*)\/([gi]*)$/.exec(filter);
   const pattern = literal
@@ -267,10 +354,6 @@ function selects(filter: string, spec: string): boolean {
     : new RegExp(filter, 'i');
   return pattern.test(join(BROWSER, spec));
 }
-
-/** Each browser shard's install: the headless shell, with no `--with-deps` (#2207). */
-const BROWSER_INSTALL =
-  'pnpm --filter @onyourleft/web exec playwright install --only-shell chromium';
 
 /** The command a browser shard's `Browser gate` step runs, wrapper and all. */
 const gateCommand = (script: string): string =>
@@ -518,6 +601,33 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // both stops with 4 s to spare.
     const BUILDS_MS = 16_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
+  });
+});
+
+describe('the nightly and demo workflows install the browser as the gate does — #2209', () => {
+  const nightly = read(ROOT, '.github', 'workflows', 'nightly.yml');
+  const demo = read(ROOT, '.github', 'workflows', 'demo-video.yml');
+
+  it('installs the headless shell in every nightly job that runs a browser, and asks apt for nothing', () => {
+    // Five installs, each `--with-deps` until #2209: the slow Ubuntu mirror
+    // #2207 measured could stall any of them, and their fonts made a nightly
+    // frame differ from a required one.
+    const installs = runLines(nightly).filter((line) => line.includes('playwright install'));
+    expect(installs.length).toBeGreaterThanOrEqual(5);
+    for (const install of installs) expect(install).toBe(BROWSER_INSTALL);
+    expect(runLines(nightly).filter((line) => ASKS_APT.test(line))).toEqual([]);
+  });
+
+  it('installs the headless shell for the demo video, and asks apt for ffmpeg alone', () => {
+    const installs = runLines(demo).filter((line) => line.includes('playwright install'));
+    expect(installs).toHaveLength(2);
+    for (const install of installs) expect(install).toBe(BROWSER_INSTALL);
+    // ffmpeg is not on the image, and Playwright's own has no libx264: the
+    // one thing apt is asked for, with no recommended packages (no fonts).
+    expect([...new Set(runLines(demo).filter((line) => ASKS_APT.test(line)))].sort()).toEqual([
+      'sudo apt-get install --yes --no-install-recommends ffmpeg',
+      'sudo apt-get update',
+    ]);
   });
 });
 
@@ -856,11 +966,10 @@ describe('the required check is one job over every shard — #1285', () => {
     );
     // On a job, this reports a failure to `needs` as success; on a step, it
     // turns a red step green. Neither belongs in a gate.
-    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toContain('continue-on-error');
+    expect(uncommented(workflow)).not.toContain('continue-on-error');
     // The verdict step must run on every event and its exit must reach the
     // job. A step-level `if:` or a `shell:` override (`... || true`) switches
     // it off with every shard red, and the check would pass.
-    const uncommented = (text: string): string => text.replace(/^\s*#.*\n/gm, '');
     const steps = uncommented(aggregate)
       .split(/^ {6}- /m)
       .slice(1);
@@ -978,14 +1087,56 @@ describe('the required check is one job over every shard — #1285', () => {
         id,
       ).toEqual([BROWSER_INSTALL]);
     }
-    const uncommented = workflow.replace(/^\s*#.*\n/gm, '');
-    expect(uncommented).not.toMatch(/--with-deps|install-deps|apt-get|apt install/);
+    expect(runLines(workflow).filter((line) => ASKS_APT.test(line))).toEqual([]);
+  });
+
+  it('reads every spelling of asking apt, and not a path through /etc/apt — #2209', () => {
+    for (const asks of [
+      'pnpm exec playwright install --with-deps chromium',
+      'pnpm exec playwright install-deps chromium',
+      'sudo apt-get install --yes fonts-liberation',
+      'sudo apt -y install fonts-liberation',
+      'sudo apt update',
+      'apt install ffmpeg',
+      '/usr/bin/apt install ffmpeg',
+    ]) {
+      expect(ASKS_APT.test(asks), asks).toBe(true);
+    }
+    for (const not of [
+      'sudo rm -f /etc/apt/sources.list.d/google-chrome.list \\',
+      BROWSER_INSTALL,
+      'pnpm run adapt',
+    ]) {
+      expect(ASKS_APT.test(not), not).toBe(false);
+    }
+    // A `run: |` block is read line by line, and a comment is not a command.
+    expect(
+      runLines(
+        '      - name: x\n        run: |\n          # apt update\n          sudo apt update\n',
+      ),
+    ).toEqual(['sudo apt update']);
+  });
+
+  it('launches only the browser the installs fetch: no channel, no headed run, in the config or in any spec or tool — #2207, #2209', () => {
     // `--only-shell` is the browser the gate launches: a headless run with no
     // `channel` is Playwright's headless shell. A project given a channel or a
     // headed run would launch a browser this step did not install.
     for (const use of [config.use, ...PROJECTS.map((project) => project.use)]) {
       expect(use?.channel).toBeUndefined();
       expect(use?.headless).not.toBe(false);
+    }
+    // #2209: and a launch a spec or a tool makes for itself, which no project
+    // reaches: `offline.browser.spec.ts`' persistent contexts, and the demo's
+    // `render-video.ts`. Every one passes its options inline.
+    const launches = launchesIn([BROWSER, join(BROWSER, '..', 'tools')]);
+    const where = launches.map((launch) => launch.file);
+    expect(where.filter((file) => file.endsWith('offline.browser.spec.ts'))).toHaveLength(2);
+    expect(where.filter((file) => file.endsWith('render-video.ts'))).toHaveLength(1);
+    for (const launch of launches) {
+      expect(launch.browser, launch.file).toBe('chromium');
+      expect(launch.options, launch.file).not.toMatch(
+        /\bchannel\s*:|\bheadless\s*:\s*false|\bexecutablePath\b/,
+      );
     }
   });
 

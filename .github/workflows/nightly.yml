@@ -148,8 +148,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Tests outside coverage
         run: pnpm run test:uninstrumented
@@ -292,8 +296,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (2 of 5)
         run: pnpm run test:browser:nightly:shard-2
@@ -339,8 +347,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (3 of 5)
         run: pnpm run test:browser:nightly:shard-3
@@ -384,8 +396,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (4 of 5)
         run: pnpm run test:browser:nightly:shard-4
@@ -433,8 +449,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (5 of 5)
         run: pnpm run test:browser:nightly:shard-5

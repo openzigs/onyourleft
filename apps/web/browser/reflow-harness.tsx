@@ -1163,7 +1163,7 @@ function keptBeforeFirstControl(): string[] {
     return [];
   }
   const control = laidOutControls(main)[0] ?? null;
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return [...main.querySelectorAll('[data-oyl-kept-visible]')]
     .filter(
       (element) =>
@@ -1177,7 +1177,7 @@ function keptBeforeFirstControl(): string[] {
 
 /** The route's summary under its `h1`, and how many lines it lays out on — #993. */
 function summaryLines(): { readonly text: string; readonly lines: number } | null {
-  const summary = document.querySelector('main > h1 + p');
+  const summary = document.querySelector('main > .oyl-view-head > h1 + p');
   if (summary === null || !laidOut(summary)) {
     return null;
   }
@@ -1196,7 +1196,7 @@ function summaryLines(): { readonly text: string; readonly lines: number } | nul
 
 /** The help control under a screen's title, and what it holds — #993. */
 function helpControl(): HelpControl | null {
-  const toggle = document.querySelector('main > .oyl-help > summary');
+  const toggle = document.querySelector('main > .oyl-view-head > .oyl-help > summary');
   if (toggle === null) {
     return null;
   }
@@ -1223,7 +1223,7 @@ function proseBeforeFirstControl(): string[] {
   const control = laidOutControls(main)[0] ?? null;
   // The route's own summary is the shell's (#48), under its `h1`, and is the
   // one sentence every route keeps.
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return proseBetween(main, summary, control).map((element) =>
     (proseWords(element) ?? '').slice(0, 80),
   );
@@ -1360,7 +1360,7 @@ function inlineDisclosureCopies(): void {
  */
 function putTheLineBack(route: RouteDefinition): void {
   const main = document.querySelector('main');
-  const title = main?.querySelector(':scope > h1');
+  const title = main?.querySelector(':scope > .oyl-view-head > h1');
   if (main === null || main === undefined || title === null || title === undefined) {
     return;
   }

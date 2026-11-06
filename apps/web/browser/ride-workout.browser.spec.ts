@@ -960,7 +960,7 @@ test.describe('a ride on a loop — #1312', () => {
           // these seconds the strip and the plan view are not laid out — and
           // on a tablet, where the notice has a cell of its own, they are.
           const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-          const routePanel = ['the elevation strip', 'the plan view'];
+          const routePanel = ['the elevation strip', 'the road ahead', 'the plan view'];
           const lost = seen.items
             .filter((each) => !inside(each.box, viewport) || !each.onTop)
             .map((each) => each.name);
