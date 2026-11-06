@@ -131,9 +131,8 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'segment_flag.subject_athlete_id': { erased: true },
   // Emptied, not deleted: the entry stays, and an erased flagger is named nowhere (#69, owner 2026-11-06).
   'segment_integrity_log.actor_athlete_id': { erased: true },
-  'segment_integrity_log.subject_athlete_id': {
-    kept: 'the leaderboard integrity log is append-only: what was excluded or flagged, and whose it was, is the record an appeal reads (#69)',
-  },
+  // Emptied, not deleted: the event stays, and an erased rider is named nowhere (#69, owner 2026-11-06).
+  'segment_integrity_log.subject_athlete_id': { erased: true },
 };
 
 /** Every `table.column` ending `athlete_id` that has no foreign key, from the database. */

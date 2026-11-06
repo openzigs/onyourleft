@@ -21,17 +21,19 @@
  *   `segment_id` and `effort_id` carry no foreign key, for 0038's reason: a
  *   flag is one athlete's row about another's.
  * - **`segment_integrity_log`** — every exclusion and every flag, with its
- *   actor (`NULL` for the instance's own rule, or an erased flagger), the athlete it was about, the
- *   segment, the effort and the reason. ⚠️ **Append-only in the schema**, as
- *   the moderation log is (#83): two triggers abort any `DELETE` and every
- *   `UPDATE` but ONE, because moderation without an audit trail is
- *   unappealable. The one: when a FLAGGER's account is erased, their id is
- *   taken out of the entries they are the actor of (the owner's ruling on #69,
- *   2026-11-06) — `actor_athlete_id` set to `NULL`, nothing else changed, and
- *   only once no athlete holds that id. So an erased flagger is named nowhere,
- *   and what they flagged, whose it was, why and when stay. Its athlete
- *   columns carry no foreign key, so erasing an account leaves the record of
- *   what was done, and `down` is refused while it holds an entry.
+ *   actor (`NULL` for the instance's own rule, or an erased flagger), the
+ *   athlete it was about (`NULL` once they erased their account), the segment,
+ *   the effort and the reason. ⚠️ **Append-only in the schema**, as the
+ *   moderation log is (#83): two triggers abort any `DELETE` and every
+ *   `UPDATE` but erasure's, because moderation without an audit trail is
+ *   unappealable. Erasure's (the owner's rulings on #69, 2026-11-06): an
+ *   erased athlete's id is taken out of every entry — `actor_athlete_id` for a
+ *   flagger, `subject_athlete_id` for the rider it was about — each set to
+ *   `NULL` only once no athlete holds that id, and nothing else changed. So an
+ *   erased rider is named nowhere, and the event — what was flagged or
+ *   excluded, why and when — stays. Its athlete columns carry no foreign key,
+ *   so erasing an account leaves the record of what was done, and `down` is
+ *   refused while it holds an entry.
  *
  * `segment_flag_by_effort` and `segment_flag_by_segment` answer the board's
  * two `not exists`; `segment_flag_by_flagger` the per-athlete rate limit.
@@ -89,16 +91,26 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
   await sql`create trigger segment_integrity_log_no_update before update on segment_integrity_log
     when not (
-      old.actor_athlete_id is not null
-      and new.actor_athlete_id is null
-      and not exists (select 1 from athlete where athlete.id = old.actor_athlete_id)
-      and new.id = old.id
+      new.id = old.id
       and new.at = old.at
       and new.action = old.action
-      and new.subject_athlete_id is old.subject_athlete_id
       and new.segment_id = old.segment_id
       and new.effort_id is old.effort_id
       and new.reason = old.reason
+      and (
+        new.actor_athlete_id is old.actor_athlete_id
+        or (
+          new.actor_athlete_id is null
+          and not exists (select 1 from athlete where athlete.id = old.actor_athlete_id)
+        )
+      )
+      and (
+        new.subject_athlete_id is old.subject_athlete_id
+        or (
+          new.subject_athlete_id is null
+          and not exists (select 1 from athlete where athlete.id = old.subject_athlete_id)
+        )
+      )
     )
     begin select raise(abort, 'segment_integrity_log is append-only'); end`.execute(db);
   await sql`create trigger segment_integrity_log_no_delete before delete on segment_integrity_log

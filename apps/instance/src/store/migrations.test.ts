@@ -435,31 +435,47 @@ describe('the migrations (#769)', () => {
         /append-only/,
       );
       expect(() => database.exec('DELETE FROM segment_integrity_log')).toThrow(/append-only/);
-      // The one update (#69, owner 2026-11-06): an erased flagger's id emptied,
-      // nothing else, and only once no athlete holds it.
-      const actor = () =>
-        (
-          database.prepare('SELECT actor_athlete_id AS actor FROM segment_integrity_log').get() as {
-            actor: string | null;
-          }
-        ).actor;
-      expect(actor()).toBe('a');
-      // Athlete `a` is seeded: while it exists, its id stays.
-      expect(() =>
-        database.exec('UPDATE segment_integrity_log SET actor_athlete_id = NULL'),
-      ).toThrow(/append-only/);
+      // Erasure's updates (#69, the owner's rulings of 2026-11-06): an erased
+      // athlete's id emptied from the actor and the subject, nothing else, and
+      // only once no athlete holds it.
+      const row = () =>
+        database
+          .prepare(
+            'SELECT at, action, actor_athlete_id AS actor, subject_athlete_id AS subject, segment_id AS segment, effort_id AS effort, reason FROM segment_integrity_log',
+          )
+          .get() as Record<string, unknown>;
+      const seeded = row();
+      expect(seeded).toMatchObject({ actor: 'a', subject: 'a' });
+      const refused = (set: string) => {
+        expect(() => database.exec(`UPDATE segment_integrity_log SET ${set}`), set).toThrow(
+          /append-only/,
+        );
+      };
+      // Athlete `a` is seeded: while it exists, its id stays, as actor and as subject.
+      refused('actor_athlete_id = NULL');
+      refused('subject_athlete_id = NULL');
       // Erased (the seed's other rows still point at it, so without their keys checked).
       database.exec('PRAGMA foreign_keys = OFF');
       database.exec("DELETE FROM athlete WHERE id = 'a'");
-      expect(() =>
-        database.exec("UPDATE segment_integrity_log SET actor_athlete_id = NULL, reason = 'other'"),
-      ).toThrow(/append-only/);
-      expect(() =>
-        database.exec("UPDATE segment_integrity_log SET actor_athlete_id = 'b'"),
-      ).toThrow(/append-only/);
-      expect(actor()).toBe('a');
+      // Each other column, changed beside an allowed emptying, is refused —
+      // one probe per condition the trigger holds.
+      for (const emptied of ['actor_athlete_id = NULL', 'subject_athlete_id = NULL']) {
+        refused(`${emptied}, at = at + 1`);
+        refused(`${emptied}, action = 'excluded'`);
+        refused(`${emptied}, segment_id = '${'b'.repeat(32)}'`);
+        refused(`${emptied}, effort_id = NULL`);
+        refused(`${emptied}, effort_id = 'effort-b'`);
+        refused(`${emptied}, reason = 'other'`);
+      }
+      // An id is emptied, never replaced by another.
+      refused("actor_athlete_id = 'b'");
+      refused("subject_athlete_id = 'b'");
+      refused("actor_athlete_id = NULL, subject_athlete_id = 'b'");
+      refused("subject_athlete_id = NULL, actor_athlete_id = 'b'");
+      expect(row()).toEqual(seeded);
       database.exec('UPDATE segment_integrity_log SET actor_athlete_id = NULL');
-      expect(actor()).toBeNull();
+      database.exec('UPDATE segment_integrity_log SET subject_athlete_id = NULL');
+      expect(row()).toEqual({ ...seeded, actor: null, subject: null });
     } finally {
       database.close();
     }

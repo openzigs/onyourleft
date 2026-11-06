@@ -466,6 +466,54 @@ describe('the community flag (#69’s fourth to sixth criteria)', () => {
     ]);
     expect(JSON.stringify(log)).not.toContain(flagger.athleteId);
   });
+
+  it('names nowhere a rider whose effort was flagged or excluded, once they erase their account; the events stay', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    const bea = await onTheBoard('Bea', segmentId, 300);
+    const effortId = (await board(ann, segmentId)).rows[0]?.effortId ?? '';
+    // Bea's own impossible time, excluded by the instance's rule…
+    await share(bea, segmentId, await publicRide(bea), IMPOSSIBLE_SECONDS);
+    // …and Cy's, which stays Cy's.
+    const cy = await onTheBoard('Cy', segmentId, IMPOSSIBLE_SECONDS);
+    const flagger = await rider('Flagger');
+    await share(flagger, segmentId, await publicRide(flagger), 320);
+    await flagEffort(flagger, segmentId, effortId);
+    expect(
+      (await logOf(segmentId)).filter((entry) => entry.subjectAthleteId === bea.athleteId),
+    ).toHaveLength(2);
+
+    expect(
+      (
+        await world.call('DELETE', '/v1/account', {
+          token: bea.token,
+          body: { recoveryCode: bea.recoveryCodes[0] },
+        })
+      ).status,
+    ).toBeLessThan(300);
+
+    const log = await logOf(segmentId);
+    expect(JSON.stringify(log)).not.toContain(bea.athleteId);
+    expect(log).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'flagged_effort',
+          actorAthleteId: flagger.athleteId,
+          subjectAthleteId: null,
+          effortId,
+          reason: 'vehicle',
+        }),
+        expect.objectContaining({
+          action: 'excluded',
+          actorAthleteId: null,
+          subjectAthleteId: null,
+        }),
+        // Another rider's entry is untouched.
+        expect.objectContaining({ action: 'excluded', subjectAthleteId: cy.athleteId }),
+      ]),
+    );
+    expect(log).toHaveLength(3);
+  });
 });
 
 describe('a hazardous segment (#69’s seventh criterion)', () => {

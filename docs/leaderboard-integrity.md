@@ -85,15 +85,16 @@ holds:
 - the action;
 - who did it, or nobody when it was the instance's own rule or the flagger has since erased their
   account;
-- whose effort it was;
+- whose effort it was, or nobody once that rider has erased their account;
 - the segment and the effort;
 - the reason;
 - the time.
 
 The log is **append-only in the schema**: two triggers abort any `DELETE` and every `UPDATE` but
-one. When an account is erased, the record of what was done stays. The one update is for a flagger
-who erases their account: their id is taken out of the entries they raised, and nothing else in
-them changes, so the log never names an erased flagger (the owner's ruling on #69, 2026-11-06). Undoing migration 0039 is refused while the
+erasure's. When an account is erased, the record of what was done stays, and the account's id is
+taken out of it: out of every entry the rider raised as a flagger, and out of every entry about
+their efforts. Nothing else in an entry changes, so the log keeps the event (what was flagged or
+excluded, why and when) and never names an erased rider (the owner's rulings on #69, 2026-11-06). Undoing migration 0039 is refused while the
 log holds any entry. The instance's moderators read the log at `GET /v1/moderation/segment-log`.
 To anyone else, that address answers as though it did not exist.
 
