@@ -1908,7 +1908,7 @@ html {
 /*
  * #2045: one device to a ROW — the owner's screenshot review of 2026-11-05.
  * Its icon, its name, its own reading and its connected dot on one line,
- * wrapping only where a name or a reading is too long for it. With four
+ * wrapping only where a reading is too long for it. With four
  * sensors paired the module stays short enough that Last ride and This week
  * are above a 1280×800 tablet's fold (`home.browser.spec.ts` §"four sensors
  * paired"); its control, `?rows=stacked`, puts each part back on a line of
@@ -1960,10 +1960,16 @@ html {
   height: 1.25rem;
 }
 
+/* A name is one line whatever its length, cut short with an ellipsis where
+   the row has no room for it all — a long name never makes its row two lines
+   tall (the Linux runner's wider font wrapped one). The whole name is still
+   the row's text, and the Devices screen shows it in full. */
 .oyl-home__sensor-name {
   flex: 1 1 0;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .oyl-home__sensor-reading {

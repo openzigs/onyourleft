@@ -474,7 +474,8 @@ function fourSensors(): RideSnapshot {
       },
       {
         id: deviceId('strap'),
-        name: 'HRM-Pro 7C1D',
+        // Long enough not to fit beside its reading: it must stay one line.
+        name: 'HRM-Pro Plus 7C1D-0042-A9F3',
         role: 'heart-rate',
         capabilities: ['heart-rate'],
         state: 'connected',

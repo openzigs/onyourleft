@@ -625,6 +625,20 @@ test.describe('#2044 — Home is a grid of modules', () => {
         `${(seen.trainer?.height ?? NaN).toFixed(0)} px tall: ${describeBoxes(four)}`,
     );
     expect(await page.locator('.oyl-home__sensor-row').count()).toBe(4);
+    // Each device is ONE row: its name one line, however long (the strap's
+    // is too long to fit), so no row is taller than its words.
+    const names = await page.locator('.oyl-home__sensor-name').evaluateAll((all) =>
+      all.map((name) => ({
+        text: name.textContent,
+        height: name.getBoundingClientRect().height,
+        line: Number.parseFloat(getComputedStyle(name).lineHeight),
+      })),
+    );
+    for (const name of names) {
+      expect(name.height, `${name.text ?? ''} is more than one line`).toBeLessThanOrEqual(
+        name.line * 1.5,
+      );
+    }
     for (const [name, box] of four) {
       expect(box, `${name} was not drawn`).toBeDefined();
       expect(box?.bottom ?? Infinity, `${name} is not wholly above the fold`).toBeLessThanOrEqual(
