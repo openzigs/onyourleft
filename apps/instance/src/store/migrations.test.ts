@@ -441,7 +441,7 @@ describe('the migrations (#769)', () => {
       const row = () =>
         database
           .prepare(
-            'SELECT at, action, actor_athlete_id AS actor, subject_athlete_id AS subject, segment_id AS segment, effort_id AS effort, reason FROM segment_integrity_log',
+            'SELECT id, at, action, actor_athlete_id AS actor, subject_athlete_id AS subject, segment_id AS segment, effort_id AS effort, reason FROM segment_integrity_log',
           )
           .get() as Record<string, unknown>;
       const seeded = row();
@@ -460,6 +460,7 @@ describe('the migrations (#769)', () => {
       // Each other column, changed beside an allowed emptying, is refused —
       // one probe per condition the trigger holds.
       for (const emptied of ['actor_athlete_id = NULL', 'subject_athlete_id = NULL']) {
+        refused(`${emptied}, id = id + 1`);
         refused(`${emptied}, at = at + 1`);
         refused(`${emptied}, action = 'excluded'`);
         refused(`${emptied}, segment_id = '${'b'.repeat(32)}'`);
