@@ -138,6 +138,7 @@ import {
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
   LAPTOP_VIEWPORTS,
+  roomGivesWay,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -2148,7 +2149,7 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
  * room, and its layout holds the ride's own invariants there: every reading
  * and control on the stage and uncovered, every panel whole, none over
  * another or over the leaning rider. In a room the pacer, the ghost and the
- * wind give way first, as on a tablet; and under 40 rem tall (1024×600), while
+ * wind give way first under 45 rem tall, and stay in a 1280×720 window; and under 40 rem tall (1024×600), while
  * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
  * FAR AT ARM'S LENGTH").
  */
@@ -2187,7 +2188,7 @@ for (const viewport of LAPTOP_VIEWPORTS) {
           .filter((each) => each.box.width * each.box.height <= 1)
           .map((each) => each.name);
         expect(clipped, how).toEqual(
-          query === '?room=following'
+          query === '?room=following' && roomGivesWay(viewport)
             ? ['reading: Pacer', 'reading: Your best', 'reading: Wind']
             : [],
         );
