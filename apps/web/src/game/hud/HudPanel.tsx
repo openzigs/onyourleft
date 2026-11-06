@@ -69,7 +69,7 @@ import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
-import type { HudLayoutPreference } from './hud-layout-preference';
+import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
 import { RaceStandings } from './RaceStandings';
 import { LapSplits } from './LapSplits';
 import { LAP_SPLITS_TEXT, lapSplits } from './lap-splits';
@@ -386,7 +386,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     }
   }, [racePanel]);
   const standingsShown =
-    standings !== undefined && props.layout?.hidden.includes('standings') !== true;
+    standings !== undefined && panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings');
   const splitsShown =
     laps !== undefined && planLap(props.profile, props.state.ride.distance) !== undefined;
   const swap = (to: 'standings' | 'laps'): ReactNode =>

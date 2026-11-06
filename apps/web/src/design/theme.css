@@ -118,6 +118,11 @@
   --oyl-color-hud-zone-band5: #553922;
   --oyl-color-hud-zone-band6: #482726;
   --oyl-color-hud-zone-band7: #493858;
+  --oyl-color-hud-grade-descent: #4f9fe0;
+  --oyl-color-hud-grade-flat: #6b7177;
+  --oyl-color-hud-grade-climb: #d8b630;
+  --oyl-color-hud-grade-steep: #e8812c;
+  --oyl-color-hud-grade-wall: #e5484d;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -382,12 +387,14 @@ h3 {
 }
 
 /*
- * ⚠️ **A page title is the display step since #992** — the owner's ruling of
- * 2026-10-02 on epic #935 ("a bold type scale"): every view's `h1` is
- * `--oyl-font-size-display` at the heaviest weight, in the display face, and
- * shares its declarations with `.oyl-display` below. A reviewer who remembers
- * the `h1` at `xxl` is reading the old file. Section headings step down from
- * it, `h2` at `xl` and `h3` at `lg`, both bold.
+ * ⚠️ **A page title was the display step from #992 to #2065.** #992 (the
+ * owner's ruling of 2026-10-02 on epic #935, "a bold type scale") set every
+ * view's `h1` at `--oyl-font-size-display`, heaviest weight, display face,
+ * sharing its declarations with `.oyl-display` below. Since #2065 a view's
+ * title is `.oyl-view-head > h1`, which sets the size — `lg` on a phone, `xxl`
+ * from 40rem — and keeps the weight and the face from here. A reviewer who
+ * remembers the display step on a title is reading the old file. Section
+ * headings step down from `h1`, `h2` at `xl` and `h3` at `lg`, both bold.
  */
 h1 {
   font-family: var(--oyl-font-family-display);
@@ -648,13 +655,16 @@ html {
  * zero tall there (#671), and a 44 px row above every page pushed Ride
  * details' first control 36 px below the bar on a 390×844 phone on CI
  * (`controls-first.browser.spec.ts`, #666). So on a phone the mute is drawn at
- * the end of the title's first line, anchored to the `h1` — the place the
- * screen's ⓘ already uses (`.oyl-help` below), and just before it where there
- * is one — as an icon, its words clipped and still its name. It stays first
- * in the DOM, so it stays first in the tab order. A browser without anchor
- * positioning keeps the row: a taller page, never a hidden mute — which is why
- * this `@supports` block has no `@supports not` twin (`browser/ride-stage.ts`
- * §`ANCHOR_BLOCKS` counts it).
+ * the end of the title's first line, anchored to the title block — the place
+ * the screen's ⓘ already uses (`.oyl-help` below), and just before it where
+ * there is one — as an icon, its words clipped and still its name. ⚠️ Since
+ * #2065 the title is `.oyl-view-head > h1` at `lg` on a phone, and the ⓘ is
+ * the title block's, so the anchor, the room kept for the mute and its top are
+ * the title block's and `lg`'s, the same ones `.oyl-help > summary` uses. It
+ * stays first in the DOM, so it stays first in the tab order. A browser without
+ * anchor positioning keeps the row: a taller page, never a hidden mute — which
+ * is why this `@supports` block has no `@supports not` twin
+ * (`browser/ride-stage.ts` §`ANCHOR_BLOCKS` counts it).
  */
 .oyl-header__mute {
   margin-inline-start: auto;
@@ -665,13 +675,30 @@ html {
 
 @media (max-width: 37.49rem) {
   @supports (anchor-name: --oyl-view-title) {
-    .oyl-shell:has(.oyl-header__mute) .oyl-main > h1 {
+    /*
+     * The room is kept where the mute is, and nowhere else. The title takes
+     * the whole first row, its end padding the mute's, so the line under it
+     * is never beside it. The 44 px mute, centred on the title's first line,
+     * hangs below that line into the line under the title's first line, so a
+     * float as tall as the overhang keeps the mute's width off that one line
+     * only: the rest of the line keeps the width #2065 gave it (less the ⓘ's
+     * room), its two-line limit (`controls-first.browser.spec.ts`) holds, and
+     * the block costs not a pixel more height (its ceiling, the same file).
+     */
+    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head {
       anchor-name: --oyl-view-title;
+    }
+
+    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head > h1 {
+      flex-basis: 100%;
       padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
     }
 
-    .oyl-shell:has(.oyl-header__mute) .oyl-main:has(> .oyl-help) > h1 {
-      padding-inline-end: calc(2 * (2.75rem + var(--oyl-space-sm)));
+    .oyl-shell:has(.oyl-header__mute) .oyl-main > .oyl-view-head > h1 + p::before {
+      content: '';
+      float: inline-end;
+      inline-size: calc(2.75rem + var(--oyl-space-sm));
+      block-size: max(0px, calc(1.375rem - var(--oyl-font-size-lg) * 0.65));
     }
 
     .oyl-header .oyl-header__mute {
@@ -679,13 +706,13 @@ html {
       /* Above a `main` that is positioned for its ⓘ, which comes later in the DOM. */
       z-index: 1;
       position-anchor: --oyl-view-title;
-      top: calc(anchor(top) + (var(--oyl-font-size-display) * 1.1 - 2.75rem) / 2);
+      top: calc(anchor(top) + (var(--oyl-font-size-lg) * 1.1 - 2.75rem) / 2);
       right: anchor(right);
       padding-inline: var(--oyl-space-sm);
       justify-content: center;
     }
 
-    .oyl-shell:has(.oyl-main > .oyl-help) .oyl-header .oyl-header__mute {
+    .oyl-shell:has(.oyl-main > .oyl-view-head > .oyl-help) .oyl-header .oyl-header__mute {
       right: calc(anchor(right) + 2.75rem + var(--oyl-space-sm));
     }
 
@@ -901,8 +928,9 @@ html {
 
 /*
  * The current destination is marked four ways and only one of them is colour:
- * `aria-current` for assistive technology, a heavier label, a larger icon, and
- * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
+ * `aria-current` for assistive technology, a heavier label, a larger icon in a
+ * heavier stroke (#2066), and the filled pill — a SHAPE the other destinations
+ * lack. Criterion 4 of #427,
  * #48's sixth, and #944's third. The fill is `accent`, at 3.08 (light) and
  * 7.22 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
  * label and icon on it are `accentInk`, at 4.9 and 13.33 — both declared pairs
@@ -926,6 +954,16 @@ html {
 
 .oyl-nav-link[aria-current] .oyl-nav-icon {
   transform: scale(1.2);
+}
+
+/*
+ * #2066: the current destination's icon in a heavier stroke as well, as its
+ * label is in a heavier weight — the two weights say "here" in the one place
+ * a rider looks, with no colour at all. `NavIcon.tsx` draws every icon at
+ * 1.8; this is a CSS property, so it outranks that presentation attribute.
+ */
+.oyl-nav-link[aria-current] .oyl-nav-icon {
+  stroke-width: 2.25;
 }
 
 .oyl-nav-link:hover .oyl-nav-label {
@@ -1077,6 +1115,29 @@ html {
   }
 }
 
+/*
+ * THE MARK — #2066. The app's launcher icon heads the RAIL (`AppShell.tsx`
+ * §`PrimaryNav`), decorative and hidden from assistive technology, and only
+ * where the rail has the height for it: 40rem, the sticky header's own floor.
+ * Below that — a phone on its side shows the rail at 390 px tall — its 4 rem
+ * would push the fifth destination toward the bottom edge for a picture. Not
+ * on a phone's bar at all: whether a phone carries the brand is the owner's
+ * open question on #2030. `shell.browser.spec.ts` §"#2066" measures it.
+ */
+.oyl-nav-mark {
+  display: none;
+}
+
+@media (min-width: 37.5rem) and (min-height: 40rem) {
+  .oyl-nav-mark {
+    display: block;
+    inline-size: 3rem;
+    block-size: 3rem;
+    margin: 0 auto var(--oyl-space-md);
+    border-radius: var(--oyl-radius);
+  }
+}
+
 /* RAIL — a medium or expanded window. */
 @media (min-width: 37.5rem) {
   .oyl-nav {
@@ -1131,36 +1192,145 @@ html {
 
 .oyl-main {
   flex: 1;
-  padding: var(--oyl-space-lg) var(--oyl-space-md);
+  padding: calc(var(--oyl-space-md) + var(--oyl-space-xs)) var(--oyl-space-md) var(--oyl-space-lg);
   max-width: var(--oyl-measure);
+}
+
+/*
+ * THE TITLE BLOCK — #2065, epic #2034.
+ *
+ * Every screen opened with its `h1` at the display step and the line under it
+ * stacked below at a paragraph's margins: 108 px from the top of `main` to the
+ * bottom of the line at 1280×800 and at 412×915, 116 px on a list–detail
+ * route, and 176 px on a phone where the title wrapped — paid above the fold
+ * on every screen, for two lines of words. `controls-first.browser.spec.ts`
+ * §"#2065" walks the route table at both sizes, holds every route to half of
+ * the tallest of those figures (today's rules put back are its control), and
+ * publishes each route's height before and after.
+ *
+ * - **One row that wraps.** `AppShell` puts the `h1`, its line and the
+ *   screen's ⓘ in one box, a flex row on the first baseline: the line sits
+ *   beside the title where it fits, and wraps under the title where it does
+ *   not. On a phone "fits" is 20rem of line — most of a phone's width — so a
+ *   line wraps whole under its title rather than into a narrow column beside
+ *   it, where a 60-character sentence took three rows. A wrap moves the line,
+ *   never a word of it: every sentence stays on its route, and the DOM order
+ *   is still the `h1`, the line, the help.
+ * - **The title steps down** — `xxl` from 40rem, where the cards' own titles
+ *   are `xl` and the page's stays above them, and `lg` on a phone, the size a
+ *   compact app bar gives its title: at `xl` a phone's long title pushed its
+ *   two-row line past the ceiling. The display step was a hero's size for a
+ *   title that names the screen the rider just chose. Still the display face
+ *   at its heaviest weight and still `main`'s first heading. The line keeps
+ *   the body size, at a line-height a step tighter than a paragraph's.
+ * - **`main`'s top padding from `lg` (24 px) to `md` + `xs` (20 px)**, and no
+ *   further: `shell.browser.spec.ts` §`MINIMUM_HEADING_CLEARANCE` holds the
+ *   `h1` 16 px clear of the chrome after a fragment jump, and the padding is
+ *   that gap — on a page too short to scroll, and where the header sticks, no
+ *   scroll margin can supply it, and where the header does not stick the same
+ *   spec holds the margin at the inset alone. `md` alone left the `h1` 15.8 px
+ *   clear at 320×256, where the jump lands `main` a fraction of a pixel high;
+ *   `xs` is the slack.
+ * - **As wide as its words, and wider than the reading measure if they need
+ *   it.** A `prose` route's `main` stops at `--oyl-measure`, and a long title
+ *   beside its line does not fit in it: at 1280 px *Connect to an instance*
+ *   took two rows there. From the rail's breakpoint the box is as wide as the
+ *   title, the line and the ⓘ, up to the shell's width less `main`'s padding
+ *   — the viewport less the rail (5.5rem, §"RAIL") and the side insets — so
+ *   it may reach past `main`'s end edge, and the ⓘ stays at the end of the
+ *   line rather than out at the window's edge. Where `main` fills the shell
+ *   the cap is `main`'s own width, so one rule serves every layout; the line
+ *   itself keeps the measure. Below the rail the box is `main`'s width.
+ *
+ * The box takes the margin the line under the title had (`md`), and it
+ * collapses with what follows as the line's did. While a ride has the screen
+ * the box has no class (#423) and holds only the hidden title.
+ */
+.oyl-view-head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-md);
+  margin-block-end: var(--oyl-space-md);
+}
+
+.oyl-view-head > h1 {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--oyl-font-size-lg);
+}
+
+.oyl-view-head > h1 + p {
+  flex: 1 1 20rem;
+  max-width: var(--oyl-measure);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/*
+ * From the rail: the box is its words' width, so the line's flex basis is its
+ * own width too — a 20rem basis wider than a short line would wrap a row that
+ * fits. It wraps under the title only where the whole row is wider than the
+ * shell.
+ */
+@media (min-width: 37.5rem) {
+  .oyl-view-head > h1 + p {
+    flex-basis: auto;
+  }
+
+  .oyl-view-head {
+    inline-size: max-content;
+    max-inline-size: max(
+      100%,
+      calc(100vw - 5.5rem - var(--oyl-safe-left) - var(--oyl-safe-right) - 2 * var(--oyl-space-md))
+    );
+  }
+}
+
+@media (min-width: 40rem) {
+  .oyl-view-head > h1 {
+    font-size: var(--oyl-font-size-xxl);
+  }
 }
 
 /*
  * A screen's help, beside its title — #993 (`design/ScreenHelp.tsx`).
  *
- * The `<details>` stands AFTER the line under the title, so `main > h1 + p` is
- * still that line and the panel opens in its place in the flow; its summary,
- * the ⓘ, is drawn at the end of the title's first line. So `main` is its
- * containing block, and the title stops short of the ⓘ rather than running
- * under it.
+ * The `<details>` stands AFTER the line under the title, inside the title
+ * block since #2065: on a line of its own (`flex-basis: 100%`), so its panel
+ * opens under the row, in the flow; its summary, the ⓘ, is drawn at the end
+ * of the title's row. So the title block is its containing block, and the
+ * title and the line beside it stop short of the ⓘ rather than running under
+ * it. A closed `<details>` whose summary is out of the flow is no height at
+ * all, so the row costs nothing for it.
  *
  * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason): the glyph
  * alone is 20 px, and `controls-first.browser.spec.ts` strips the declaration
  * as its control. Its glyph is `accentText` on the page — the declared non-text
  * pair the disclosure markers use (SC 1.4.11).
  */
-.oyl-main:has(> .oyl-help) {
-  position: relative;
+.oyl-view-head:has(> .oyl-help) {
+  padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
 }
 
-.oyl-main:has(> .oyl-help) > h1 {
-  padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
+/* A line of its own: a `max-width` here would let it share the title's row
+   wherever the row is wider than the measure, and squeeze the line. */
+.oyl-view-head > .oyl-help {
+  flex-basis: 100%;
+  /* The box is as wide as its words (#2065), and an open panel is words: left
+     to contribute, one click widens the box to its cap and the ⓘ, drawn at the
+     box's end edge, jumps to the shell's far side. Contained, the help adds
+     nothing to the box's width and the panel takes the width the title row
+     gave it. */
+  contain: inline-size;
 }
 
 .oyl-help > summary {
   position: absolute;
-  inset-block-start: calc(var(--oyl-space-lg) + (var(--oyl-font-size-display) * 1.1 - 2.75rem) / 2);
-  inset-inline-end: var(--oyl-space-md);
+  inset-block-start: calc((var(--oyl-font-size-lg) * 1.1 - 2.75rem) / 2);
+  inset-inline-end: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1171,6 +1341,12 @@ html {
   color: var(--oyl-color-accent-text);
   cursor: pointer;
   list-style: none;
+}
+
+@media (min-width: 40rem) {
+  .oyl-help > summary {
+    inset-block-start: calc((var(--oyl-font-size-xxl) * 1.1 - 2.75rem) / 2);
+  }
 }
 
 .oyl-help > summary::-webkit-details-marker {
@@ -1187,7 +1363,8 @@ html {
 }
 
 .oyl-help__panel {
-  margin-block-end: var(--oyl-space-md);
+  max-width: var(--oyl-measure);
+  margin-block-start: var(--oyl-space-sm);
 }
 
 .oyl-help__panel > p {
@@ -1371,6 +1548,16 @@ html {
   grid-column: 1 / -1;
 }
 
+/*
+ * A section that is a very long list (Credits' credited works and its
+ * software, thousands of pixels): across every column, since in one cell the
+ * other columns stood empty beside it for most of the page (#2190's review:
+ * 15220 px in three columns against 12240 on the measure).
+ */
+.oyl-sections > .oyl-sections__long {
+  grid-column: 1 / -1;
+}
+
 /* A Settings card of many boxes (#1237's workout goals): across every column,
    its boxes side by side, rather than one column three times its neighbour. */
 .oyl-sections > .oyl-settings-card--wide {
@@ -1378,21 +1565,51 @@ html {
 }
 
 @container oyl-pane (min-width: 40rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--oyl-space-md) var(--oyl-space-lg);
     align-items: start;
   }
 
-  .oyl-sections:not(.oyl-sections--broad) > * {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) > * {
     margin-block: 0;
   }
 }
 
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad) {
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * A pair — #2067: a screen whose view gathers itself into exactly two groups
+ * (the route builder: the waypoints and their map, then the legs and the
+ * save; a ride's own page: its figures, traces and laps, then the rest). Two
+ * columns from 54rem, as `--broad` below, and never three, which would leave
+ * a third of a landscape tablet empty beside two groups. Not from 40rem: an
+ * upright tablet's `main` (42.5rem) halved gave the route builder's map 328
+ * px, narrower than a phone's column (#2190's review). A group holding a
+ * table keeps its column rather than spanning both, as a lone table section
+ * does above: each group is half of the pair, and its table scrolls sideways
+ * inside its own region (`design/ScrollTable.tsx`).
+ */
+@container oyl-pane (min-width: 54rem) {
+  .oyl-sections--pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--oyl-space-md) var(--oyl-space-lg);
+    align-items: start;
+  }
+
+  .oyl-sections--pair > * {
+    margin-block: 0;
+  }
+
+  /* Both classes: as specific as the full-width rule's `:not()` (#2195), and later. */
+  .oyl-sections.oyl-sections--pair > :has(.oyl-scroll-region) {
+    grid-column: auto;
   }
 }
 
@@ -2175,9 +2392,11 @@ html {
  * first control for one line of text that fits beside the heading. `.oyl-ride`
  * below has the whole budget; this rule is one of its two terms.
  *
- * The same `60rem` as `.oyl-ride`'s first column break, on purpose: below it
- * the screen is one column and a page that scrolls, the fold is not a promise
- * anybody made, and the stacked title is left exactly as it was.
+ * ⚠️ **Since #2065 the row itself is `.oyl-view-head`'s, on every route and at
+ * every width** (§"THE TITLE BLOCK"), so this grid no longer places the title
+ * and the line in two columns: it is one column, kept so that the Ride
+ * screen's children keep the margins they were measured with (a grid's
+ * margins do not collapse, and `rideview.browser.spec.ts` holds the fold).
  *
  * `align-items: start` and not `stretch`: `.oyl-main` is the flex child that
  * takes the shell's spare height, and a stretched grid row would hand that
@@ -2186,26 +2405,9 @@ html {
 @media (min-width: 60rem) {
   .oyl-main--instruments {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: var(--oyl-space-lg);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     align-content: start;
-  }
-
-  .oyl-main--instruments > * {
-    grid-column: 1 / -1;
-  }
-
-  .oyl-main--instruments > h1 {
-    grid-column: 1;
-    align-self: baseline;
-    margin-bottom: var(--oyl-space-md);
-  }
-
-  .oyl-main--instruments > h1 + p {
-    grid-column: 2;
-    align-self: baseline;
-    margin: 0 0 var(--oyl-space-md);
   }
 }
 
@@ -2271,9 +2473,10 @@ html {
  * than merely bigger: the target scroll position is `main`'s offset minus the
  * margin, which comes out negative, so the browser clamps it to the top of the
  * document and `main` is never tucked under the header at all. Measured by
- * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header —
- * which is `.oyl-main`'s own 1.5rem top padding, the same gap the layout has
- * with no sticky header. The 5rem this replaces lands `scrollY` at 17 and the
+ * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header then —
+ * which is `.oyl-main`'s own top padding (1.5rem then, `md` + `xs` = 1.25rem,
+ * 20px, since #2065), the same gap the layout has with no sticky header. The 5rem this
+ * replaces lands `scrollY` at 17 and the
  * `h1` 7px clear, flush against the chrome.
  *
  * ⚠️ The 97px is a MEASUREMENT and a twelfth route would change it. If the
@@ -6174,6 +6377,118 @@ select.oyl-input {
 }
 
 /*
+ * THE FIRST-PAINT INTRO — #2053.
+ *
+ * `index.html`'s `#oyl-intro`: the page's first frame is the Android 12+
+ * splash's picture (#2052), the mark on the canvas at the 288 dp the system
+ * draws it, centred in the window. A CSS pixel is a dp in the WebView, so the
+ * size is in px and does not follow the rider's text size, as the splash does
+ * not. Above every layer but the live camera indicator's 30, which ADR 0029
+ * D-5 keeps strictly highest (`camera/indicator-style.test.ts`), and never
+ * under the pointer, so a press reaches the route as it shows through.
+ *
+ * `shell/intro.ts` sets `data-oyl-intro='leaving'` once the first route has
+ * painted: the canvas fades and the mark grows a little as it goes, both on
+ * the medium motion token, and the element is removed when they end. It never
+ * sets it on a ride route or for a rider who asked for less motion, and the
+ * two blocks below collapse it anyway.
+ */
+.oyl-intro {
+  align-items: center;
+  background-color: var(--oyl-color-canvas);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: fixed;
+  z-index: 29;
+}
+
+.oyl-intro__mark {
+  height: 288px;
+  width: 288px;
+}
+
+.oyl-intro[data-oyl-intro='leaving'] {
+  animation: oyl-intro-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard) forwards;
+}
+
+.oyl-intro[data-oyl-intro='leaving'] .oyl-intro__mark {
+  animation: oyl-intro-mark-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard) forwards;
+}
+
+@keyframes oyl-intro-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes oyl-intro-mark-out {
+  to {
+    transform: scale(1.08);
+  }
+}
+
+/*
+ * THE ROUTE SLIDE — #2054.
+ *
+ * Going into a page below the one on screen (Segments to one segment, About
+ * to its credits) and back out of it is a short slide, so the rider can tell
+ * where they went; one tab to another stays the cross-fade above.
+ * `shell/route-motion.ts` §`navigationKind` decides which, `AppShell.tsx`'s
+ * `<ViewTransition>` sets the class, and these rules name only the keyframes:
+ * the duration and the curve are THE ROUTE CROSS-FADE's (#945), so the 200 ms
+ * ceiling and both blocks that collapse motion hold for these too. Deeper
+ * slides the new page in from the right and the old out towards the left
+ * (physical `translateX`: the app has no RTL, no `dir=` under `apps/web/src`);
+ * back is the mirror. Where the WebView has no View Transition API, React
+ * swaps the views with no animation at all.
+ */
+::view-transition-old(*.oyl-route-deeper) {
+  animation-name: oyl-route-out-to-start;
+}
+
+::view-transition-new(*.oyl-route-deeper) {
+  animation-name: oyl-route-in-from-end;
+}
+
+::view-transition-old(*.oyl-route-back) {
+  animation-name: oyl-route-out-to-end;
+}
+
+::view-transition-new(*.oyl-route-back) {
+  animation-name: oyl-route-in-from-start;
+}
+
+@keyframes oyl-route-in-from-end {
+  from {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+}
+
+@keyframes oyl-route-out-to-start {
+  to {
+    opacity: 0;
+    transform: translateX(-2rem);
+  }
+}
+
+@keyframes oyl-route-in-from-start {
+  from {
+    opacity: 0;
+    transform: translateX(-2rem);
+  }
+}
+
+@keyframes oyl-route-out-to-end {
+  to {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+}
+
+/*
  * Motion is opt-in. Every duration in this file is a `--oyl-motion-*` token
  * (#936), and this block collapses every one of them for a reader who asked
  * for less motion.
@@ -7041,17 +7356,130 @@ select.oyl-input {
   display: block;
 }
 
-.oyl-hud__profile-line {
-  fill: none;
-  stroke: var(--oyl-color-hud-ink-muted);
-  stroke-width: 1;
+/* #2075: the whole route FILLED, in the HUD's edge colour (4.47:1 on its
+   surface), and the rider's marker in its ink over a wider stroke of the
+   surface, so the marker reads against the fill (3.90:1) and against the
+   empty strip above it alike. Both pairs are declared in `tokens.ts`. */
+.oyl-hud__profile-fill {
+  fill: var(--oyl-color-hud-border);
+}
+
+.oyl-hud__profile-here-edge {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 7;
   vector-effect: non-scaling-stroke;
 }
 
 .oyl-hud__profile-here {
   stroke: var(--oyl-color-hud-ink);
-  stroke-width: 2;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+/*
+ * THE ROAD AHEAD — #2075, `game/hud/look-ahead.ts`.
+ *
+ * ⚠️ **Its own row, the panel's full width, and taller than the whole
+ * route's strip — the owner's screenshot review of 2026-11-05.** Beside the
+ * whole route's strip it was 3 rem tall and three fifths of an 18 rem panel,
+ * and with the bands drawn under the road's line a descent or a flat stretch
+ * was a sliver at its floor. Now each band is a column of the strip's full
+ * height (`HudCore.tsx` §`LookAheadStrip`) and the road is a line over them,
+ * so a descent is as readable as a climb; and the strip is under the whole
+ * route's, across the panel, 3.5 rem tall, where the route panel is at the
+ * bottom of a screen 30 rem tall or more. The panel is taller by that row,
+ * and `ride.browser.spec.ts` holds every panel clear of the leaning rider at
+ * every overlay viewport. A phone has no row to give, upright or on its side,
+ * so there the two strips stay side by side at one height (§"COLUMN", and
+ * §"A SHORT corners layout" below).
+ *
+ * Each band is its colour under marks of the panel's own surface: none on the
+ * flat, dots on a descent, one hatch on a climb, a denser one on a steep
+ * stretch and a cross-hatch on a very steep one, so no band is told by colour
+ * alone (SC 1.4.1). The rider is the left edge, a 4 px ink line. The strip
+ * does not clip what is drawn on it, so a road on the window's floor or at
+ * its top, and the rider's line at its edge, are drawn whole: the bands
+ * themselves end at its box.
+ *
+ * The next climb is a caption of its own beside the route's sentence, on the
+ * same line where the panel is wide enough and wrapping under it where not.
+ */
+.oyl-hud__strips {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__ahead-svg {
+  display: block;
+  width: 100%;
+  height: 3.5rem;
+  overflow: visible;
+}
+
+.oyl-hud__ahead-road-edge {
+  fill: none;
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__ahead-road {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__band-mark {
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__band-dot {
+  fill: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__band--descent .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-descent);
+}
+
+.oyl-hud__band--flat .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-flat);
+}
+
+.oyl-hud__band--climb .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-climb);
+}
+
+.oyl-hud__band--steep .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-steep);
+}
+
+.oyl-hud__band--wall .oyl-hud__band-fill {
+  fill: var(--oyl-color-hud-grade-wall);
+}
+
+.oyl-hud__ahead-here {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__profile-captions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__ahead-text {
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink);
 }
 
 /* #285 — the route in plan, with the rider on it.
@@ -8530,6 +8958,20 @@ select.oyl-input {
     height: 2rem;
   }
 
+  /* #2075: beside it, at its height, as on an upright phone (§"COLUMN"). A
+     phone on its side has no row to give either: under it, the road ahead
+     made the route panel 36 px taller, and with sounds on and a side camera
+     filming, or above a gesture bar's inset (#1441), the ride's controls left
+     the stage at 844×390 and 736×360. The bands are still the strip's full
+     height (the owner's review of 2026-11-05). */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2rem;
+  }
+
   .oyl-game--riding .oyl-hud__actions,
   .oyl-game--riding .oyl-hud__route {
     width: min(100%, 16rem);
@@ -8849,7 +9291,28 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__route {
     display: grid;
     gap: var(--oyl-space-sm);
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 1fr) 4.5rem;
+  }
+
+  /* #2075, and the owner's screenshot review of 2026-11-05: *"on the phone
+     the strips and caption use only the left half of the route panel"*. The
+     plan view takes 4.5 rem, `plan.ts` §PLAN_SMALLEST_PIXELS (the width its
+     rider's mark is sized for), and the strips and their captions take the
+     rest: 248 of 328 px at 360 wide, where three fifths was 191. The strips
+     stay side by side — under each other, or with the plan view under them,
+     the panel is taller, and at 360×752 a Delivery ride's map credit ends
+     about a pixel above the leaning rider (§"#2072 — AN UPRIGHT PHONE UNDER
+     24 REM") — and are 2.75 rem tall, so that the route's sentence and the
+     next climb, two lines where the column is too narrow for both on one,
+     still end inside the plan view's 5 rem beside them: 44 + 4 + 2 × 15.4 =
+     79 px of 80. */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__profile-svg,
+  .oyl-game--riding .oyl-hud__ahead-svg {
+    height: 2.75rem;
   }
 }
 
@@ -10222,6 +10685,271 @@ select.oyl-input {
 }
 
 /*
+ * THE TABLET'S READINGS AT ARM'S LENGTH — #2130, ADR 0063 D-5.
+ *
+ * On the corners layout of a TABLET (46 rem wide and 47 rem tall or more:
+ * 1280×800, 1024×768, 800×1280) a secondary numeral is set at 2.45 rem and a
+ * primary one at 3.815 rem. D-5's floor is 16 arc-minutes at a 1 m mount, 4.65
+ * mm of cap height, which is 27.4 CSS px on a 10.1-inch 1280×800 tablet (one
+ * CSS px taken as 0.1700 mm, an assumption: the owner's tablet has not been
+ * measured). Barlow's cap is 0.700 em, so a numeral needs 2.45 rem or more:
+ * 1.5 rem draws a 17.1 px cap and 2.45 rem a 27.95 px one, measured
+ * (`metric-numerals.browser.spec.ts` §"#2130"). The primary is the ride's own
+ * `metric` step, 3.815 rem, which keeps #423's tiers at 1.56 to 1
+ * (`hud-value-size.test.ts` holds 1.5).
+ *
+ * The tracks are re-cut for the type, and every number below was measured in
+ * the pinned Chromium rather than reasoned about:
+ * - from 50 rem tall (1280×800, 800×1280) the primary panel's four readings
+ *   (#2071's gradient the fourth) take a 32 rem column, power and the
+ *   gradient the wider tracks, 1.3 to 1: a four-digit power is 132.8 px in
+ *   its 136 px track, and a three-digit heart rate 99 px in 105. The units
+ *   stay under their numbers, as #2071 has them;
+ * - the secondary tier is six tracks there, the moving time's own (#1124)
+ *   third, in a panel up to 48 rem wide, so a room's nine readings are two
+ *   rows and a race's standings under them clear *Pause*. UPRIGHT (800×1280,
+ *   under 51 rem) there is no width for the tier beside the primary panel,
+ *   so both panels span the stage's width, one under the other: two tracks
+ *   beside it were five rows in a room, and the standings under them were
+ *   over the leaning rider;
+ * - ⚠️ **on a 4:3 tablet (under 50 rem tall, 1024×768) four primary tracks
+ *   at 3.815 rem take the same 32 rem, the secondary tier beside them has
+ *   four tracks, and a room's readings are three rows: the standings ran
+ *   over *Pause*.** So there the gradient keeps the SECONDARY size, 2.45 rem
+ *   (#2071 made it primary at 2.5 rem), and is drawn in the secondary
+ *   panel's first cell exactly as #2071 draws it on an upright phone with no
+ *   room for four primary tracks (§"THE GRADIENT, PRIMARY"): the primary
+ *   panel is three tracks, 1.4 to 1 to 1, in 24 rem, and the secondary five,
+ *   the moving time's the fourth;
+ * - ⚠️ **what gives way, recorded as #419 asks: on the 4:3 tablet, in a
+ *   room's LAP RACE, the room's readings give way to the race's**, exactly as
+ *   #1912 has them give way on a phone (hidden by clip, still read by a
+ *   screen reader): *Place* and *Item* were a third row there, and the
+ *   standings ran 63 px over *Pause*. Nothing else gives way on a tablet;
+ * - the clock row's reservation in the primary panel is one line of the new
+ *   secondary size, 2.45 × 1.05 rem;
+ * - ⚠️ **every unit on its number's line — the owner's screenshot review of
+ *   2026-11-05.** In six equal tracks *To go*'s ` km` fell under `39.94` at
+ *   1280×800: at 2.45 rem the number is 95.9 px and the unit 17.5, in 108.
+ *   So the tracks that hold *Speed* and *To go* have floors cut for their
+ *   widest ordinary values with the unit beside them: `99.9 km/h` is 107.6 px
+ *   (6.875 rem, 110 px), `99.99 km` 113.4 (7.25 rem, 116). On the 4:3 tablet
+ *   that leaves the last track 81 px with an 8 px gap, under the 5.5 rem
+ *   floor, so there the gap is the primary panel's 4 px and the gradient's
+ *   cell is 7.25 rem too, for `-19.9 %` and its glyph: the last track is then
+ *   97 px. No track is added or lost, so no panel gains a row. `metric-numerals.browser.spec.ts`
+ *   §"every unit is on its number's line" sets the widest values and reads
+ *   every unit against its digits at every overlay viewport. A speed of 100
+ *   km/h or more, or 100 km or more to go, is wider still and is not held
+ *   (the number alone is then wider than its old track as well). The primary
+ *   units stay a row of their own under the numbers, as #2071 draws them:
+ *   that is a layout, all four together, not a wrap, and four primary units
+ *   beside a four-digit power at 3.815 rem would need a 38 rem column.
+ *
+ * ⚠️ **Phones keep 1.5 and 2.5 rem — what that costs, written down as #419
+ * asks.** Every phone layout is measured to within a few pixels of the leaning
+ * rider's helmet at the sizes it has (§"THE CLOCK ROW", §"THE MOVING TIME ON
+ * AN UPRIGHT PHONE"), and the same sizes on a phone put the top panels over
+ * the rider at every overlay viewport under 47 rem tall and every value past
+ * its track at 360 px (measured: 301 cases of the ride's specs). D-5's figure
+ * is stated for the tablet, and on a phone a rider's secondary numerals stay
+ * under its floor until a phone layout with room for them is designed
+ * (#2130's pull request names the follow-up).
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 2.6rem);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__value {
+    font-size: 3.815rem;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  /* #259's word stays the word size: the rule above outranks the word rule's
+     selector, and an outcome word at 2.45 rem is wider than its track. */
+  .oyl-game--riding .oyl-hud__fields--secondary .oyl-hud__value--word {
+    font-size: 1.25rem;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    width: min(100%, 48rem);
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud {
+    grid-template-columns: minmax(0, 32rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  /* The owner's review of 2026-11-05: every unit on its number's line. */
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      repeat(3, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud {
+    /* Three columns, so the primary area is the primary panel's own 32 rem
+       (the clock row is placed in that area without anchor positioning,
+       #1120) and *Pause* keeps the width it has beside the route panel. */
+    grid-template-areas:
+      'primary primary .'
+      'secondary secondary secondary'
+      'notices notices notices'
+      'route actions actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 8rem) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    width: 100%;
+  }
+
+  /* #1124's floor for the moving time's own track, as from 51 rem. */
+  .oyl-game--riding .oyl-hud__field--moving .oyl-hud__value {
+    min-inline-size: 6.5ch;
+  }
+}
+
+/* The 4:3 tablet: the gradient in the secondary panel's first cell. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    column-gap: var(--oyl-space-xs);
+    grid-template-columns:
+      minmax(7.25rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      minmax(5.5rem, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary::before {
+    content: '';
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient .oyl-hud__unit {
+    display: inline;
+    font-size: var(--oyl-font-size-sm);
+  }
+
+  /* A room's LAP RACE: the room's readings give way, as #1912 has them give
+     way on a phone (§"A ROOM RIDE ON A PHONE"). */
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race)
+    > .oyl-hud__field--room {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+    .oyl-game--riding .oyl-hud__fields--secondary {
+      anchor-name: --oyl-hud-secondary;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      position-anchor: --oyl-hud-secondary;
+      left: calc(anchor(left) + var(--oyl-space-sm) + 1px);
+      top: calc(anchor(top) + var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+    .oyl-game--riding .oyl-hud__fields--primary > .oyl-hud__field--gradient {
+      position: absolute;
+      grid-area: secondary;
+      left: calc(var(--oyl-space-sm) + 1px);
+      top: calc(var(--oyl-space-sm) + 1px);
+    }
+  }
+}
+
+/*
+ * THE RIDE SO FAR AT ARM'S LENGTH — #2076 at #2130's sizes (PR #2213).
+ *
+ * #2076's *Distance*, *Climbed* and *Avg power* were cut for 1.5 rem
+ * secondary numerals; at #2130's 2.45 rem, measured in the pinned Chromium:
+ * - `199.9 km` is 116 px with its unit on its line, and its track was a
+ *   5.5 rem one, 105 px at 1280×800 and 95 px at 1024×768: the unit fell under
+ *   the number. So from 50 rem tall the fourth track, which the distance
+ *   takes on every ride (after *Speed*, *To go* and the moving time), has
+ *   *To go*'s 7.25 rem floor, and the gap is the 4 px the 4:3 tablet already
+ *   has, so the last two tracks keep 109 px for `4850 m` (99 px);
+ * - on the 4:3 tablet the five tracks have no width for a sixth floor, so
+ *   *Avg power* (`425 W`, 78 px) takes the first row's last, narrowest track,
+ *   and the distance and the climb the second row's first two;
+ * - a room's followed rider, named in its label, landed in the moving time's
+ *   content-sized track and took it, and the two readings after it, past the
+ *   stage's edge at 1280×800 and 800×1280: a room's readings size their track
+ *   by its width, never their label, as a round's and a race's do;
+ * - ⚠️ **what gives way, recorded as #419 asks: on the 4:3 tablet, in a ROOM,
+ *   the ride so far gives way** (hidden by clip, still read by a screen
+ *   reader), as it already does in a room's lap race on every tablet: a
+ *   room's three readings were a third row of the tier there, and a race's
+ *   standings under it ran over *Pause*. The saved ride states all three.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room {
+    contain: inline-size;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    column-gap: var(--oyl-space-xs);
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      repeat(2, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--average-power {
+    grid-area: 1 / 5;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
  * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
  *
  * Two secondary readings after the ride so far, drawn exactly where it is
@@ -10244,16 +10972,6 @@ select.oyl-input {
  * the panel, in an outline of the label's colour that is the bar's full scale.
  * The bar is `aria-hidden`; the number and the name are never colour alone.
  */
-/* With the two readings in the tier, a room's followed rider lands in the
-   moving time's content-sized track on a tablet (§"A DELIVERY ROUND ON THE
-   STAGE" has the same finding for *Houses*), and the rider's name as its
-   label — max-content ignores where it may break — took the track past the
-   stage's edge at 1280×800, 1024×768 and 800×1280. So a room's readings size
-   their track by its width, never their label, as a round's and a race's do. */
-.oyl-game--riding .oyl-hud__field--room {
-  contain: inline-size;
-}
-
 /* The swatch: a square of the zone's colour beside its number, the height of
    the digits' x-height or so, so the number is still the reading. */
 .oyl-hud__zone-swatch {
@@ -10412,70 +11130,186 @@ select.oyl-input {
 }
 
 /*
- * THE HUD'S TEXT SIZE — #2079.
+ * THE HUD'S TEXT SIZE — #2079, cut against #2130's tablet sizes (PR #2213).
  *
- * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the four
- * readings a rider steers the effort by — power, cadence, heart rate and the
- * gradient — at 1.25 and 1.5 times the primary size, 3.125 and 3.75 rem, on
- * a TABLET's corners layout (46 rem wide and 47 rem tall or more). The
- * column they stand in grows to hold them (30 and 33 rem), power and the
- * gradient take the wider tracks (1.3 to 1: `1999` and `+12.5` are the widest
- * readings), and an upright tablet stands the secondary panel under the
- * primary, across the stage, because 33 rem and the secondary tier do not fit
- * 50 rem side by side.
+ * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the
+ * primary readings a rider steers the effort by — power, cadence, heart rate
+ * and the gradient — at 4.375 and 5 rem on a TABLET's corners layout (46 rem
+ * wide and 47 rem tall or more): 1.15 and 1.31 times #2130's 3.815 rem, which
+ * is the NORMAL size there and larger than this block's first cut (3.125 and
+ * 3.75 rem, PR #2235's review). The panels are re-cut for them, every number
+ * measured in the pinned Chromium with the widest ordinary values set
+ * (`1999` W, `199` rpm and bpm, `-19.9` %): at 5 rem `1999` is 174 px, in a
+ * 179 px track at 1280×800, 177 at 1024×768 and 181 upright, and `199` is
+ * 131 px in 138, 136 and 181:
+ *
+ * - LANDSCAPE (51 rem wide or more) the primary readings stay one row, so the
+ *   row the secondary tier shares with them stays short and a race's
+ *   standings (#1347) and a notice hang under it as they do at the normal
+ *   size, clear of *Pause*: the four in a 41.5 rem column at 1280×800, power
+ *   and the gradient the wider tracks, and on the 4:3 tablet the three in
+ *   29.75 rem with the gradient in the secondary tier's first cell, as #2130
+ *   draws it there. The secondary tier is four tracks beside them;
+ * - UPRIGHT (800×1280) there is no width for four in a row and the tier, so
+ *   the four stand two by two in 24 rem, the tier spans the stage under them,
+ *   and a race's standings stand BESIDE the four at the top end edge rather
+ *   than under the tier: hung under it at the first cut's sizes they were 2
+ *   and 26 px over the leaning rider (`[504,422 → 792,665]` at large).
  *
  * ⚠️ **What it costs, recorded as #419 asks: on a phone the setting changes
  * nothing**, and Settings says so beside it. Every phone layout is measured
  * to within a few pixels of the leaning rider and of its own tracks at the
  * size it has (§"THE CLOCK ROW", §"THE MOVING TIME ON AN UPRIGHT PHONE"), and
  * a primary reading a quarter larger is a third primary row or a value past
- * its track on every one. ⚠️ **And only the four primary readings grow**: the
- * secondary tier's tracks and rows are what a room's standings and a Delivery
- * round are fitted around on a tablet, and the four are the numbers a tired
- * rider looks for. `ride-hud-layout.browser.spec.ts` lays the HUD out at both
- * sizes at all nine overlay viewports.
+ * its track on every one. ⚠️ **And only the primary readings grow**, and on
+ * the 4:3 tablet the gradient stays the secondary size, as it is there at the
+ * normal size: the secondary tier's tracks and rows are what a room's
+ * standings and a Delivery round are fitted around on a tablet, and the
+ * primary readings are the numbers a tired rider looks for.
+ * `ride-hud-layout.browser.spec.ts` lays the HUD out at both sizes at all
+ * nine overlay viewports, on a plain ride, in a room, in a lap race, in a
+ * Delivery round and in a workout.
  */
 @media (min-width: 46rem) and (min-height: 47rem) {
-  .oyl-game--riding
-    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__fields--primary {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
-  }
-
   .oyl-game--riding .oyl-hud--text-large .oyl-hud__fields--primary .oyl-hud__value {
-    font-size: 3.125rem;
+    font-size: 4.375rem;
   }
 
   .oyl-game--riding .oyl-hud--text-extra-large .oyl-hud__fields--primary .oyl-hud__value {
-    font-size: 3.75rem;
+    font-size: 5rem;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      minmax(7.25rem, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--average-power {
+    grid-area: auto;
   }
 }
 
+/* Landscape: the tier beside the primary readings spans two rows, so a
+   notice starts under the primary panel and a race's standings under the
+   tier, whichever is the taller: at four tracks the tier is a third row in a
+   room, and a notice under it met the sound and side-camera rows above the
+   route panel (`ride-room.browser.spec.ts` §"#1409"). */
 @media (min-width: 51rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud.oyl-hud--text-large {
-    grid-template-columns: minmax(0, 30rem) minmax(0, 1fr);
-  }
-
-  .oyl-game--riding .oyl-hud.oyl-hud--text-extra-large {
-    grid-template-columns: minmax(0, 33rem) minmax(0, 1fr);
-  }
-}
-
-@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
     grid-template-areas:
-      'primary primary .'
-      'secondary secondary secondary'
-      'notices notices notices'
-      'route actions actions';
-    grid-template-columns: minmax(0, 24rem) minmax(0, 9rem) minmax(0, 1fr);
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
     grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
   .oyl-game--riding
     .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
     .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 41.5rem) minmax(0, 1fr);
+  }
+}
+
+/* The 4:3 tablet: three in a row, and the gradient's cell first in the tier. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 29.75rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(7.25rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr)
+      minmax(max-content, 1fr);
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary
+    > .oyl-hud__field--gradient
+    .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  /* ⚠️ **What gives way, recorded as #419 asks: here, in a ROOM, the
+     pacer's and the ghost's gaps and the wind give way** to the room's
+     readings, as they do on a phone (§"A ROOM RIDE ON A PHONE"): in four
+     tracks they were a third row, and a race's standings under it ran 23 px
+     over *Pause* with *Report*'s reasons open. Hidden by clip, so a screen
+     reader still reads them. */
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--gives-way {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* Upright: two by two, the tier under them, and a race's standings beside. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-areas:
+      'primary beside'
+      'secondary secondary'
+      'notices notices'
+      'route actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
     width: 100%;
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      repeat(2, minmax(5.5rem, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
   }
 }
 
@@ -10510,6 +11344,22 @@ select.oyl-input {
   width: 1.5rem;
   height: 1.5rem;
   margin: 0;
+}
+
+/* ⚠️ **And on an upright tablet, in a room with sounds on and a side camera
+   paired, it gives way too** — recorded as #419 asks. The sound row and the
+   side camera's row both stand on the route panel there (§"#1409"), and with
+   the graph's 4 rem in the panel the side camera's row was 45 px into the
+   leaning rider's box at 800×1280 (`ride-room.browser.spec.ts` §"#1409",
+   `[8,861 → 264,916]`), measured on PR #2231's tree merged with #2213. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__actions > .oyl-sound):has(
+      > .oyl-hud__actions > .oyl-hud__side-camera-row
+    )
+    .oyl-hud__recent {
+    display: none;
+  }
 }
 
 /* --- Capability queries (#307) --------------------------------------------- */

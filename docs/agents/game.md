@@ -1157,6 +1157,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         returned and the recorder's lap time only, so they are
                         the saved ride's rows; on a loop only, in a race's
                         standings' place and swapped with them
+    src/game/hud/look-ahead.ts
+                        the next kilometre of road on the HUD (#2075): the
+                        road a line at a FIXED scale (100 m of height across the
+                        strip) over five grade bands of our own, each the
+                        strip's full height with its own fill pattern;
+                        the next climb is `climb-ahead.ts`'s own `slopeAhead`,
+                        so the strip and the voice name the same one
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's
@@ -1217,7 +1224,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         out-and-back's turn changes no hill in view; the other
                         pass's ground is sunk out of sight with the turning
                         point closed round the road's end (§`retracedRoles`),
-                        or drawn a metre under where it only lies alongside
+                        or drawn a metre under where it only lies alongside.
                         ⚠️ Since #2149 a sharp bend's inside, where the fold
                         stops the rows short of the bend's centre, is closed
                         on one point (`closeFans`): within the clear band
