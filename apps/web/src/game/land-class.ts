@@ -620,33 +620,80 @@ function levellingField(
   return { levels, bytes: (measured + (onTheTown === undefined ? 0 : 1)) * CHUNK_BYTES };
 }
 
-/** A two-pass chamfer distance transform over a square grid, in place. */
-function chamfer(grid: Float32Array, side: number): void {
-  for (let z = 0; z < side; z += 1) {
-    for (let x = 0; x < side; x += 1) {
-      const at = z * side + x;
-      let best = grid[at] as number;
-      if (x > 0) best = Math.min(best, (grid[at - 1] as number) + SIDE_STEP);
-      if (z > 0) {
-        best = Math.min(best, (grid[at - side] as number) + SIDE_STEP);
-        if (x > 0) best = Math.min(best, (grid[at - side - 1] as number) + DIAGONAL_STEP);
-        if (x + 1 < side) best = Math.min(best, (grid[at - side + 1] as number) + DIAGONAL_STEP);
-      }
-      grid[at] = best;
-    }
+/**
+ * A two-pass chamfer distance transform over a square grid, in place.
+ *
+ * ⚠️ The grid's first and last columns, and its first and last rows, are
+ * written out beside the loop over its interior rather than tested for in it
+ * (#1688): the same neighbours of every cell, and the same least of them,
+ * with no branch per cell. Under the nightly coverage run V8 counts every
+ * branch taken, and the per-cell tests made this loop most of the time of
+ * every test that presses a mapped town (`mapped-paint.test.ts`,
+ * `worship-steeple.test.ts`), past their 5 s timeout on the slower runners.
+ *
+ * Exported for `land-class.test.ts` §"the chamfer, cell by cell", which holds
+ * it to the two passes with a test per cell; the product's one caller is
+ * {@link levellingField}, in this module.
+ */
+export function chamfer(grid: Float32Array, side: number): void {
+  const last = side - 1;
+  // Forward: from the left, above-left, above and above-right.
+  for (let x = 1; x < side; x += 1) {
+    grid[x] = Math.min(grid[x] as number, (grid[x - 1] as number) + SIDE_STEP);
   }
-  for (let z = side - 1; z >= 0; z -= 1) {
-    for (let x = side - 1; x >= 0; x -= 1) {
-      const at = z * side + x;
-      let best = grid[at] as number;
-      if (x + 1 < side) best = Math.min(best, (grid[at + 1] as number) + SIDE_STEP);
-      if (z + 1 < side) {
-        best = Math.min(best, (grid[at + side] as number) + SIDE_STEP);
-        if (x + 1 < side) best = Math.min(best, (grid[at + side + 1] as number) + DIAGONAL_STEP);
-        if (x > 0) best = Math.min(best, (grid[at + side - 1] as number) + DIAGONAL_STEP);
-      }
-      grid[at] = best;
+  for (let row = side; row < side * side; row += side) {
+    grid[row] = Math.min(
+      grid[row] as number,
+      (grid[row - side] as number) + SIDE_STEP,
+      (grid[row - side + 1] as number) + DIAGONAL_STEP,
+    );
+    for (let at = row + 1; at < row + last; at += 1) {
+      grid[at] = Math.min(
+        grid[at] as number,
+        (grid[at - 1] as number) + SIDE_STEP,
+        (grid[at - side] as number) + SIDE_STEP,
+        (grid[at - side - 1] as number) + DIAGONAL_STEP,
+        (grid[at - side + 1] as number) + DIAGONAL_STEP,
+      );
     }
+    const end = row + last;
+    grid[end] = Math.min(
+      grid[end] as number,
+      (grid[end - 1] as number) + SIDE_STEP,
+      (grid[end - side] as number) + SIDE_STEP,
+      (grid[end - side - 1] as number) + DIAGONAL_STEP,
+    );
+  }
+  // Backward: from the right, below-right, below and below-left.
+  const bottom = last * side;
+  for (let x = last - 1; x >= 0; x -= 1) {
+    grid[bottom + x] = Math.min(
+      grid[bottom + x] as number,
+      (grid[bottom + x + 1] as number) + SIDE_STEP,
+    );
+  }
+  for (let row = bottom - side; row >= 0; row -= side) {
+    const end = row + last;
+    grid[end] = Math.min(
+      grid[end] as number,
+      (grid[end + side] as number) + SIDE_STEP,
+      (grid[end + side - 1] as number) + DIAGONAL_STEP,
+    );
+    for (let at = end - 1; at > row; at -= 1) {
+      grid[at] = Math.min(
+        grid[at] as number,
+        (grid[at + 1] as number) + SIDE_STEP,
+        (grid[at + side] as number) + SIDE_STEP,
+        (grid[at + side + 1] as number) + DIAGONAL_STEP,
+        (grid[at + side - 1] as number) + DIAGONAL_STEP,
+      );
+    }
+    grid[row] = Math.min(
+      grid[row] as number,
+      (grid[row + 1] as number) + SIDE_STEP,
+      (grid[row + side] as number) + SIDE_STEP,
+      (grid[row + side + 1] as number) + DIAGONAL_STEP,
+    );
   }
 }
 
