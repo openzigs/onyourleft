@@ -667,20 +667,27 @@ Readings after, on the branch (`gh workflow run nightly.yml --ref`):
 | Run | Commit | CPU | coverage | `landform.test.ts` | Red cases |
 |---|---|---|--:|--:|---|
 | [42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792) | f4e83683 (the loops) | EPYC 7763 | 1 448 | 282 | the radius-12 m hairpin walk 5.2 s, the crossroads 5.2 s, `corridor-wiring` 5.1 s, `lap-race-wiring`'s recorded ride at its own 10 s |
+| [42287054864](https://github.com/openzigs/onyourleft/actions/runs/42287054864) | 10c5c741 (and the splits) | Xeon 6973P-C | 1 015 | 176 | none: every job of the run green |
+| [42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) | 0bb1373f (10c5c741 and this section) | Xeon Platinum 8370C | 1 444 | 288 | the 32x ride 5.0 s, `corridor-wiring` 5.1 s |
 
 ⚠️ **None of these readings is a row of the table above**, and neither are the four before it: each
 is past that table's 60 % bound (1 080 s), which `nightly-split.test.ts` would turn red, and the
 answer that section gives, two coverage jobs, is not #1688's to make. The table still holds the
-2026-10-29 figures, so that case is green on a bound the job no longer keeps.
+2026-10-29 figures, so that case is green on a bound the job no longer keeps: the slowest reading
+since is 1 798 s, and the slowest after #1688 is 1 448 s.
 
 **What is left.** The job's time is now the suite's whole work over the runner's two cores, not
 one file: on the 7763 the Vitest run summed 3 374 s of case time against 4 320 s before, and
 `near-tree-fade.test.ts` (455 s) is its slowest file. A case's time on the 7763 under coverage is
 about four times its time alone on a development Mac under coverage, so a case that takes more than
-about a second there is near the 5 s timeout on that runner. The cases still nearest it all draw
-whole frames — scenery, ground and the standing of every item on it — with no one loop the larger
-part: `corridor-wiring.test.tsx`'s late read (two rides), the 32x ride, `lap-race-wiring`'s
-recorded ride (its own 10 s) and the bot-and-ghost hairpin walks (their own 30 s).
+about a second there is near the 5 s timeout on that runner. The two still red on the third
+reading, and the cases nearest them, all draw whole frames — scenery, ground and the standing of
+every item on it — with no one loop the larger part: `corridor-wiring.test.tsx`'s late read and the
+32x ride (each two whole rides compared, so not split as the hairpin walks were),
+`lap-race-wiring`'s recorded ride (9.6 s of its own 10 s on the 8370C) and the bot-and-ghost
+hairpin walks (their own 30 s). What would move them is a cheaper `sceneFrame` as a whole, or a
+change to this job's shape — the two coverage jobs this section's table already calls for, or
+fewer Vitest workers on the two-core runner — and those are the owner's to choose.
 
 #### 23m39s of 25 — #1051
 
