@@ -63,7 +63,8 @@
  * `?sections=prose` and `?sections=uncontained` are #1014's: a screen of
  * sections, and a detail pane, with nothing to decide their columns; and
  * `?sections=columns` is its review's, the sections in #1014's first CSS
- * columns rather than in rows ({@link applySectionsControl}).
+ * columns rather than in rows ({@link applySectionsControl}). `?sections=tracks`
+ * is #2197's: a two-section screen in three tracks again.
  *
  * `?chooser=as-shipped` is #1028's: Analysis' ride chooser 8rem wide with its
  * name allowed to wrap, as it shipped ({@link applyChooserControl}).
@@ -1163,7 +1164,7 @@ function keptBeforeFirstControl(): string[] {
     return [];
   }
   const control = laidOutControls(main)[0] ?? null;
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return [...main.querySelectorAll('[data-oyl-kept-visible]')]
     .filter(
       (element) =>
@@ -1177,7 +1178,7 @@ function keptBeforeFirstControl(): string[] {
 
 /** The route's summary under its `h1`, and how many lines it lays out on — #993. */
 function summaryLines(): { readonly text: string; readonly lines: number } | null {
-  const summary = document.querySelector('main > h1 + p');
+  const summary = document.querySelector('main > .oyl-view-head > h1 + p');
   if (summary === null || !laidOut(summary)) {
     return null;
   }
@@ -1196,7 +1197,7 @@ function summaryLines(): { readonly text: string; readonly lines: number } | nul
 
 /** The help control under a screen's title, and what it holds — #993. */
 function helpControl(): HelpControl | null {
-  const toggle = document.querySelector('main > .oyl-help > summary');
+  const toggle = document.querySelector('main > .oyl-view-head > .oyl-help > summary');
   if (toggle === null) {
     return null;
   }
@@ -1223,7 +1224,7 @@ function proseBeforeFirstControl(): string[] {
   const control = laidOutControls(main)[0] ?? null;
   // The route's own summary is the shell's (#48), under its `h1`, and is the
   // one sentence every route keeps.
-  const summary = main.querySelector(':scope > h1 + p');
+  const summary = main.querySelector(':scope > .oyl-view-head > h1 + p');
   return proseBetween(main, summary, control).map((element) =>
     (proseWords(element) ?? '').slice(0, 80),
   );
@@ -1360,7 +1361,7 @@ function inlineDisclosureCopies(): void {
  */
 function putTheLineBack(route: RouteDefinition): void {
   const main = document.querySelector('main');
-  const title = main?.querySelector(':scope > h1');
+  const title = main?.querySelector(':scope > .oyl-view-head > h1');
   if (main === null || main === undefined || title === null || title === undefined) {
     return;
   }
@@ -1597,7 +1598,8 @@ function applyPanesControl(): void {
  * fail on, and the heights it publishes have a "before". The one change to
  * it is #2195's: a section the shipped page keeps in a column
  * (`.oyl-sections__fits-column`) is kept in one here too, so the control
- * differs from the page in the columns and in nothing else.
+ * differs from the page in the columns and in nothing else. For the same
+ * reason a two-section screen (`.oyl-sections--halves`, #2197) keeps its two.
  */
 const FIRST_CUT_COLUMNS = `
 .oyl-sections > * { break-inside: avoid; }
@@ -1609,7 +1611,7 @@ const FIRST_CUT_COLUMNS = `
   .oyl-sections > .oyl-panel + .oyl-panel { margin-block-start: var(--oyl-space-md); }
 }
 @container oyl-pane (min-width: 64rem) {
-  .oyl-sections:not(.oyl-sections--broad) { columns: 3; }
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--halves) { columns: 3; }
 }
 @container oyl-pane (min-width: 54rem) {
   .oyl-sections--broad { columns: 2; column-gap: var(--oyl-space-lg); }
@@ -1678,8 +1680,25 @@ function applySectionsControl(): void {
     style.setAttribute('data-oyl-control', 'sections=columns');
     style.textContent = FIRST_CUT_COLUMNS;
     document.head.append(style);
+  } else if (sections === 'tracks') {
+    const style = document.createElement('style');
+    style.setAttribute('data-oyl-control', 'sections=tracks');
+    style.textContent = THREE_TRACKS_FOR_HALVES;
+    document.head.append(style);
   }
 }
+
+/**
+ * #2197's control: a two-section screen (`.oyl-sections--halves`) given the
+ * three tracks every other screen gets from 64rem, which is the page before
+ * #2197 — two sections and an empty third track in landscape.
+ * `sections.browser.spec.ts` §"no track without a section" must fail on it.
+ */
+const THREE_TRACKS_FOR_HALVES = `
+@container oyl-pane (min-width: 64rem) {
+  .oyl-sections.oyl-sections--halves { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+`;
 
 /**
  * `?shape=off` and `?shape=tall` — #941. `off` takes the drawn shape off every

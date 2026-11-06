@@ -66,6 +66,8 @@ import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
+import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
+import { matchHash } from './shell/routes';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
@@ -123,6 +125,7 @@ import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
+import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
@@ -313,6 +316,12 @@ interface ClientPlatform {
    * cannot reach another app's player, so it gets none and no control.
    */
   readonly otherPlayer: OtherPlayer | undefined;
+  /**
+   * Each connected sensor's battery, for Home's sensors module — #2047. A
+   * browser's, from the Web Bluetooth transport; `undefined` in the shell,
+   * whose plugin reads no Battery Service yet.
+   */
+  readonly battery: BatteryLevelPort | undefined;
 }
 
 /**
@@ -475,6 +484,8 @@ async function buildPlatform(
       launch,
       steering,
       otherPlayer,
+      // #2047: the plugin reads no Battery Service, so the shell shows no level.
+      battery: undefined,
     };
   }
 
@@ -489,13 +500,21 @@ async function buildPlatform(
       launch: NO_LAUNCH,
       steering: undefined,
       otherPlayer: undefined,
+      battery: undefined,
     };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
     bluetooth: probe.bluetooth,
+    // #2047: the Battery Service in every pairing's grant, for Home's levels.
+    batteryLevel: true,
   });
   return {
+    // #2047. The same transport, so the level read is of the link the ride
+    // controller holds; a refusal (an id it no longer holds) is no level.
+    battery: {
+      readBatteryLevel: async (id) => browserTransport.readBatteryLevel(id).catch(() => undefined),
+    },
     rideController: createRideController({
       ...shared,
       transport: browserTransport,
@@ -1623,14 +1642,30 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       };
     },
     hidden: () => document.hidden,
+    // #2253: the rider's own player, which the loop yields to — #2073's
+    // `OtherPlayer`, in the Android shell only; none in a browser.
+    riderPlayer: platform.otherPlayer,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
-  const launch = launchRelease(platform.launch, (callback) => {
-    window.requestAnimationFrame(() => {
-      callback();
-    });
-  });
+  // #2053: the first-paint intro takes over from it in the same frame, and
+  // animates out unless the first route is a ride route or the rider asked for
+  // less motion (`shell/intro.ts`). Read then, from the route on screen.
+  const launch = launchRelease(
+    platform.launch,
+    (callback) => {
+      window.requestAnimationFrame(() => {
+        callback();
+      });
+    },
+    (failed) => {
+      endIntro(document.getElementById(INTRO_ID), {
+        firstRoute: matchHash(window.location.hash).route.id,
+        lessMotion: window.matchMedia(LESS_MOTION_QUERY).matches,
+        failed,
+      });
+    },
+  );
   const root = createRoot(container, launchRootOptions(launch));
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1641,6 +1676,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(platform.signal === undefined ? {} : { signal: platform.signal })}
+          {...(platform.battery === undefined ? {} : { battery: platform.battery })}
           {...(platform.bluetoothAsk === undefined ? {} : { bluetoothAsk: platform.bluetoothAsk })}
           {...(platform.systemSettings === undefined
             ? {}

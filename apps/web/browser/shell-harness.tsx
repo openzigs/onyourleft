@@ -939,6 +939,8 @@ function main(): void {
                     };
                   },
                   hidden: () => document.hidden,
+                  // #2253: with `?own-player=heard`, the rider's player is in use.
+                  riderPlayer: otherPlayer,
                 }),
               }
             : {})}

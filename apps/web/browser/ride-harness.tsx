@@ -1013,6 +1013,8 @@ function measure(): StageMeasurement {
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
+    // #2075: the next kilometre, beside it.
+    ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
@@ -1082,7 +1084,7 @@ function measure(): StageMeasurement {
     chrome: {
       header: document.querySelector('header.oyl-header') !== null,
       navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
-      summary: document.querySelector('main > p.oyl-muted') !== null,
+      summary: document.querySelector('main > .oyl-view-head > p.oyl-muted') !== null,
       footer: document.querySelector('footer.oyl-footer') !== null,
       skipLink: document.querySelector('.oyl-skip-link') !== null,
     },

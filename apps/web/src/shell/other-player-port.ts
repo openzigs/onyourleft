@@ -42,12 +42,9 @@ export interface OtherPlayerPort {
 export interface RiderPlayerInUse {
   /**
    * Whether the rider's own player is in use now, so that our menu music
-   * stays silent (ruling 3 of 2026-11-05 on #2073).
-   *
-   * @unwired until #2253: the menu music player (#2058) reached `main` while
-   * #2073 was in review, and #2253 is owner ruling 3's wiring, `menu-music.ts`
-   * asking this before it starts, with our own menu loop kept from counting
-   * as the rider's player (spike 0034 §1.3, isMusicActive counts it).
+   * stays silent (ruling 3 of 2026-11-05 on #2073). `menu-music.ts` asks it
+   * before the loop starts (#2253), and keeps our own loop from counting as
+   * the rider's player (spike 0034 §1.3, isMusicActive counts it).
    */
   riderPlayerInUse(): boolean;
 }

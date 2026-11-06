@@ -267,4 +267,10 @@ describe('main.tsx composes the player inside the Android shell — #2073', () =
   it('hands it to the shell', () => {
     expect(main).toContain('otherPlayer={platform.otherPlayer}');
   });
+
+  it('hands the same player to the menus’ music, which yields to it — #2253', () => {
+    const call = /createMenuMusic\(\{[\s\S]*?\n {2}\}\);/.exec(main)?.[0];
+    expect(call, 'main.tsx makes no menu music').toBeDefined();
+    expect(call).toMatch(/\briderPlayer:\s*platform\.otherPlayer,/);
+  });
 });

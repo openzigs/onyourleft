@@ -511,7 +511,9 @@ export function WorkoutPanel({
           // Not `live` since #445: `RideAnnouncer` speaks it, in order.
           <StatusMessage tone="warning">{workout.fault}</StatusMessage>
         )}
-        {sound.enabled ? <SoundControls preference={sound} onChange={changeSound} /> : null}
+        {sound.enabled ? (
+          <SoundControls preference={sound} onChange={changeSound} storage={storage} />
+        ) : null}
         <p>
           {STATUS_TEXT[workout.status]} — {durationText(workout.elapsedSeconds)} of{' '}
           {durationText(workout.totalSeconds)}

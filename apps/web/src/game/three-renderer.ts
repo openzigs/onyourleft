@@ -331,6 +331,7 @@ import {
   GARAGE,
   minimumAreaRectangle,
   ROOF_ROLES,
+  SPIRE_SURFACE,
   SHINGLE_COURSE_METRES,
   STOREY_METRES,
   STYLE_BRICK_FOUNDATION,
@@ -855,7 +856,7 @@ export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
 
 /**
  * The kit each kind wears UNDER its tint — #623. The rider wears the house kit
- * (`bicycle.ts` §`HOUSE_KIT`, the app's accent); the pacer and the ghost wear
+ * (`bicycle.ts` §`HOUSE_KIT`, teal, its own colour since #2123); the pacer and the ghost wear
  * `bicycle.ts` §`PACER_KIT`, the blue #368 told them apart in, because
  * {@link RIDER_TINTS} multiplies and cannot put back a hue the kit lacks.
  *
@@ -16792,6 +16793,8 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   porch: 1,
   'porch-roof': REALISTIC_ROLE_SHADE.roof,
   'porch-trim': 1,
+  // #2206: a spire is shaded as the roof it is built of.
+  spire: REALISTIC_ROLE_SHADE.roof,
 };
 
 /**
@@ -16813,6 +16816,12 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
     case 'porch-roof':
       return (
         roofPaintsOf(plan.surfaces.roof, plan.cladding.roof === 'shingle')?.[plan.paint.roof] ??
+        unpainted
+      );
+    case 'spire':
+      // #2206: slate's own paint, the plan's where its roof is slate too, and the first otherwise.
+      return (
+        paintsOf(SPIRE_SURFACE)?.[plan.surfaces.roof === SPIRE_SURFACE ? plan.paint.roof : 0] ??
         unpainted
       );
     case 'driveway':
@@ -19157,6 +19166,8 @@ export interface DrawnMappedBuilding {
   /** Its first vertex in its wall surface's range, and in its roof surface's; -1 for a model. */
   readonly wallAt: number;
   readonly roofAt: number;
+  /** Its first vertex of its spire, in the slate's range; -1 for a model — #2206. */
+  readonly spireAt: number;
   /** Its first vertex in the house models' buffer, or -1 for an extrusion — #1585. */
   readonly modelAt: number;
 }
@@ -19236,6 +19247,8 @@ export class MappedBuildingBelt {
   /** Each drawn building's first vertex in its wall surface's range and in its roof's. */
   readonly #wallAt: Int32Array;
   readonly #roofAt: Int32Array;
+  /** Each drawn building's first vertex of its spire, in the slate's range — #2206. */
+  readonly #spireAt: Int32Array;
   /** Each drawn building's vertex after its model, or -1 for an extrusion — #1835. */
   readonly #modelEnd: Int32Array;
   /** Which drawn buildings the near plane would cut this frame, so are drawn as nothing — #1835. @see clearOf */
@@ -19273,6 +19286,7 @@ export class MappedBuildingBelt {
     this.#houses = houses;
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
+    this.#spireAt = new Int32Array(this.#selection.plans.length);
     this.#materials = new Map(
       FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
     );
@@ -19441,6 +19455,7 @@ export class MappedBuildingBelt {
         this.#modelAt[at] = modelEnd;
         this.#wallAt[at] = -1;
         this.#roofAt[at] = -1;
+        this.#spireAt[at] = -1;
         modelEnd = this.#appendModel(plan, plan.model, modelEnd);
         this.#modelEnd[at] = modelEnd;
         continue;
@@ -19449,10 +19464,13 @@ export class MappedBuildingBelt {
       this.#modelEnd[at] = -1;
       const wall = surfaces.indexOf(plan.surfaces.wall);
       const roof = surfaces.indexOf(plan.surfaces.roof);
+      const spire = surfaces.indexOf(SPIRE_SURFACE);
+      this.#spireAt[at] = -1;
       this.#wallAt[at] = this.#cursors[wall] as number;
       this.#roofAt[at] = this.#cursors[roof] as number;
       for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
-        const slot = ROOF_ROLES.has(role) ? roof : wall;
+        const slot = role === 'spire' ? spire : ROOF_ROLES.has(role) ? roof : wall;
+        if (role === 'spire') this.#spireAt[at] = this.#cursors[slot] as number;
         this.#cursors[slot] = this.#append(plan, role, this.#cursors[slot] as number);
       }
     }
@@ -19540,14 +19558,20 @@ export class MappedBuildingBelt {
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
       let walls = 0;
       let roofs = 0;
+      let spires = 0;
       for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
-        if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
+        if (role === 'spire') spires += roleTriangles(plan, role) * 3;
+        else if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
         else walls += roleTriangles(plan, role) * 3;
       }
       const geometry = this.mesh.geometry;
       const surfaces = selection.surfaces;
       geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
       geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
+      // #2206: a spire's slate, a group of its own where the roof is not slate.
+      if (spires > 0) {
+        geometry.addGroup(this.#spireAt[at] as number, spires, surfaces.indexOf(SPIRE_SURFACE));
+      }
     }
   }
 
@@ -19585,7 +19609,7 @@ export class MappedBuildingBelt {
     const repeat = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface]);
     // A plan's texture coordinates are bays across and storeys up, and a
     // roof's storeys both ways: back to metres, then the photograph's repeats.
-    const acrossMetres = role === 'roof' ? STOREY_METRES : BAY_METRES;
+    const acrossMetres = role === 'roof' || role === 'spire' ? STOREY_METRES : BAY_METRES;
     const shade = MAPPED_ROLE_SHADE[role];
     const [red, green, blue] = mappedRolePaint(plan, role);
     const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
@@ -19692,6 +19716,8 @@ export class MappedBuildingBelt {
     const position = this.#position.array as Float32Array;
     let wall = this.#wallAt[at] as number;
     let roof = this.#roofAt[at] as number;
+    let spire = this.#spireAt[at] as number;
+    const spireFrom = spire;
     const wallFrom = wall;
     const roofFrom = roof;
     // A wall's surface is never a roof's (`footprint-buildings.ts`
@@ -19699,8 +19725,9 @@ export class MappedBuildingBelt {
     for (const role of this.#selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
       const floats = plan.triangles[role];
       const vertices = roleTriangles(plan, role) * 3;
-      const onRoof = ROOF_ROLES.has(role);
-      const from = onRoof ? roof : wall;
+      const onSpire = role === 'spire';
+      const onRoof = !onSpire && ROOF_ROLES.has(role);
+      const from = onSpire ? spire : onRoof ? roof : wall;
       for (let vertex = 0; vertex < vertices; vertex += 1) {
         const source = vertex * FOOTPRINT_VERTEX_FLOATS;
         const to = (from + vertex) * 3;
@@ -19708,11 +19735,13 @@ export class MappedBuildingBelt {
         position[to + 1] = hide ? 0 : (floats[source + 1] as number);
         position[to + 2] = hide ? 0 : (floats[source + 2] as number);
       }
-      if (onRoof) roof += vertices;
+      if (onSpire) spire += vertices;
+      else if (onRoof) roof += vertices;
       else wall += vertices;
     }
     if (wall > wallFrom) this.#position.addUpdateRange(wallFrom * 3, (wall - wallFrom) * 3);
     if (roof > roofFrom) this.#position.addUpdateRange(roofFrom * 3, (roof - roofFrom) * 3);
+    if (spire > spireFrom) this.#position.addUpdateRange(spireFrom * 3, (spire - spireFrom) * 3);
     this.#position.needsUpdate = true;
   }
 
@@ -19740,6 +19769,7 @@ export class MappedBuildingBelt {
       far: this.#selection.far[place] === 1,
       wallAt: this.#wallAt[place] as number,
       roofAt: this.#roofAt[place] as number,
+      spireAt: this.#spireAt[place] as number,
       modelAt: this.#modelAt[place] as number,
     };
   }

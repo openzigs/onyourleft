@@ -72,6 +72,7 @@ import {
   type Insets,
 } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import { PAUSE_MUSIC_NAME } from '../src/shell/OtherPlayerControls';
 import { isRideRoute } from '../src/shell/route-motion';
 import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
@@ -457,14 +458,21 @@ for (const viewport of VIEWPORTS) {
         // there it is the far end of the `h1`'s box that has to hit the `h1`
         // — the same proof that hit-testing sees this page, on the one thing
         // every route is sure to have, and clear of the link, which on a
-        // phone sits over the heading's start. Since #2056 the far end of its
-        // CONTENT box: the padding past it is where the header's mute is drawn.
+        // phone sits over the heading's start. ⚠️ Since #2065 that is the
+        // title BLOCK's far end: the `h1` is as wide as its words, beside the
+        // line under it, and on a phone the link covers all of it. Since #2056
+        // short of the room the title keeps for the header's mute, which is
+        // drawn there: the block's content box, less the `h1`'s end padding.
         const headerBox = header.getBoundingClientRect();
-        const heading = document.querySelector('h1');
-        if (heading === null) throw new Error('no h1');
+        const heading = document.querySelector('main > .oyl-view-head');
+        if (heading === null) throw new Error('no title block');
         const headingBox = heading.getBoundingClientRect();
+        const title = heading.querySelector(':scope > h1');
+        if (title === null) throw new Error('no title in the title block');
         const contentRight =
-          headingBox.right - Number.parseFloat(getComputedStyle(heading).paddingInlineEnd);
+          headingBox.right -
+          Number.parseFloat(getComputedStyle(heading).paddingInlineEnd) -
+          Number.parseFloat(getComputedStyle(title).paddingInlineEnd);
         const [target, x, y] =
           headerBox.height > 0
             ? [header, headerBox.right - 4, headerBox.top + headerBox.height / 2]
@@ -481,7 +489,7 @@ for (const viewport of VIEWPORTS) {
       expect(hit.linkHeight, 'the skip link has no box to hit-test').toBeGreaterThan(0);
       expect(
         hit.onHeaderElsewhere,
-        'a point inside the header (or, where the header is folded away, the h1) does not hit ' +
+        'a point inside the header (or, where the header is folded away, the title block) does not hit ' +
           'it, so this hit test proves nothing',
       ).toBe(true);
       expect(
@@ -1673,8 +1681,12 @@ interface NavLinkBox {
   readonly indicatorWidth: number;
   readonly indicatorHeight: number;
   readonly labelColour: string;
+  /** The label's computed `font-weight` — #2066. */
+  readonly labelWeight: number;
   /** The icon's computed `transform`: `none`, or a matrix. */
   readonly iconTransform: string;
+  /** The icon's computed `stroke-width`, in px — #2066. */
+  readonly iconStroke: number;
 }
 
 async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
@@ -1696,7 +1708,9 @@ async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
         indicatorWidth: indicator?.getBoundingClientRect().width ?? 0,
         indicatorHeight: indicator?.getBoundingClientRect().height ?? 0,
         labelColour: label === null ? '' : getComputedStyle(label).color,
+        labelWeight: label === null ? 0 : Number(getComputedStyle(label).fontWeight),
         iconTransform: icon === null ? '' : getComputedStyle(icon).transform,
+        iconStroke: icon === null ? 0 : Number.parseFloat(getComputedStyle(icon).strokeWidth),
       };
     }),
   );
@@ -1785,11 +1799,29 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       const current = links.find((link) => link.current !== null);
       const other = links.find((link) => link.current === null);
       // What is left still tells the current destination apart — by its
-      // label's colour (and its weight and larger icon, which this does not
-      // read) — but with no painted SHAPE…
+      // label's colour, its weights and its larger icon (#2066's control
+      // below takes those away too) — but with no painted SHAPE…
       expect(current?.labelColour).not.toBe(other?.labelColour);
       // …and the case above fails over it.
       expect(paintedPillFaults(links)).not.toEqual([]);
+    });
+
+    test('#2066 — the control: an indicator by colour alone fails the weight check', async ({
+      page,
+    }) => {
+      await openShell(page);
+      // Every mark of the current destination taken away but its colour: the
+      // pill, the larger icon, and the two weights.
+      await page.addStyleTag({ content: COLOUR_ONLY_INDICATOR });
+      const links = await navLinks(page);
+      const current = links.find((link) => link.current !== null);
+      const other = links.find((link) => link.current === null);
+      // The apparatus: the colour is still there, so it is the weights the
+      // case above rests on, not a destination nothing marks at all.
+      expect(current?.labelColour).not.toBe(other?.labelColour);
+      const faults = paintedPillFaults(links);
+      expect(faults.some((fault) => fault.includes('label is weight'))).toBe(true);
+      expect(faults.some((fault) => fault.includes('icon stroke'))).toBe(true);
     });
 
     test('#944 — is no larger than before the indicator', async ({ browser }) => {
@@ -1847,6 +1879,16 @@ const NAV_BOX_BEFORE_944 = { row: 57.84, bar: 62.84, rail: 88 } as const;
 
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
 
+/**
+ * #2066's control: the current destination told apart by its label's colour
+ * and nothing else — no pill, no larger icon, no heavier label or stroke.
+ */
+const COLOUR_ONLY_INDICATOR = `
+  .oyl-nav-link[aria-current] { font-weight: inherit !important; }
+  .oyl-nav-link[aria-current] .oyl-nav-indicator { background: transparent !important; }
+  .oyl-nav-link[aria-current] .oyl-nav-icon { transform: none !important; stroke-width: 1.8 !important; }
+`;
+
 /** `NavIcon.tsx`'s icon size. */
 const NAV_ICON_PIXELS = 24;
 
@@ -1874,6 +1916,22 @@ function paintedPillFaults(links: readonly NavLinkBox[]): readonly string[] {
       );
     }
     if (here.iconTransform === 'none') faults.push(`“${here.label}”'s icon is not drawn larger`);
+    // #2066: and two WEIGHTS, neither of them a colour — the label's and the
+    // icon's stroke — each heavier than every other destination's.
+    for (const other of links.filter((each) => each.current === null)) {
+      if (here.labelWeight <= other.labelWeight) {
+        faults.push(
+          `“${here.label}”'s label is weight ${String(here.labelWeight)}, ` +
+            `no heavier than “${other.label}”'s ${String(other.labelWeight)}`,
+        );
+      }
+      if (here.iconStroke <= other.iconStroke) {
+        faults.push(
+          `“${here.label}”'s icon stroke is ${String(here.iconStroke)} px, ` +
+            `no heavier than “${other.label}”'s ${String(other.iconStroke)}`,
+        );
+      }
+    }
   }
   for (const link of links.filter((each) => each.current === null)) {
     if (link.indicatorBackground !== TRANSPARENT) {
@@ -1989,6 +2047,136 @@ for (const viewport of [
       });
   });
 }
+
+/**
+ * #2066 — the app's mark heads the rail on a tablet, and it is decoration.
+ *
+ * At a landscape tablet and an upright one the rail draws exactly one mark:
+ * the launcher icon, decoded, 48 px square, above the first destination and
+ * clear of it. It is hidden from assistive technology twice over (`alt=""`
+ * and `aria-hidden`), because the header already names the app once and a
+ * second name would read it twice. Where the rail is too short to spare the
+ * height (a phone on its side, 844×390) and on a phone's bar, nothing is
+ * drawn: a phone's brand is the owner's open question on #2030.
+ *
+ * ⚠️ **The controls**: the mark's rule hidden, and the mark given a name,
+ * must each turn {@link markFaults} non-empty, or a page with no mark at all
+ * — or a mark read aloud as a second "On Your Left" — would pass.
+ */
+interface RailMark {
+  readonly drawn: number;
+  readonly decoded: boolean;
+  readonly width: number;
+  readonly height: number;
+  readonly bottom: number;
+  readonly firstLinkTop: number;
+  readonly alt: string | null;
+  readonly ariaHidden: string | null;
+}
+
+async function railMark(page: Page): Promise<RailMark> {
+  return page.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    if (nav === null) throw new Error('no Primary nav');
+    const drawn = [...nav.querySelectorAll('img')].filter(
+      (image) => image.checkVisibility() && image.getBoundingClientRect().width > 0,
+    );
+    const mark = drawn[0];
+    const box = mark?.getBoundingClientRect();
+    return {
+      drawn: drawn.length,
+      decoded: mark !== undefined && mark.complete && mark.naturalWidth > 0,
+      width: box?.width ?? 0,
+      height: box?.height ?? 0,
+      bottom: box?.bottom ?? Number.NaN,
+      firstLinkTop: nav.querySelector('a')?.getBoundingClientRect().top ?? Number.NaN,
+      alt: mark?.getAttribute('alt') ?? null,
+      ariaHidden: mark?.getAttribute('aria-hidden') ?? null,
+    };
+  });
+}
+
+/** What is wrong with the rail's mark where one is drawn. Empty is a pass. */
+function markFaults(mark: RailMark): readonly string[] {
+  const faults: string[] = [];
+  if (mark.drawn !== 1) return [`${String(mark.drawn)} marks drawn in the rail`];
+  if (!mark.decoded) faults.push('the mark did not decode');
+  if (
+    Math.abs(mark.width - RAIL_MARK_PIXELS) > 0.5 ||
+    Math.abs(mark.height - RAIL_MARK_PIXELS) > 0.5
+  ) {
+    faults.push(`the mark is ${mark.width.toFixed(1)}×${mark.height.toFixed(1)} px`);
+  }
+  if (!(mark.bottom <= mark.firstLinkTop)) {
+    faults.push(`the mark ends at ${mark.bottom.toFixed(1)}, under the first destination's top`);
+  }
+  if (mark.alt !== '' || mark.ariaHidden !== 'true') {
+    faults.push(
+      `the mark is named (alt ${String(mark.alt)}, aria-hidden ${String(mark.ariaHidden)})`,
+    );
+  }
+  return faults;
+}
+
+/** `theme.css` §"THE MARK": 3rem at the root's 16 px. */
+const RAIL_MARK_PIXELS = 48;
+
+test.describe('#2066 — the app’s mark heads the rail', () => {
+  for (const viewport of [
+    { name: 'a landscape tablet, 1280×800', width: 1280, height: 800, drawn: true },
+    { name: 'an upright tablet, 768×1024', width: 768, height: 1024, drawn: true },
+    { name: 'a phone’s bar, 375×667', width: 375, height: 667, drawn: false },
+    { name: 'a short rail, a phone on its side 844×390', width: 844, height: 390, drawn: false },
+  ] as const) {
+    test.describe(viewport.name, () => {
+      test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+      test(
+        viewport.drawn ? 'is drawn once, decorative, above the destinations' : 'is not drawn',
+        async ({ browser }) => {
+          const page = await sharedShell(browser, viewport);
+          await page.waitForFunction(() =>
+            [...document.querySelectorAll('nav[aria-label="Primary"] img')].every(
+              (image) => (image as HTMLImageElement).complete,
+            ),
+          );
+          const mark = await railMark(page);
+          console.log(`#2066 mark at ${viewport.name}: ${JSON.stringify(mark)}`);
+          if (viewport.drawn) {
+            expect(markFaults(mark)).toEqual([]);
+          } else {
+            expect(mark.drawn).toBe(0);
+          }
+        },
+      );
+    });
+  }
+
+  test.describe('the controls, at 1280×800', () => {
+    test.use({ viewport: { width: 1280, height: 800 } });
+
+    test('with the mark’s rule hidden, the case fails', async ({ page }) => {
+      await openShell(page);
+      await page.addStyleTag({ content: '.oyl-nav-mark { display: none !important; }' });
+      expect(markFaults(await railMark(page))).not.toEqual([]);
+    });
+
+    test('with the mark given a name, the case fails', async ({ page }) => {
+      await openShell(page);
+      await page.evaluate(() => {
+        const mark = document.querySelector('nav[aria-label="Primary"] img');
+        mark?.setAttribute('alt', 'On Your Left');
+        mark?.removeAttribute('aria-hidden');
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('nav[aria-label="Primary"] img')].every(
+          (image) => (image as HTMLImageElement).complete,
+        ),
+      );
+      expect(markFaults(await railMark(page)).some((fault) => fault.includes('named'))).toBe(true);
+    });
+  });
+});
 
 /**
  * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
@@ -3900,7 +4088,7 @@ interface MuteReading {
 async function readMute(page: Page): Promise<MuteReading> {
   return page.evaluate(() => {
     const mute = document.querySelector('.oyl-header__mute');
-    const h1 = document.querySelector('.oyl-main > h1');
+    const h1 = document.querySelector('.oyl-main > .oyl-view-head > h1');
     if (mute === null || h1 === null) throw new Error('no mute, or no title');
     const box = mute.getBoundingClientRect();
     const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
@@ -3908,9 +4096,14 @@ async function readMute(page: Page): Promise<MuteReading> {
       other.bottom <= box.top || other.top >= box.bottom || other.width === 0
         ? Number.NEGATIVE_INFINITY
         : Math.min(other.right, box.right) - Math.max(other.left, box.left);
-    const range = document.createRange();
-    range.selectNodeContents(h1);
-    const words = [...range.getClientRects()].map(overlap);
+    // Since #2065 the line under the title shares its row where it fits, so
+    // its words are measured with the title's.
+    const line = document.querySelector('.oyl-main > .oyl-view-head > h1 + p');
+    const words = [h1, ...(line === null ? [] : [line])].flatMap((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return [...range.getClientRects()].map(overlap);
+    });
     const help = document.querySelector('.oyl-help > summary')?.getBoundingClientRect();
     return {
       width: box.width,
@@ -3940,12 +4133,29 @@ test.describe('#2056 — the header mute', () => {
         await page.evaluate((hash) => {
           window.location.hash = hash;
         }, hrefFor(route));
-        await expect(page.locator('.oyl-main > h1')).toHaveText(route.title);
+        await expect(page.locator('.oyl-main > .oyl-view-head > h1')).toHaveText(route.title);
         // At the top of the page, where a rider arriving there sees the title:
         // below the rail breakpoint the mute scrolls with it, as the header does.
         await page.evaluate(() => {
           window.scrollTo(0, 0);
         });
+        // Since #2054 a navigation between menu routes is a view transition,
+        // and while it runs every point on the page hits the transition's
+        // pseudo-elements on `html` — so the mute is read once it has ended.
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document
+                  .getAnimations()
+                  .filter((animation) =>
+                    (animation.effect as KeyframeEffect | null)?.pseudoElement?.startsWith(
+                      '::view-transition',
+                    ),
+                  ).length,
+            ),
+          )
+          .toBe(0);
         await settled(page);
         const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
         await expect(mute).toHaveCount(1);
@@ -4073,5 +4283,32 @@ test.describe('#2058 — the menus’ music, in a real engine', () => {
       await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
     }
     expect((await readMusic(page)).elements, 'one element for the visit').toBe(1);
+  });
+});
+
+/**
+ * #2253 through the harness's composition, which is `main.tsx`'s: the one
+ * `OtherPlayer` the header shows (`?own-player=heard`) is also the menus'
+ * music's `riderPlayer`. Heard playing, a press makes no loop at all — the
+ * same press that starts it in the case above.
+ */
+test.describe('#2253 — the menus’ music yields to the rider’s own player, in a real engine', () => {
+  test('with the rider’s player heard playing, a press starts nothing', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?music=fixture&own-player=heard');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    // The header heard it playing: its play/pause offers to pause.
+    await expect(page.getByRole('button', { name: PAUSE_MUSIC_NAME })).toBeVisible();
+
+    await pressSomethingElse(page);
+    // The press's handler has run once focus has left the skip link.
+    await expect(page.locator('.oyl-skip-link')).not.toBeFocused();
+    expect(await readMusic(page), 'the loop started over the rider’s own player').toEqual({
+      elements: 0,
+      playing: false,
+      time: 0,
+      bus: null,
+    });
   });
 });
