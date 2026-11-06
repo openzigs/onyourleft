@@ -99,11 +99,17 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell `render-video.ts` launches, and nothing from apt
+      # (#2209). ffmpeg below is the one thing apt is still asked for here.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       # Not on the runner image (ubuntu-24.04's readme lists no ffmpeg). A tool
-      # the render runs, never shipped.
+      # the render runs, never shipped. ⚠️ From apt, the one step here that is
+      # (#2209): Playwright's own FFmpeg is built to record a page's video as
+      # WebM, with no libx264 for the render's MP4. `--no-install-recommends`,
+      # so it brings no fonts, and the apt-source step above stays load-bearing.
       - name: Install ffmpeg
         run: |
           sudo apt-get update
@@ -157,8 +163,11 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell `render-video.ts` launches, and nothing from apt
+      # (#2209). ffmpeg below is the one thing apt is still asked for here.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Install ffmpeg
         run: |
