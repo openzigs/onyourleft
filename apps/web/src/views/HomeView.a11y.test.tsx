@@ -243,7 +243,7 @@ describe('the home screen — #428', () => {
     await settle();
     await settle();
     // No Trainer card to carry it, so the empty state does — once.
-    expect(document.querySelector('.oyl-home__trainer')).toBeNull();
+    expect(document.querySelector('.oyl-home__sensors')).toBeNull();
     const devices = [
       ...document.querySelectorAll(`main a[href="${hrefFor(routeById('devices'))}"]`),
     ];
@@ -461,7 +461,7 @@ describe('the illustrated home — #939', () => {
 
   it('keeps the trainer’s sentence and its link to Devices (#659) when no trainer is paired', async () => {
     await openHome([]);
-    const trainer = document.querySelector('.oyl-home__trainer');
+    const trainer = document.querySelector('.oyl-home__sensors');
     expect(trainer?.textContent).toContain('No trainer paired.');
     expect(trainer?.querySelector(`a[href="${hrefFor(routeById('devices'))}"]`)?.textContent).toBe(
       'Pair one on Devices',
@@ -651,7 +651,7 @@ describe('the module grid — #2044', () => {
     );
     expect(modules()).toEqual([
       'Next up',
-      'Trainer',
+      'Sensors',
       'Last ride',
       'This week',
       'Ride',
@@ -663,12 +663,12 @@ describe('the module grid — #2044', () => {
 
   it('a first open: the other ways to start stand where the last ride will, after the sensors', async () => {
     await openHome([]);
-    expect(modules()).toEqual(['Your first ride', 'Trainer', 'Nothing recorded yet']);
+    expect(modules()).toEqual(['Your first ride', 'Sensors', 'Nothing recorded yet']);
   });
 
   it('makes each module slot a section named by its own h2, each a named region (not landmark-free: an unnamed section beside another fails the audit)', async () => {
     await openHome([ride('only', 2)]);
-    for (const slot of ['.oyl-home__trainer', '.oyl-home__last', '.oyl-home__week']) {
+    for (const slot of ['.oyl-home__sensors', '.oyl-home__last', '.oyl-home__week']) {
       const section = document.querySelector(slot);
       expect(section?.tagName, slot).toBe('SECTION');
       // No role of its own: not a nav, an aside or a declared region.

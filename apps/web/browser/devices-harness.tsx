@@ -17,6 +17,8 @@
  * `browser/devices.browser.spec.ts` walks it as a new rider does: Home's own
  * link, then *Pair a smart trainer*, then the Ride screen and Home again, which
  * read the connection back through the controller mounted above the router.
+ * Since #2045 the strap can be made to beat ({@link DevicesHarness.heartRate}),
+ * so Home's sensors module is read with a live number from the real decoder.
  *
  * ## The control
  *
@@ -77,6 +79,13 @@ export interface DevicesHarness {
   readonly control: boolean;
   /** How many times the page called `BluetoothDevice.forget()` on each device. */
   readonly forgets: () => { readonly trainer: number; readonly strap: number };
+  /**
+   * #2045: the strap's heart beats at `bpm` from now on — a Heart Rate
+   * Measurement notified every half second while it is connected, as a real
+   * strap notifies about once a second, so the reading never goes stale
+   * while the spec reads it. A later call changes the number.
+   */
+  readonly heartRate: (bpm: number) => void;
 }
 
 declare global {
@@ -181,12 +190,29 @@ const forgets = (): { trainer: number; strap: number } => ({
   strap: fake.bench.device('strap').forgets,
 });
 
+/** How often the scripted strap notifies once {@link heartRate} has started it. */
+const BEAT_EVERY_MS = 500;
+let bpm: number | undefined;
+const heartRate = (next: number): void => {
+  const started = bpm !== undefined;
+  bpm = next;
+  if (started) return;
+  window.setInterval(() => {
+    const strap = fake.bench.device('strap');
+    // Flags 0: an 8-bit value, then the beats per minute. The fake refuses a
+    // notification on a characteristic nobody subscribed to, so none is sent
+    // until the strap is paired.
+    if (bpm === undefined || !strap.notifying(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT)) return;
+    strap.notify(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT, Uint8Array.from([0, bpm]));
+  }, BEAT_EVERY_MS);
+};
+
 // #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
 try {
   await viewGroupsLoaded();
   run();
-  window.__oylDevices = { ready: true, errors, control, forgets };
+  window.__oylDevices = { ready: true, errors, control, forgets, heartRate };
 } catch (error: unknown) {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylDevices = { ready: false, errors, control, forgets };
+  window.__oylDevices = { ready: false, errors, control, forgets, heartRate };
 }

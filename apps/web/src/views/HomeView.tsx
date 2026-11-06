@@ -69,8 +69,8 @@
  *
  * Home was one column of cards with the last ride under the ride choices. It
  * is a grid of modules now, in ONE reading order on every layout: Next up
- * (the quick-launch), the sensors (today the Trainer card; #2045 fills the
- * slot), the last ride (#2048) — or, on a first open, the other ways to start
+ * (the quick-launch), the sensors (#2045, {@link SensorsModule}, which took
+ * the Trainer card's slot), the last ride (#2048) — or, on a first open, the other ways to start
  * — and the week (#2049); then the ride choices, fitness and the badges. On a
  * phone that is one column in that order; on a landscape tablet the first
  * four are two rows of two inside the first screen. DOM order is the visual
@@ -79,8 +79,9 @@
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
- * launch. The trainer's state and a ride left unfinished come from the ride
- * controller's snapshot, which is already in memory. #939 added no read:
+ * launch. The sensors, the trainer's state and a ride left unfinished come
+ * from the ride controller's snapshot, which is already in memory — #2045
+ * added no store read. #939 added no read:
  * `HomeView.reads.test.tsx` counts every store call the screen makes. #1010
  * adds at most ONE record read, `getRoute`, and only when a ride was ridden
  * on a route — `home/home.ts` §`loadNextUp`.
@@ -91,11 +92,13 @@
  */
 
 import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
-import { useEffect, useState, type JSX } from 'react';
+import type { ConnectionState } from '@onyourleft/sensors';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
 import { ProfileShape, SensorGlyph } from '../design/illustration';
+import type { SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
@@ -109,7 +112,9 @@ import {
 } from '../home/home';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { ProgressPanel } from '../progress/ProgressPanel';
-import type { RideController } from '../ride/controller';
+import type { PairedSensor, PairingRole, RideController } from '../ride/controller';
+import type { RideMetricId } from '../ride/metrics';
+import { metricSentence, metricText, presentationFor } from '../ride/MetricGrid';
 import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, hrefForGameRoute, routeById } from '../shell/routes';
@@ -189,7 +194,7 @@ export function HomeView(props: HomeViewProps): JSX.Element {
             the last ride (or, on a first open, the other ways to start), the
             week — and then the rest. `theme.css` §"#2044" lays them out. */}
         <NextUp next={next} />
-        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
+        {props.controller === undefined ? null : <SensorsModule controller={props.controller} />}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
         {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
         {data?.lastRide === undefined ? null : (
@@ -396,37 +401,192 @@ function LeftUnfinished({
 }
 
 /**
- * The trainer, from what the ride controller already knows. Its words and its
- * link to Devices (#659) are unchanged by #939: a rider with no trainer is
- * told so in a sentence, never by a picture alone.
+ * The sensors module — #2045, in the slot #2044 kept for it: the trainer and
+ * every BLE sensor the rider paired, each in words, with what it is reading
+ * now, and ONE press to Devices (#659), where pairing lives. A `section`
+ * named by its own `h2`, second in the reading order.
  *
- * Since #2044 it is the sensor-status module's slot (#2045 fills it), second
- * in the reading order, and — like the last ride's and the week's — a
- * `section` named by its own `h2`.
+ * ## One port, and it is the ride controller's
+ *
+ * Read from {@link useRideSnapshot}, the subscription the Devices screen's
+ * `ride/SensorPairing.tsx` renders from — the same `sensors` rows, so a device
+ * paired there is listed here with no second connection path. Each row's
+ * reading is that DEVICE's own (`ride/controller.ts` §`PairedSensor.readings`),
+ * not the Ride screen's merged channel, so a trainer and a power meter both
+ * sending power each show their own number.
+ *
+ * ## Honest states only — docs/agents/web-bluetooth.md
+ *
+ * A device is *connected* or *not connected*, and nothing else. A browser has
+ * no silent reconnect and no background scan, so this never says a device is
+ * being searched for or will come back by itself: a lost link is "not
+ * connected", and the way back is the Devices screen's chooser.
+ * `HomeView.sensors.test.tsx` holds that over the real Web Bluetooth
+ * transport in every state it reports.
+ *
+ * The trainer keeps its row and its sentences from #939 — *No trainer
+ * paired*, and whether this app has control — first, because it is the one
+ * device here this app can drive. State is words, never colour (SC 1.4.1);
+ * the glyph is `aria-hidden` decoration and says nothing.
+ *
+ * ⚠️ **One link to Devices** (#1429): the trainer's own while no trainer is
+ * paired, and the module's otherwise.
+ *
+ * ## One compact row a device — the owner's screenshot review, 2026-11-05
+ *
+ * Each device is ONE row: its icon, its name, its own live reading and a
+ * connected dot. The kind of device and the reading's label are said to a
+ * screen reader in words the row's icon already shows on screen, so the
+ * row's text is still *Heart rate strap, HRM-Pro 7C1D, Heart rate: 142 bpm,
+ * Connected*. The dot is never the only signal (SC 1.4.1): connected is a
+ * filled dot, not connected a ring with the words *Not connected* beside it.
+ * The module's own link sits beside its heading, which is as tall as its
+ * glyph anyway. With four sensors paired that keeps Last ride and This week
+ * above a 1280×800 tablet's fold, which the module's first drawing (each part
+ * of a device on a line of its own, ~460 px tall) did not —
+ * `home.browser.spec.ts` §"four sensors paired" measures it.
  */
-function TrainerCard({ controller }: { readonly controller: RideController }): JSX.Element {
-  const trainer = useRideSnapshot(controller).trainer;
+function SensorsModule({ controller }: { readonly controller: RideController }): JSX.Element {
+  const snapshot = useRideSnapshot(controller);
+  const presentation = presentationFor(useUnits());
+  const { trainer } = snapshot;
+  const trainers = snapshot.sensors.filter((sensor) => sensor.role === 'trainer');
+  const others = snapshot.sensors.filter((sensor) => sensor.role !== 'trainer');
+  const noTrainer = !trainer.paired && trainers.length === 0;
+  const devices = hrefFor(routeById('devices'));
+  // #939's sentence: whether this app has control of the trainer.
+  const control = trainer.paired ? (
+    <p className="oyl-home__sensor-note">
+      {!trainer.hasControl ? (
+        <>
+          Paired, and this app has not been given control.{' '}
+          <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
+        </>
+      ) : (
+        'Paired, and this app has control.'
+      )}
+    </p>
+  ) : null;
   return (
-    <section className="oyl-panel oyl-home__trainer" aria-labelledby="oyl-home-trainer">
-      <h2 id="oyl-home-trainer" className="tw:flex tw:items-center tw:gap-sm">
-        <SensorGlyph kind="trainer" className="oyl-home__glyph" />
-        Trainer
-      </h2>
-      <p>
-        {!trainer.paired ? (
-          <>
-            No trainer paired. <a href={hrefFor(routeById('devices'))}>Pair one on Devices</a>.
-          </>
-        ) : !trainer.hasControl ? (
-          <>
-            Paired, and this app has not been given control.{' '}
-            <a href={hrefFor(routeById('ride'))}>Ask for it on Ride</a>.
-          </>
+    <section className="oyl-panel oyl-home__sensors" aria-labelledby="oyl-home-sensors">
+      <div className="oyl-home__sensors-head">
+        <h2 id="oyl-home-sensors" className="tw:flex tw:items-center tw:gap-sm">
+          <SensorGlyph kind="trainer" className="oyl-home__glyph" />
+          Sensors
+        </h2>
+        {noTrainer ? null : <a href={devices}>Pair or forget devices on Devices</a>}
+      </div>
+      <ul className="oyl-home__sensor-list">
+        {noTrainer ? (
+          <li>
+            <p className="tw:m-0">
+              No trainer paired. <a href={devices}>Pair one on Devices</a>.
+            </p>
+          </li>
+        ) : trainers.length === 0 ? (
+          <li>{control}</li>
         ) : (
-          'Paired, and this app has control.'
+          trainers.map((sensor, index) => (
+            <SensorRow key={sensor.id} sensor={sensor} presentation={presentation}>
+              {index === 0 ? control : null}
+            </SensorRow>
+          ))
         )}
-      </p>
+        {others.map((sensor) => (
+          <SensorRow key={sensor.id} sensor={sensor} presentation={presentation} />
+        ))}
+      </ul>
+      {others.length === 0 ? (
+        <p className="oyl-muted tw:mb-0">No heart rate, power or cadence sensor paired.</p>
+      ) : null}
     </section>
+  );
+}
+
+/** What each kind of device is called in a row — the Devices screen's own words. */
+const SENSOR_KIND: Readonly<Record<PairingRole, string>> = {
+  trainer: 'Smart trainer',
+  'heart-rate': 'Heart rate strap',
+  'power-meter': 'Power meter',
+  'speed-cadence': 'Speed or cadence sensor',
+};
+
+/** Each kind's icon — the Devices screen's (`ride/SensorPairing.tsx`). */
+const SENSOR_ICON: Readonly<Record<PairingRole, SensorGlyphKind>> = {
+  trainer: 'trainer',
+  'heart-rate': 'heart-rate',
+  'power-meter': 'power',
+  'speed-cadence': 'cadence',
+};
+
+/**
+ * Which reading a row shows: the first of these the device supplies — a
+ * trainer's power before its cadence, a speed or cadence sensor's cadence
+ * before its speed.
+ */
+const ROW_READING: Readonly<Record<PairingRole, readonly RideMetricId[]>> = {
+  trainer: ['power', 'cadence', 'speed'],
+  'heart-rate': ['heartRate'],
+  'power-meter': ['power'],
+  'speed-cadence': ['cadence', 'speed'],
+};
+
+/**
+ * Connected, or not — the two states Home says (§"Honest states only" above).
+ * The Devices screen says WHY one is not, and what to do about it.
+ */
+function connectedWords(state: ConnectionState): string {
+  return state === 'connected' ? 'Connected' : 'Not connected';
+}
+
+/**
+ * One device, one row: its icon, its name, its own live reading and its
+ * connected dot. Every word the screen leaves to the icon or the dot is
+ * still in the row for a screen reader (`oyl-visually-hidden`), so the row
+ * reads as one sentence. `children` is a line under the row, the whole of its
+ * width — the trainer's control sentence.
+ */
+function SensorRow({
+  sensor,
+  presentation,
+  children,
+}: {
+  readonly sensor: PairedSensor;
+  readonly presentation: ReturnType<typeof presentationFor>;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  const connected = sensor.state === 'connected';
+  const reading = ROW_READING[sensor.role]
+    .map((id) => sensor.readings?.find((each) => each.id === id))
+    .find((each) => each !== undefined);
+  const label = reading === undefined ? '' : presentation[reading.id].label;
+  return (
+    <li className="oyl-home__sensor-row">
+      <SensorGlyph kind={SENSOR_ICON[sensor.role]} className="oyl-home__sensor-icon" />
+      <span className="oyl-home__sensor-name">
+        <span className="oyl-visually-hidden">{SENSOR_KIND[sensor.role]}, </span>
+        {sensor.name}
+      </span>
+      {connected && reading !== undefined ? (
+        <span className="oyl-home__sensor-reading">
+          <span className="oyl-visually-hidden">, {label}: </span>
+          {metricSentence(label, metricText(reading.state, presentation[reading.id])).slice(
+            label.length + 2,
+          )}
+        </span>
+      ) : null}
+      <span className="oyl-home__sensor-state">
+        <span
+          aria-hidden="true"
+          className={`oyl-home__sensor-dot${connected ? ' oyl-home__sensor-dot--on' : ''}`}
+        />
+        <span className="oyl-visually-hidden">, </span>
+        <span className={connected ? 'oyl-visually-hidden' : undefined}>
+          {connectedWords(sensor.state)}
+        </span>
+      </span>
+      {children}
+    </li>
   );
 }
 
