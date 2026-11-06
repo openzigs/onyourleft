@@ -9,10 +9,10 @@
  *
  * - **The mapped-blobs lever** (#1657): `levers=-mapped-blobs` takes the
  *   mapped buildings' ground blobs out of the mixed town's frame, and nothing
- *   else.
+ *   else — on a 320 × 180 page since #1937 (`SIXTEENTH_PAGE`).
  * - **The city centre** (#1636): `town=city`, held between its two towers,
  *   draws its shop fronts and its tower inside the page's 35 calls — on a
- *   320 × 180 page since #1915 (`CITY_VIEWPORT`).
+ *   320 × 180 page since #1915.
  *
  * This file's nightly describes are a job of their own (docs/agents/ci.md §4c
  * §"Four nightly browser shards — #1698", whose fifth shard this is);
@@ -25,9 +25,14 @@ import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
 import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
-import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { frameReading, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
 
 test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGHTLY }, () => {
+  // The case compares two frames' calls and triangles, which the canvas's
+  // shape decides and its size does not (`SIXTEENTH_PAGE`): at 1280 × 720 a
+  // load on an EPYC 7763 ran past its 150 s — #1937.
+  test.use({ viewport: SIXTEENTH_PAGE });
+
   test('grounds the mixed town’s buildings, and with the lever off draws none of their blobs', async ({
     page,
   }) => {
@@ -42,8 +47,13 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
       `#1657 town=mixed at=1300: ${String(grounded.result.lastFrame.triangles)} triangles in ` +
         `${String(grounded.result.lastFrame.calls)} draw calls grounded, ` +
         `${String(off.result.lastFrame.triangles)} in ${String(off.result.lastFrame.calls)} ` +
-        `with the lever off: ${String(added / GROUND_BLOB_TRIANGLES)} mapped blobs`,
+        `with the lever off: ${String(added / GROUND_BLOB_TRIANGLES)} mapped blobs; frame ` +
+        `p50/p90 ${frameReading(grounded.result)} grounded · ${frameReading(off.result)} off`,
     );
+    // Not vacuous: both drawn at the small page, so their frames are the cheap ones.
+    for (const load of [grounded, off]) {
+      expect(load.result.drawingBuffer).toEqual([SIXTEENTH_PAGE.width, SIXTEENTH_PAGE.height]);
+    }
     expect(grounded.result.leversOff).toEqual(['people']);
     expect(off.result.leversOff).toEqual(['mapped-blobs', 'people']);
     // The lever reaches the blobs: off, the frame draws fewer, a quad each,
@@ -57,24 +67,11 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
   });
 });
 
-/**
- * The city centre's page, a sixteenth of the default 1280 × 720 and the same
- * 16:9 shape — #1915.
- *
- * The case counts a frame's draw calls, which the frustum decides, and the
- * frustum is the canvas's SHAPE, not its size: at 320 × 180 the city draws
- * the same 22 calls and the same 45 664 and 44 614 triangles as at 1280 × 720
- * (a Mac, 2026-10-30). What the size does decide is each frame's fill under
- * SwiftShader, and the page publishes only after a second of frames each
- * under `MAXIMUM_FRAME_GAP_MS` (1 s, `realistic/loop.ts`), a slower one being
- * a stall that counts for nothing. On a slow runner a 1280 × 720 frame of the
- * city, with #1884's rooms behind its glass, came near that second, so a load
- * waited on chance: 25 s to over 160 s, and once past the case's 300 s.
- */
-const CITY_VIEWPORT = { width: 320, height: 180 };
-
 test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, () => {
-  test.use({ viewport: CITY_VIEWPORT });
+  // On `SIXTEENTH_PAGE` since #1915: at 320 × 180 the city draws the same 22
+  // calls and the same 45 664 and 44 614 triangles as at 1280 × 720 (a Mac,
+  // 2026-10-30), and at 1280 × 720 a load waited 25 s to over 160 s on chance.
+  test.use({ viewport: SIXTEENTH_PAGE });
 
   test('draws a city centre’s shop fronts and its tower inside the page’s 35 calls', async ({
     page,
@@ -95,7 +92,7 @@ test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, 
           `${String(city.result.frameMs.count)} frames, ${String(city.result.stalls)} stall(s)`,
       );
       // Not vacuous: drawn at the small page, so its frames are the cheap ones.
-      expect(city.result.drawingBuffer).toEqual([CITY_VIEWPORT.width, CITY_VIEWPORT.height]);
+      expect(city.result.drawingBuffer).toEqual([SIXTEENTH_PAGE.width, SIXTEENTH_PAGE.height]);
       expect(city.result.lastFrame.calls).toBeGreaterThan(0);
       expect(city.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     }

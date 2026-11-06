@@ -1131,8 +1131,8 @@ function measure(): RideViewMeasurement {
   const main = document.querySelector('main');
   const nav = document.querySelector('nav[aria-label="Primary"]');
   const card = document.querySelector('.oyl-metric');
-  const title = document.querySelector('main > h1');
-  const summary = document.querySelector('main > h1 + p');
+  const title = document.querySelector('main > .oyl-view-head > h1');
+  const summary = document.querySelector('main > .oyl-view-head > h1 + p');
   const metricGrid = document.querySelector('.oyl-ride__group--live .oyl-metric-grid');
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },

@@ -855,7 +855,7 @@ export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
 
 /**
  * The kit each kind wears UNDER its tint — #623. The rider wears the house kit
- * (`bicycle.ts` §`HOUSE_KIT`, the app's accent); the pacer and the ghost wear
+ * (`bicycle.ts` §`HOUSE_KIT`, teal, its own colour since #2123); the pacer and the ghost wear
  * `bicycle.ts` §`PACER_KIT`, the blue #368 told them apart in, because
  * {@link RIDER_TINTS} multiplies and cannot put back a hue the kit lacks.
  *

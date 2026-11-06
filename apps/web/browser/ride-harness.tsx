@@ -1114,7 +1114,7 @@ function measure(): StageMeasurement {
     chrome: {
       header: document.querySelector('header.oyl-header') !== null,
       navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
-      summary: document.querySelector('main > p.oyl-muted') !== null,
+      summary: document.querySelector('main > .oyl-view-head > p.oyl-muted') !== null,
       footer: document.querySelector('footer.oyl-footer') !== null,
       skipLink: document.querySelector('.oyl-skip-link') !== null,
     },
