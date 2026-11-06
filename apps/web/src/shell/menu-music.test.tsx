@@ -16,7 +16,7 @@
  */
 
 import { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { writeAudioBus, writeMasterMuted, readMusicAndMaster } from '../game/audio-mix';
 import { fakeAudioContext, musicPath, type FakeAudio } from '../game/audio-testing';
@@ -413,6 +413,30 @@ describe('the rider’s mix while the loop plays — #2058', () => {
     await pressWithoutLeaving(headerMute() ?? null);
     expect(element?.paused).toBe(false);
     expect(musicPath(music.fake).master.gain.value).toBe(1);
+  });
+
+  it('a mute the device refused to keep leaves it playing, and the button unpressed — #2240', async () => {
+    const music = rig(localStorage);
+    await shell(music);
+    await pressWithoutLeaving(homeControl());
+    const [element] = music.made;
+    expect(element?.paused).toBe(false);
+
+    // The device refuses every write from here on (a full quota, a private
+    // window), so the master stays unmuted where the music reads it.
+    const refuse = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    try {
+      await pressWithoutLeaving(headerMute() ?? null);
+      expect(refuse, 'the mute never tried to keep its choice').toHaveBeenCalled();
+      expect(headerMute()?.getAttribute('aria-pressed')).toBe('false');
+      expect(element?.paused, 'paused under a mute that was never kept').toBe(false);
+      expect(musicPath(music.fake).master.gain.value).toBe(1);
+      expect(musicBus(music)).toBe(0.5);
+    } finally {
+      refuse.mockRestore();
+    }
   });
 });
 
