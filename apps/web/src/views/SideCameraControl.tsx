@@ -320,13 +320,15 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
     case 'ready':
       // #2192: a picture the instance turned away was still sealed and sent,
       // so it is counted among the sent, and the turned-away count is told as
-      // a part OF that count, straight after it — never beside a sent count
-      // that leaves it out, which read as a contradiction.
+      // a part OF that count, naming it — never beside a sent count that
+      // leaves it out, which read as a contradiction. The hosted sentence
+      // stays straight after the first and says it covers pictures READ, as
+      // the turned-away ones were never forwarded.
       return (
         `Pictures sealed and sent to your instance, and not kept here: ${String(looked + state.rateLimited)}, ` +
         `with you in ${String(state.posed)} of them.` +
-        instanceRateLimitedText(state.rateLimited) +
         onTo +
+        instanceRateLimitedText(state.rateLimited, looked + state.rateLimited) +
         ` Not sent, because one was already with your instance: ${String(state.skipped)}.`
       );
   }
@@ -341,7 +343,7 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
 function sideInstanceOnToText(host: string | undefined): string {
   return host === undefined
     ? ''
-    : ` Your instance sends each one on to ${host}, the service your own key is for.`;
+    : ` Your instance sends each one it reads on to ${host}, the service your own key is for.`;
 }
 
 /**
@@ -349,10 +351,10 @@ function sideInstanceOnToText(host: string | undefined): string {
  * too often, with its leading space, or nothing when none was (#2175). Since
  * #2192 these are a part of the sent count it follows, not apart from it.
  */
-function instanceRateLimitedText(count: number): string {
+function instanceRateLimitedText(count: number, sent: number): string {
   return count === 0
     ? ''
-    : ` Of those, turned away by your instance unread, because it was asked too often: ${String(count)}.`;
+    : ` Of the ${String(sent)} sent, turned away by your instance unread, because it was asked too often: ${String(count)}.`;
 }
 
 /**

@@ -55,7 +55,7 @@ afterEach(async () => {
 });
 
 describe('the running instance sweeps the local picture model’s hour — #2175, #2192', () => {
-  it('once when the store opens, and again on every hour the jobs are swept on', async () => {
+  it('once when the store opens, and again when the hour is swept', async () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-side-pose-'));
     const path = join(directory, 'instance.sqlite');
     await migrateForDeploy(path);

@@ -761,7 +761,7 @@ describe('what the tablet says about the pictures — #530', () => {
   const pictures = (): string =>
     document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
   const ON_TO =
-    'Your instance sends each one on to models.example, the service your own key is for.';
+    'Your instance sends each one it reads on to models.example, the service your own key is for.';
 
   it('names the hosted service the instance sends each picture on to, before any and after — #2175', async () => {
     const { send } = await analysing(
@@ -786,13 +786,13 @@ describe('what the tablet says about the pictures — #530', () => {
       () => host,
     );
     await send(1);
-    expect(pictures()).not.toContain('sends each one on to');
+    expect(pictures()).not.toContain('sends each one it reads on to');
     host = 'models.example';
     await send(1);
     expect(pictures()).toContain(ON_TO);
     host = undefined;
     await send(1);
-    expect(pictures()).not.toContain('sends each one on to');
+    expect(pictures()).not.toContain('sends each one it reads on to');
   });
 
   it('names the service while the first picture is with the instance — #2175', () => {
@@ -820,7 +820,7 @@ describe('what the tablet says about the pictures — #530', () => {
     await send(2);
     // #2192: they were sealed and sent, so the sent count has them in it.
     expect(pictures()).toBe(
-      'Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. Of those, turned away by your instance unread, because it was asked too often: 2. Not sent, because one was already with your instance: 0.',
+      'Pictures sealed and sent to your instance, and not kept here: 2, with you in 0 of them. Of the 2 sent, turned away by your instance unread, because it was asked too often: 2. Not sent, because one was already with your instance: 0.',
     );
   });
 
@@ -839,11 +839,11 @@ describe('what the tablet says about the pictures — #530', () => {
       finished: false,
     } as const;
     // Three looked at and three turned away: six sent, and the three turned
-    // away are said as a part of those six, straight after them.
+    // away are said as a part of those six, named after the hosted sentence.
     expect(sidePicturesText(state)).toBe(
       'Pictures sealed and sent to your instance, and not kept here: 6, with you in 1 of them. ' +
-        'Of those, turned away by your instance unread, because it was asked too often: 3. ' +
-        `${ON_TO} Not sent, because one was already with your instance: 4.`,
+        `${ON_TO} Of the 6 sent, turned away by your instance unread, because it was asked too often: 3. ` +
+        `Not sent, because one was already with your instance: 4.`,
     );
     // None turned away: the sent count is the looked-at count, and no sentence about it.
     expect(sidePicturesText({ ...state, rateLimited: 0 })).toBe(
