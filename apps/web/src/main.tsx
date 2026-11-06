@@ -59,11 +59,15 @@ import {
 } from './offline/update';
 import { AppShell, VIEW_GROUPS } from './shell/AppShell';
 import { createMenuSounds } from './shell/menu-sounds';
+import { createMenuMusic, MENU_MUSIC_TRACK } from './shell/menu-music';
+import { readMusicAndMaster } from './game/audio-mix';
 import { readMenuSoundPreference } from './shell/menu-sound-preference';
 import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
+import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
+import { matchHash } from './shell/routes';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
@@ -1592,13 +1596,41 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const menuSounds = createMenuSounds(sharedCueOutput(), () =>
     readMenuSoundPreference(deviceStorage()),
   );
+  // #2058: the menus' music, over the same one output — its bus, its fade,
+  // its mute. Silent until #2057 commits the loop (`MENU_MUSIC_TRACK`).
+  const menuMusic = createMenuMusic({
+    output: sharedCueOutput(),
+    track: MENU_MUSIC_TRACK,
+    mix: () => readMusicAndMaster(deviceStorage()),
+    createElement: () => new Audio(),
+    schedule: (callback, ms) => {
+      const timer = window.setTimeout(callback, ms);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    },
+    hidden: () => document.hidden,
+  });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
-  const launch = launchRelease(platform.launch, (callback) => {
-    window.requestAnimationFrame(() => {
-      callback();
-    });
-  });
+  // #2053: the first-paint intro takes over from it in the same frame, and
+  // animates out unless the first route is a ride route or the rider asked for
+  // less motion (`shell/intro.ts`). Read then, from the route on screen.
+  const launch = launchRelease(
+    platform.launch,
+    (callback) => {
+      window.requestAnimationFrame(() => {
+        callback();
+      });
+    },
+    (failed) => {
+      endIntro(document.getElementById(INTRO_ID), {
+        firstRoute: matchHash(window.location.hash).route.id,
+        lessMotion: window.matchMedia(LESS_MOTION_QUERY).matches,
+        failed,
+      });
+    },
+  );
   const root = createRoot(container, launchRootOptions(launch));
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1647,6 +1679,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
           menuSounds={menuSounds}
+          menuMusic={menuMusic}
           transfer={buildTransferPort(worldCorridorPort)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}

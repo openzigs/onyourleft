@@ -58,6 +58,27 @@ export interface CueOutput {
    */
   isRunning(): boolean;
   /**
+   * Set the graph's buses from the rider's mix as it is stored now — #2056:
+   * called after a press on the header's mute or a volume on Settings, so a
+   * sound already playing follows the choice at once rather than at the next
+   * sound. ⚠️ **Never creates or resumes a context**: a mute pressed before any
+   * sound has played must not start the platform's audio thread, and with no
+   * graph there is nothing to set — the mix is read when the graph is built.
+   */
+  applyMix(): void;
+  /**
+   * Route the menus' music element into the music bus — #2058. Once per
+   * element, and only after {@link resume}, inside the press that starts the
+   * music; a no-op with no context. The bus stays at 0 until
+   * {@link setMusicOn}.
+   */
+  attachMusic(element: HTMLMediaElement): void;
+  /**
+   * Ramp the music bus up to the rider's music level, or down to 0 — #2058.
+   * A ramp, never a step; it never makes or resumes a context.
+   */
+  setMusicOn(on: boolean): void;
+  /**
    * Let the platform stop running the audio — #447. Suspends a context that is
    * running and does nothing otherwise; never creates one.
    *

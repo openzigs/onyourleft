@@ -754,309 +754,331 @@ export function ActivityDetailView({
     <>
       {embedded ? null : <h2>{activity.name}</h2>}
 
-      <dl className="oyl-ride-summary">
+      {/*
+        #2067: the ride's own page is two columns on a tablet — its figures,
+        traces and laps, then everything else this device holds about it —
+        in the order they are read. Inside a list–detail pane (embedded) the
+        pane is the column, and the two groups simply follow each other.
+      */}
+      <div className={embedded ? undefined : 'oyl-sections oyl-sections--pair'}>
         <div>
-          <dt>Started</dt>
-          <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
-        </div>
-        {/* #1437: the same two names as Home and History, moving first. */}
-        <div>
-          <dt>{MOVING_TIME_LABEL}</dt>
-          <dd>
-            <Reading value={formatDuration(activity.movingTime)} />
-          </dd>
-        </div>
-        <div>
-          <dt>{ELAPSED_TIME_LABEL}</dt>
-          <dd>
-            <Reading value={formatDuration(activity.elapsedTime)} />
-          </dd>
-        </div>
-        {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
+          <dl className="oyl-ride-summary">
+            <div>
+              <dt>Started</dt>
+              <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
+            </div>
+            {/* #1437: the same two names as Home and History, moving first. */}
+            <div>
+              <dt>{MOVING_TIME_LABEL}</dt>
+              <dd>
+                <Reading value={formatDuration(activity.movingTime)} />
+              </dd>
+            </div>
+            <div>
+              <dt>{ELAPSED_TIME_LABEL}</dt>
+              <dd>
+                <Reading value={formatDuration(activity.elapsedTime)} />
+              </dd>
+            </div>
+            {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
             distance known — no row, as on Home and the result card. */}
-        {distance === undefined ? null : (
-          <div>
-            <dt>Distance</dt>
-            <dd>
-              <Reading value={formatDistance(distance, units).value} unit={distanceUnit(units)} />
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt>Average power</dt>
-          <dd>
-            {averagePower === undefined ? (
-              noPowerText(activity.averagePower)
-            ) : (
-              <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
+            {distance === undefined ? null : (
+              <div>
+                <dt>Distance</dt>
+                <dd>
+                  <Reading
+                    value={formatDistance(distance, units).value}
+                    unit={distanceUnit(units)}
+                  />
+                </dd>
+              </div>
             )}
-          </dd>
-        </div>
-        <div>
-          <dt>Position</dt>
-          {/*
+            <div>
+              <dt>Average power</dt>
+              <dd>
+                {averagePower === undefined ? (
+                  noPowerText(activity.averagePower)
+                ) : (
+                  <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Position</dt>
+              {/*
             In words. An indoor ride is the ordinary case here, and #50's first
             criterion is that it renders without a map rather than with an empty
             one — so the view says which it is rather than leaving a hole where
             a map would be.
           */}
-          <dd>{activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}</dd>
-        </div>
-        {/* #785: the races this ride was ridden in, as each room said it —
+              <dd>
+                {activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}
+              </dd>
+            </div>
+            {/* #785: the races this ride was ridden in, as each room said it —
             kept with the ride on this device, one line each, in order (#1360's
             review, N3). No row for a ride in no race. */}
-        {activity.rideFacts?.races === undefined || activity.rideFacts.races.length === 0 ? null : (
-          <div>
-            <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
-            {activity.rideFacts.races.map((race, index) => (
-              <dd key={index}>{raceFactText(race)}</dd>
-            ))}
-          </div>
-        )}
-      </dl>
+            {activity.rideFacts?.races === undefined ||
+            activity.rideFacts.races.length === 0 ? null : (
+              <div>
+                <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
+                {activity.rideFacts.races.map((race, index) => (
+                  <dd key={index}>{raceFactText(race)}</dd>
+                ))}
+              </div>
+            )}
+          </dl>
 
-      <h3>Traces</h3>
+          <h3>Traces</h3>
 
-      {streams === undefined ? (
-        <StatusMessage tone="info">
-          This ride has no per-second data stored on this device, so there is nothing to chart. Its
-          totals above are the whole of what was kept.
-        </StatusMessage>
-      ) : (
-        <>
-          <p className="oyl-muted">
-            {/*
+          {streams === undefined ? (
+            <StatusMessage tone="info">
+              This ride has no per-second data stored on this device, so there is nothing to chart.
+              Its totals above are the whole of what was kept.
+            </StatusMessage>
+          ) : (
+            <>
+              <p className="oyl-muted">
+                {/*
               The reduction, said out loud. #50's fourth criterion is a read
               budget, and a budget the rider cannot see is one that quietly
               stops being met.
             */}
-            {String(streams.sampleCount)} readings a second apart, drawn at up to{' '}
-            {String(CHART_POINTS)} points a trace.
-          </p>
+                {String(streams.sampleCount)} readings a second apart, drawn at up to{' '}
+                {String(CHART_POINTS)} points a trace.
+              </p>
 
-          {chartable.length === 0 ? (
-            <StatusMessage tone="info">
-              This ride stored a track and no sensor channels, so there is nothing to chart.
-            </StatusMessage>
-          ) : (
-            <>
-              {/* #2081: distance is the speed channel summed, so only a ride with one offers it. */}
-              {available.includes('speed') ? (
-                <AxisChoice
-                  kind={axisKind}
-                  onChange={chooseAxis}
-                  distance={distanceState}
-                  unit={unit}
-                />
-              ) : null}
-              <TraceCursor
-                seconds={cursor}
-                saidAt={saidAt}
-                rideSeconds={rideSeconds}
-                onChange={(seconds) => {
-                  moveCursor(seconds, 'key');
-                }}
-                distance={
-                  coverage === undefined || profile === undefined
-                    ? undefined
-                    : distanceText(distanceAt(profile, saidAt), units)
-                }
-                lap={lapAt(bands, saidAt)}
-                readings={chartable.flatMap((series) => {
-                  const trace = traces.get(series.channel);
-                  return trace === undefined ? [] : [{ series, trace }];
-                })}
-              />
-            </>
-          )}
+              {chartable.length === 0 ? (
+                <StatusMessage tone="info">
+                  This ride stored a track and no sensor channels, so there is nothing to chart.
+                </StatusMessage>
+              ) : (
+                <>
+                  {/* #2081: distance is the speed channel summed, so only a ride with one offers it. */}
+                  {available.includes('speed') ? (
+                    <AxisChoice
+                      kind={axisKind}
+                      onChange={chooseAxis}
+                      distance={distanceState}
+                      unit={unit}
+                    />
+                  ) : null}
+                  <TraceCursor
+                    seconds={cursor}
+                    saidAt={saidAt}
+                    rideSeconds={rideSeconds}
+                    onChange={(seconds) => {
+                      moveCursor(seconds, 'key');
+                    }}
+                    distance={
+                      coverage === undefined || profile === undefined
+                        ? undefined
+                        : distanceText(distanceAt(profile, saidAt), units)
+                    }
+                    lap={lapAt(bands, saidAt)}
+                    readings={chartable.flatMap((series) => {
+                      const trace = traces.get(series.channel);
+                      return trace === undefined ? [] : [{ series, trace }];
+                    })}
+                  />
+                </>
+              )}
 
-          {/*
+              {/*
             #2068: every recorded channel, stacked, on one time axis — no
             toggles. Each slot is drawn now and watched; its channel is read
             when it scrolls into view, so the slot keeps its place meanwhile.
           */}
-          {chartable.map((series) => {
-            const trace = traces.get(series.channel);
-            const failed = trace === undefined ? failedReads.get(series.channel) : undefined;
-            // #2194, the owner's ruling of 2026-11-06: with the distance axis
-            // chosen, a failed speed read is said once, by the axis choice,
-            // which already gives the reason; the speed slot then says nothing.
-            const saidByAxis =
-              series.channel === 'speed' &&
-              axisKind === 'distance' &&
-              distanceState.kind === 'failed';
-            return (
-              <div
-                key={series.channel}
-                // #2194: a failed slot holds no chart, so it keeps no chart's height.
-                className={
-                  failed === undefined ? 'oyl-trace-slot' : 'oyl-trace-slot oyl-trace-slot--failed'
-                }
-                data-oyl-trace-slot={series.channel}
-                ref={(element) => {
-                  if (element === null) {
-                    slots.current.delete(series.channel);
-                  } else {
-                    slots.current.set(series.channel, element);
-                  }
-                }}
-              >
-                {trace === undefined ? (
-                  failed !== undefined ? (
-                    saidByAxis ? null : (
-                      // #2194: a read that failed says so, not "Reading…" for good.
-                      <StatusMessage tone="warning">
-                        Could not read this ride&rsquo;s {series.label.toLowerCase()}. {failed}
-                      </StatusMessage>
-                    )
-                  ) : (
-                    <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
-                  )
-                ) : (
-                  <TraceSlot
-                    series={series}
-                    trace={trace}
-                    rideSeconds={rideSeconds}
-                    cursor={cursor}
-                    axis={axis}
-                    laps={bands}
-                    onPick={pickAt}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </>
-      )}
+              {chartable.map((series) => {
+                const trace = traces.get(series.channel);
+                const failed = trace === undefined ? failedReads.get(series.channel) : undefined;
+                // #2194, the owner's ruling of 2026-11-06: with the distance axis
+                // chosen, a failed speed read is said once, by the axis choice,
+                // which already gives the reason; the speed slot then says nothing.
+                const saidByAxis =
+                  series.channel === 'speed' &&
+                  axisKind === 'distance' &&
+                  distanceState.kind === 'failed';
+                return (
+                  <div
+                    key={series.channel}
+                    // #2194: a failed slot holds no chart, so it keeps no chart's height.
+                    className={
+                      failed === undefined
+                        ? 'oyl-trace-slot'
+                        : 'oyl-trace-slot oyl-trace-slot--failed'
+                    }
+                    data-oyl-trace-slot={series.channel}
+                    ref={(element) => {
+                      if (element === null) {
+                        slots.current.delete(series.channel);
+                      } else {
+                        slots.current.set(series.channel, element);
+                      }
+                    }}
+                  >
+                    {trace === undefined ? (
+                      failed !== undefined ? (
+                        saidByAxis ? null : (
+                          // #2194: a read that failed says so, not "Reading…" for good.
+                          <StatusMessage tone="warning">
+                            Could not read this ride&rsquo;s {series.label.toLowerCase()}. {failed}
+                          </StatusMessage>
+                        )
+                      ) : (
+                        <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
+                      )
+                    ) : (
+                      <TraceSlot
+                        series={series}
+                        trace={trace}
+                        rideSeconds={rideSeconds}
+                        cursor={cursor}
+                        axis={axis}
+                        laps={bands}
+                        onPick={pickAt}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
 
-      {/*
+          {/*
         #2081: the ride's power curve, five seconds to an hour, with the
         all-time curve as a second line. Only for a ride with power; read once
         its section scrolls into view.
       */}
-      {available.includes('power') ? (
-        <div data-oyl-curve-slot="" ref={curveSlot}>
-          <RideCurve
-            ride={traces.get('power')?.curve}
-            failed={traces.has('power') ? undefined : failedReads.get('power')}
-            allTime={allTime}
-          />
-        </div>
-      ) : null}
+          {available.includes('power') ? (
+            <div data-oyl-curve-slot="" ref={curveSlot}>
+              <RideCurve
+                ride={traces.get('power')?.curve}
+                failed={traces.has('power') ? undefined : failedReads.get('power')}
+                allTime={allTime}
+              />
+            </div>
+          ) : null}
 
-      {/*
+          {/*
         #2069: the ride's time in zone, as Analysis draws it — a bar chart and
         its table per basis. Only for a ride with power or heart rate, and only
         where there is an analysis port to read the rider's thresholds from.
       */}
-      {analysis === undefined ||
-      !(available.includes('power') || available.includes('heartRate')) ? null : (
-        <div data-oyl-zones-slot="" ref={zonesSlot}>
-          <RideZones state={rideZones} />
+          {analysis === undefined ||
+          !(available.includes('power') || available.includes('heartRate')) ? null : (
+            <div data-oyl-zones-slot="" ref={zonesSlot}>
+              <RideZones state={rideZones} />
+            </div>
+          )}
+
+          <h3>Laps</h3>
+          {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
+          <LapsTable laps={laps} units={units} />
         </div>
-      )}
 
-      <h3>Laps</h3>
-      {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
-      <LapsTable laps={laps} units={units} />
-
-      {/*
+        <div>
+          {/*
         #1319: a ride with a workout lists its blocks, under their own
         heading after the laps — two tables, never one (WorkoutBlocksTable).
         A ride with no workout renders nothing here.
       */}
-      {activity.rideFacts?.workoutBlocks === undefined ? null : (
-        <>
-          <h3>Workout blocks</h3>
-          <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
-        </>
-      )}
+          {activity.rideFacts?.workoutBlocks === undefined ? null : (
+            <>
+              <h3>Workout blocks</h3>
+              <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
+            </>
+          )}
 
-      {/*
+          {/*
         #388. Only for a ride the side camera filmed — the owner's ruling puts
         the report on the ride's own page and nowhere else, and a ride with no
         report renders nothing here at all.
       */}
-      <SideCameraSection sideCamera={sideCamera} />
+          <SideCameraSection sideCamera={sideCamera} />
 
-      {/*
+          {/*
         #804, #805. A model's write-up of this ride, on every ride's page and
         below the side camera's report, never in place of it (ADR 0035 D-3):
         the saved one, screened again, and the press that asks for a new one.
         It sends nothing until that is pressed. With no instance it is one
         sentence.
       */}
-      <RideWriteUpSection
-        instance={instanceWriteUp}
-        activityId={activity.id}
-        initial={savedWriteUp}
-        reread={async () =>
-          port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
-        }
-      />
+          <RideWriteUpSection
+            instance={instanceWriteUp}
+            activityId={activity.id}
+            initial={savedWriteUp}
+            reread={async () =>
+              port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
+            }
+          />
 
-      {/*
+          {/*
         #793. The ride's "may be raced" consent (ADR 0021 D-5.1): off unless
         the rider turns it on here, revocable here, and never the share
         setting. On every ride, because consent is per ride.
       */}
-      <RaceConsentSection port={port} activity={activity} />
+          <RaceConsentSection port={port} activity={activity} />
 
-      {/*
+          {/*
         #836. The rider's own note on this ride, for the analysis to look back
         on: one passage of at most 900 characters, kept here and synced.
       */}
-      <RiderTextBox
-        port={riderText}
-        kind="note"
-        textKey={activity.id}
-        maximum={MAXIMUM_RIDE_NOTE_CHARACTERS}
-        words={NOTE_WORDS}
-        headingLevel={3}
-      />
+          <RiderTextBox
+            port={riderText}
+            kind="note"
+            textKey={activity.id}
+            maximum={MAXIMUM_RIDE_NOTE_CHARACTERS}
+            words={NOTE_WORDS}
+            headingLevel={3}
+          />
 
-      {activity.hasPosition ? (
-        <>
-          <h3>Route</h3>
-          {/*
+          {activity.hasPosition ? (
+            <>
+              <h3>Route</h3>
+              {/*
             The geometry the map is handed is chosen here, and it is the whole
             of #63's sixth criterion: with the shared view open the map receives
             the **trimmed** segments, and the untrimmed ones are not in its
             props, its state or the DOM. ADR 0004 decision C — obfuscation is
             applied in the payload, never by the renderer.
           */}
-          <MapPanel
-            port={mapPort}
-            basemap={basemap}
-            tiles={tiles}
-            track={showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack}
-          />
+              <MapPanel
+                port={mapPort}
+                basemap={basemap}
+                tiles={tiles}
+                track={
+                  showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack
+                }
+              />
 
-          <h3>What a shared copy would contain</h3>
-          {showShared ? (
-            <SharedSummary track={shared} own={activity.distance} />
-          ) : (
-            <>
-              {/* #1013: what a published copy would hide is a privacy sentence,
+              <h3>What a shared copy would contain</h3>
+              {showShared ? (
+                <SharedSummary track={shared} own={activity.distance} />
+              ) : (
+                <>
+                  {/* #1013: what a published copy would hide is a privacy sentence,
                 kept on the screen whole. */}
-              <p className="oyl-muted" data-oyl-kept-visible="">
-                Your own view shows your own track, whole — this ride is yours. A copy published
-                anywhere else would have your privacy zones applied to it first.
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  void revealShared();
-                }}
-              >
-                Show what a shared copy would contain
-              </Button>
+                  <p className="oyl-muted" data-oyl-kept-visible="">
+                    Your own view shows your own track, whole — this ride is yours. A copy published
+                    anywhere else would have your privacy zones applied to it first.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      void revealShared();
+                    }}
+                  >
+                    Show what a shared copy would contain
+                  </Button>
+                </>
+              )}
             </>
-          )}
-        </>
-      ) : undefined}
+          ) : undefined}
 
-      {embedded ? null : <WayOut />}
+          {embedded ? null : <WayOut />}
+        </div>
+      </div>
     </>
   );
 }
