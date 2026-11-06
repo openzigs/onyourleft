@@ -129,8 +129,11 @@ export function menuCueFor(target: EventTarget | null): MenuCueName | undefined 
   return 'select';
 }
 
-/** Whether a menu sound may play at all, for this press. */
-function quiet(context: PressContext): boolean {
+/**
+ * Whether the menus' sound may play at all, for this press — and, since
+ * #2058, whether the menus' music may (`menu-music.ts` asks the same question).
+ */
+export function quiet(context: PressContext): boolean {
   return (
     context.immersive ||
     isRideRoute(context.routeId) ||
