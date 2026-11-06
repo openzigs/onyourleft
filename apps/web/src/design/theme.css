@@ -2020,6 +2020,7 @@ html {
   flex: none;
   align-items: center;
   gap: var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
   font-variant-numeric: tabular-nums;
 }
 

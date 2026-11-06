@@ -632,8 +632,8 @@ function SensorRow({
  * A sensor's battery as a badge — #2047, compact since the owner's review of
  * #2045: the glyph filled to the level and the number on screen, and `low`
  * beside it at or under the threshold, in words before the warning pair (SC
- * 1.4.1). The rest of `batteryWords` is said to a screen reader only, so the
- * badge's text is still *Battery 20%, low — charge it or change it soon*.
+ * 1.4.1). The rest of `batteryBadgeWords` is said to a screen reader only, so
+ * the badge's text is still *Battery 20%, low — charge it or change it soon*.
  */
 function BatteryBadge({ level }: { readonly level: Percent }): JSX.Element {
   const words = batteryBadgeWords(level);
