@@ -19,6 +19,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ARRIVING_REALISTIC_QUALITY,
   DISPLAY_RATE,
   FRAME_MS_REDUCE_ABOVE,
   HEADROOM_REDUCE_ABOVE,
@@ -27,17 +28,21 @@ import {
   INITIAL_REALISTIC_QUALITY,
   QUALITY_LADDER,
   REALISTIC_LADDER,
+  REALISTIC_SETTLING_SAMPLES,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SHADOW_MAP_OFF,
   SUSTAINED_SAMPLES,
   TARGET_FRAMES_PER_SECOND,
+  frameTimeHot,
   keepsShadowMap,
   nextQuality,
   nextWorldQuality,
   qualitySettings,
   readShadowMapChoice,
+  realisticWorldArrived,
   rungFor,
+  thermallyHot,
   worldRung,
   type QualityLevel,
   type QualitySample,
@@ -669,6 +674,65 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
   it('is never reached from a stylised start, however cool the device', () => {
     const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
     expect(sustainWorld(stylised, COOL, SUSTAINED_SAMPLES * 10).realistic).toBe(false);
+  });
+});
+
+describe('the realistic ladder waits for its world — #2289', () => {
+  function sustainWorld(
+    state: WorldQualityState,
+    sample: QualitySample,
+    count: number,
+  ): WorldQualityState {
+    let current = state;
+    for (let index = 0; index < count; index += 1) {
+      current = nextWorldQuality(current, sample);
+    }
+    return current;
+  }
+
+  it('is not fed at all while the realistic world is arriving, however long and however hot', () => {
+    const waited = sustainWorld(ARRIVING_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 20);
+    expect(waited).toEqual(ARRIVING_REALISTIC_QUALITY);
+    expect(worldRung(waited)).toBe(REALISTIC_LADDER[0]);
+  });
+
+  it('ignores the settling window once the world is here, then is fed as before', () => {
+    const arrived = realisticWorldArrived(ARRIVING_REALISTIC_QUALITY);
+    expect(arrived.settling).toBe(REALISTIC_SETTLING_SAMPLES);
+    const settled = sustainWorld(arrived, HOT, REALISTIC_SETTLING_SAMPLES);
+    // Nothing moved, not even the pressure: the window is not a head start.
+    expect(settled).toEqual({ ...INITIAL_REALISTIC_QUALITY, settling: 0 });
+    // A whole run after it, less one sample: still the top.
+    const almost = sustainWorld(settled, HOT, SUSTAINED_SAMPLES - 1);
+    expect(almost.quality.level).toBe(0);
+    expect(nextWorldQuality(almost, HOT).quality.level).toBe(1);
+  });
+
+  it('leaves for the stylised top exactly as before once settled — the thresholds are not raised', () => {
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      HOT,
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const left = sustainWorld(settled, HOT, SUSTAINED_SAMPLES * 2);
+    expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
+    expect(REALISTIC_SETTLING_SAMPLES).toBe(SUSTAINED_SAMPLES);
+    expect(FRAME_MS_REDUCE_ABOVE).toBe(45);
+    expect(SUSTAINED_SAMPLES).toBe(30);
+  });
+
+  it('leaves a stylised state alone when the world arrives after the ride left realism', () => {
+    const stylised: WorldQualityState = { realistic: false, quality: { level: 2, pressure: 4 } };
+    expect(realisticWorldArrived(stylised)).toBe(stylised);
+  });
+
+  it('names its two hot signals as the ladder reads them', () => {
+    expect(thermallyHot({ frameMs: 10, thermalHeadroom: HEADROOM_REDUCE_ABOVE + 0.01 })).toBe(true);
+    expect(thermallyHot({ frameMs: 10, thermalHeadroom: HEADROOM_REDUCE_ABOVE })).toBe(false);
+    expect(thermallyHot({ frameMs: 10, thermalHeadroom: Number.NaN })).toBe(false);
+    expect(thermallyHot({ frameMs: 10 })).toBe(false);
+    expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE + 0.1 })).toBe(true);
+    expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE })).toBe(false);
   });
 });
 

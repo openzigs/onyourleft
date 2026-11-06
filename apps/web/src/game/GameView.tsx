@@ -69,11 +69,12 @@ import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wa
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
+  ARRIVING_REALISTIC_QUALITY,
   INITIAL_QUALITY,
-  INITIAL_REALISTIC_QUALITY,
   keepsShadowMap,
   nextWorldQuality,
   qualitySettings,
+  realisticWorldArrived,
   readShadowMapChoice,
   rungFor,
   worldRung,
@@ -82,6 +83,8 @@ import {
   type WorldQualityState,
 } from './quality';
 import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from './realistic-assets';
+import { writeRealisticReport } from './realistic-report';
+import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
@@ -1010,6 +1013,12 @@ function GameScreen({
    */
   const qualityRef = useRef<WorldQualityState>(STYLISED_START);
   /**
+   * THIS ride's record of why the realistic ladder moved — #2289. A new one
+   * for each realistic ride; none for a stylised one. What it returns is kept
+   * on the device (`realistic-report.ts`) and shown under Settings › Game world.
+   */
+  const realisticWatchRef = useRef<RealisticWatch | undefined>(undefined);
+  /**
    * The kit colour THIS ride is drawn in — #623. Read when the ride starts, as
    * the mass is, and handed to the view when the view exists: the view may be
    * built after `start`, because `three` arrives asynchronously.
@@ -1855,7 +1864,10 @@ function GameScreen({
       } catch {
         seasonRef.current = NO_SEASON;
       }
-      qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
+      // #2289: a realistic ride does not feed the ladder until its world has
+      // arrived and settled. @see quality.ts REALISTIC_SETTLING_SAMPLES
+      qualityRef.current = realistic ? ARRIVING_REALISTIC_QUALITY : STYLISED_START;
+      realisticWatchRef.current = realistic ? new RealisticWatch() : undefined;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
       setWorldNotice(undefined);
@@ -2277,6 +2289,8 @@ function GameScreen({
                 return;
               }
               if (outcome.loaded) {
+                // #2289: the next frames upload the world; they are not counted.
+                qualityRef.current = realisticWorldArrived(qualityRef.current);
                 view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
                 return;
               }
@@ -3031,10 +3045,18 @@ function GameScreen({
       if (frameMs !== undefined) {
         const previous = qualityRef.current;
         const forecast = headroom.latest();
-        const next = nextWorldQuality(previous, {
-          frameMs,
-          thermalHeadroom: forecastForFrame(forecast, spentReading),
-        });
+        const sample = { frameMs, thermalHeadroom: forecastForFrame(forecast, spentReading) };
+        const next = nextWorldQuality(previous, sample);
+        // #2289: why the realistic ladder moved, kept where the owner can read it.
+        const report = realisticWatchRef.current?.observe(
+          previous,
+          next,
+          sample,
+          simulation.state.elapsed,
+        );
+        if (report !== undefined) {
+          writeRealisticReport(deviceStorage(), report);
+        }
         if (
           next.quality.level !== previous.quality.level ||
           next.realistic !== previous.realistic

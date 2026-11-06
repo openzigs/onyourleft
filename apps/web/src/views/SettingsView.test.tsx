@@ -63,6 +63,7 @@ import {
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 import { readRealisticWorldChoice } from '../game/world-preference';
+import { writeRealisticReport } from '../game/realistic-report';
 import { DRAFT_READING_STORAGE_KEY, readDraftReadingChoice } from '../game/draft-preference';
 import { OSM_ATTRIBUTION, readBasemapConfig, type BasemapConfig } from '../map/basemap';
 import { MAP_TILES_STORAGE_KEY, readMapTilesChoice } from '../map/tiles-preference';
@@ -1085,6 +1086,43 @@ describe('the game world — #475', () => {
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
     mounted.unmount();
+  });
+
+  it('says why the last realistic ride left the realistic world, from what that ride kept — #2289', async () => {
+    const store = disk();
+    // Nothing kept: nothing said.
+    const before = await settings(store);
+    const nothing = before.container.querySelector('.oyl-world__report');
+    before.unmount();
+    expect(nothing).toBeNull();
+    writeRealisticReport(store, {
+      frameMsLimit: 45,
+      headroomLimit: 0.85,
+      settling: { frames: 30, slow: 3, worstMs: 280 },
+      steps: [
+        {
+          rung: 1,
+          left: true,
+          rideSeconds: 92,
+          frames: 30,
+          overFrameMs: 30,
+          overHeadroom: 0,
+          medianMs: 58,
+          worstMs: 71,
+        },
+      ],
+    });
+    const mounted = await settings(store);
+    const copy = (
+      mounted.container.querySelector('.oyl-world .oyl-world__report')?.textContent ?? ''
+    ).replace(/\s+/g, ' ');
+    mounted.unmount();
+    expect(copy).toContain('The last ride on this device in the realistic world:');
+    expect(copy).toContain('3 took longer than 45 ms, the longest 280 ms.');
+    expect(copy).toContain(
+      'It left the realistic world 92 s into the ride, from realistic rung 2, on frame time',
+    );
+    expect(copy).not.toContain('It did not leave the realistic world.');
   });
 });
 

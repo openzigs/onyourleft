@@ -31,6 +31,7 @@ import type { GameRenderer, SceneFrame } from './port';
 import {
   FRAME_MS_REDUCE_ABOVE,
   REALISTIC_LADDER,
+  REALISTIC_SETTLING_SAMPLES,
   SUSTAINED_SAMPLES,
   qualitySettings,
   type QualitySettings,
@@ -42,6 +43,7 @@ import {
   type RealisticWorldOutcome,
 } from './realistic-assets';
 import { PEOPLE_NEAR_MAX } from './people';
+import { readRealisticReport, realisticReportLines } from './realistic-report';
 import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { STRUCTURE_KINDS } from './scatter';
 import { sceneFrame } from './scene';
@@ -312,6 +314,10 @@ describe('which world a ride draws — #475', () => {
     await settleLoad({ loaded: true });
     told = [];
     const hot = FRAME_MS_REDUCE_ABOVE + 10;
+    // #2289: the swap's frames are not counted, however slow…
+    await frames(hot, REALISTIC_SETTLING_SAMPLES);
+    expect(told).toEqual([]);
+    // …and a realistic world that stays slow after them still leaves.
     await frames(hot, SUSTAINED_SAMPLES + 2);
     await frames(hot, SUSTAINED_SAMPLES + 2);
     expect(told).toEqual([REALISTIC_LADDER[1], qualitySettings(0)]);
@@ -325,24 +331,78 @@ describe('which world a ride draws — #475', () => {
     expect(told.at(-1)).toEqual(qualitySettings(0));
   });
 
-  it('does not hand realism back, or say a load failed, to a ride that already left it — #475’s review', async () => {
+  it('counts exactly the settling window and no more: the first slow frame after it starts the run — #2289', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await ride();
-    // Hot while the world is still arriving: out of realism for the ride.
+    await settleLoad({ loaded: true });
+    told = [];
     const hot = FRAME_MS_REDUCE_ABOVE + 10;
-    await frames(hot, SUSTAINED_SAMPLES + 2);
-    await frames(hot, SUSTAINED_SAMPLES + 2);
-    expect(told.at(-1)).toEqual(qualitySettings(0));
-    expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    // One frame short of a whole run after the window: no step yet.
+    await frames(hot, REALISTIC_SETTLING_SAMPLES + SUSTAINED_SAMPLES - 1);
+    expect(told).toEqual([]);
+    // The run's last frame steps down.
+    await frames(hot, 1);
+    expect(told).toEqual([REALISTIC_LADDER[1]]);
+  });
+
+  it('does not leave realism for slow frames drawn while the world arrives, or for the swap’s — #2289', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
     const before = told.length;
-    // A load that fails now must not replace the notice the rider has with
-    // one about a world the ride is no longer asking for.
-    await settleLoad(OFFLINE);
+    // Three whole runs of slow frames while the ~33 MB arrive: on the Pixel 8
+    // on 2026-11-06 two were enough to leave before a realistic frame was drawn.
+    const slow = FRAME_MS_REDUCE_ABOVE + 10;
+    await frames(slow, 3 * (SUSTAINED_SAMPLES + 2));
     expect(told.length).toBe(before);
+    expect(mounted?.container.textContent).not.toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    // The world arrives and is drawn, and its upload frames are slower still.
+    await settleLoad({ loaded: true });
+    expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
+    await frames(300, REALISTIC_SETTLING_SAMPLES);
+    // Then a world the device draws comfortably stays realistic.
+    await frames(1000 / 60, 3 * (SUSTAINED_SAMPLES + 2));
+    expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
+    expect(told.every((each) => each.world === 'realistic')).toBe(true);
+    expect(mounted?.container.textContent).not.toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    // …and what the swap cost is kept where the owner can read it.
+    const report = readRealisticReport(localStorage);
+    expect(report?.settling).toEqual({
+      frames: REALISTIC_SETTLING_SAMPLES,
+      slow: REALISTIC_SETTLING_SAMPLES,
+      worstMs: 300,
+    });
+    expect(report?.steps).toEqual([]);
+    expect(
+      realisticReportLines(report ?? { frameMsLimit: 0, headroomLimit: 0, steps: [] }),
+    ).toContain('It did not leave the realistic world.');
+  });
+
+  it('keeps why it left on the device: the signal, the readings and the rung — #2289', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await settleLoad({ loaded: true });
+    await frames(1000 / 60, REALISTIC_SETTLING_SAMPLES);
+    const hot = FRAME_MS_REDUCE_ABOVE + 10;
+    await frames(hot, SUSTAINED_SAMPLES);
+    await frames(hot, SUSTAINED_SAMPLES);
     expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
-    const said = realisticWorldNotice(OFFLINE, false);
-    expect(said).toBeDefined();
-    expect(mounted?.container.textContent).not.toContain(said);
+    const report = readRealisticReport(localStorage);
+    expect(report?.settling).toMatchObject({ frames: REALISTIC_SETTLING_SAMPLES, slow: 0 });
+    expect(report?.steps.map((step) => [step.rung, step.left])).toEqual([
+      [0, false],
+      [1, true],
+    ]);
+    const left = report?.steps[1];
+    // Frame time fired, every sample of the window; jsdom reports no forecast.
+    expect(left).toMatchObject({
+      frames: SUSTAINED_SAMPLES,
+      overFrameMs: SUSTAINED_SAMPLES,
+      overHeadroom: 0,
+      medianMs: hot,
+      worstMs: hot,
+    });
+    expect(left?.headroomMax).toBeUndefined();
+    expect(left?.rideSeconds).toBeGreaterThan(0);
   });
 
   it('does not touch a ride that ended before the world arrived', async () => {

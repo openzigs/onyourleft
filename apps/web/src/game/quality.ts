@@ -1053,6 +1053,14 @@ export interface WorldQualityState {
   readonly realistic: boolean;
   /** The level on whichever ladder {@link realistic} names. */
   readonly quality: QualityState;
+  /**
+   * How many more drawn frames the realistic ladder ignores — #2289. Absent or
+   * 0: every sample is fed. `Infinity` while the realistic world is still
+   * arriving ({@link ARRIVING_REALISTIC_QUALITY}), and
+   * {@link REALISTIC_SETTLING_SAMPLES} from the moment it is handed to the
+   * view ({@link realisticWorldArrived}). Read only while {@link realistic}.
+   */
+  readonly settling?: number;
 }
 
 /**
@@ -1062,6 +1070,60 @@ export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
   realistic: true,
   quality: INITIAL_QUALITY,
 };
+
+/**
+ * How many drawn frames the realistic ladder ignores once the realistic world
+ * is handed to the view — #2289.
+ *
+ * ## Why the first frames of the realistic world are not evidence
+ *
+ * The view builds the realistic world on the first frame drawn after the swap
+ * (`three-renderer.ts` §`#applyWorld`): its programs are linked and its
+ * textures uploaded on the frame that first draws them, as three does unasked
+ * (`three-renderer.ts` §`uploadRealisticTexturesOf` is the browser gate's,
+ * not the product's). Those frames measure the swap, not the world, and on the
+ * owner's Pixel 8 on 2026-11-06 they were enough, with the stylised frames
+ * drawn while the ~33 MB arrived, to take a ride out of realism within about
+ * three seconds — before it had drawn the realistic world at all.
+ *
+ * ## Why this number
+ *
+ * {@link SUSTAINED_SAMPLES}: one whole decision window. The ladder cannot be
+ * moved by fewer than that many hot samples, so a swap that costs fewer slow
+ * frames than this cannot by itself start a step; a swap that costs more is a
+ * world the device is not drawing comfortably, and the window after it is
+ * the ladder's again. ⚠️ **Chosen, not measured on a phone**: the lane that
+ * wrote it could not run one. Every realistic ride now records what its
+ * settling cost — `realistic-report.ts`, shown under Settings › Game world —
+ * so the owner's next Pixel 8 ride measures it, and this is the constant to
+ * change if that reading says the swap costs more frames than this.
+ *
+ * ⚠️ It does **not** raise {@link FRAME_MS_REDUCE_ABOVE} or
+ * {@link SUSTAINED_SAMPLES}: a realistic world that is genuinely too slow
+ * still leaves, {@link REALISTIC_SETTLING_SAMPLES} frames later than before.
+ */
+export const REALISTIC_SETTLING_SAMPLES = SUSTAINED_SAMPLES;
+
+/**
+ * A ride that chose the realistic world, while that world is still arriving —
+ * #2289. The ladder is not fed at all: what the view draws meanwhile is the
+ * stylised world (`three-renderer.ts` §`#applyWorld`), and its frame times say
+ * nothing about the realistic one. {@link realisticWorldArrived} starts the
+ * settling.
+ */
+export const ARRIVING_REALISTIC_QUALITY: WorldQualityState = {
+  ...INITIAL_REALISTIC_QUALITY,
+  settling: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * The state once the realistic world is handed to the view: the next
+ * {@link REALISTIC_SETTLING_SAMPLES} drawn frames are ignored, then the ladder
+ * is fed — #2289. A ride that has left realism is returned as it is.
+ */
+export function realisticWorldArrived(state: WorldQualityState): WorldQualityState {
+  return state.realistic ? { ...state, settling: REALISTIC_SETTLING_SAMPLES } : state;
+}
 
 /**
  * The next state after one more measurement, on whichever ladder the ride is.
@@ -1084,6 +1146,12 @@ export function nextWorldQuality(
   if (!state.realistic) {
     return { realistic: false, quality: nextQuality(state.quality, sample) };
   }
+  // #2289: the world is arriving, or its first frames are the swap's.
+  // @see REALISTIC_SETTLING_SAMPLES
+  const settling = state.settling ?? 0;
+  if (settling > 0) {
+    return { ...state, settling: settling - 1 };
+  }
   const moved = step(state.quality, sample, REALISTIC_LADDER.length - 1);
   if (moved.pastTheFloor) {
     return { realistic: false, quality: INITIAL_QUALITY };
@@ -1102,14 +1170,25 @@ export function worldRung(state: WorldQualityState): QualitySettings {
 
 /** Whether this sample argues for less work. */
 function isHot(sample: QualitySample): boolean {
+  return thermallyHot(sample) || frameTimeHot(sample);
+}
+
+/**
+ * Whether this sample's thermal forecast argues for less work — one of
+ * {@link isHot}'s two signals, exported so `realistic-watch.ts` names the one
+ * that fired by the same test the ladder applies (#2289).
+ */
+export function thermallyHot(sample: QualitySample): boolean {
   const headroom = sample.thermalHeadroom;
   // ⚠️ `NaN > x` is false, so a vendor returning NaN reads as "not hot" here and
   // the frame time is what decides. That is the intended behaviour and it is
   // stated because the opposite reading — NaN as hot — would throttle every
   // device whose vendor never implemented the API.
-  if (headroom !== undefined && Number.isFinite(headroom) && headroom > HEADROOM_REDUCE_ABOVE) {
-    return true;
-  }
+  return headroom !== undefined && Number.isFinite(headroom) && headroom > HEADROOM_REDUCE_ABOVE;
+}
+
+/** Whether this sample's frame time argues for less work — {@link isHot}'s other signal. */
+export function frameTimeHot(sample: QualitySample): boolean {
   return sample.frameMs > FRAME_MS_REDUCE_ABOVE;
 }
 

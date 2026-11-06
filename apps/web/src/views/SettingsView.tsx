@@ -141,6 +141,7 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { readRealisticReport, realisticReportLines } from '../game/realistic-report';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
 import {
@@ -1436,6 +1437,8 @@ function GameWorldPanel({
   readonly storage: PreferenceStorage | undefined;
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  // #2289: why the last realistic ride stepped down or left, read once.
+  const [report] = useState(() => readRealisticReport(storage));
   // #1622: on by default, in either world — only a stored "off" turns it off.
   const [decorated, setDecorated] = useState(() => readHolidayDecorations(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
@@ -1491,6 +1494,19 @@ function GameWorldPanel({
           Ride in the realistic world
         </label>
       </p>
+      {/* #2289: what the last realistic ride's ladder read — the owner's
+        diagnostic, and a rider's answer to "why did it go standard". Counts and
+        milliseconds only: `realistic-report.ts` keeps no coordinate. */}
+      {report === undefined ? null : (
+        <div className="oyl-world__report">
+          <p className="oyl-muted">The last ride on this device in the realistic world:</p>
+          {realisticReportLines(report).map((line) => (
+            <p className="oyl-muted" key={line}>
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
       <p>
         <label className="oyl-announce__switch">
           <input

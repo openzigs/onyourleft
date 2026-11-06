@@ -4124,3 +4124,42 @@ build gives the pair. Its hard limit is #1523's: the top rung off the GPU ceilin
 limit with people on and inside it with `-people` is **no room**: `QualitySettings.people` goes to
 0 on the top realistic rung too, until there is — the owner's ruling. Post the table on #1541 and
 #733.
+
+## Part AK — does the Pixel 8 stay in the realistic world? ([#2289](https://github.com/openzigs/onyourleft/issues/2289))
+
+**Added 2026-11-06** by #2289. Checked with `grep '^## Part'` for a duplicate letter first — AJ was
+the last, and AK was free. It changes no resistance: no trainer is needed, and no debugger either.
+
+On 2026-11-06 the owner's Pixel 8 (Android 17, WebView 156, `main` at `d1df5f74`) left the realistic
+world within seconds of a ride starting. Two things counted against the realistic ladder that were
+not the realistic world: the stylised frames drawn while the ~33 MB arrived, and the frames that
+upload it. Since #2289 the ladder is not fed until the world is here, and then ignores
+`quality.ts` §`REALISTIC_SETTLING_SAMPLES` (30) drawn frames; the 45 ms and 30-frame thresholds are
+unchanged. **The 30 is chosen, not measured** — the lane that wrote it ran no phone — and this Part
+is its measurement. Each realistic ride now keeps what its ladder read (`realistic-report.ts`), and
+Settings › Game world shows it under the switch: what the settling window cost, and each step down,
+with the signal that fired (frame time, the thermal forecast, or both), the readings and the rung.
+It holds no coordinate.
+
+| Step | What to do |
+|---|---|
+| AK1 | Install #2289's merge on the Pixel 8. Settings › Game world: **Ride in the realistic world** on |
+| AK2 | Ride any route for **5 minutes**, on charge, from a cool start (AH3's band) |
+| AK3 | Open Settings › Game world and copy the lines under the switch into the table below, word for word |
+| AK4 | Only if the ride left: a second 5-minute ride, cooled first, to see whether the reading repeats |
+
+| Reading (AK3) | Ride 1 | Ride 2 (AK4) |
+|---|---|---|
+| Settling: frames over 45 ms of the 30, and the longest, ms | | |
+| Stayed realistic for 5 minutes? | | |
+| If it stepped down: after how many seconds, from which rung, on which signal | | |
+| If it stepped down: frames over 45 ms of the last 30, median and longest, ms | | |
+| If it stepped down: the highest thermal forecast, or "none reported" | | |
+
+**Reading it.** If more than about half the settling frames are over 45 ms and the longest is
+several hundred milliseconds, the swap is longer than the window: raise
+`REALISTIC_SETTLING_SAMPLES` to cover it, never the thresholds. If the settling is cheap and the ride
+still leaves **on frame time** with a median well over 45 ms from the reduced rung (the report's
+"realistic rung 2"), the phone is genuinely too slow for it, and the proposal for the owner is a lower one — for example no
+people near and a lower render scale — rather than leaving. If it leaves **on the thermal
+forecast**, that is heat, which #2289 does not change. Post the table on #2289.
