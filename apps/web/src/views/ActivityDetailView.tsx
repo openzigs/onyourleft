@@ -69,10 +69,10 @@
  * the renderer.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 
 import { metres, type Metres, type PowerDurationCurve } from '@onyourleft/domain';
-import { activityId as toActivityId, type ActivityId } from '@onyourleft/store';
+import { activityId as toActivityId, type ActivityId, type UnitSystem } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
@@ -111,6 +111,7 @@ import {
   type RideAxis,
 } from '../detail/axis';
 import { curveRows, onRideDurations } from '../detail/curve';
+import type { PickKind } from '../detail/TraceChart';
 import type { SharedTrack } from '../detail/privacy';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
@@ -252,8 +253,19 @@ type AllTimeState =
 /**
  * #2081: the distance axis, as the rider's choice finds it — still to be read
  * (it comes with the speed chart's read), or read and covering no ground.
+ * #2194: or the speed read failed, with why.
  */
-type DistanceState = 'reading' | 'ready' | 'none';
+type DistanceState =
+  | { readonly kind: 'reading' | 'ready' | 'none' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * #2194: how long a mouse must rest on a chart before the read-out says where
+ * it is. A tap, a click and the keyboard are said at once; a hover moves the
+ * line at once and is said only when it stops, so a screen-reader user who
+ * also uses a mouse hears one reading, not one for every step it crossed.
+ */
+export const HOVER_SETTLE_MS = 400;
 
 /** #2069: the ride's time in zone, before and after its section is read. */
 type ZonesState =
@@ -261,6 +273,11 @@ type ZonesState =
   | { readonly kind: 'ready'; readonly zones: RideZoneAnalysis }
   | { readonly kind: 'none' }
   | { readonly kind: 'failed'; readonly reason: string };
+
+/** #2081: a distance ridden, in the rider's unit, with it. */
+function distanceText(metresRidden: number, units: UnitSystem): string {
+  return `${formatDistance(metres(metresRidden), units).value} ${distanceUnit(units)}`;
+}
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -308,6 +325,13 @@ export function ActivityDetailView({
   const [traces, setTraces] = useState<ReadonlyMap<TraceChannel, Trace>>(new Map());
   // #2068: the shared cursor, in seconds into the ride.
   const [cursor, setCursor] = useState(0);
+  // #2194: where the read-out says the cursor is — the cursor itself, except
+  // while a mouse hovering has not yet rested (`HOVER_SETTLE_MS`).
+  const [saidAt, setSaidAt] = useState(0);
+  const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // #2194: the channels whose read failed, and why. A later read that
+  // succeeds puts its trace in `traces`, which every reader of this prefers.
+  const [failedReads, setFailedReads] = useState<ReadonlyMap<TraceChannel, string>>(new Map());
   // The channels a read has been started for, and which units' reads count.
   const requested = useRef(new Set<TraceChannel>());
   const generation = useRef(0);
@@ -340,6 +364,32 @@ export function ActivityDetailView({
   const rideZones: ZonesState =
     heldZones !== undefined && heldZones.id === id ? heldZones.state : { kind: 'waiting' };
   const curveSeen = id !== undefined && curveSeenFor === id;
+  // #2068, #2081: the one time axis every chart is drawn on — the whole ride,
+  // from the summary — and the distance axis once the speed has been read.
+  // #2194: held, so a move of the cursor hands every chart the same axis and
+  // none redraws its paths (`detail/TraceChart.tsx` §`lines`).
+  const readyStreams = state.kind === 'ready' ? state.overview.streams : undefined;
+  const rideSeconds =
+    readyStreams === undefined ? 0 : readyStreams.sampleCount * Number(readyStreams.sampleInterval);
+  const profile: DistanceProfile | undefined = traces.get('speed')?.distance;
+  const timeline = useMemo(() => timeAxis(rideSeconds), [rideSeconds]);
+  const coverage = useMemo(
+    () =>
+      profile === undefined
+        ? undefined
+        : distanceAxis(profile, DISTANCE_AXIS_TITLE, (metresRidden) =>
+            distanceText(metresRidden, units),
+          ),
+    [profile, units],
+  );
+
+  // #2194: a hover still settling when the page goes is not said afterwards.
+  useEffect(
+    () => () => {
+      clearTimeout(settling.current);
+    },
+    [],
+  );
   const allTime: AllTimeState =
     analysis === undefined
       ? { kind: 'none' }
@@ -390,6 +440,7 @@ export function ActivityDetailView({
     generation.current += 1;
     requested.current.clear();
     setTraces(new Map());
+    setFailedReads(new Map());
   }, [units]);
 
   /**
@@ -447,10 +498,14 @@ export function ActivityDetailView({
             CHART_POINTS,
             Number(state.overview.streams?.sampleInterval ?? 1),
           );
-        } catch {
+        } catch (error: unknown) {
           // A channel that will not read (a corrupt blob) must not stop the
           // channels after it, and may be asked for again on a later pass.
           requested.current.delete(channel);
+          // #2194: and says so, rather than "Reading…" for good.
+          if (generation.current === asked) {
+            setFailedReads((held) => new Map(held).set(channel, reasonOf(error)));
+          }
           continue;
         }
         if (trace === undefined || generation.current !== asked) {
@@ -658,25 +713,37 @@ export function ActivityDetailView({
   const { activity, streams, laps, sideCamera, writeUp: savedWriteUp } = state.overview;
   const available = streams?.channels ?? [];
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
-  // #2068: the one time axis every chart is drawn on — the whole ride, from
-  // the summary, so no chart's own length decides where a minute is.
-  const rideSeconds =
-    streams === undefined ? 0 : streams.sampleCount * Number(streams.sampleInterval);
   // #2081: the laps as stretches of the ride's clock, and the axis the stack shares.
   const bands = streams === undefined ? [] : lapBands(laps, streams.startedAt, rideSeconds);
   const unit = distanceUnit(units);
-  const sayDistance = (metresRidden: number): string =>
-    `${formatDistance(metres(metresRidden), units).value} ${unit}`;
-  const profile: DistanceProfile | undefined = traces.get('speed')?.distance;
-  const coverage =
-    profile === undefined ? undefined : distanceAxis(profile, DISTANCE_AXIS_TITLE, sayDistance);
   const byDistance = axisKind === 'distance' ? coverage : undefined;
+  const speedFailed = failedReads.get('speed');
   const distanceState: DistanceState =
-    profile === undefined ? 'reading' : coverage === undefined ? 'none' : 'ready';
-  const axis: RideAxis = byDistance ?? timeAxis(rideSeconds);
+    profile !== undefined
+      ? { kind: coverage === undefined ? 'none' : 'ready' }
+      : speedFailed === undefined
+        ? { kind: 'reading' }
+        : { kind: 'failed', reason: speedFailed };
+  const axis: RideAxis = byDistance ?? timeline;
   const step = cursorStep(rideSeconds);
-  const pickAt = (seconds: number): void => {
-    setCursor(Math.min(rideSeconds, Math.round(seconds / step) * step));
+  /**
+   * #2194: the keyboard's slider and a tap move the cursor and the read-out
+   * together; a mouse hovering moves the cursor at once and the read-out
+   * once it has rested for {@link HOVER_SETTLE_MS}.
+   */
+  const moveCursor = (seconds: number, how: PickKind | 'key'): void => {
+    setCursor(seconds);
+    clearTimeout(settling.current);
+    if (how === 'hover') {
+      settling.current = setTimeout(() => {
+        setSaidAt(seconds);
+      }, HOVER_SETTLE_MS);
+    } else {
+      setSaidAt(seconds);
+    }
+  };
+  const pickAt = (seconds: number, how: PickKind): void => {
+    moveCursor(Math.min(rideSeconds, Math.round(seconds / step) * step), how);
   };
   // #1054: a stored average that shows as 0 W says nothing was measured.
   const averagePower = shownAveragePower(activity.averagePower);
@@ -798,14 +865,17 @@ export function ActivityDetailView({
                   ) : null}
                   <TraceCursor
                     seconds={cursor}
+                    saidAt={saidAt}
                     rideSeconds={rideSeconds}
-                    onChange={setCursor}
+                    onChange={(seconds) => {
+                      moveCursor(seconds, 'key');
+                    }}
                     distance={
                       coverage === undefined || profile === undefined
                         ? undefined
-                        : sayDistance(distanceAt(profile, cursor))
+                        : distanceText(distanceAt(profile, saidAt), units)
                     }
-                    lap={lapAt(bands, cursor)}
+                    lap={lapAt(bands, saidAt)}
                     readings={chartable.flatMap((series) => {
                       const trace = traces.get(series.channel);
                       return trace === undefined ? [] : [{ series, trace }];
@@ -821,10 +891,23 @@ export function ActivityDetailView({
           */}
               {chartable.map((series) => {
                 const trace = traces.get(series.channel);
+                const failed = trace === undefined ? failedReads.get(series.channel) : undefined;
+                // #2194, the owner's ruling of 2026-11-06: with the distance axis
+                // chosen, a failed speed read is said once, by the axis choice,
+                // which already gives the reason; the speed slot then says nothing.
+                const saidByAxis =
+                  series.channel === 'speed' &&
+                  axisKind === 'distance' &&
+                  distanceState.kind === 'failed';
                 return (
                   <div
                     key={series.channel}
-                    className="oyl-trace-slot"
+                    // #2194: a failed slot holds no chart, so it keeps no chart's height.
+                    className={
+                      failed === undefined
+                        ? 'oyl-trace-slot'
+                        : 'oyl-trace-slot oyl-trace-slot--failed'
+                    }
                     data-oyl-trace-slot={series.channel}
                     ref={(element) => {
                       if (element === null) {
@@ -835,7 +918,16 @@ export function ActivityDetailView({
                     }}
                   >
                     {trace === undefined ? (
-                      <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
+                      failed !== undefined ? (
+                        saidByAxis ? null : (
+                          // #2194: a read that failed says so, not "Reading…" for good.
+                          <StatusMessage tone="warning">
+                            Could not read this ride&rsquo;s {series.label.toLowerCase()}. {failed}
+                          </StatusMessage>
+                        )
+                      ) : (
+                        <p className="oyl-muted">Reading {series.label.toLowerCase()}…</p>
+                      )
                     ) : (
                       <TraceSlot
                         series={series}
@@ -860,7 +952,11 @@ export function ActivityDetailView({
       */}
           {available.includes('power') ? (
             <div data-oyl-curve-slot="" ref={curveSlot}>
-              <RideCurve ride={traces.get('power')?.curve} allTime={allTime} />
+              <RideCurve
+                ride={traces.get('power')?.curve}
+                failed={traces.has('power') ? undefined : failedReads.get('power')}
+                allTime={allTime}
+              />
             </div>
           ) : null}
 
@@ -1057,13 +1153,26 @@ function RideZones({ state }: { readonly state: ZonesState }): JSX.Element | nul
  */
 function RideCurve({
   ride,
+  failed,
   allTime,
 }: {
   /** The ride's own curve, from the power trace; `undefined` until that is read. */
   readonly ride: PowerDurationCurve | undefined;
+  /** #2194: why the power trace's read failed, while it has. */
+  readonly failed?: string | undefined;
   readonly allTime: AllTimeState;
 }): JSX.Element {
   const heading = <h3>Power curve</h3>;
+  if (ride === undefined && failed !== undefined) {
+    return (
+      <>
+        {heading}
+        <StatusMessage tone="warning">
+          Could not read this ride&rsquo;s power, so its power curve cannot be drawn. {failed}
+        </StatusMessage>
+      </>
+    );
+  }
   if (ride === undefined || allTime.kind === 'waiting') {
     return (
       <>
@@ -1164,11 +1273,17 @@ function AxisChoice({
           ))}
         </div>
       </fieldset>
-      {kind !== 'distance' ? null : distance === 'none' ? (
+      {kind !== 'distance' ? null : distance.kind === 'none' ? (
         <StatusMessage tone="info">
           This ride&rsquo;s speed covers no distance, so its charts stay drawn against time.
         </StatusMessage>
-      ) : distance === 'ready' ? null : (
+      ) : distance.kind === 'failed' ? (
+        // #2194: a speed read that failed says so, not "Reading…" for good.
+        <StatusMessage tone="warning">
+          Could not read this ride&rsquo;s speed, so its charts stay drawn against time.{' '}
+          {distance.reason}
+        </StatusMessage>
+      ) : distance.kind === 'ready' ? null : (
         <p className="oyl-muted">Reading the distance ridden…</p>
       )}
     </>
@@ -1187,6 +1302,7 @@ function AxisChoice({
  */
 function TraceCursor({
   seconds,
+  saidAt,
   rideSeconds,
   onChange,
   distance,
@@ -1194,6 +1310,11 @@ function TraceCursor({
   readings,
 }: {
   readonly seconds: number;
+  /**
+   * #2194: the moment the read-out says — {@link seconds}, except while a
+   * hover has not rested. The distance and the lap are the read-out's too.
+   */
+  readonly saidAt: number;
   readonly rideSeconds: number;
   readonly onChange: (seconds: number) => void;
   /** #2081: the distance ridden by then, with its unit, once the distance axis has been read. */
@@ -1205,12 +1326,12 @@ function TraceCursor({
 }): JSX.Element {
   const step = cursorStep(rideSeconds);
   const at = [
-    formatDuration(seconds),
+    formatDuration(saidAt),
     ...(distance === undefined ? [] : [distance]),
     ...(lap === undefined ? [] : [`lap ${String(lap.number)}`]),
   ].join(', ');
   const said = readings.map(({ series, trace }) => {
-    const value = pointAt(trace.points, trace.secondsPerPoint, seconds);
+    const value = pointAt(trace.points, trace.secondsPerPoint, saidAt);
     return `${series.label} ${value === undefined ? 'no reading' : `${series.format(value)} ${series.unit}`}`;
   });
   return (
@@ -1229,7 +1350,8 @@ function TraceCursor({
         }}
       />
       {/* #2081: polite and whole, so a screen reader says every channel's
-          reading each time the cursor moves — by key, tap or hover. */}
+          reading each time the cursor moves — by key or tap at once, and by
+          a hover once it rests (#2194). */}
       <output
         htmlFor={TRACE_CURSOR_ID}
         className="oyl-trace-cursor__reading"
@@ -1262,7 +1384,7 @@ function TraceSlot({
   /** #2081: the axis the stack shares, its laps, and where a tap moves the cursor. */
   readonly axis: RideAxis;
   readonly laps: readonly LapBand[];
-  readonly onPick: (seconds: number) => void;
+  readonly onPick: (seconds: number, how: PickKind) => void;
 }): JSX.Element {
   const here = pointAt(trace.points, trace.secondsPerPoint, cursor);
   // The table is the same trace at reading resolution rather than at drawing

@@ -34,7 +34,7 @@
  * effort, which is the reading a rider would take from it.
  */
 
-import type { JSX, PointerEvent } from 'react';
+import { useMemo, useRef, type JSX, type PointerEvent } from 'react';
 
 import { formatDuration } from '../format';
 
@@ -103,12 +103,24 @@ export interface TraceChartProps {
    */
   readonly cursorReading?: string | undefined;
   /**
-   * A tap or a hover on the drawing, as seconds into the ride — #2081. The
-   * page moves its one cursor there. A keyboard moves the same cursor with
-   * the slider (`views/ActivityDetailView.tsx` §`TraceCursor`).
+   * A tap or a hover on the drawing, as seconds into the ride — #2081 — and
+   * which of the two it was (#2194), so the page can say a tap at once and a
+   * hover only once it rests. The page moves its one cursor there. A keyboard
+   * moves the same cursor with the slider (`views/ActivityDetailView.tsx`
+   * §`TraceCursor`).
    */
-  readonly onPick?: ((seconds: number) => void) | undefined;
+  readonly onPick?: ((seconds: number, how: PickKind) => void) | undefined;
 }
+
+/** How the pointer picked a moment: a tap or click, or a mouse passing over (#2194). */
+export type PickKind = 'tap' | 'hover';
+
+/**
+ * How far a finger may move between going down and coming up and still be a
+ * tap, in CSS pixels — #2194. Further is a scroll (or a drag), which picks
+ * nothing.
+ */
+export const TAP_SLOP_PX = 10;
 
 /** The seconds the time axis covers: the shared span when one is given, else the trace's own. */
 function spanOf(props: TraceChartProps): number {
@@ -247,29 +259,57 @@ export function traceAxes(props: TraceChartProps): TraceAxes {
  * nine bare numbers between them.
  */
 export default function TraceChart(props: TraceChartProps): JSX.Element {
-  const { points, secondsPerPoint, cursor, laps = [], cursorReading, onPick } = props;
-  const extent = traceExtent(points);
-  const segments = traceSegments(points);
+  const { points, secondsPerPoint, cursor, laps = [], cursorReading, onPick, timeSpan } = props;
   const description = describeTrace(props);
   const axes = traceAxes(props);
-  const axis = axisOf(props);
+  // #2194: held while the trace and the axis are, so the paths below are too.
+  const axis = useMemo(
+    () => props.axis ?? timeAxis(timeSpan ?? points.length * secondsPerPoint),
+    [props.axis, timeSpan, points.length, secondsPerPoint],
+  );
   const covered = points.length * secondsPerPoint;
   const cursorX = cursor === undefined ? undefined : axis.fractionAt(cursor) * CHART_WIDTH;
   const xAt = (seconds: number): number => axis.fractionAt(seconds) * CHART_WIDTH;
+  /**
+   * #2194: the trace's paths — up to {@link CHART_WIDTH} points each time —
+   * computed once per trace and axis, not on every move of the cursor, which
+   * is the one prop a hover changes.
+   */
+  const lines = useMemo(() => {
+    const extent = traceExtent(points);
+    return traceSegments(points).map((segment) => ({
+      from: segment.from,
+      d: pathFor(
+        segment.values,
+        segment.from,
+        points.length,
+        extent?.low ?? 0,
+        extent?.high ?? 0,
+        covered,
+        axis,
+      ),
+    }));
+  }, [points, covered, axis]);
+  /** Where a finger or a button went down, until it comes up (#2194). */
+  const down = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
+
+  /** The moment under the pointer, or nothing for a drawing not laid out. */
+  const secondsUnder = (event: PointerEvent<SVGSVGElement>): number | undefined => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return box.width <= 0 ? undefined : axis.secondsAt((event.clientX - box.left) / box.width);
+  };
 
   /**
-   * A tap, or a hover with a mouse, moves the page's cursor to the moment
-   * under the pointer. A touch that drags is left to scroll the page.
+   * A mouse passing over moves the page's cursor as it goes (#2081). A tap or
+   * a click moves it where the pointer comes up — #2194: not where a finger
+   * went down, because every scroll of the page starts with one, and only
+   * when it came up within {@link TAP_SLOP_PX} of where it went down.
    */
-  const pick = (event: PointerEvent<SVGSVGElement>, always: boolean): void => {
-    if (onPick === undefined || (!always && event.pointerType !== 'mouse')) {
-      return;
+  const pick = (event: PointerEvent<SVGSVGElement>, how: PickKind): void => {
+    const at = onPick === undefined ? undefined : secondsUnder(event);
+    if (at !== undefined) {
+      onPick?.(at, how);
     }
-    const box = event.currentTarget.getBoundingClientRect();
-    if (box.width <= 0) {
-      return;
-    }
-    onPick(axis.secondsAt((event.clientX - box.left) / box.width));
   };
 
   return (
@@ -294,10 +334,27 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
         aria-label={description}
         preserveAspectRatio="none"
         onPointerDown={(event) => {
-          pick(event, true);
+          down.current = { x: event.clientX, y: event.clientY };
+        }}
+        onPointerUp={(event) => {
+          const from = down.current;
+          down.current = undefined;
+          if (
+            from !== undefined &&
+            Math.abs(event.clientX - from.x) <= TAP_SLOP_PX &&
+            Math.abs(event.clientY - from.y) <= TAP_SLOP_PX
+          ) {
+            pick(event, 'tap');
+          }
+        }}
+        onPointerCancel={() => {
+          // The browser took the touch for a scroll (`touch-action: pan-y`).
+          down.current = undefined;
         }}
         onPointerMove={(event) => {
-          pick(event, false);
+          if (event.pointerType === 'mouse') {
+            pick(event, 'hover');
+          }
         }}
       >
         <g aria-hidden="true">
@@ -324,9 +381,9 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
               )}
             </g>
           ))}
-          {segments.map((segment) => (
+          {lines.map((line) => (
             <path
-              key={segment.from}
+              key={line.from}
               className="oyl-trace__line"
               // `round` on both, so an isolated reading between two gaps renders
               // as a dot rather than as nothing at all. A zero-length path with a
@@ -335,15 +392,7 @@ export default function TraceChart(props: TraceChartProps): JSX.Element {
               strokeLinecap="round"
               strokeLinejoin="round"
               fill="none"
-              d={pathFor(
-                segment.values,
-                segment.from,
-                points.length,
-                extent?.low ?? 0,
-                extent?.high ?? 0,
-                covered,
-                axis,
-              )}
+              d={line.d}
             />
           ))}
           {cursorX === undefined ? null : (
