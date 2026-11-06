@@ -238,7 +238,20 @@ jobs:
       # these are the required job's own tests, so a failure here and not
       # there is a case that passes only without instrumentation -- a timeout
       # tuned too close (docs/agents/ci.md section 4c), which is worth an issue.
+      #
+      # ⚠️ TWO Vitest workers, not the three Vitest starts on this runner's
+      # four vCPUs (two cores of two threads, docs/agents/ci.md section 4c
+      # "Two Vitest shards -- #2154"): with three, two share a core, and the
+      # whole-ride cases ran past their own timeouts on the EPYC 7763 in the
+      # split's first reading -- the lap race at 10.0 of its 10 s, the 32x
+      # ride at 5.0 of 5 s -- exactly as they had in the one job. On an EPYC
+      # 9V74, two workers ran those cases in two thirds of the time three
+      # did, and this half took no longer (section 4c "Two coverage jobs --
+      # #2285"). No timeout moved: a worker count is a share of the CPU, not
+      # a stop.
       - name: Tests under coverage (1 of 2)
+        env:
+          VITEST_MAX_WORKERS: '2'
         run: pnpm run test:coverage:shard-1
 
       # What the merge reads: this half's results and coverage, which Vitest
@@ -291,8 +304,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Every other file of the run. ⚠️ A failure here opens the nightly
-      # issue too, for the reason the first half's step gives.
+      # issue too, for the reason the first half's step gives. Two workers
+      # for the first half's reason.
       - name: Tests under coverage (2 of 2)
+        env:
+          VITEST_MAX_WORKERS: '2'
         run: pnpm run test:coverage:shard-2
 
       # What the merge reads: this half's results and coverage, which Vitest
