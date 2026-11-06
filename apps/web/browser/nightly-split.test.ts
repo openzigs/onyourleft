@@ -637,14 +637,6 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   const runCommands = (workflow: string): string[] =>
     [...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => String(match[1]).trim());
 
-  it('runs the uninstrumented Vitest files with the preset-route archive check switched on — #2268', () => {
-    // Unset, `preset-bake-archive.test.ts` skips and the step is green over a
-    // check that never ran.
-    const step = /- name: Tests outside coverage\n((?: {8}.*\n)+)/.exec(uncommented(nightly));
-    expect(step?.[1]).toMatch(/^ {8}env:\n {10}OYL_DEMO_BAKE_ARCHIVE_CHECK: '1'\n/);
-    expect(step?.[1]).toMatch(/^ {8}run: pnpm run test:uninstrumented\n/m);
-  });
-
   it('runs the uninstrumented Vitest files, and each half of the nightly browser checks in a job of its own — #1675', () => {
     const commands = runCommands(nightly);
     expect(commands).toContain('pnpm run test:uninstrumented');

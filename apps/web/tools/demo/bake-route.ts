@@ -38,8 +38,9 @@
  *   SHA-256 and the reader version (D-5.2). Without it, a bake that disagrees
  *   with the recorded digests fails, naming which field moved. CI holds the
  *   committed records too (#2268): every pull request checks the archive URL,
- *   reader version and GPX digest offline (`bake-route.test.ts`), and the
- *   nightly workflow bakes from the archive (`preset-bake-archive.test.ts`).
+ *   reader version and GPX digest offline (`bake-route.test.ts`); the
+ *   archive's identity and the file's digest need the archive, which
+ *   `preset-bake-archive.test.ts` bakes from when asked to.
  *
  * ## Adding a preset route (the owner)
  *

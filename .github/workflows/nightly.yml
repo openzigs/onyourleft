@@ -26,12 +26,14 @@
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
 #   owner's ruling of 2026-10-03: the opt-in realistic world, #866's class.
-#   Since #2268 it also runs apps/web/tools/demo/preset-bake-archive.test.ts,
-#   which bakes each preset demo route from the PUBLISHED archive and fails
-#   when the result drifts from its committed `.bake.json` record. It is the
-#   one Vitest file that reaches the network, so it is not on every pull
-#   request; the record's offline half (archive URL, reader version, GPX
-#   digest) stays required, in bake-route.test.ts.
+#   Since #2268 it also selects apps/web/tools/demo/preset-bake-archive.test.ts,
+#   which bakes each preset demo route from the PUBLISHED archive -- and
+#   SKIPS here: it runs only with OYL_DEMO_BAKE_ARCHIVE_CHECK=1, which this
+#   workflow does not set, because tiles.openzigs.com answers a GitHub
+#   runner with HTTP 403 for a range (run 42269980561) while it answers a
+#   rider with 206. It is in this run so that no required run selects it.
+#   The record's offline half (archive URL, reader version, GPX digest) is
+#   required, in bake-route.test.ts.
 #
 #   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
 #   which is the reviewed list in apps/web/browser/nightly.ts, with each
@@ -93,8 +95,6 @@ on:
       - apps/web/package.json
       - apps/web/src/game/near-field.test.ts
       - apps/web/src/game/realistic-textures.test.ts
-      - apps/web/demo/routes/*.bake.json
-      - apps/web/tools/demo/preset-bake-archive.test.ts
       - package.json
       - packages/fit/tools/fuzz/decode-fuzz.test.ts
       - scripts/coverage-summary.mjs
@@ -163,12 +163,7 @@ jobs:
       - name: Install the pinned Chromium
         run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
-      # OYL_DEMO_BAKE_ARCHIVE_CHECK: preset-bake-archive.test.ts reads the
-      # published archive only when it is set (#2268); unset, it skips, so a
-      # local run stays offline.
       - name: Tests outside coverage
-        env:
-          OYL_DEMO_BAKE_ARCHIVE_CHECK: '1'
         run: pnpm run test:uninstrumented
 
       # One worker: the realistic loads draw on the CPU through SwiftShader,

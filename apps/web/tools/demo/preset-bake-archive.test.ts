@@ -15,13 +15,22 @@
  * the reader makes of it changes without a reader-version bump.
  *
  * ⚠️ **It reaches the network**: about ten range requests to
- * `PUBLISHED_BASEMAP_URL`, the reads a rider on the route makes. That is why
- * it is in `test:uninstrumented`, which only the nightly workflow runs in CI,
- * and why it runs only with `OYL_DEMO_BAKE_ARCHIVE_CHECK=1`, which that
- * workflow sets (`nightly-split.test.ts` holds it there): a local
- * `pnpm run test` stays offline. Its baked file goes nowhere; the
- * record is never rewritten here (`demo:bake -- --route <id> --record` does
- * that, by hand, after a move on purpose).
+ * `PUBLISHED_BASEMAP_URL`, the reads a rider on the route makes. So it runs
+ * only with `OYL_DEMO_BAKE_ARCHIVE_CHECK=1`, and a plain `pnpm run test`
+ * stays offline:
+ *
+ * ```sh
+ * OYL_DEMO_BAKE_ARCHIVE_CHECK=1 pnpm exec vitest run apps/web/tools/demo/preset-bake-archive.test.ts
+ * ```
+ *
+ * ⚠️ **CI does not set it.** `tiles.openzigs.com` answers a GitHub-hosted
+ * runner with HTTP 403 for a range, where it answers a rider with 206 —
+ * measured on this check's first nightly runs (run 42269980561). Until the
+ * owner lets runners read the archive, a night here would only ever be red.
+ * The file is in `test:uninstrumented` so that no required run selects it.
+ * Its baked file goes nowhere; the record is never rewritten here
+ * (`demo:bake -- --route <id> --record` does that, by hand, after a move on
+ * purpose).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -38,7 +47,7 @@ import {
   type BakeRecord,
 } from './bake-route';
 
-/** Set to `1` by the nightly workflow's `Tests outside coverage` step; unset, nothing is fetched. */
+/** `1` to bake from the published archive; unset, nothing is fetched and the describe skips. */
 const reachesNetwork = process.env['OYL_DEMO_BAKE_ARCHIVE_CHECK'] === '1';
 
 describe.runIf(reachesNetwork)(
