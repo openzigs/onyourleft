@@ -47,7 +47,12 @@ import { rideSummaryOf } from '../ride-analysis/ride-summary';
 import { raceRouteOf } from '../detail/race-consent';
 import { importActivityFiles } from '../transfer/import-batch';
 import type { LoadedFrom } from './instance-pin';
-import { createInstancePort, type InstanceStorage } from './instance-port';
+import {
+  createInstancePort,
+  INSTANCE_SESSION_STORAGE_KEY,
+  instanceEraser,
+  type InstanceStorage,
+} from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import {
   createLeaderboardPort,
@@ -58,7 +63,7 @@ import {
   parseSegmentList,
   pathEntersPrivacyZone,
 } from './leaderboard-port';
-import { readInstanceAccount } from './sign-in';
+import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from './sign-in';
 import { createSyncPort } from './sync-port';
 import { LOADED_LOCALLY } from './testing';
 
@@ -73,6 +78,12 @@ interface IdentityInstance {
         athleteId: string,
         contentSha256: string,
       ): Promise<{ readonly visibility?: string } | undefined>;
+      setActivityVisibility(
+        athleteId: string,
+        contentSha256: string,
+        visibility: 'private' | 'followers' | 'public',
+      ): Promise<boolean>;
+      withdrawSegment(athleteId: string, segmentId: string): Promise<boolean>;
     }) => Promise<T>,
   ): Promise<T>;
   close(): Promise<void>;
@@ -444,6 +455,28 @@ async function onTheInstance(w: IdentityInstance, on: Device, ride: ActivityId):
   )?.visibility;
 }
 
+/** Set the ride's visibility on the instance directly, as an earlier share would have. */
+async function setOnTheInstance(
+  w: IdentityInstance,
+  on: Device,
+  ride: ActivityId,
+  visibility: 'private' | 'followers' | 'public',
+): Promise<void> {
+  const account = readInstanceAccount(on.storage);
+  const file = (await on.store().listSyncBase(LOCAL_ATHLETE)).find(
+    (row) => row.activityId === ride,
+  )?.key;
+  expect(
+    await w.freshRead((store) =>
+      store.setActivityVisibility(account!.instanceAthleteId, file as string, visibility),
+    ),
+  ).toBe(true);
+}
+
+/** This device's leaderboard record, read straight from its storage by its name. */
+const heldRecord = (on: Device): string | null =>
+  on.storage.getItem('oyl.instance-leaderboards.v1');
+
 /** The ride's visibility on the device, read on a fresh connection. */
 async function onDevice(on: Device, ride: ActivityId): Promise<unknown> {
   const visibility = (await on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))
@@ -518,6 +551,24 @@ describe('withdrawing, and a share that fails (#68)', () => {
     expect(await onTheInstance(w, bea, ride.id)).toBe('private');
   }, 30_000);
 
+  for (const held of ['followers', 'public'] as const) {
+    it(`puts the instance back to \`${held}\` when it had that and the efforts are refused`, async () => {
+      const { w, send } = await world();
+      const bea = await connected(send, w, 'Bea');
+      const ride = await syncedRide(bea);
+      const segment = await withSegment(bea, ownSegment());
+      expect(await bea.boards.publish(segment)).toBe('published');
+      await setOnTheInstance(w, bea, ride.id, held);
+      const outside = {
+        ...effortOn(segment, ride, 95),
+        startedAt: unixSeconds(ride.startedAt - 600),
+      };
+      expect((await bea.boards.share(segment, [outside])).failed).toBe(1);
+      expect(await onTheInstance(w, bea, ride.id)).toBe(held);
+      expect(await onDevice(bea, ride.id)).toBe('private');
+    }, 30_000);
+  }
+
   it('puts the ride back as it was on the device when the instance does not take its visibility', async () => {
     const { w, send } = await world();
     const bea = await connected(send, w, 'Bea');
@@ -559,6 +610,8 @@ describe('a segment whose path passes through a privacy zone (#68, ADR 0004 C)',
     expect(pathEntersPrivacyZone(sparse, [zone(10.002, 20)])).toBe(true);
     // The same zone 300 m to the side: the line passes it by.
     expect(pathEntersPrivacyZone(sparse, [zone(10.002, 20.0027)])).toBe(false);
+    // Past the last point, on the line's extension: the line stops short of it.
+    expect(pathEntersPrivacyZone(sparse, [zone(10.0095, 20)])).toBe(false);
   });
 
   it('is not offered, is not asked about, and sends nothing', async () => {
@@ -643,6 +696,103 @@ describe('a segment this rider published, withheld afterwards (#68)', () => {
     expect(await bea.boards.withdrawSegment(segmentId)).toBe(true);
     const anna = await connected(send, w, 'Anna');
     expect(await anna.boards.listSegments()).toEqual([]);
+  }, 30_000);
+});
+
+describe('this device’s record of what it published and shared (#68)', () => {
+  it('is gone after a disconnect', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    expect(await bea.boards.publish(await withSegment(bea, ownSegment()))).toBe('published');
+    expect(heldRecord(bea)).not.toBeNull();
+    await bea.instance.disconnect();
+    expect(heldRecord(bea)).toBeNull();
+  }, 30_000);
+
+  it('is gone after this device is erased', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    expect(await bea.boards.publish(await withSegment(bea, ownSegment()))).toBe('published');
+    expect(heldRecord(bea)).not.toBeNull();
+    // What `eraseDevice` calls for the instance (`main.tsx`).
+    instanceEraser(bea.storage).forget();
+    expect(heldRecord(bea)).toBeNull();
+  }, 30_000);
+
+  it('is never offered to another account on the same instance', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const segment = await withSegment(bea, ownSegment());
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const hidden = await withSegment(bea, { ...segment, visibility: 'private' });
+    expect(await bea.boards.standing(hidden)).toMatchObject({
+      held: { segmentId, yours: true },
+    });
+    // The same device, signed in as Anna on the same instance.
+    const anna = await connected(send, w, 'Anna');
+    for (const key of [INSTANCE_ACCOUNT_STORAGE_KEY, INSTANCE_SESSION_STORAGE_KEY]) {
+      bea.storage.setItem(key, anna.storage.getItem(key) as string);
+    }
+    expect(await bea.boards.standing(hidden)).toEqual({
+      kind: 'withheld',
+      refusal: NOT_PUBLIC_REFUSAL,
+    });
+  }, 30_000);
+
+  it('is written again after a disconnect and a sign-in, so a segment withheld later is still withdrawable', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    expect(await bea.boards.publish(segment)).toBe('published');
+    expect((await bea.boards.share(segment, [effortOn(segment, ride, 95)])).rides).toBe(1);
+    const athlete = readInstanceAccount(bea.storage)!.instanceAthleteId;
+    await bea.instance.disconnect();
+    expect(heldRecord(bea)).toBeNull();
+    // Signed in again: an instance that knows this device's key signs it in to the same account.
+    const card = (await w.instanceKeys.show()).card;
+    expect(await bea.instance.connect(testing.TEST_ORIGIN, 'Bea', card)).toMatchObject({
+      kind: 'connected',
+    });
+    expect(readInstanceAccount(bea.storage)!.instanceAthleteId).toBe(athlete);
+    expect(heldRecord(bea)).toBeNull();
+
+    // Opening the page asks, as for any segment it would offer, and reads the board.
+    expect(await bea.boards.standing(segment)).toEqual({
+      kind: 'published',
+      segmentId,
+      yours: true,
+    });
+    expect((await bea.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([
+      { rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 },
+    ]);
+    await zoneAt(bea, segment.geometry[3]!);
+    expect(await bea.boards.standing(segment)).toEqual({
+      kind: 'withheld',
+      refusal: IN_A_ZONE_REFUSAL,
+      held: { segmentId, yours: true, shared: true },
+    });
+    expect(await bea.boards.withdrawSegment(segmentId)).toBe(true);
+  }, 30_000);
+
+  it('forgets a segment the instance no longer has, when withdrawing it finds it gone', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const segment = await withSegment(bea, ownSegment());
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    expect(await bea.boards.publish(segment)).toBe('published');
+    // Removed on the instance behind this device's back.
+    const athlete = readInstanceAccount(bea.storage)!.instanceAthleteId;
+    expect(await w.freshRead((store) => store.withdrawSegment(athlete, segmentId))).toBe(true);
+    const hidden = await withSegment(bea, { ...segment, visibility: 'private' });
+    expect(await bea.boards.standing(hidden)).toMatchObject({ held: { segmentId } });
+    expect(await bea.boards.withdrawSegment(segmentId)).toBe(false);
+    expect(await bea.boards.standing(hidden)).toEqual({
+      kind: 'withheld',
+      refusal: NOT_PUBLIC_REFUSAL,
+    });
   }, 30_000);
 });
 
