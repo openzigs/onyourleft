@@ -24,7 +24,7 @@
  * `HudPanel` renders it.
  */
 
-import { useRef, useState, type JSX, type ReactNode } from 'react';
+import { useId, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import type { UnitSystem } from '@onyourleft/store';
 
@@ -53,6 +53,16 @@ import {
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
 import { isLapRaceReading, riderHolds } from './lap-race-hud';
+import {
+  GRADE_BANDS,
+  LOOK_AHEAD_METRES,
+  LOOK_AHEAD_RISE_METRES,
+  lookAhead,
+  nextClimbLabel,
+  nextClimbText,
+  type GradeBand,
+  type LookAhead,
+} from './look-ahead';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
@@ -199,7 +209,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       <FieldList tier="secondary" readings={readings} />
 
       <div className="oyl-hud__panel oyl-hud__route">
-        <ElevationStrip reading={elevation} profile={props.profile} />
+        <ElevationStrip
+          reading={elevation}
+          profile={props.profile}
+          distance={props.state.ride.distance}
+          units={props.units}
+        />
 
         {props.routeFigure}
       </div>
@@ -584,7 +599,7 @@ function Gauge(props: { readonly fraction: number }): JSX.Element {
 }
 
 /**
- * The elevation profile with "you are here".
+ * The elevation profile with "you are here", and the road ahead beside it.
  *
  * #94 calls this *"the single most motivating element — it shows what is coming
  * and what is done"*. It is an SVG rather than a canvas for the same reason the
@@ -603,47 +618,187 @@ function Gauge(props: { readonly fraction: number }): JSX.Element {
  * elevation profile genuinely ends, so there is no more road to draw; what a
  * second lap changes is where the marker is on it, which now sweeps the strip
  * again rather than sitting on the right-hand edge for the rest of the ride.
+ *
+ * ## Filled, and the road ahead beside it — #2075
+ *
+ * The whole route is a FILLED shape since #2075, in `hudBorder`, with the
+ * marker in `hudInk` over a wider stroke of the panel's surface, so it reads
+ * against the fill and the empty sky alike (both pairs are declared 3:1 in
+ * `tokens.ts`). Beside it, at the same height so the route panel is no taller,
+ * {@link LookAheadStrip} draws the next kilometre at a fixed scale, and the
+ * next climb is written under it.
  */
 function ElevationStrip(props: {
   readonly reading: ProfileReading;
   readonly profile: HudInput['profile'];
+  readonly distance: number;
+  readonly units: UnitSystem;
 }): JSX.Element {
   const elevations = props.profile.elevations;
   const points = strip(elevations);
   const percent = props.reading.position * 100;
+  const ahead = lookAhead(props.profile, props.distance);
+  const climb = nextClimbText(ahead.nextClimb, props.units);
   return (
     <div className="oyl-hud__profile">
-      <svg
-        className="oyl-hud__profile-svg"
-        viewBox="0 0 100 24"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={props.reading.label}
-      >
-        <polyline className="oyl-hud__profile-line" points={points} />
-        <line
-          className="oyl-hud__profile-here"
-          x1={percent}
-          y1={0}
-          x2={percent}
-          y2={24}
-          data-testid="oyl-hud-position"
-          // ⚠️ **The contract this attribute carries changed in #287**: it is
-          // the fraction along the profile, WRAPPED on a `loop: true` route and
-          // clamped on any other, rather than always clamped. It is the same
-          // number the marker's `x` is drawn from and the same one the sentence
-          // below is rounded from, so a test reading it is reading what the
-          // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
-          data-position={String(props.reading.position)}
-        />
-      </svg>
+      <div className="oyl-hud__strips">
+        <svg
+          className="oyl-hud__profile-svg"
+          viewBox="0 0 100 24"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={props.reading.label}
+        >
+          {points === '' ? null : (
+            <polygon className="oyl-hud__profile-fill" points={`0,24 ${points} 100,24`} />
+          )}
+          <line className="oyl-hud__profile-here-edge" x1={percent} y1={0} x2={percent} y2={24} />
+          <line
+            className="oyl-hud__profile-here"
+            x1={percent}
+            y1={0}
+            x2={percent}
+            y2={24}
+            data-testid="oyl-hud-position"
+            // ⚠️ **The contract this attribute carries changed in #287**: it is
+            // the fraction along the profile, WRAPPED on a `loop: true` route and
+            // clamped on any other, rather than always clamped. It is the same
+            // number the marker's `x` is drawn from and the same one the sentence
+            // below is rounded from, so a test reading it is reading what the
+            // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
+            data-position={String(props.reading.position)}
+          />
+        </svg>
+        <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.nextClimb, props.units)} />
+      </div>
       {/*
         The non-visual equivalent, which the rest of this app provides for every
         chart (#77's, #50's). A profile is a picture of a number, and the number
-        is available.
+        is available. The next climb is its own line beside it (#2075), so a
+        sentence other features read whole stays the sentence it was.
       */}
-      <p className="oyl-hud__profile-text">{props.reading.text}</p>
+      <div className="oyl-hud__profile-captions">
+        <p className="oyl-hud__profile-text">{props.reading.text}</p>
+        {climb === undefined ? null : (
+          <p className="oyl-hud__ahead-text" data-testid="oyl-hud-next-climb">
+            {climb}
+          </p>
+        )}
+      </div>
     </div>
+  );
+}
+
+/**
+ * The next kilometre of road — #2075, `look-ahead.ts`.
+ *
+ * The viewBox is the window itself: {@link LOOK_AHEAD_METRES} across and
+ * {@link LOOK_AHEAD_RISE_METRES} of height up, so a metre of climb is the same
+ * height on every route and a steeper road is a steeper line. The rider is the
+ * left edge. Each run of one grade band is a column of the strip's full
+ * height filled with its band's PATTERN — the band's colour under hatching or
+ * dots in the panel's own surface — so a band is never told by colour alone
+ * (SC 1.4.1), and a descent is as tall as a climb (the owner's review of
+ * 2026-11-05). The road is a line over the bands; the caption under the
+ * strips says the next climb in words.
+ *
+ * `role="img"` with the next climb as its name, as the whole route's strip is
+ * named by its sentence.
+ */
+function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: string }): JSX.Element {
+  // React's ids carry punctuation a `url(#…)` reference need not survive.
+  const id = `oyl-ahead-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const { ahead } = props;
+  const yOf = (height: number): number =>
+    LOOK_AHEAD_RISE_METRES - Math.min(LOOK_AHEAD_RISE_METRES, Math.max(0, height));
+  const road = ahead.points
+    .map((point) => `${String(point.ahead)},${String(yOf(point.height))}`)
+    .join(' ');
+  return (
+    <svg
+      className="oyl-hud__ahead-svg"
+      viewBox={`0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={`The next kilometre: ${props.label}`}
+      data-testid="oyl-hud-look-ahead"
+    >
+      <defs>
+        {GRADE_BANDS.map((band) => (
+          <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} />
+        ))}
+      </defs>
+      {ahead.runs.map((run) => (
+        // The owner's review of 2026-11-05: each band at the strip's FULL
+        // height, not under the road's line. At the fixed scale a descent or
+        // a flat ends at the window's floor and was a sliver a pixel or two
+        // tall; a band's height now says nothing, so every band is as
+        // readable as a climb's, and the road's shape is the line below.
+        <rect
+          key={`${run.band}-${String(run.start)}`}
+          className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
+          x={run.start}
+          y={0}
+          width={run.end - run.start}
+          height={LOOK_AHEAD_RISE_METRES}
+          fill={`url(#${id}-${run.band})`}
+          data-band={run.band}
+          data-start={String(run.start)}
+          data-end={String(run.end)}
+        />
+      ))}
+      {/*
+        The road itself, at the fixed scale, over the bands: the ink line on a
+        wider stroke of the panel's surface, as the whole route's marker is
+        drawn, so it reads on every band's colour and pattern alike.
+      */}
+      <polyline className="oyl-hud__ahead-road-edge" points={road} />
+      <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
+      <line
+        className="oyl-hud__ahead-here"
+        x1={0}
+        y1={0}
+        x2={0}
+        y2={LOOK_AHEAD_RISE_METRES}
+        data-height={String(ahead.riderHeight)}
+      />
+    </svg>
+  );
+}
+
+/** One band's fill: its colour, and the marks that tell it apart without colour. */
+function BandPattern(props: { readonly id: string; readonly band: GradeBand }): JSX.Element {
+  // In the strip's own units — metres across, metres up — about 11 by 10 px
+  // on a 270 px strip three rem tall.
+  const width = 40;
+  const height = 20;
+  const { pattern } = props.band;
+  return (
+    <pattern
+      id={props.id}
+      className={`oyl-hud__band oyl-hud__band--${props.band.key}`}
+      patternUnits="userSpaceOnUse"
+      width={width}
+      height={height}
+      data-pattern={pattern}
+    >
+      <rect className="oyl-hud__band-fill" x={0} y={0} width={width} height={height} />
+      {pattern === 'dots' ? (
+        <ellipse className="oyl-hud__band-dot" cx={width / 2} cy={height / 2} rx={6} ry={3} />
+      ) : null}
+      {pattern === 'hatch' || pattern === 'dense-hatch' || pattern === 'cross-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={0} y1={height} x2={width} y2={0} />
+      ) : null}
+      {pattern === 'dense-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={-width / 2} y1={height} x2={width / 2} y2={0} />
+      ) : null}
+      {pattern === 'dense-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={width / 2} y1={height} x2={width * 1.5} y2={0} />
+      ) : null}
+      {pattern === 'cross-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={0} y1={0} x2={width} y2={height} />
+      ) : null}
+    </pattern>
   );
 }
 
