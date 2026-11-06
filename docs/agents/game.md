@@ -1134,7 +1134,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a ramp: the music bus is 0 whenever music is not playing.
                         #2059: every short sound while music plays ramps the
                         duck to `MUSIC_DUCK_LEVEL` and back after it ends
-                        (`setTargetAtTime`, never a step; `music-duck.test.ts`)
+                        (`setTargetAtTime`, never a step; `music-duck.test.ts`).
+                        Since #2219 *Mute sounds* is pressed while the master
+                        mute (the header's, menu routes only) is on, and its
+                        unmuting press clears the master before `begin()`
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from

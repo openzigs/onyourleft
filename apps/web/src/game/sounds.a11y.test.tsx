@@ -45,16 +45,24 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { workoutStub } from '../workouts/testing';
 
+import { AUDIO_MIX_STORAGE_KEY, writeMasterMuted } from './audio-mix';
 import type { CueOutput } from './audio-port';
-import { fakeAudioContext, recordingOutput, type RecordingOutput } from './audio-testing';
+import {
+  fakeAudioContext,
+  musicPath,
+  recordingOutput,
+  type RecordingOutput,
+} from './audio-testing';
 import { CUES_STORAGE_KEY, DEFAULT_CUES } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import {
   ANNOUNCEMENTS_STORAGE_KEY,
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
+  type PreferenceStorage,
 } from './hud/announce-preference';
 import type { GameRenderer } from './port';
+import { SoundControls } from './SoundControls';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { deviceAudioMix, webAudioOutput } from './web-audio';
 
@@ -296,6 +304,45 @@ describe('the game — #400', () => {
       muted: true,
     });
   }, 12_000);
+
+  it('shows a master mute set in the menus as Mute sounds pressed, and the press clears it — #2219', async () => {
+    // #2056's header mute is on menu routes only, so a rider who muted there
+    // starts a ride with every cue silenced. Read from the GRAPH's master gain,
+    // over the app's own mix, never from the button.
+    chooseSounds();
+    writeMasterMuted(deviceStorage(), true);
+    const fake = fakeAudioContext();
+    const graph = webAudioOutput(() => fake.context, deviceAudioMix(deviceStorage));
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        renderer={() => Promise.resolve(RENDERER)}
+        now={() => nowMs}
+        sounds={graph}
+      />,
+    );
+    await settle();
+    await press(button('Ride '));
+    expect(musicPath(fake).master.gain.value, 'the master mute did not reach the ride').toBe(0);
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
+
+    await press(button('Mute sounds'));
+    expect(musicPath(fake).master.gain.value).toBe(1);
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('false');
+    expect(JSON.parse(localStorage.getItem(AUDIO_MIX_STORAGE_KEY) ?? '{}')).toMatchObject({
+      masterMuted: false,
+      cues: { muted: false },
+    });
+
+    // The next press is the ride's own mute again: the cues, not the master.
+    await press(button('Mute sounds'));
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
+    expect(musicPath(fake).master.gain.value).toBe(1);
+    expect(JSON.parse(localStorage.getItem(AUDIO_MIX_STORAGE_KEY) ?? '{}')).toMatchObject({
+      masterMuted: false,
+      cues: { muted: true },
+    });
+  });
 });
 
 describe('the audio may stop once nothing is riding — #447', () => {
@@ -720,11 +767,56 @@ describe('a workout — #400', () => {
     });
   });
 
+  it('shows a master mute set in the menus as Mute sounds pressed, and the press clears it — #2219', async () => {
+    chooseSounds();
+    writeMasterMuted(deviceStorage(), true);
+    const fake = fakeAudioContext();
+    const graph = webAudioOutput(() => fake.context, deviceAudioMix(deviceStorage));
+    await show(undefined, 150, graph);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150, graph);
+    expect(musicPath(fake).master.gain.value, 'the master mute did not reach the ride').toBe(0);
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
+
+    await press(button('Mute sounds'));
+    expect(musicPath(fake).master.gain.value).toBe(1);
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('false');
+    expect(JSON.parse(localStorage.getItem(AUDIO_MIX_STORAGE_KEY) ?? '{}')).toMatchObject({
+      masterMuted: false,
+    });
+  });
+
   it('makes no call at all for a rider who did not turn sounds on', async () => {
     await show(undefined, 150);
     await press(button('Ride Sweet spot'));
     await show(riding(), 150);
     await show(riding({ nowRiding: '5 min at 95%' }), 230);
     expect(output.calls).toEqual([]);
+  });
+});
+
+describe('the ride’s Mute sounds and the master mute — #2219', () => {
+  it('does not claim the master was cleared when the device refused to keep it', async () => {
+    // The graph reads the master back from storage, so a refused write leaves
+    // every sound silent: the button must go on saying so.
+    const refusing: PreferenceStorage = {
+      getItem: (key) => (key === AUDIO_MIX_STORAGE_KEY ? '{"masterMuted":true}' : null),
+      setItem: () => {
+        throw new Error('quota');
+      },
+    };
+    const changes: unknown[] = [];
+    mounted = await mount(
+      <SoundControls
+        preference={{ ...DEFAULT_CUES, enabled: true }}
+        storage={refusing}
+        onChange={(next) => changes.push(next)}
+      />,
+    );
+    await settle();
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
+    await press(button('Mute sounds'));
+    expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
+    expect(changes).toEqual([]);
   });
 });
