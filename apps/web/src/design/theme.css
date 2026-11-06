@@ -11043,70 +11043,186 @@ select.oyl-input {
 }
 
 /*
- * THE HUD'S TEXT SIZE — #2079.
+ * THE HUD'S TEXT SIZE — #2079, cut against #2130's tablet sizes (PR #2213).
  *
- * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the four
- * readings a rider steers the effort by — power, cadence, heart rate and the
- * gradient — at 1.25 and 1.5 times the primary size, 3.125 and 3.75 rem, on
- * a TABLET's corners layout (46 rem wide and 47 rem tall or more). The
- * column they stand in grows to hold them (30 and 33 rem), power and the
- * gradient take the wider tracks (1.3 to 1: `1999` and `+12.5` are the widest
- * readings), and an upright tablet stands the secondary panel under the
- * primary, across the stage, because 33 rem and the secondary tier do not fit
- * 50 rem side by side.
+ * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the
+ * primary readings a rider steers the effort by — power, cadence, heart rate
+ * and the gradient — at 4.375 and 5 rem on a TABLET's corners layout (46 rem
+ * wide and 47 rem tall or more): 1.15 and 1.31 times #2130's 3.815 rem, which
+ * is the NORMAL size there and larger than this block's first cut (3.125 and
+ * 3.75 rem, PR #2235's review). The panels are re-cut for them, every number
+ * measured in the pinned Chromium with the widest ordinary values set
+ * (`1999` W, `199` rpm and bpm, `-19.9` %): at 5 rem `1999` is 174 px, in a
+ * 179 px track at 1280×800, 177 at 1024×768 and 181 upright, and `199` is
+ * 131 px in 138, 136 and 181:
+ *
+ * - LANDSCAPE (51 rem wide or more) the primary readings stay one row, so the
+ *   row the secondary tier shares with them stays short and a race's
+ *   standings (#1347) and a notice hang under it as they do at the normal
+ *   size, clear of *Pause*: the four in a 41.5 rem column at 1280×800, power
+ *   and the gradient the wider tracks, and on the 4:3 tablet the three in
+ *   29.75 rem with the gradient in the secondary tier's first cell, as #2130
+ *   draws it there. The secondary tier is four tracks beside them;
+ * - UPRIGHT (800×1280) there is no width for four in a row and the tier, so
+ *   the four stand two by two in 24 rem, the tier spans the stage under them,
+ *   and a race's standings stand BESIDE the four at the top end edge rather
+ *   than under the tier: hung under it at the first cut's sizes they were 2
+ *   and 26 px over the leaning rider (`[504,422 → 792,665]` at large).
  *
  * ⚠️ **What it costs, recorded as #419 asks: on a phone the setting changes
  * nothing**, and Settings says so beside it. Every phone layout is measured
  * to within a few pixels of the leaning rider and of its own tracks at the
  * size it has (§"THE CLOCK ROW", §"THE MOVING TIME ON AN UPRIGHT PHONE"), and
  * a primary reading a quarter larger is a third primary row or a value past
- * its track on every one. ⚠️ **And only the four primary readings grow**: the
- * secondary tier's tracks and rows are what a room's standings and a Delivery
- * round are fitted around on a tablet, and the four are the numbers a tired
- * rider looks for. `ride-hud-layout.browser.spec.ts` lays the HUD out at both
- * sizes at all nine overlay viewports.
+ * its track on every one. ⚠️ **And only the primary readings grow**, and on
+ * the 4:3 tablet the gradient stays the secondary size, as it is there at the
+ * normal size: the secondary tier's tracks and rows are what a room's
+ * standings and a Delivery round are fitted around on a tablet, and the
+ * primary readings are the numbers a tired rider looks for.
+ * `ride-hud-layout.browser.spec.ts` lays the HUD out at both sizes at all
+ * nine overlay viewports, on a plain ride, in a room, in a lap race, in a
+ * Delivery round and in a workout.
  */
 @media (min-width: 46rem) and (min-height: 47rem) {
-  .oyl-game--riding
-    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__fields--primary {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr);
-  }
-
   .oyl-game--riding .oyl-hud--text-large .oyl-hud__fields--primary .oyl-hud__value {
-    font-size: 3.125rem;
+    font-size: 4.375rem;
   }
 
   .oyl-game--riding .oyl-hud--text-extra-large .oyl-hud__fields--primary .oyl-hud__value {
-    font-size: 3.75rem;
+    font-size: 5rem;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      minmax(7.25rem, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--average-power {
+    grid-area: auto;
   }
 }
 
+/* Landscape: the tier beside the primary readings spans two rows, so a
+   notice starts under the primary panel and a race's standings under the
+   tier, whichever is the taller: at four tracks the tier is a third row in a
+   room, and a notice under it met the sound and side-camera rows above the
+   route panel (`ride-room.browser.spec.ts` §"#1409"). */
 @media (min-width: 51rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud.oyl-hud--text-large {
-    grid-template-columns: minmax(0, 30rem) minmax(0, 1fr);
-  }
-
-  .oyl-game--riding .oyl-hud.oyl-hud--text-extra-large {
-    grid-template-columns: minmax(0, 33rem) minmax(0, 1fr);
-  }
-}
-
-@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
     grid-template-areas:
-      'primary primary .'
-      'secondary secondary secondary'
-      'notices notices notices'
-      'route actions actions';
-    grid-template-columns: minmax(0, 24rem) minmax(0, 9rem) minmax(0, 1fr);
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
     grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
   .oyl-game--riding
     .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
     .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 41.5rem) minmax(0, 1fr);
+  }
+}
+
+/* The 4:3 tablet: three in a row, and the gradient's cell first in the tier. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 29.75rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(7.25rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr)
+      minmax(max-content, 1fr);
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary
+    > .oyl-hud__field--gradient
+    .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  /* ⚠️ **What gives way, recorded as #419 asks: here, in a ROOM, the
+     pacer's and the ghost's gaps and the wind give way** to the room's
+     readings, as they do on a phone (§"A ROOM RIDE ON A PHONE"): in four
+     tracks they were a third row, and a race's standings under it ran 23 px
+     over *Pause* with *Report*'s reasons open. Hidden by clip, so a screen
+     reader still reads them. */
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--gives-way {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* Upright: two by two, the tier under them, and a race's standings beside. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-areas:
+      'primary beside'
+      'secondary secondary'
+      'notices notices'
+      'route actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
     width: 100%;
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      repeat(2, minmax(5.5rem, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
   }
 }
 

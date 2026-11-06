@@ -8,7 +8,11 @@
  * viewports*. `ride.browser.spec.ts` and its siblings measure the normal size;
  * this lays the same page out at *large* and *extra large*, written to the
  * device where Settings writes them (`ride-harness.tsx` §`?text=`), at every
- * overlay viewport, both ways (#1120), and holds the layout's own invariants:
+ * overlay viewport, both ways (#1120), on a plain ride, in a room, in a
+ * room's lap race, in a Delivery round and in a workout — PR #2235's review
+ * found a race's standings over the leaning rider at 800×1280 in a room and
+ * a lap race, which the plain ride alone did not show — and holds the
+ * layout's own invariants:
  *
  * - every reading and control on the stage, uncovered, with no scrolling;
  * - every panel whole, and none laid over another;
@@ -16,6 +20,12 @@
  * - a primary reading visibly larger than a secondary one;
  * - and the size the rider chose drawn where Settings says it is — on a
  *   tablet — and the normal size on a phone, which has no room for it.
+ *
+ * A reading a layout gives way to a mode's own (#419: a room's, a round's, a
+ * race's) is clipped to a pixel, and a phone's route panel is not drawn while
+ * a notice stands in its cell (#437); each mode's own spec holds which give
+ * way at the normal size. Here an item or a panel laid out at no size is set
+ * aside and named in the log, and power, *Pause* and *End ride* never are.
  *
  * And with every panel a rider may turn off turned off (`?hide=`), the same
  * invariants, the panels gone and the notices' cell still the HUD's.
@@ -45,11 +55,18 @@ test.afterEach(async () => {
   await attachSharedPageOnFailure(test.info());
 });
 
-/** The primary value's size in px at the normal text size: `theme.css`'s 2.5 rem. */
-const NORMAL_PRIMARY_PIXELS = 40;
+/** The primary value's size in px on a phone, at every text size: 2.5 rem. */
+const PHONE_PRIMARY_PIXELS = 40;
 
-/** What `theme.css` §"THE HUD'S TEXT SIZE" sets a primary value at on a tablet. */
-const PRIMARY_PIXELS = { large: 50, 'extra-large': 60 } as const;
+/** The primary value's size in px on a tablet at the normal size: #2130's 3.815 rem. */
+const TABLET_NORMAL_PRIMARY_PIXELS = 61.04;
+
+/**
+ * What `theme.css` §"THE HUD'S TEXT SIZE" sets a primary value at on a
+ * tablet: 4.375 and 5 rem, each larger than #2130's normal size (PR #2235's
+ * review: the first cut, 3.125 and 3.75 rem, was smaller than it).
+ */
+const PRIMARY_PIXELS = { large: 70, 'extra-large': 80 } as const;
 
 /** The layout's own invariants, as the ride's specs hold them, as failure lines. */
 function layoutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
@@ -78,22 +95,70 @@ function layoutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
   return faults;
 }
 
+/** The rides the ride specs measure, by the harness's query. */
+const MODES = [
+  ['a plain ride', ''],
+  // A room at its tallest: a race's standings, a rider followed, *Report*'s
+  // reasons open and the sound row (`ride-room.browser.spec.ts` §"#1407").
+  ['a room', '?room=report&sounds=on'],
+  // And with a side camera's row on the route panel too (§"#1409").
+  ['a room with a side camera', '?room=following&sounds=on&side=lost'],
+  ['a lap race', '?room=lap-race'],
+  ['a Delivery round', '?delivery=round'],
+  ['a workout', '?trainer=workout'],
+] as const;
+
+/** What is never given way, at any size, in any mode. */
+const ALWAYS_DRAWN = ['reading: Power', 'control: Pause', 'control: End ride'];
+
+/** The layout's faults, less a clipped item's, and the clipped items' names. */
+function sizeFaults(
+  seen: StageMeasurement,
+  viewport: Viewport,
+): { readonly faults: string[]; readonly clipped: string[] } {
+  const clipped = [...seen.items, ...seen.panels]
+    .filter((each) => each.box.width * each.box.height <= 1)
+    .map((each) => each.name);
+  const faults = layoutFaults(seen, viewport).filter(
+    (fault) =>
+      !clipped.some(
+        (name) => fault.startsWith(`lost: ${name} [`) || fault.startsWith(`not whole: ${name} [`),
+      ),
+  );
+  return { faults, clipped };
+}
+
 for (const size of ['large', 'extra-large'] as const) {
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`#2079 the HUD at ${size} text holds its layout — ${viewport.name}`, async ({
-      browser,
-    }) => {
-      const page = await sharedRide(browser, viewport, `?text=${size}`);
-      const tablet = TABLET_VIEWPORTS.includes(viewport);
-      for (const [how, seen] of await bothWays(page)) {
-        expect(layoutFaults(seen, viewport), how).toEqual([]);
-        // Drawn at the rider's size on a tablet, and at the normal size on a
-        // phone, which Settings says has no room for it.
-        expect(seen.primaryValuePixels, how).toBe(
-          tablet ? PRIMARY_PIXELS[size] : NORMAL_PRIMARY_PIXELS,
+  for (const [mode, query] of MODES) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`#2079 the HUD at ${size} text holds its layout — ${mode} — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(
+          browser,
+          viewport,
+          `${query === '' ? '?' : `${query}&`}text=${size}`,
         );
-      }
-    });
+        const tablet = TABLET_VIEWPORTS.includes(viewport);
+        for (const [how, seen] of await bothWays(page)) {
+          const { faults, clipped } = sizeFaults(seen, viewport);
+          console.log(
+            `#2079 ${size} ${mode} ${viewport.name} ${how}: clipped ${clipped.join(', ')}`,
+          );
+          expect(faults, how).toEqual([]);
+          const names = seen.items.map((each) => each.name);
+          for (const name of ALWAYS_DRAWN) {
+            expect(names, how).toContain(name);
+            expect(clipped, how).not.toContain(name);
+          }
+          // Drawn at the rider's size on a tablet, and at the normal size on a
+          // phone, which Settings says has no room for it.
+          expect(seen.primaryValuePixels, how).toBe(
+            tablet ? PRIMARY_PIXELS[size] : PHONE_PRIMARY_PIXELS,
+          );
+        }
+      });
+    }
   }
 }
 
@@ -104,7 +169,10 @@ test('#2079 the control — without the text size the primary value is the norma
   if (tablet === undefined) throw new Error('no tablet viewport');
   const page = await sharedRide(browser, tablet);
   const seen = await measure(page);
-  expect(seen.primaryValuePixels).toBe(NORMAL_PRIMARY_PIXELS);
+  expect(seen.primaryValuePixels).toBe(TABLET_NORMAL_PRIMARY_PIXELS);
+  // Each size larger than the normal one, the reason for the setting.
+  expect(PRIMARY_PIXELS.large).toBeGreaterThan(TABLET_NORMAL_PRIMARY_PIXELS);
+  expect(PRIMARY_PIXELS['extra-large']).toBeGreaterThan(PRIMARY_PIXELS.large);
 });
 
 /**
