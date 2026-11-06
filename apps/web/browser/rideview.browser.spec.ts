@@ -1318,14 +1318,20 @@ for (const viewport of EASED_VIEWPORTS) {
       // name it had is gone; off, it has no such words.
       expect(find(before, STARTS_A_WORKOUT_WITH_REPLANS)).toBeUndefined();
       expect(find(after, STARTS_A_WORKOUT)).toBeUndefined();
-      // ⚠️ The first Ride is exactly where it was, and as tall: the line that
-      // goes is under it, the badge that comes is on the heading's row, and
-      // the words added to it (#1329) do not wrap it onto a second line.
+      // ⚠️ The first Ride is exactly where it was, and no taller: the line
+      // that goes is under it, and the badge that comes is on the heading's
+      // row. "Ride, with re-plans" (#1329) is one line, 48 px. Off, the
+      // workout's name can take two: on CI's fonts upright it is 69.6 px.
       expect(find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.top).toBe(
         find(before, STARTS_A_WORKOUT)?.box.top,
       );
-      expect(find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.height).toBe(
-        find(before, STARTS_A_WORKOUT)?.box.height,
+      expect(
+        find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.height ?? Infinity,
+      ).toBeLessThanOrEqual(RIDE_TIME_TARGET_PIXELS + SUBPIXEL_TOLERANCE);
+      expect(
+        find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.height ?? Infinity,
+      ).toBeLessThanOrEqual(
+        (find(before, STARTS_A_WORKOUT)?.box.height ?? -Infinity) + SUBPIXEL_TOLERANCE,
       );
       expect(after.trainerCard?.chooserHeading).toEqual(before.trainerCard?.chooserHeading);
       expect(after.replanDisclosure?.headline).toEqual(before.replanDisclosure?.headline);
@@ -1338,7 +1344,10 @@ for (const viewport of EASED_VIEWPORTS) {
       const note = `the first Ride ${startsMargin(before).toFixed(1)} px above the fold with the switch off, ${startsMargin(after).toFixed(1)} px with it on and "Re-plans on" shown`;
       testInfo.annotations.push({ type: '#1329 the badge', description: note });
       console.log(`#1329 — the badge — ${viewport.name} — ${note}`);
-      expect(startsMargin(after), note).toBe(startsMargin(before));
+      // #1329: never less; more where the workout's name had wrapped.
+      expect(startsMargin(after), note).toBeGreaterThanOrEqual(
+        startsMargin(before) - SUBPIXEL_TOLERANCE,
+      );
       expect(startsMargin(after), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     });
   });
@@ -1477,10 +1486,15 @@ for (const viewport of EASED_VIEWPORTS) {
     expect(rides(on).map((each) => each.name)).toEqual(
       rides(off).map((each) => each.name.replace(/^Ride /, `${RIDE_WITH_REPLANS}: `)),
     );
-    // One line each, as tall as it was: the words do not wrap a button.
-    expect(rides(on).map((each) => each.box.height)).toEqual(
-      rides(off).map((each) => each.box.height),
-    );
+    // One line each, and none taller than it was: the words wrap no button.
+    for (const [index, each] of rides(on).entries()) {
+      expect(each.box.height, each.name).toBeLessThanOrEqual(
+        RIDE_TIME_TARGET_PIXELS + SUBPIXEL_TOLERANCE,
+      );
+      expect(each.box.height, each.name).toBeLessThanOrEqual(
+        (rides(off)[index]?.box.height ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+    }
     expect(rides(on)[0]?.box.top).toBe(first.box.top);
     expect(theSwitch(on)?.box.top).toBe(the.box.top);
     // #1244's badge, restored on #1332: shown once, on the heading's row, and
@@ -1489,7 +1503,7 @@ for (const viewport of EASED_VIEWPORTS) {
     expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(1);
     expectBadgeOnTheHeadingRow(on, viewport);
     const onMargin = foldMargin(rides(on)[0]?.box.bottom ?? Infinity, viewport);
-    expect(onMargin, note).toBe(firstMargin);
+    expect(onMargin, note).toBeGreaterThanOrEqual(firstMargin - SUBPIXEL_TOLERANCE);
     expect(onMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 }
