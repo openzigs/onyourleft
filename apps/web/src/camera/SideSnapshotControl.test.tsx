@@ -35,6 +35,7 @@ import {
   snapshotHeldText,
   snapshotsNotKeptText,
 } from './SideSnapshotControl';
+import { CONSENT_STATEMENT } from './consent';
 import { sideSnapshotKeeper } from './snapshot-keeper';
 import { cleanFrameBytes, scriptedLiveView } from './testing';
 
@@ -111,6 +112,20 @@ describe('Save snapshot', () => {
     });
     expect(buttonNamed(SAVE_SNAPSHOT_LABEL)).toBeDefined();
     expect(document.body.textContent).toContain(SNAPSHOT_WHERE_IT_GOES);
+  });
+
+  it('says only what #1060’s approved consent says, word for word (PR #1121, ADR 0044 D-10)', () => {
+    const consent = CONSENT_STATEMENT.join(' ');
+    const sentences = SNAPSHOT_WHERE_IT_GOES.split(/(?<=\.) /);
+    expect(sentences.length).toBeGreaterThan(1);
+    for (const sentence of sentences) {
+      expect(consent).toContain(sentence);
+    }
+    // The setup clause of the after-press sentence is the consent's too.
+    expect(consent).toContain('joins the next ride you save, and is thrown away if you save none.');
+    expect(snapshotHeldText({ kind: 'held', joins: 'next-ride', held: 1 })).toContain(
+      'joins the next ride you save, and is thrown away if you save none.',
+    );
   });
 
   it('keeps exactly one picture for one press, however many arrive after it', async () => {

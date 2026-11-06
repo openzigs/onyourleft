@@ -39,11 +39,20 @@ import {
 /** The control's name. */
 export const SAVE_SNAPSHOT_LABEL = 'Save snapshot';
 
-/** What the rider is told beside the control, before pressing (D-3). */
+/**
+ * What the rider is told beside the control, before pressing (D-3).
+ *
+ * ⚠️ **Word for word the snapshot sentences of `CONSENT_STATEMENT`
+ * (`consent.ts`)**: #1060's owner-approved wording (PR #1121, ADR 0044 D-10).
+ * Do not reword it here; a change is a change to the approved text, and
+ * `SideSnapshotControl.test.tsx` fails while a sentence of this one is not in
+ * the consent.
+ */
 export const SNAPSHOT_WHERE_IT_GOES =
-  'A snapshot keeps the picture on the screen now, with its outline, with a ride: the ride under ' +
-  'way, or, before a ride, the next ride you save. It is thrown away if you save none, and shown ' +
-  'only on that ride’s page.';
+  'Pressing "Save snapshot" keeps that one picture with the ride it was taken in, shown only on ' +
+  'that ride’s page once you open its section. A snapshot taken while you set up joins the next ' +
+  'ride you save, and is thrown away if you save none. A snapshot is never sent to your computer ' +
+  'or to any service.';
 
 /** What the rider is told after a press, one sentence per outcome. */
 export function snapshotHeldText(outcome: SnapshotHeld): string {
