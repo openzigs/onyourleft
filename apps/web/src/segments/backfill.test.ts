@@ -375,6 +375,28 @@ describe('privacy and frozen attributes reach the stored effort', () => {
     expect([...port.stored.values()][0]?.visibility).toBe('private-match');
   });
 
+  it('an effort at a speed no rider can go is stored as excluded, and a possible one is not (#69)', async () => {
+    // Twenty metres a sample: at half a second a sample that is 40 m/s, over
+    // the 27.8 m/s a ride may average; at a second, 20 m/s, which is under it.
+    const fast = stubMatchPort({
+      athleteId: OWNER,
+      rides: [{ ...traversingRide(0), sampleIntervalSeconds: 0.5 }],
+      segments: [theSegment()],
+    });
+    await sweepToEnd(fast, indexSegments([theSegment()]));
+    const [impossible] = [...fast.stored.values()];
+    expect(impossible?.elapsed).toBeLessThan(500 / 27.8);
+    expect(impossible?.visibility).toBe('excluded');
+
+    const steady = stubMatchPort({
+      athleteId: OWNER,
+      rides: [traversingRide(0)],
+      segments: [theSegment()],
+    });
+    await sweepToEnd(steady, indexSegments([theSegment()]));
+    expect([...steady.stored.values()][0]?.visibility).toBe('public');
+  });
+
   it('the athlete’s recorded mass is copied onto the effort', async () => {
     const port = stubMatchPort({
       athleteId: OWNER,

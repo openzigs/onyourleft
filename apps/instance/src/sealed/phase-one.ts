@@ -117,6 +117,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/moderation/notices', 'Every moderator read'),
   only('GET', '/v1/moderation/appeals', 'Every moderator read'),
   only('GET', '/v1/moderation/record', 'Every moderator read'),
+  // #69: the leaderboard integrity log, born sealed with every moderator read.
+  only('GET', '/v1/moderation/segment-log', 'Every moderator read'),
   only('POST', '/v1/moderation/items/hide', 'Every other moderator action'),
   only('POST', '/v1/moderation/notices/{noticeId}/steps', 'Every other moderator action'),
   only('POST', '/v1/moderation/appeals/{appealId}/decide', 'Every other moderator action'),
