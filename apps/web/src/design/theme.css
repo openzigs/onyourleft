@@ -702,6 +702,14 @@ html {
       right: calc(anchor(right) + 2.75rem + var(--oyl-space-sm));
     }
 
+    /* #2073: the mute has left the row, so the music controls take its auto
+       margin. In this block, not one of its own: `ride-stage.ts` counts them.
+       Three classes, so it outranks the two-class beside-the-mute rule that
+       comes later in the file and would otherwise win on order. */
+    .oyl-header .oyl-header__mute + .oyl-other-player {
+      margin-inline-start: auto;
+    }
+
     .oyl-header__mute-words {
       position: absolute;
       width: 1px;
@@ -713,6 +721,61 @@ html {
       white-space: nowrap;
       border: 0;
     }
+  }
+}
+
+/*
+ * The rider's own music player's controls — #2073 (`shell/OtherPlayerControls.tsx`),
+ * at the header's far end, after the mute (#2056) where both show. 48 px
+ * targets by the issue, declared here rather than through
+ * `.oyl-button--ride`, whose list is the ride-time ruling's.
+ * `browser/other-player.browser.spec.ts` measures them.
+ *
+ * ⚠️ Below the rail breakpoint the header is zero tall (#671), so while these
+ * show it is one row of them there; the mute is drawn beside the `h1` there,
+ * not in that row. They show only inside the Android shell, once the rider's
+ * own player was heard, and never on a ride route.
+ */
+.oyl-other-player {
+  margin-inline-start: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oyl-space-sm);
+}
+
+/* Beside the mute, not halfway to it: one auto margin, the mute's. */
+.oyl-header__mute + .oyl-other-player {
+  margin-inline-start: var(--oyl-space-sm);
+}
+
+/* Two classes, so it outranks `.oyl-button`'s 2.75rem, which is declared later. */
+.oyl-other-player .oyl-other-player__button {
+  min-height: 3rem;
+  min-width: 3rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+/*
+ * On a phone each control shows its first word, the rest of its name folded
+ * off the screen and still its name (`OtherPlayerControls.tsx` §`Name`): three
+ * full names took two rows of a header that is otherwise zero tall. Where the
+ * mute has left the row for the `h1`, the controls take its auto margin: that
+ * rule is in the mute's own `@supports` block above.
+ */
+@media (max-width: 37.49rem) {
+  .oyl-other-player__rest {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
