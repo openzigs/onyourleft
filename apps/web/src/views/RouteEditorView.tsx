@@ -704,7 +704,7 @@ function Editor({
       )}
 
       <h2>Change the whole route</h2>
-      <div>
+      <div className="oyl-route-editor__actions">
         <Button
           variant="secondary"
           onClick={() => {
