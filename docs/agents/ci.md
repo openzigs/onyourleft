@@ -335,7 +335,18 @@ of 2026-11-02 to 05 ([41434484136](https://github.com/openzigs/onyourleft/action
 [42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562)): **16 to 30 s on all
 20**, a median of 19 s. On the demo's last five `Demo video checks`: 18, 20, 23 and 32 s, and
 **684 s** on run [42121778580](https://github.com/openzigs/onyourleft/actions/runs/42121778580),
-the stall #2207 measured.
+the stall #2207 measured. After, on this change's pull request, three attempts of each:
+
+| Run | `2 of 5` | `3 of 5` | `4 of 5` | `5 of 5` | heavy | Run | `Demo video checks` |
+|---|--:|--:|--:|--:|--:|---|--:|
+| [42129669442](https://github.com/openzigs/onyourleft/actions/runs/42129669442) attempt 1 | 3 s | 5 s | 4 s | 5 s | 4 s | [42129669303](https://github.com/openzigs/onyourleft/actions/runs/42129669303) attempt 1 | 3 s |
+| attempt 2 | 5 s | 4 s | 4 s | 6 s | 4 s | attempt 2 | 3 s |
+| attempt 3 | 5 s | 5 s | 4 s | 3 s | 3 s | attempt 3 | 4 s |
+
+**3 to 6 s on all 18**, against 16 to 30 s and one 684 s before. Every nightly browser job and the
+demo check was green on every attempt. The nightly coverage report, which installs no browser, reached
+its 30-minute stop on attempt 1 as the scheduled runs of 2026-11-04 and 05 did; it is not this
+change's.
 
 #### Where the time comes from next — owed before B9 and B12
 
