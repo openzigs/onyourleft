@@ -138,9 +138,13 @@ import {
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
+import { PLAN_SMALLEST_PIXELS } from '../src/game/hud/plan';
 import { workoutRescueText } from '../src/workout/rescue-text';
 
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
+
+/** The route panel's gap on an upright phone, `--oyl-space-sm` (#2075). */
+const ROUTE_PANEL_GAP_PIXELS = 8;
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -183,8 +187,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       ]);
       expect(seen.panels).toHaveLength(4);
       // Twelve readings, the strip, the plan view, the trainer line, two
-      // controls and, since #1482, the touch lock.
-      expect(seen.items).toHaveLength(18);
+      // controls and, since #1482, the touch lock — and since #2075 the road
+      // ahead beside the strip.
+      expect(seen.items).toHaveLength(19);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -400,6 +405,105 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         ).toEqual([]);
         // In the primary list in the document, wherever it is drawn.
         expect(seen.primary, how).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+      }
+    });
+
+    /**
+     * #2075, and the owner's screenshot review of 2026-11-05: the road
+     * ahead is the route panel's full width and TALLER than the whole route's
+     * strip, on its own row under it — except on a phone, upright or on its
+     * side, which has no row to give (`theme.css` §"THE ROAD AHEAD"): there
+     * it is beside the whole route's strip at its height. Upright, the two
+     * strips and their captions take the whole panel but the plan view's
+     * `PLAN_SMALLEST_PIXELS` column, where they had three fifths of it. Both
+     * ways (#1120).
+     */
+    test('the road ahead is the route panel’s width and taller, or beside the strip on a phone — #2075', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
+      // A phone, upright or on its side, has no row to give (`theme.css`
+      // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
+      const beside = Math.min(viewport.width, viewport.height) <= 480;
+      const upright = viewport.width < 736 && viewport.height >= 752;
+      for (const [how, seen] of await bothWays(page)) {
+        const whole = named(seen.items, 'the elevation strip');
+        const ahead = named(seen.items, 'the road ahead');
+        const plan = named(seen.items, 'the plan view');
+        const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+        if (route === undefined) throw new Error(`${how}: no route panel`);
+        expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
+        expect(
+          ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+            ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
+        ).toBe(true);
+        if (beside) {
+          expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
+          expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+        }
+        if (beside && upright) {
+          // The phone's width: the strips run from the whole route's strip's
+          // start to the plan view's column, and the plan view is no wider
+          // than the box its rider's mark is sized for.
+          expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
+            PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
+          );
+          const gap = plan.box.left - ahead.box.right;
+          expect(
+            gap,
+            `${how}: ${describeItem(ahead)} beside ${describeItem(plan)}`,
+          ).toBeLessThanOrEqual(ROUTE_PANEL_GAP_PIXELS + SUBPIXEL_TOLERANCE);
+        }
+        if (!beside) {
+          expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
+          expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
+        }
+      }
+    });
+
+    /**
+     * The owner's review of 2026-11-05: every grade band is the strip's full
+     * height as the engine draws it, so a descent or a flat stretch is as
+     * readable as a climb. Read off each band's own box.
+     */
+    test('every band on the road ahead is the strip’s full height — #2075', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
+      const read = await page.evaluate(() => {
+        const strip = document.querySelector('[data-testid="oyl-hud-look-ahead"]');
+        if (strip === null) throw new Error('no road ahead on the stage');
+        const box = strip.getBoundingClientRect();
+        return {
+          height: box.height,
+          bands: [...strip.querySelectorAll('.oyl-hud__ahead-run')].map((band) => {
+            const each = band.getBoundingClientRect();
+            return {
+              band: band.getAttribute('data-band') ?? '',
+              top: each.top - box.top,
+              bottom: box.bottom - each.bottom,
+              width: each.width,
+            };
+          }),
+        };
+      });
+      expect(read.bands.length).toBeGreaterThan(0);
+      for (const band of read.bands) {
+        expect(
+          Math.max(Math.abs(band.top), Math.abs(band.bottom)),
+          `${band.band}: ${JSON.stringify(band)} in a ${String(read.height)} px strip`,
+        ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
       }
     });
 
@@ -744,7 +848,7 @@ for (const viewport of STACKED_VIEWPORTS) {
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Twelve readings since #2072's elapsed time and clock, and the rest as above.
-      expect(seen.items).toHaveLength(18);
+      expect(seen.items).toHaveLength(19);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -1559,7 +1663,7 @@ test.describe('a ride with a side camera paired — #551', () => {
           expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
           expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
           expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
-          for (const name of ['the elevation strip', 'the plan view']) {
+          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
             const item = named(seen.items, name);
             expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
           }
@@ -1640,7 +1744,7 @@ test.describe('a ride with a standing notice, once it is put away — #437', () 
       await page.getByRole('button', { name: 'Trainer notice' }).click();
       for (const [how, put] of await bothWays(page)) {
         await test.step(how, async () => {
-          for (const name of ['the elevation strip', 'the plan view']) {
+          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
             const item = named(put.items, name);
             expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
             expect(inside(item.box, viewport), describeItem(item)).toBe(true);
