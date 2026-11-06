@@ -59,9 +59,13 @@ import type { SideLivePicture, SideLiveViewPort } from './side-live-view-port';
 /** What the picture is — its text alternative, which says what it is and not what it shows. */
 export const SIDE_LIVE_PICTURE_LABEL = 'The side camera’s latest picture';
 
-/** The caption's first sentence: what the picture is, and that it is not kept. */
+/**
+ * The caption's first sentence: what the picture is, and that it is not kept
+ * unless the rider presses *Save snapshot* (#1063, owner ruling 2026-11-06).
+ * "Not kept" alone would be false beside the button that keeps it.
+ */
 export const SIDE_LIVE_CAPTION =
-  'The side camera’s latest picture, shown until the next one arrives and not kept.';
+  'The side camera’s latest picture, shown until the next one arrives, and not kept unless you press “Save snapshot”.';
 
 export interface SideLiveViewProps {
   readonly view: SideLiveViewPort;

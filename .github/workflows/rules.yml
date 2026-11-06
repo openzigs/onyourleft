@@ -221,7 +221,12 @@ jobs:
       #   there is nothing to install. The version is printed because the
       #   runner's is older than a typical developer's and the two can disagree.
       #
-      #   format:check, lint, typecheck -- docs/agents/commands.md §4a.
+      #   format:check, lint, typecheck -- docs/agents/commands.md §4a. Since
+      #   #2272 `lint` is scripts/lint.sh: one ESLint process per workspace
+      #   project, one after another, because one process for the whole tree
+      #   ran out of its 4 GB heap here. Each prints its peak heap beside its
+      #   limit. Its suite beside it: a file that falls between the processes,
+      #   or a failing process that is swallowed, is a gate removed.
       #
       #   check-a11y-suite.test.sh -- the accessibility checker (below) decides
       #   what counts as an accessibility test from paths and from
@@ -329,6 +334,7 @@ jobs:
           'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
           'format:check' 'pnpm run format:check'
           'lint' 'pnpm run lint'
+          'lint runner tests' 'bash scripts/lint.test.sh'
           'typecheck' 'pnpm run typecheck'
           'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
           'test split' 'pnpm run check:test-split'

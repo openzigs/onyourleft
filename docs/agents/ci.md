@@ -40,7 +40,9 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 [#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
 suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841),
 and — since #1285 — `bash scripts/check-shard-results.test.sh` in a shard and
-`bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`.
+`bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`, and —
+since [#2272](https://github.com/openzigs/onyourleft/issues/2272) — `bash scripts/lint.test.sh`
+beside `lint` in the concurrent step (§"Lint, a project per process — #2272").
 ⚠️ **Since #1280 it takes no coverage and publishes none**: the coverage table and the HTML
 artefact are the NIGHTLY workflow's (§"The nightly job — #866"), where the two reporting steps
 still cannot fail the job: the run where coverage moved unexpectedly is exactly the one whose
@@ -214,6 +216,54 @@ same 25 % the first 9V74 sample on #833's own pull request showed, and in the tw
 touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
 not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
 from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### Lint, a project per process — #2272
+
+⚠️ **`pnpm run lint` is `scripts/lint.sh`, not `eslint .`, and a reviewer who remembers one ESLint
+process is reading the old file.** On 2026-11-06 the merge-queue run for #2236 (run 42263160979)
+failed in `Checks` with `JavaScript heap out of memory`: `lint` had reached its 4 GB heap after
+283 s. typescript-eslint's project service keeps every TypeScript program it opens, so one process
+over the whole tree held all of them at once — `apps/web`'s, `apps/instance`'s, each package's and
+the root's — and the sum had grown into the limit. `scripts/lint.sh` runs one ESLint process per
+directory under `apps/` and `packages/`, then one for the rest of the tree (`.` with exactly those
+directories ignored), **one after another**, so the peak is the largest single program's rather
+than the sum. Same `eslint.config.js`, same files, same rules: on the tree of #2272's branch the
+whole-tree run (given 8 GB to finish) and the split run linted the same 2 433 files, none twice,
+with the same messages. Its suite, `scripts/lint.test.sh`, is the guarantee that stays true: a
+problem in every place a file can be — inside an app, inside a package, at the root, in a
+directory that is no project — is reported once and fails the run, from the first process or the
+last.
+
+Every process prints `lint-memory: peak heap N MB of a M MB limit, peak RSS R MB`
+(`scripts/lint-memory.mjs`), so every `Checks` log carries the margin. The heap figure is sampled,
+so it counts garbage not yet collected: an upper bound, and a process whose live heap reaches the
+limit prints nothing and dies instead. The limit is Node's default, about 4 GB on the 16 GB
+runner; `--max-old-space-size` is **not** raised, because nothing measured needs it.
+
+Readings, `lint` inside `Checks, concurrently` (the peak of the whole run before; of its largest
+process, `apps/web`, after):
+
+| | Run | CPU | Peak heap (limit 4 192 MB) | Peak RSS | `lint` | Result |
+|---|---|---|--:|--:|--:|---|
+| **Before**, merge queue for #2236 | [42263160979](https://github.com/openzigs/onyourleft/actions/runs/42263160979) | EPYC 9V74 | 4 019 MB, 3 987 MB live after its last mark-compact | — | 320 s | out of memory at 283 s, exit 134 |
+| **Before**, #2272's first commit | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 1 | EPYC 9V74 | 3 990 MB | 4 456 MB | 268 s | passed |
+| **Before**, the same, rerun | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 2 | Xeon Platinum 8573C | 4 013 MB | 4 435 MB | 323 s | passed |
+| **After**, #2272's second commit | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 1 | Xeon Platinum 8573C | 3 254 MB (`apps/web`) | 3 689 MB | 302 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 2 | EPYC 7763 | 3 132 MB (`apps/web`) | 3 758 MB | 342 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 3 | EPYC 9V74 | 3 283 MB (`apps/web`) | 3 705 MB | 260 s | passed |
+
+The next largest processes were `apps/instance` (1 092 to 1 354 MB) and `packages/store` (about
+525 MB); the rest of the tree took about 210 MB. The `Checks` job took as long as it did before
+(5 m 11 s and 6 m 12 s before; 5 m 48 s, 6 m 37 s and 5 m 08 s after), and `lint` is still the
+concurrent step's long pole: `apps/instance`, first, shares four CPUs with 28 other commands.
+
+Locally (an Apple M4 Pro, 4 144 MB limit, run alone), on the same tree: the whole-tree process
+died at the limit after 124 s; the split run passed in 107 to 154 s, `apps/web` peaking at
+3 309 MB sampled and **2 740 MB live** (the largest heap left after a mark-compact, from
+`--trace-gc`), `apps/instance` 1 353 MB, every package 200 to 530 MB, the rest 178 MB. Given 8 GB,
+the whole-tree process peaked at 5 357 MB. ⚠️ **`apps/web` is now the margin**: one program, so
+splitting its files across processes would not shrink it. When its line nears the limit, the next
+lever is a smaller program — `apps/web/tsconfig.json` split in two — not a bigger heap.
 
 #### The merge queue — #2198
 
@@ -621,6 +671,73 @@ The coverage job is the one closest to its bound: 60 % of 1 800 s is 1 080 s, 17
 slowest reading. When a new row turns this red, split `test:coverage` between two jobs, as #1675
 split the browser checks. Do not lengthen the stop or change the 60 %.
 
+
+#### Cheaper cases under coverage — #1688
+
+⚠️ **From 2026-11-04 the `coverage` job was red on every nightly run**, and the table above did not
+show it: its three rows predate it. A case past Vitest's 5 s timeout under coverage turned it red,
+a different case most nights, and on the EPYC 7763 the job came within seconds of its 1 800 s stop.
+The owner's ruling for #1688 (2026-11-06): make those cases cheaper, and **never raise a timeout
+or the job's stop**. Four readings before, each the coverage job's own seconds from the Actions
+API, with the slowest Vitest file's own seconds:
+
+| Run | Event | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562) | `schedule` | EPYC 7763 | 1 761 | 1 276 | `people` (side road) 5.8 s, the 32x ride 5.0 s, `worship-steeple` 7.3 s |
+| [42039098957](https://github.com/openzigs/onyourleft/actions/runs/42039098957) | `workflow_dispatch` | EPYC 7763 | 1 798 | 1 290 | `people` ×2, the 32x ride, `worship-steeple` 7.1 s, `landform-levelling` |
+| [42067419110](https://github.com/openzigs/onyourleft/actions/runs/42067419110) | `workflow_dispatch` | EPYC 9V74 | 1 469 | 989 | `worship-steeple` 5.8 s |
+| [42206133669](https://github.com/openzigs/onyourleft/actions/runs/42206133669) | `schedule` | EPYC 9V45 | 1 201 | 826 | two hairpin walks, 6.2 and 6.5 s, `mapped-paint` 5.7 s |
+
+Over 19 red runs from 2026-11-04 to 2026-11-06 the cases that failed most were
+`line-on-the-road.test.ts`'s hairpin walks (11 runs), `worship-steeple.test.ts` (9), the 32x ride
+in `simulated-rider-wiring.test.tsx` (7), `people.test.ts`'s side roads (6 and 5),
+`mapped-paint.test.ts` (5), `corridor-wiring.test.tsx` (4) and `chase-camera-bend.test.ts` (4).
+
+**Where the time was.** A CPU profile of one worker under `--coverage` (`NODE_OPTIONS=--cpu-prof`
+with `--pool=threads`) put each of those cases' time in one of four loops. V8's block coverage counts
+every branch a loop takes, and a loop that branches per cell or calls a closure per row ran 5 to 12
+times slower under it than without; none of them is slow in a ride.
+
+| Loop | What it cost, locally, under coverage | Now |
+|---|---|---|
+| `land-class.ts` §`chamfer`, a branch per cell | 2.0 of `mapped-paint`'s and `worship-steeple`'s 2.4 s | the edges written out beside a branch-free interior; 0.25 → 0.23 ms a chunk without coverage |
+| `terrain.ts` §`retracedRows`, every point against every stretch | 1.5 of each hairpin case's 2.4 s | stretches filed by 8 m cell |
+| `landform.ts` §`groundTop`, every item against every row, through a closure | 0.7 of each frame-drawing case's 1.7 s | rows skipped by run-of-eight boxes, no closure |
+| `landform.test.ts`'s walk over every triangle for each metre of a ray | 331 of the file's 495 s | triangles looked up by cell; `surfaceTop` allocates nothing per triangle |
+
+Each gives the answer it gave: `land-class.test.ts` §"the chamfer, cell by cell" holds `chamfer` to
+the passes with a test per cell, `landform.test.ts` §"this file's own lookup" holds the cells to the
+walk, and the rest is held by the tests that were already there (`out-and-back.test.ts` for the
+retrace, `arrangement-unchanged.test.ts` and #2099's for the boxes). Two cases are also split in
+two, doing no less: each hairpin walk meets at the step nearest the apex, and each of `people.test.ts`'s
+#1619 claims is a case beside its control. No timeout, no stop and no worker count moved.
+
+Readings after, on the branch (`gh workflow run nightly.yml --ref`):
+
+| Run | Commit | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792) | f4e83683 (the loops) | EPYC 7763 | 1 448 | 282 | the radius-12 m hairpin walk 5.2 s, the crossroads 5.2 s, `corridor-wiring` 5.1 s, `lap-race-wiring`'s recorded ride at its own 10 s |
+| [42287054864](https://github.com/openzigs/onyourleft/actions/runs/42287054864) | 10c5c741 (and the splits) | Xeon 6973P-C | 1 015 | 176 | none: every job of the run green |
+| [42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) | 0bb1373f (10c5c741 and this section) | Xeon Platinum 8370C | 1 444 | 288 | the 32x ride 5.0 s, `corridor-wiring` 5.1 s |
+
+⚠️ **None of these readings is a row of the table above**, and neither are the four before it: each
+is past that table's 60 % bound (1 080 s), which `nightly-split.test.ts` would turn red, and the
+answer that section gives, two coverage jobs, is not #1688's to make. The table still holds the
+2026-10-29 figures, so that case is green on a bound the job no longer keeps: the slowest reading
+since is 1 798 s, and the slowest after #1688 is 1 448 s.
+
+**What is left.** The job's time is now the suite's whole work over the runner's two cores, not
+one file: on the 7763 the Vitest run summed 3 374 s of case time against 4 320 s before, and
+`near-tree-fade.test.ts` (455 s) is its slowest file. A case's time on the 7763 under coverage is
+about four times its time alone on a development Mac under coverage, so a case that takes more than
+about a second there is near the 5 s timeout on that runner. The two still red on the third
+reading, and the cases nearest them, all draw whole frames — scenery, ground and the standing of
+every item on it — with no one loop the larger part: `corridor-wiring.test.tsx`'s late read and the
+32x ride (each two whole rides compared, so not split as the hairpin walks were),
+`lap-race-wiring`'s recorded ride (9.6 s of its own 10 s on the 8370C) and the bot-and-ghost
+hairpin walks (their own 30 s). What would move them is a cheaper `sceneFrame` as a whole, or a
+change to this job's shape — the two coverage jobs this section's table already calls for, or
+fewer Vitest workers on the two-core runner — and those are the owner's to choose.
 
 #### 23m39s of 25 — #1051
 
@@ -1983,6 +2100,17 @@ artefact. On a pull request it runs only when the video tooling or the demo code
 `apps/web/tools/demo/**` and the files they import from the gate) changes, and then runs only the
 checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
 check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
+
+[`.github/workflows/demo-release.yml`](../../.github/workflows/demo-release.yml) — **`Demo route release`**
+([#1932](https://github.com/openzigs/onyourleft/issues/1932), ADR 0056 D-4.2) — on `workflow_dispatch`
+from `main` only, it bakes the demo's preset routes from the published archive, builds the demo, and
+publishes a GitHub release of each route's `.bin`, `routes.json` and `LICENCE-ODbL.txt`
+(`tools/demo/demo-release.ts`). ⚠️ **It has no pull-request trigger, on purpose**: it bakes
+OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `bake` job holds
+`contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
+`GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
+holds its trigger, runners, pins and permissions in the required suite.
+[`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs.
 
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs

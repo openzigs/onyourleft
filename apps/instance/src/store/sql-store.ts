@@ -154,6 +154,11 @@ export interface PublishedSegment {
   readonly definition: string;
   /** Unix seconds: when it was published here. */
   readonly createdAt: number;
+  /**
+   * Whether any rider flagged it hazardous (#69): it then awards nothing to
+   * anybody. Read with it; never written through this record.
+   */
+  readonly hazardous?: boolean;
 }
 
 /** One effort as a rider shares it (#68): the instance mints its id. */
@@ -163,6 +168,11 @@ export interface SegmentEffortWrite {
   readonly startedAt: number;
   readonly elapsedSeconds: number;
   readonly visibility: 'public' | 'private-match';
+  /**
+   * Why the instance's own rule excludes it (#69), in words, or `null`. Kept
+   * with the effort, so its rider sees why; recorded in the integrity log.
+   */
+  readonly excludedReason: string | null;
 }
 
 /** One stored effort (#68). */
@@ -170,6 +180,37 @@ export interface SegmentEffortRow extends SegmentEffortWrite {
   readonly athleteId: string;
   readonly segmentId: string;
   readonly contentSha256: string;
+  /** Whether any rider flagged it (#69): then it is on no shared board. */
+  readonly flagged: boolean;
+}
+
+/** One rider's flag (#69): an effort, or with `effortId` null the segment itself as hazardous. */
+export interface SegmentFlagWrite {
+  /** The flagger. */
+  readonly athleteId: string;
+  readonly segmentId: string;
+  readonly effortId: string | null;
+  readonly reason: string;
+  /** Unix seconds. */
+  readonly at: number;
+  /** The rate limit: at most `limit` flags by this rider in `windowSeconds` before `at`. */
+  readonly limit: number;
+  readonly windowSeconds: number;
+}
+
+/** One entry of the leaderboard integrity log (#69): append-only. */
+export interface SegmentIntegrityLogEntry {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly action: 'excluded' | 'flagged_effort' | 'flagged_hazardous';
+  /** Who did it, or `null` for the instance's own rule or a flagger who erased their account. */
+  readonly actorAthleteId: string | null;
+  /** Whose effort it was about, or `null` for a segment or a rider who erased their account. */
+  readonly subjectAthleteId: string | null;
+  readonly segmentId: string;
+  readonly effortId: string | null;
+  readonly reason: string;
 }
 
 /**
@@ -2034,6 +2075,27 @@ export interface SqlStore {
     since: number,
     limit: number,
   ): Promise<readonly BoardRow[]>;
+  /**
+   * #69: record one rider's flag — on an effort on the segment, or with
+   * `effortId` null on the segment as hazardous — and its log entry, in one
+   * transaction. Refused, with nothing written, unless the flagger has an
+   * effort of their own on the segment (`no-effort-of-yours`) and is under
+   * their limit (`rate_limited`); an effort that is the flagger's own, not on
+   * the segment, or by a rider the flagger may not see is `not-found`; a flag
+   * this rider already raised is `already`.
+   */
+  flagSegment(
+    flag: SegmentFlagWrite,
+  ): Promise<'flagged' | 'already' | 'rate_limited' | 'no-effort-of-yours' | 'not-found'>;
+  /**
+   * #69, for the moderators: the integrity log after entry `after`, oldest
+   * first. ⚠️ Instance-wide by design — it is the moderators' audit trail, read
+   * only on a `reaches: 'moderation'` route.
+   */
+  listSegmentIntegrityLog(
+    after: number | undefined,
+    limit: number,
+  ): Promise<readonly SegmentIntegrityLogEntry[]>;
   /** #68, for the account export: every segment THIS athlete published, oldest first. */
   listSegmentsPublishedBy(athleteId: string): Promise<readonly PublishedSegment[]>;
   /** #68, for the account export: every effort THIS athlete shared, on any segment. */
@@ -2655,7 +2717,9 @@ export function seenBy(viewerId: string) {
          or (block.athlete_id = athlete.id and block.blocked_athlete_id = ${viewerId}))))`;
 }
 
-const segmentEffortFrom = (row: Selectable<SegmentEffortTable>): SegmentEffortRow => ({
+const segmentEffortFrom = (
+  row: Selectable<SegmentEffortTable> & { readonly flagged: number | bigint },
+): SegmentEffortRow => ({
   id: row.id,
   athleteId: row.athlete_id,
   segmentId: row.segment_id,
@@ -2663,9 +2727,13 @@ const segmentEffortFrom = (row: Selectable<SegmentEffortTable>): SegmentEffortRo
   startedAt: row.started_at,
   elapsedSeconds: row.elapsed_seconds,
   visibility: row.visibility,
+  excludedReason: row.excluded_reason,
+  flagged: Number(row.flagged) === 1,
 });
 
-const publishedSegmentFrom = (row: Selectable<SegmentTable>): PublishedSegment => ({
+const publishedSegmentFrom = (
+  row: Selectable<SegmentTable> & { readonly hazardous: number | bigint },
+): PublishedSegment => ({
   id: row.id,
   athleteId: row.athlete_id,
   name: row.name,
@@ -2673,7 +2741,27 @@ const publishedSegmentFrom = (row: Selectable<SegmentTable>): PublishedSegment =
   distanceMetres: row.distance_metres,
   definition: row.definition,
   createdAt: row.created_at,
+  hazardous: Number(row.hazardous) === 1,
 });
+
+/**
+ * #69: how many DIFFERENT riders must flag a segment hazardous before nothing
+ * on it is ranked. One rider's flag cannot switch a board off for everyone, and
+ * nothing yet reverses it (docs/leaderboard-integrity.md, "What is not built yet").
+ */
+export const HAZARD_FLAGGERS = 3;
+
+/** #69: whether enough riders flagged the selected segment hazardous, as a column of the same read. */
+const hazardousColumn =
+  sql<number>`(select count(distinct segment_flag.athlete_id) from segment_flag where segment_flag.segment_id = segment.id and segment_flag.effort_id is null) >= ${HAZARD_FLAGGERS}`.as(
+    'hazardous',
+  );
+
+/** #69: whether any rider flagged the selected effort, as a column of the same read. */
+const flaggedColumn =
+  sql<number>`exists (select 1 from segment_flag where segment_flag.segment_id = segment_effort.segment_id and segment_flag.subject_athlete_id = segment_effort.athlete_id and segment_flag.subject_content_sha256 = segment_effort.content_sha256)`.as(
+    'flagged',
+  );
 
 const syncItemFrom = (row: Selectable<SyncItemTable>): SyncItem => ({
   seq: row.seq,
@@ -3975,6 +4063,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectFrom('segment')
           .innerJoin('athlete', 'athlete.id', 'segment.athlete_id')
           .selectAll('segment')
+          .select(hazardousColumn)
           .where('segment.id', '=', segmentId)
           .where(seenBy(viewerId))
           .executeTakeFirst();
@@ -3987,6 +4076,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectFrom('segment')
           .innerJoin('athlete', 'athlete.id', 'segment.athlete_id')
           .selectAll('segment')
+          .select(hazardousColumn)
           .where(seenBy(viewerId));
         if (after !== undefined) {
           query = query.where((eb) =>
@@ -4021,8 +4111,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .where('athlete_id', '=', athleteId)
               .executeTakeFirst();
             if (held === undefined) return false;
-            // Every effort on it, anybody's: `segment_id` has no foreign key
-            // (migration 0038 says why), so nothing else would.
+            // Every effort on it and every flag on it, anybody's: neither
+            // names the segment by a foreign key (migrations 0038 and 0039
+            // say why), so nothing else would. The integrity log keeps its
+            // record of them: it is append-only.
+            await trx.deleteFrom('segment_flag').where('segment_id', '=', segmentId).execute();
             await trx.deleteFrom('segment_effort').where('segment_id', '=', segmentId).execute();
             await trx
               .deleteFrom('segment')
@@ -4059,7 +4152,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (kept.length > 0) gone = gone.where('started_at', 'not in', kept);
           await gone.execute();
           for (const effort of efforts) {
-            await trx
+            const before = await trx
+              .selectFrom('segment_effort')
+              .select('excluded_reason')
+              .where('athlete_id', '=', athleteId)
+              .where('segment_id', '=', segmentId)
+              .where('content_sha256', '=', contentSha256)
+              .where('started_at', '=', effort.startedAt)
+              .executeTakeFirst();
+            const stored = await trx
               .insertInto('segment_effort')
               .values({
                 id: effort.id,
@@ -4070,8 +4171,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 elapsed_seconds: effort.elapsedSeconds,
                 visibility: effort.visibility,
                 received_at: now,
+                excluded_reason: effort.excludedReason,
               })
-              // The same traversal shared again keeps its id.
+              // The same traversal shared again keeps its id: a flag names it.
               .onConflict((conflict) =>
                 conflict
                   .columns(['athlete_id', 'segment_id', 'content_sha256', 'started_at'])
@@ -4079,9 +4181,31 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                     elapsed_seconds: effort.elapsedSeconds,
                     visibility: effort.visibility,
                     received_at: now,
+                    excluded_reason: effort.excludedReason,
                   }),
               )
-              .execute();
+              .returning('id')
+              .executeTakeFirstOrThrow();
+            // #69: every exclusion is recorded, in the same transaction as the
+            // effort it excludes, with no actor — it is the instance's rule.
+            // Once: sharing an already-excluded effort again adds nothing.
+            if (
+              effort.excludedReason !== null &&
+              before?.excluded_reason !== effort.excludedReason
+            ) {
+              await trx
+                .insertInto('segment_integrity_log')
+                .values({
+                  at: now,
+                  action: 'excluded',
+                  actor_athlete_id: null,
+                  subject_athlete_id: athleteId,
+                  segment_id: segmentId,
+                  effort_id: stored.id,
+                  reason: effort.excludedReason,
+                })
+                .execute();
+            }
           }
           return 'replaced' as const;
         }),
@@ -4093,6 +4217,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           await db
             .selectFrom('segment_effort')
             .selectAll()
+            .select(flaggedColumn)
             .where('athlete_id', '=', athleteId)
             .where('segment_id', '=', segmentId)
             .where('started_at', '>=', since)
@@ -4110,6 +4235,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           await db
             .selectFrom('segment')
             .selectAll()
+            .select(hazardousColumn)
             .where('athlete_id', '=', athleteId)
             .orderBy('created_at')
             .orderBy('id')
@@ -4123,6 +4249,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           await db
             .selectFrom('segment_effort')
             .selectAll()
+            .select(flaggedColumn)
             .where('athlete_id', '=', athleteId)
             .orderBy('segment_id')
             .orderBy('started_at')
@@ -4136,7 +4263,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         // ONE statement, whatever the board's length (#68's third criterion):
         // the names come in the same join, never a read per row. The ride's
         // visibility and the effort's are two conditions on purpose — the
-        // second is the privacy zone (`@onyourleft/domain` §`EffortVisibility`).
+        // second is the privacy zone (`@onyourleft/domain` §`EffortVisibility`)
+        // — and since #69 two more: the instance's own rule did not exclude
+        // the effort, and no rider flagged it. A hazardous segment answers no
+        // row at all (`segments.ts` asks first, on the segment it read).
         const rows = await sql<{
           id: string;
           athlete_id: string;
@@ -4157,8 +4287,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             join athlete on athlete.id = effort.athlete_id
             where effort.segment_id = ${segmentId}
               and effort.visibility = 'public'
+              and effort.excluded_reason is null
               and ride.visibility = 'public'
               and effort.started_at >= ${since}
+              and not exists (
+                select 1 from segment_flag as flag
+                where flag.segment_id = effort.segment_id
+                  and flag.subject_athlete_id = effort.athlete_id
+                  and flag.subject_content_sha256 = effort.content_sha256
+              )
               and ${seenBy(viewerId)}
           )
           select best.id, best.athlete_id, best.started_at, best.elapsed_seconds,
@@ -4174,6 +4311,107 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           displayNameHiddenAt: row.display_name_hidden_at,
           startedAt: row.started_at,
           elapsedSeconds: row.elapsed_seconds,
+        }));
+      }),
+
+    flagSegment: (flag) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          // The brake on drive-by flagging (#69): a rider flags only a segment
+          // they have an effort of their own on, and a limited number a window.
+          const mine = await trx
+            .selectFrom('segment_effort')
+            .select('id')
+            .where('athlete_id', '=', flag.athleteId)
+            .where('segment_id', '=', flag.segmentId)
+            // An effort the instance itself excluded as impossible is no
+            // standing to flag anybody.
+            .where('excluded_reason', 'is', null)
+            .executeTakeFirst();
+          if (mine === undefined) return 'no-effort-of-yours' as const;
+          let already = trx
+            .selectFrom('segment_flag')
+            .select('id')
+            .where('athlete_id', '=', flag.athleteId)
+            .where('segment_id', '=', flag.segmentId);
+          already =
+            flag.effortId === null
+              ? already.where('effort_id', 'is', null)
+              : already.where('effort_id', '=', flag.effortId);
+          // Before the limit: saying it again is not a new flag.
+          if ((await already.executeTakeFirst()) !== undefined) return 'already' as const;
+          const recent = await trx
+            .selectFrom('segment_flag')
+            .select((eb) => eb.fn.countAll<number>().as('n'))
+            .where('athlete_id', '=', flag.athleteId)
+            .where('created_at', '>', flag.at - flag.windowSeconds)
+            .executeTakeFirstOrThrow();
+          if (Number(recent.n) >= flag.limit) return 'rate_limited' as const;
+          let subject: string | null = null;
+          let subjectRide: string | null = null;
+          if (flag.effortId !== null) {
+            // An effort on THIS segment, somebody else's, by a rider the
+            // flagger may see — the choke point's rule, as on the board.
+            const target = await trx
+              .selectFrom('segment_effort')
+              .innerJoin('athlete', 'athlete.id', 'segment_effort.athlete_id')
+              .select(['segment_effort.athlete_id', 'segment_effort.content_sha256'])
+              .where('segment_effort.id', '=', flag.effortId)
+              .where('segment_effort.segment_id', '=', flag.segmentId)
+              .where('segment_effort.athlete_id', '!=', flag.athleteId)
+              .where(seenBy(flag.athleteId))
+              .executeTakeFirst();
+            if (target === undefined) return 'not-found' as const;
+            subject = target.athlete_id;
+            subjectRide = target.content_sha256;
+          }
+          await trx
+            .insertInto('segment_flag')
+            .values({
+              athlete_id: flag.athleteId,
+              segment_id: flag.segmentId,
+              effort_id: flag.effortId,
+              subject_athlete_id: subject,
+              subject_content_sha256: subjectRide,
+              reason: flag.reason,
+              created_at: flag.at,
+            })
+            .execute();
+          // The record, in the same transaction as the flag it records.
+          await trx
+            .insertInto('segment_integrity_log')
+            .values({
+              at: flag.at,
+              action: flag.effortId === null ? 'flagged_hazardous' : 'flagged_effort',
+              actor_athlete_id: flag.athleteId,
+              subject_athlete_id: subject,
+              segment_id: flag.segmentId,
+              effort_id: flag.effortId,
+              reason: flag.reason,
+            })
+            .execute();
+          return 'flagged' as const;
+        }),
+      ),
+
+    listSegmentIntegrityLog: (after, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('segment_integrity_log').selectAll();
+        if (after !== undefined) query = query.where('id', '>', after);
+        return (
+          await query
+            .orderBy('id')
+            .limit(Math.max(0, Math.floor(limit)))
+            .execute()
+        ).map((row) => ({
+          id: row.id,
+          at: row.at,
+          action: row.action,
+          actorAthleteId: row.actor_athlete_id,
+          subjectAthleteId: row.subject_athlete_id,
+          segmentId: row.segment_id,
+          effortId: row.effort_id,
+          reason: row.reason,
         }));
       }),
 
@@ -5957,6 +6195,33 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .select('content_sha256')
               .where('athlete_id', '=', athleteId)
               .execute();
+            // Every flag anybody raised on this athlete's efforts or on a
+            // segment they published (#69): neither names them by a foreign
+            // key. The integrity log keeps its record: it is append-only.
+            await trx
+              .deleteFrom('segment_flag')
+              .where((eb) =>
+                eb.or([
+                  eb('subject_athlete_id', '=', athleteId),
+                  eb(
+                    'effort_id',
+                    'in',
+                    eb
+                      .selectFrom('segment_effort')
+                      .select('segment_effort.id')
+                      .where('segment_effort.athlete_id', '=', athleteId),
+                  ),
+                  eb(
+                    'segment_id',
+                    'in',
+                    eb
+                      .selectFrom('segment')
+                      .select('segment.id')
+                      .where('segment.athlete_id', '=', athleteId),
+                  ),
+                ]),
+              )
+              .execute();
             // Every effort anybody shared on a segment this athlete published
             // (#68): `segment_effort.segment_id` has no foreign key, so the
             // loop below would leave them ranked on a segment that is gone.
@@ -5985,6 +6250,21 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .where('blocked_athlete_id', '=', athleteId)
               .execute();
             await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
+            // An erased athlete is named nowhere in the integrity log (#69, the
+            // owner's rulings of 2026-11-06): not as the flagger, and not as
+            // the rider an exclusion or a flag was about. The log keeps the
+            // event — what, why and when. Its trigger allows these updates
+            // alone, and only once the athlete row is gone.
+            await trx
+              .updateTable('segment_integrity_log')
+              .set({ actor_athlete_id: null })
+              .where('actor_athlete_id', '=', athleteId)
+              .execute();
+            await trx
+              .updateTable('segment_integrity_log')
+              .set({ subject_athlete_id: null })
+              .where('subject_athlete_id', '=', athleteId)
+              .execute();
             return held.map((row) => row.content_sha256);
           }),
         ),
