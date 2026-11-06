@@ -19,10 +19,13 @@ import {
   type OtherPlayerPlugin,
 } from '@onyourleft/mobile';
 
+import { CameraController } from '../camera/session';
+import { browserSecureWindow } from '../camera/secure-window-testing';
+import { manualSchedule, scriptedCamera, scriptedLink } from '../camera/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { AppShell } from './AppShell';
+import { AppShell, type AppShellProps } from './AppShell';
 import { OTHER_PLAYER_POLL_MILLISECONDS, OtherPlayer } from './other-player';
 import { manualOtherPlayerClock, type ManualOtherPlayerClock } from './other-player-testing';
 import {
@@ -30,6 +33,7 @@ import {
   OTHER_PLAYER_GROUP_NAME,
   PAUSE_MUSIC_NAME,
   PLAY_MUSIC_NAME,
+  Name,
   PREVIOUS_TRACK_NAME,
 } from './OtherPlayerControls';
 
@@ -37,6 +41,9 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
 
 /** A ride route's view is the largest to load the first time, under coverage most of all. */
 const RIDE_ROUTE = { timeout: 20_000 } as const;
+
+/** The side camera's view is lazy too, and is driven to filming on top of loading. */
+const SIDE_CAMERA_ROUTE = { timeout: 20_000 } as const;
 
 let mounted: Mounted | undefined;
 
@@ -69,14 +76,19 @@ interface Shell {
   readonly time: ManualOtherPlayerClock;
 }
 
-async function open(path: string, active: boolean, withPlayer = true): Promise<Shell> {
+async function open(
+  path: string,
+  active: boolean,
+  withPlayer = true,
+  more: Partial<AppShellProps> = {},
+): Promise<Shell> {
   const scripted = scriptedPlugin(active);
   const time = manualOtherPlayerClock();
   const player = withPlayer
     ? new OtherPlayer(capacitorOtherPlayer(scripted.plugin), time.clock)
     : undefined;
   globalThis.location.hash = `#${path}`;
-  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} otherPlayer={player} />);
+  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} otherPlayer={player} {...more} />);
   await settle();
   return { keys: scripted.keys, state: scripted.state, time };
 }
@@ -181,5 +193,73 @@ describe('the rider’s own music player in the header — #2073', () => {
     await onePoll(shell.time);
     expect(group()).toBeNull();
     expect(shell.state.readings).toBe(asked);
+  });
+
+  it(
+    'is not asked while the side camera films, a screen that is not a ride route',
+    SIDE_CAMERA_ROUTE,
+    async () => {
+      // The side camera is the one screen that takes the screen over (#423's
+      // `immersive`) without being a ride route, so it is what proves the
+      // `!immersive` half of `AppShell`'s guard: the header leaves with the
+      // screen either way, and only the readings show the poll went on.
+      const controller = new CameraController({
+        secureWindow: browserSecureWindow(),
+        port: scriptedCamera().port,
+        schedule: manualSchedule().schedule,
+      });
+      const link = scriptedLink();
+      const shell = await open('/camera/side', true, true, {
+        camera: controller,
+        sideCameraLink: link,
+      });
+      await onePoll(shell.time);
+      expect(group()).not.toBeNull();
+      const consent = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
+      if (consent === undefined) throw new Error('no acknowledgement box');
+      consent.click();
+      await settle();
+      const turnOn = queryAll<HTMLButtonElement>(document, 'button').find((each) =>
+        (each.textContent ?? '').includes('Turn the camera on'),
+      );
+      if (turnOn === undefined) throw new Error('no Turn the camera on');
+      await activateWithKeyboard(turnOn);
+      await settle();
+      await act(async () => {
+        link.emit({ kind: 'start' });
+        await Promise.resolve();
+      });
+      await settle();
+      // Non-vacuity: the side camera has the screen, so the header has gone.
+      expect(document.querySelector('header.oyl-header')).toBeNull();
+      const asked = shell.state.readings;
+      await onePoll(shell.time);
+      await onePoll(shell.time);
+      expect(shell.state.readings).toBe(asked);
+    },
+  );
+});
+
+describe('a control’s name, folded on a phone — #2073', () => {
+  it('shows the first word and folds the rest, all of it still the name', async () => {
+    mounted = await mount(
+      <span id="name">
+        <Name name="Pause music" />
+      </span>,
+    );
+    const name = document.getElementById('name');
+    expect(name?.textContent).toBe('Pause music');
+    expect(name?.querySelector('.oyl-other-player__rest')?.textContent).toBe(' music');
+  });
+
+  it('keeps every letter of a one-word name, with nothing to fold', async () => {
+    mounted = await mount(
+      <span id="name">
+        <Name name="Pause" />
+      </span>,
+    );
+    const name = document.getElementById('name');
+    expect(name?.textContent).toBe('Pause');
+    expect(name?.querySelector('.oyl-other-player__rest')).toBeNull();
   });
 });

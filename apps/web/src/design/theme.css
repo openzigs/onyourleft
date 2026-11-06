@@ -676,8 +676,10 @@ html {
     }
 
     /* #2073: the mute has left the row, so the music controls take its auto
-       margin. In this block, not one of its own: `ride-stage.ts` counts them. */
-    .oyl-header__mute + .oyl-other-player {
+       margin. In this block, not one of its own: `ride-stage.ts` counts them.
+       Three classes, so it outranks the two-class beside-the-mute rule that
+       comes later in the file and would otherwise win on order. */
+    .oyl-header .oyl-header__mute + .oyl-other-player {
       margin-inline-start: auto;
     }
 

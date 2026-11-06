@@ -43,9 +43,12 @@ export interface OtherPlayerControlsProps {
  * screen on a phone (`theme.css` §`.oyl-other-player__rest`), where three full
  * names took two rows. Folded, never removed: the name is still the whole of
  * it, and what a rider sees is its start (WCAG 2.2 SC 2.5.3, Label in Name).
+ * Exported for its test only.
  */
-function Name({ name }: { readonly name: string }): JSX.Element {
+export function Name({ name }: { readonly name: string }): JSX.Element {
   const space = name.indexOf(' ');
+  // One word has nothing to fold, and `slice(0, -1)` would drop its last letter.
+  if (space === -1) return <>{name}</>;
   return (
     <>
       {name.slice(0, space)}

@@ -11,6 +11,9 @@
  * heard. Measured at the two sizes the issue's screenshots are taken at: a
  * tablet at 1280×800 and a phone at 412×915.
  *
+ * The far-end case is the phone's own auto margin (`theme.css`'s anchored
+ * mute block), which a later two-class rule outranked until #2242's review.
+ *
  * The last case strips `.oyl-other-player__button`'s declaration and watches
  * the measurement fall below 48, so the number is the rule's and not an
  * accident of the words' length.
@@ -88,6 +91,24 @@ for (const viewport of VIEWPORTS) {
       await open(page);
       const tops = new Set((await boxes(page)).map((box) => Math.round(box.top)));
       expect([...tops], 'the controls wrapped onto a second row').toHaveLength(1);
+    });
+
+    test('the three sit at the header’s far end, not beside the wordmark', async ({ page }) => {
+      await open(page);
+      const placed = await page.evaluate((selector) => {
+        const header = document.querySelector('header.oyl-header');
+        const group = document.querySelector(selector);
+        if (header === null || group === null) return undefined;
+        const box = header.getBoundingClientRect();
+        const end = box.right - Number.parseFloat(getComputedStyle(header).paddingInlineEnd);
+        return { end, right: group.getBoundingClientRect().right };
+      }, GROUP);
+      expect(placed, 'no header or no controls').toBeDefined();
+      if (placed === undefined) return;
+      expect(
+        Math.abs(placed.end - placed.right),
+        `the controls end at x=${placed.right.toFixed(1)}, the header's content at x=${placed.end.toFixed(1)}`,
+      ).toBeLessThanOrEqual(1);
     });
   });
 }
