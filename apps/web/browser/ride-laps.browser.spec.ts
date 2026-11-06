@@ -24,6 +24,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   OVERLAY_VIEWPORTS,
   TABLET_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
   bothWays,
   layoutFaults,
   measure,
@@ -97,13 +98,22 @@ const SIZED_VIEWPORTS = [
   ),
 ];
 
-for (const { viewport, size, text } of SIZED_VIEWPORTS) {
+/**
+ * And a laptop's or a desktop's window under 47 rem tall: the owner's ruling of
+ * 2026-11-06 (#2034) ties the splits' give-way to phones, so it draws them.
+ */
+const LOOP_VIEWPORTS = [
+  ...SIZED_VIEWPORTS,
+  ...LAPTOP_VIEWPORTS.map((viewport) => ({ viewport, size: '', text: '' })),
+];
+
+for (const { viewport, size, text } of LOOP_VIEWPORTS) {
   test(`#2080 a loop's lap splits hold the layout${size} — ${viewport.name}`, async ({
     browser,
   }) => {
     const page = await sharedRide(browser, viewport, `?lap=ended${text}`);
     expect(await splitRows(page)).toEqual(HARNESS_ROWS);
-    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    const tablet = TABLET_VIEWPORTS.includes(viewport) || LAPTOP_VIEWPORTS.includes(viewport);
     const box = await splitsBox(page);
     if (tablet) {
       // Drawn: wide enough for its four columns, and a panel the rider reads.

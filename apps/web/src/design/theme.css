@@ -8799,9 +8799,29 @@ select.oyl-input {
   border: 0;
 }
 
-@media (min-width: 46rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud .oyl-hud__standings,
+/* #2080: a loop's lap splits are drawn on every corners layout but a
+   phone's — a tablet, and a laptop's or a desktop's window under 47 rem tall
+   (the owner's ruling of 2026-11-06, #2034); a race's standings, and the
+   swap between the two, on a tablet only, as `main` draws the standings. */
+@media (min-width: 46rem) and (height > 30rem) {
   .oyl-game--riding .oyl-hud .oyl-hud__laps {
+    position: static;
+    width: min(100%, 18rem);
+    height: auto;
+    margin: 0;
+    padding: var(--oyl-space-sm);
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    border: 1px solid var(--oyl-color-hud-border);
+    grid-area: notices;
+    align-self: start;
+    justify-self: end;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__standings {
     position: static;
     width: min(100%, 18rem);
     height: auto;
