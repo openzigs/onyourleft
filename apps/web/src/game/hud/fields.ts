@@ -525,7 +525,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   // argument rather than a unit one: this is a countdown, and a rider watching
   // the last kilometre go past wants the ten-metre digit. `units/format.ts`
   // §Rounding says why the two are kept apart.
-  const togo = formatDistance(remaining as Metres, units, REMAINING_DECIMALS);
+  const togo = remainingDistance(remaining as Metres, units);
   // ⚠️ **Last, and the position is the decision rather than an afterthought.**
   // The order above is a contract — #94 asks a rider to find a field by
   // position rather than by reading its label — and this is the one field
@@ -1034,6 +1034,32 @@ const SETTLED: Readonly<Record<GhostOutcome, { value: string; detail: string }>>
 
 /** How many decimals the distance still to ride is counted down to. */
 const REMAINING_DECIMALS = 2;
+
+/**
+ * From this many kilometres (or miles) to go, the countdown drops to
+ * `LONG_REMAINING_DECIMALS` — #2130, the owner's ruling of 2026-11-06.
+ */
+const LONG_REMAINING_FROM = 100;
+
+/**
+ * One decimal on a long route: `139.82 km` filled its track on a tablet and
+ * `km` wrapped under it, and the ten-metre digit #94 keeps is for the last
+ * kilometres, not the first hundred.
+ */
+const LONG_REMAINING_DECIMALS = 1;
+
+/**
+ * The distance still to ride: two decimals below 100 km (or 100 mi) and one
+ * from there up, so `139.8 km` is no wider than `99.99 km`. The test is on the
+ * number as it would be SHOWN at two decimals, so `99.996` is `100.0` and never
+ * `100.00`.
+ */
+function remainingDistance(remaining: Metres, units: UnitSystem): Measurement {
+  const fine = formatDistance(remaining, units, REMAINING_DECIMALS);
+  return Number(fine.value) < LONG_REMAINING_FROM
+    ? fine
+    : formatDistance(remaining, units, LONG_REMAINING_DECIMALS);
+}
 
 /**
  * How many decimals the wind is shown to: **none**.

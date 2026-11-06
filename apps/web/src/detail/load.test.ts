@@ -193,6 +193,19 @@ describe('loadTrace — what the power and speed reads carry for #2081', () => {
     expect(trace?.distance?.secondsPerStep).toBe(4);
   });
 
+  it('says how much ride time one point covers in true seconds, as the distance profile does — #2194', async () => {
+    const port = stubDetail(ATHLETE, {
+      activity: stubActivity(),
+      channels: { speed: Array.from({ length: 1200 }, () => metresPerSecond(10)) },
+      laps: [],
+    });
+    const trace = await loadTrace(port, RIDE, 'speed', 'metric', CHART_POINTS, 2);
+    // 1 200 samples of 2 s in 600 points: 4 s a point, the profile's step —
+    // not the 2 samples a point that is right only at 1 Hz.
+    expect(trace?.secondsPerPoint).toBe(4);
+    expect(trace?.secondsPerPoint).toBe(trace?.distance?.secondsPerStep);
+  });
+
   it('carries neither on any other channel', async () => {
     const trace = await loadTrace(fourHourRide(), RIDE, 'heartRate', 'metric');
     expect(trace?.curve).toBeUndefined();

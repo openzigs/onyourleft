@@ -21,7 +21,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { STRAP_NAME, TRAINER_NAME } from './devices-fixture';
+import { STRAP_BATTERY_PERCENT, STRAP_NAME, TRAINER_NAME } from './devices-fixture';
 import type { DevicesHarness } from './devices-harness';
 
 /** A phone, upright — #654's re-review names this viewport for the fold. */
@@ -99,7 +99,7 @@ test('a new rider pairs a trainer from Home, and Ride and Home both see it', asy
   // matcher passes over a Home that rendered no Trainer region at all (#659's
   // review). This is `HomeView.tsx` §`FromTheRide`'s sentence for a trainer
   // that is paired and has not been given control.
-  await expect(page.getByRole('region', { name: 'Trainer' })).toContainText(
+  await expect(page.getByRole('region', { name: 'Sensors' })).toContainText(
     'Paired, and this app has not been given control.',
   );
 });
@@ -129,6 +129,87 @@ test('a second device is its own press, and Forget lets it go through BluetoothD
   await expect(row(page, 'Heart rate strap').locator('.oyl-pairing__state')).toHaveText(
     `${STRAP_NAME}: Connected`,
   );
+});
+
+/** Home's sensors module — #2045. */
+const sensors = (page: Page) => page.getByRole('region', { name: 'Sensors' });
+
+test('#2045: with nothing connected Home’s sensors module says so in words, and its one link reaches Devices', async ({
+  page,
+}) => {
+  await open(page);
+  await expect(sensors(page)).toContainText('No trainer paired.');
+  await expect(sensors(page)).toContainText('No heart rate, power or cadence sensor paired.');
+  await expect(sensors(page).getByRole('link')).toHaveCount(1);
+  await sensors(page).getByRole('link', { name: 'Pair one on Devices' }).click();
+  await expect(page).toHaveURL(/#\/devices$/);
+});
+
+test('#2045: a strap paired on Devices reads connected on Home, with its live heart rate, and the number moves', async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() => {
+    window.__oylDevices?.heartRate(142);
+  });
+  await sensors(page).getByRole('link', { name: 'Pair one on Devices' }).click();
+  await page.getByRole('button', { name: 'Pair a heart rate strap' }).click();
+  await expect(row(page, 'Heart rate strap').locator('.oyl-pairing__state')).toHaveText(
+    `${STRAP_NAME}: Connected`,
+  );
+
+  await page.evaluate(() => {
+    window.location.hash = '#/';
+  });
+  // One compact row (the owner's review of #2045): the kind and the label are
+  // said to a screen reader, the name and the number are on screen.
+  await expect(sensors(page).locator('.oyl-home__sensor-row')).toHaveText([
+    `Heart rate strap, ${STRAP_NAME}, Heart rate: 142 bpm, Battery ${String(STRAP_BATTERY_PERCENT)}%, Connected`,
+  ]);
+  await expect(sensors(page).locator('.oyl-home__sensor-dot--on')).toHaveCount(1);
+  // Read from the controller's subscription while Home is open — a copy taken
+  // when Home rendered would keep the first number.
+  await page.evaluate(() => {
+    window.__oylDevices?.heartRate(151);
+  });
+  await expect(sensors(page).locator('.oyl-home__sensor-row')).toHaveText([
+    `Heart rate strap, ${STRAP_NAME}, Heart rate: 151 bpm, Battery ${String(STRAP_BATTERY_PERCENT)}%, Connected`,
+  ]);
+});
+
+test('#2047: a strap reporting 37% reads Battery 37% on Home; the trainer, reporting none, shows no percentage at all', async ({
+  page,
+}) => {
+  await open(page);
+  // Both paired, on Devices, each its own press.
+  await walkHomeToPaired(page);
+  await page.getByRole('button', { name: 'Pair a heart rate strap' }).click();
+  await expect(row(page, 'Heart rate strap').locator('.oyl-pairing__state')).toHaveText(
+    `${STRAP_NAME}: Connected`,
+  );
+  await page.evaluate(() => {
+    window.location.hash = '#/';
+  });
+
+  // The strap's own row, read from the rendered module.
+  const strapRow = sensors(page)
+    .locator('li')
+    .filter({ hasText: `Heart rate strap, ${STRAP_NAME}` });
+  await expect(strapRow.locator('.oyl-home__battery')).toHaveText(
+    `Battery ${String(STRAP_BATTERY_PERCENT)}%`,
+  );
+  // The control: the trainer serves no Battery Service, so its row has no
+  // battery line — and nothing in the module reads 0%.
+  const trainerRow = sensors(page)
+    .locator('li')
+    .filter({ hasText: `Smart trainer, ${TRAINER_NAME}` });
+  await expect(trainerRow).toContainText(
+    `Smart trainer, ${TRAINER_NAME}, Power: waiting for the first reading, Connected`,
+  );
+  await expect(trainerRow.locator('.oyl-home__sensor-dot--on')).toHaveCount(1);
+  await expect(trainerRow.locator('.oyl-home__battery')).toHaveCount(0);
+  await expect(sensors(page).locator('.oyl-home__battery')).toHaveCount(1);
+  expect(await sensors(page).textContent()).not.toMatch(/\b0\s?%/);
 });
 
 test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairing control is above the fold, and the prose is after the controls`, async ({

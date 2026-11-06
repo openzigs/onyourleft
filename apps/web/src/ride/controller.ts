@@ -215,6 +215,22 @@ export interface PairedSensor {
   readonly role: PairingRole;
   readonly capabilities: readonly MeasurementCapability[];
   readonly state: ConnectionState;
+  /**
+   * What THIS device last read on each channel it supplies, in
+   * {@link RIDE_METRIC_IDS} order — #2045, for Home's sensor module.
+   *
+   * ⚠️ **Not {@link RideSnapshot.metrics}.** That is one reading per channel
+   * from whichever device sent it last, so a trainer and a power meter both
+   * sending power share one number, and a module that named a device beside
+   * it could name the wrong one. These are kept per device, from the same
+   * `onMeasurement` call that feeds the recorder, and go stale on the same
+   * clock and threshold. A device that is not connected reads `unpaired` on
+   * every channel, as a channel nobody supplies does.
+   *
+   * Optional for the stub snapshots in `testing.ts`, which predate it;
+   * `createRideController` always sets it.
+   */
+  readonly readings?: readonly RideMetric[];
 }
 
 /** Everything the screen may say about the trainer. */
@@ -1388,6 +1404,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   /** How many entries {@link attach} has listed this session. @see SensorEntry.pairing */
   let pairingsMade = 0;
   const latest = new Map<MeasurementCapability, LatestReading>();
+  /** The same readings, kept per device — #2045. @see PairedSensor.readings */
+  const latestByDevice = new Map<DeviceId, Map<MeasurementCapability, LatestReading>>();
 
   let recorder: Recorder | undefined;
   let saveState: RideSaveState = 'unavailable';
@@ -2396,6 +2414,17 @@ export function createRideController(options: RideControllerOptions): RideContro
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',
         ),
         state: entry.state,
+        readings: RIDE_METRIC_IDS.filter((metric) =>
+          entry.device.capabilities.has(METRIC_CAPABILITY[metric]),
+        ).map((metric) => ({
+          id: metric,
+          state: metricStateFor(
+            latestByDevice.get(entry.device.identity.id)?.get(METRIC_CAPABILITY[metric]),
+            entry.state === 'connected',
+            clock,
+            staleAfterSeconds,
+          ),
+        })),
       })),
       workout: workoutSnapshot(),
       trainer: {
@@ -2470,10 +2499,13 @@ export function createRideController(options: RideControllerOptions): RideContro
   // --- Measurements ---------------------------------------------------------
 
   const onMeasurement = (measurement: SensorMeasurement): void => {
-    latest.set(measurement.capability, {
-      value: valueOf(measurement),
-      at: measurement.at,
-    });
+    const reading: LatestReading = { value: valueOf(measurement), at: measurement.at };
+    latest.set(measurement.capability, reading);
+    // #2045: and against the device that sent it, for Home's sensor module.
+    const source = measurement.device.id;
+    const mine = latestByDevice.get(source) ?? new Map<MeasurementCapability, LatestReading>();
+    mine.set(measurement.capability, reading);
+    latestByDevice.set(source, mine);
     // Into the recorder as well as onto the screen, and through the same call:
     // a screen that showed a reading the recorder never saw would be the
     // "wrong layer" defect in its most visible form.
@@ -2526,6 +2558,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       controlChoice: NO_TRAINER_CONTROL,
       pairing: (pairingsMade += 1),
     };
+    // #2045: a new pairing starts with no reading of its own, so a device
+    // forgotten and paired again never shows what it read the last time.
+    latestByDevice.delete(id);
     sensors.set(id, entry);
     try {
       await wire(entry);

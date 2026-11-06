@@ -95,6 +95,7 @@ import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shar
 import { AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 import { ZOOMED_DIGIT_FLOOR_PIXELS } from '../src/ride/MetricGrid';
+import { RIDE_WITH_REPLANS } from '../src/workout/replan-text';
 
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
 const SUBPIXEL_TOLERANCE = 1;
@@ -104,6 +105,15 @@ const UNSTYLED = 'rgba(0, 0, 0, 0)';
 
 /** The control the owner could not see. @see rideview-harness.tsx §WORKOUT */
 const STARTS_A_WORKOUT = 'Ride Sweet spot, three by twelve';
+/**
+ * #1329, the owner's ruling of 2026-11-05: the same control while the re-plan
+ * switch is on. It reads "Ride, with re-plans"; the workout's name is after
+ * that in its accessible name, off the screen (`ride/WorkoutPanel.tsx`).
+ */
+const STARTS_A_WORKOUT_WITH_REPLANS = `${RIDE_WITH_REPLANS}: Sweet spot, three by twelve`;
+/** A control that starts a workout, with the switch on or off. */
+const startsAWorkout = (control: RideViewControl): boolean =>
+  control.name.startsWith('Ride ') || control.name.startsWith(`${RIDE_WITH_REPLANS}: `);
 /** The sensors group's one control since #659 — `ride/SensorPairing.tsx` §`ConnectedSensors`. */
 const DEVICES_LINK = 'Pair or forget devices on Devices';
 
@@ -1307,17 +1317,40 @@ for (const viewport of EASED_VIEWPORTS) {
       const find = (seen: RideViewMeasurement, name: string) =>
         seen.controls.find((each) => each.group === 'trainer' && each.name === name);
       expect(find(after, REPLAN_SWITCH)?.box.top).toBe(find(before, REPLAN_SWITCH)?.box.top);
-      // ⚠️ The first Ride is exactly where it was: the line that goes is under
-      // it, and the badge that comes is on the heading's row.
-      expect(find(after, STARTS_A_WORKOUT)?.box.top).toBe(find(before, STARTS_A_WORKOUT)?.box.top);
+      // #1329: on, the first Ride says so after the workout's name, and the
+      // name it had is gone; off, it has no such words.
+      expect(find(before, STARTS_A_WORKOUT_WITH_REPLANS)).toBeUndefined();
+      expect(find(after, STARTS_A_WORKOUT)).toBeUndefined();
+      // ⚠️ The first Ride is exactly where it was, and no taller: the line
+      // that goes is under it, and the badge that comes is on the heading's
+      // row. "Ride, with re-plans" (#1329) is one line, 48 px. Off, the
+      // workout's name can take two: on CI's fonts upright it is 69.6 px.
+      expect(find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.top).toBe(
+        find(before, STARTS_A_WORKOUT)?.box.top,
+      );
+      expect(
+        find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.height ?? Infinity,
+      ).toBeLessThanOrEqual(RIDE_TIME_TARGET_PIXELS + SUBPIXEL_TOLERANCE);
+      expect(
+        find(after, STARTS_A_WORKOUT_WITH_REPLANS)?.box.height ?? Infinity,
+      ).toBeLessThanOrEqual(
+        (find(before, STARTS_A_WORKOUT)?.box.height ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
       expect(after.trainerCard?.chooserHeading).toEqual(before.trainerCard?.chooserHeading);
       expect(after.replanDisclosure?.headline).toEqual(before.replanDisclosure?.headline);
       const startsMargin = (seen: RideViewMeasurement): number =>
-        foldMargin(find(seen, STARTS_A_WORKOUT)?.box.bottom ?? Infinity, viewport);
+        foldMargin(
+          (find(seen, STARTS_A_WORKOUT) ?? find(seen, STARTS_A_WORKOUT_WITH_REPLANS))?.box.bottom ??
+            Infinity,
+          viewport,
+        );
       const note = `the first Ride ${startsMargin(before).toFixed(1)} px above the fold with the switch off, ${startsMargin(after).toFixed(1)} px with it on and "Re-plans on" shown`;
       testInfo.annotations.push({ type: '#1329 the badge', description: note });
       console.log(`#1329 — the badge — ${viewport.name} — ${note}`);
-      expect(startsMargin(after), note).toBe(startsMargin(before));
+      // #1329: never less; more where the workout's name had wrapped.
+      expect(startsMargin(after), note).toBeGreaterThanOrEqual(
+        startsMargin(before) - SUBPIXEL_TOLERANCE,
+      );
       expect(startsMargin(after), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     });
   });
@@ -1414,7 +1447,7 @@ for (const viewport of EASED_VIEWPORTS) {
     await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=many`);
     const off = await measure(page);
     const rides = (seen: RideViewMeasurement) =>
-      seen.controls.filter((each) => each.group === 'trainer' && each.name.startsWith('Ride '));
+      seen.controls.filter((each) => each.group === 'trainer' && startsAWorkout(each));
     const theSwitch = (seen: RideViewMeasurement) =>
       seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
     expect(rides(off)).toHaveLength(12);
@@ -1449,6 +1482,22 @@ for (const viewport of EASED_VIEWPORTS) {
     const on = await measure(page);
     expect(on.replanDisclosure?.switchedOn).toBe(true);
     expect(on.replanDisclosure?.sentences).toHaveLength(8);
+    // #1329, the owner's ruling of 2026-11-05: all twelve say it while it is
+    // on, the last as well as the first, and none says it while it is off.
+    expect(rides(off).filter((each) => each.name.includes(RIDE_WITH_REPLANS))).toEqual([]);
+    expect(rides(on)).toHaveLength(12);
+    expect(rides(on).map((each) => each.name)).toEqual(
+      rides(off).map((each) => each.name.replace(/^Ride /, `${RIDE_WITH_REPLANS}: `)),
+    );
+    // One line each, and none taller than it was: the words wrap no button.
+    for (const [index, each] of rides(on).entries()) {
+      expect(each.box.height, each.name).toBeLessThanOrEqual(
+        RIDE_TIME_TARGET_PIXELS + SUBPIXEL_TOLERANCE,
+      );
+      expect(each.box.height, each.name).toBeLessThanOrEqual(
+        (rides(off)[index]?.box.height ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+    }
     expect(rides(on)[0]?.box.top).toBe(first.box.top);
     expect(theSwitch(on)?.box.top).toBe(the.box.top);
     // #1244's badge, restored on #1332: shown once, on the heading's row, and
@@ -1457,7 +1506,7 @@ for (const viewport of EASED_VIEWPORTS) {
     expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(1);
     expectBadgeOnTheHeadingRow(on, viewport);
     const onMargin = foldMargin(rides(on)[0]?.box.bottom ?? Infinity, viewport);
-    expect(onMargin, note).toBe(firstMargin);
+    expect(onMargin, note).toBeGreaterThanOrEqual(firstMargin - SUBPIXEL_TOLERANCE);
     expect(onMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 }

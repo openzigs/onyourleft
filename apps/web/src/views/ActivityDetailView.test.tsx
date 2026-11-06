@@ -43,6 +43,9 @@ import {
   seedRide,
   streamSetFor,
 } from '@onyourleft/store/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -82,7 +85,12 @@ import {
 } from '../testing/mount';
 import { UnitsProvider } from '../units/context';
 
-import { ActivityDetailView, DISTANCE_AXIS_TITLE, READING_RIDE_TEXT } from './ActivityDetailView';
+import {
+  ActivityDetailView,
+  DISTANCE_AXIS_TITLE,
+  HOVER_SETTLE_MS,
+  READING_RIDE_TEXT,
+} from './ActivityDetailView';
 import { AnalysisView } from './AnalysisView';
 
 const ATHLETE = athleteId('athlete-a');
@@ -1182,6 +1190,124 @@ describe('#2068 — the stacked charts, read back from the real store (docs/agen
   });
 });
 
+/** `port`, with every read of `channel` refused as a corrupt blob would be. */
+function failing(port: StubDetail, channel: StreamChannel): StubDetail {
+  return {
+    ...port,
+    store: {
+      ...port.store,
+      getStreamChannel: (owner, id, asked) =>
+        asked === channel
+          ? Promise.reject(new Error('The stored channel is corrupt.'))
+          : port.store.getStreamChannel(owner, id, asked),
+    },
+  };
+}
+
+describe('#2194 — a read that fails says so, never “Reading…” for good', () => {
+  it('says the power chart and the power curve could not be read, and why', async () => {
+    await import('../detail/PowerCurveChart');
+    mounted = await open(failing(indoorRide(), 'power'));
+    await settle();
+    const slot = document.querySelector('[data-oyl-trace-slot="power"]');
+    expect(slot?.textContent).toContain(
+      'Could not read this ride’s power. The stored channel is corrupt.',
+    );
+    expect(slot?.textContent).not.toContain('Reading power');
+    expect(slot?.querySelector('.oyl-status--warning')).not.toBeNull();
+    // The owner's ruling of 2026-11-06: no chart-sized space under the warning.
+    expect(slot?.classList.contains('oyl-trace-slot--failed')).toBe(true);
+    expect(
+      document
+        .querySelector('[data-oyl-trace-slot="heartRate"]')
+        ?.classList.contains('oyl-trace-slot--failed'),
+    ).toBe(false);
+    const curve = document.querySelector('[data-oyl-curve-slot]');
+    expect(curve?.textContent).toContain(
+      'Could not read this ride’s power, so its power curve cannot be drawn. The stored channel is corrupt.',
+    );
+    expect(curve?.textContent).not.toContain('Reading the power curve');
+    // The channels that did read are drawn as ever.
+    expect(
+      document.querySelector('[data-oyl-trace-slot="heartRate"] svg.oyl-trace'),
+    ).not.toBeNull();
+  });
+
+  it('says the distance could not be read when the speed would not, and stays on time', async () => {
+    mounted = await open(
+      failing(
+        stubDetail(ATHLETE, {
+          activity: stubActivity({ hasPosition: false }),
+          channels: {
+            power: powerSeries(600),
+            speed: Array.from({ length: 600 }, () => metresPerSecond(10)),
+          },
+          laps: [],
+        }),
+        'speed',
+      ),
+    );
+    await act(async () => {
+      document
+        .querySelector<HTMLInputElement>('input[name="oyl-trace-axis"][value="distance"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    expect(document.body.textContent).toContain(
+      'Could not read this ride’s speed, so its charts stay drawn against time. The stored channel is corrupt.',
+    );
+    expect(document.body.textContent).not.toContain('Reading the distance ridden');
+    // The owner's ruling of 2026-11-06: said once, by the axis choice, and not
+    // again in the speed slot, which keeps no chart's height either.
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    const speed = document.querySelector('[data-oyl-trace-slot="speed"]');
+    expect(speed?.textContent).toBe('');
+    expect(speed?.classList.contains('oyl-trace-slot--failed')).toBe(true);
+    expect(
+      queryAll(
+        document.querySelector('[data-oyl-trace-slot="power"]') as Element,
+        '.oyl-trace-chart__times > div',
+      ).map((each) => each.textContent),
+    ).toEqual(['0:00', '5:00', '10:00']);
+  });
+});
+
+describe('#2194 — the owner’s screenshot rulings of 2026-11-06', () => {
+  it('says a failed speed read once on the time axis, in the speed slot and not at the axis choice', async () => {
+    mounted = await open(
+      failing(
+        stubDetail(ATHLETE, {
+          activity: stubActivity({ hasPosition: false }),
+          channels: {
+            power: powerSeries(600),
+            speed: Array.from({ length: 600 }, () => metresPerSecond(10)),
+          },
+          laps: [],
+        }),
+        'speed',
+      ),
+    );
+    await settle();
+    await settle();
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    expect(document.querySelector('[data-oyl-trace-slot="speed"]')?.textContent).toContain(
+      'Could not read this ride’s speed. The stored channel is corrupt.',
+    );
+  });
+
+  it('gives a failed slot no chart’s height in the stylesheet', () => {
+    const theme = readFileSync(join(import.meta.dirname, '../design/theme.css'), 'utf8');
+    const slot = theme.indexOf('.oyl-trace-slot {');
+    const failed = theme.indexOf('.oyl-trace-slot--failed {');
+    expect(slot).toBeGreaterThan(-1);
+    // After the slot's own rule, so it wins at the same specificity.
+    expect(failed).toBeGreaterThan(slot);
+    expect(theme.slice(failed, theme.indexOf('}', failed))).toMatch(/min-height:\s*0;/);
+  });
+});
+
 describe('#2081 — the ride’s power curve, beside the all-time one', () => {
   let observers: FakeIntersectionObservers | undefined;
 
@@ -1508,6 +1634,25 @@ describe('#2081 — laps marked on every trace', () => {
 });
 
 describe('#2081 — the tap and hover read-out', () => {
+  /** One pointer event on `svg`, at `clientX`. */
+  async function pointer(
+    svg: Element,
+    type: 'pointerdown' | 'pointerup' | 'pointermove',
+    clientX: number,
+    pointerType: string,
+  ): Promise<void> {
+    await act(async () => {
+      svg.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, pointerType }));
+      await Promise.resolve();
+    });
+  }
+
+  /** A finger down and up again in one place: a tap (#2194). */
+  async function tap(svg: Element, clientX: number): Promise<void> {
+    await pointer(svg, 'pointerdown', clientX, 'touch');
+    await pointer(svg, 'pointerup', clientX, 'touch');
+  }
+
   function laidOut(svg: Element): void {
     vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
       left: 0,
@@ -1526,12 +1671,7 @@ describe('#2081 — the tap and hover read-out', () => {
     mounted = await open(indoorRide());
     const [, heartRate] = queryAll(document, 'svg.oyl-trace');
     laidOut(heartRate as Element);
-    await act(async () => {
-      heartRate?.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 151, pointerType: 'touch' }),
-      );
-      await Promise.resolve();
-    });
+    await tap(heartRate as Element, 151);
     await settle();
     // A quarter of a 1 200 s ride is 300 s, already on a 2 s step.
     const slider = document.querySelector<HTMLInputElement>('#oyl-trace-cursor');
@@ -1555,12 +1695,7 @@ describe('#2081 — the tap and hover read-out', () => {
     mounted = await open(indoorRide());
     const [, heartRate] = queryAll(document, 'svg.oyl-trace');
     laidOut(heartRate as Element);
-    await act(async () => {
-      heartRate?.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 150.6, pointerType: 'touch' }),
-      );
-      await Promise.resolve();
-    });
+    await tap(heartRate as Element, 150.6);
     await settle();
     // 150.6 of 600 units is 301.2 s of 1 200; the nearest 2 s step is 302.
     expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
@@ -1577,6 +1712,49 @@ describe('#2081 — the tap and hover read-out', () => {
     expect(document.querySelector('#oyl-trace-cursor')?.getAttribute('aria-valuetext')).toBe(
       '11:40',
     );
+  });
+
+  it('moves the line under a hovering mouse at once, and says where only once it rests — #2194', async () => {
+    mounted = await open(indoorRide());
+    const [power] = queryAll(document, 'svg.oyl-trace');
+    laidOut(power as Element);
+    const output = (): string =>
+      document.querySelector('output[for="oyl-trace-cursor"]')?.textContent ?? '';
+    const before = output();
+    expect(before.startsWith('0:00')).toBe(true);
+    // A mouse crossing three steps on its way.
+    for (const clientX of [100, 140, 151]) {
+      await pointer(power as Element, 'pointermove', clientX, 'mouse');
+    }
+    // The line and the slider follow it…
+    expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
+    expect(
+      queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor').map((line) =>
+        line.getAttribute('x1'),
+      ),
+    ).toEqual(['151.00', '151.00', '151.00']);
+    // …and the polite read-out has not changed for any of the three steps.
+    expect(output()).toBe(before);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, HOVER_SETTLE_MS + 50));
+    });
+    // Once it rests, it says where it rested, once.
+    expect(output()).toBe('5:02, lap 1: Power 153 W, Heart rate 142 bpm, Cadence 88 rpm');
+  });
+
+  it('says a tap at once, and a hover still settling is not said after it — #2194', async () => {
+    mounted = await open(indoorRide());
+    const [power] = queryAll(document, 'svg.oyl-trace');
+    laidOut(power as Element);
+    const output = (): string =>
+      document.querySelector('output[for="oyl-trace-cursor"]')?.textContent ?? '';
+    await pointer(power as Element, 'pointermove', 100, 'mouse');
+    await tap(power as Element, 151);
+    expect(output().startsWith('5:02,')).toBe(true);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, HOVER_SETTLE_MS + 50));
+    });
+    expect(output().startsWith('5:02,')).toBe(true);
   });
 
   it('shows a dash, never a number, for a chart whose sensor gave nothing at the cursor', async () => {
