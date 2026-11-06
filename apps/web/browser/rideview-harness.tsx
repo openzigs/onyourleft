@@ -650,8 +650,9 @@ function snapshot(): RideSnapshot {
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
     manualLap: { available: true, last: LAP_ENDED ? WIDEST_LAP : undefined },
-    // #2076: the ride's distance on the grid, at a three-digit figure, so the
-    // grid is laid out and measured with its fifth reading in it.
+    // #2076: the ride's distance, at a three-digit figure, so the clock row
+    // (`RideView.tsx` §`RideClock`), where it is drawn, is laid out and
+    // measured at its widest.
     totals: { distance: metres(123_456), climbed: undefined, averagePower: undefined },
   };
   if (WIDEST_READINGS) {
