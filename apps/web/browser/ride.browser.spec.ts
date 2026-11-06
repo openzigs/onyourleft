@@ -411,16 +411,20 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     /**
      * #2075, and the owner's screenshot review of 2026-11-05: the road
      * ahead is the route panel's full width and TALLER than the whole route's
-     * strip, on its own row under it — except on an upright phone, which has
-     * no row to give (`theme.css` §"COLUMN"): there it is beside the whole
-     * route's strip at its height, and the two strips and their captions take
-     * the whole panel but the plan view's `PLAN_SMALLEST_PIXELS` column, where
-     * they had three fifths of it. Both ways (#1120).
+     * strip, on its own row under it — except on a phone, upright or on its
+     * side, which has no row to give (`theme.css` §"THE ROAD AHEAD"): there
+     * it is beside the whole route's strip at its height. Upright, the two
+     * strips and their captions take the whole panel but the plan view's
+     * `PLAN_SMALLEST_PIXELS` column, where they had three fifths of it. Both
+     * ways (#1120).
      */
-    test('the road ahead is the route panel’s width and taller, or beside the strip on an upright phone — #2075', async ({
+    test('the road ahead is the route panel’s width and taller, or beside the strip on a phone — #2075', async ({
       browser,
     }) => {
       const page = await sharedRide(browser, viewport);
+      // A phone, upright or on its side, has no row to give (`theme.css`
+      // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
+      const beside = Math.min(viewport.width, viewport.height) <= 480;
       const upright = viewport.width < 736 && viewport.height >= 752;
       for (const [how, seen] of await bothWays(page)) {
         const whole = named(seen.items, 'the elevation strip');
@@ -434,7 +438,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
             ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
           `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
         ).toBe(true);
-        if (upright) {
+        if (beside) {
           expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
             SUBPIXEL_TOLERANCE,
           );
@@ -443,6 +447,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           );
           expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
           expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+        }
+        if (upright) {
           // The phone's width: the strips run from the whole route's strip's
           // start to the plan view's column, and the plan view is no wider
           // than the box its rider's mark is sized for.

@@ -7061,11 +7061,12 @@ select.oyl-input {
  * was a sliver at its floor. Now each band is a column of the strip's full
  * height (`HudCore.tsx` §`LookAheadStrip`) and the road is a line over them,
  * so a descent is as readable as a climb; and the strip is under the whole
- * route's, across the panel: 3.5 rem where the route panel is at the bottom
- * of a taller screen, 2.5 rem on a phone on its side (below). The panel is
- * taller by that row, and `ride.browser.spec.ts` holds every panel clear of
- * the leaning rider at every overlay viewport. An upright phone has no row to
- * give, so there the two strips stay side by side (§"COLUMN").
+ * route's, across the panel, 3.5 rem tall, where the route panel is at the
+ * bottom of a screen 30 rem tall or more. The panel is taller by that row,
+ * and `ride.browser.spec.ts` holds every panel clear of the leaning rider at
+ * every overlay viewport. A phone has no row to give, upright or on its side,
+ * so there the two strips stay side by side at one height (§"COLUMN", and
+ * §"A SHORT corners layout" below).
  *
  * Each band is its colour under marks of the panel's own surface: none on the
  * flat, dots on a descent, one hatch on a climb, a denser one on a steep
@@ -8545,10 +8546,18 @@ select.oyl-input {
     height: 2rem;
   }
 
-  /* #2075, the owner's review of 2026-11-05: the road ahead under it, the
-     panel's width, half a rem taller. */
+  /* #2075: beside it, at its height, as on an upright phone (§"COLUMN"). A
+     phone on its side has no row to give either: under it, the road ahead
+     made the route panel 36 px taller, and with sounds on and a side camera
+     filming, or above a gesture bar's inset (#1441), the ride's controls left
+     the stage at 844×390 and 736×360. The bands are still the strip's full
+     height (the owner's review of 2026-11-05). */
+  .oyl-game--riding .oyl-hud__strips {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
   .oyl-game--riding .oyl-hud__ahead-svg {
-    height: 2.5rem;
+    height: 2rem;
   }
 
   .oyl-game--riding .oyl-hud__actions,
