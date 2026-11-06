@@ -130,6 +130,7 @@ import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
+import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -175,6 +176,7 @@ import { createStatementsPort, type StatementsPort } from './instance/statements
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
+import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -309,6 +311,12 @@ interface ClientPlatform {
    * `plugin`, a browser's on the same `navigator.bluetooth`.
    */
   readonly steering: SteeringController | undefined;
+  /**
+   * The rider's own music player, another app — #2073. Inside the Android
+   * shell only (`shell/other-player.ts` §`otherPlayerOffered`): a browser
+   * cannot reach another app's player, so it gets none and no control.
+   */
+  readonly otherPlayer: OtherPlayer | undefined;
   /**
    * Each connected sensor's battery, for Home's sensors module — #2047. A
    * browser's, from the Web Bluetooth transport; `undefined` in the shell,
@@ -462,6 +470,11 @@ async function buildPlatform(
     const steering = createSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
     );
+    // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
+    // others in `MainActivity`: media keys have nothing to do with a link.
+    const otherPlayer = otherPlayerOffered(platformCapacitor())
+      ? new OtherPlayer(mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()))
+      : undefined;
     return {
       rideController,
       shell,
@@ -471,6 +484,7 @@ async function buildPlatform(
       systemSettings,
       launch,
       steering,
+      otherPlayer,
       // #2047: the plugin reads no Battery Service, so the shell shows no level.
       battery: undefined,
     };
@@ -486,6 +500,7 @@ async function buildPlatform(
       systemSettings: undefined,
       launch: NO_LAUNCH,
       steering: undefined,
+      otherPlayer: undefined,
       battery: undefined,
     };
   }
@@ -515,6 +530,7 @@ async function buildPlatform(
     bluetoothAsk: undefined,
     systemSettings: undefined,
     launch: NO_LAUNCH,
+    otherPlayer: undefined,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -1111,6 +1127,26 @@ function buildGhostPort(): GhostPort | undefined {
 }
 
 /**
+ * The segment screens' way to the rider's instance's segments and boards
+ * (#68): the ONE production place a leaderboard port is built, so
+ * `check:wiring` reports `createLeaderboardPort` if this goes. Over the sealed
+ * session the Connect screen keeps, through the one instance module (ADR 0036
+ * D-3 (a)); a device with no instance is offered none of it and sends nothing.
+ */
+function buildLeaderboardPort(): LeaderboardPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createLeaderboardPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    store: localStore,
+    athleteId: LOCAL_ATHLETE,
+  });
+}
+
+/**
  * The Moderation screen's port (#955): the ONE production place a moderation
  * port is built, so `check:wiring` reports `createModerationPort` if this goes.
  * Over the session the Connect screen keeps, through the one instance module
@@ -1627,9 +1663,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       };
     },
     hidden: () => document.hidden,
-    // #2253: the rider's own player, which the loop yields to. None yet: #2242
-    // supplies the Android shell's `OtherPlayer` (`platform.otherPlayer`).
-    riderPlayer: undefined,
+    // #2253: the rider's own player, which the loop yields to — #2073's
+    // `OtherPlayer`, in the Android shell only; none in a browser.
+    riderPlayer: platform.otherPlayer,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
@@ -1672,6 +1708,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
+          otherPlayer={platform.otherPlayer}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on
@@ -1711,6 +1748,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           routes={buildRoutePort(worldCorridorPort)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
+          boards={buildLeaderboardPort()}
           game={buildGamePort(rideController, buildGhostPort(), worldCorridorPort)}
           gameTrainer={buildGameTrainerPort(rideController)}
           gameRenderer={loadGameRenderer}

@@ -40,6 +40,7 @@ import type {
   SyncItemWrite,
   HistoryIndexWrite,
   ModerationLogEntry,
+  PublishedSegment,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -254,6 +255,22 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
   };
 }
 
+/**
+ * A segment `athleteId` published (#68): an id that is 32 hex digits, as the
+ * instance's are, and a definition that says whose it is.
+ */
+export function publishedSegmentFixture(athleteId: string): Omit<PublishedSegment, 'athleteId'> {
+  return {
+    // The athlete first: the first 32 digits are the first 16 characters.
+    id: hexOf(`${athleteId}-seg`).slice(0, 32),
+    name: `Segment of ${athleteId}`,
+    sport: 'ride',
+    distanceMetres: 555,
+    definition: JSON.stringify({ of: athleteId }),
+    createdAt: 1_790_000_150,
+  };
+}
+
 /** A rename limit the fixtures never reach. */
 export const FIXTURE_RENAME_LIMIT = { count: 100, windowSeconds: 86_400 } as const;
 
@@ -452,6 +469,31 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       origin: `https://models-of-${athlete}.example`,
       recordedAt: 1_790_000_560,
     });
+  }
+  // Migration 0038's (#68): each published a segment, and each shared an
+  // effort from their synced ride on every one of the three — so erasing one
+  // athlete takes the efforts the other two shared on their segment.
+  for (const athlete of ATHLETES) {
+    await store.publishSegment(athlete, publishedSegmentFixture(athlete));
+  }
+  for (const athlete of ATHLETES) {
+    const ride = activityRecordFixture(athlete, 'synced-ride').contentSha256;
+    for (const owner of ATHLETES) {
+      await store.replaceSegmentEfforts(
+        athlete,
+        publishedSegmentFixture(owner).id,
+        ride,
+        [
+          {
+            id: `effort-of-${athlete}-on-${owner}`,
+            startedAt: 1_790_000_100,
+            elapsedSeconds: 300,
+            visibility: 'public',
+          },
+        ],
+        1_790_000_160,
+      );
+    }
   }
   // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
   await store.createPrivateRoom({

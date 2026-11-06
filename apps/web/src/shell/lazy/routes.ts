@@ -12,3 +12,4 @@
 
 export { RoutesView } from '../../views/RoutesView';
 export { RouteBuilderView } from '../../views/RouteBuilderView';
+export { RouteEditorView } from '../../views/RouteEditorView';

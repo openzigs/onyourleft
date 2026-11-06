@@ -81,6 +81,7 @@ import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
@@ -115,6 +116,8 @@ import {
 import { HeaderMute } from './HeaderMute';
 import type { MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
+import type { OtherPlayer } from './other-player';
+import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
 import {
   isRideRoute,
@@ -159,6 +162,7 @@ const SegmentsView = lazyView(HISTORY_GROUP, (group) => group.SegmentsView);
 const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetailView);
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
+const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -370,6 +374,12 @@ export interface AppShellProps {
    */
   readonly soundOutput?: import('../game/audio-port').CueOutput | undefined;
   /**
+   * The rider's own music player, another app — #2073. Made by `main.tsx`
+   * inside the Android shell only (`other-player.ts` §`otherPlayerOffered`);
+   * `undefined` in a browser, where the header offers no such control.
+   */
+  readonly otherPlayer?: OtherPlayer | undefined;
+  /**
    * The trainer game's store reads and sensor sampling (#85).
    *
    * Passed in for exactly the reason the two above are, plus one more: the
@@ -493,6 +503,12 @@ export interface AppShellProps {
    * sentence rather than crashing the audit.
    */
   readonly efforts?: EffortPort | undefined;
+  /**
+   * The rider's instance's segments and leaderboards (#68), on the Segments
+   * screen and each segment's own. `undefined` with no instance, and then
+   * nothing about one renders.
+   */
+  readonly boards?: LeaderboardPort | undefined;
   /**
    * The settings screen's one write (#238).
    *
@@ -677,7 +693,7 @@ function viewFor(
     case 'analysis':
       return <AnalysisView port={props.analysis} />;
     case 'segments':
-      return <SegmentsView port={props.segments} match={props.match} />;
+      return <SegmentsView port={props.segments} match={props.match} boards={props.boards} />;
     case 'routes':
       return (
         <RoutesView
@@ -698,6 +714,17 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+        />
+      );
+    case 'route-editor':
+      return (
+        <RouteEditorView
+          // #2007: a saved route's line, kept, with one stretch at a time redrawn.
+          routes={props.routes}
+          selected={match.parameter}
+          provider={props.routing}
+          map={props.map}
+          basemap={props.basemap}
         />
       );
     case 'workouts':
@@ -743,7 +770,9 @@ function viewFor(
         />
       );
     case 'segment-detail':
-      return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
+      return (
+        <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
+      );
     case 'camera':
       return (
         <CameraView
@@ -913,6 +942,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
     };
   });
 
+  // #2073: the header asks whether the rider's own player is playing only
+  // where its controls may show, so never on a ride route or while a ride has
+  // the screen, where the ride's own cues would read as the rider's music.
+  const otherPlayer = props.otherPlayer;
+  const otherPlayerMayShow = !immersive && !isRideRoute(route.id);
+  useEffect(() => {
+    if (otherPlayer === undefined || !otherPlayerMayShow) return undefined;
+    return otherPlayer.watch();
+  }, [otherPlayer, otherPlayerMayShow]);
+
   /*
    * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
    * review. Under a view transition React runs passive effects only once the
@@ -1068,7 +1107,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
         {/*
           #671: the header is the wordmark and, since #2056, the one-press
-          mute on a menu route — nothing else. The navigation is
+          mute on a menu route, and since #2073 the rider's own music player's
+          controls once other audio was seen, on a menu route inside the
+          Android shell — nothing else. The navigation is
           its own landmark beside it rather than inside it — a bar or a rail
           since #427, so it was never in the header's box on any screen but the
           shortest, where it made the header 191 px of 256.
@@ -1090,6 +1131,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
               ride route, whose own sound controls stay as they are.
             */}
             {isRideRoute(route.id) ? null : <HeaderMute output={props.soundOutput} />}
+            {/*
+              #2073, owner ruling 2 of 2026-11-05: never on a ride route, whose
+              controls have their own rules (`design/ride-time-controls.ts`).
+              After the mute, which stays first in the tab order (#2056).
+            */}
+            {otherPlayer === undefined || !otherPlayerMayShow ? null : (
+              <OtherPlayerControls player={otherPlayer} />
+            )}
           </header>
         )}
 
