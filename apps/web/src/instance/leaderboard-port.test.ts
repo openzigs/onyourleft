@@ -360,7 +360,19 @@ describe('integrity, through the instance (#69)', () => {
       }),
     ]);
 
+    // Two riders are not enough to switch a board off; the third is.
+    const cy = await connected(send, w, 'Cy');
+    const cyRide = await syncedRide(cy);
+    expect(await cy.boards.addSegment(segmentId)).toBe('added');
+    await cy.boards.share(segmentId, [
+      effortOn((await cy.store().getSegment(LOCAL_ATHLETE, toSegmentId(segmentId)))!, cyRide, 105),
+    ]);
     expect(await anna.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
+    expect(await bea.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
+    expect(await bea.boards.board(segmentId, 'instance', 'all-time')).toMatchObject({
+      hazardous: false,
+    });
+    expect(await cy.boards.flagHazard(segmentId, 'junction')).toBe('flagged');
     const hazardous = await bea.boards.board(segmentId, 'instance', 'all-time');
     expect(hazardous).toMatchObject({ hazardous: true, rows: [] });
   }, 30_000);
