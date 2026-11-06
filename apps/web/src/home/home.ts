@@ -70,8 +70,9 @@ import {
   type RouteProfile,
   type Seconds,
   type UnixSeconds,
+  type Watts,
 } from '@onyourleft/domain';
-import type { ActivitySummary, RouteId } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, RouteId } from '@onyourleft/store';
 
 import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import type { AnalysisPort } from '../analysis/store-port';
@@ -105,11 +106,22 @@ function calendarDaysBetween(earlier: CalendarDay, later: CalendarDay): number {
 }
 
 export interface HomeLastRide {
+  /** For the link to the ride's own page — #2048. */
+  readonly id: ActivityId;
   readonly name: string;
   readonly startedAt: UnixSeconds;
   readonly timeZone: string;
   readonly movingTime: Seconds;
   readonly distance: Metres;
+  /** The ride's average power, or `undefined` where none was recorded — #2048. */
+  readonly averagePower: Watts | undefined;
+  /**
+   * The saved route it was ridden on, or `undefined` — #2048, so the module
+   * can draw that route's climb from the one `getRoute` Next up already makes
+   * (`loadNextUp`): the newest ride on a route IS the newest ride whenever
+   * this is set. No stream is read for it (§"One list read" above).
+   */
+  readonly routeId: RouteId | undefined;
   /** The ride's `rideLoad`, or `undefined` when it carries no load summary. */
   readonly load: number | undefined;
   /**
@@ -321,11 +333,14 @@ export async function loadHome(
     }
     // Ascending, so the last one seen is the newest.
     lastRide = {
+      id: summary.id,
       name: summary.name,
       startedAt: summary.startedAt,
       timeZone: summary.startedAtTimeZone,
       movingTime: summary.movingTime,
       distance: summary.distance,
+      averagePower: summary.averagePower,
+      routeId: summary.routeId,
       load,
       noLoadToWorkOut: hasNoLoadToWorkOut(summary),
     };

@@ -91,7 +91,7 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import { unixSeconds, type Percent, type UnixSeconds } from '@onyourleft/domain';
+import { unixSeconds, type Percent, type RouteProfile, type UnixSeconds } from '@onyourleft/domain';
 import type { ConnectionState } from '@onyourleft/sensors';
 import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
@@ -102,7 +102,14 @@ import type { SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
-import { formatDuration, formatStartedAt, MOVING_TIME_LABEL } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  formatStartedAt,
+  MOVING_TIME_LABEL,
+  POWER_UNIT,
+  shownAveragePower,
+} from '../format';
 import {
   loadHome,
   loadNextUp,
@@ -124,7 +131,7 @@ import type { RideMetricId } from '../ride/metrics';
 import { metricSentence, metricText, presentationFor } from '../ride/MetricGrid';
 import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
-import { hrefFor, hrefForGameRoute, routeById } from '../shell/routes';
+import { hrefFor, hrefForActivity, hrefForGameRoute, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
 import {
   formatDistance,
@@ -211,7 +218,9 @@ export function HomeView(props: HomeViewProps): JSX.Element {
           <SensorsModule controller={props.controller} battery={props.battery} />
         )}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
-        {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
+        {data?.lastRide === undefined ? null : (
+          <LastRide last={data.lastRide} profile={lastRideProfile(data.lastRide, nextUp)} />
+        )}
         {data?.lastRide === undefined ? null : (
           <ThisWeek week={data.week} previous={data.previousWeek} />
         )}
@@ -238,6 +247,19 @@ export function HomeView(props: HomeViewProps): JSX.Element {
       </div>
     </div>
   );
+}
+
+/**
+ * The climb the last ride's module draws — #2048: the route Next up read,
+ * when it is the route the last ride was ridden on. The newest ride on a
+ * route is the newest ride whenever that ride has a route, so this is the
+ * same record, read once.
+ */
+function lastRideProfile(
+  last: NonNullable<HomeData['lastRide']>,
+  next: HomeNextUp | undefined,
+): RouteProfile | undefined {
+  return next?.kind === 'route' && last.routeId === next.id ? next.profile : undefined;
 }
 
 /**
@@ -278,21 +300,58 @@ function GettingStarted({
 }
 
 /**
- * *Last ride* — the module slot #2048 fills. Since #2044 it is its own
- * module, third in the reading order after Next up and the sensors, rather
- * than the first of the cards under the ride choices: a `section` named by
- * its own `h2`, as every module is — `a11y/audit.ts` §"landmarks are
- * distinguishable" (#864) refuses an unnamed `section` beside another.
+ * *Last ride* — #2048, in the slot #2044 made for it: third in the reading
+ * order after Next up and the sensors, a `section` named by its own `h2`, as
+ * every module is — `a11y/audit.ts` §"landmarks are distinguishable" (#864)
+ * refuses an unnamed `section` beside another.
+ *
+ * The NEWEST ride (`home/home.ts` reads the summaries newest first, #1107):
+ * its name as the link to its own page, when, moving time, distance, average
+ * power where it was recorded, and load. On a first open this slot is
+ * {@link GettingStarted}'s *Nothing recorded yet*, whose start is Next up's
+ * one *Start a ride* (#1429 keeps a first open to one first step).
+ *
+ * ## The climb, and no map — ⚠️ a location surface
+ *
+ * The ride's shape is its elevation, drawn with {@link ProfileShape}: never
+ * its GPS trace, which on a dashboard is where a rider lives for no gain
+ * (CLAUDE.md §6). The profile is the saved route's the ride was ridden on —
+ * the one record Next up already read (`loadNextUp`), so this costs no read
+ * and decodes no stream — with its climb in words beside it, because the
+ * drawing is `aria-hidden`. A ride on no saved route draws no profile.
+ * Nothing in this module formats a coordinate; `HomeView.last-ride.test.tsx`
+ * holds that no latitude or longitude reaches it.
  */
-function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }): JSX.Element {
+function LastRide({
+  last,
+  profile,
+}: {
+  readonly last: NonNullable<HomeData['lastRide']>;
+  /** The route the ride was ridden on, when Next up has read it. */
+  readonly profile: RouteProfile | undefined;
+}): JSX.Element {
   const units = useUnits();
   const lastDistance = shownDistance(last.distance);
+  // #1054: a mean that shows as 0 W is no figure, as on the ride result card.
+  const lastPower = shownAveragePower(last.averagePower);
   return (
     <section className="oyl-panel oyl-home__last" aria-labelledby="oyl-home-last">
       <h2 id="oyl-home-last">Last ride</h2>
       <p>
-        <strong>{last.name}</strong>
+        <a href={hrefForActivity(last.id)}>
+          <strong>{last.name}</strong>
+        </a>
       </p>
+      {profile === undefined ? null : (
+        <div className="oyl-home__last-climb">
+          {/* The owner's review (2026-11-05): the near hill's dark green was
+              faint on the dark card; the accent is a declared 3:1 pair on it. */}
+          <ProfileShape className="oyl-home__last-profile" profile={profile} paintAs="mark" />
+          <p className="oyl-muted tw:m-0">
+            Climb {measurementText(formatSmallDistance(profile.totalAscent, units))}
+          </p>
+        </div>
+      )}
       <dl className="oyl-home__facts">
         <div>
           <dt>When</dt>
@@ -311,6 +370,14 @@ function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }
             <dt>Distance</dt>
             <dd>
               <Reading {...formatDistance(lastDistance, units)} />
+            </dd>
+          </div>
+        )}
+        {lastPower === undefined ? null : (
+          <div>
+            <dt>Average power</dt>
+            <dd>
+              <Reading value={formatPowerValue(lastPower)} unit={POWER_UNIT} />
             </dd>
           </div>
         )}

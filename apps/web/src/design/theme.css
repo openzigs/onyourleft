@@ -2170,6 +2170,20 @@ html {
   stroke-linecap: round;
 }
 
+/* #2048: the last ride's climb — the route's own profile, the module's width
+   and 3rem tall, as Next up's, with the climb in words under it. */
+.oyl-home__last-climb {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  margin-block-end: var(--oyl-space-sm);
+}
+
+.oyl-home__last-profile {
+  display: block;
+  width: 100%;
+  height: 3rem;
+}
+
 /* The sensors module's glyph (the Trainer card's until #2045) — a medium
    drawing like the ring above and the cards' pictures (the owner's ruling of
    2026-10-01 on #935), at the least a medium drawing is (44 px,
