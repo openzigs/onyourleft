@@ -763,6 +763,10 @@ const KEEPS_THE_MEASURE: Partial<Record<RouteId, string>> = {
     'one table and its compare: in two columns the table scrolled in half the width beside an ' +
     'almost empty column, which #2067 tried and put back',
   'not-found': 'two sentences and two links',
+  'route-editor':
+    '#2007’s editor, one column read in order — the change to a part, its map, the whole-route ' +
+    'changes, the save — built beside #2067 rather than after it; whether it becomes a pair as ' +
+    'the route builder did is the owner’s to rule',
 };
 
 interface Span {

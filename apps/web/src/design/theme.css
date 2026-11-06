@@ -6472,6 +6472,19 @@ select.oyl-input {
 }
 
 /*
+ * The route editor's whole-route buttons (#2007): Out and back, Reverse,
+ * Return to start, Undo and Redo, spaced and wrapped as the map's buttons
+ * above (the owner's ruling of 2026-11-06: they touched). Held apart in
+ * `controls-first.browser.spec.ts`.
+ */
+.oyl-route-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin-block: var(--oyl-space-sm);
+}
+
+/*
  * The route planner's waypoints on its map (#2006) — `map/maplibre.ts` makes
  * each one this element, `aria-hidden` and out of the tab order, because the
  * planner's list is the keyboard's way to them. A disc in the accent with the

@@ -690,7 +690,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         profile and where its numbers came from; since #2102
                         `loop.ts`, a short loop for a lap race: Close the loop,
                         a target length, and a drawn line that ends where it
-                        starts saved as a loop. ⚠️ The
+                        starts saved as a loop; since #2007 `route-edit.ts`,
+                        a saved route edited with its line kept: one stretch
+                        spliced into the saved profile and every other sample
+                        left as it was (`views/RouteEditorView.tsx`,
+                        `#/routes/edit/<id>`). ⚠️ The
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
