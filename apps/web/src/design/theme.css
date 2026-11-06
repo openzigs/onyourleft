@@ -10823,10 +10823,7 @@ select.oyl-input {
 @media (min-width: 46rem) and (min-height: 47rem) {
   .oyl-game--riding
     .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race):has(> .oyl-hud__field--room)
-    > :is(.oyl-hud__field--total, .oyl-hud__field--effort),
-  .oyl-game--riding
-    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
-    > .oyl-hud__field--effort {
+    > .oyl-hud__field--total {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -11176,16 +11173,18 @@ select.oyl-input {
 /*
  * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
  *
- * Two secondary readings after the ride so far, drawn exactly where it is
- * drawn and given way exactly where it gives way (the two rules above name
- * both classes), for the same reason: a phone's overlay has no row for them.
+ * Two secondary readings after the ride so far, drawn where it is drawn and
+ * given way on a PHONE's overlay with it (the rule above names both
+ * classes), for the same reason: a phone's overlay has no row for them. A
+ * laptop's window shows them (the owner's ruling of 2026-11-06, #2034).
  *
- * ⚠️ **And on a tablet in a ROOM they give way too** (the first rule above),
- * recorded as #419 asks: the room's three readings and these two are a fourth
- * row of the tier, and with it a race's standings ran over *Pause* and the
- * secondary panel over the route panel at 1024×768 (`ride-room.browser.spec.ts`
- * §"#1356", §"#1407", §"#1409"). In a room the rider's own W/kg is in the
- * standings beside everyone's, and the ride so far stays.
+ * ⚠️ **On a tablet they never give way**, in a room or out of one — the
+ * owner's ruling of 2026-11-06 (#2034): they are the rider's own, and in a
+ * group ride there are no standings that say them. In a room the pacer's and
+ * the ghost's gaps and the wind give way first (§"THE RIDE SO FAR AT ARM'S
+ * LENGTH"), and then the ride so far on the 4:3 tablet and in a room's lap
+ * race. This PR's first cut hid these two in every tablet room instead,
+ * which reversed `main`'s room order.
  *
  * The zone's NUMBER is the reading, in the HUD's ink, beside a SWATCH of its
  * zone's colour — an SVG, as the gauges are, so the panel stays its one
