@@ -27,6 +27,7 @@ import {
   MUSIC_DUCK_BACK_SECONDS,
   MUSIC_DUCK_DOWN_SECONDS,
   MUSIC_DUCK_LEVEL,
+  MUSIC_FADE_MS,
   MUSIC_FADE_SECONDS,
   webAudioOutput,
 } from '../game/web-audio';
@@ -36,7 +37,12 @@ import { mount, settle, type Mounted } from '../testing/mount';
 
 import { AppShell } from './AppShell';
 import { HEADER_MUTE_NAME } from './HeaderMute';
-import { createMenuMusic, type MenuMusic } from './menu-music';
+import {
+  createMenuMusic,
+  OWN_LOOP_SETTLE_MS,
+  type MenuMusic,
+  type RiderPlayer,
+} from './menu-music';
 import { readMenuSoundPreference, writeMenuSoundPreference } from './menu-sound-preference';
 import { createMenuSounds, type MenuSounds } from './menu-sounds';
 
@@ -71,12 +77,16 @@ interface Rig {
   readonly made: FakeElement[];
   /** End every fade that is waiting, as the timer would. */
   readonly endFades: () => void;
+  /** End every wait before the rider's player is asked again (#2253), as the timer would. */
+  readonly endSettle: () => void;
   hidden: boolean;
 }
 
 function rig(
   store: PreferenceStorage,
-  { track }: { track: string | undefined } = { track: TRACK },
+  { track, riderPlayer }: { track: string | undefined; riderPlayer?: RiderPlayer | undefined } = {
+    track: TRACK,
+  },
 ): Rig {
   const fake = fakeAudioContext();
   const output = webAudioOutput(
@@ -84,17 +94,25 @@ function rig(
     deviceAudioMix(() => store),
   );
   const made: FakeElement[] = [];
-  const waiting = new Set<() => void>();
+  /** Each timer waiting, with the time it was set for. */
+  const waiting = new Map<() => void, number>();
+  const run = (ms: number): void => {
+    for (const [callback, after] of [...waiting]) {
+      if (after !== ms) continue;
+      waiting.delete(callback);
+      callback();
+    }
+  };
   const built: Rig = {
     fake,
     output,
     made,
     hidden: false,
     endFades: () => {
-      for (const callback of [...waiting]) {
-        waiting.delete(callback);
-        callback();
-      }
+      run(MUSIC_FADE_MS);
+    },
+    endSettle: () => {
+      run(OWN_LOOP_SETTLE_MS);
     },
     music: createMenuMusic({
       output,
@@ -122,13 +140,14 @@ function rig(
         made.push(element);
         return element as unknown as HTMLMediaElement;
       },
-      schedule: (callback) => {
-        waiting.add(callback);
+      schedule: (callback, ms) => {
+        waiting.set(callback, ms);
         return () => {
           waiting.delete(callback);
         };
       },
       hidden: () => built.hidden,
+      riderPlayer,
     }),
   };
   return built;
@@ -475,6 +494,188 @@ describe(
         bus.automation.filter((event) => event.method === 'value'),
         'only the level the bus was made at',
       ).toHaveLength(1);
+    });
+  },
+);
+
+/**
+ * The phone as #2073's header sees it — owner ruling 3 of 2026-11-05, #2253.
+ * Android's `isMusicActive()` is true while the rider's own player plays OR
+ * our loop does (spike 0034 §1.3), and the header keeps its latest reading
+ * (`OtherPlayer.riderPlayerInUse`, #2242). A reading is taken only when a
+ * case calls {@link Phone.read}, as the header's 4 s poll would — and never on
+ * a ride route or behind a hidden page, where it does not poll.
+ */
+interface Phone {
+  /** The rider's own player is playing, in another app. */
+  riderPlaying: boolean;
+  /** The header's latest reading. */
+  readonly reading: boolean;
+  /** One reading, of everything playing: theirs, and ours. */
+  read(): void;
+  readonly player: RiderPlayer;
+}
+
+function phone(): Phone & { hear(made: readonly FakeElement[]): void } {
+  let ours: readonly FakeElement[] = [];
+  let reading = false;
+  const built = {
+    riderPlaying: false,
+    get reading() {
+      return reading;
+    },
+    read() {
+      reading = built.riderPlaying || ours.some((element) => !element.paused);
+    },
+    player: { riderPlayerInUse: () => reading },
+    hear(made: readonly FakeElement[]) {
+      ours = made;
+    },
+  };
+  return built;
+}
+
+/** A rig whose music asks `device` about the rider's player. */
+function rigWith(device: ReturnType<typeof phone>, store: PreferenceStorage = disk()): Rig {
+  const music = rig(store, { track: TRACK, riderPlayer: device.player });
+  device.hear(music.made);
+  return music;
+}
+
+async function setHidden(music: Rig, hidden: boolean): Promise<void> {
+  music.hidden = hidden;
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+  });
+}
+
+describe('the menus’ music yields to the rider’s own player — #2253', () => {
+  it('a press while the rider’s player plays starts nothing; a press once it stops starts the loop', async () => {
+    const device = phone();
+    const music = rigWith(device);
+    device.riderPlaying = true;
+    device.read();
+    await shell(music);
+
+    await pressWithoutLeaving(homeControl());
+    expect(music.made, 'the loop started over the rider’s own player').toEqual([]);
+    expect(music.fake.gains, 'a graph was built for a loop that yielded').toEqual([]);
+
+    device.riderPlaying = false;
+    device.read();
+    await pressWithoutLeaving(homeControl());
+    expect(music.made[0]?.paused).toBe(false);
+    expect(musicBus(music)).toBe(0.5);
+  });
+
+  it('the rider starts their player in their own app: our loop pauses, and shown again it stays silent', async () => {
+    const device = phone();
+    const music = rigWith(device);
+    device.read();
+    await shell(music);
+    await pressWithoutLeaving(homeControl());
+    const [element] = music.made;
+    expect(element?.paused).toBe(false);
+
+    // The rider leaves for their player and starts it. Nothing is read while
+    // the page is hidden: the header's last reading is from before our loop.
+    await setHidden(music, true);
+    expect(element?.paused).toBe(true);
+    device.riderPlaying = true;
+    await setHidden(music, false);
+    expect(element?.paused, 'came back over the rider’s player on a stale reading').toBe(true);
+
+    device.read();
+    music.endSettle();
+    expect(element?.paused, 'played over the rider’s own player').toBe(true);
+
+    // Their player stops, and the next press brings ours back.
+    device.riderPlaying = false;
+    device.read();
+    await pressWithoutLeaving(homeControl());
+    expect(element?.paused).toBe(false);
+    expect(musicBus(music)).toBe(0.5);
+  });
+});
+
+describe(
+  'the menus’ own loop never counts as the rider’s player — #2253',
+  { timeout: RIDE_VIEWS_TIMEOUT_MS },
+  () => {
+    it('a reading while our loop plays is ours: the loop carries on across presses and menu routes', async () => {
+      const device = phone();
+      const music = rigWith(device);
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      device.read();
+      // The model is faithful: Android reads our own loop as music playing.
+      expect(device.reading).toBe(true);
+
+      await pressWithoutLeaving(homeControl());
+      await go('#/settings');
+      await pressWithoutLeaving(document.querySelector('main button, main a[href]'));
+      expect(music.made).toHaveLength(1);
+      expect(music.made[0]?.paused, 'our loop stopped for itself').toBe(false);
+      expect(musicBus(music)).toBe(0.5);
+    });
+
+    it('after a ride, a reading of our loop from before it is not the rider’s: the loop comes back once the header has read again', async () => {
+      const device = phone();
+      const music = rigWith(device);
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      device.read();
+
+      await go('#/ride');
+      music.endFades();
+      // A long ride: every wait set on the ride screen is long over.
+      music.endSettle();
+      expect(element?.paused).toBe(true);
+
+      await go('#/');
+      expect(element?.paused, 'came back before the header could read again').toBe(true);
+      device.read();
+      expect(device.reading).toBe(false);
+      music.endSettle();
+      expect(element?.paused, 'our own loop was read as the rider’s player').toBe(false);
+      expect(musicBus(music)).toBe(0.5);
+    });
+
+    it('unmuted soon after it was muted, the loop waits for a reading that cannot be its own', async () => {
+      const device = phone();
+      const music = rigWith(device, localStorage);
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      device.read();
+
+      await pressWithoutLeaving(headerMute() ?? null);
+      expect(element?.paused).toBe(true);
+      await pressWithoutLeaving(headerMute() ?? null);
+      expect(element?.paused, 'asked while the answer was still our own loop').toBe(true);
+
+      device.read();
+      music.endSettle();
+      expect(element?.paused).toBe(false);
+      expect(musicPath(music.fake).master.gain.value).toBe(1);
+    });
+
+    it('back on a menu before the fade ends, the loop carries on at once: it never fell silent', async () => {
+      const device = phone();
+      const music = rigWith(device);
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      device.read();
+
+      await go('#/ride');
+      await go('#/');
+      expect(element?.paused).toBe(false);
+      music.endFades();
+      expect(element?.paused).toBe(false);
+      expect(musicBus(music)).toBe(0.5);
     });
   },
 );
