@@ -10116,13 +10116,36 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     expect(workoutGraphText(paused)).not.toContain('asks');
     expect(heldInstead(paused)).toBeUndefined();
     expect(workoutGraphKey(paused)).toBe('');
-    // #1313: the strip draws no line through the pause, though the trace
-    // still carries a range and a target, and its name says no more.
+    // #1313, the owner's ruling of 2026-11-05: through the pause the strip
+    // hides the stale dashed range, though the trace still carries one, and
+    // keeps the heart rate already ridden; its name says no range.
     const strip = workoutStripPaths(paused);
-    expect(strip.lane).toEqual({ kind: 'heart-rate', range: '', heartRate: '' });
-    expect(workoutStripPaths({ ...paused, status: 'running' }).lane).not.toEqual(strip.lane);
-    expect(workoutStripName(paused)).not.toMatch(/Your power|Heart rate|chosen range/);
+    if (strip.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(strip.lane.range).toBe('');
+    expect(strip.lane.heartRate).not.toBe('');
+    // The same line it would draw running: the pause takes away the range only.
+    const asRunning = workoutStripPaths({ ...paused, status: 'running' }).lane;
+    expect(asRunning.kind === 'heart-rate' ? asRunning.heartRate : undefined).toBe(
+      strip.lane.heartRate,
+    );
+    expect(asRunning.kind === 'heart-rate' ? asRunning.range : '').not.toBe('');
+    expect(workoutStripName(paused)).toMatch(/Heart rate: \d+ bpm\./);
+    expect(workoutStripName(paused)).not.toContain('chosen range');
     expect(strip.progress.done).not.toBe('');
+
+    // And everything is back on resume, through the same controller.
+    await rig.controller.resume();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    const resumed = rig.controller.getSnapshot().workout;
+    if (resumed === undefined) throw new Error('no workout');
+    expect(resumed.status).toBe('running');
+    const back = workoutStripPaths(resumed);
+    if (back.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(back.lane.range).not.toBe('');
+    expect(back.lane.heartRate).not.toBe('');
+    expect(workoutStripName(resumed)).toContain('with a chosen range of 130–140 bpm');
     rig.controller.dispose();
   });
 

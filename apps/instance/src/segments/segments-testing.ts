@@ -98,6 +98,31 @@ export const SEGMENT_HAPPY_CALLS: Readonly<
       efforts: [{ startedAt: RIDE_STARTED_AT + 60, elapsedSeconds: 300, visibility: 'public' }],
     });
   },
+  flagSegmentEffort: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    const segmentId = await publish(world, token, definitionFixture('Flagged on for the spec'));
+    await authorised(world, token, 'POST', `/v1/segments/${segmentId}/efforts/${content}`, {
+      efforts: [{ startedAt: RIDE_STARTED_AT + 60, elapsedSeconds: 300, visibility: 'public' }],
+    });
+    await riderWithSharedEffort(world, segmentId);
+    const board = (await (
+      await authorised(world, token, 'GET', `/v1/segments/${segmentId}/leaderboard`)
+    ).json()) as { rows: { effortId: string; yours: boolean }[] };
+    const theirs = board.rows.find((row) => !row.yours)?.effortId ?? '';
+    return authorised(world, token, 'POST', `/v1/segments/${segmentId}/efforts/${theirs}/flag`, {
+      reason: 'vehicle',
+    });
+  },
+  flagSegmentHazard: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    const segmentId = await publish(world, token, definitionFixture('Hazardous for the spec'));
+    await authorised(world, token, 'POST', `/v1/segments/${segmentId}/efforts/${content}`, {
+      efforts: [{ startedAt: RIDE_STARTED_AT + 60, elapsedSeconds: 300, visibility: 'public' }],
+    });
+    return authorised(world, token, 'POST', `/v1/segments/${segmentId}/hazard`, {
+      reason: 'traffic',
+    });
+  },
   getSegmentLeaderboard: async (world) => {
     const { token } = await riderWithRide(world);
     const segmentId = await publish(world, token, definitionFixture('Ranked for the spec'));

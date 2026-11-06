@@ -30,6 +30,7 @@ import { formatDuration } from '../format';
 import { loadHistory, loadOverlay, type EffortHistory, type OverlayResult } from '../efforts/load';
 import type { EffortPort } from '../efforts/store-port';
 import type { LeaderboardPort } from '../instance/leaderboard-port';
+import { notCountedSentence } from '../segments/excluded';
 import { InstanceBoard } from '../segments/InstanceBoard';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
@@ -111,7 +112,13 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
     () => (history === undefined ? [] : rankEfforts(history.rows.map((row) => row.effort))),
     [history],
   );
-  const best = useMemo(() => personalBest(ranked), [ranked]);
+  // #69: a segment the rider's instance says is hazardous awards no personal
+  // best — told by its board, which is the only thing here that knows.
+  const [hazardous, setHazardous] = useState(false);
+  const best = useMemo(() => (hazardous ? undefined : personalBest(ranked)), [ranked, hazardous]);
+  // #69: the efforts that do not count are still the rider's, and are shown
+  // with the reason rather than dropped (`segments/excluded.ts`).
+  const notCounted = history?.notCounted ?? [];
 
   const toggle = useCallback((id: string) => {
     setOverlay(undefined);
@@ -237,6 +244,42 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
         </>
       )}
 
+      {hazardous ? (
+        <StatusMessage tone="info">
+          This segment was flagged hazardous on your instance, so no personal best is awarded on it.
+        </StatusMessage>
+      ) : null}
+
+      {notCounted.length === 0 ? null : (
+        <ScrollTable
+          className="oyl-data-table"
+          caption="Your efforts on this segment that are not counted, and why"
+        >
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">Ride</th>
+              <th scope="col">Why it is not counted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notCounted.map((row) => (
+              <tr key={row.effort.id}>
+                <td>{formatDuration(row.effort.elapsed)}</td>
+                <td>
+                  {row.activity === undefined ? (
+                    'Ride no longer on this device'
+                  ) : (
+                    <a href={hrefForActivity(row.effort.activityId)}>{row.activity.name}</a>
+                  )}
+                </td>
+                <td>{notCountedSentence(history.segment, row.effort, units)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </ScrollTable>
+      )}
+
       {overlay === undefined ? null : <Overlay result={overlay} />}
 
       {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
@@ -245,6 +288,7 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
           port={boards}
           segment={history.segment}
           efforts={history.rows.map((row) => row.effort)}
+          onHazardous={setHazardous}
         />
       ) : null}
     </section>

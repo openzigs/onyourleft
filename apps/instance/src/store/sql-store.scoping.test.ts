@@ -514,6 +514,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       return found;
     },
   },
+  flagSegment: {
+    notAScopedRead:
+      'a write about another rider’s effort, held to the choke point’s rule and to the flagger’s own effort in segments/integrity.test.ts (#69)',
+  },
+  listSegmentIntegrityLog: {
+    notAScopedRead:
+      'the moderators’ audit trail, instance-wide by design and read only on a `reaches: moderation` route (#69)',
+  },
   listSegmentsPublishedBy: {
     probe: async (store, athleteId) => store.listSegmentsPublishedBy(athleteId),
   },

@@ -407,10 +407,15 @@ describe('#1789 building fields: through the real store and back, and a row with
     expect(fieldsHandedToThePlan(state).length).toBeGreaterThan(0);
   });
 
-  it('changes no Dexie schema: the store is at version 20, and worldCorridors and its keys are as #1545 declared them', () => {
-    expect(SCHEMA_VERSION).toBe(20);
-    expect(SCHEMA_VERSIONS).toHaveLength(20);
-    expect(SCHEMA_VERSIONS.at(-1)?.[TABLE.worldCorridors]).toBe('[owner+routeId], owner');
+  it('changes no Dexie schema: the store is at version 21, and worldCorridors and its keys are as #1545 declared them', () => {
+    // 21 since #1063, which re-declares cameraFrames alone; worldCorridors is
+    // still as version 20 (#1545) declared it.
+    expect(SCHEMA_VERSION).toBe(21);
+    expect(SCHEMA_VERSIONS).toHaveLength(21);
+    expect(
+      SCHEMA_VERSIONS.findLast((stores) => TABLE.worldCorridors in stores)?.[TABLE.worldCorridors],
+    ).toBe('[owner+routeId], owner');
+    expect(SCHEMA_VERSIONS.at(-1)?.[TABLE.worldCorridors]).toBeUndefined();
   });
 });
 

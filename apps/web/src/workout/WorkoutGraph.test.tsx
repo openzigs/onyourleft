@@ -410,29 +410,68 @@ describe('the HUD’s strip as markup — #1307', () => {
   });
 
   it.each([
-    ['power', () => input({ status: 'paused', holdingWatts: 50 }), 'power'],
+    [
+      'power',
+      () => input({ status: 'paused', holdingWatts: 50 }),
+      'power',
+      'oyl-workout-strip__power',
+      /^Your power: \d+ W\.$/,
+    ],
     [
       'heart-rate',
       () => input({ status: 'paused', holdingWatts: 50, trace: trace(RANGE) }),
       'heart-rate',
+      'oyl-workout-strip__heart-rate',
+      /^Heart rate: 134 bpm\.$/,
     ],
   ] as const)(
-    'draws no line while paused, in the %s lane, and keeps its text and bar — #1313',
-    (_name, make, lane) => {
+    'paused, hides the dashed target in the %s lane, keeps the line ridden, its text and bar — #1313',
+    (_name, make, lane, ridden, said) => {
       const root = rendered(<WorkoutStrip workout={make()} />);
       const image = root.querySelector('[role="img"]');
       // The lane keeps its place, so the panel does not move.
       expect(image?.getAttribute('data-oyl-lane')).toBe(lane);
       expect(root.querySelectorAll('svg')).toHaveLength(2);
+      // The owner's ruling of 2026-11-05: no stale dashed target (or range),
+      // and the trace already ridden is kept.
       expect([...classesOf(root)].sort()).toEqual(
-        ['oyl-workout-strip__track', 'oyl-workout-strip__done', 'oyl-workout-strip__now'].sort(),
+        [
+          ridden,
+          'oyl-workout-strip__track',
+          'oyl-workout-strip__done',
+          'oyl-workout-strip__now',
+        ].sort(),
       );
       expect(textOf(root, 'p')).toEqual(['Paused · Target 50 W']);
-      // The name says what is drawn: the pause and the target, no power or heart rate.
+      // The name says what is drawn: the pause, the target confirmed (in
+      // words, as the text says it) and the line ridden, and no range.
       const name = image?.getAttribute('aria-label') ?? '';
       expect(name).toContain('Workout graph. Paused.');
       expect(name).toContain('Target the trainer last confirmed: 50 W.');
-      expect(name).not.toMatch(/Your power|Heart rate|chosen range/);
+      expect(name.split(/(?<=\.) /).filter((sentence) => said.test(sentence))).toHaveLength(1);
+      expect(name).not.toContain('chosen range');
+    },
+  );
+
+  it.each([
+    ['power', (status: 'paused' | 'running') => input({ status }), 'oyl-workout-strip__target'],
+    [
+      'heart-rate',
+      (status: 'paused' | 'running') => input({ status, trace: trace(RANGE) }),
+      'oyl-workout-strip__range',
+    ],
+  ] as const)(
+    'draws the %s lane’s dashed target again once the workout runs, and names the range again — #1313',
+    (_name, make, dashed) => {
+      const paused = rendered(<WorkoutStrip workout={make('paused')} />);
+      expect(classesOf(paused)).not.toContain(dashed);
+      const running = rendered(<WorkoutStrip workout={make('running')} />);
+      expect(classesOf(running)).toContain(dashed);
+      if (dashed === 'oyl-workout-strip__range') {
+        expect(running.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain(
+          'with a chosen range of 130–140 bpm',
+        );
+      }
     },
   );
 
