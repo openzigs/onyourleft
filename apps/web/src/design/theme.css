@@ -2137,37 +2137,94 @@ html {
   inset: 0;
 }
 
-/* The days ridden of the last seven, as a ring beside the sentence (#939). */
+/*
+ * The days ridden of the last seven, then since #2049 the week's bar chart —
+ * where #939's ring was, the same fact and each day's moving time. Since the
+ * owner's screenshot review of 2026-11-05 the chart is the card's whole width
+ * (it was 8.5rem beside the sentence), so the sentence is a line of its own
+ * above it. The sentence comes first in the DOM and is read first; the
+ * drawing is `aria-hidden`. Under it, the table's disclosure, or the table
+ * itself when the chart has thrown.
+ */
+/* The week's inset is Next up's and the sensors' (#2045), the cards it sits
+   under and beside on a landscape tablet. */
+.oyl-panel.oyl-home__week {
+  padding: var(--oyl-space-md);
+}
+
 .oyl-home__days {
-  display: flex;
-  align-items: center;
-  gap: var(--oyl-space-md);
-  margin-bottom: var(--oyl-space-sm);
+  display: grid;
+  row-gap: var(--oyl-space-xs);
+  margin-bottom: var(--oyl-space-xs);
 }
 
-.oyl-home__days p {
+.oyl-home__days > :not(.oyl-week-chart) {
+  margin-block: 0;
+}
+
+/*
+ * #2049: this week's moving time, a bar per day (`home/WeekChart.tsx`), the
+ * card's whole width, with each day's time over its bar. The bars are one
+ * colour — `accent` on the panel's `surfaceRaised`, a declared non-text pair
+ * (3.60:1 light, `tokens.ts`) — so colour says nothing; the values are the
+ * panel's own `ink`, and the day's letter under each column and the table one
+ * press away say the rest.
+ */
+.oyl-week-chart {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+}
+
+.oyl-week-chart__plot {
+  position: relative;
+  height: 2.75rem;
+}
+
+.oyl-week-chart__bars {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.oyl-week-chart__bar {
+  fill: var(--oyl-color-accent);
+}
+
+/* Each bar's value, over its middle, its foot on the bar's top — a list, as
+   the day letters are, so each is a word of its own. */
+.oyl-week-chart__values {
   margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.oyl-home__ring {
-  flex: none;
-  width: 3rem;
-  height: 3rem;
+.oyl-week-chart__value {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--oyl-color-ink);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.oyl-home__ring-track,
-.oyl-home__ring-fill {
-  fill: none;
-  stroke-width: 6;
-}
-
-.oyl-home__ring-track {
+.oyl-week-chart__base {
   stroke: var(--oyl-color-border);
+  stroke-width: 1;
 }
 
-.oyl-home__ring-fill {
-  stroke: var(--oyl-color-accent-text);
-  stroke-linecap: round;
+.oyl-week-chart__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1;
+  text-align: center;
 }
 
 /* #2048: the last ride's climb — the route's own profile, the module's width
@@ -7481,7 +7538,7 @@ select.oyl-input {
 
 .oyl-hud__profile-svg {
   width: 100%;
-  height: 3rem;
+  height: 2.5rem;
   display: block;
 }
 

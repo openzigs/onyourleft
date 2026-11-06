@@ -91,13 +91,14 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import { unixSeconds, type Percent, type RouteProfile, type UnixSeconds } from '@onyourleft/domain';
+import { metres, unixSeconds, type Percent, type RouteProfile, type UnixSeconds } from '@onyourleft/domain';
 import type { ConnectionState } from '@onyourleft/sensors';
 import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
 import { ProfileShape, SensorGlyph } from '../design/illustration';
+import { ChartSlot } from '../design/ChartSlot';
 import type { SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
@@ -118,6 +119,7 @@ import {
   type HomePreviousWeek,
 } from '../home/home';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
+import { WeekChart } from '../home/WeekChart';
 import { ProgressPanel } from '../progress/ProgressPanel';
 import {
   batteryBadgeWords,
@@ -846,6 +848,21 @@ function NextUp({ next }: { readonly next: HomeNextUp | undefined }): JSX.Elemen
   );
 }
 
+/** The week table's caption — #2049. */
+const WEEK_TABLE_CAPTION = 'Day by day';
+
+/** A day of the week table: *Today*, or its weekday and date. */
+function dayName(day: string, today: boolean): string {
+  return today
+    ? 'Today'
+    : new Intl.DateTimeFormat('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      }).format(new Date(`${day}T12:00:00Z`));
+}
+
 /** The week before's figure, as the words under a reading — its own `dd`. */
 function weekBefore(value: string): string {
   return `Week before: ${value}`;
@@ -853,11 +870,21 @@ function weekBefore(value: string): string {
 
 /**
  * *This week* — #1010: rides, moving time and load in big tabular numerals
- * (`Reading`), each set against the seven days before, and the days ridden as
- * a ring beside the sentence that says the same. Numbers only — no streak
- * and no target (#935 D-6). Every figure is `home/home.ts`'s arithmetic over
- * the one read. Since #2044 the week module's slot (#2049 fills it), fourth
- * in the reading order, a `section` named by its own `h2`.
+ * (`Reading`), each set against the seven days before, and since #2049 the
+ * week's distance. Numbers only — no streak and no target (#935 D-6). Every
+ * figure is `home/home.ts`'s arithmetic over the one read. Fourth in the
+ * reading order since #2044, a `section` named by its own `h2`.
+ *
+ * ## The days, drawn — #2049
+ *
+ * Beside the sentence that says how many days were ridden, a bar per day of
+ * moving time (`home/WeekChart.tsx`), in the place #939's ring of the days
+ * ridden had: the bars draw the same fact — a bar on each day ridden — and
+ * how long each was, at the ring's medium size, which is what lets the four
+ * modules still stand inside a landscape tablet's first screen
+ * (`home.browser.spec.ts` §"#2044"). The chart is `aria-hidden`; its table,
+ * *Day by day*, is one press away under it, and stands alone if the chart
+ * throws (`design/ChartSlot.tsx`, `a11y/degradation.a11y.test.tsx`).
  */
 function ThisWeek({
   week,
@@ -866,6 +893,8 @@ function ThisWeek({
   readonly week: HomeData['week'];
   readonly previous: HomePreviousWeek;
 }): JSX.Element {
+  const units = useUnits();
+  const weekDistance = shownDistance(metres(week.distance));
   return (
     <section className="oyl-panel oyl-home__week" aria-labelledby="oyl-home-week">
       {/* #1013: which seven days these are is the section's help. */}
@@ -880,8 +909,22 @@ function ThisWeek({
         <p>No rides in the last seven days.</p>
       ) : (
         <div className="oyl-home__days">
-          <DaysRing days={week.daysRidden} />
           <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
+          {/* #2049: moving time per day, drawn where #939's ring was, with
+              the same figures as a table one press away — and the table
+              alone if the chart throws (`design/ChartSlot.tsx`). */}
+          <ChartSlot
+            caption={WEEK_TABLE_CAPTION}
+            columns={['Day', 'Rides', MOVING_TIME_LABEL]}
+            rows={week.days.map((day, index) => [
+              dayName(day.day, index === week.days.length - 1),
+              String(day.rides),
+              formatDuration(day.movingTime),
+            ])}
+            emptyMessage="No rides in the last seven days."
+            chart={<WeekChart days={week.days} />}
+            tablePosition="disclosed"
+          />
         </div>
       )}
       <dl className="oyl-home__facts">
@@ -899,6 +942,16 @@ function ThisWeek({
           </dd>
           <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
         </div>
+        {/* #2049: the week's distance beside its rides and time. #1070: a
+            week whose rides stored no distance shows none, not 0 km. */}
+        {weekDistance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading {...formatDistance(weekDistance, units)} />
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Load</dt>
           <dd>
@@ -918,42 +971,3 @@ function ThisWeek({
     </section>
   );
 }
-
-/**
- * The days ridden in the last seven, as a ring beside the sentence that says
- * the same thing — #939's progress. Built from `home/home.ts`'s one read; no
- * streak and no badge (#935 D-6 is its own issue). The ring is decoration:
- * the sentence carries the number.
- */
-function DaysRing({ days }: { readonly days: number }): JSX.Element {
-  const share = Math.max(0, Math.min(1, days / 7));
-  return (
-    <svg
-      aria-hidden="true"
-      focusable="false"
-      className="oyl-home__ring"
-      viewBox={`0 0 ${String(RING_BOX)} ${String(RING_BOX)}`}
-    >
-      <circle
-        className="oyl-home__ring-track"
-        cx={RING_BOX / 2}
-        cy={RING_BOX / 2}
-        r={RING_RADIUS}
-      />
-      {share === 0 ? null : (
-        <circle
-          className="oyl-home__ring-fill"
-          cx={RING_BOX / 2}
-          cy={RING_BOX / 2}
-          r={RING_RADIUS}
-          strokeDasharray={`${String(share * RING_CIRCUMFERENCE)} ${String(RING_CIRCUMFERENCE)}`}
-          transform={`rotate(-90 ${String(RING_BOX / 2)} ${String(RING_BOX / 2)})`}
-        />
-      )}
-    </svg>
-  );
-}
-
-const RING_BOX = 48;
-const RING_RADIUS = 20;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
