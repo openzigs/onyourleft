@@ -315,6 +315,20 @@ export const COLOUR_TOKENS = {
    * the distinction survives for a rider who cannot see the tint at all.
    */
   hudStaleInk: '#f1af48',
+  /*
+   * The look-ahead strip's grade bands (#2075, `game/hud/look-ahead.ts`
+   * §`GRADE_BANDS`), on the HUD's surface. Our own five, and the order a
+   * rider already reads — cool for down, grey for flat, warmer and redder as
+   * it steepens. **Never the only signal** (SC 1.4.1): each band is also its
+   * own fill pattern, drawn in `hudSurface` over the colour, and the next
+   * climb is written out in words beside the strip. Each colour is a declared
+   * 3:1 against `hudSurface` (SC 1.4.11) in {@link CONTRAST_REQUIREMENTS}.
+   */
+  hudGradeDescent: '#4f9fe0',
+  hudGradeFlat: '#6b7177',
+  hudGradeClimb: '#d8b630',
+  hudGradeSteep: '#e8812c',
+  hudGradeWall: '#e5484d',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -1361,6 +1375,56 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_TEXT,
     measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
+  },
+  {
+    foreground: 'hudGradeDescent',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 6.58, dark: 6.58 },
+    where: 'a descent on the HUD’s look-ahead strip, and its dotted pattern (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudGradeFlat',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 3.8, dark: 3.8 },
+    where: 'flat road on the HUD’s look-ahead strip (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudGradeClimb',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 9.52, dark: 9.52 },
+    where: 'a climb on the HUD’s look-ahead strip, and its hatching (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudGradeSteep',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 6.8, dark: 6.8 },
+    where: 'a steep stretch on the HUD’s look-ahead strip, and its hatching (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudGradeWall',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 4.79, dark: 4.79 },
+    where:
+      'a very steep stretch on the HUD’s look-ahead strip, and its cross-hatching (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudBorder',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 4.47, dark: 4.47 },
+    where: 'the whole route’s filled elevation strip on the HUD (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudInk',
+    background: 'hudBorder',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 3.9, dark: 3.9 },
+    where: 'the rider’s marker where it crosses the whole route’s filled strip (SC 1.4.11, #2075)',
   },
   {
     foreground: 'accentText',

@@ -750,7 +750,7 @@ const VOLUME = 'sound: Sound volume';
 /** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
 const REPORT_REASONS_TIMEOUT_MS = 15_000;
 
-const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
+const ROUTE_READINGS = ['the elevation strip', 'the road ahead', 'the plan view'] as const;
 
 /** What `theme.css` records as giving way in this state at this viewport. */
 function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {

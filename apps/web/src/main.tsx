@@ -1610,6 +1610,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       };
     },
     hidden: () => document.hidden,
+    // #2253: the rider's own player, which the loop yields to. None yet: #2242
+    // supplies the Android shell's `OtherPlayer` (`platform.otherPlayer`).
+    riderPlayer: undefined,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
