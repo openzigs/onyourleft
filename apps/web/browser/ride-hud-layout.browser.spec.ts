@@ -43,6 +43,7 @@ import {
   measure,
   overlap,
   riderBox,
+  roomGivesWay,
   sharedRide,
   type Viewport,
 } from './ride-stage';
@@ -158,6 +159,17 @@ for (const size of ['large', 'extra-large'] as const) {
           for (const name of ALWAYS_DRAWN) {
             expect(names, how).toContain(name);
             expect(clipped, how).not.toContain(name);
+          }
+          // The owner's ruling of 2026-11-06 (#2034): in a room at these
+          // sizes the pacer, the ghost and the wind give way wherever
+          // `roomGivesWay(viewport, true)` says — on every tablet and phone.
+          if (query.includes('room=')) {
+            for (const name of ['reading: Pacer', 'reading: Your best', 'reading: Wind']) {
+              const reading = seen.items.find((each) => each.name === name);
+              expect(reading, `${how}: ${name}`).toBeDefined();
+              const hidden = (reading?.box.width ?? 0) * (reading?.box.height ?? 0) <= 1;
+              expect(hidden, `${how}: ${name}`).toBe(roomGivesWay(viewport, true));
+            }
           }
           // The owner's ruling of 2026-11-06 (#2034): a race's standings keep
           // 16 px or more above the actions panel on the landscape tablets.
