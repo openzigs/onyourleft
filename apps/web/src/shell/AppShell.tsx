@@ -161,6 +161,7 @@ const SegmentsView = lazyView(HISTORY_GROUP, (group) => group.SegmentsView);
 const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetailView);
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
+const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -715,6 +716,17 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+        />
+      );
+    case 'route-editor':
+      return (
+        <RouteEditorView
+          // #2007: a saved route's line, kept, with one stretch at a time redrawn.
+          routes={props.routes}
+          selected={match.parameter}
+          provider={props.routing}
+          map={props.map}
+          basemap={props.basemap}
         />
       );
     case 'workouts':

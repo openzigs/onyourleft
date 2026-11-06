@@ -293,6 +293,60 @@ test.describe('#946 — the menu sounds’ switch and volume', () => {
   });
 });
 
+/**
+ * #2234 — on Settings each volume's label sits beside its slider (centred on
+ * it, to its left) or directly above it, and never below. With the label and
+ * the slider as two inline boxes on one line, Chromium put the label's
+ * baseline on the slider's bottom edge — a range input has no text baseline —
+ * so the words hung at the bottom of the 44 px slider, below its thumb.
+ *
+ * `label[for]` is what ties each label to its slider, so the label measured is
+ * the one the slider's accessible name comes from.
+ */
+test.describe('#2234 — the Settings volume labels sit beside or above their slider', () => {
+  const UPRIGHT_PHONE = { width: 412, height: 915 };
+  const SLIDERS = ['Sound volume', 'Menu sound volume', 'Music volume'] as const;
+  /** Rounding in a centred flex row; the defect was 16 px. */
+  const SLACK = 1;
+
+  for (const viewport of [TABLET, UPRIGHT_PHONE]) {
+    test(`at ${String(viewport.width)}×${String(viewport.height)}`, async ({ page }) => {
+      await open(page, viewport);
+      await visit(page, 'settings');
+      // The menu sounds' volume is offered once they are on (#946).
+      await page.getByRole('switch', { name: 'Play sounds in the menus' }).click();
+      for (const name of SLIDERS) {
+        const slider = page.getByRole('slider', { name, exact: true });
+        await expect(slider, name).toHaveCount(1);
+        await slider.scrollIntoViewIfNeeded();
+        const boxes = await slider.evaluate((input) => {
+          const label = document.querySelector(`label[for="${input.id}"]`);
+          if (label === null) return undefined;
+          // The label's WORDS, not its box: a label stretched to the row's
+          // height is centred on the slider while its text sits at the top.
+          const words = document.createRange();
+          words.selectNodeContents(label);
+          return {
+            label: words.getBoundingClientRect().toJSON() as DOMRect,
+            slider: input.getBoundingClientRect().toJSON() as DOMRect,
+          };
+        });
+        expect(boxes, `${name}: no label[for] names it`).toBeDefined();
+        if (boxes === undefined) continue;
+        const { label, slider: range } = boxes;
+        const middle = (box: DOMRect): number => box.top + box.height / 2;
+        const beside =
+          label.right <= range.left + SLACK && Math.abs(middle(label) - middle(range)) <= SLACK;
+        const above = label.bottom <= range.top + SLACK;
+        expect(
+          beside || above,
+          `${name}: label ${JSON.stringify(label)} is neither beside nor above slider ${JSON.stringify(range)}`,
+        ).toBe(true);
+      }
+    });
+  }
+});
+
 test.describe('#994 — steppers', () => {
   test('every step button on Settings is a 44 × 44 target, measured three ways', async ({
     page,

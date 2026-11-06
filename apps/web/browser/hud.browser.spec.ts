@@ -292,8 +292,14 @@ const VIEWPORTS = [
  * the track at 119 px, so this assertion stayed green. What caught it was the
  * control panel below, whose words stopped overflowing — which is the division
  * of labour between the two, and the reason neither is redundant.
+ *
+ * ⚠️ **240 since #2130, where it was 200.** On a landscape tablet the HUD's
+ * readings are set at ADR 0063 D-5's sizes, and the widest field is the clock
+ * row's `ELAPSED 9:59:59`, a label and a 2.45 rem time on one line: 205 px at
+ * 1280×800 in the pinned Chromium. A grid that failed to load is still a
+ * full-width block, over 1000 px there.
  */
-const WIDEST_CREDIBLE_TRACK = 200;
+const WIDEST_CREDIBLE_TRACK = 240;
 
 /**
  * How much fractional slack the finer comparison allows, in CSS pixels.
@@ -957,8 +963,10 @@ for (const viewport of VIEWPORTS) {
       const none = deliveryStage(measured, 'none');
       expect(none.fields).toEqual([]);
       expect(none.panel).toBeDefined();
-      // The ordinary ride's panel is the two rows every claim below is against.
-      expect(rows(none)).toBe(2);
+      // The ordinary ride's panel is the two rows every claim below is against
+      // â one on the tablet since #2130, whose six secondary tracks hold the
+      // ordinary ride's six readings in a row.
+      expect(rows(none)).toBe(tablet ? 1 : 2);
       for (const stage of ['start', 'end']) {
         const round = deliveryStage(measured, stage);
         const name = `${viewport.name}/${stage}`;
