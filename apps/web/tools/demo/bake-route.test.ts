@@ -37,7 +37,7 @@ import {
   readCorridorTiles,
   unpackCorridorFeatures,
 } from '../../src/game/world-data/corridor';
-import { ODBL_LICENCE_URL, ODBL_NOTICE } from '../../src/map/basemap';
+import { ODBL_LICENCE_URL, ODBL_NOTICE, PUBLISHED_BASEMAP_URL } from '../../src/map/basemap';
 import { buildArchive } from '../../src/world-data/archive-testing';
 import { corridorArchiveFrom } from '../../src/world-data/corridor-source';
 import { countingSource } from '../../src/world-data/archive-testing';
@@ -45,8 +45,11 @@ import { countingSource } from '../../src/world-data/archive-testing';
 import {
   archiveOf,
   bakeRoute,
+  offlineRecordDrift,
   parseBakeArguments,
   personalGpxFields,
+  PRESET_ROUTES_DIRECTORY,
+  presetRouteIds,
   provenanceFindings,
   readBakeInput,
   recordDrift,
@@ -606,5 +609,53 @@ describe('demo:bake’s preset-route inputs — #1651, ADR 0056 D-7', () => {
     const out = stripPresetGpx(argumentsFor(['--gpx', path, '--strip']), directory);
     expect(out).toBe(join(directory, 'climb.gpx'));
     expect(readFileSync(out, 'utf8')).toBe(strippedFixture());
+  });
+});
+
+describe('the committed preset records agree with this checkout — #2268', () => {
+  const gpx = strippedGpx(routeLineOf(fixtureGpx()).points);
+  const current = {
+    archiveUrl: PUBLISHED_BASEMAP_URL,
+    readerVersion: CORRIDOR_READER_VERSION,
+    gpxSha256: createHash('sha256').update(gpx).digest('hex'),
+  };
+
+  it('names the archive URL, reader version and GPX digest a record moved from, and none when it agrees', () => {
+    expect(offlineRecordDrift(current, gpx)).toStrictEqual([]);
+    // The two moves that left upstate-climb's record stale (#2268): the
+    // basemap URL (ADR 0062) and the reader version (#1789).
+    expect(
+      offlineRecordDrift(
+        {
+          ...current,
+          archiveUrl: 'https://tiles.openzigs.com/basemap-us-20260914.pmtiles',
+          readerVersion: CORRIDOR_READER_VERSION - 1,
+        },
+        gpx,
+      ),
+    ).toStrictEqual(['archiveUrl', 'readerVersion']);
+    expect(offlineRecordDrift(current, `${gpx}\n`)).toStrictEqual(['gpxSha256']);
+    // Provenance alone, never recorded: nothing to hold the archive to.
+    expect(offlineRecordDrift({}, gpx)).toStrictEqual(['archiveUrl', 'readerVersion', 'gpxSha256']);
+  });
+
+  it('lists the preset routes by their committed records, and nothing else in the directory', () => {
+    const directory = mkdtempSync(join(scratch, 'presets-'));
+    writeFileSync(join(directory, 'b-route.bake.json'), '{}');
+    writeFileSync(join(directory, 'b-route.gpx'), gpx);
+    writeFileSync(join(directory, 'a-route.bake.json'), '{}');
+    writeFileSync(join(directory, 'c-route.gpx'), gpx);
+    expect(presetRouteIds(directory)).toStrictEqual(['a-route', 'b-route']);
+  });
+
+  it('holds every committed preset route to the published archive, this reader and its own GPX', () => {
+    const ids = presetRouteIds(PRESET_ROUTES_DIRECTORY);
+    expect(ids).toContain('upstate-climb');
+    for (const id of ids) {
+      // Read as the bake reads it: the committed GPX and record, provenance checked.
+      const input = readBakeInput(parseBakeArguments(['--route', id]), PRESET_ROUTES_DIRECTORY);
+      expect(input.committed, id).toBeDefined();
+      expect(offlineRecordDrift(input.committed ?? {}, input.gpx), id).toStrictEqual([]);
+    }
   });
 });
