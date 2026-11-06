@@ -124,8 +124,18 @@ pnpm run format:check
 pnpm run format
 
 # ESLint 10 + typescript-eslint, type-aware. Also enforces the SPDX header and
-# the package boundaries — see §3 and §4d.
+# the package boundaries — see §3 and §4d. Since #2272 it is scripts/lint.sh:
+# one ESLint process per directory under apps/ and packages/, then one for the
+# rest of the tree, one after another, because a single `eslint .` holds every
+# project's TypeScript program at once and ran out of its 4 GB heap in CI. Same
+# config, same files, same rules. Each process prints `lint-memory: peak heap N
+# MB of a M MB limit` to stderr; any argument reaches every process
+# (`pnpm run lint --fix`). ci.md §4c "Lint, a project per process" has the readings.
 pnpm run lint
+
+# Its suite. Fixture-driven: a problem in every place a file can be is
+# reported once and fails the run, whichever process it is in.
+bash scripts/lint.test.sh
 
 # tsc --noEmit, per package, because each package is allowed a different
 # platform surface. Runs the root config too.

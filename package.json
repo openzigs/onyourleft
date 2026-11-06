@@ -13,7 +13,7 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "NODE_OPTIONS=--import=./scripts/lint-memory.mjs eslint .",
+    "lint": "bash scripts/lint.sh",
     "typecheck": "tsc --noEmit --project tsconfig.json && pnpm --recursive run typecheck",
     "test": "vitest run",
     "test:required": "vitest run --exclude src/game/near-field.test.ts --exclude tools/fuzz/decode-fuzz.test.ts --exclude src/game/realistic-textures.test.ts --exclude '**/*.a11y.test.*'",
