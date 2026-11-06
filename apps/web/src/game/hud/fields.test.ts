@@ -667,6 +667,73 @@ describe('the gap to whatever the rider is chasing', () => {
   });
 });
 
+/** A straight road north, `kilometres` long, for a countdown past 100 — #2130. */
+function longInput(kilometres: number): HudInput {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= kilometres; index += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(10 + (index * 1000) / 111_320),
+        degreesLongitude(0),
+      ),
+      elevation: altitudeMetres(10),
+    });
+  }
+  const profile = routeProfile(points);
+  return {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 152, live: true },
+  };
+}
+
+/** `To go` with `left` metres still to ride on `input`'s route. */
+function toGoWith(input: HudInput, left: number, units: HudInput['units'] = 'metric') {
+  const total: number = input.profile.totalDistance;
+  return fieldNamed(
+    {
+      ...input,
+      units,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(0), distance: metres(total - left) },
+      },
+    },
+    'remaining',
+  );
+}
+
+describe('a long countdown drops to one decimal from 100 — #2130', () => {
+  // The owner's ruling of 2026-11-06: `139.82 km` filled its track on every
+  // tablet and `km` wrapped under it. From 100 km (or 100 mi) to go the
+  // countdown is one decimal, so it is never wider than `99.99`.
+  const long = longInput(340);
+
+  it('keeps two decimals at 99.99 km', () => {
+    expect(toGoWith(long, 99_990).value).toBe('99.99');
+  });
+
+  it('shows one decimal at 100.0 km', () => {
+    expect(toGoWith(long, 100_000).value).toBe('100.0');
+  });
+
+  it('shows one decimal at 199.9 km', () => {
+    expect(toGoWith(long, 199_900).value).toBe('199.9');
+  });
+
+  it('never shows 100.00: 99.996 km rounds into the one-decimal range', () => {
+    expect(toGoWith(long, 99_996).value).toBe('100.0');
+  });
+
+  it('is the same rule in miles: 99.99 mi, 100.0 mi and 199.9 mi', () => {
+    const mile = 1609.344;
+    expect(toGoWith(long, 99.99 * mile, 'imperial').value).toBe('99.99');
+    expect(toGoWith(long, 100 * mile, 'imperial').value).toBe('100.0');
+    expect(toGoWith(long, 199.9 * mile, 'imperial')).toMatchObject({ value: '199.9', unit: 'mi' });
+  });
+});
+
 describe('the HUD follows the rider\u2019s units (#238)', () => {
   // ⚠️ This is the screen the issue is named for. It converted and labelled
   // inline — `(state.ride.speed as number) * 3.6, 'km/h'` and
