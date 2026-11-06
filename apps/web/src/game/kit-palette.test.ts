@@ -17,11 +17,11 @@
  *   the three held to its OWN hue in both directions;
  * - and a jersey equal to the bot's tint fails that measure — the control;
  * - its jersey is held 40 degrees of hue from every other entry's jersey, so
- *   no two choices are near-duplicates (#2123). One pair is short of it and
- *   is named, with why, in {@link SHORT_PAIRS}.
+ *   no two choices are near-duplicates (#2123). Since #2255 no pair is short
+ *   of it, so {@link SHORT_PAIRS} is empty.
  */
 
-import { KIT_COLOURS } from '@onyourleft/store';
+import { KIT_COLOURS, parseKitColour } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -55,11 +55,10 @@ import { LIT_COLOURS, RiderBelt, riderKitsOf, threeGameRenderer } from './three-
  * shrink. The house kit is in no pair, which is #2123's ruling: it is its own
  * colour.
  */
-const SHORT_PAIRS: ReadonlySet<string> = new Set([
-  // 31.0 apart. Both predate #2123's measure, and moving either changes what
-  // a rider who chose it wears, which is the owner's to rule on; #2123's pull
-  // request records it as deferred.
-  'green–lime',
+const SHORT_PAIRS: ReadonlySet<string> = new Set<string>([
+  // Empty since #2255. Green and Lime were 31.0 apart; the owner ruled on
+  // 2026-11-06 (#2123) to move the Lime kit to a yellow-green. It shipped at
+  // hue 78, not 60; bicycle.ts §KIT_PALETTE says why 60 was rejected.
 ]);
 
 /** A colour's three 8-bit channels, from `0xrrggbb`. */
@@ -141,6 +140,14 @@ describe('the kit palette — #623', () => {
     expect(riderKitFor('magenta')).not.toBe(HOUSE_KIT);
   });
 
+  it('dresses a rider who saved Lime before #2255 in the yellow-green, under the same key', () => {
+    // The key a row already holds still decodes, and now names the moved kit.
+    const saved = parseKitColour('lime');
+    expect(saved).toBe('lime');
+    expect(KIT_PALETTE[saved].name).toBe('Yellow-green');
+    expect(riderKitFor(saved)).toBe(KIT_PALETTE.lime.kit);
+  });
+
   it('holds every entry under the light and in the list that bounds it', () => {
     for (const key of KIT_COLOURS) {
       const { jersey, limb } = KIT_PALETTE[key].kit;
@@ -163,8 +170,9 @@ describe('the kit palette — #623', () => {
 
   it('holds every entry’s jersey 40 degrees of hue from every other entry’s — #2123', () => {
     // The owner's ruling of 2026-11-05: the house kit stays teal, its own
-    // colour, and is not the page's Hi-Vis accent, an olive 13 degrees from
-    // the Lime kit. So no entry may sit beside another, the house kit included.
+    // colour, and is not the page's Hi-Vis accent, an olive that sat 13
+    // degrees from the Lime kit as #2123 found it. So no entry may sit beside
+    // another, the house kit included.
     const short: string[] = [];
     for (const [i, a] of KIT_COLOURS.entries()) {
       for (const b of KIT_COLOURS.slice(i + 1)) {
