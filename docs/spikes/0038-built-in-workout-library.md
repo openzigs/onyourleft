@@ -345,7 +345,7 @@ library is written in them.
 ## 4. What bears on #210
 
 **Posted on #210**: the comment at
-[#210 (comment)](https://github.com/openzigs/onyourleft/issues/210#issuecomment-PLACEHOLDER), on
+[#210 (comment)](https://github.com/openzigs/onyourleft/issues/210#issuecomment-6698497652), on
 2026-11-06. It quotes #210's unblock condition 3 and states, without deciding:
 
 1. `h4l/zwift-workout-file-reference` (§2.2) is a source documenting the element set under `MIT OR
