@@ -11457,6 +11457,21 @@ select.oyl-input {
   }
 }
 
+/* On both landscape tablets at these sizes: in a room the rider's own W/kg
+   and zone stay (the owner's ruling of 2026-11-06, #2034), and in four
+   tracks they make the tier a third row, so a race's standings under it ran
+   into the actions panel: 23 px with *Report*'s reasons open at 1024×768,
+   and 15 px at 1280×800 in a race on a loop, with #2080's swap in them. So
+   the standings' lines give up their own padding, 28 px over seven lines;
+   nothing gives way and no control moves. */
+@media (min-width: 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings-line {
+    padding-block: 0;
+  }
+}
+
 @media (min-width: 51rem) and (min-height: 50rem) {
   .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
     grid-template-columns: minmax(0, 41.5rem) minmax(0, 1fr);
@@ -11494,17 +11509,6 @@ select.oyl-input {
     > .oyl-hud__field--gradient
     .oyl-hud__value {
     font-size: 2.45rem;
-  }
-
-  /* In a room the rider's own W/kg and zone stay (the owner's ruling of
-     2026-11-06, #2034), and in four tracks they make the tier a third row
-     here: a race's standings under it ran 23 px into the actions panel with
-     *Report*'s reasons open. So here the standings' lines give up their own
-     padding, 28 px over seven lines; nothing gives way and no control moves. */
-  .oyl-game--riding
-    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
-    .oyl-hud__standings-line {
-    padding-block: 0;
   }
 }
 
