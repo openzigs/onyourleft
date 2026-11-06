@@ -70,4 +70,39 @@ describe('excluded efforts (#69)', () => {
       ),
     ).toEqual([counted.id]);
   });
+
+  it('do not use up listEfforts’ limit: the counted efforts behind them are still read', async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    const segment = segmentFor(ATHLETE_A);
+    const ride = rideFor(ATHLETE_A);
+    // Two impossible times, fastest of all, ahead of two counted ones in the index.
+    const excluded = [1, 2].map((elapsedSeconds) =>
+      effortFor(ATHLETE_A, segment.id, ride.id, {
+        startedAt: unixSeconds(1_700_000_100 + elapsedSeconds),
+        elapsedSeconds,
+        visibility: 'excluded',
+      }),
+    );
+    const counted = [90, 95].map((elapsedSeconds) =>
+      effortFor(ATHLETE_A, segment.id, ride.id, {
+        startedAt: unixSeconds(1_700_000_500 + elapsedSeconds),
+        elapsedSeconds,
+      }),
+    );
+    await harness.write(async (store) => {
+      await store.putSegment(segment);
+      await store.putActivity(ride);
+      await store.putActivityEfforts(ATHLETE_A, ride.id, [...excluded, ...counted]);
+    });
+
+    for (const limit of [1, 2]) {
+      expect(
+        (await harness.read((store) => store.listEfforts(ATHLETE_A, segment.id, limit))).map(
+          (effort) => effort.id,
+        ),
+        `limit ${String(limit)}`,
+      ).toEqual(counted.slice(0, limit).map((effort) => effort.id));
+    }
+  });
 });

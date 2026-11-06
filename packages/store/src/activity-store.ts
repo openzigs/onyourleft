@@ -2960,14 +2960,17 @@ export class ActivityStore {
     segment: SegmentId,
     limit?: number,
   ): Promise<SegmentEffortRecord[]> {
+    // Filtered BEFORE the limit (#69): an excluded effort is the fastest a
+    // rider has when it is impossible, so a limit counted first would fill
+    // the page with rows the filter then drops, and hide counted efforts.
     let query = this.#segmentEfforts
       .where(INDEX.effortByAthleteAndSegment)
-      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true);
+      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true)
+      .filter((row) => row.visibility !== 'excluded');
     if (limit !== undefined) {
       query = query.limit(limit);
     }
-    const rows = await query.toArray();
-    return rows.filter((row) => row.visibility !== 'excluded');
+    return query.toArray();
   }
 
   /**

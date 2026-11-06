@@ -194,6 +194,19 @@ describe('automatic exclusion (#69’s first and second criteria)', () => {
     expect(entry?.reason).toMatch(/^Excluded automatically/);
   });
 
+  it('keeps a near-zero time off every board: #68 takes any time above 0, and this is the floor', async () => {
+    const ann = await rider('Ann');
+    const segmentId = await segmentBy(ann);
+    await onTheBoard('Bea', segmentId, 300);
+    // A thousandth of a second: accepted as a time (`segments.ts` asks only > 0), never ranked.
+    const cy = await onTheBoard('Cy', segmentId, 0.001);
+    expect(names(await board(ann, segmentId))).toEqual(['Bea']);
+    expect((await board(cy, segmentId, '?scope=personal')).rows[0]).toMatchObject({
+      rank: null,
+      excluded: expect.stringMatching(/^Excluded automatically/) as string,
+    });
+  });
+
   it('records an exclusion once, however often the same effort is shared again', async () => {
     const ann = await rider('Ann');
     const segmentId = await segmentBy(ann);
