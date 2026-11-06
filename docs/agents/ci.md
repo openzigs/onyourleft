@@ -672,6 +672,73 @@ slowest reading. When a new row turns this red, split `test:coverage` between tw
 split the browser checks. Do not lengthen the stop or change the 60 %.
 
 
+#### Cheaper cases under coverage — #1688
+
+⚠️ **From 2026-11-04 the `coverage` job was red on every nightly run**, and the table above did not
+show it: its three rows predate it. A case past Vitest's 5 s timeout under coverage turned it red,
+a different case most nights, and on the EPYC 7763 the job came within seconds of its 1 800 s stop.
+The owner's ruling for #1688 (2026-11-06): make those cases cheaper, and **never raise a timeout
+or the job's stop**. Four readings before, each the coverage job's own seconds from the Actions
+API, with the slowest Vitest file's own seconds:
+
+| Run | Event | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562) | `schedule` | EPYC 7763 | 1 761 | 1 276 | `people` (side road) 5.8 s, the 32x ride 5.0 s, `worship-steeple` 7.3 s |
+| [42039098957](https://github.com/openzigs/onyourleft/actions/runs/42039098957) | `workflow_dispatch` | EPYC 7763 | 1 798 | 1 290 | `people` ×2, the 32x ride, `worship-steeple` 7.1 s, `landform-levelling` |
+| [42067419110](https://github.com/openzigs/onyourleft/actions/runs/42067419110) | `workflow_dispatch` | EPYC 9V74 | 1 469 | 989 | `worship-steeple` 5.8 s |
+| [42206133669](https://github.com/openzigs/onyourleft/actions/runs/42206133669) | `schedule` | EPYC 9V45 | 1 201 | 826 | two hairpin walks, 6.2 and 6.5 s, `mapped-paint` 5.7 s |
+
+Over 19 red runs from 2026-11-04 to 2026-11-06 the cases that failed most were
+`line-on-the-road.test.ts`'s hairpin walks (11 runs), `worship-steeple.test.ts` (9), the 32x ride
+in `simulated-rider-wiring.test.tsx` (7), `people.test.ts`'s side roads (6 and 5),
+`mapped-paint.test.ts` (5), `corridor-wiring.test.tsx` (4) and `chase-camera-bend.test.ts` (4).
+
+**Where the time was.** A CPU profile of one worker under `--coverage` (`NODE_OPTIONS=--cpu-prof`
+with `--pool=threads`) put each of those cases' time in one of four loops. V8's block coverage counts
+every branch a loop takes, and a loop that branches per cell or calls a closure per row ran 5 to 12
+times slower under it than without; none of them is slow in a ride.
+
+| Loop | What it cost, locally, under coverage | Now |
+|---|---|---|
+| `land-class.ts` §`chamfer`, a branch per cell | 2.0 of `mapped-paint`'s and `worship-steeple`'s 2.4 s | the edges written out beside a branch-free interior; 0.25 → 0.23 ms a chunk without coverage |
+| `terrain.ts` §`retracedRows`, every point against every stretch | 1.5 of each hairpin case's 2.4 s | stretches filed by 8 m cell |
+| `landform.ts` §`groundTop`, every item against every row, through a closure | 0.7 of each frame-drawing case's 1.7 s | rows skipped by run-of-eight boxes, no closure |
+| `landform.test.ts`'s walk over every triangle for each metre of a ray | 331 of the file's 495 s | triangles looked up by cell; `surfaceTop` allocates nothing per triangle |
+
+Each gives the answer it gave: `land-class.test.ts` §"the chamfer, cell by cell" holds `chamfer` to
+the passes with a test per cell, `landform.test.ts` §"this file's own lookup" holds the cells to the
+walk, and the rest is held by the tests that were already there (`out-and-back.test.ts` for the
+retrace, `arrangement-unchanged.test.ts` and #2099's for the boxes). Two cases are also split in
+two, doing no less: each hairpin walk meets at the step nearest the apex, and each of `people.test.ts`'s
+#1619 claims is a case beside its control. No timeout, no stop and no worker count moved.
+
+Readings after, on the branch (`gh workflow run nightly.yml --ref`):
+
+| Run | Commit | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792) | f4e83683 (the loops) | EPYC 7763 | 1 448 | 282 | the radius-12 m hairpin walk 5.2 s, the crossroads 5.2 s, `corridor-wiring` 5.1 s, `lap-race-wiring`'s recorded ride at its own 10 s |
+| [42287054864](https://github.com/openzigs/onyourleft/actions/runs/42287054864) | 10c5c741 (and the splits) | Xeon 6973P-C | 1 015 | 176 | none: every job of the run green |
+| [42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) | 0bb1373f (10c5c741 and this section) | Xeon Platinum 8370C | 1 444 | 288 | the 32x ride 5.0 s, `corridor-wiring` 5.1 s |
+
+⚠️ **None of these readings is a row of the table above**, and neither are the four before it: each
+is past that table's 60 % bound (1 080 s), which `nightly-split.test.ts` would turn red, and the
+answer that section gives, two coverage jobs, is not #1688's to make. The table still holds the
+2026-10-29 figures, so that case is green on a bound the job no longer keeps: the slowest reading
+since is 1 798 s, and the slowest after #1688 is 1 448 s.
+
+**What is left.** The job's time is now the suite's whole work over the runner's two cores, not
+one file: on the 7763 the Vitest run summed 3 374 s of case time against 4 320 s before, and
+`near-tree-fade.test.ts` (455 s) is its slowest file. A case's time on the 7763 under coverage is
+about four times its time alone on a development Mac under coverage, so a case that takes more than
+about a second there is near the 5 s timeout on that runner. The two still red on the third
+reading, and the cases nearest them, all draw whole frames — scenery, ground and the standing of
+every item on it — with no one loop the larger part: `corridor-wiring.test.tsx`'s late read and the
+32x ride (each two whole rides compared, so not split as the hairpin walks were),
+`lap-race-wiring`'s recorded ride (9.6 s of its own 10 s on the 8370C) and the bot-and-ghost
+hairpin walks (their own 30 s). What would move them is a cheaper `sceneFrame` as a whole, or a
+change to this job's shape — the two coverage jobs this section's table already calls for, or
+fewer Vitest workers on the two-core runner — and those are the owner's to choose.
+
 #### 23m39s of 25 — #1051
 
 ⚠️ **Four days after #866's 887 s the job was back at 1 400 s on the 7763**, and PR #1047's run
