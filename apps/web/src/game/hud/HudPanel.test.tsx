@@ -1015,6 +1015,9 @@ describe('the lap splits panel — #2080', () => {
     );
     const standingsShown = auditAccessibility(document);
     expect(standingsShown, formatViolations(standingsShown)).toEqual([]);
+    // The swap is one button either way round: swapping adds no tab stop
+    // (the owner's ruling of 2026-11-06, #2034).
+    const withStandings = tabbableElements(document).length;
     await act(async () => {
       button('Show laps')?.click();
       await Promise.resolve();
@@ -1022,5 +1025,9 @@ describe('the lap splits panel — #2080', () => {
     expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
     const splitsShown = auditAccessibility(document);
     expect(splitsShown, formatViolations(splitsShown)).toEqual([]);
+    expect(tabbableElements(document)).toHaveLength(withStandings);
+    expect(
+      tabbableElements(document).filter((each) => each.classList.contains('oyl-hud__swap')),
+    ).toHaveLength(1);
   });
 });

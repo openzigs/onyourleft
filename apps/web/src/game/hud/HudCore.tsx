@@ -528,6 +528,9 @@ function fieldClass(reading: HudReading): string {
     // row's wide tracks there (the same section).
     ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
     ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
+    // #2080: a room's draft by name, which gives way to a race's standings
+    // with the swap in them at large text (`theme.css` §"A LOOP'S LAP SPLITS").
+    ...(reading.key === 'room-draft' ? ['oyl-hud__field--draft'] : []),
   ].join(' ');
 }
 

@@ -154,8 +154,9 @@ test('#2080 the control — a point-to-point route draws no lap splits', async (
  * hold which give way; here they are named in the log and set aside.
  */
 function raceFaults(seen: StageMeasurement, viewport: Viewport, label: string): string[] {
+  // A reading clipped to a pixel, or a control a state does not draw (*Follow*
+  // and *Report* while *Report*'s reasons are open, laid out at no size).
   const clipped = seen.items
-    .filter((each) => each.name.startsWith('reading: '))
     .filter((each) => each.box.width * each.box.height <= 1)
     .map((each) => each.name);
   if (clipped.length > 0)
@@ -170,49 +171,74 @@ function swapControl(page: Page, words: string) {
   return page.locator('.oyl-hud__swap', { hasText: words });
 }
 
-for (const { viewport, size, text } of SIZED_VIEWPORTS) {
-  test(`#2080 in a race on a loop, the splits swap with the standings${size} — ${viewport.name}`, async ({
-    page,
-  }) => {
-    await openRide(page, viewport, `?room=lap-race&lap=ended${text}`);
-    await page.waitForSelector('.oyl-hud__standings');
-    const tablet = TABLET_VIEWPORTS.includes(viewport);
-    if (!tablet) {
-      // A phone draws neither panel, so it offers no control to swap them.
-      const seen = await measure(page);
-      expect(seen.givenWay).toContain('control: Show laps');
-      expect(await swapControl(page, 'Show laps').isVisible()).toBe(false);
-      return;
-    }
-    const toLaps = swapControl(page, 'Show laps');
-    const box = await toLaps.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
-    for (const [how, seen] of await bothWays(page)) {
-      const standings = seen.panels.find((each) => each.name.includes('oyl-hud__standings'));
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-      console.log(
-        `#2080 standings with the swap${size}, ${how} — ${viewport.name}: ` +
-          `${((actions?.box.top ?? 0) - (standings?.box.bottom ?? 0)).toFixed(0)} px above the actions panel`,
-      );
-      expect(raceFaults(seen, viewport, `standings${size}, ${how}`), `standings, ${how}`).toEqual(
-        [],
-      );
-    }
-    await toLaps.click();
-    expect(await page.locator('.oyl-hud__standings').count()).toBe(0);
-    expect(await splitRows(page)).toEqual(HARNESS_ROWS);
-    // The press took its panel away; the focus is on the control that brings it back.
-    const back = swapControl(page, 'Show standings');
-    await expect(back).toBeFocused();
-    expect((await back.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(48);
-    for (const [how, seen] of await bothWays(page)) {
-      const splits = seen.panels.find((each) => each.name.includes('oyl-hud__laps'));
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-      console.log(
-        `#2080 splits with the swap${size}, ${how} — ${viewport.name}: ` +
-          `${((actions?.box.top ?? 0) - (splits?.box.bottom ?? 0)).toFixed(0)} px above the actions panel`,
-      );
-      expect(raceFaults(seen, viewport, `splits${size}, ${how}`), `splits, ${how}`).toEqual([]);
-    }
-  });
+/**
+ * The races on a loop the swap is held in: a lap race, the same with
+ * *Report*'s reasons open (the actions panel at its tallest), and an ORDINARY
+ * race with *Report* open (PR #2248's review: its standings, with the swap,
+ * ran 23 px into the actions panel at 1024×768 at large text).
+ */
+const RACES_ON_A_LOOP = [
+  ['a lap race', '?room=lap-race&lap=ended'],
+  ['a lap race with Report open', '?room=lap-race-report&lap=ended'],
+  ['a race with Report open', '?room=report&lap=ended'],
+] as const;
+
+/** The owner's least clearance between the panel and the actions panel (2026-11-06). */
+const MARGIN_PIXELS = 16;
+
+for (const [race, query] of RACES_ON_A_LOOP) {
+  for (const { viewport, size, text } of SIZED_VIEWPORTS) {
+    test(`#2080 in ${race} on a loop, the splits swap with the standings${size} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, `${query}${text}`);
+      await page.waitForSelector('.oyl-hud__standings');
+      const tablet = TABLET_VIEWPORTS.includes(viewport);
+      if (!tablet) {
+        // A phone draws neither panel, so it offers no control to swap them.
+        const seen = await measure(page);
+        expect(seen.givenWay).toContain('control: Show laps');
+        expect(await swapControl(page, 'Show laps').isVisible()).toBe(false);
+        return;
+      }
+      /** The shown panel's clearance above the actions panel, logged and held. */
+      const clearance = (seen: StageMeasurement, panel: string, how: string): void => {
+        const shown = seen.panels.find((each) => each.name.includes(panel));
+        const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+        const margin = (actions?.box.top ?? 0) - (shown?.box.bottom ?? 0);
+        console.log(
+          `#2080 ${race}: ${panel} with the swap${size}, ${how} — ${viewport.name}: ` +
+            `${margin.toFixed(0)} px above the actions panel`,
+        );
+        expect(margin, `${panel}, ${how}`).toBeGreaterThanOrEqual(MARGIN_PIXELS);
+      };
+      const toLaps = swapControl(page, 'Show laps');
+      const before = await toLaps.boundingBox();
+      expect(before?.height ?? 0).toBeGreaterThanOrEqual(48);
+      for (const [how, seen] of await bothWays(page)) {
+        expect(raceFaults(seen, viewport, `standings${size}, ${how}`), `standings, ${how}`).toEqual(
+          [],
+        );
+        clearance(seen, 'oyl-hud__standings', how);
+      }
+      await toLaps.click();
+      expect(await page.locator('.oyl-hud__standings').count()).toBe(0);
+      expect(await splitRows(page)).toEqual(HARNESS_ROWS);
+      // The press took its panel away; the focus is on the control that brings it back.
+      const back = swapControl(page, 'Show standings');
+      await expect(back).toBeFocused();
+      // The owner's ruling of 2026-11-06 (#2034): the same small button in
+      // the same corner — the box the finger pressed is the box it presses back.
+      const after = await back.boundingBox();
+      for (const side of ['x', 'y', 'width', 'height'] as const) {
+        expect(Math.abs((after?.[side] ?? -99) - (before?.[side] ?? 99)), side).toBeLessThanOrEqual(
+          1,
+        );
+      }
+      for (const [how, seen] of await bothWays(page)) {
+        expect(raceFaults(seen, viewport, `splits${size}, ${how}`), `splits, ${how}`).toEqual([]);
+        clearance(seen, 'oyl-hud__laps', how);
+      }
+    });
+  }
 }

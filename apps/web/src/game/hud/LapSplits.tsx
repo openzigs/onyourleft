@@ -67,6 +67,12 @@ export function LapSplits(props: LapSplitsProps): JSX.Element {
   const { now, last, best } = props.splits;
   return (
     <section className="oyl-hud__panel oyl-hud__laps" aria-label={LAP_SPLITS_TEXT.name}>
+      {/*
+        In a race, the swap first, at the panel's top end — the same small
+        button in the same corner as *Show laps* on the standings' summary
+        row (the owner's ruling of 2026-11-06, #2034).
+      */}
+      {props.swap === undefined ? null : <div className="oyl-hud__laps-top">{props.swap}</div>}
       {/* The column headings, for the eye: each figure says its own. */}
       <div className="oyl-hud__laps-head" aria-hidden="true">
         <span />
@@ -80,7 +86,6 @@ export function LapSplits(props: LapSplitsProps): JSX.Element {
         <Row row={last} />
         <Row row={best} />
       </ul>
-      {props.swap}
     </section>
   );
 }
