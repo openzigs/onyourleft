@@ -58,7 +58,19 @@ describe.runIf(reachesNetwork)(
         const args = parseBakeArguments(['--route', id]);
         const { gpx, committed } = readBakeInput(args, PRESET_ROUTES_DIRECTORY);
         const { archive, archiveUrl } = archiveOf(args.archive);
-        const baked = await bakeRoute({ routeId: id, gpx, archive, archiveUrl });
+        // The read's own lines (`describeCorridorFailure`, which names no
+        // coordinate) go into a failure, so a red night says why it was red.
+        const lines: string[] = [];
+        const log = (line: string): void => {
+          lines.push(line);
+        };
+        const baked = await bakeRoute({ routeId: id, gpx, archive, archiveUrl, log }).catch(
+          (error: unknown) => {
+            throw new Error(
+              [error instanceof Error ? error.message : String(error), ...lines].join('\n'),
+            );
+          },
+        );
         expect(recordDrift(committed as BakeRecord, recordOf(baked.entry))).toStrictEqual([]);
       },
       120_000,
