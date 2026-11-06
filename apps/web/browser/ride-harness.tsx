@@ -1096,6 +1096,15 @@ function measure(): StageMeasurement {
   // #1482: and the touch lock, which is the design system's toggle rather
   // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
   for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
+    // #2080: the swap between a race's standings and a loop's lap splits is
+    // drawn only where its panel is — on a tablet — and not displayed at all
+    // on a phone, where the panel is clipped to nothing (`theme.css` §"A
+    // LOOP'S LAP SPLITS"). There it has given way, and is said so.
+    const box = control.getBoundingClientRect();
+    if (control.classList.contains('oyl-hud__swap') && box.width * box.height === 0) {
+      givenWay.push(`control: ${textOf(control)}`);
+      continue;
+    }
     items.push(item(`control: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.

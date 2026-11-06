@@ -141,6 +141,8 @@ import {
   type RideWorkoutSnapshot,
 } from './controller';
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
+import { lapSplits } from '../game/hud/lap-splits';
+import { formatDuration } from '../format';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
 import {
@@ -8839,6 +8841,76 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       // TCX lap's time was read as its elapsed time.
       expect(back.map((lap) => lap.movingTime)).toEqual(back.map((lap) => lap.elapsedTime));
     });
+  });
+});
+
+describe('#2080 — the HUD’s lap splits are the saved ride’s laps', () => {
+  const WHOLE = {
+    kind: 'lap',
+    distance: metres(1_000),
+    ascent: metres(14),
+    partial: false,
+  } as const;
+
+  it('shows the last and the best lap as the ride’s page will list them, read both ways', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    // The port `main.tsx` builds over this controller — the game's only way in.
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    hud.courseLine?.({ kind: 'started' });
+    // Lap 1 slow and steady, lap 2 quicker and harder, lap 3 slower again:
+    // the best is not the last, and each lap's power is its own.
+    await ride(rig, 12);
+    const afterOne = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    rig.bench.rider.set({ power: watts(290) });
+    await ride(rig, 8);
+    const afterTwo = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    rig.bench.rider.set({ power: watts(180) });
+    await ride(rig, 10);
+    const afterThree = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    expect([afterOne.length, afterTwo.length, afterThree.length]).toEqual([1, 2, 3]);
+
+    // What the HUD's panel shows, part-way round the fourth lap: the lap in
+    // progress on the recorder's clock, the last lap and the best.
+    await ride(rig, 4);
+    const shown = lapSplits(afterThree, hud.rideLapSeconds?.());
+    expect(shown.now).toMatchObject({ lap: '4', time: '0:04' });
+    expect([shown.last.lap, shown.last.time]).toEqual(['3', '0:10']);
+    expect([shown.best.lap, shown.best.time]).toEqual(['2', '0:08']);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back through the store, as the ride's page reads them (§5).
+    const saved = await harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('ride-1')),
+    );
+    const third = saved[2];
+    const second = saved[1];
+    expect(third?.ordinal).toBe(2);
+    expect(second?.ordinal).toBe(1);
+    // Each figure the panel shows of a whole lap is that lap's saved row.
+    expect(shown.last).toEqual({
+      label: 'Last',
+      lap: String((third?.ordinal ?? -2) + 1),
+      time: formatDuration(third?.movingTime ?? Number.NaN),
+      power: `${String(third?.averagePower)} W`,
+    });
+    expect(shown.best).toEqual({
+      label: 'Best',
+      lap: String((second?.ordinal ?? -2) + 1),
+      time: formatDuration(second?.movingTime ?? Number.NaN),
+      power: `${String(second?.averagePower)} W`,
+    });
+    // And the panel worked out from the saved rows is the panel the ride
+    // showed. (The fourth lap was never ended at a line, so it is not a row.)
+    expect(saved).toHaveLength(3);
+    const fromSaved = lapSplits(saved, undefined);
+    expect([fromSaved.last, fromSaved.best]).toEqual([shown.last, shown.best]);
+    rig.controller.dispose();
   });
 });
 

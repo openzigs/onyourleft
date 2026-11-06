@@ -207,6 +207,38 @@ export function describeItem(item: StageItem): string {
 }
 
 /**
+ * The layout's own invariants, as the ride's specs hold them, as failure lines
+ * — #2079, and #2080's lap splits: everything on the stage, uncovered and
+ * unscrolled; every panel whole, over no other and not over the leaning
+ * rider; and the primary tier visibly larger than the secondary.
+ */
+export function layoutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  if (seen.scrollY !== 0 || seen.stageScrollTop !== 0) faults.push('the stage scrolled');
+  for (const item of seen.items) {
+    if (!inside(item.box, viewport) || !item.onTop) faults.push(`lost: ${describeItem(item)}`);
+  }
+  for (const panel of seen.panels) {
+    if (!inside(panel.box, viewport)) faults.push(`not whole: ${describeItem(panel)}`);
+  }
+  seen.panels.forEach((a, index) => {
+    for (const b of seen.panels.slice(index + 1)) {
+      if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  const rider = riderBox(viewport);
+  for (const panel of seen.panels) {
+    if (overlap(panel.box, rider)) faults.push(`over the rider: ${describeItem(panel)}`);
+  }
+  if (seen.primaryValuePixels / seen.secondaryValuePixels < MINIMUM_TIER_RATIO) {
+    faults.push(
+      `primary ${String(seen.primaryValuePixels)} px over secondary ${String(seen.secondaryValuePixels)} px`,
+    );
+  }
+  return faults;
+}
+
+/**
  * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels, for a rider
  * leaning as far as one is ever drawn (#499).
  *

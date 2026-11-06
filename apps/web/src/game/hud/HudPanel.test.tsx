@@ -57,6 +57,7 @@ import {
   routeProfile,
   seconds,
   thresholdShare,
+  unixSeconds,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -774,5 +775,144 @@ describe('the rider’s HUD layout — #2079', () => {
     mounted.unmount();
     mounted = await mount(<HudPanel {...base} />);
     expect(mounted.container.querySelector('.oyl-hud')?.className).toBe('oyl-hud');
+  });
+});
+
+/** #2080: a loop's lap splits, where a race's standings are, and swapped with them. */
+describe('the lap splits panel — #2080', () => {
+  /** A level loop, out and back, so its two ends meet. */
+  const loop = (() => {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 8; index += 1) {
+      const out = index <= 4 ? index : 8 - index;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (out * 100) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(60),
+      });
+    }
+    return routeProfile(points, { loop: true });
+  })();
+  const laps = [
+    {
+      startedAt: unixSeconds(1_800_000_000),
+      elapsedTime: seconds(312),
+      movingTime: seconds(312),
+      distance: loop.totalDistance,
+      averagePower: watts(205),
+    },
+    {
+      startedAt: unixSeconds(1_800_000_312),
+      elapsedTime: seconds(298),
+      movingTime: seconds(298),
+      distance: loop.totalDistance,
+      averagePower: watts(231),
+    },
+  ];
+  const standings = {
+    place: 1,
+    of: 2,
+    lines: [
+      { riderId: 3, place: 1, who: 'You', gap: '', figure: '3.5 W/kg', flagged: false, you: true },
+      {
+        riderId: 7,
+        place: 2,
+        who: 'Bea',
+        gap: '+4 s',
+        figure: '3.1 W/kg',
+        flagged: false,
+        you: false,
+      },
+    ],
+  };
+  const base = {
+    state: atStartLine(loop),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  };
+  /** The panel's rows as read: each row's cells, its label first. */
+  const rows = (): string[][] =>
+    queryAll(mounted?.container ?? document, '.oyl-hud__laps tbody tr').map((row) =>
+      [...row.children].map((cell) => cell.textContent ?? ''),
+    );
+  const button = (name: string): HTMLButtonElement | undefined =>
+    queryAll(mounted?.container ?? document, 'button').find(
+      (each): each is HTMLButtonElement => each.textContent === name,
+    );
+
+  it('draws the lap in progress, the last lap and the best on a loop', async () => {
+    mounted = await mount(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />);
+    expect(mounted.container.querySelector('.oyl-hud__laps')?.getAttribute('aria-label')).toBe(
+      'Lap splits',
+    );
+    expect(rows()).toEqual([
+      ['Now', '3', '1:15', '—'],
+      ['Last', '2', '4:58', '231 W'],
+      ['Best', '2', '4:58', '231 W'],
+    ]);
+    // Not a live region: it changes every second.
+    expect(mounted.container.querySelector('.oyl-hud__laps [aria-live]')).toBeNull();
+    // With no race there is nothing to swap with.
+    expect(button('Show standings')).toBeUndefined();
+  });
+
+  it('is not drawn on a point-to-point route', async () => {
+    const profile = route();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        state={atStartLine(profile)}
+        profile={profile}
+        laps={laps}
+        lapSeconds={75}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+  });
+
+  it('swaps with a race’s standings, standings first, and keeps the focus on the swap', async () => {
+    mounted = await mount(
+      <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} standings={standings} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+
+    await act(async () => {
+      button('Show laps')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+    expect(rows()[1]).toEqual(['Last', '2', '4:58', '231 W']);
+    expect(document.activeElement).toBe(button('Show standings'));
+
+    await act(async () => {
+      button('Show standings')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    expect(document.activeElement).toBe(button('Show laps'));
+  });
+
+  it('takes the standings’ place alone when the rider turned the standings off', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        profile={loop}
+        laps={laps}
+        lapSeconds={75}
+        standings={standings}
+        layout={{ hidden: ['standings'], textSize: 'normal' }}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    expect(button('Show standings')).toBeUndefined();
   });
 });

@@ -1143,6 +1143,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         second, a dropped reading a gap (`NaN`), never a
                         zero; the SVG is memoised on the count written, so it
                         is redrawn at most once a second
+    src/game/hud/lap-splits.ts, LapSplits.tsx
+                        a loop's lap splits (#2080): the lap in progress, the
+                        last lap and the best, from the laps `courseLine`
+                        returned and the recorder's lap time only, so they are
+                        the saved ride's rows; on a loop only, in a race's
+                        standings' place and swapped with them
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's

@@ -8029,7 +8029,8 @@ select.oyl-input {
  * `ride-room.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
  * of the leaning rider at all three, both with anchor positioning and without.
  */
-.oyl-hud .oyl-hud__standings {
+.oyl-hud .oyl-hud__standings,
+.oyl-hud .oyl-hud__laps {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -8042,7 +8043,8 @@ select.oyl-input {
 }
 
 @media (min-width: 46rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud .oyl-hud__standings {
+  .oyl-game--riding .oyl-hud .oyl-hud__standings,
+  .oyl-game--riding .oyl-hud .oyl-hud__laps {
     position: static;
     width: min(100%, 18rem);
     height: auto;
@@ -8102,6 +8104,91 @@ select.oyl-input {
 
 .oyl-hud__standings-flag {
   font-size: var(--oyl-font-size-sm);
+}
+
+/*
+ * A LOOP'S LAP SPLITS — #2080, `LapSplits.tsx`.
+ *
+ * In a race's standings' place and on their terms (above): a panel of its own
+ * at the end edge under the secondary readings on a tablet, and visually
+ * hidden on a phone. ⚠️ **What that costs, recorded as #419 asks: on a phone
+ * a rider sees no splits**, and keeps the lap's number and time under the
+ * elevation strip (`fields.ts` §`profileReading`) and the lap's notice as
+ * each lap ends. A phone's corners are taken, as they are for the standings.
+ *
+ * In a race the two share the place, and *Show laps* / *Show standings*
+ * swaps them. ⚠️ The control is drawn only where its panel is: on a phone the
+ * panel is clipped to nothing, and a control a keyboard can reach and an eye
+ * cannot see is a focus with nowhere to show (SC 2.4.7) — so there it is not
+ * displayed at all, and a phone's screen reader reads the standings.
+ */
+.oyl-hud__laps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-hud__laps-table :is(th, td) {
+  padding: 0.125rem 0 0.125rem var(--oyl-space-xs);
+  text-align: end;
+  white-space: nowrap;
+}
+
+.oyl-hud__laps-table thead th {
+  font-size: var(--oyl-font-size-sm);
+  font-weight: 400;
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__laps-table .oyl-hud__laps-label {
+  padding-inline-start: 0;
+  text-align: start;
+  font-weight: 400;
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud .oyl-hud__swap {
+  display: none;
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__swap {
+    display: block;
+    width: 100%;
+    margin-block-start: var(--oyl-space-xs);
+  }
+
+  /* In the standings, on the summary's row: the panel is the taller of the
+     two, and a row of its own put it 23 px into the actions panel at
+     1024×768 (`ride-laps.browser.spec.ts`). */
+  .oyl-game--riding .oyl-hud .oyl-hud__standings-head .oyl-hud__swap {
+    width: auto;
+    margin: 0;
+    flex: none;
+    font-size: var(--oyl-font-size-sm);
+  }
+}
+
+.oyl-hud__standings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oyl-space-sm);
+  margin-block-end: var(--oyl-space-xs);
+}
+
+.oyl-hud__standings-head .oyl-hud__standings-summary {
+  margin: 0;
+}
+
+/* On the 4:3 tablet the summary's row still left the standings 1 px above
+   the actions panel at 1024×768, so there, with the swap in them, the lines
+   give up their own padding: seven lines, 28 px. Nowhere else, and not
+   without the swap, so a room's race looks as it did. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__standings:has(.oyl-hud__swap) .oyl-hud__standings-line {
+    padding-block: 0;
+  }
 }
 
 /*
