@@ -448,7 +448,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
           expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
         }
-        if (upright) {
+        if (beside && upright) {
           // The phone's width: the strips run from the whole route's strip's
           // start to the plan view's column, and the plan view is no wider
           // than the box its rider's mark is sized for.
@@ -460,7 +460,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
             gap,
             `${how}: ${describeItem(ahead)} beside ${describeItem(plan)}`,
           ).toBeLessThanOrEqual(ROUTE_PANEL_GAP_PIXELS + SUBPIXEL_TOLERANCE);
-        } else {
+        }
+        if (!beside) {
           expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
           expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
             SUBPIXEL_TOLERANCE,
