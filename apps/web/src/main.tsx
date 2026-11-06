@@ -50,6 +50,7 @@ import {
 } from './ride/trainer-target-memory';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
+import { ownThresholdPowerFrom } from './game/own-threshold';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
 import {
@@ -754,8 +755,10 @@ function buildGamePort(
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
     // #2077: the rider's own threshold, for the HUD's zone indicator — the
-    // local athlete's row, and only theirs.
-    ownThresholdPower: async () => (await store.getAthlete(LOCAL_ATHLETE))?.thresholdPower,
+    // local athlete's row, and only theirs. ⚠️ An optional member, so the
+    // module is what holds it: `game/own-threshold.test.ts` reads it through a
+    // real store, and dropping this line is a red `check:wiring` (WIRE001).
+    ownThresholdPower: ownThresholdPowerFrom(store),
     loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
       if (ghosts === undefined) return { kind: 'unavailable' };
       const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));

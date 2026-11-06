@@ -10155,9 +10155,13 @@ select.oyl-input {
    STAGE" has the same finding for *Houses*), and the rider's name as its
    label — max-content ignores where it may break — took the track past the
    stage's edge at 1280×800, 1024×768 and 800×1280. So a room's readings size
-   their track by its width, never their label, as a round's and a race's do. */
-.oyl-game--riding .oyl-hud__field--room {
-  contain: inline-size;
+   their track by its width, never their label, as a round's and a race's do.
+   On a tablet only, where that is measured: a phone's room layout is
+   untouched (PR #2225's review). */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room {
+    contain: inline-size;
+  }
 }
 
 /* The swatch: a square of the zone's colour beside its number, the height of
