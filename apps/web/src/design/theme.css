@@ -8697,16 +8697,6 @@ select.oyl-input {
   margin: 0;
 }
 
-/* On the 4:3 tablet the summary's row still left the standings 1 px above
-   the actions panel at 1024×768, so there, with the swap in them, the lines
-   give up their own padding: seven lines, 28 px. Nowhere else, and not
-   without the swap, so a room's race looks as it did. */
-@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
-  .oyl-game--riding .oyl-hud .oyl-hud__standings:has(.oyl-hud__swap) .oyl-hud__standings-line {
-    padding-block: 0;
-  }
-}
-
 /*
  * A ROOM RIDE ON A PHONE — #1356.
  *

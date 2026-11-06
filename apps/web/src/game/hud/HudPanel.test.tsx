@@ -39,7 +39,7 @@
 import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { auditAccessibility, formatViolations } from '../../a11y/audit';
+import { auditAccessibility, formatViolations, tabbableElements } from '../../a11y/audit';
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
@@ -904,6 +904,20 @@ describe('the lap splits panel — #2080', () => {
       ['Last', '2', '4:58', '231 W'],
       ['Best', '2', '4:58', '231 W'],
     ]);
+    // What a screen reader hears, row by row: the column headings are drawn
+    // `aria-hidden`, so each figure must say its own (PR #2248's review).
+    expect(
+      queryAll(mounted.container, '.oyl-hud__laps-row').map((row) =>
+        (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
+    ).toEqual([
+      'Now Lap 3 Time 1:15 Avg power —',
+      'Last Lap 2 Time 4:58 Avg power 231 W',
+      'Best Lap 2 Time 4:58 Avg power 231 W',
+    ]);
+    expect(
+      mounted.container.querySelector('.oyl-hud__laps-head')?.getAttribute('aria-hidden'),
+    ).toBe('true');
     // Not a live region: it changes every second.
     expect(mounted.container.querySelector('.oyl-hud__laps [aria-live]')).toBeNull();
     // With no race there is nothing to swap with.
@@ -978,10 +992,17 @@ describe('the lap splits panel — #2080', () => {
         {hud}
       </main>
     );
+    // A HUD panel adds no tab stop to a ride: the same HUD with no laps handed
+    // to it draws no splits, and has exactly as many tab stops.
+    mounted = await mount(onAPage(<HudPanel {...base} profile={loop} lapSeconds={75} />));
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    const withoutSplits = tabbableElements(document).length;
+    mounted.unmount();
     mounted = await mount(
       onAPage(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />),
     );
     expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    expect(tabbableElements(document)).toHaveLength(withoutSplits);
     const alone = auditAccessibility(document);
     expect(alone, formatViolations(alone)).toEqual([]);
     mounted.unmount();
