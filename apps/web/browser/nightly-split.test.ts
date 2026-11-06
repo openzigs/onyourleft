@@ -855,11 +855,14 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
       ).toHaveLength(1);
       const [id = '', job = ''] = where[0] ?? [];
       expect(suitesOf(job), id).toEqual(['install', name]);
-      // Two workers on the runner's two cores (#2285): with Vitest's three,
-      // two share a core and the whole-ride cases pass their own timeouts on
-      // the EPYC 7763. docs/agents/ci.md §4c §"Two coverage jobs — #2285".
-      const run = stepsOf(job).find((step) => step.includes(`run: pnpm run ${name}\n`)) ?? '';
-      expect(run, id).toMatch(/^ {10}VITEST_MAX_WORKERS: '2'$/m);
+      // Two workers for the game half on the runner's two cores (#2285):
+      // with Vitest's three, two share a core and its whole-ride cases pass
+      // their own timeouts on the EPYC 7763. docs/agents/ci.md §4c §"Two
+      // coverage jobs — #2285".
+      if (name === 'test:coverage:shard-1') {
+        const run = stepsOf(job).find((step) => step.includes(`run: pnpm run ${name}\n`)) ?? '';
+        expect(run, id).toMatch(/^ {10}VITEST_MAX_WORKERS: '2'$/m);
+      }
       return id;
     });
     expect(new Set(homes).size).toBe(homes.length);

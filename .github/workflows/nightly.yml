@@ -304,11 +304,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Every other file of the run. ⚠️ A failure here opens the nightly
-      # issue too, for the reason the first half's step gives. Two workers
-      # for the first half's reason.
+      # issue too, for the reason the first half's step gives. Vitest's own
+      # three workers: every case that has passed its timeout under coverage
+      # since 2026-11-04 is a game case, in the first half, and with two
+      # workers this half took 854 to 880 s on a Xeon Platinum 8573C against
+      # 780 s with three on an EPYC 7763, the slowest type the one job ran
+      # on (section 4c "Two coverage jobs -- #2285").
       - name: Tests under coverage (2 of 2)
-        env:
-          VITEST_MAX_WORKERS: '2'
         run: pnpm run test:coverage:shard-2
 
       # What the merge reads: this half's results and coverage, which Vitest
