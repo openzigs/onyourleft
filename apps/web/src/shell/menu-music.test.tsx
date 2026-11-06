@@ -45,6 +45,8 @@ import {
 } from './menu-music';
 import { readMenuSoundPreference, writeMenuSoundPreference } from './menu-sound-preference';
 import { createMenuSounds, type MenuSounds } from './menu-sounds';
+import { OtherPlayer } from './other-player';
+import { PAUSE_MUSIC_NAME } from './OtherPlayerControls';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -703,3 +705,196 @@ describe(
     });
   },
 );
+
+/**
+ * #2073 meets #2253: `main.tsx` hands the Android shell's one `OtherPlayer`
+ * to the header (`otherPlayer`) and to the menus' music (`riderPlayer`). Here
+ * the same composition, with the real `OtherPlayer` over a port that answers
+ * as `OtherPlayerPlugin.java` would: what the header's own poll heard is what
+ * the loop yields to.
+ */
+describe('the header’s OtherPlayer is the player the menus’ music yields to — #2073, #2253', () => {
+  it('reported in use, a press starts nothing; once it reads silent, a press starts the loop', async () => {
+    let active = true;
+    const player = new OtherPlayer(
+      {
+        sendKey: () => Promise.resolve(),
+        otherAudioActive: () => Promise.resolve(active),
+      },
+      // No timer: the readings are the mount's and the ones asked for below.
+      { now: () => 0, every: () => () => undefined },
+    );
+    const music = rig(disk(), { track: TRACK, riderPlayer: player });
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        menuMusic={music.music}
+        soundOutput={music.output}
+        otherPlayer={player}
+      />,
+    );
+    await settle();
+
+    await pressWithoutLeaving(homeControl());
+    expect(music.made, 'the loop started over the rider’s own player').toEqual([]);
+    expect(music.fake.gains, 'a graph was built for a loop that yielded').toEqual([]);
+    // Non-vacuity: the header's poll on mount is what heard the rider's player.
+    expect(player.getSnapshot().playing).toBe(true);
+
+    active = false;
+    await act(async () => {
+      await player.poll();
+    });
+    await pressWithoutLeaving(homeControl());
+    expect(music.made[0]?.paused).toBe(false);
+    expect(musicBus(music)).toBe(0.5);
+  });
+});
+
+/**
+ * #2242's review: the header's *Pause music* runs its `onClick` before
+ * `AppShell`'s bubbling press handler, and `OtherPlayer.press` believes the
+ * pause at once. Unless the loop ignores a press inside the rider's player's
+ * controls, that same click starts our loop over theirs: for good when the key
+ * is refused, since the loop asks nothing while it plays.
+ */
+describe('a press on the rider’s own player’s controls never starts the loop — #2073', () => {
+  async function shellWithPlayer(sendKey: () => Promise<void>): Promise<{
+    music: Rig;
+    player: OtherPlayer;
+    sent: string[];
+  }> {
+    const sent: string[] = [];
+    const player = new OtherPlayer(
+      {
+        sendKey: (key) => {
+          sent.push(key);
+          return sendKey();
+        },
+        otherAudioActive: () => Promise.resolve(true),
+      },
+      { now: () => 0, every: () => () => undefined },
+    );
+    const music = rig(disk(), { track: TRACK, riderPlayer: player });
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        menuMusic={music.music}
+        soundOutput={music.output}
+        otherPlayer={player}
+      />,
+    );
+    await settle();
+    // The mount's reading was one; a second in a row is a sighting, and the controls show.
+    await act(async () => {
+      await player.poll();
+    });
+    await settle();
+    return { music, player, sent };
+  }
+
+  function pauseMusic(): HTMLButtonElement | undefined {
+    return [...document.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.trim() === PAUSE_MUSIC_NAME,
+    );
+  }
+
+  it('*Pause music* sends the pause, and makes no music element', async () => {
+    const { music, player, sent } = await shellWithPlayer(() => Promise.resolve());
+    await pressWithoutLeaving(pauseMusic() ?? null);
+    await settle();
+
+    expect(sent).toEqual(['pause']);
+    // Non-vacuity: the press was believed, so the loop was free to start.
+    expect(player.riderPlayerInUse()).toBe(false);
+    expect(music.made, 'our loop started on the rider’s own Pause').toEqual([]);
+    expect(music.fake.gains, 'a graph was built for a press on the rider’s player').toEqual([]);
+  });
+
+  it('a pause the device refused leaves the loop unmade, and the rider’s player in use', async () => {
+    const { music, player, sent } = await shellWithPlayer(() =>
+      Promise.reject(new Error('no media session')),
+    );
+    await pressWithoutLeaving(pauseMusic() ?? null);
+    await settle();
+
+    expect(sent).toEqual(['pause']);
+    expect(player.riderPlayerInUse()).toBe(true);
+    expect(music.made, 'our loop is playing over the rider’s player').toEqual([]);
+    // And it does not come over it on the next press either.
+    await pressWithoutLeaving(homeControl());
+    expect(music.made).toEqual([]);
+  });
+});
+
+describe('a press on the rider’s own player’s controls, after our loop has played — #2073', () => {
+  it('*Pause music* does not bring back a loop that yielded to the rider’s player', async () => {
+    let active = false;
+    const player = new OtherPlayer(
+      { sendKey: () => Promise.resolve(), otherAudioActive: () => Promise.resolve(active) },
+      { now: () => 0, every: () => () => undefined },
+    );
+    const music = rig(disk(), { track: TRACK, riderPlayer: player });
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        menuMusic={music.music}
+        soundOutput={music.output}
+        otherPlayer={player}
+      />,
+    );
+    await settle();
+    await pressWithoutLeaving(homeControl());
+    const [element] = music.made;
+    expect(element?.paused).toBe(false);
+
+    // The rider leaves, starts their player, and comes back: our loop yields.
+    await setHidden(music, true);
+    active = true;
+    await setHidden(music, false);
+    await act(async () => {
+      await player.poll();
+      await player.poll();
+    });
+    music.endSettle();
+    await settle();
+    expect(element?.paused).toBe(true);
+
+    const pause = [...document.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.trim() === PAUSE_MUSIC_NAME,
+    );
+    await pressWithoutLeaving(pause ?? null);
+    // Non-vacuity: the press was believed, so the loop was free to come back.
+    expect(player.riderPlayerInUse()).toBe(false);
+    expect(element?.paused, 'our loop came back on the rider’s own Pause').toBe(true);
+    expect(music.made).toHaveLength(1);
+  });
+});
+
+describe('back from another app before the loop ever played — #2242 review', () => {
+  it('a press within a poll of coming back waits for a reading taken after it', async () => {
+    const device = phone();
+    const music = rigWith(device);
+    device.read();
+    await shell(music);
+
+    // No press yet. The rider leaves, starts their player, and comes back.
+    await setHidden(music, true);
+    device.riderPlaying = true;
+    await setHidden(music, false);
+    await pressWithoutLeaving(homeControl());
+    expect(music.made, 'the loop started on the reading from before they left').toEqual([]);
+
+    // The header reads again: their player is in use, and still nothing starts.
+    device.read();
+    music.endSettle();
+    await pressWithoutLeaving(homeControl());
+    expect(music.made).toEqual([]);
+
+    // Their player stops, and the next press starts ours.
+    device.riderPlaying = false;
+    device.read();
+    await pressWithoutLeaving(homeControl());
+    expect(music.made[0]?.paused).toBe(false);
+  });
+});

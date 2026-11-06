@@ -13,8 +13,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     /**
-     * ⚠️ {@link RecordingServicePlugin}, {@link ThermalPlugin} (#247) and {@link SecureWindowPlugin}
-     * (#1061) are registered here, BEFORE
+     * ⚠️ {@link RecordingServicePlugin}, {@link ThermalPlugin} (#247), {@link SecureWindowPlugin}
+     * (#1061) and {@link OtherPlayerPlugin} (#2073) are registered here, BEFORE
      * {@code super.onCreate}. Capacitor
      * auto-discovers plugins that ship as packages; one that lives in the application's own source
      * tree has to be registered by hand, and registering it after the bridge is built is a silent
@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(RecordingServicePlugin.class);
         registerPlugin(ThermalPlugin.class);
         registerPlugin(SecureWindowPlugin.class);
+        registerPlugin(OtherPlayerPlugin.class);
         super.onCreate(savedInstanceState);
         // #2127: AppCompat took the window's background from the launch theme in super.onCreate,
         // and that is the canvas WITH the logo (drawable/oyl_launch_window.xml). Left there it is

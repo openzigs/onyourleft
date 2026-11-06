@@ -26,6 +26,14 @@
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
 #   owner's ruling of 2026-10-03: the opt-in realistic world, #866's class.
+#   Since #2268 it also selects apps/web/tools/demo/preset-bake-archive.test.ts,
+#   which bakes each preset demo route from the PUBLISHED archive -- and
+#   SKIPS here: it runs only with OYL_DEMO_BAKE_ARCHIVE_CHECK=1, which this
+#   workflow does not set, because tiles.openzigs.com answers a GitHub
+#   runner with HTTP 403 for a range (run 42269980561) while it answers a
+#   rider with 206. It is in this run so that no required run selects it.
+#   The record's offline half (archive URL, reader version, GPX digest) is
+#   required, in bake-route.test.ts.
 #
 #   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
 #   which is the reviewed list in apps/web/browser/nightly.ts, with each

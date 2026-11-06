@@ -1103,6 +1103,8 @@ describe('the required check is one job over every shard — #1285', () => {
       'shellcheck --version && shellcheck scripts/*.sh',
       'pnpm run format:check',
       'pnpm run lint',
+      // #2272: lint is a process per project, and its runner has a suite.
+      'bash scripts/lint.test.sh',
       'pnpm run typecheck',
       'bash scripts/check-a11y-suite.test.sh',
       'pnpm run check:test-split',
