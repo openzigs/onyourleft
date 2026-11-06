@@ -347,12 +347,14 @@ describe('the header', () => {
     expect(document.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary');
   });
 
-  it('offers five destinations, each an icon and a word — #427, #428', async () => {
+  it('offers six destinations, each an icon and a word — #427, #428, #2292', async () => {
     await open('/');
     const primary = [...document.querySelectorAll('nav[aria-label="Primary"] a')];
     expect(primary.map((a) => a.getAttribute('href'))).toEqual([
       '#/',
       '#/ride',
+      // #2292: the Games tab, after Ride.
+      '#/games',
       '#/activities',
       '#/routes',
       // #1429: More opens its own menu page, not the first page under it.
@@ -361,6 +363,7 @@ describe('the header', () => {
     expect(primary.map((a) => a.textContent)).toEqual([
       'Home',
       'Ride',
+      'Games',
       'History',
       'Routes',
       'More',
@@ -379,6 +382,7 @@ describe('the header', () => {
     ).toEqual([
       'lucide-house',
       'lucide-bike',
+      'lucide-gamepad-2',
       'lucide-rotate-ccw-clock',
       'lucide-route',
       'lucide-ellipsis',

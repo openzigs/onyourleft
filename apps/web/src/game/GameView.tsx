@@ -207,7 +207,7 @@ import {
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
-import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
+import { gameDeliveryFromHash, gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
@@ -907,18 +907,23 @@ function GameScreen({
     if (value) setWithGhost(false);
   }, []);
   const [withPacer, setWithPacer] = useState(false);
+  // #2292: a course chosen on a game's course picker (the Games tab) opens
+  // this setup with that game's switch on (`shell/routes.ts`
+  // §`hrefForGamePlay`). Read once, on mount, as the route is; the switch is
+  // the rider's from then on, so switching it off is a ride with no game.
+  const [played] = useState(() => gamePlayFromHash(globalThis.location.hash));
   /**
    * Whether the rider switched on a Delivery round in the chooser — #1818.
    * Per ride, like the pacer. The chooser asks for it only with the realistic
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
-  const [withDelivery, setWithDelivery] = useState(false);
+  const [withDelivery, setWithDelivery] = useState(() => played === 'delivery');
   /**
    * Whether the rider switched on a lap race in the chooser, and which race
    * — #1907. Per ride, like the round beside it; one mode a ride, so turning
    * either on turns the other off, as the two ghosts do.
    */
-  const [withLapRace, setWithLapRace] = useState(false);
+  const [withLapRace, setWithLapRace] = useState(() => played === 'lap-race');
   const [lapRaceChoice, setLapRaceChoice] = useState<LapRaceChoice>(DEFAULT_LAP_RACE_CHOICE);
   const chooseDelivery = useCallback((value: boolean) => {
     setWithDelivery(value);

@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
+  coursesRouteFor,
   CREDITS_ROUTE,
   gameDeliveryFromHash,
+  gamePlayFromHash,
   gameRouteFromHash,
   hrefFor,
+  hrefForGamePlay,
   hrefForGameRoute,
   hrefForActivity,
   hrefForSelection,
@@ -20,6 +23,7 @@ import {
   routeById,
   routeForHash,
   ROUTES,
+  routesInGroup,
 } from './routes';
 import { SELECTIONS } from '../testing/populated-shell';
 import { sentencesOf } from '../testing/route-sentences';
@@ -220,6 +224,39 @@ describe('the trainer game’s developer route for a Delivery round — #1816', 
   });
 });
 
+describe('a game switched on from the Games tab — #2292', () => {
+  it('is still the game route, and reads back the route and the game it was given', () => {
+    for (const mode of ['delivery', 'lap-race'] as const) {
+      const href = hrefForGamePlay(mode, 'route/with a slash');
+      expect(routeForHash(href).id).toBe('game');
+      expect(gameRouteFromHash(href)).toBe('route/with a slash');
+      expect(gamePlayFromHash(href)).toBe(mode);
+    }
+  });
+
+  it('switches nothing on with no query, another value, or another key', () => {
+    expect(gamePlayFromHash('#/game')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?route=x')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?play=')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?play=golf')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?route=delivery')).toBeUndefined();
+    expect(gamePlayFromHash('')).toBeUndefined();
+  });
+
+  it('is never the developer route, which is read at the press whatever the switch says', () => {
+    expect(gameDeliveryFromHash(hrefForGamePlay('delivery', 'x'))).toBe(false);
+  });
+
+  it('gives Games a tab of one page, and each game a course picker under it', () => {
+    expect(routesInGroup('games').map((route) => route.id)).toEqual(['games']);
+    expect(routeForHash('#/games/delivery')).toEqual(coursesRouteFor('delivery'));
+    expect(routeForHash('#/games/lap-race')).toEqual(coursesRouteFor('lap-race'));
+    expect(coursesRouteFor('delivery').group).toBe('games');
+    expect(coursesRouteFor('lap-race').group).toBe('games');
+    expect(routeForHash('#/games/golf').id).toBe('not-found');
+  });
+});
+
 describe('routeById', () => {
   it.each(ALL_ROUTES)('finds $id', (route) => {
     expect(routeById(route.id)).toEqual(route);
@@ -363,8 +400,11 @@ describe('which routes are read and which are operated (#422)', () => {
       'analysis',
       'camera',
       'credits',
+      'delivery-courses',
       'devices',
+      'games',
       'instance',
+      'lap-race-courses',
       'more',
       'route-builder',
       'segments',

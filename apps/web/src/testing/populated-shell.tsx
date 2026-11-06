@@ -236,6 +236,20 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
   more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
+  // #2292: the fixture's one route is not a loop and its week is a fresh one,
+  // so both cards say the same in both walks.
+  games: {
+    kind: 'constant',
+    marker: '.oyl-main .oyl-games__card a[href="#/games/lap-race"]',
+    reason: 'two cards, each the same in both walks: no loop, and a fresh Delivery week',
+  },
+  // #2292: this harness chooses no realistic world, so the page says Delivery
+  // needs it in both walks; the lap race's page draws the same list.
+  'delivery-courses': {
+    kind: 'none',
+    reason: 'the standard world is chosen here, so it says a round needs the realistic one',
+  },
+  'lap-race-courses': { kind: 'fixture', marker: '.oyl-main .oyl-game-courses__course' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -298,6 +312,12 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
   'route-editor': { kind: 'none', reason: 'one saved route, opened by its id' },
   more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
+  games: { kind: 'none', reason: 'a card for each game, never empty (#2292)' },
+  'delivery-courses': {
+    kind: 'none',
+    reason: 'the standard world is chosen here, so it says a round needs the realistic one',
+  },
+  'lap-race-courses': { kind: 'empty-state', sentence: 'You have no saved routes yet.' },
   'not-found': { kind: 'none', reason: 'a heading and the route list' },
 };
 

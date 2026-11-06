@@ -140,6 +140,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * not be reachable from the entry chunk.
  */
 const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const GAMES_GROUP = viewGroup(async () => import('./lazy/games'));
 const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
 const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
 const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
@@ -147,6 +148,7 @@ const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
 /** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
 export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
   RIDE_GROUP,
+  GAMES_GROUP,
   HISTORY_GROUP,
   ROUTES_GROUP,
   MORE_GROUP,
@@ -155,6 +157,8 @@ export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
 const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
 const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
 const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const GamesView = lazyView(GAMES_GROUP, (group) => group.GamesView);
+const GameCoursesView = lazyView(GAMES_GROUP, (group) => group.GameCoursesView);
 const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
 const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
 const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
@@ -769,6 +773,13 @@ function viewFor(
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
+    case 'games':
+      // #2292: a card for each game, the lap race's reading the rider's loops.
+      return <GamesView port={props.game} />;
+    case 'delivery-courses':
+      return <GameCoursesView mode="delivery" port={props.game} />;
+    case 'lap-race-courses':
+      return <GameCoursesView mode="lap-race" port={props.game} />;
     case 'segment-detail':
       return (
         <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />

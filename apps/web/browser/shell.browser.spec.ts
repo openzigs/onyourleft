@@ -1666,8 +1666,8 @@ const NAVIGATION_VIEWPORTS = [
   { name: '1280×800 — a landscape tablet', width: 1280, height: 800, expect: 'rail' },
 ] as const;
 
-/** How many primary destinations #427 allows at most. */
-const MOST_DESTINATIONS = 5;
+/** How many primary destinations #427 allows at most: six since #2292, the owner's ruling that added Games. */
+const MOST_DESTINATIONS = 6;
 
 interface NavLinkBox {
   readonly label: string;
@@ -1759,7 +1759,7 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       }
     });
 
-    test('holds at most five destinations, each a 44×44 target as Chromium lays it out', async ({
+    test('holds at most six destinations, each a 44×44 target as Chromium lays it out', async ({
       browser,
     }) => {
       const page = await sharedShell(browser, viewport);
