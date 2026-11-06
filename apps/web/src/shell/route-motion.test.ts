@@ -9,7 +9,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { mayAnimateBetween, mayCarryOn, RIDE_ROUTE_IDS } from './route-motion';
+import {
+  mayAnimateBetween,
+  mayCarryOn,
+  NAVIGATION_TRANSITION_TYPE,
+  navigationKind,
+  RIDE_ROUTE_IDS,
+  ROUTE_TRANSITION_CLASS,
+} from './route-motion';
 import { carriedFrom } from './ListDetail';
 import { ALL_ROUTES, matchHash, routeById, type RouteId } from './routes';
 
@@ -41,6 +48,51 @@ describe('which navigations may animate (#945)', () => {
     for (const id of RIDE_ROUTE_IDS) {
       expect(ids.has(id)).toBe(true);
     }
+  });
+});
+
+describe('which way a navigation goes (#2054)', () => {
+  const by = (hash: string): ReturnType<typeof matchHash> => matchHash(hash);
+
+  it('goes deeper into a page below, and back out of it', () => {
+    expect(navigationKind(by('#/segments'), by('#/segments/s-1'))).toBe('deeper');
+    expect(navigationKind(by('#/segments/s-1'), by('#/segments'))).toBe('back');
+    expect(navigationKind(by('#/about'), by('#/about/credits'))).toBe('deeper');
+    expect(navigationKind(by('#/about/credits'), by('#/about'))).toBe('back');
+    expect(navigationKind(by('#/routes'), by('#/routes/new'))).toBe('deeper');
+    // More than one level, either way.
+    expect(navigationKind(by('#/settings'), by('#/settings/instance/moderation'))).toBe('deeper');
+    expect(navigationKind(by('#/settings/instance/moderation'), by('#/settings'))).toBe('back');
+  });
+
+  it('goes across between tabs, and between pages neither of which is above the other', () => {
+    expect(navigationKind(at('home'), at('activities'))).toBe('across');
+    expect(navigationKind(at('activities'), at('routes'))).toBe('across');
+    expect(navigationKind(by('#/segments/s-1'), by('#/activities/a-1'))).toBe('across');
+    expect(navigationKind(by('#/settings'), by('#/segments/s-1'))).toBe('across');
+  });
+
+  it('compares whole segments, never a character prefix', () => {
+    // `/about` is a character prefix of `/about-x/y` but not a segment of it.
+    const page = (path: string): ReturnType<typeof matchHash> => ({
+      route: { ...routeById('about'), path },
+    });
+    expect(navigationKind(page('/about'), page('/about-x/y'))).toBe('across');
+    expect(navigationKind(page('/about-x/y'), page('/about'))).toBe('across');
+    expect(navigationKind(page('/about'), page('/about/y'))).toBe('deeper');
+  });
+
+  it('never counts Home as above anything, or every navigation from it would be deeper', () => {
+    expect(navigationKind(at('home'), by('#/activities/a-1'))).toBe('across');
+    expect(navigationKind(by('#/activities/a-1'), at('home'))).toBe('across');
+  });
+
+  it('names a slide class for deeper and back, and the cross-fade for the rest', () => {
+    expect(ROUTE_TRANSITION_CLASS[NAVIGATION_TRANSITION_TYPE.deeper]).toBe('oyl-route-deeper');
+    expect(ROUTE_TRANSITION_CLASS[NAVIGATION_TRANSITION_TYPE.back]).toBe('oyl-route-back');
+    expect(ROUTE_TRANSITION_CLASS.default).toBe('oyl-route');
+    // `across` falls to the default, the cross-fade #945 shipped.
+    expect(NAVIGATION_TRANSITION_TYPE.across in ROUTE_TRANSITION_CLASS).toBe(false);
   });
 });
 

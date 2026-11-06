@@ -91,6 +91,9 @@ export interface SidePose {
  *   the {@link NoRiderCause} it carries.
  * - `unreadable` — the picture could not be decoded, or the model failed on
  *   it. The next one is tried.
+ * - `rate-limited` — the rider's instance turned the picture away unread
+ *   because it was asked too often (#2175). Not a failure: it is counted on
+ *   its own, and the next one is tried, later.
  * - `unavailable` — the model could not be loaded at all. Nothing more is
  *   tried for the rest of the pairing, and the screen says so — and, for the
  *   rider's instance (#1106), says WHY ({@link SideUnavailableReason}).
@@ -99,6 +102,7 @@ export type SidePoseOutcome =
   | { readonly kind: 'pose'; readonly pose: SidePose }
   | { readonly kind: 'no-rider'; readonly cause: NoRiderCause }
   | { readonly kind: 'unreadable' }
+  | { readonly kind: 'rate-limited' }
   | { readonly kind: 'unavailable'; readonly why?: SideUnavailableReason };
 
 /**
@@ -196,6 +200,15 @@ export interface SideAnalysisState {
   readonly unreadable: number;
   /** Pictures dropped unexamined because a newer one arrived while the model was busy (D-6). */
   readonly skipped: number;
+  /** Pictures the rider's instance turned away unread for being asked too often (#2175). */
+  readonly rateLimited: number;
+  /**
+   * The hosted service the rider's instance sends the pictures on to, by host,
+   * when the rider's hosted switch is on (#2175) — the host their consent
+   * named. `undefined` when the instance's own model looks at them, and for
+   * the tablet and the computer.
+   */
+  readonly hostedService?: string | undefined;
   readonly framing: SideFramingState;
   /** Whether the session is over, so the numbers are held for the report and nothing more is added. */
   readonly finished: boolean;

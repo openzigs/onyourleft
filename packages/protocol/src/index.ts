@@ -27,6 +27,14 @@ export type {
   Frame,
   FrameRider,
   Hello,
+  HeldItem,
+  ItemEvent,
+  ItemEventKind,
+  ItemKey,
+  Items,
+  ItemUse,
+  LaneChange,
+  LapRaceConfig,
   ProtocolMessage,
   Refuse,
   RefuseReason,
@@ -38,6 +46,7 @@ export type {
   RoomMessage,
   Standings,
   StandingsRider,
+  VoiceLink,
   Welcome,
 } from './messages';
 export {
@@ -52,15 +61,22 @@ export {
 export type { Field, Shape } from './schema';
 export {
   CLIENT_MESSAGE_TYPES,
+  CLIENT_OUTCOME_FIELDS,
+  ITEM_KEYS,
+  LANE_COUNT,
   MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ITEM_EVENTS,
+  MAXIMUM_LAPS,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
+  MAXIMUM_RACE_OFFSET_CENTIMETRES,
   MAXIMUM_REPORTED_POWER_WATTS,
   MAXIMUM_RIDERS,
   MAXIMUM_TICKET_LENGTH,
   MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   MESSAGE_FIELDS,
   ROOM_MESSAGE_TYPES,
+  VOICE_INVITE_PATTERN,
 } from './schema';
 
 export type { DecodeExpectations, Decoded, Refusal, RefusalReason } from './codec';

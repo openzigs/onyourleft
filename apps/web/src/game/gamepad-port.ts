@@ -50,6 +50,14 @@
  * held for the next read as well as while it is down, so a tap shorter than
  * a frame is one throw, not none.
  *
+ * ⚠️ **A pad that goes lets go of every forwarded button** (#1893). A pad
+ * unplugged with a button held gets a cancelled release from Android, which
+ * `MainActivity` sends even once the device has gone. In case none arrives,
+ * a `gamepaddisconnected` of any pad also lets go of every forwarded button
+ * that is down. The worst this does to a second pad is to miss a hold: a
+ * throw is asked for on a press, never on a release. A press not yet read
+ * is still read once.
+ *
  * ## Untrusted input
  *
  * A pad is a device that may not be what it claims (CLAUDE.md §6): its axes
@@ -142,8 +150,15 @@ export function navigatorGamepads(host: GamepadHost, shell = false): GamepadPort
   return {
     pads: () => (shell ? [forwarded(), ...platform()] : platform()),
     onConnectionChange: (listener) => {
+      // #1893: in the shell a pad going lets go of every forwarded button, in case its release never comes.
+      const disconnected = shell
+        ? (): void => {
+            down.clear();
+            listener();
+          }
+        : listener;
       host.addEventListener('gamepadconnected', listener);
-      host.addEventListener('gamepaddisconnected', listener);
+      host.addEventListener('gamepaddisconnected', disconnected);
       const forward: ForwardButton | undefined = shell
         ? (button, isDown) => {
             if (!isButtonNumber(button) || typeof isDown !== 'boolean') return;
@@ -158,7 +173,7 @@ export function navigatorGamepads(host: GamepadHost, shell = false): GamepadPort
       if (forward !== undefined) host[FORWARDED_BUTTON_GLOBAL] = forward;
       return () => {
         host.removeEventListener('gamepadconnected', listener);
-        host.removeEventListener('gamepaddisconnected', listener);
+        host.removeEventListener('gamepaddisconnected', disconnected);
         if (forward !== undefined && host[FORWARDED_BUTTON_GLOBAL] === forward) {
           host[FORWARDED_BUTTON_GLOBAL] = undefined;
         }

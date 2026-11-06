@@ -66,7 +66,7 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
     // instance's ask (#1102) is the one press.
     expect(ANALYSIS_MODULES).toEqual(
       expect.arrayContaining([
-        `${ANALYSIS_ROOT}/template/template.ts`,
+        `${ANALYSIS_ROOT}/template/agent-v1.ts`,
         `${ANALYSIS_ROOT}/input.ts`,
         `${ANALYSIS_ROOT}/screen/write-up-screen.ts`,
         'ride-analysis/instance-analysis.ts',
@@ -74,7 +74,7 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
       ]),
     );
     // And past one level: a template reaches the screen's matchers through the screen.
-    expect(importWalk().closure([`${ANALYSIS_ROOT}/template/template.ts`]).modules).toContain(
+    expect(importWalk().closure([`${ANALYSIS_ROOT}/template/agent-v1.ts`]).modules).toContain(
       `${ANALYSIS_ROOT}/screen/angle-claims.ts`,
     );
   });
@@ -106,7 +106,7 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
     };
     // And in the instance's ask and its press (#1102).
     for (const target of [
-      `${ANALYSIS_ROOT}/template/template.ts`,
+      `${ANALYSIS_ROOT}/template/agent-v1.ts`,
       `${ANALYSIS_ROOT}/screen/write-up-screen.ts`,
       'ride-analysis/instance-analysis.ts',
       'ride-analysis/InstanceWriteUpControl.tsx',

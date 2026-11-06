@@ -72,6 +72,8 @@ import {
   type Insets,
 } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import { isRideRoute } from '../src/shell/route-motion';
+import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
 /**
  * The viewports measured, and why each is here.
@@ -156,8 +158,8 @@ const CHROME_AREA_BEFORE_944: Readonly<Record<(typeof VIEWPORTS)[number]['name']
  */
 const MINIMUM_HEADING_CLEARANCE = 16;
 
-/** `#dde0df`, elevation 3 in `design/tokens.ts`, as Chromium reports a colour. */
-const ELEVATION_3 = 'rgb(221, 224, 223)';
+/** `#cbcdd0`, elevation 3 in `design/tokens.ts`, as Chromium reports a colour. */
+const ELEVATION_3 = 'rgb(203, 205, 208)';
 
 async function openShell(page: Page): Promise<void> {
   await page.goto('/shell.html');
@@ -455,15 +457,25 @@ for (const viewport of VIEWPORTS) {
         // there it is the far end of the `h1`'s box that has to hit the `h1`
         // — the same proof that hit-testing sees this page, on the one thing
         // every route is sure to have, and clear of the link, which on a
-        // phone sits over the heading's start.
+        // phone sits over the heading's start. ⚠️ Since #2065 that is the
+        // title BLOCK's far end: the `h1` is as wide as its words, beside the
+        // line under it, and on a phone the link covers all of it. Since #2056
+        // short of the room the title keeps for the header's mute, which is
+        // drawn there: the block's content box, less the `h1`'s end padding.
         const headerBox = header.getBoundingClientRect();
-        const heading = document.querySelector('h1');
-        if (heading === null) throw new Error('no h1');
+        const heading = document.querySelector('main > .oyl-view-head');
+        if (heading === null) throw new Error('no title block');
         const headingBox = heading.getBoundingClientRect();
+        const title = heading.querySelector(':scope > h1');
+        if (title === null) throw new Error('no title in the title block');
+        const contentRight =
+          headingBox.right -
+          Number.parseFloat(getComputedStyle(heading).paddingInlineEnd) -
+          Number.parseFloat(getComputedStyle(title).paddingInlineEnd);
         const [target, x, y] =
           headerBox.height > 0
             ? [header, headerBox.right - 4, headerBox.top + headerBox.height / 2]
-            : [heading, headingBox.right - 4, headingBox.top + headingBox.height / 2];
+            : [heading, contentRight - 4, headingBox.top + headingBox.height / 2];
         const elsewhere = document.elementFromPoint(x, y);
 
         return {
@@ -476,7 +488,7 @@ for (const viewport of VIEWPORTS) {
       expect(hit.linkHeight, 'the skip link has no box to hit-test').toBeGreaterThan(0);
       expect(
         hit.onHeaderElsewhere,
-        'a point inside the header (or, where the header is folded away, the h1) does not hit ' +
+        'a point inside the header (or, where the header is folded away, the title block) does not hit ' +
           'it, so this hit test proves nothing',
       ).toBe(true);
       expect(
@@ -1668,8 +1680,12 @@ interface NavLinkBox {
   readonly indicatorWidth: number;
   readonly indicatorHeight: number;
   readonly labelColour: string;
+  /** The label's computed `font-weight` — #2066. */
+  readonly labelWeight: number;
   /** The icon's computed `transform`: `none`, or a matrix. */
   readonly iconTransform: string;
+  /** The icon's computed `stroke-width`, in px — #2066. */
+  readonly iconStroke: number;
 }
 
 async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
@@ -1691,7 +1707,9 @@ async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
         indicatorWidth: indicator?.getBoundingClientRect().width ?? 0,
         indicatorHeight: indicator?.getBoundingClientRect().height ?? 0,
         labelColour: label === null ? '' : getComputedStyle(label).color,
+        labelWeight: label === null ? 0 : Number(getComputedStyle(label).fontWeight),
         iconTransform: icon === null ? '' : getComputedStyle(icon).transform,
+        iconStroke: icon === null ? 0 : Number.parseFloat(getComputedStyle(icon).strokeWidth),
       };
     }),
   );
@@ -1780,11 +1798,29 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       const current = links.find((link) => link.current !== null);
       const other = links.find((link) => link.current === null);
       // What is left still tells the current destination apart — by its
-      // label's colour (and its weight and larger icon, which this does not
-      // read) — but with no painted SHAPE…
+      // label's colour, its weights and its larger icon (#2066's control
+      // below takes those away too) — but with no painted SHAPE…
       expect(current?.labelColour).not.toBe(other?.labelColour);
       // …and the case above fails over it.
       expect(paintedPillFaults(links)).not.toEqual([]);
+    });
+
+    test('#2066 — the control: an indicator by colour alone fails the weight check', async ({
+      page,
+    }) => {
+      await openShell(page);
+      // Every mark of the current destination taken away but its colour: the
+      // pill, the larger icon, and the two weights.
+      await page.addStyleTag({ content: COLOUR_ONLY_INDICATOR });
+      const links = await navLinks(page);
+      const current = links.find((link) => link.current !== null);
+      const other = links.find((link) => link.current === null);
+      // The apparatus: the colour is still there, so it is the weights the
+      // case above rests on, not a destination nothing marks at all.
+      expect(current?.labelColour).not.toBe(other?.labelColour);
+      const faults = paintedPillFaults(links);
+      expect(faults.some((fault) => fault.includes('label is weight'))).toBe(true);
+      expect(faults.some((fault) => fault.includes('icon stroke'))).toBe(true);
     });
 
     test('#944 — is no larger than before the indicator', async ({ browser }) => {
@@ -1842,6 +1878,16 @@ const NAV_BOX_BEFORE_944 = { row: 57.84, bar: 62.84, rail: 88 } as const;
 
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
 
+/**
+ * #2066's control: the current destination told apart by its label's colour
+ * and nothing else — no pill, no larger icon, no heavier label or stroke.
+ */
+const COLOUR_ONLY_INDICATOR = `
+  .oyl-nav-link[aria-current] { font-weight: inherit !important; }
+  .oyl-nav-link[aria-current] .oyl-nav-indicator { background: transparent !important; }
+  .oyl-nav-link[aria-current] .oyl-nav-icon { transform: none !important; stroke-width: 1.8 !important; }
+`;
+
 /** `NavIcon.tsx`'s icon size. */
 const NAV_ICON_PIXELS = 24;
 
@@ -1869,6 +1915,22 @@ function paintedPillFaults(links: readonly NavLinkBox[]): readonly string[] {
       );
     }
     if (here.iconTransform === 'none') faults.push(`“${here.label}”'s icon is not drawn larger`);
+    // #2066: and two WEIGHTS, neither of them a colour — the label's and the
+    // icon's stroke — each heavier than every other destination's.
+    for (const other of links.filter((each) => each.current === null)) {
+      if (here.labelWeight <= other.labelWeight) {
+        faults.push(
+          `“${here.label}”'s label is weight ${String(here.labelWeight)}, ` +
+            `no heavier than “${other.label}”'s ${String(other.labelWeight)}`,
+        );
+      }
+      if (here.iconStroke <= other.iconStroke) {
+        faults.push(
+          `“${here.label}”'s icon stroke is ${String(here.iconStroke)} px, ` +
+            `no heavier than “${other.label}”'s ${String(other.iconStroke)}`,
+        );
+      }
+    }
   }
   for (const link of links.filter((each) => each.current === null)) {
     if (link.indicatorBackground !== TRANSPARENT) {
@@ -1984,6 +2046,136 @@ for (const viewport of [
       });
   });
 }
+
+/**
+ * #2066 — the app's mark heads the rail on a tablet, and it is decoration.
+ *
+ * At a landscape tablet and an upright one the rail draws exactly one mark:
+ * the launcher icon, decoded, 48 px square, above the first destination and
+ * clear of it. It is hidden from assistive technology twice over (`alt=""`
+ * and `aria-hidden`), because the header already names the app once and a
+ * second name would read it twice. Where the rail is too short to spare the
+ * height (a phone on its side, 844×390) and on a phone's bar, nothing is
+ * drawn: a phone's brand is the owner's open question on #2030.
+ *
+ * ⚠️ **The controls**: the mark's rule hidden, and the mark given a name,
+ * must each turn {@link markFaults} non-empty, or a page with no mark at all
+ * — or a mark read aloud as a second "On Your Left" — would pass.
+ */
+interface RailMark {
+  readonly drawn: number;
+  readonly decoded: boolean;
+  readonly width: number;
+  readonly height: number;
+  readonly bottom: number;
+  readonly firstLinkTop: number;
+  readonly alt: string | null;
+  readonly ariaHidden: string | null;
+}
+
+async function railMark(page: Page): Promise<RailMark> {
+  return page.evaluate(() => {
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    if (nav === null) throw new Error('no Primary nav');
+    const drawn = [...nav.querySelectorAll('img')].filter(
+      (image) => image.checkVisibility() && image.getBoundingClientRect().width > 0,
+    );
+    const mark = drawn[0];
+    const box = mark?.getBoundingClientRect();
+    return {
+      drawn: drawn.length,
+      decoded: mark !== undefined && mark.complete && mark.naturalWidth > 0,
+      width: box?.width ?? 0,
+      height: box?.height ?? 0,
+      bottom: box?.bottom ?? Number.NaN,
+      firstLinkTop: nav.querySelector('a')?.getBoundingClientRect().top ?? Number.NaN,
+      alt: mark?.getAttribute('alt') ?? null,
+      ariaHidden: mark?.getAttribute('aria-hidden') ?? null,
+    };
+  });
+}
+
+/** What is wrong with the rail's mark where one is drawn. Empty is a pass. */
+function markFaults(mark: RailMark): readonly string[] {
+  const faults: string[] = [];
+  if (mark.drawn !== 1) return [`${String(mark.drawn)} marks drawn in the rail`];
+  if (!mark.decoded) faults.push('the mark did not decode');
+  if (
+    Math.abs(mark.width - RAIL_MARK_PIXELS) > 0.5 ||
+    Math.abs(mark.height - RAIL_MARK_PIXELS) > 0.5
+  ) {
+    faults.push(`the mark is ${mark.width.toFixed(1)}×${mark.height.toFixed(1)} px`);
+  }
+  if (!(mark.bottom <= mark.firstLinkTop)) {
+    faults.push(`the mark ends at ${mark.bottom.toFixed(1)}, under the first destination's top`);
+  }
+  if (mark.alt !== '' || mark.ariaHidden !== 'true') {
+    faults.push(
+      `the mark is named (alt ${String(mark.alt)}, aria-hidden ${String(mark.ariaHidden)})`,
+    );
+  }
+  return faults;
+}
+
+/** `theme.css` §"THE MARK": 3rem at the root's 16 px. */
+const RAIL_MARK_PIXELS = 48;
+
+test.describe('#2066 — the app’s mark heads the rail', () => {
+  for (const viewport of [
+    { name: 'a landscape tablet, 1280×800', width: 1280, height: 800, drawn: true },
+    { name: 'an upright tablet, 768×1024', width: 768, height: 1024, drawn: true },
+    { name: 'a phone’s bar, 375×667', width: 375, height: 667, drawn: false },
+    { name: 'a short rail, a phone on its side 844×390', width: 844, height: 390, drawn: false },
+  ] as const) {
+    test.describe(viewport.name, () => {
+      test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+      test(
+        viewport.drawn ? 'is drawn once, decorative, above the destinations' : 'is not drawn',
+        async ({ browser }) => {
+          const page = await sharedShell(browser, viewport);
+          await page.waitForFunction(() =>
+            [...document.querySelectorAll('nav[aria-label="Primary"] img')].every(
+              (image) => (image as HTMLImageElement).complete,
+            ),
+          );
+          const mark = await railMark(page);
+          console.log(`#2066 mark at ${viewport.name}: ${JSON.stringify(mark)}`);
+          if (viewport.drawn) {
+            expect(markFaults(mark)).toEqual([]);
+          } else {
+            expect(mark.drawn).toBe(0);
+          }
+        },
+      );
+    });
+  }
+
+  test.describe('the controls, at 1280×800', () => {
+    test.use({ viewport: { width: 1280, height: 800 } });
+
+    test('with the mark’s rule hidden, the case fails', async ({ page }) => {
+      await openShell(page);
+      await page.addStyleTag({ content: '.oyl-nav-mark { display: none !important; }' });
+      expect(markFaults(await railMark(page))).not.toEqual([]);
+    });
+
+    test('with the mark given a name, the case fails', async ({ page }) => {
+      await openShell(page);
+      await page.evaluate(() => {
+        const mark = document.querySelector('nav[aria-label="Primary"] img');
+        mark?.setAttribute('alt', 'On Your Left');
+        mark?.removeAttribute('aria-hidden');
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('nav[aria-label="Primary"] img')].every(
+          (image) => (image as HTMLImageElement).complete,
+        ),
+      );
+      expect(markFaults(await railMark(page)).some((fault) => fault.includes('named'))).toBe(true);
+    });
+  });
+});
 
 /**
  * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
@@ -2699,7 +2891,8 @@ for (const theme of THEMES) {
       });
       expect(read, 'the file input, its label or a secondary button is missing').toBeDefined();
       expect(read?.file).toEqual(read?.secondary);
-      expect(read?.file.color).toBe(rgbOf('accent', theme));
+      // #2118: a label is the accent's TEXT token.
+      expect(read?.file.color).toBe(rgbOf('accentText', theme));
       // #992: tonal, so a filled surface step and not the page.
       expect(read?.file.backgroundColor).toBe(rgbOf('surfaceOverlay', theme));
       // `--oyl-space-sm`, 8 px: "GPX fileChoose File" is the defect.
@@ -3387,6 +3580,54 @@ test.describe('#991 — the display face is the bundled one, from this app’s o
   });
 });
 
+/*
+ * #2040, ADR 0063 D-5 — the third weight, 600, through the same pipeline and
+ * from the same origin. No product rule asks for 600 yet (its first users are
+ * the type-scale issues after #2041), so the case sets one line in the display
+ * family at 600 on the specimen page, as a rule would, and reads what the
+ * engine loaded for it. The control refuses the font files, as #991's does.
+ */
+async function semiBold(page: Page): Promise<{ readonly status: string; readonly check: boolean }> {
+  return page.evaluate(async () => {
+    const line = document.createElement('p');
+    line.textContent = 'Label 0123456789';
+    line.style.fontFamily = 'var(--oyl-font-family-display)';
+    line.style.fontWeight = '600';
+    document.body.append(line);
+    await document.fonts.load('600 16px Barlow').catch(() => []);
+    await document.fonts.ready;
+    const face = [...document.fonts].find(
+      (candidate) =>
+        candidate.family.replaceAll(/['"]/g, '') === 'Barlow' && candidate.weight === '600',
+    );
+    return { status: face?.status ?? 'absent', check: document.fonts.check('600 16px Barlow') };
+  });
+}
+
+test.describe('#2040 — Barlow 600 is the bundled one, from this app’s own origin', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('loads Barlow 600 from the page’s origin when a line asks for it', async ({ page }) => {
+    const fonts: string[] = [];
+    page.on('request', (request) => {
+      if (request.resourceType() === 'font') fonts.push(request.url());
+    });
+    await openIllustration(page);
+    const read = await semiBold(page);
+    const origin = new URL(page.url()).origin;
+    expect(read.status, 'Barlow 600 did not load').toBe('loaded');
+    expect(read.check).toBe(true);
+    expect(fonts.some((url) => /\/assets\/barlow-latin-600-[^/]+\.woff2$/.test(url))).toBe(true);
+    expect(fonts.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  });
+
+  test('the control — with the font files refused, 600 does not load', async ({ page }) => {
+    await page.route('**/*.woff2', (route) => route.abort());
+    await openIllustration(page);
+    expect((await semiBold(page)).status).not.toBe('loaded');
+  });
+});
+
 test.describe('#936 — the menus’ motion collapses when it should', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -3726,5 +3967,320 @@ test.describe('#944 — under forced colours the current destination keeps a sha
     }
     // The padding took the border back: the pill is the height it was.
     expect(current[0]?.height).toBeCloseTo(plain.find((each) => each.current)?.height ?? 0, 1);
+  });
+});
+
+/**
+ * #2056 — the header's one-press mute, in a real engine.
+ *
+ * ## What is measured
+ *
+ * - **Its target**, at a landscape tablet and an upright phone: 44 px in both
+ *   axes, and the topmost thing at its own centre. Below the rail breakpoint
+ *   the wordmark is folded away (#671) and the mute is drawn at the end of
+ *   the page title's line (`theme.css` anchors it to the `h1`), so there the
+ *   header stays 0 px tall.
+ * - **What it does to the sound**, read from the PAGE'S OWN AUDIO GRAPH: a
+ *   probe installed before the app loads ({@link AUDIO_GRAPH_PROBE}) records
+ *   every gain the platform's `AudioContext` makes and where each is
+ *   connected, and reads the master — the one gain on the destination — from
+ *   the node itself. The press is a real one, the context is Chromium's, and
+ *   the graph is the one `game/web-audio.ts` builds; nothing here asks the
+ *   button what it did.
+ *
+ * ⚠️ **The control** is a button that only flips its own state: the PR that
+ * added this ran the spec with `HeaderMute.tsx`'s write and `applyMix` call
+ * deleted, and the master read 1 after the press. A press is what builds the
+ * graph (a context is made only inside a gesture), so the spec first turns the
+ * menus' sounds on in storage and presses the skip link with the keyboard —
+ * a press on a control that navigates nowhere, which sounds a *select*.
+ *
+ * ## What this does NOT prove
+ *
+ * That anything is heard. Headless Chromium has no speaker to listen to; the
+ * level the master is set to is the claim, and a person with headphones is the
+ * check (`docs/validation/0003-screen-reader-and-assistive-technology.md`
+ * Part I).
+ */
+const AUDIO_GRAPH_PROBE = `(() => {
+  localStorage.setItem('oyl.menuSounds.v1', JSON.stringify({ enabled: true, volume: 0.5 }));
+  const edges = new WeakMap();
+  const gains = [];
+  const createGain = BaseAudioContext.prototype.createGain;
+  BaseAudioContext.prototype.createGain = function (...args) {
+    const node = createGain.apply(this, args);
+    gains.push(node);
+    return node;
+  };
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (to, ...rest) {
+    const list = edges.get(this) ?? [];
+    list.push(to);
+    edges.set(this, list);
+    return connect.call(this, to, ...rest);
+  };
+  const sources = [];
+  const createSource = AudioContext.prototype.createMediaElementSource;
+  AudioContext.prototype.createMediaElementSource = function (...args) {
+    const node = createSource.apply(this, args);
+    sources.push(node);
+    return node;
+  };
+  window.__oylMusicBus = () => {
+    const bus = (edges.get(sources[0]) ?? [])[0];
+    return bus === undefined ? null : bus.gain.value;
+  };
+  window.__oylMaster = () => {
+    const master = gains.filter((node) => (edges.get(node) ?? []).includes(node.context.destination));
+    if (master.length !== 1) return { masters: master.length, gain: null, state: null };
+    return { masters: 1, gain: master[0].gain.value, state: master[0].context.state };
+  };
+})();`;
+
+interface MasterReading {
+  readonly masters: number;
+  readonly gain: number | null;
+  readonly state: string | null;
+}
+
+async function readMaster(page: Page): Promise<MasterReading> {
+  return page.evaluate(() =>
+    (window as unknown as { __oylMaster: () => MasterReading }).__oylMaster(),
+  );
+}
+
+/** A press that builds the graph: the skip link, by keyboard, which sounds a *select*. */
+async function pressSomethingElse(page: Page): Promise<void> {
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.oyl-skip-link')).toBeFocused();
+  await page.keyboard.press('Enter');
+}
+
+/**
+ * The viewports the mute is measured at, and why: the owner's tablet, where it
+ * is in the header's row, and two phones, where the header is zero tall and
+ * the mute is drawn at the end of the title's first line (`theme.css`
+ * §"#2056"). 390×844 is where a header row of its own pushed Ride details'
+ * first control under the bar on CI; 320×256 is SC 1.4.10's viewport.
+ */
+const MUTE_VIEWPORTS = [
+  { name: 'tablet 1280×800', width: 1280, height: 800 },
+  { name: 'phone 412×915', width: 412, height: 915 },
+  { name: 'phone 390×844', width: 390, height: 844 },
+  { name: '320×256', width: 320, height: 256 },
+] as const;
+
+/** What the mute's box is, and what it is drawn over, on the page as it is now. */
+interface MuteReading {
+  readonly width: number;
+  readonly height: number;
+  readonly onTop: boolean;
+  /** What is drawn at the mute's centre when it is not the mute — the failure's diagnostic. */
+  readonly coveredBy: string;
+  readonly header: number;
+  /** How far the title's text runs into the mute, in px; 0 or less is clear. */
+  readonly intoTitle: number;
+  /** How far the mute runs into the screen's ⓘ where there is one; 0 or less is clear. */
+  readonly intoHelp: number;
+}
+
+async function readMute(page: Page): Promise<MuteReading> {
+  return page.evaluate(() => {
+    const mute = document.querySelector('.oyl-header__mute');
+    const h1 = document.querySelector('.oyl-main > .oyl-view-head > h1');
+    if (mute === null || h1 === null) throw new Error('no mute, or no title');
+    const box = mute.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    const overlap = (other: DOMRect): number =>
+      other.bottom <= box.top || other.top >= box.bottom || other.width === 0
+        ? Number.NEGATIVE_INFINITY
+        : Math.min(other.right, box.right) - Math.max(other.left, box.left);
+    // Since #2065 the line under the title shares its row where it fits, so
+    // its words are measured with the title's.
+    const line = document.querySelector('.oyl-main > .oyl-view-head > h1 + p');
+    const words = [h1, ...(line === null ? [] : [line])].flatMap((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return [...range.getClientRects()].map(overlap);
+    });
+    const help = document.querySelector('.oyl-help > summary')?.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      onTop: hit !== null && mute.contains(hit),
+      coveredBy:
+        hit === null
+          ? `nothing at (${box.x.toFixed(0)}, ${box.y.toFixed(0)})`
+          : `${hit.tagName.toLowerCase()}.${[...hit.classList].join('.')}`,
+      header: document.querySelector('.oyl-header')?.getBoundingClientRect().height ?? Number.NaN,
+      intoTitle: Math.max(Number.NEGATIVE_INFINITY, ...words),
+      intoHelp: help === undefined ? Number.NEGATIVE_INFINITY : overlap(help),
+    };
+  });
+}
+
+test.describe('#2056 — the header mute', () => {
+  for (const viewport of MUTE_VIEWPORTS) {
+    test(`is a 44 px target, on top, clear of the title, on every menu route at ${viewport.name}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await openShell(page);
+      const menu = ALL_ROUTES.filter((route) => !isRideRoute(route.id));
+      const lines: string[] = [];
+      for (const route of menu) {
+        await page.evaluate((hash) => {
+          window.location.hash = hash;
+        }, hrefFor(route));
+        await expect(page.locator('.oyl-main > .oyl-view-head > h1')).toHaveText(route.title);
+        // At the top of the page, where a rider arriving there sees the title:
+        // below the rail breakpoint the mute scrolls with it, as the header does.
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        // Since #2054 a navigation between menu routes is a view transition,
+        // and while it runs every point on the page hits the transition's
+        // pseudo-elements on `html` — so the mute is read once it has ended.
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document
+                  .getAnimations()
+                  .filter((animation) =>
+                    (animation.effect as KeyframeEffect | null)?.pseudoElement?.startsWith(
+                      '::view-transition',
+                    ),
+                  ).length,
+            ),
+          )
+          .toBe(0);
+        await settled(page);
+        const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
+        await expect(mute).toHaveCount(1);
+        const read = await readMute(page);
+        lines.push(
+          `${route.id}: ${read.width.toFixed(1)}×${read.height.toFixed(1)}, header ` +
+            `${read.header.toFixed(1)}, into title ${read.intoTitle.toFixed(1)}, into ⓘ ` +
+            `${read.intoHelp.toFixed(1)}`,
+        );
+        expect(read.width, route.id).toBeGreaterThanOrEqual(44);
+        expect(read.height, route.id).toBeGreaterThanOrEqual(44);
+        expect(read.onTop, `${route.id}: the mute is covered by ${read.coveredBy}`).toBe(true);
+        expect(read.intoTitle, `${route.id}: the title runs under the mute`).toBeLessThanOrEqual(0);
+        expect(read.intoHelp, `${route.id}: the mute covers the screen’s ⓘ`).toBeLessThanOrEqual(0);
+        if (viewport.width < 600) {
+          expect(read.header, `${route.id}: the phone’s header grew a row`).toBe(0);
+        }
+      }
+      console.log(`#2056 ${viewport.name}\n  ${lines.join('\n  ')}`);
+    });
+  }
+
+  test('silences the master on the page’s own audio graph, and keeps it across a reload', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?sounds=on');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const mute = page.getByRole('banner').getByRole('button', { name: 'Mute all sound' });
+    await expect(mute).toHaveAttribute('aria-pressed', 'false');
+
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMaster(page)).gain).toBe(1);
+    expect((await readMaster(page)).state).toBe('running');
+
+    await mute.click();
+    await expect(mute).toHaveAttribute('aria-pressed', 'true');
+    // The master glides to 0 (a time constant of 20 ms), so it is polled.
+    await expect.poll(async () => (await readMaster(page)).gain ?? 1).toBeLessThan(0.001);
+
+    await page.reload();
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    await expect(mute).toHaveAttribute('aria-pressed', 'true');
+    // A fresh graph, built at the next press from what was kept.
+    expect((await readMaster(page)).masters).toBe(0);
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMaster(page)).masters).toBe(1);
+    expect((await readMaster(page)).gain).toBe(0);
+  });
+});
+
+/**
+ * #2058 — the menus' music, in a real engine.
+ *
+ * The page is the real `AppShell` with the real player (`shell/menu-music.ts`)
+ * over the shared output, and a loop the harness makes (`?music=fixture`: a
+ * second of tone as a WAV, because #2057's loop is not committed yet). The
+ * music bus is read from the page's own graph — the gain the element's
+ * `MediaElementAudioSourceNode` is connected to, recorded by
+ * {@link AUDIO_GRAPH_PROBE} — and "playing" from the element itself, its
+ * `paused` and a `currentTime` that moves.
+ *
+ * The rules that need a ride controller, a hidden page or a stored mute are
+ * `src/shell/menu-music.test.tsx`'s, over the same graph code.
+ */
+interface MusicReading {
+  readonly elements: number;
+  readonly playing: boolean;
+  readonly time: number;
+  readonly bus: number | null;
+}
+
+async function readMusic(page: Page): Promise<MusicReading> {
+  return page.evaluate(() => {
+    const seen = window as unknown as {
+      __oylMusicElements: HTMLMediaElement[];
+      __oylMusicBus: () => number | null;
+    };
+    const [element] = seen.__oylMusicElements;
+    return {
+      elements: seen.__oylMusicElements.length,
+      playing: element !== undefined && !element.paused,
+      time: element?.currentTime ?? 0,
+      bus: seen.__oylMusicBus(),
+    };
+  });
+}
+
+test.describe('#2058 — the menus’ music, in a real engine', () => {
+  test('nothing before a press; then the loop plays through the music bus, and stops on each ride route', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?music=fixture');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    expect(await readMusic(page), 'something was made or played before a press').toEqual({
+      elements: 0,
+      playing: false,
+      time: 0,
+      bus: null,
+    });
+
+    await pressSomethingElse(page);
+    await expect.poll(async () => (await readMusic(page)).playing).toBe(true);
+    // The default level, 0.5, reached by a ramp rather than set.
+    await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    const started = (await readMusic(page)).time;
+    await expect.poll(async () => (await readMusic(page)).time).toBeGreaterThan(started);
+
+    for (const ride of ['#/ride', '#/game']) {
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, ride);
+      await expect.poll(async () => (await readMusic(page)).bus ?? 1, ride).toBeLessThan(0.01);
+      await expect.poll(async () => (await readMusic(page)).playing, ride).toBe(false);
+
+      await page.evaluate(() => {
+        window.location.hash = '#/';
+      });
+      await expect
+        .poll(async () => (await readMusic(page)).playing, `back from ${ride}`)
+        .toBe(true);
+      await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    }
+    expect((await readMusic(page)).elements, 'one element for the visit').toBe(1);
   });
 });

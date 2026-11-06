@@ -60,6 +60,7 @@ import {
   type GeneratedSpecies,
 } from './generated-trees';
 import {
+  REALISTIC_CHAIN_LINK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_RIDER,
   REALISTIC_STRUCTURE_SURFACES,
@@ -222,6 +223,43 @@ describe('Poly Haven’s answers', () => {
     expect(() =>
       polyHavenFiles('fir', { ...select, maps: ['twig_diff', 'twig_mask'] }, answer),
     ).toThrow(/fir: Poly Haven offers no twig_mask\/1k\/jpg/);
+  });
+
+  it('takes a model, everything it includes AND its named maps — #1274', () => {
+    const answer = {
+      wire_opacity: { '1k': { jpg: file('fence_wire_opacity_1k.jpg') } },
+      gltf: {
+        '1k': {
+          gltf: {
+            ...file('fence_1k.gltf'),
+            include: {
+              'textures/wire_diff.jpg': file('wire_diff.jpg'),
+              'fence.bin': file('f.bin'),
+            },
+          },
+        },
+      },
+    };
+    const select = { type: 'model', resolution: '1k', maps: ['wire_opacity'] } as const;
+    expect(polyHavenFiles('fence', select, answer).map((each) => each.path)).toEqual([
+      'fence_1k.gltf',
+      'textures/wire_diff.jpg',
+      'fence.bin',
+      'fence_wire_opacity_1k.jpg',
+    ]);
+    // The glTF does not include the opacity, so a map the asset lacks is a
+    // refusal, not a wire drawn as a solid sheet.
+    expect(() => polyHavenFiles('fence', { ...select, maps: ['wire_mask'] }, answer)).toThrow(
+      /fence: Poly Haven offers no wire_mask\/1k\/jpg/,
+    );
+    // And the chain-link source asks for its opacity, through the origin
+    // every Poly Haven source is read by: its page, the MD5s and the lock.
+    const fence = SOURCES.find((source) => source.id === 'modular_chainlink_fence');
+    expect(fence?.origin).toEqual({
+      from: 'polyhaven',
+      select: { type: 'model', resolution: '1k', maps: ['wire_opacity'] },
+    });
+    expect(fence?.licence).toBe('CC0-1.0');
   });
 
   it('refuses rather than quietly downloading less than was asked for', () => {
@@ -488,7 +526,13 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     // flipped; a GLB's own maps never are (`encode-ktx2.ts` §`pinnedImageEncoder`).
     for (const output of OUTPUTS) {
       const recipe = output.recipe;
-      if (recipe.how === 'ktx2') expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+      // #1274: but the chain-link's wire, read at its GLB's own texture
+      // coordinates, which `GLTFLoader` never flips — the rider's case.
+      if (recipe.how === 'ktx2') {
+        expect(recipe.ktx2.origin, output.file).toBe(
+          output.file === REALISTIC_CHAIN_LINK.wire ? 'top-left' : 'bottom-left',
+        );
+      }
       // #624: a drawn map is drawn the way its coordinates read it, row 0 at
       // v = 0, and never went through TextureLoader — so it is not flipped.
       if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
@@ -527,12 +571,13 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       if (step === undefined) continue;
       // #624: a roughness map is data — linear, never sRGB colour.
       // #966: the wordmark is a cut-out over its board, so it keeps its alpha.
+      // #1274: the chain-link's wire opacity is data too, a number a texel.
       expect(step.encoding, output.file).toBe(
         recipe.how === 'wordmark'
           ? 'colour-alpha'
           : output.file.includes('_nor_gl_')
             ? 'normal'
-            : output.file.includes('_rough_')
+            : output.file.includes('_rough_') || output.file.includes('_opacity_')
               ? 'data'
               : 'colour',
       );

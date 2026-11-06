@@ -55,8 +55,8 @@
  * By settlement size (phase A) and land use (phase B), in people per metre of
  * line ({@link PEOPLE_PER_METRE}): a village's pavements by how many of its
  * houses have a front path; a mapped footway by the land at its middle
- * (`land-class.ts`) and, on built-up land, its `kind` (commercial and retail
- * busier than residential). **Runners** keep to paths and parks
+ * (`land-class.ts`) and, on built-up land, its `kind` (commercial busier than
+ * residential). **Runners** keep to paths and parks
  * ({@link RUNNER_SHARE}): a sidewalk, a pavement and a front path have none.
  *
  * ## Where each one is — a function of the second, not a walk forward
@@ -137,8 +137,8 @@ export type WalkKind = 'pavement' | 'door-path' | 'sidewalk' | 'footway' | 'park
  *   quieter than a full village's;
  * - `door-path`: a front path is short, so this is the chance somebody is on
  *   one: about one path in five, over a path's 3 to 8 m;
- * - a mapped footway by its land: `commercial` and `retail` built-up land the
- *   busiest, other built-up land half that, a park's paths a little less, and
+ * - a mapped footway by its land: `commercial` built-up land the busiest,
+ *   other built-up land half that, a park's paths a little less, and
  *   anything else — fields, woods, unclassed — the quietest.
  */
 export const PEOPLE_PER_METRE = {
@@ -533,9 +533,8 @@ function footwayDensity(
   if (here === 'park') return PEOPLE_PER_METRE.park;
   if (here === 'built-up') {
     const kind = kindAt(corridor, x, z);
-    return kind === 'commercial' || kind === 'retail'
-      ? PEOPLE_PER_METRE.commercial
-      : PEOPLE_PER_METRE['built-up'];
+    // #1946: only `commercial`; the archive emits no `retail` (#1630, spike 0031).
+    return kind === 'commercial' ? PEOPLE_PER_METRE.commercial : PEOPLE_PER_METRE['built-up'];
   }
   return PEOPLE_PER_METRE.elsewhere;
 }

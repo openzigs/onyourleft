@@ -29,6 +29,7 @@
     "vite.browser.config.ts",
     "vite.demo.config.ts",
     "playwright.config.ts",
+    "playwright.video.config.ts",
     "vitest.config.ts"
   ]
 }

@@ -20,10 +20,14 @@ disagree, the ADR wins.
 - **The world corridor store** ([#1545](https://github.com/openzigs/onyourleft/issues/1545),
   ADR 0054 D-3). Per (owner, route), on the rider's device only, in its own IndexedDB object store in
   `packages/store` (`WorldCorridorRecord`): building footprints with `kind`, `height` and
-  `min_height`; land-use and water polygons with `kind`; footway lines with `kind` and
+  `min_height`, and, from #1789, the twelve building fields of ADR 0054's 2026-11-01 amendment
+  (building type, levels, roof levels, roof shape, orientation and direction, wall and roof colour
+  as palette indices, wall and roof material, start year and landmark flag, each `null` where the
+  archive carries none); land-use and water polygons with `kind`; footway lines with `kind` and
   `kind_detail`; street lines with `kind`, `kind_detail` and whether each is a bridge or a tunnel
-  (#1565, ADR 0054's 2026-10-22 amendment); and which tiles were read and when. No OSM identifier,
-  no name and no address.
+  (#1565, ADR 0054's 2026-10-22 amendment); place points with `kind`, `kind_detail` and
+  `population_rank` (ADR 0055); and which tiles were read and when. No OSM identifier, no name and
+  no address.
   Every record carries `licence: 'ODbL-1.0'`: the store is treated as a **Derivative Database** of
   OpenStreetMap (D-3.2). It is droppable without loss and is erased with its route and by the device
   erase (D-3.4).
@@ -35,7 +39,9 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
 
 - **The ride map** shows `© OpenStreetMap contributors` beside the map whenever a map is drawn
   (ADR 0012 D-5). The string is `apps/web/src/map/basemap.ts` §`OSM_ATTRIBUTION`, and every surface
-  uses that constant, never a copy.
+  uses that constant, never a copy. Since #1975 the same line goes on to credit ESA WorldCover
+  (CC BY 4.0, `§WORLDCOVER_ATTRIBUTION`), whose derived `landcover` layer the archive carries and
+  the app does not draw; OpenStreetMap stays first.
 - **The ride screen** shows the same line, small, in the HUD's actions panel, **for the whole ride**
   whenever the ride's world was given map data when it started (`GameView.tsx`, #1552). It is keyed
   on the corridor the ride started with, never on "the realistic world is chosen" and never on what
@@ -46,7 +52,7 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
 - **The credits screen** (`apps/web/src/views/CreditsView.tsx`) has a *Map data* entry naming
   OpenStreetMap contributors, linking the ODbL 1.0, and carrying ODbL §4.3 a's own example sentence:
   *"Contains information from OpenStreetMap, which is made available here under the Open Database
-  License (ODbL)."*
+  License (ODbL)."* Below it, the ESA WorldCover credit and a link to CC BY 4.0 (#1975).
 - **An exported course** (`packages/fit/src/route/`) carries the attribution and the licence URL in
   the formats that have somewhere to put them.
 
@@ -79,10 +85,11 @@ synthetic road and draws no OpenStreetMap data.
 
 - **What is in it.** Per preset route, one file in the demo's build output (`apps/web/demo/dist`,
   gitignored, never committed; a SHA-256 per route may be): the decoded corridor records the
-  renderer reads (footprints, land use, water, footways and streets, with the fields ADR 0054 D-3.3
-  lists and no OSM identifier, name or address), the route's line and elevation from a GPX the owner
-  supplies, stripped to latitude, longitude and elevation (ADR 0056 D-2, D-7), and the licence,
-  source and notice. No owner, route id or device time.
+  renderer reads (footprints, land use, water, footways, streets and place points, with the fields
+  ADR 0054 D-3.3 lists and no OSM identifier, name or address; ADR 0056's 2026-11-01 amendment),
+  the route's line and elevation from a GPX the owner supplies, stripped to latitude, longitude and
+  elevation (ADR 0056 D-2, D-7), and the licence, source and notice. No owner, route id or device
+  time.
 - **Its licence.** It is a Derivative Database that is Publicly Used, so it is offered **under ODbL
   1.0** (§4.4 a.i). Shipping it in a build Publicly Conveys it, so the file carries the licence's
   URI and a notice file sits beside it (§4.2 b and d). The notice is ODbL §4.3 a's example:

@@ -47,6 +47,10 @@
  * 4. **#1104 B1-a, after it**: *"Your instance deletes them when you withdraw
  *    or remove your key."* — the owner's ruling of 2026-10-26, which the
  *    instance carries out (`apps/instance` §`analysis/hosted-settings.ts`).
+ *    [#1935](https://github.com/openzigs/onyourleft/issues/1935), the owner's
+ *    ruling of 2026-11-03, makes it true where the operator's command also set
+ *    a key for the account: removing the rider's key then leaves a key that
+ *    serves it, so `clearKey` keeps the list and only withdrawing deletes it.
  *
  * It names no vendor and no model (ADR 0031 D-4): the service is named by the
  * address the rider typed.
@@ -116,7 +120,8 @@ export function hostedInstanceConsent(endpoint: string): HostedInstanceConsent {
         'privacy zones — their names, where they are and how large — when you agree, and again ' +
         'each time you ask for a ride analysis by this service. They are sealed on the way, and ' +
         'your instance keeps them with your account. Your instance deletes them when you ' +
-        'withdraw or remove your key.',
+        'withdraw your agreement. It also deletes them when you remove your key, unless the ' +
+        "operator's command set a key for your account: then they stay until you withdraw.",
       `Your key is held by your instance, encrypted, and is sent only to ${endpoint}. It is never ` +
         'sent back to this device and is never put in a file the app or your instance exports. ' +
         HOSTED_KEY_OPERATOR_CAN_READ,
@@ -252,10 +257,25 @@ export const HOSTED_ANSWER_REFUSAL_TEXT = {
 
 export type HostedAnswerRefusal = keyof typeof HOSTED_ANSWER_REFUSAL_TEXT;
 
-/** Said when the instance did not answer, or answered something this cannot read. */
+/**
+ * Said when the instance did not answer a READ of the settings, or answered
+ * something this cannot read. Nothing was asked to change, so nothing did.
+ */
 export const HOSTED_UNREADABLE =
   'Your instance did not answer, or answered something this app cannot read. Nothing was ' +
   'changed, and nothing was sent to a service.';
+
+/**
+ * Said when a CHANGE — a key stored or removed, an agreement given or
+ * withdrawn — had no answer this can read (#1796). The request may have
+ * reached the instance, and been done, before its answer was lost, so this
+ * says it cannot tell and never that nothing changed. None of the four sends
+ * anything to a service.
+ */
+export const HOSTED_CHANGE_UNKNOWN =
+  'Your instance did not answer, or answered something this app cannot read, so this app ' +
+  'cannot tell whether your change was made. Nothing was sent to a service. Open this page ' +
+  'again to see what your instance holds.';
 
 /** Said by an instance that cannot hold a rider's own key. */
 export const HOSTED_NOT_OFFERED =

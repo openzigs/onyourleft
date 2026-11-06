@@ -89,7 +89,7 @@ export const ROOM_ROUTES: readonly Route[] = [
     operationId: 'createRoom',
     reaches: 'own',
     summary:
-      'Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over.',
+      'Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over. A `lapRace: { laps, items }` makes a private race a lap race on the creator’s loop, `lengthMetres` being one lap (#1910): refused for a group ride, a route that is not a loop, or a public room.',
     identity: true,
     rooms: true,
     auth: 'session',
@@ -106,6 +106,8 @@ export const ROOM_ROUTES: readonly Route[] = [
         gpx: string,
         visibility: { type: 'string', enum: ['private', 'public'] },
         startsAt: { type: 'integer' },
+        // #1910: a private lap race on a loop — `lengthMetres` is one lap.
+        lapRace: object({ laps: { type: 'integer' }, items: { type: 'boolean' } }),
       },
       ['kind', 'ridingPosition', 'loop', 'lengthMetres', 'grades', 'gpx'],
     ),
@@ -136,15 +138,20 @@ export const ROOM_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'not_found', 'rate_limited'],
     response: {
       contentType: 'application/json',
-      schema: object({
-        roomId: string,
-        kind,
-        ridingPosition: position,
-        drafting: { type: 'boolean' },
-        loop: { type: 'boolean' },
-        routeSha256: string,
-        creator: { type: 'boolean' },
-      }),
+      schema: object(
+        {
+          roomId: string,
+          kind,
+          ridingPosition: position,
+          drafting: { type: 'boolean' },
+          loop: { type: 'boolean' },
+          routeSha256: string,
+          creator: { type: 'boolean' },
+          // #1912: a lap race's laps and items; never its seed.
+          lapRace: object({ laps: { type: 'integer' }, items: { type: 'boolean' } }),
+        },
+        ['roomId', 'kind', 'ridingPosition', 'drafting', 'loop', 'routeSha256', 'creator'],
+      ),
     },
     handle: async (context) =>
       answer(await roomsOf(context).join(callerOf(context), context.json, context.client)),
@@ -201,15 +208,20 @@ export const ROOM_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'not_found', 'not_eligible'],
     response: {
       contentType: 'application/json',
-      schema: object({
-        roomId: string,
-        kind,
-        ridingPosition: position,
-        drafting: { type: 'boolean' },
-        loop: { type: 'boolean' },
-        routeSha256: string,
-        creator: { type: 'boolean' },
-      }),
+      schema: object(
+        {
+          roomId: string,
+          kind,
+          ridingPosition: position,
+          drafting: { type: 'boolean' },
+          loop: { type: 'boolean' },
+          routeSha256: string,
+          creator: { type: 'boolean' },
+          // #1912: a lap race's laps and items; never its seed.
+          lapRace: object({ laps: { type: 'integer' }, items: { type: 'boolean' } }),
+        },
+        ['roomId', 'kind', 'ridingPosition', 'drafting', 'loop', 'routeSha256', 'creator'],
+      ),
     },
     handle: async (context) =>
       answer(await roomsOf(context).joinPublic(callerOf(context), context.params.roomId ?? '')),
@@ -384,7 +396,16 @@ export const ROOM_ROUTES: readonly Route[] = [
         found.seat.athleteId,
         { reason: context.json.reason },
       );
-      if (removed.ok) await context.probes?.removeFromRoom?.(found.roomId, found.seat.athleteId);
+      if (removed.ok) {
+        await context.probes?.removeFromRoom?.(found.roomId, found.seat.athleteId);
+        // #876: and its Discord voice, once the rider is out of the room.
+        await context.probes?.afterRoomRemoval?.({
+          roomId: found.roomId,
+          actorId: caller.athleteId,
+          targetId: found.seat.athleteId,
+          logId: removed.value.logId,
+        });
+      }
       return moderationAnswer(removed, (value) => json(value));
     },
   },

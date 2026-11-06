@@ -34,6 +34,8 @@
   Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
   and the Record-Keeping Guidance (spike 0019 §5 items 1–3). They are to be read before the first
   review, which is due within 3 months of opening (owner, 2026-09-30).
+  **Read in full on 2026-11-03** ([#1365](https://github.com/openzigs/onyourleft/issues/1365)):
+  what each changes is under [Amendments](#amendments), for the owner to decide.
 - **Related drafts**: [children's access assessment](childrens-access-assessment.md),
   [notice-and-action and complaints](notice-and-action.md),
   [statements of reasons](statement-of-reasons.md), [DSA scope](dsa-scope.md). The operator's
@@ -219,6 +221,7 @@ alternative measures and of how they comply.
 | ICU C1 | A content moderation function that reviews suspected illegal content | The owner, through the moderation routes (`docs/moderation.md`). The procedure is [notice-and-action](notice-and-action.md) |
 | ICU C2 | Swift take-down | Hide a display name; suspend. **Taking down one item** (a route in a room, a result, a room listing) is not built: filed as [#913](https://github.com/openzigs/onyourleft/issues/913) |
 | ICU D1, D2 | Enabling complaints; easy to find, access and use, with a reporting tool *"clearly accessible in relation to that content"* (D2.2(a)) and assistive technology support (D2.4) | Partly. Signed-in riders can report a rider (#83), and in a room (#789). **Reporting by non-users ("affected persons", s.20(5)) and reporting a specific item** is filed as [#907](https://github.com/openzigs/onyourleft/issues/907) |
+| ICU D2.2(a), where the report control is | The reporting tool *"clearly accessible in relation to that content"* | **Measure taken, 2026-11-04** (owner ruling on [#1381](https://github.com/openzigs/onyourleft/issues/1381)). The link to the instance's notice page, with the references to report, sits next to the content it is about: under a room (its listing and its route) and under a race's result (the room, the route and each row), where the rider reads them ([#1877](https://github.com/openzigs/onyourleft/pull/1877)). The ride screen itself has no report control: nobody fills in a form while pedalling, and a rider reports from the room or the result when the ride is over. Revisit at the first review, and sooner if a report shows the placement is not reaching the person who saw the content. A change to where the control is, is a significant change under Step 4 (point 6 above) |
 | ICU D7 | Appropriate action on complaints about suspected illegal content, considered promptly | The procedure in [notice-and-action](notice-and-action.md). Target times (owner, 2026-09-30): 48 hours for notices of illegal content (s.10(3A)), and 7 days for other reports and complaints |
 | ICU D9, D10 | Appeals determined promptly, and action after the determination | **Not built.** Filed as [#911](https://github.com/openzigs/onyourleft/issues/911). ⚠️ With one moderator, an appeal is decided by the person who took the decision. A notice or complaint about the only moderator is handled as the owner decided on 2026-09-30: [notice-and-action](notice-and-action.md#a-notice-or-complaint-about-the-moderator) |
 | ICU D11, D12, D13 | Proactive-technology complaints; all other relevant complaints, directed to a responsible individual (D12.3); manifestly unfounded complaints | No proactive technology is used, so D11 has nothing to act on. D12: the owner. D13: the procedure says how an unfounded complaint is recorded |
@@ -284,7 +287,190 @@ as a significant change that needs a further assessment **before** it ships:
    §2 Q5).
 4. Reading the three Ofcom documents named at the top (the Risk Assessment Guidance, the Children's
    Access Assessments Guidance and the Record-Keeping Guidance) in full, before the first review.
+   **Read on 2026-11-03: see [Amendments](#amendments).**
 
 Decided by the owner on 2026-09-30, and no longer open here: the level for harassment and stalking
 (low), the ICU A2 accountable individual (the owner, who is also the governance body), that the
 Discord voice link is not part of the service assessed, and the contact address.
+
+## Amendments
+
+### 2026-11-03: Ofcom's Risk Assessment Guidance and Record-Keeping Guidance, read in full
+
+> **An agent's summary for the owner** ([#1365](https://github.com/openzigs/onyourleft/issues/1365):
+> *"Owner's hands (or an agent's summary for the owner)"*). It is **not legal advice**. **It changes
+> no level, measure or conclusion the owner adopted on 2026-09-30.** Where the guidance points to a
+> change, this entry says so and leaves the decision to the owner, at or before the first review.
+> The Children's Access Assessments Guidance is the subject of the matching entry in the
+> [children's access assessment](childrens-access-assessment.md#amendments).
+
+**What was read, and how.** Ofcom still answers `403` to `curl` and WebFetch, as spike 0019 §5
+recorded. Each PDF was fetched from the Internet Archive's capture of the exact URL that Ofcom's
+*Online safety regulatory documents and guidance* page links. That page, as captured on 2026-09-25,
+lists both documents as the current versions. The text was extracted with `pdftotext` and read in
+full. The Search Risk Profile (Part 3 §1, Table 9.2) was read but not applied, because it is for
+search services.
+
+| Document | Version | Ofcom URL (as linked on 2026-09-25) | Archive capture | SHA-256 of the PDF read |
+|---|---|---|---|---|
+| Risk Assessment Guidance and Risk Profiles | **V2.0, "Published 25 June 2026"**, 84 pages | `…/illegal-harms/updates/risk-assessment-guidance-and-risk-profiles.pdf?v=419947` | 2026-07-02 | `c3380670eddc2c9ffe611d4ae8dde2c8e0282b62458bc1c758ef2d8e711c05df` |
+| Record-Keeping and Review Guidance | **V3.0, "Published 25 June 2026"**, 17 pages | `…/illegal-harms/updates/record-keeping-and-review-guidance.pdf?v=420034` | 2026-07-02 | `733b3f213d614c294b19efb112b3f09788e0389547a5258a492c0f70de2a68bd` |
+
+The `…` stands for `https://www.ofcom.org.uk/siteassets/resources/documents/online-safety/information-for-industry`.
+The same page lists the version this assessment relied on (O9, headed 16 December 2024) as
+**superseded**. Paragraph numbers below are the guidance's own: "RAG" is the Risk Assessment
+Guidance, "RKG" the Record-Keeping and Review Guidance.
+
+#### What the Risk Assessment Guidance changes
+
+**1. There are 18 kinds of priority illegal content, and Step 2 has no row of its own for five of
+them** (cyberflashing shared a row with intimate image abuse).
+RAG Table 1 and Appendix A list: terrorism; CSEA (grooming, image-based CSAM, CSAM URLs); hate;
+harassment, stalking, threats and abuse; controlling or coercive behaviour; intimate image abuse;
+extreme pornography; sexual exploitation of adults; human trafficking; unlawful immigration; fraud
+and financial offences; proceeds of crime; drugs and psychoactive substances; firearms, knives and
+other weapons; encouraging or assisting suicide and serious self-harm; foreign interference; animal
+cruelty; cyberflashing. A U2U service also assesses image-based CSAM, CSAM URLs and grooming
+**separately**, and gives CSEA an overall level (RAG ¶2.7, ¶3.4). The rows the Step 2 table lacks,
+with levels **proposed by this reading for the owner to adopt or change**:
+
+| Kind | Risk Profile factors present (below) | Proposed level | Reasons |
+|---|---|---|---|
+| Extreme pornography | None of the four listed | **Negligible** | The offence is possessing extreme pornographic images. The instance shows no images or video, so it is not possible here |
+| Firearms, knives and other weapons | 3b (anonymous profiles) | **Low** | Only through a display name, which is at most 32 characters (`MAXIMUM_DISPLAY_NAME_SCALARS`) and which a moderator can hide. No listings, payments or messaging |
+| Animal cruelty | None of the six listed | **Low** | No images, video, livestreaming or comments. A display name is the only text another rider sees |
+| Cyberflashing (now its own kind, not part of intimate image abuse) | 3a, 3b | **Negligible** | The offence is sending a photograph or film of genitals. Nothing on the instance sends an image |
+| CSAM URLs (U2U only) | None of the seven in RAG Table 13.1 (URLs), unless the owner answers yes to questions 2 or 4b below, and then few | **Low** | A display name is free text, so a URL can be typed into one (RAG fn 78 counts a URL in plain text). The URL table's "negligible" needs a service where users cannot share text; its "low" needs no evidence and few of its factors, which fits. An account is required, so its "high" (text shared without an account) does not apply |
+| CSEA, overall | — | **Low** | The highest of its parts: grooming and CSAM URLs low, image-based CSAM negligible |
+
+"Encouraging or assisting serious self-harm" in Step 2 is now **encouraging or assisting suicide (or
+attempted suicide) and serious self-harm** (RAG Appendix A row 15). The level the owner adopted (low)
+is unaffected by the change of name.
+
+**2. The Risk Profile questionnaire, answered** (RAG Part 3 §1, Figure 1; a record of the answers is
+what RAG ¶2.22–2.23 and RKG ¶3.7(a)–(b) ask for). Proposed answers, for the owner:
+
+| Question | Proposed answer | Why |
+|---|---|---|
+| 1a Social media · 1b Messaging · 1d Adult · 1e Forum or chat room · 1f Marketplace · 1g File-sharing | No | None of these is offered (Step 1 above) |
+| **1c Gaming service** (*"services which allow users to interact within partially or fully simulated virtual environments"*) | **Yes** | **New.** In a group ride or race the room re-simulates every rider on a route and sends each the others' progress (`apps/instance/src/room/core/room.ts`). Key harms: terrorism, CSEA (grooming), hate, and harassment, stalking, threats and abuse |
+| 2 Child users | **The owner's answer** | It follows the [children's access assessment](childrens-access-assessment.md), whose 2026-11-03 amendment finds the guidance does not support its conclusion as recorded |
+| 3a User profiles | Yes | Display names, already in Step 1 |
+| **3a Fake user profiles** | **Yes** | **New.** A display name is self-chosen and unverified, so one rider can take another's name. Key harms: grooming; harassment; controlling or coercive behaviour; proceeds of crime; fraud; foreign interference |
+| **3b Anonymous user profiles** | **Yes** | **New.** RAG fn 57 counts an alias (*"pseudonymity"*) where a user's identity is unknown to other users, which a self-chosen display name is. Users without accounts: no, because all nine room routes need a session (`apps/instance/src/rooms/routes.ts`) |
+| 4a User connections (follow or subscribe) | No | There is no follower graph |
+| **4b User groups** | **The owner's answer, or a lawyer's** | A private room joined by its code is a closed group of riders for a ride's lifetime, with no messaging in it. Whether that is a "user group" turns on the Register of Risks glossary, which was not read |
+| 4b Group messaging · 5a Livestreaming · 5b Direct messaging · 5c Encrypted messaging · 5d Commenting · 5e Images or video · 5g Re-posting | No | None is offered. Voice is on Discord, which the owner ruled is not part of the service assessed |
+| 5f Posting or sending location information | Yes | Routes in rooms, already in Step 1 |
+| 6 Goods or services for sale · 7a Searching user-generated content · 7b Hyperlinking · 8 Recommender systems | No | None is offered. The listing is ordered by start time, then creation time. Riders cannot post links, though a display name can hold a URL as text (CSAM URLs, above). The Discord invite is made by the owner's bot, not by a rider |
+| General: user base demographics; business model; commercial profile | Apply to every service | **Commercial profile is new to this record.** RAG Table 9 names *"low capacity or early-stage services"* as raising the likelihood of different kinds of illegal harm, because they *"may have limited technical skills and financial resources to introduce effective risk management"*. One owner who is also the only moderator is that profile |
+
+**3. What the new factors do to the adopted levels.** Counted from RAG Table 9.1, with the answers
+above (4b and 2, which are the owner's, left out; each adds one where it is listed):
+
+| Kind | Factors present / factors listed for it | Adopted level |
+|---|---|---|
+| Harassment, stalking, threats and abuse | **5 / 13**: 1c, 3a, 3a fake, 3b, 5f | Low (owner) |
+| Grooming | 4 / 16: 1c, 3a, 3a fake, 5f | Low |
+| Hate | 3 / 11: 1c, 3a, 3b | Low |
+| Foreign interference | 3 / 13: 3a, 3a fake, 3b | Low |
+| Controlling or coercive behaviour | 2 / 8: 3a fake, 5f | Low |
+| Terrorism · drugs · fraud · proceeds of crime · human trafficking | 2 each | Low |
+| Cyberflashing | 2 / 7: 3a, 3b | Negligible (proposed in point 1: the offence needs an image) |
+| Every other kind | 0 or 1 | As adopted |
+
+- **Harassment, stalking, threats and abuse.** RAG Table 13: *low* fits a service that has *"used
+  evidence … and … concluded that there is no evidence of this, and … identified no or few specific
+  risk factors"*; *medium* fits *"several specific risk factors"* where the provider *"cannot
+  demonstrate"* its systems are effective. RAG ¶3.3: *"Where the evidence of risk is not conclusive …
+  we expect providers to err on the side of caution and select the higher risk level."* With five of
+  thirteen factors and no evidence from use yet, **the guidance points towards medium for this kind
+  until evidence from use supports low.** The owner's rating of low stands until the owner changes it.
+  If it became medium, ICU D3–D6 come in (Step 2 above), and one more kind at medium would make the
+  service multi-risk.
+- **Grooming.** Without evidence that grooming has happened, RAG Table 13.3 rates a service medium or
+  high only where users can communicate one-to-one with child users. The instance has no messaging,
+  so the table's low row fits whatever the answer to question 2. RAG fn 91: children outside the UK count for grooming.
+- **Hate and foreign interference** have three factors each, all of them display names or the game.
+  Low remains arguable, and the first review should test it against the report queue.
+
+**4. What the record must hold that this one does not yet** (RAG Table 8, RKG ¶3.6–3.7):
+
+- confirmation that the Risk Profiles were consulted, with the factors found: point 2 above, once the
+  owner adopts it;
+- a level for every one of the 18 kinds, for each CSAM sub-kind and for CSEA overall: point 1 above;
+- **a list of the evidence for each kind**. Every level above rests on reasoning about features. The
+  core inputs (RAG Table 10) are the Risk Profiles, user complaints and reports, user data,
+  retrospective analysis of incidents, and evidence from existing controls. The report queue, the
+  moderation log and #912's record of each notice exist now, and the first review should list them
+  for each kind;
+- confirmation that the findings went through governance channels. The owner is the governance body
+  (ICU A2, above), so the owner's approval is that confirmation, and the record should say so;
+- **a written policy for keeping the assessment up to date** that names a review cycle of no more than
+  12 months and a responsible person (RAG ¶2.48–2.49, ¶2.68). Proposed: *"The owner reviews this
+  assessment at least every 12 months, first within 3 months of the instance opening to the public,
+  before any change in Step 4's list, and whenever Ofcom changes a Risk Profile that applies to this
+  service. The owner is responsible."*
+
+**5. A trigger Step 4 does not list.** The duty to keep the assessment up to date includes updating
+it *"if Ofcom makes any significant change to a Risk Profile that relates to your service"* (RAG
+¶2.44(b), ¶2.50–2.53). V2.0 has 18 kinds where the version relied on had 17, and it links the
+new one, cyberflashing, to user profiles, anonymous profiles and user connections among others. It
+was published before this assessment was adopted, so points 1–3 are that update. Ofcom offers email updates of changes to the Risk Profiles
+(¶2.51); subscribing to them is the owner's choice.
+
+**6. More changes Ofcom counts as significant** (RAG Part 3 §4, Table 14). Proposed additions to the
+s.9(4) list in Step 4:
+
+- moving the report control, or changing how prominent it is, or how reporting works;
+- any revenue, sponsorship or paid tier, and any change in who runs or owns the instance;
+- promoting the instance to grow its user base faster.
+
+Table 14 also names *"Change in capacity (in terms of number of employees)"*, which the list already
+covers as a second moderator, or losing the only one.
+
+**7. A timing sentence for the lawyer.** RAG ¶2.18 says: *"If your service is in operation on or before
+the publication of this guidance, you need to complete your first risk assessment within three months
+of the date on which this guidance is published."* Read literally against V2.0's date, that is 25
+September 2026, five days before this assessment was completed. It matters only if the instance was
+already a Part 3 service before 25 June 2026 (open point 1). The sentence looks carried over from the
+2024 version, where it set the 16 March 2025 deadline. ¶2.19 repeats the Act's rule for a new service:
+three months from when it starts or comes into scope.
+
+#### What the Record-Keeping and Review Guidance changes
+
+**8. No exemption.** RKG ¶1.2: the guidance *"applies to providers of regulated U2U services"*, and it
+describes no s.23(7) exemption. The open question in the s.23 row of Step 3 is answered as far as
+Ofcom's guidance goes: treat the record-keeping and review duties as applying.
+
+**9. How the records are kept** (RKG ¶2.1–2.7): durable, in English, *"dated when it is made and on each
+occasion that it is updated"*, able to be given to Ofcom *"easily and quickly"*, and with earlier
+versions kept for at least three years after they stop being current. This file's git history is the
+version record. It must not be rewritten, and each update needs a date, as this entry has.
+
+**10. A record for each Codes measure** (RKG ¶4.2): a description, **which Code** it comes from, and
+**the date it takes effect**. Step 3's table has the descriptions and the measure numbers, but no Code
+version and no dates, and its "State on 2026-09-30" column is out of date: #907, #910, #911, #912 and
+#913 closed on 2026-10-16 and #909 on 2026-10-23. The first review should add a date to each measure.
+(This entry checked only that the issues closed. It did not check what they shipped.)
+
+**11. A record of alternative measures** (RKG ¶5.3–5.4). Where an applicable Codes measure is not
+taken, the record must name it, the alternative and its date, how the alternative meets the duty, and
+how s.49(5) (freedom of expression and privacy) was weighed. Step 3 records no alternatives. With one
+moderator, an appeal is decided by the person who took the decision (ICU D9). Whether that meets D9 or
+is an alternative needs a decision, and then a record.
+
+**12. A compliance review, which is a separate duty** (RKG §6). The owner must review compliance with
+ss.10, 20 and 21 (and the other RKG Table 3 duties that apply) *"regularly"*, *"as a minimum … once a
+year"* (¶6.5), and after any significant change. Step 4 commits only to reviewing the assessment.
+Proposed: one review a year that covers both, recorded with its date.
+
+#### The open points above, after this reading
+
+- Open point 4 is done: the documents were read on 2026-11-03.
+- Open point 2 is answered by point 1 of this entry, as a proposal for the owner.
+- **New, for the owner:** the answers to questionnaire questions 2 and 4b; whether to adopt the
+  proposed rows and answers; the level for harassment, stalking, threats and abuse in the light of
+  point 3; and whether the appeal procedure meets ICU D9 or is recorded as an alternative.
+- **Still not read:** Ofcom's Register of Risks (updated 25 June 2026), which RAG Part 1 ¶2.6 recommends and
+  which holds the glossary that would settle question 4b.

@@ -84,6 +84,13 @@ interface ButtonCommonProps {
    * press**: a click still reaches `onClick`, and the caller refuses it there.
    */
   readonly unavailable?: boolean;
+  /**
+   * `aria-busy`, for a button whose action is under way — #1826's *Pair a
+   * steering controller* while the controller is paired. It says nothing a
+   * click is refused by: pair it with {@link unavailable}, and refuse the
+   * press in `onClick`.
+   */
+  readonly busy?: boolean;
   /** The id of an element that explains this button, for `aria-describedby`. */
   readonly describedBy?: string;
   /**
@@ -164,6 +171,7 @@ export function Button({
   type = 'button',
   disabled = false,
   unavailable = false,
+  busy = false,
   describedBy,
   focusOnMount = false,
   ref,
@@ -206,6 +214,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       aria-disabled={unavailable ? true : undefined}
+      aria-busy={busy ? true : undefined}
       aria-describedby={describedBy}
       // Only a toggle says which way it stands. `undefined` renders nothing,
       // so a primary or secondary is never announced as "not pressed".
@@ -219,13 +228,27 @@ export function Button({
 
 export interface ButtonLinkProps {
   readonly children: ReactNode;
-  /** Where it goes — a hash route from `shell/routes.ts` §`hrefFor`. */
+  /** Where it goes — a hash route from `shell/routes.ts` §`hrefFor`, or, when `external`, another site. */
   readonly href: string;
   /** `primary` or `secondary`: a toggle changes a setting, and a link changes the page. */
   readonly variant?: 'primary' | 'secondary';
   readonly onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
   /** `ListDetail.tsx` §`CreateLink`'s marker, which its tests and the panes' skip link find it by. */
   readonly create?: boolean;
+  /**
+   * `ride` for a link a rider presses DURING a ride — #875's *Join voice on
+   * Discord* on a race's start line, the owner's ruling of 2026-11-04 ("make
+   * it a button first", at least 48 px). The same `oyl-button--ride` a
+   * {@link Button} wears ({@link RIDE_SIZE_CLASS}).
+   */
+  readonly size?: 'ride';
+  /**
+   * A link to another site or app, not a hash route: `target="_blank"`, so
+   * inside the Android shell the system opens it rather than the WebView
+   * (`views/AboutView.tsx` §the source link), and `rel="noreferrer"`, so the
+   * other site is not told which page sent the rider.
+   */
+  readonly external?: boolean;
 }
 
 /**
@@ -244,13 +267,18 @@ export function ButtonLink({
   variant = 'primary',
   onClick,
   create = false,
+  size,
+  external = false,
 }: ButtonLinkProps): JSX.Element {
   return (
     <a
-      className={VARIANT_CLASS[variant]}
+      className={
+        size === 'ride' ? `${VARIANT_CLASS[variant]} ${RIDE_SIZE_CLASS}` : VARIANT_CLASS[variant]
+      }
       href={href}
       onClick={onClick}
       data-oyl-create={create ? '' : undefined}
+      {...(external ? { target: '_blank', rel: 'noreferrer' } : {})}
     >
       {children}
     </a>

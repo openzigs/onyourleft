@@ -46,7 +46,7 @@ export const SUBPIXEL_TOLERANCE = 1;
 export const MINIMUM_TIER_RATIO = 1.5;
 
 /** `theme.css` §`--oyl-color-hud-surface`, as `getComputedStyle` spells it. */
-export const HUD_SURFACE = 'rgb(16, 22, 28)';
+export const HUD_SURFACE = 'rgb(16, 18, 21)';
 
 export interface Viewport {
   readonly name: string;
@@ -245,15 +245,52 @@ export function named(items: readonly StageItem[], name: string): StageItem {
 }
 
 /**
+ * #2072 — the time of day's reading. It is drawn in the primary panel's clock
+ * row on every overlay layout but a short corners phone under 51 rem, where
+ * the row already holds the moving time: there, since #2071, it is a
+ * secondary reading in the grid, in the cell the gradient left (`theme.css`
+ * §"THE CLOCK ROW", §"THE GRADIENT, PRIMARY").
+ */
+export const CLOCK_READING = 'reading: Clock';
+
+/** Whether {@link CLOCK_READING} is drawn in the clock row at this viewport. */
+export function clockInTheClockRow(viewport: Viewport): boolean {
+  const narrowOnItsSide =
+    viewport.width >= 736 &&
+    viewport.width < 816 &&
+    viewport.height >= 360 &&
+    viewport.height <= 480;
+  return !narrowOnItsSide;
+}
+
+/**
+ * #2071 — whether the gradient is drawn in the PRIMARY panel at this
+ * viewport, at the primary size: every corners layout, and an upright phone at
+ * least 25.5 rem wide and 53 rem tall (`theme.css` §"THE GRADIENT, PRIMARY").
+ * Elsewhere upright it is drawn in the secondary panel's first cell.
+ */
+export function gradientInPrimary(viewport: Viewport): boolean {
+  const corners = viewport.width >= 736 && viewport.height >= 360;
+  const roomyUpright = viewport.width >= 408 && viewport.height >= 848;
+  return corners || roomyUpright;
+}
+
+/**
  * #1120 — how many `@supports (anchor-name: …)` blocks `theme.css` has, and
  * how many `@supports not (anchor-name: …)` fallbacks. One each for #576's
  * side-camera row on a phone on its side, #1111's moving time below 802 px on
- * its side, and #1111's moving time upright. A block added or taken away
- * changes these, and the case that reads them says which.
+ * its side, #1111's moving time upright, #2072's clock row on every overlay
+ * layout, and #2071's gradient in the secondary panel on an upright phone with
+ * no room for four primary tracks. A block added or taken away changes these,
+ * and the case that reads them says which.
+ *
+ * Plus one anchor block with NO fallback: #2056's header mute drawn beside the
+ * title on a phone, on a menu route only. Without anchor positioning it is the
+ * header's own row, which is what the stylesheet lays out with no rule at all.
  */
-export const ANCHOR_BLOCKS = 3;
+export const ANCHOR_BLOCKS = 6;
 
-export const ANCHOR_FALLBACK_BLOCKS = 3;
+export const ANCHOR_FALLBACK_BLOCKS = 5;
 
 /**
  * #1120 — the stage measured as an engine with NO anchor positioning lays it
@@ -293,13 +330,15 @@ export async function withoutAnchors(
 
 /**
  * Whether the layout at this viewport uses anchor positioning at all
- * (`theme.css`): the short corners layout — 46 rem wide or more, 22.5 to 30 rem
- * tall — and the column layout, under 46 rem wide and 47 rem tall or more.
+ * (`theme.css`): every corners layout — 46 rem wide or more, 22.5 rem tall or
+ * more, since #2072's clock row hangs from the primary panel there; until
+ * then only the short one, 30 rem tall or less — and the column layout, under
+ * 46 rem wide and 47 rem tall or more.
  */
 export function usesAnchorPositioning(viewport: Viewport): boolean {
-  const short = viewport.width >= 736 && viewport.height >= 360 && viewport.height <= 480;
+  const corners = viewport.width >= 736 && viewport.height >= 360;
   const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
-  return short || column;
+  return corners || column;
 }
 
 /**
@@ -311,8 +350,13 @@ export function usesAnchorPositioning(viewport: Viewport): boolean {
  * the room, so this cannot fail there and is not run there; what failed at
  * 360×800 was a standing notice beside it, which §"a ride with a standing
  * notice" holds both ways.
+ *
+ * ⚠️ **390×844 left the set in #2041.** The HUD's numbers are Barlow with
+ * tabular figures since then (ADR 0063 D-5), narrower than the system face
+ * they were measured in, and on CI's fonts the widest ride then had the room
+ * there too, so the control found nothing over the rider.
  */
-export const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '390×844', '360×752']);
+export const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '360×752']);
 
 /** The two ways a stage is laid out (#1120), each with the words a failure carries. */
 export const ANCHORED = 'with anchor positioning';

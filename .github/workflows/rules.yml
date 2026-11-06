@@ -7,8 +7,8 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by jobs side by side -- the SHARDS, five since
-# #1720 -- and one more, `rules`, that does nothing but fail unless every one
+# Since #1285 the work is done by jobs side by side -- the SHARDS, six since
+# #2154 -- and one more, `rules`, that does nothing but fail unless every one
 # of them succeeded. `main` requires a status check whose context is exactly
 # "Repository rules", and that last job is the one that carries the name: a
 # shard reports under its own context, which `main` does not require, so a red
@@ -19,7 +19,10 @@
 #   checks   the bare-clone script checks, format, lint, typecheck, the build,
 #            every checker and its suite, the instance image, the Capacitor
 #            and third-party-notices gates
-#   tests    the accessibility gate and the Vitest suite
+#   tests-1, tests-2
+#            the Vitest suite, divided by Vitest project since #2154: the
+#            `web` project in `tests-1`, every other project and the
+#            accessibility gate in `tests-2`
 #   browser-1, browser-2, browser-3
 #            the pinned Chromium and the browser gate (#63), a third each
 #            since #1720 (halves since #1362), divided by spec file on
@@ -40,8 +43,22 @@ name: Repository rules
 # not covered by the fork-approval gate at all -- is banned by CLAUDE.md section
 # 8 and enforced by rule WF001 in scripts/check-repo-rules.sh. That rule greps
 # this directory for the name, so the name cannot appear here even in a comment.
+#
+# `merge_group` since #2198: `main` merges through GitHub's merge queue, and the
+# queue merges a pull request only once the required "Repository rules" check
+# has reported on the queue's own `gh-readonly-queue/main/...` ref -- the
+# pull request merged with main and with every entry ahead of it. Without this
+# trigger that check never reports there and every queued pull request waits
+# until the queue's timeout removes it. No job or step here reads a field of
+# the pull_request payload (a base SHA, a label, a number), so every one runs
+# unchanged under it, against the merge group's commit. Unlike `pull_request`,
+# a queue run is in this repository's own context, as a push to `main` is: it
+# holds what the push after the merge would, and only a reviewed pull request
+# that someone with write access queued reaches it. Nothing below references a
+# secret, and the token stays `contents: read`.
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
@@ -58,12 +75,17 @@ permissions:
 # commit was green, and two merges in quick succession would otherwise cancel
 # the first -- leaving a commit on the default branch with no completed run
 # against it, which is the one place the history matters.
+#
+# Never a merge-queue run either (#2198): each queue entry has a ref of its own,
+# so the group never collides, and a cancelled run there is a required check
+# that reports `cancelled` and drops the pull request from the queue. The
+# queue removes an entry it no longer needs by itself.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # --- Shard 1 of 4: everything that is not Vitest and not a browser ------------
+  # --- Shard 1 of 6: everything that is not Vitest and not a browser ------------
   checks:
     name: Checks
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
@@ -274,6 +296,9 @@ jobs:
       #   section 4c). Its suite fakes `docker` on PATH and needs no Docker.
       #   mirror script tests -- #1231. The suite of the script
       #   mirror-base-image.yml runs; a fake `skopeo`, no registry.
+      #   basemap build script tests -- #1557. The suite of
+      #   apps/web/tools/basemap/build.sh; fake `curl`, `git`, `java` and
+      #   `mvn`, no network and no tiles.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -320,6 +345,7 @@ jobs:
           'instance image' 'bash scripts/check-instance-image.sh'
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'
+          'basemap build script tests' 'bash apps/web/tools/basemap/build.test.sh'
           'shard results checker tests' 'bash scripts/check-shard-results.test.sh'
 
       # The generated-artefact gate (#299). `cap sync` writes two files this
@@ -375,32 +401,126 @@ jobs:
       - name: Third-party notices
         run: pnpm run check:notices
 
-  # --- Shard 2 of 4: everything that is Vitest -----------------------------------
+  # --- Shards 2 and 3 of 6: everything that is Vitest, in two parts (#2154) -----
   #
-  # The accessibility gate and the suite, one after the other and alone on
-  # their runner. Not side by side, and not beside anything else: Vitest keeps
-  # three of the four CPUs busy and has a 5 s case timeout that several cases
-  # come within a second of on the slower runner (#651).
+  # The accessibility gate and the suite, alone on their runners. Not side by
+  # side with anything else: Vitest keeps three of the four CPUs busy and has
+  # a 5 s case timeout that several cases come within a second of on the
+  # slower runner (#651).
+  #
+  # ⚠️ TWO jobs since #2154, and a reviewer who remembers one `tests` shard is
+  # reading the old file. One job ran the whole suite, and on 2026-11-04 it
+  # took 739 to 954 s of its 960 s stop on `main` and was cancelled at it on
+  # two pull requests with every test green (run 41911049968). The suite is
+  # divided by Vitest PROJECT, which is how it was measured to divide: of
+  # 1 940 s of summed case time on the EPYC 7763 (`main` run 41886972871),
+  # the `web` project held 1 170 s and every other project 770 s, so `web` is
+  # `tests-1`'s part and the rest is `tests-2`'s, with the accessibility gate
+  # (also `web`, 64 to 88 s) beside the smaller part. docs/agents/ci.md
+  # section 4c "Two Vitest shards -- #2154" has the measurements.
   #
   # `check:test-split` (in the `checks` shard) is what holds that every test
   # file runs exactly once across this workflow and the nightly one: it asks
   # Vitest what `test:a11y`, `test:required` and `test:uninstrumented` each
-  # select and fails a file in none or in two. The first two are this shard's
-  # two steps and nightly-split.test.ts fails if either command leaves it. The
-  # suite is NOT divided between jobs: 364 to 376 s on the slower runner is
-  # not the long pole, the browser gate is.
-  tests:
-    name: Tests
+  # select and fails a file in none or in two, and since #2154 that the
+  # required run's parts, `test:required:shard-1` and `-2`, are each
+  # `test:required` with a `--project` filter, select at least one file each,
+  # and between them every file it selects exactly once. A NEW Vitest project
+  # lands in `tests-2` without an edit here: its pattern is `!web`.
+  # nightly-split.test.ts fails if a part's command, or the accessibility
+  # gate, leaves these two jobs.
+  tests-1:
+    name: Tests (1 of 2)
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop, and docs/agents/ci.md section 4c "Shards
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
-    # 448 to 461 s on the slower runner. ⚠️ 16 minutes since #1720, which
-    # added the first rows to the measured table since this shard grew: it
-    # took 604 to 635 s on the last five green `main` runs and 636 s on the
-    # EPYC 7763 in #1720's own, 264 s inside 15 minutes, short of the five
-    # minutes nightly-split.test.ts holds every stop clear of.
+    # 16 minutes since #1720, and NOT raised by #2154, which divided the run
+    # instead: a stop is not a budget. nightly-split.test.ts holds it five
+    # minutes clear of the slowest run in section 4c's table.
+    timeout-minutes: 16
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in the `checks` shard, which has the
+        # provenance.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Each shard is its own runner, so each prints its own CPU: a shard's
+      # duration means nothing without it (#866, #864).
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      # The toolchain, exactly as in the `checks` shard: .nvmrc, pnpm from the
+      # `packageManager` field through corepack, and a frozen install with no
+      # dependency cache (3 to 5 s, #651).
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `test:required`, not `test` and -- since #1280 -- not `test:coverage`.
+      # ⚠️ THIS STEP TAKES NO COVERAGE, and a reviewer who remembers a coverage
+      # table in this job's summary is reading the old file. The owner's ruling
+      # of 2026-10-12 (#1280): V8's instrumentation cost this step 106 to 133 s
+      # on the EPYC 7763 (364 s and 376 s without it against 482 s to 497 s
+      # with, run 38243281606), the job was being cancelled at its stop with
+      # every test green, and coverage is REPORTED, never gated (ADR 0005
+      # decision C sets no percentage floor and forbids inventing one -- the
+      # gate is the mutation list in the pull request body). So the report is
+      # taken by `test:coverage` in .github/workflows/nightly.yml, over the
+      # same files, and published in that run's summary with its HTML as an
+      # artefact. EVERY TEST THAT RAN HERE STILL RUNS HERE: `test:required` is
+      # `test:coverage` without the flag, and `check:test-split` fails the two
+      # if their excludes differ. What a pull request loses is the table.
+      #
+      # ⚠️ NOT on one runner with the browser gate, and that was measured rather
+      # than assumed (#651). They are the two longest steps and it was the
+      # obvious move; run 36323764725 did it and went red on BOTH halves. Each
+      # is CPU-bound on its own -- Vitest keeps three of the four CPUs busy, and
+      # SwiftShader draws the game on the CPU -- so together the plain game
+      # page's load passed its case's 60 s, and two Vitest cases that take
+      # 3.5 to 4.4 s alone passed their 5 s. Two gates that go red because of
+      # each other are not two gates. Since #1285 each has a runner of its own,
+      # which is the same separation without one waiting for the other.
+      #
+      # ⚠️ Since #852 it is NOT the whole suite. The two heaviest files -- the
+      # #545 near-field rides and the FIT decode fuzz -- spent about 300 s of
+      # this step's summed test time under V8's instrumentation, which slows
+      # their hot loops about three times, so this step excludes them
+      # and `test:uninstrumented` runs them with none. They gate exactly as
+      # before; the coverage REPORT stops counting what those two files alone
+      # execute, which section 5 says is a signal and not a gate. `check:test-split`,
+      # in the `checks` shard, is what stops the two lists coming apart
+      # -- a file in no run is a file CI never runs. ⚠️ Since #866 those
+      # two files run in the NIGHTLY workflow, not in this job (below), and
+      # since #1076 so does realistic-textures.test.ts. Since #1076 this step
+      # also excludes the `.a11y.test.` files, which the Accessibility step
+      # runs (in `tests-2` since #2154), so they run once rather than twice.
+      #
+      # ⚠️ Since #2154 this is the `web` project's part of that run, and the
+      # other projects' part is `tests-2`'s; `pnpm run test:required` is still
+      # the whole run, locally.
+      - name: Tests
+        run: pnpm run test:required:shard-1
+
+  tests-2:
+    name: Tests (2 of 2)
+    runs-on: ubuntu-latest
+    # @see `tests-1`'s stop.
     timeout-minutes: 16
     steps:
       - name: Check out the repository
@@ -464,52 +584,16 @@ jobs:
       # gate, so a mis-scoped gate is reported as that rather than as a green
       # run over fewer files.
       #
-      # Alone, since #651: see this shard's own comment for why.
+      # Alone, since #651: see the Vitest shards' comment for why. Beside the
+      # smaller part of the suite since #2154.
       - name: Accessibility
         run: |
           pnpm run check:a11y-suite
           pnpm run test:a11y
 
-      # `test:required`, not `test` and -- since #1280 -- not `test:coverage`.
-      # ⚠️ THIS STEP TAKES NO COVERAGE, and a reviewer who remembers a coverage
-      # table in this job's summary is reading the old file. The owner's ruling
-      # of 2026-10-12 (#1280): V8's instrumentation cost this step 106 to 133 s
-      # on the EPYC 7763 (364 s and 376 s without it against 482 s to 497 s
-      # with, run 38243281606), the job was being cancelled at its stop with
-      # every test green, and coverage is REPORTED, never gated (ADR 0005
-      # decision C sets no percentage floor and forbids inventing one -- the
-      # gate is the mutation list in the pull request body). So the report is
-      # taken by `test:coverage` in .github/workflows/nightly.yml, over the
-      # same files, and published in that run's summary with its HTML as an
-      # artefact. EVERY TEST THAT RAN HERE STILL RUNS HERE: `test:required` is
-      # `test:coverage` without the flag, and `check:test-split` fails the two
-      # if their excludes differ. What a pull request loses is the table.
-      #
-      # ⚠️ NOT on one runner with the browser gate, and that was measured rather
-      # than assumed (#651). They are the two longest steps and it was the
-      # obvious move; run 36323764725 did it and went red on BOTH halves. Each
-      # is CPU-bound on its own -- Vitest keeps three of the four CPUs busy, and
-      # SwiftShader draws the game on the CPU -- so together the plain game
-      # page's load passed its case's 60 s, and two Vitest cases that take
-      # 3.5 to 4.4 s alone passed their 5 s. Two gates that go red because of
-      # each other are not two gates. Since #1285 each has a runner of its own,
-      # which is the same separation without one waiting for the other.
-      #
-      # ⚠️ Since #852 it is NOT the whole suite. The two heaviest files -- the
-      # #545 near-field rides and the FIT decode fuzz -- spent about 300 s of
-      # this step's summed test time under V8's instrumentation, which slows
-      # their hot loops about three times, so this step excludes them
-      # and `test:uninstrumented` runs them with none. They gate exactly as
-      # before; the coverage REPORT stops counting what those two files alone
-      # execute, which section 5 says is a signal and not a gate. `check:test-split`,
-      # in the `checks` shard, is what stops the two lists coming apart
-      # -- a file in no run is a file CI never runs. ⚠️ Since #866 those
-      # two files run in the NIGHTLY workflow, not in this job (below), and
-      # since #1076 so does realistic-textures.test.ts. Since #1076 this step
-      # also excludes the `.a11y.test.` files, which the Accessibility step
-      # above runs, so they run once rather than twice.
+      # Every project but `web`: @see `tests-1`'s `Tests` step.
       - name: Tests
-        run: pnpm run test:required
+        run: pnpm run test:required:shard-2
 
       # ⚠️ The other half of #852's split, `test:uninstrumented`, is NOT here
       # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is
@@ -517,7 +601,7 @@ jobs:
       # a `Tests outside coverage` step here is reading the old file.
       # `check:test-split` still fails a file in no Vitest run.
 
-  # --- Shards 3 to 5 of 5: the browser gate (#63), in three parts (#1362, #1720) --
+  # --- Shards 4 to 6 of 6: the browser gate (#63), in three parts (#1362, #1720) --
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -632,7 +716,10 @@ jobs:
       # Both spellings, because the image names it `.list` today and apt's
       # deb822 format would name it `.sources`; `rm -f` because a missing file
       # is this step's desired outcome rather than an error. It runs before
-      # the step that installs the browser.
+      # the step that installs the browser. ⚠️ Since #2207 nothing in this
+      # workflow runs apt, so here it is a no-op kept as a guard, as it is in
+      # nightly.yml since #2209; it is still load-bearing in demo-video.yml,
+      # whose ffmpeg comes from apt, and which points at this comment.
       - name: Drop the unrelated Chrome apt source
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
@@ -642,21 +729,30 @@ jobs:
       # ships Chromium revision 1243 and `playwright install` fetches exactly
       # that. (#206 took this from 1.56.0/1194; docs/agents/ci.md section 4c
       # requires these two numbers to move together and to be updated in the
-      # same pull request as the bump.) `--with-deps` installs the shared
-      # libraries a headless Chromium needs on a bare runner, with the
-      # passwordless sudo ubuntu-latest grants. It is mostly a ~170 MB
-      # download, the one step here whose duration depends on somebody else's
-      # CDN -- and on Ubuntu's mirror. ⚠️ A step of its own since #1285 (it was
-      # one of `Checks, concurrently`'s commands, where it had three CPUs'
+      # same pull request as the bump.) ⚠️ A step of its own since #1285 (it
+      # was one of `Checks, concurrently`'s commands, where it had three CPUs'
       # worth of company), with a stop of its own, so the latest the gate can
-      # start is a number this file states. Ten minutes and not five: on
-      # #1285's first measuring run (38261783717) the runner's Ubuntu mirror
-      # served 22 MB of fonts at about 40 kB/s, and a five-minute stop turned
-      # a slow mirror into a red pull request, which the one job never did.
-      # Alone it takes about 25 s.
+      # start is a number this file states.
+      #
+      # ⚠️ No `--with-deps` since #2207, and `--only-shell`. Every timed-out
+      # install (three on 2026-11-05, each at this step's ten minutes) spent
+      # its time in apt: `--with-deps` downloaded 21.9 MB of fonts the image
+      # lacks from the runner's Ubuntu mirror at 30 to 40 kB/s, while
+      # Playwright's CDN served all three browser archives in about 6 s. The
+      # image already has every shared library a headless Chromium needs (apt
+      # reported each one "already the newest version"), and the app bundles
+      # its own font, Barlow, so the step now asks apt for nothing; a library
+      # a future image drops fails the gate's first launch with Playwright's
+      # "Host system is missing dependencies", red and named. `--only-shell`
+      # because a headless run with no `channel` launches the headless shell,
+      # never the full Chromium (nightly-split.test.ts holds both). Not a
+      # cache: the CDN half was never slow, and a restore costs what the
+      # download does. docs/agents/ci.md section 4c "The browser install --
+      # #2207" has the times before and after. The ten-minute stop is
+      # unchanged; it is now only a stop on a hung CDN.
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       # Builds the harness and drives it; docs/agents/commands.md section 4a documents both
       # halves as one command. The two `vite build`s are its own, so this shard
@@ -729,7 +825,7 @@ jobs:
 
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Browser gate
         timeout-minutes: 14
@@ -777,7 +873,7 @@ jobs:
 
       - name: Install the pinned Chromium
         timeout-minutes: 10
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Browser gate
         timeout-minutes: 14
@@ -813,7 +909,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, tests, browser-1, browser-2, browser-3]
+    needs: [checks, tests-1, tests-2, browser-1, browser-2, browser-3]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.

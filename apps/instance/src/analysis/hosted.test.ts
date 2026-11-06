@@ -417,9 +417,10 @@ describe('the masking item', () => {
       'a longitude that is text',
       '{"words":[],"zones":[{"label":"x","latitude":1,"longitude":"0","radius":5}]}',
     ],
+    // #1796: nought is a distance the device's store holds (`masking-item.test.ts`); below it is not.
     [
-      'a radius of nought',
-      '{"words":[],"zones":[{"label":"x","latitude":1,"longitude":0,"radius":0}]}',
+      'a radius below nought',
+      '{"words":[],"zones":[{"label":"x","latitude":1,"longitude":0,"radius":-1}]}',
     ],
     ['a zone with no label', '{"words":[],"zones":[{"latitude":1,"longitude":0,"radius":5}]}'],
   ])('refuses %s whole', (_case, text) => {

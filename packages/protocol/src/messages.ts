@@ -11,13 +11,16 @@
  *
  * ```text
  * client → room   hello   { protocol, physicsVersion, ticket }
- * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig } | refuse { reason }
+ * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig, voiceInvite? } | refuse { reason }
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
- * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags]] }   every 1 s
+ * client → room   item-use { sequence, atMs }                               a lap race only
+ * client → room   lane    { sequence, atMs, lane }                           a lap race only
+ * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags, …lap]], itemEvents? }   every 1 s
  * room → client   countdown { startsInMs }                                  a race only
  * room → client   name    { riderId, displayName }                           a race only
  * room → client   standings { tick, riders: [[id, gap ds, W/kg ×10, flags]] }  a race only, every 1 s
  * room → client   finish  { order: [riderId, …] }                            a race only
+ * room → client   voice   { voiceInvite? }                                    the room's voice link changed
  * ```
  *
  * ## Three things that are decisions
@@ -28,6 +31,12 @@
  * - **A report carries no `riderId`.** ADR 0028 D-2's report names one, and
  *   the room attaches it — from the connection the report arrived on, never
  *   from the wire. A rider id a client could write is one it could forge.
+ * - **A lap race's client sends inputs, never outcomes** (#1908, ADR 0060
+ *   D-5.4). It may ask to use its held item ({@link ItemUse}) and to change
+ *   lane ({@link LaneChange}); which item it holds, whether a use hit anyone,
+ *   its race offset, its laps and its place are the room's, and arrive in the
+ *   frame. A client message that names an outcome is refused
+ *   `outcome-from-client` (`schema.ts` §`CLIENT_OUTCOME_FIELDS`).
  * - ⚠️ **No field anywhere carries a latitude or a longitude.** A rider is
  *   placed by distance along the route (ADR 0028 D-7.3), and the route is
  *   named by the SHA-256 of its content, never inlined: its geometry travels
@@ -47,8 +56,24 @@
  * `protocol-mismatch` at its hello, and told to update
  * (`apps/web` §`room-ride.ts` `ROOM_REFUSED_TEXT`), rather than seated in a
  * race whose list it cannot show.
+ *
+ * **3** since #1908 (epic #1894, [ADR 0060](../../../docs/adr/0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)):
+ * a lap race with items. A welcome may carry the race's laps and items
+ * setting ({@link RoomConfig.lapRace}), a client may send an {@link ItemUse}
+ * and a {@link LaneChange}, and a frame may carry each rider's race offset,
+ * lane, held item and laps ({@link FrameRider}) and the tick's
+ * {@link ItemEvent}s. A version-2 build is refused `protocol-mismatch` at its
+ * hello, as a version-1 build was by version 2.
+ *
+ * **4** since #875 (spike 0017 option A, #794): a welcome may carry the
+ * room's Discord voice link ({@link Welcome.voiceInvite}). The decoder refuses
+ * a key it does not know (`codec.ts`, `unknown-key`), so a version-3 build
+ * would refuse every welcome from a room with voice; it is refused
+ * `protocol-mismatch` at its hello instead, and told to update. In the same
+ * unreleased version, #876 added {@link VoiceLink}: the room's link changed
+ * under riders it had already welcomed.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 4;
 
 /** Where a rider's hands are, fixed by the race — `@onyourleft/physics`' `RidingPosition`. */
 export type RidingPosition = 'upright' | 'hoods' | 'drops';
@@ -75,6 +100,52 @@ export interface Report {
   readonly cadenceRpm?: number;
 }
 
+/**
+ * A lap race's input: use the item the room says this rider holds — #1908.
+ *
+ * ⚠️ **It names no item.** The item used is the one the room holds for the
+ * rider, so a client cannot use an item it was never given (#1909 refuses a
+ * use with nothing held by changing nothing).
+ */
+export interface ItemUse {
+  readonly type: 'item-use';
+  /** Increasing per rider, as a {@link Report}'s; the room admits one only past the last it admitted. */
+  readonly sequence: number;
+  /** The client's own clock when the rider pressed, in milliseconds. */
+  readonly atMs: number;
+}
+
+/** A lap race's input: ride in this lane from now — #1908, ADR 0060 D-6.3. */
+export interface LaneChange {
+  readonly type: 'lane';
+  /** Increasing per rider, as a {@link Report}'s. */
+  readonly sequence: number;
+  /** The client's own clock when the rider steered, in milliseconds. */
+  readonly atMs: number;
+  /** `0` to `schema.ts` §`LANE_COUNT` − 1; the middle lane is where a race starts. */
+  readonly lane: number;
+}
+
+/**
+ * An item, by key — `@onyourleft/domain` §`ItemKind`, restated because this
+ * package has no production dependency (`lap-race-agreement.test.ts` holds the
+ * two equal). A key, never a rider-facing word.
+ */
+export type ItemKey = 'tailwind' | 'tow' | 'puddle' | 'crosswind-gust' | 'rain-cape';
+
+/** What a lap racer holds: an item, or `none`. */
+export type HeldItem = ItemKey | 'none';
+
+/** A lap race's items setting, chosen when the room is made and fixed for it — the {@link Drafting} precedent. */
+export type Items = 'on' | 'off';
+
+/** A lap race's settings, said in the welcome so every rider knows them before the start (#1908). */
+export interface LapRaceConfig {
+  /** How many laps of the route the race is: 1 to `schema.ts` §`MAXIMUM_LAPS`. */
+  readonly laps: number;
+  readonly items: Items;
+}
+
 /** What kind of room this is: a race has a finish order, a group ride does not. */
 export type RoomKind = 'race' | 'ride';
 
@@ -94,6 +165,12 @@ export interface RoomConfig {
    * is every rider at `k = 1`, through the same code (ADR 0038).
    */
   readonly drafting: Drafting;
+  /**
+   * Present in a lap race, and only there (#1908): a lap race is a `race` on
+   * a loop route whose welcome carries this. One field holding both settings,
+   * so a welcome cannot carry laps without an items setting or the reverse.
+   */
+  readonly lapRace?: LapRaceConfig;
 }
 
 /** A room's drafting setting (#787). */
@@ -112,6 +189,20 @@ export interface Welcome {
   /** The route, by the SHA-256 of its content, lower-case hex. Never its geometry. */
   readonly routeRef: { readonly sha256: string };
   readonly roomConfig: RoomConfig;
+  /**
+   * The room's Discord voice channel, as an invite link — #875, spike 0017
+   * option A. Present only where the instance's operator turned voice on and
+   * the room has a channel (a rider's private room, `apps/instance`
+   * §`voice/room-voice.ts`), and absent everywhere else: a room works exactly
+   * as it does without it.
+   *
+   * ⚠️ **In the welcome, and so only after admission**: a hello that is
+   * refused is answered by a {@link Refuse}, which carries no link, so a
+   * rider the room does not admit never receives one. Held to
+   * `schema.ts` §`VOICE_INVITE_PATTERN`, so a client can put it in an `href`
+   * knowing it opens Discord's invite host and nothing else.
+   */
+  readonly voiceInvite?: string;
 }
 
 /**
@@ -151,7 +242,13 @@ export const FLAG_COASTING = 2;
  */
 export const FLAG_FINISHED = 4;
 
-/** One rider in a frame. On the wire, a five-slot array in this order. */
+/**
+ * One rider in a frame. On the wire, a five-slot array in this order — or, in
+ * a lap race, nine: the five, then {@link raceOffsetCentimetres},
+ * {@link lane}, {@link held} and {@link lapsDone}, all four or none
+ * (`schema.ts` §`Shape` `tail`). Every one of the four is the ROOM's answer
+ * (ADR 0028 D-2 rule 4, ADR 0060 D-5.4); a client never sends one.
+ */
 export interface FrameRider {
   readonly riderId: number;
   /** Distance along the route, in whole decimetres. */
@@ -165,6 +262,37 @@ export interface FrameRider {
   readonly draftPercent: number;
   /** {@link FLAG_PLAUSIBILITY} and {@link FLAG_COASTING}, or'd. */
   readonly flags: number;
+  /**
+   * A lap race only: how far items have moved this rider from their effort
+   * distance, in whole centimetres, within ± `schema.ts`
+   * §`MAXIMUM_RACE_OFFSET_CENTIMETRES` (ADR 0060 D-3.3's B). Never sent to a
+   * trainer (ADR 0060 D-3).
+   */
+  readonly raceOffsetCentimetres?: number;
+  /** A lap race only: the lane the room has this rider in. */
+  readonly lane?: number;
+  /** A lap race only: the item the room holds for this rider. */
+  readonly held?: HeldItem;
+  /** A lap race only: laps completed at the drawn distance. */
+  readonly lapsDone?: number;
+}
+
+/** What happened to an item on a tick (#1908). */
+export type ItemEventKind = 'pick-up' | 'use' | 'hit';
+
+/**
+ * One item event of a tick, for a client to announce — #1908. On the wire, a
+ * three-slot array in this order.
+ *
+ * ⚠️ **A rider id and an item key, never a place.** A hit names who was hit
+ * and by what kind of item, not where; a client that wants to draw it reads
+ * the rider's distance and lane from the same frame.
+ */
+export interface ItemEvent {
+  readonly riderId: number;
+  /** `pick-up`: the rider now holds the item; `use`: the rider used it; `hit`: an item of this key hit the rider. */
+  readonly event: ItemEventKind;
+  readonly item: ItemKey;
 }
 
 /** The room's tick: the whole field, once a second. */
@@ -174,6 +302,12 @@ export interface Frame {
   /** The last report sequence the room admitted from the recipient; absent before the first. */
   readonly ackSequence?: number;
   readonly riders: readonly FrameRider[];
+  /**
+   * A lap race only: the item events of this tick, at most `schema.ts`
+   * §`MAXIMUM_ITEM_EVENTS`. Absent or empty on a tick with none. An
+   * announcement, never state: every outcome is also in {@link riders}.
+   */
+  readonly itemEvents?: readonly ItemEvent[];
 }
 
 /**
@@ -263,11 +397,25 @@ export interface Finish {
   readonly order: readonly number[];
 }
 
+/**
+ * The room's Discord voice link changed — #876: a rider was removed from the
+ * room or banned, so its channel was replaced (spike 0017 §3.3) and the riders
+ * still in the room are given the new link. Absent `voiceInvite` is no voice
+ * any more. Sent only to riders the room has already welcomed, and never to
+ * the rider who was removed or banned; held to `schema.ts`
+ * §`VOICE_INVITE_PATTERN` as a welcome's link is.
+ */
+export interface VoiceLink {
+  readonly type: 'voice';
+  readonly voiceInvite?: string;
+}
+
 /** What a client may send. */
-export type ClientMessage = Hello | Report;
+export type ClientMessage = Hello | Report | ItemUse | LaneChange;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish;
+export type RoomMessage =
+  Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish | VoiceLink;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

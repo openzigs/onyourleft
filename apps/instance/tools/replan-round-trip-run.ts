@@ -676,6 +676,8 @@ async function oneRun(
   timeoutMs: number,
   variant: number,
   source: MeasuredSource,
+  /** For `instance-hosted`: the origin the consent names, which a hosted start names too (#1796). */
+  endpoint: string | undefined,
 ): Promise<RunRecord> {
   device.takeCrypto();
   const began = performance.now();
@@ -684,6 +686,7 @@ async function oneRun(
     input: syntheticInput(variant),
     templateVersion: '1',
     source,
+    ...(endpoint === undefined ? {} : { endpoint }),
   });
   const startMs = performance.now() - began;
   const jobId = (started.body as { jobId?: unknown } | null)?.jobId;
@@ -931,7 +934,15 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
     }
     starts += 1;
     jobs += 1;
-    const record = await oneRun(device, run, cold, options.runTimeoutMs, jobs, source);
+    const record = await oneRun(
+      device,
+      run,
+      cold,
+      options.runTimeoutMs,
+      jobs,
+      source,
+      hostedOrigin,
+    );
     log(
       `${cold ? 'cold' : 'warm'} ${String(run)}: ${record.status}${record.failure === undefined ? '' : `:${record.failure}`} in ${record.totalMs.toFixed(0)} ms, ${String(record.steps.length)} steps`,
     );

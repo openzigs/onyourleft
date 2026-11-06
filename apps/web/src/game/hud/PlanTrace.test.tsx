@@ -154,6 +154,55 @@ describe('the rider’s mark', () => {
   });
 });
 
+describe('the road ridden and the road ahead — #2070', () => {
+  /** The last `x y` pair of a path's `d`. */
+  function endOf(path: Element | undefined): { readonly x: number; readonly y: number } {
+    const numbers = (path?.getAttribute('d') ?? '')
+      .split(/[ML ]+/)
+      .filter(Boolean)
+      .map(Number);
+    return { x: numbers.at(-2) ?? Number.NaN, y: numbers.at(-1) ?? Number.NaN };
+  }
+
+  it('grows the ridden road on the one mounted panel, as HudPanel re-renders it', async () => {
+    const profile = straightRoute();
+    mounted = await mount(<PlanTrace profile={profile} distance={profile.totalDistance / 4} />);
+    const before =
+      queryAll(mounted.container, '[data-oyl-plan-part="ridden"]')[0]?.getAttribute('d') ?? '';
+
+    await mounted.rerender(<PlanTrace profile={profile} distance={profile.totalDistance / 2} />);
+
+    const after =
+      queryAll(mounted.container, '[data-oyl-plan-part="ridden"]')[0]?.getAttribute('d') ?? '';
+    expect(after.split('L').length).toBeGreaterThan(before.split('L').length);
+  });
+
+  it('draws no ridden road at the start line', async () => {
+    mounted = await mount(<PlanTrace profile={straightRoute()} distance={0} />);
+
+    expect(queryAll(mounted.container, '[data-oyl-plan-part="ridden"]')).toHaveLength(0);
+    expect(queryAll(mounted.container, '[data-oyl-plan-part="ahead"]')).toHaveLength(1);
+  });
+
+  it('ends the ridden road under the rider, and grows it as they ride', async () => {
+    const profile = straightRoute();
+    const total: number = profile.totalDistance;
+    const lengths: number[] = [];
+    for (const distance of [total / 4, total / 2]) {
+      mounted?.unmount();
+      mounted = await mount(<PlanTrace profile={profile} distance={distance} />);
+      const ridden = queryAll(mounted.container, '[data-oyl-plan-part="ridden"]');
+      expect(ridden).toHaveLength(1);
+      const end = endOf(ridden[0]);
+      const mark = markAt();
+      // Under the mark, which is 16 units across (radius 8): the cut is a drawn sample.
+      expect(Math.hypot(end.x - mark.x, end.y - mark.y)).toBeLessThan(1);
+      lengths.push((ridden[0]?.getAttribute('d') ?? '').split('L').length);
+    }
+    expect(lengths[1] ?? 0).toBeGreaterThan(lengths[0] ?? 0);
+  });
+});
+
 describe('what a screen reader is handed', () => {
   it('is the sentence, on an element with a role, not a pile of paths', async () => {
     const profile = straightRoute();

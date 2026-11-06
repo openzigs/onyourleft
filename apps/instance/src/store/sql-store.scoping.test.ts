@@ -338,6 +338,10 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
   putNoticeStep: { notAScopedRead: 'a moderator’s write about a notice; notice-steps.test.ts' },
   listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
+  eraseNoticeDetails: {
+    notAScopedRead:
+      'the instance’s own sweep, erasing a notice’s notifier details by its id, once its decision or its twelve months have passed (#1381, #1923); notice-retention.test.ts',
+  },
   hideItem: { notAScopedRead: 'a moderator’s write; items.test.ts' },
   listHiddenItemsOfRoom: {
     notAScopedRead:
@@ -367,6 +371,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
+  logVoiceAction: {
+    notAScopedRead: 'a write to the moderators’ log (#876); sql-store.moderation.test.ts',
+  },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',

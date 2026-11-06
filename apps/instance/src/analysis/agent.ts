@@ -239,7 +239,7 @@ export const AGENT_BUDGETS: AgentBudgets = {
   tokens: AGENT_TOKEN_BUDGET,
 };
 
-/** A pessimistic count: three characters a token, as the chain's bounds are set (template-v2). */
+/** A pessimistic count: three characters a token, as the chain's bounds were set (#810; the chain went in #1797). */
 export function estimatedTokens(characters: number): number {
   return Math.ceil(characters / 3);
 }

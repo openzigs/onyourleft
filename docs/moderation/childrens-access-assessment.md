@@ -26,6 +26,8 @@
   Assessment Guidance (with the current Risk Profiles), the Children's Access Assessments Guidance
   and the Record-Keeping Guidance (spike 0019 §5 items 1–3). They are to be read before the first
   review, which is due within 3 months of opening (owner, 2026-09-30).
+  **Read in full on 2026-11-03** ([#1365](https://github.com/openzigs/onyourleft/issues/1365)):
+  what each changes is under [Amendments](#amendments), for the owner to decide.
 - **Related drafts**: [illegal content risk assessment](illegal-content-risk-assessment.md), which
   describes the service and its features.
 
@@ -180,9 +182,99 @@ The three options the draft weighed are kept below as the record of what was con
 2. The three Ofcom documents named at the top (the Risk Assessment Guidance, the Children's Access
    Assessments Guidance and the Record-Keeping Guidance), not yet read in full, to be read before the
    first review (spike §5 items 1–3).
+   **Read on 2026-11-03: see [Amendments](#amendments).**
 3. What ss.11–12 would require under option A (not read).
 4. Whether any EU rule on minors applies. Spike 0019 records an EU "KIDS ACT" proposal second-hand
    only (source S1), and DSA Art. 14(3) applies only to a service *"primarily directed at minors or
    … predominantly used by them"*.
 
 Decided by the owner on 2026-09-30, and no longer open here: the conclusion (option B).
+
+## Amendments
+
+### 2026-11-03: Ofcom's Children's Access Assessments Guidance, read in full
+
+> **An agent's summary for the owner** ([#1365](https://github.com/openzigs/onyourleft/issues/1365):
+> *"Owner's hands (or an agent's summary for the owner)"*). It is **not legal advice**. **It does not
+> change the conclusion: option B is the owner's, and it stands until the owner changes it.** This
+> entry records what the guidance says about it. The Risk Assessment Guidance and the Record-Keeping
+> Guidance are the subject of the matching entry in the
+> [illegal content risk assessment](illegal-content-risk-assessment.md#amendments).
+
+**What was read, and how.** Ofcom still answers `403` to `curl` and WebFetch (spike 0019 §5 item 1).
+The PDF was fetched from the Internet Archive's capture, on 2025-06-12, of the exact URL that Ofcom's
+*Online safety regulatory documents and guidance* page links. That page, as captured on 2026-09-25,
+still lists this version as the current one (*"Children's Access Assessments Guidance • PDF •
+968.02 KB • 9 May 2025"*). The text was extracted with `pdftotext` and read in full, including Annex
+A1 (the record) and Annex A2 (case studies).
+
+| Document | Version | Ofcom URL (as linked on 2026-09-25) | SHA-256 of the PDF read |
+|---|---|---|---|
+| Children's access assessments: Guidance | "Published 24 April 2025", 33 pages | `https://www.ofcom.org.uk/siteassets/resources/documents/consultations/category-1-10-weeks/statement-protecting-children-from-harms-online/main-document/childrens-access-assessments-guidance.pdf?v=396655` | `48e4e487c6978862828422c4ac477616edb534202a3dccf342c8a1cab837ceef` |
+
+Paragraph numbers below are the guidance's own.
+
+**1. Stage 1 is unchanged.** ¶3.9: a service that relies *"solely on self-declaration, general
+contractual restrictions, or payment methods"* goes to Stage 2. That is what this assessment did.
+
+**2. The Stage 2 standard is stricter than this record meets.** ¶4.2: *"You must only conclude that the
+child user condition is not met if you have evidence that demonstrates that neither of the two
+criteria is met."* Annex A1.7: *"You must record evidence against both criteria of the child user
+condition."* The record for option B holds three items. Against the guidance:
+
+| Evidence recorded for option B | What the guidance says |
+|---|---|
+| Registration is `approval`: the owner sees every sign-up | The guidance names no human approval as a source. The owner sees a name and a tick box, and this assessment already says that is not evidence of age |
+| Riders confirm they are 18 or over | ¶4.11: *"you should not rely on this data alone to conclude that you do not have a significant number of users who are children"* |
+| It is a cycling-training instance | Table 7, *"Content that appeals to children"*, has a row *"Games and sports"* (*"Gaming, sports, esports and sports personalities"*) and lists *"Content about wellness, health and fitness"*. ¶4.19: *"if your service is likely to attract a significant number of children between 15-17, this would be sufficient to meet this criterion, even if you are confident there are no younger children on the service."* The table above already records junior riders and junior racing |
+| (Criterion (a), who actually uses it) | Nothing is recorded, because the instance had not opened. ¶2.9 and s.35(4)(b): it must rest on *"evidence about who actually uses the service"* |
+
+The guidance's case studies point the same way. Its *"Large dating service"*, whose terms say 18 and
+over and which asks users to declare their age, concludes that the condition **is met**. Its
+*"Sport service"* concludes that it is not met because its content and advertising target senior
+citizens. This instance's content (rides, races and a game) is not aimed at any age group.
+
+**What follows.** On this guidance, **the evidence recorded does not demonstrate that neither
+criterion is met, so option B as recorded is not supported.** ¶2.33 adds that Ofcom can treat a
+service as likely to be accessed by children *"even if the service in question has concluded that it
+is not likely to be accessed by children"*. The owner's choices, at or before the first review, are
+the three already weighed above:
+
+- **A**: conclude the service is likely to be accessed by children. ¶2.5: a children's risk
+  assessment and the safety duties protecting children follow. Ofcom's *Children's Risk Assessment
+  Guidance and Children's Risk Profiles* (9 May 2025) and its *Protection of Children Code of Practice
+  for user-to-user services* (4 July 2025) set them out. **Neither was read for this entry.**
+- **B, kept**: record evidence against **both** criteria. For criterion (b) that means showing why a
+  cycling game with races is not of a kind likely to attract 15–17-year-olds, which Table 7 and ¶4.19
+  make hard. For criterion (a) it means evidence from use (point 5).
+- **C**: highly effective age assurance with access controls, for public rooms. ¶2.20 and ¶3.9: it
+  settles Stage 1 for that part only, and registration, sync and private rooms stay at Stage 2.
+
+**3. Who counts as a user.** ¶2.10: *"It does not matter whether a user is registered … merely viewing
+(or otherwise encountering) user-to-user content on a service counts as actively using that
+service."* ¶4.12: data that counts only registered users is unreliable if unregistered people can see
+content. All nine room routes need a session (`apps/instance/src/rooms/routes.ts`). Whether any other
+route shows rider content without one was not checked here.
+
+**4. Dates the record must carry** (Annex A1.8, ¶5.4, s.36(3)): the date the assessment was completed,
+and *"the expected deadline for your next children's access assessment"*. Completed 2026-09-30. **The
+next one is due no later than 2027-09-30**, and sooner before any significant change, or on evidence
+of a significant increase in the number of children using the service (¶5.5). The owner's review
+within 3 months of opening comes earlier and does not replace it.
+
+**5. Evidence to collect from opening**, if option B is to be kept (Table 6, ¶4.40): reports that a
+rider is under 18; accounts refused or suspended because of age, and how many; where the app and the
+instance are promoted. ¶4.36: promotion on services that children use counts towards attracting
+children. Recording each approval refused, and each suspension, for age in the moderation log would
+provide the first two.
+
+**6. More significant changes** (¶5.8–5.10), proposed for the list in the risk assessment's Step 4:
+marketing or promoting the app or instance where children are likely to see it; hosting a new kind of
+content; and any change in who runs the instance. *"Changing the 18+ rule"* is already on the list.
+
+**7. Where this meets the risk assessment.** The Risk Assessment Guidance's Risk Profile asks *"Do
+child users access some or all of my service?"* (Figure 1, question 2). Its answer follows whatever the
+owner concludes here.
+
+**The open points above, after this reading.** Open point 2 is done. Open point 3 (what ss.11–12
+require under option A) now has a reading list: the two Ofcom documents named under option A.

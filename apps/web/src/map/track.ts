@@ -39,6 +39,8 @@
  * valid position in Kenya.
  */
 
+import type { GeographicPosition } from '@onyourleft/domain';
+
 import type { TrackSegment } from '../detail/privacy';
 
 /** One `[longitude, latitude]` pair, in GeoJSON order. */
@@ -98,6 +100,23 @@ export function trackGeometry(segments: readonly TrackSegment[]): TrackGeometry 
     coordinates.push(line);
   }
   return coordinates.length === 0 ? undefined : { type: 'MultiLineString', coordinates };
+}
+
+/**
+ * A saved route's line (#2003): its profile's positions, as one run.
+ *
+ * Through {@link trackGeometry}, so the one transposition stays the one in the
+ * program. A route has no gaps — it is a plan, not a recording — so it is a
+ * single segment, and `index` is the position's place in the profile rather
+ * than a second of a ride.
+ *
+ * ⚠️ **Untrimmed, and that is right only on the rider's own device.** This is
+ * the owner's own view of their own route, the same call as a ride's own
+ * track (`views/ActivityDetailView.tsx`); a copy that leaves the device goes
+ * through `routes/share.ts`, never through here.
+ */
+export function routeGeometry(positions: readonly GeographicPosition[]): TrackGeometry | undefined {
+  return trackGeometry([{ points: positions.map((position, index) => ({ index, position })) }]);
 }
 
 /** The geometry as a Feature. `undefined` propagates. */

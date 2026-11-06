@@ -190,7 +190,7 @@ describe('#1808 — a mapped house’s front step, planned with the house', () =
       ...corridorOf(origin, [
         buildingBeside(profile, origin, [rectangleBeside(300, 15, 10, 8)], 6),
       ]),
-      landUse: [landBeside(profile, origin, 'landuse', 'retail', 100, 900, -100, 100)],
+      landUse: [landBeside(profile, origin, 'landuse', 'commercial', 100, 900, -100, 100)],
     };
     const plans = plansOf(corridor, profile, origin);
     expect(plans).toHaveLength(1);

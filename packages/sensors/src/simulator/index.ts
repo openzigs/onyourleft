@@ -52,8 +52,24 @@ export {
   hrsStrap,
   modernTrainer,
   SERVICE_CAPABILITIES,
+  steeringController,
   vendorOnlyTrainer,
 } from './devices';
+
+// --- A steering and button controller (#1823) --------------------------------
+//
+// An OpenBikeControl device as a model: a script of typed changes on the
+// simulator's clock. The bytes are the bridge's, in `protocol/`.
+
+export type {
+  AppInformation,
+  ControllerChange,
+  ControllerNotification,
+  ControllerOptions,
+  ControllerStep,
+  MalformedShape,
+  SimulatedController,
+} from './controller';
 
 // --- A vendor's own control point (#90) --------------------------------------
 //

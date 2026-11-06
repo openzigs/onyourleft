@@ -162,6 +162,47 @@ describe('the demo stage — #1647', () => {
     });
   });
 
+  describe('says the realistic world is loading until its load settles — #1654', () => {
+    it('from the first snapshot, while the files have not arrived', () => {
+      const { frames, stage, snapshots } = stageWith();
+      stage.play();
+      frames.step(30);
+      expect(snapshots.length).toBeGreaterThan(1);
+      expect(snapshots.every((each) => each.realisticLoading)).toBe(true);
+    });
+
+    it.each<[string, RealisticWorldOutcome]>([
+      ['loaded', { loaded: true }],
+      ['refused', { loaded: false, offline: false, detail: 'refused' }],
+    ])('and no longer once they are %s, on a paused stage', async (_name, outcome) => {
+      const { snapshots } = stageWith(Promise.resolve(outcome));
+      expect(snapshots.at(-1)?.realisticLoading).toBe(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(snapshots.at(-1)?.realisticLoading).toBe(false);
+    });
+
+    it('and no longer when they arrive after the ladder left realism, on a paused stage', async () => {
+      let arrive: (outcome: RealisticWorldOutcome) => void = () => undefined;
+      const { frames, stage, snapshots } = stageWith(
+        new Promise((resolve) => {
+          arrive = resolve;
+        }),
+      );
+      stage.play();
+      frames.step(FRAMES_TO_LEAVE_REALISM, SLOW_FRAME_MS);
+      stage.pause();
+      frames.step(1);
+      const published = snapshots.length;
+      expect(snapshots.at(-1)?.realisticLoading).toBe(true);
+      arrive({ loaded: true });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(snapshots.length).toBeGreaterThan(published);
+      expect(snapshots.at(-1)?.realisticLoading).toBe(false);
+    });
+  });
+
   it('does not put realism back when the files arrive after the ladder left it', async () => {
     let arrive: (outcome: RealisticWorldOutcome) => void = () => undefined;
     const { frames, view, stage, snapshots } = stageWith(

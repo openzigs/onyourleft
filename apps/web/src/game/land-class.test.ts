@@ -47,6 +47,11 @@ import {
   type LandClassMask,
 } from './land-class';
 import { northRoute } from './route-fixtures-testing';
+import {
+  landUseCorridor,
+  REMOVED_LAND_USE_KINDS,
+  TOWN_LAND_USE_CLASSES,
+} from './testing/land-use-fixtures';
 import { scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { sceneFrame } from './scene';
 import {
@@ -186,19 +191,56 @@ describe('the kind table', () => {
     expect(landClassOfKind('landuse', 'scrub')).toBe('wood');
     expect(landClassOfKind('landuse', 'cemetery')).toBe('park');
     expect(landClassOfKind('landuse', 'meadow')).toBe('farmland');
-    expect(landClassOfKind('landuse', 'marina')).toBe('water');
+    expect(landClassOfKind('landuse', 'wetland')).toBe('water');
     expect(landClassOfKind('landuse', 'beach')).toBe('other');
     expect(landClassOfKind('landuse', 'aerodrome')).toBe('other');
     expect(landClassOfKind('landuse', 'a kind nobody wrote down')).toBe('other');
     // A `water` feature is water, whatever its kind says.
     expect(landClassOfKind('water', 'residential')).toBe('water');
-    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(41);
+    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(28);
   });
 
   it('does not find Object’s own properties for a hostile kind', () => {
     for (const kind of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
       expect(landClassOfKind('landuse', kind)).toBe('other');
     }
+  });
+});
+
+describe('the land-use kinds our archive emits — #1630, spike 0031', () => {
+  const fixture = landUseCorridor([
+    ...Object.keys(TOWN_LAND_USE_CLASSES),
+    ...REMOVED_LAND_USE_KINDS,
+  ]);
+  const mask = landClassMask(fixture.corridor);
+
+  it('reads every kind the spike found in towns as its class, through landClassMask and classAt', () => {
+    for (const [kind, expected] of Object.entries(TOWN_LAND_USE_CLASSES)) {
+      expect(mask.classAt(...fixture.centreOf(kind)), kind).toBe(expected);
+    }
+  });
+
+  it('reads every removed kind as other: retail and neighbourhood are no longer built-up', () => {
+    expect(mask.classAt(...fixture.centreOf('retail'))).toBe('other');
+    expect(mask.classAt(...fixture.centreOf('neighbourhood'))).toBe('other');
+    for (const kind of REMOVED_LAND_USE_KINDS) {
+      expect(mask.classAt(...fixture.centreOf(kind)), kind).toBe('other');
+      expect(Object.hasOwn(LAND_CLASS_OF_KIND, kind), kind).toBe(false);
+    }
+  });
+
+  it('still names commercial land by its raw kind — the #1590 shop-front path', () => {
+    const [x, z] = fixture.centreOf('commercial');
+    expect(kindAt(fixture.corridor, x, z)).toBe('commercial');
+    expect(mask.classAt(x, z)).toBe('built-up');
+  });
+
+  it('control: the ground between two rectangles is other, and outside the corridor unknown', () => {
+    const [x, z] = fixture.centreOf('residential');
+    // Half a rectangle and half the 20 m gap along: between it and the next.
+    expect(mask.classAt(x + 30, z)).toBe('other');
+    expect(kindAt(fixture.corridor, x + 30, z)).toBeUndefined();
+    expect(mask.classAt(-50, z)).toBe('unknown');
   });
 });
 

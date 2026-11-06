@@ -3317,6 +3317,12 @@ published figures (its run predates `oyl.txt`).
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
 | #1274 | before (one photograph for rock and scree) | the first parent of #1274's merge | — | | | | | | | | |
 | #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
+| #1274 | roadside before (the stylised lamp posts and barrier boxes) | the roadside models' merge | — ; `route=village&at=820`, `levers=-roadside-models` | | | | | | | | |
+| #1274 | roadside after (Poly Haven's lamp and barrier) | the same build | — ; `route=village&at=820` | | | | | | | | |
+| #1274 | litter before (no litter) | the litter and chain-link merge | — ; `route=village&at=820`, `levers=-litter` | | | | | | | | |
+| #1274 | litter after (bags and a tyre) | the same build | — ; `route=village&at=820` | | | | | | | | |
+| #1274 | chain-link before (no chain-link) | the same build | — ; `town=grounds&at=1100`, `levers=-chain-link` | | | | | | | | |
+| #1274 | chain-link after (the industrial estate fenced) | the same build | — ; `town=grounds&at=1100` | | | | | | | | |
 | #1283 | before (the scanned broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-trees` | | | | | | | | |
 | #1283 | after (the generated broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
 | #1294 | before (the scanned firs, beside the generated broadleaves) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
@@ -3659,6 +3665,79 @@ judged in the product, on a route with a bank beside the road.
 | On the page (AH-1274-4): can the two be told apart at all, and if so which looks more like a hillside? | |
 | In the product (AH-1274-5): does a steep bank read as rock, and is its 3 m repeat visible? | |
 | Is it worth its 0.4 MiB of build, or should the bank go back to one photograph? | |
+
+### #1274's rows — Poly Haven's street lamp and road barrier
+
+The realistic world's lamp posts are Poly Haven's `street_lamp_01` and its gantries' barriers
+`concrete_road_barrier`, both CC0, each cut by the pipeline to a few hundred triangles that carry
+their colour in their vertices (`apps/web/tools/realistic/blender/process_roadside_model.py`), so
+neither brings a texture or a draw call: the lamp is merged into the street furniture's painted mesh
+and the barrier into the gantries' one instanced mesh, whose vertex shader folds away the shape an
+instance is not (`apps/web/src/game/three-renderer.ts` §`GantryBelt`). The winter lights wind the
+new lamp's shaft (`decorations.ts` §`onRealisticLampPosts`).
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-11-04, on the owner's page at the
+village hold (`route=village&at=820`, 1280 × 800): **49 draw calls before and after**, and
+**163 980 → 165 330 triangles** (ten lamps in view at 135 triangles more each). Held at
+`at=3960`, 35 m before the finish gantry: **15 calls before and after**, **36 464 → 37 376**
+triangles. Texture memory unchanged at 77.1 MiB estimated (the two files carry no picture); the
+build **47 580 997 → 47 601 549 bytes** of the 46 MiB ceiling, transcoder included
+(`realistic-budget.test.ts`).
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread. ⚠️ **What
+could cost, and only this row can say whether it does**: the street furniture's merged mesh is
+rebuilt when the pieces in reach change, and holds about 8 600 more triangles at its fullest; every
+gantry instance submits the barrier's 48 triangles, folded or not.
+
+| Step | What to do |
+|---|---|
+| AH-1274-6 | **Before**: on the roadside models' merge with the owner's page staged, AH1–AH7 with AH4's URL plus `&route=village&at=820&levers=-roadside-models`. `RUN=1274-roadside-before` |
+| AH-1274-7 | **Cool again (AH3, 25–26 °C)**, then **after**: AH1–AH7 with AH4's URL plus `&route=village&at=820`. `RUN=1274-roadside-after` |
+| AH-1274-8 | Write both rows into the table above. **Draw calls** should not change at all; triangles by about 1 350 |
+| AH-1274-9 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&route=village&at=820`, then add `&levers=-roadside-models` (the lamp posts as they were), and the same at `at=3960` for the finish gantry's barriers |
+
+| #1274 roadside by eye | Answer |
+|---|---|
+| Do the village's lamp posts read as cast-iron lamps, and is 3.87 m the right height beside the houses? | |
+| Do the gantries' barriers read as concrete barriers, or as brown wedges? | |
+
+### #1274's rows — a village's litter and the chain-link fence
+
+By the owner's ruling of 2026-11-05: Poly Haven's `trashbag` and `old_tyre` lie on a village's
+pavements, beside some bins and by one lamp post (`apps/web/src/game/litter.ts`), merged into the
+street furniture's painted mesh; and Poly Haven's `modular_chainlink_fence` stands beside mapped
+industrial, school and sports grounds (`apps/web/src/game/chain-link.ts`), drawn inside the field
+fence's one instanced mesh, whose vertex shader folds away the fence an instance is not and whose
+wire is cut out by the kit's own opacity map. Field fences keep their planks, and the stylised
+world draws neither.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-11-05, on the owner's page at
+1280 × 800, each before with its lever off on the same build:
+
+| Frame | Calls before | Calls after | Triangles before | Triangles after |
+|---|--:|--:|--:|--:|
+| Village hold, `route=village&at=820` (`-litter`) | 49 | **49** | 167 874 | 168 054 |
+| Wooded hold, `at=2550` (`-litter,-chain-link`) | 34 | **34** | 150 946 | 153 490 |
+| Industrial estate, `town=grounds&at=1100` (`-chain-link`) | 43 | **42** | 153 006 | 154 030 |
+| School, `town=grounds&at=1330` (`-chain-link`) | 39 | **38** | 147 162 | 148 972 |
+
+The wooded hold's 2 544 are the fold's cost: its sixteen field fences each submit the chain-link's
+159 triangles, folded away. A town frame's calls fell by one because the chain-link pieces spend
+the structures' budget a hedge or a wall spent before. Texture memory **77.1 → 78.4 MiB**
+estimated (the wire's 1K opacity map, 1.3 MiB); the build **47 601 549 → 47 894 829 bytes** of
+the 46 MiB ceiling, transcoder included (`realistic-budget.test.ts`).
+
+| Step | What to do |
+|---|---|
+| AH-1274-10 | **Before**: with the owner's page staged, AH1–AH7 with AH4's URL plus `&route=village&at=820&levers=-litter`, then `&town=grounds&at=1100&levers=-chain-link`. `RUN=1274-litter-before`, `RUN=1274-chain-before` |
+| AH-1274-11 | **Cool again (AH3, 25–26 °C)**, then **after**: the same two without the levers. `RUN=1274-litter-after`, `RUN=1274-chain-after` |
+| AH-1274-12 | Write the four rows into the table above. **Draw calls** should not rise |
+| AH-1274-13 | **By eye, on the page**: the same URLs, and `town=grounds&at=1330` for the school |
+
+| #1274 litter and chain-link by eye | Answer |
+|---|---|
+| Does the litter read as a bag and a tyre, and is it sparse enough? | |
+| Does the chain-link read as wire, near and far, and is its diamond the right size? | |
 
 ### #1283's rows — the broadleaf trees, generated to their budget
 

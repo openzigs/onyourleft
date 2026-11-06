@@ -26,6 +26,16 @@ import { sha256Bytes, toBase64 } from './sync.ts';
 
 const CORPUS = new URL('../../../../packages/fit/fixtures/corpus/', import.meta.url);
 
+/**
+ * An item's text that the instance takes for `kind`: `text` itself, or for a
+ * `masking` item a list holding it as its one word (#1796: the write path
+ * refuses a masking list it cannot read). Still tells one athlete's from
+ * another's, as `text` does.
+ */
+export function itemText(kind: string, text: string): string {
+  return kind === 'masking' ? JSON.stringify({ words: [text], zones: [] }) : text;
+}
+
 /** A file from the #29 corpus, by name. */
 export function corpusFile(name: string): Uint8Array {
   return new Uint8Array(readFileSync(new URL(name, CORPUS)));

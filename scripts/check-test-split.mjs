@@ -68,12 +68,21 @@
  *    filters selects exactly one. The accessibility run selects at least one.
  * 3. No file is in two runs.
  * 4. Every file the whole suite (`vitest run`) selects is in one of the three.
+ * 5. Since #2154 the required run is divided between CI jobs, and each
+ *    `test:required:shard-<n>` script is one job's part: `pnpm run
+ *    test:required` followed only by `--project <pattern>` pairs, so no part
+ *    can keep an exclude the whole run does not, or take coverage. There are
+ *    at least two, numbered from 1 with none missing; each selects at least
+ *    one file, no file is in two, and every file the required run selects is
+ *    in one. A Vitest project added to the workspace lands in whichever part
+ *    its name matches — `!web` is every project but `web` — and in none is a
+ *    red run here rather than a file CI never runs.
  *
  * ## The seam its own suite uses
  *
- * `--lists <dir>` reads the four selections from `all.txt`,
- * `required.txt`, `uninstrumented.txt` and `a11y.txt` in that directory
- * instead of asking Vitest, so `check-test-split.test.sh` can drive every rule
+ * `--lists <dir>` reads the selections from `all.txt`,
+ * `required.txt`, `uninstrumented.txt`, `a11y.txt` and one
+ * `required-shard-<n>.txt` per part in that directory instead of asking Vitest, so `check-test-split.test.sh` can drive every rule
  * in milliseconds. CI runs this with no arguments, against Vitest itself.
  *
  * Usage: node scripts/check-test-split.mjs [--root <dir>] [--lists <dir>]
@@ -246,6 +255,52 @@ export function a11yArgumentsFrom(script) {
   return tokens.slice(2);
 }
 
+/** What a part of the required run must be, after its script name. */
+const SHARD_LEAD = ['pnpm', 'run', 'test:required'];
+
+/**
+ * The parts the required run is divided into between CI jobs — #2154: each
+ * `test:required:shard-<n>` script's name and the `--project <pattern>`
+ * arguments it adds to `test:required`, in order of `<n>`. Throws on fewer
+ * than two, on a gap in the numbering, and on any other shape: a part that
+ * is not `test:required` plus a project filter could leave out a file or run
+ * one twice in a way the selections below would not show.
+ */
+export function requiredShardsFrom(scripts) {
+  const shards = Object.entries(scripts ?? {})
+    .filter(([name]) => /^test:required:shard-\d+$/.test(name))
+    .map(([name, script]) => [Number(name.split('-').pop()), name, script])
+    .sort(([a], [b]) => a - b);
+  if (shards.length < 2) {
+    throw new Error(
+      `package.json has ${String(shards.length)} \`test:required:shard-<n>\` scripts where the ` +
+        'required run is divided between at least two CI jobs (#2154).',
+    );
+  }
+  return shards.map(([number, name, script], index) => {
+    if (number !== index + 1) {
+      throw new Error(
+        `\`${name}\` follows \`test:required:shard-${String(index)}\`: the parts are numbered ` +
+          'from 1 with none missing, so a job cannot be left running a part that is not there.',
+      );
+    }
+    const tokens = shellWords(name, script);
+    const rest = tokens.slice(SHARD_LEAD.length);
+    const shape =
+      `\`${SHARD_LEAD.join(' ')}\` followed only by \`--project <pattern>\` pairs, and at ` +
+      'least one. Change this script and check-test-split.mjs together.';
+    const pairs = rest.length > 0 && rest.length % 2 === 0;
+    if (
+      SHARD_LEAD.some((word, i) => tokens[i] !== word) ||
+      !pairs ||
+      rest.some((word, i) => (i % 2 === 0 ? word !== '--project' : word.startsWith('-')))
+    ) {
+      throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
+    }
+    return [name, rest];
+  });
+}
+
 /** `[project] path` per line, as `vitest list --filesOnly` prints it. */
 export function parseSelection(output) {
   return output
@@ -263,7 +318,7 @@ export function parseSelection(output) {
  * What is wrong, in the terms a fixer needs. Empty means the three runs are
  * exactly the whole suite, once each.
  */
-export function problems({ all, required, uninstrumented, a11y, filters }) {
+export function problems({ all, required, uninstrumented, a11y, filters, shards = [] }) {
   const found = [];
   const runs = [
     ['`test:required`', new Set(required)],
@@ -312,6 +367,31 @@ export function problems({ all, required, uninstrumented, a11y, filters }) {
       );
     }
   }
+  // Rule 5 (#2154): the required run's parts, one per CI job.
+  for (const [name, selection] of shards) {
+    if (selection.length === 0) {
+      found.push(
+        `\`${name}\` selects no files at all, so its job is green over nothing. Its ` +
+          '`--project` pattern names no project the required run selects.',
+      );
+    }
+  }
+  const shardsHolding = (path) =>
+    shards.filter(([, selection]) => selection.includes(path)).map(([name]) => `\`${name}\``);
+  for (const path of required) {
+    const holding = shardsHolding(path);
+    if (holding.length > 1) {
+      found.push(
+        `${path} runs in ${holding.join(' and ')} — more than one part of the required ` +
+          'run. Their `--project` patterns overlap.',
+      );
+    } else if (holding.length === 0) {
+      found.push(
+        `${path} is in \`test:required\` and in NONE of its parts, so no CI job runs it. ` +
+          'Its project matches no `test:required:shard-<n>` pattern.',
+      );
+    }
+  }
   return found;
 }
 
@@ -352,6 +432,7 @@ if (isEntryPoint) {
 
   let selections;
   let filters;
+  let shards;
   try {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const excludes = requiredExcludesFrom(manifest.scripts?.['test:required']);
@@ -359,15 +440,20 @@ if (isEntryPoint) {
     if (drift !== undefined) throw new Error(drift);
     filters = filtersFrom(manifest.scripts?.['test:uninstrumented']);
     const a11yArguments = a11yArgumentsFrom(manifest.scripts?.['test:a11y']);
+    const parts = requiredShardsFrom(manifest.scripts);
     const read = (name) => parseSelection(readFileSync(join(lists, name), 'utf8'));
+    const requiredArguments = excludes.flatMap((glob) => ['--exclude', glob]);
+    shards = parts.map(([name, projects]) => [
+      name,
+      lists === undefined
+        ? selectionOrEmpty(root, [...requiredArguments, ...projects])
+        : read(`required-shard-${name.split('-').pop()}.txt`),
+    ]);
     selections =
       lists === undefined
         ? {
             all: selectionFromVitest(root, []),
-            required: selectionFromVitest(
-              root,
-              excludes.flatMap((glob) => ['--exclude', glob]),
-            ),
+            required: selectionFromVitest(root, requiredArguments),
             uninstrumented: selectionOrEmpty(root, filters),
             a11y: selectionOrEmpty(root, a11yArguments),
           }
@@ -388,7 +474,7 @@ if (isEntryPoint) {
     );
     process.exit(1);
   }
-  const found = problems({ ...selections, filters });
+  const found = problems({ ...selections, filters, shards });
   if (found.length > 0) {
     console.error('check-test-split: the three Vitest runs are not the whole suite, once each.\n');
     for (const problem of found) console.error(`  - ${problem}`);
@@ -399,6 +485,9 @@ if (isEntryPoint) {
     `check-test-split: all ${String(selections.all.length)} test files run once — ` +
       `${String(selections.required.length)} in the required run, ` +
       `${String(selections.uninstrumented.length)} without it (nightly), ` +
-      `${String(selections.a11y.length)} in the Accessibility step.`,
+      `${String(selections.a11y.length)} in the Accessibility step; the required run's ` +
+      `${String(selections.required.length)} are ` +
+      shards.map(([name, selection]) => `${String(selection.length)} in \`${name}\``).join(', ') +
+      '.',
   );
 }

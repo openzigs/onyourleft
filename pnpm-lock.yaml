@@ -99,6 +99,9 @@ importers:
       '@capacitor/core':
         specifier: 8.5.3
         version: 8.5.3
+      '@capacitor/splash-screen':
+        specifier: 8.0.2
+        version: 8.0.2(@capacitor/core@8.5.3)
       '@onyourleft/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -306,6 +309,9 @@ importers:
 
   packages/protocol:
     devDependencies:
+      '@onyourleft/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../physics
@@ -438,6 +444,11 @@ packages:
 
   '@capacitor/core@8.5.3':
     resolution: {integrity: sha512-oBE1oGuYE4ZzYYrulC75OuHdSsD6zLUy7d5o1tFwDLG4govGoubY15cxpiI5l0+q87Lm5p0bhbehMdzJg4aFag==}
+
+  '@capacitor/splash-screen@8.0.2':
+    resolution: {integrity: sha512-0C6rYScr13WfAE9nPl4ScOQynmjFv9NT3Th+RZkD4ezYHmER6mcl1/lDYsv7jg3Rj3FOvLrlTlmNkUrr83kZzQ==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@cloudflare/workerd-darwin-64@1.20261010.1':
     resolution: {integrity: sha512-W5q/cRH6zClS/g2PD6s2np/rnPk+w9vEuMjdjo6twLrsZqw3HmRWUe9gA0qGxrb5hlNdpaErVrIH0f/bxBlNGg==}
@@ -2902,6 +2913,10 @@ snapshots:
   '@capacitor/core@8.5.3':
     dependencies:
       tslib: 2.8.1
+
+  '@capacitor/splash-screen@8.0.2(@capacitor/core@8.5.3)':
+    dependencies:
+      '@capacitor/core': 8.5.3
 
   '@cloudflare/workerd-darwin-64@1.20261010.1':
     optional: true

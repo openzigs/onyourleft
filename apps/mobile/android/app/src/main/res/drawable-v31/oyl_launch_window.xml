@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  The app window's first background on Android 12 and later (#2127).
+  AppCompat takes it from the launch theme in super.onCreate, before
+  BridgeActivity switches theme, so a frame of the bare window before
+  MainActivity resets it to the canvas is the splash, and never
+  Theme.DeviceDefault's near-black or white. It is the canvas, per palette,
+  with the splash's own icon (#2052) at the 288 dp the system splash draws
+  it without an icon background, so the two frames are the same picture.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/oyl_launch_background" />
+    <item
+        android:drawable="@drawable/oyl_splash_icon"
+        android:gravity="center"
+        android:width="288dp"
+        android:height="288dp" />
+</layer-list>

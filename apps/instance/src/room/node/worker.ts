@@ -51,6 +51,14 @@ const host = new RoomHost({
   onSocketClosed: (socketId) => send({ type: 'socket-closed', socketId }),
   onProtocolClose: (roomId, reason, count) =>
     send({ type: 'protocol-close', roomId, reason, count }),
+  onItemEvent: (roomId, event) =>
+    send({
+      type: 'item-event',
+      roomId,
+      riderId: event.riderId,
+      event: event.event,
+      item: event.item,
+    }),
   maxBufferedBytes: settings.maxBufferedBytes,
   pingIntervalMs: settings.pingIntervalMs,
 });
@@ -98,6 +106,7 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
             message.socketId,
             message.started,
             message.plan.startedBy,
+            message.plan.voiceInvite,
           );
         },
       );
@@ -119,6 +128,9 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
       return;
     case 'remove':
       send({ type: 'removed', id: message.id, ok: host.remove(message.roomId, message.athleteId) });
+      return;
+    case 'voice':
+      host.setVoiceInvite(message.roomId, message.invite, message.withheldFrom);
       return;
     case 'seat':
       send({

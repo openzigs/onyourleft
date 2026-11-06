@@ -102,6 +102,11 @@ const noticeSchema = object({
   notifierName: nullableString,
   notifierEmail: nullableString,
   bonaFide: { type: 'boolean' },
+  /**
+   * When the notifier details were erased — six months after the decision
+   * (#1381), or twelve after receipt with no decision (#1923) — or `null`.
+   */
+  detailsErasedAt: nullableInteger,
   ...noticeSteps,
 });
 
@@ -198,15 +203,23 @@ function athleteAction(
     request: object({ reason: string, reportId: integer, statement: statementInput }, ['reason']),
     errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
     response: actionResponse,
-    handle: async (context) =>
-      answer(
-        await moderationOf(context).act(callerId(context), action, context.params.athleteId ?? '', {
-          reason: context.json.reason,
-          reportId: context.json.reportId,
-          statement: context.json.statement,
-        }),
-        (value) => json(value),
-      ),
+    handle: async (context) => {
+      const target = context.params.athleteId ?? '';
+      const acted = await moderationOf(context).act(callerId(context), action, target, {
+        reason: context.json.reason,
+        reportId: context.json.reportId,
+        statement: context.json.statement,
+      });
+      // #876: a ban reaches the Discord voice of every room the rider is in.
+      if (acted.ok && action === 'suspend') {
+        await context.probes?.afterSuspension?.({
+          actorId: callerId(context),
+          targetId: target,
+          logId: acted.value.logId,
+        });
+      }
+      return answer(acted, (value) => json(value));
+    },
   };
 }
 
@@ -435,7 +448,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
     operationId: 'listNotices',
     reaches: 'moderation',
     summary:
-      'The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them.',
+      'The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them. Six months after a notice’s decision its notifier details are erased (#1381), or twelve months after it arrived when no decision is recorded by then (#1923): its explanation is then empty, its location, name and email `null`, and `detailsErasedAt` says when.',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated'],
@@ -457,6 +470,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
           notifierName: notice.notifierName,
           notifierEmail: notice.notifierEmail,
           bonaFide: notice.bonaFide,
+          detailsErasedAt: notice.erased?.at ?? null,
           ...stepsOf(notice.id, steps),
         })),
       });
@@ -754,7 +768,16 @@ export const MODERATION_ROUTES: readonly Route[] = [
           statement: context.json.statement,
         },
       );
-      if (removed.ok) await context.probes?.removeFromRoom?.(roomId, athleteId);
+      if (removed.ok) {
+        await context.probes?.removeFromRoom?.(roomId, athleteId);
+        // #876: and its Discord voice, once the rider is out of the room.
+        await context.probes?.afterRoomRemoval?.({
+          roomId,
+          actorId: callerId(context),
+          targetId: athleteId,
+          logId: removed.value.logId,
+        });
+      }
       return answer(removed, (value) => json(value));
     },
   },

@@ -19,7 +19,14 @@ import { testDevice, type IdentityInstance, type TestDevice } from '../auth/iden
 import type { BlobStore } from '../blob/blob-store.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { ITEM_KINDS, sha256Bytes, type AccountExport } from './sync.ts';
-import { authorised, corpusFile, signedRecordOf, syncWorld, uploadBody } from './sync-testing.ts';
+import {
+  authorised,
+  corpusFile,
+  itemText,
+  signedRecordOf,
+  syncWorld,
+  uploadBody,
+} from './sync-testing.ts';
 import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: IdentityInstance | undefined;
@@ -81,7 +88,7 @@ async function syncEverything(instance: IdentityInstance, rider: Rider): Promise
   for (const kind of ITEM_KINDS) {
     await readJson(
       await authorised(instance, rider.token, 'POST', `/v1/sync/items/${kind}/ride-0`, {
-        body: `${kind} for ${rider.athleteId}`,
+        body: itemText(kind, `${kind} for ${rider.athleteId}`),
       }),
     );
   }

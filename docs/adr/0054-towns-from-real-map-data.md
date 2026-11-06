@@ -426,3 +426,81 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   What still stands, unchanged: D-1 item 2's statement (nothing derived from an external source is
   committed), and D-3.5 for the `worldCorridors` store, whose contents never leave the device and
   which the bake never reads. ADR 0056 D-1 says exactly which sentences it supersedes.
+- **2026-11-01** — **Building footprints carry twelve more fields, from the project's own archive**
+  ([#1788](https://github.com/openzigs/onyourleft/issues/1788), on the owner's ruling D4 of
+  2026-10-27 on [#1656](https://github.com/openzigs/onyourleft/issues/1656), and the owner's
+  approval of these fields on 2026-11-01 on
+  [#1991](https://github.com/openzigs/onyourleft/pull/1991)).
+  [#1557](https://github.com/openzigs/onyourleft/issues/1557)'s profile (`apps/web/tools/basemap/`,
+  `BuildingTags.java`, merged in [#1974](https://github.com/openzigs/onyourleft/pull/1974)) writes,
+  on the z15 `buildings` features only, twelve keys that Protomaps' published build does not carry,
+  and [#1789](https://github.com/openzigs/onyourleft/issues/1789)'s decoder reads them into
+  `BuildingFeature` (`packages/map-features/src/types.ts`) and, through
+  `apps/web/src/game/world-data/corridor.ts` §`packedCorridorFeatures`, into `worldCorridors`.
+  Context's table, which D-2.2 names as the fields read, no longer lists every `buildings` field
+  read, as the 2026-10-22 entry recorded for `roads`. This entry merges together with the switch of
+  the default archive (`apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`) to #1557's US build
+  clipped to its extract, so that the store never holds a field this ADR does not name: the fields
+  are stored with a value from that switch, not before, and read from Protomaps' published build
+  every one of the twelve is `null`. Each key, the tile's first and `BuildingFeature`'s field
+  second, as it is stored:
+  - `building_type` → `buildingType`: one of the profile's 29 building types, `house` to `townhall`
+    (`apps/web/tools/basemap/building-fields.ts` §`BUILDING_TYPES`); `yes` and every other value are
+    `null`;
+  - `levels` → `levels`: a whole number, 1 to 100;
+  - `roof_levels` → `roofLevels`: a whole number, 0 to 5;
+  - `roof_shape` → `roofShape`: one of `flat`, `gabled`, `hipped`, `pyramidal`, `skillion`,
+    `half-hipped`, `gambrel`, `side_hipped`, `mansard` and `saltbox`;
+  - `roof_orientation` → `roofOrientation`: `along` or `across`;
+  - `roof_direction` → `roofDirectionDegrees`: a whole number of degrees, 0 to 345 in steps of 15;
+  - `wall_colour` and `roof_colour` → `wallColour` and `roofColour`: an index, 0 to 19, into the
+    profile's palette (`BuildingPalette.ENTRIES`), never a colour string;
+  - `wall_material` → `wallMaterial`: one of `brick`, `wood`, `stone`, `concrete`, `glass`, `metal`
+    and `plaster`;
+  - `roof_material` → `roofMaterial`: one of `roof_tiles`, `slate`, `metal`, `asphalt` and
+    `concrete`;
+  - `start_year` → `startYear`: a whole year, clamped at read to the range 1600 to 2100, two fixed
+    bounds of the decoder's own. The profile writes no year later than its build year
+    (`BuildingTags.BUILD_YEAR`), but that bound is the build's: it is recorded in the build's record
+    (`build_year`) and in no tile, so the decoder cannot apply it;
+  - `landmark` → `landmark`: `worship`, `townhall` or `school`.
+
+  Each value is whitelisted or clamped again at read, because an archive a self-hoster configures
+  (D-2.1) was not built by that profile. A value the read cannot bring within its rule, and an
+  absent one, is `null`, and a whitelisted value is held as the decoder's own constant, so no string
+  from a tile is stored. D-3.3's sentence reads, from #1789: building footprint polygons with
+  `kind`, `height` and `min_height`, and with the building type, levels, roof levels, roof shape,
+  roof orientation, roof direction, wall colour, roof colour, wall material, roof material, start
+  year and landmark flag above, each a whitelisted value, a clamped whole number or a palette index;
+  land-use polygons with `kind`; water polygons; footway lines with `kind` and `kind_detail`; street
+  lines with `kind`, `kind_detail` and whether each is a bridge or a tunnel; place points with
+  `kind`, `kind_detail` and `population_rank` (ADR 0055); and which tiles were read and when — no
+  OSM identifier, no name, no address. Three statements are false from that switch, when the
+  configured archive is one the profile built: Context item 1's *"no `roof:shape`"*; D-7's premise,
+  *"The archive carries `height` and `min_height` and no `building:levels` or `roof:shape`"*, and
+  with it D-7's title, *"Height alone"*; and the last sentence of the first 2026-10-24 entry,
+  *"`roof:shape` and the OSM building type are not in the archive"*. Until a sibling issue under
+  #1656 reads a field in the building plan, D-7's rules are still how a footprint is drawn, and
+  nothing draws differently because of this entry. What still stands, unchanged: no OSM identifier
+  and no name is kept, `addr_housenumber` is dropped, and the profile reads no name, address,
+  `building:architecture` or `building:facade`; D-3.1 to D-3.6, including that the store never
+  leaves the device (D-3.5); and D-5.7, since the landmark flag is a kind of building and never a
+  name. The demo bundle publishes the same fields:
+  [ADR 0056](0056-the-demos-shipped-map-under-odbl.md)'s entry of this date.
+- **2026-11-03** — **D-5.6's "the nearest come first" has one exception: the nearest four landmarks
+  in reach come before it**
+  ([#2094](https://github.com/openzigs/onyourleft/issues/2094), PR
+  [#2108](https://github.com/openzigs/onyourleft/pull/2108)). Under the cap, `selectMappedBuildings`
+  (`apps/web/src/game/mapped-buildings.ts`) takes the nearest `MAPPED_LANDMARKS_AHEAD` (**4**) plans
+  of the `civic` family in reach (a place of worship, a school, a town hall; an inferred family is
+  never civic) before the nearest-first walk, so a village's church 300 m out is no longer lost
+  behind 36 nearer houses. From this date D-5.6's sentence reads: *the nearest come first, within
+  the cap, after the nearest four landmarks in reach*. A landmark taken ahead ranks no procedural
+  rival in, and it draws from the same budget before any rival is ranked, so on a frame where the
+  triangle budget binds it can displace a structure nearer the rider; it opens its surfaces ahead of
+  the nearest houses, inside the same 6, so the draw calls do not rise. Beyond four, a landmark
+  ranks by distance like any building. **Status: proposed, in force only when the owner approves
+  the before/after frames on the owner's course** (#2094's fourth criterion); the PR is not to be
+  merged before that, and this entry is to be corrected or struck there if the ruling differs. What
+  still holds, unchanged: the cap does not rise (D-5.6's second and third sentences), D-5.7, and
+  D-3.1 to D-3.6.

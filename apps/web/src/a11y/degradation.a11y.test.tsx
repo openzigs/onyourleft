@@ -19,10 +19,15 @@
  *    being true.
  */
 
-import { athleteId } from '@onyourleft/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { watts } from '@onyourleft/domain';
+import { activityId, athleteId } from '@onyourleft/store';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { stubAnalysis } from '../analysis/testing';
+import type * as ZoneChartModule from '../analysis/ZoneChart';
 import { ChartSlot } from '../design/ChartSlot';
+import { stubActivity } from '../detail/testing';
+import { AnalysisView } from '../views/AnalysisView';
 import { stubLibrary } from '../library/testing';
 import { AppShell } from '../shell/AppShell';
 import { groupDestination, hrefFor, ROUTES, routeById } from '../shell/routes';
@@ -32,6 +37,24 @@ import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mo
 import { auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+
+/**
+ * #2069: the zone chart, made to throw on demand. The real one otherwise, so
+ * every other case in this file draws what ships.
+ */
+const zoneChartFails = vi.hoisted(() => ({ now: false }));
+vi.mock('../analysis/ZoneChart', async (importOriginal) => {
+  const real = await importOriginal<typeof ZoneChartModule>();
+  return {
+    ...real,
+    ZoneChart: (props: ZoneChartModule.ZoneChartProps) => {
+      if (zoneChartFails.now) {
+        throw new Error('the zone chart failed to draw');
+      }
+      return real.ZoneChart(props);
+    },
+  };
+});
 
 /**
  * An empty local store for the activities route.
@@ -154,5 +177,62 @@ describe('with a chart that throws while rendering', () => {
     await settle();
     const violations = auditAccessibility(document);
     expect(violations.length === 0 ? '' : formatViolations(violations)).toBe('');
+  });
+});
+
+describe('with a zone chart that throws while rendering — #2069', () => {
+  afterEach(() => {
+    zoneChartFails.now = false;
+  });
+
+  async function analysisOfOneRide(): Promise<Mounted> {
+    const port = stubAnalysis(athleteId('athlete-a'), [
+      {
+        activity: stubActivity({ id: activityId('ride-1'), name: 'ride-1' }),
+        power: Array.from({ length: 600 }, () => watts(200)),
+      },
+    ]);
+    const result = await mount(
+      <div>
+        <nav aria-label="Primary">
+          <ul>
+            <li>
+              <a href={hrefFor(routeById('about'))}>About</a>
+            </li>
+          </ul>
+        </nav>
+        <main>
+          <h1>Analysis</h1>
+          <AnalysisView port={port} />
+        </main>
+      </div>,
+    );
+    await settle();
+    return result;
+  }
+
+  it('leaves the zone table, with every share, and the page around it', async () => {
+    zoneChartFails.now = true;
+    mounted = await analysisOfOneRide();
+
+    expect(mounted.caughtErrors.map((error) => error.message)).toContain(
+      'the zone chart failed to draw',
+    );
+    expect(document.querySelector('.oyl-zone-chart')).toBeNull();
+    const table = [...document.querySelectorAll('table')].find((each) =>
+      (each.querySelector('caption')?.textContent ?? '').startsWith('Power zones'),
+    );
+    expect(table?.querySelectorAll('tbody tr')).toHaveLength(7);
+    expect(table?.textContent).toContain('100%');
+    const link = document.querySelector<HTMLAnchorElement>('nav a');
+    expect(tabbableElements(document)).toContain(link);
+    expect(document.body.textContent).toContain('Duration personal bests');
+  });
+
+  it('draws the chart above the same table when nothing throws — the control', async () => {
+    mounted = await analysisOfOneRide();
+
+    expect(mounted.caughtErrors).toEqual([]);
+    expect(document.querySelector('.oyl-zone-chart')).not.toBeNull();
   });
 });

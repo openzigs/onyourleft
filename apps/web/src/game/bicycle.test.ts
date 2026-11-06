@@ -51,12 +51,21 @@ import {
   LEG_BONE_COUNT,
   legBones,
   riderJoints,
+  RIDER_HALF_WIDTH_METRES,
   MAXIMUM_CRANK_STEP_SECONDS,
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
   SIMULATED_DEVELOPMENT_METRES,
   simulatedCrankAngle,
+  blendStance,
+  emptyRiderStance,
+  ELBOW_SWING_SHARE,
+  HEAD_NOD_RADIANS,
+  stanceOf,
+  STANDING_BICYCLE_ROCK_RADIANS,
+  turningCadence,
+  type DrawnPosture,
   type LimbBone,
   type RiderPart,
 } from './bicycle';
@@ -230,9 +239,10 @@ describe('the rider is a bicycle with somebody on it', () => {
     expect(BICYCLE_COLOURS).toContain(RIDER_PALETTE.jersey);
   });
 
-  it('wears the app’s own accent, and legs darker than it — #623', () => {
-    // The owner's ruling: the house kit is in the app's colours. It was the
-    // sphere's blue, 0x2f6fed, until #623.
+  it('wears the teal house kit, and legs darker than it — #623, #2037, #2123', () => {
+    // The owner's ruling of 2026-11-05 (#2123): the house kit stays teal, its
+    // own colour rather than the page's Hi-Vis accent. It was the sphere's
+    // blue, 0x2f6fed, until #623.
     expect(RIDER_PALETTE.jersey).toBe(0x0b5c55);
     expect(RIDER_PALETTE.limb).toBe(0x07443f);
     // The legs stay darker than the jersey, so the pedalling reads as motion.
@@ -432,6 +442,43 @@ describe('the rider sits on the bicycle — #369', () => {
         expect(distanceToBar(at, side)).toBeLessThan(0.04);
       }
     }
+  });
+
+  it('draws the brake hood a hand on the hoods holds — PR #2116', () => {
+    // The owner's ruling of 2026-11-04, "Fix again first": the hoods' hand
+    // floated over the bar. The hood it holds was described and never drawn.
+    const hoods = handPosition('hoods');
+    for (const side of [1, -1] as const) {
+      const hood = BAR_PARTS.find((part) => part.name === `bar hood ${side}`);
+      expect(hood, `hood ${side}`).toBeDefined();
+      const at = hood as RiderPart;
+      expect(Math.sign(at.x)).toBe(side);
+      // The hand rests on it: within a hood's own half-height and a hand's.
+      expect(Math.hypot(at.y - hoods.y, at.z - hoods.z)).toBeLessThan(0.025);
+      // PR #2116's third pass, review 5773686294: and it RISES forward, as a
+      // lever body does off the bend — its nose up and ahead of its foot. A
+      // turn about `+X` takes `+Z` toward `−Y`, so the nose's end is at
+      // `(−sin, cos)` of the pitch times half the box's depth.
+      const half = (at.solid as { readonly depth: number }).depth / 2;
+      const pitch = at.pitch;
+      const rise = -Math.sin(pitch) * half;
+      const ahead = Math.cos(pitch) * half;
+      expect(rise).toBeGreaterThan(0.01);
+      expect(ahead).toBeGreaterThan(0.01);
+      // 41°, from the bend's own geometry: between 30° and 50°.
+      expect((Math.atan2(rise, ahead) * 180) / Math.PI).toBeGreaterThan(30);
+      expect((Math.atan2(rise, ahead) * 180) / Math.PI).toBeLessThan(50);
+    }
+  });
+
+  it('sets the bar below the saddle, as a road bicycle’s is — PR #2116', () => {
+    // The owner's ruling of 2026-11-04, "Fix again first": the bar was level
+    // with the saddle's top, at the realistic hips' height, and from the
+    // three-quarter camera a hand on it read as a hand on the hip.
+    const saddle = RIDER_BODY_PARTS.find((each) => each.name === 'saddle') as RiderPart;
+    const top = saddle.y + (saddle.solid as { readonly height: number }).height / 2;
+    const tops = BAR_PARTS.find((each) => each.name === 'bar tops') as RiderPart;
+    expect(top - tops.y).toBeGreaterThan(0.06);
   });
 
   it('gets lower with every position the drag table charges less air for', () => {
@@ -1122,10 +1169,11 @@ describe('a rider who moves like a rider — #625', () => {
     expect(up.trunkRoll).toBeCloseTo(TRUNK_ROCK_RADIANS, 12);
     expect(up.ankle[0]).toBeCloseTo(-ANKLE_SWING_RADIANS, 12);
     expect(up.ankle[1]).toBeCloseTo(ANKLE_SWING_RADIANS, 12);
-    // The sources' figures, as radians: 2°, 3° (the small end of 3.4–7.2°),
-    // and half of a 24° ankle range.
+    // The sources' figures, as radians: 2°, 6° (the upper end of 3.4–7.2°,
+    // since #1999's ruling that 3° did not read from behind), and half of a
+    // 24° ankle range.
     expect((PELVIS_ROLL_RADIANS * 180) / Math.PI).toBeCloseTo(2, 9);
-    expect((TRUNK_ROCK_RADIANS * 180) / Math.PI).toBeCloseTo(3, 9);
+    expect((TRUNK_ROCK_RADIANS * 180) / Math.PI).toBeCloseTo(6, 9);
     expect((ANKLE_SWING_RADIANS * 180) / Math.PI).toBeCloseTo(12, 9);
   });
 
@@ -1208,5 +1256,245 @@ describe('a rider who moves like a rider — #625', () => {
       // …and the cranks move on exactly those.
       expect(advanceCrank(1, reading, 0.1) !== 1, JSON.stringify(reading)).toBe(turns);
     }
+  });
+});
+
+describe('the rider in each position on the bicycle — #1999', () => {
+  const POSTURES: readonly DrawnPosture[] = ['upright', 'hoods', 'drops', 'aero', 'standing'];
+  const apart = (
+    a: { readonly x: number; readonly y: number; readonly z: number },
+    b: { readonly x: number; readonly y: number; readonly z: number },
+  ): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+  it('puts the hands on the bar where each position holds it: the tops, the hoods, the drops', () => {
+    const where: Record<DrawnPosture, ReturnType<typeof handPosition>> = {
+      upright: handPosition('upright'),
+      hoods: handPosition('hoods'),
+      drops: handPosition('drops'),
+      // The aero tuck is in the drops, and a standing rider on the hoods.
+      aero: handPosition('drops'),
+      standing: handPosition('hoods'),
+    };
+    for (const posture of POSTURES) {
+      const joints = riderJoints(0.4, emptyRiderJoints(), 0, stanceOf(posture, emptyRiderStance()));
+      for (const grip of joints.grip) {
+        expect(grip.y, posture).toBeCloseTo(where[posture].y, 12);
+        expect(grip.z, posture).toBeCloseTo(where[posture].z, 12);
+      }
+      // The owner's ruling of 2026-11-04: across the bar too. The hoods and
+      // the drops are on the bends, the bar's own ends; the tops beside the
+      // stem — PR #2116's third pass, where they were out at the hips' width
+      // and from behind the arms hung straight beside the hips.
+      const [plus, minus] = joints.grip;
+      expect(minus.x, posture).toBe(-plus.x);
+      if (posture === 'upright') {
+        expect(plus.x).toBeGreaterThan(0.06);
+        expect(plus.x).toBeLessThan(0.12);
+      } else {
+        expect(plus.x, posture).toBeCloseTo(RIDER_HALF_WIDTH_METRES, 12);
+      }
+    }
+  });
+
+  it('is the hoods, seated, when no stance is given', () => {
+    for (const angle of [0, 1.3, Math.PI, 5]) {
+      const before = riderJoints(angle, emptyRiderJoints(), 0.1);
+      const hoods = riderJoints(
+        angle,
+        emptyRiderJoints(),
+        0.1,
+        stanceOf('hoods', emptyRiderStance()),
+      );
+      expect(hoods).toEqual(before);
+    }
+  });
+
+  it('takes a standing rider out of the saddle and forward, with the knee still bent at the bottom of every stroke', () => {
+    const seated = riderJoints(0, emptyRiderJoints(), 0);
+    // The thigh and the shin, read where the seated leg reaches its pedal: the top.
+    const shin = apart(seated.knee[0], seated.foot[0]);
+    const thigh = apart({ ...seated.hips, x: seated.knee[0].x }, seated.knee[0]);
+    const stance = stanceOf('standing', emptyRiderStance());
+    for (let angle = 0; angle < 2 * Math.PI; angle += 0.05) {
+      const joints = riderJoints(angle, emptyRiderJoints(), 0, stance);
+      // The hips are forward of where the saddle holds them.
+      expect(joints.hips.z).toBeGreaterThan(seated.hips.z + 0.15);
+      for (const index of [0, 1] as const) {
+        // Each leg's two-bone solve reached its pedal: the shin is its own
+        // length, not stretched past it, and the leg is never straight.
+        const knee = joints.knee[index];
+        const foot = joints.foot[index];
+        expect(apart(knee, foot)).toBeCloseTo(shin, 9);
+        expect(apart({ ...joints.hips, x: knee.x }, foot)).toBeLessThan(thigh + shin - 0.01);
+      }
+    }
+  });
+
+  it('lowers the shoulders in the drops and raises them on the tops', () => {
+    const shoulders = (posture: DrawnPosture): number =>
+      riderJoints(0, emptyRiderJoints(), 0, stanceOf(posture, emptyRiderStance())).shoulders.y;
+    expect(shoulders('drops')).toBeLessThan(shoulders('hoods') - 0.05);
+    expect(shoulders('upright')).toBeGreaterThan(shoulders('hoods') + 0.02);
+  });
+
+  // The owner's ruling of 2026-11-03: from the chase camera behind, the drops
+  // and the tops looked like the hoods. These are the minimums they are held
+  // apart by; `realistic-textures.test.ts` measures the same on the drawn body.
+  const backOf = (posture: DrawnPosture): { angle: number; length: number } => {
+    const { hips, shoulders } = riderJoints(
+      0,
+      emptyRiderJoints(),
+      0,
+      stanceOf(posture, emptyRiderStance()),
+    );
+    const up = shoulders.y - hips.y;
+    const along = shoulders.z - hips.z;
+    return { angle: (Math.atan2(up, along) * 180) / Math.PI, length: Math.hypot(up, along) };
+  };
+
+  it('reads from behind: the back at least 20° flatter in the drops and 5° more upright on the tops than on the hoods', () => {
+    const hoods = backOf('hoods');
+    expect(hoods.angle - backOf('drops').angle).toBeGreaterThan(20);
+    // ⚠️ 12° until PR #2116's third pass, which raised the hoods' back from
+    // 48° to 58° so the arm reaches the hood rather than folding to it. The
+    // tops read by their hands beside the stem since then, not by the back.
+    expect(backOf('upright').angle - hoods.angle).toBeGreaterThan(5);
+    // The owner's ruling of 2026-11-04: the aero tuck's back is flat — 30°
+    // flatter than the hoods and 8° flatter than the drops, at the least.
+    expect(hoods.angle - backOf('aero').angle).toBeGreaterThan(30);
+    expect(backOf('drops').angle - backOf('aero').angle).toBeGreaterThan(8);
+    // Only the angle changes: the back is its own length within a centimetre.
+    for (const posture of ['upright', 'drops', 'aero'] as const) {
+      expect(Math.abs(backOf(posture).length - hoods.length), posture).toBeLessThan(0.01);
+    }
+  });
+
+  it('lifts the head on the tops, and further in the drops and the tuck to look up the road, and leaves it on the hoods', () => {
+    // PR #2116's second pass: the drops and the tuck used to turn the head
+    // DOWN from a back near level, which put the face at the road under the
+    // front wheel and the back of the skull over the helmet's rim.
+    const pitch = (posture: DrawnPosture): number =>
+      (stanceOf(posture, emptyRiderStance()).headPitch * 180) / Math.PI;
+    expect(pitch('hoods')).toBe(0);
+    expect(pitch('standing')).toBe(0);
+    expect(pitch('upright')).toBeLessThan(-5);
+    expect(pitch('drops')).toBeLessThan(-20);
+    expect(pitch('aero')).toBeLessThan(pitch('drops'));
+    // Blended with the rest: half-way from the hoods is half the drops' turn.
+    const half = blendStance(
+      stanceOf('hoods', emptyRiderStance()),
+      stanceOf('drops', emptyRiderStance()),
+      0.5,
+      emptyRiderStance(),
+    );
+    expect(half.headPitch).toBeCloseTo(stanceOf('drops', emptyRiderStance()).headPitch / 2, 12);
+  });
+
+  it('turns the tuck’s elbows furthest back and the tops’ hands furthest down, and blends both — #2148', () => {
+    // Refs #2148: dropping `elbowBack` from `blendStance`, or the tuck's
+    // `elbowBack` set to nought, passed every test. PR #2116's second pass adds
+    // the hand's angle, which the same two mutations would pass by too. Since
+    // the third pass it is `handDown`, the hand's own line below the
+    // bicycle's horizontal, and steepest on the tops, over the bar.
+    const of = (posture: DrawnPosture) => stanceOf(posture, emptyRiderStance());
+    for (const posture of ['upright', 'hoods', 'drops', 'standing'] as const) {
+      expect(of('aero').elbowBack, posture).toBeGreaterThan(of(posture).elbowBack);
+    }
+    for (const posture of ['hoods', 'drops', 'aero', 'standing'] as const) {
+      expect(of('upright').handDown, posture).toBeGreaterThan(of(posture).handDown);
+    }
+    // Drops' elbows in, not out to the side: the owner's "chicken wings".
+    expect(of('drops').elbowOut).toBeLessThan(of('hoods').elbowOut);
+    // Blended as every other figure is: half-way is half of each.
+    const half = blendStance(of('hoods'), of('aero'), 0.5, emptyRiderStance());
+    expect(half.elbowBack).toBeCloseTo((of('hoods').elbowBack + of('aero').elbowBack) / 2, 12);
+    expect(half.handDown).toBeCloseTo((of('hoods').handDown + of('aero').handDown) / 2, 12);
+  });
+});
+
+describe('the body’s motion grows with effort, and a standing rider rocks the bicycle — #1999', () => {
+  const HALF_PI = Math.PI / 2;
+
+  it('rocks the trunk half as much at the easiest and half as much again at the hardest', () => {
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0).trunkRoll).toBeCloseTo(
+      -TRUNK_ROCK_RADIANS / 2,
+      12,
+    );
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).trunkRoll).toBeCloseTo(
+      -1.5 * TRUNK_ROCK_RADIANS,
+      12,
+    );
+    // The default is #625's rock exactly.
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion()).trunkRoll).toBeCloseTo(
+      -TRUNK_ROCK_RADIANS,
+      12,
+    );
+  });
+
+  it('nods the head at a hard effort only, with each downstroke', () => {
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5).headNod).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.2).headNod).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(
+      HEAD_NOD_RADIANS,
+      12,
+    );
+    expect(riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(
+      HEAD_NOD_RADIANS,
+      12,
+    );
+    // Between the downstrokes it is up again.
+    expect(riderMotion(0, 1, 0, emptyRiderMotion(), 1).headNod).toBeCloseTo(0, 12);
+  });
+
+  it('rocks the bicycle away from the downstroke when standing, and not seated', () => {
+    const standing = riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1);
+    // `+X`'s pedal going down tips the top toward `−X`: a positive roll.
+    expect(standing.bicycleRock).toBeCloseTo(STANDING_BICYCLE_ROCK_RADIANS, 12);
+    expect(riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).bicycleRock).toBeCloseTo(
+      -STANDING_BICYCLE_ROCK_RADIANS,
+      12,
+    );
+    // And the trunk rocks twice as far out of the saddle.
+    expect(standing.trunkRoll).toBeCloseTo(-2 * TRUNK_ROCK_RADIANS, 12);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0).bicycleRock).toBe(0);
+  });
+
+  it('swings each elbow out with its own downstroke, further with effort, and not out of the saddle', () => {
+    const down = riderMotion(HALF_PI, 1, 0, emptyRiderMotion());
+    // `+X`'s downstroke: `+X`'s elbow out, `−X`'s in by as much — each by a
+    // SHARE of its position's own turn out (PR #2116's third pass).
+    expect(down.elbow[0]).toBeCloseTo(ELBOW_SWING_SHARE, 12);
+    expect(down.elbow[1]).toBeCloseTo(-ELBOW_SWING_SHARE, 12);
+    const other = riderMotion(3 * HALF_PI, 1, 0, emptyRiderMotion());
+    expect(other.elbow[0]).toBeCloseTo(-ELBOW_SWING_SHARE, 12);
+    // At the hardest, three quarters of the turn: never all of it, so an
+    // elbow never swings in past straight down.
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 1).elbow[0]).toBeCloseTo(
+      1.5 * ELBOW_SWING_SHARE,
+      12,
+    );
+    expect(1.5 * ELBOW_SWING_SHARE).toBeLessThan(1);
+    // PR #2116's second pass: standing, the doubled trunk rock carries the
+    // shoulder out, and an elbow swung out on top of it kicked out past it.
+    expect(Math.abs(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 1).elbow[0])).toBe(0);
+    expect(riderMotion(HALF_PI, 1, 0, emptyRiderMotion(), 0.5, 0.5).elbow[0]).toBeCloseTo(
+      0.5 * ELBOW_SWING_SHARE,
+      12,
+    );
+    expect(Math.abs(riderMotion(HALF_PI, 0, 0, emptyRiderMotion()).elbow[0])).toBe(0);
+  });
+
+  it('rocks nothing with no cadence, standing or not — #349', () => {
+    const still = riderMotion(HALF_PI, 0, 0, emptyRiderMotion(), 1, 1);
+    expect(Math.abs(still.bicycleRock)).toBe(0);
+    expect(Math.abs(still.trunkRoll)).toBe(0);
+    expect(Math.abs(still.headNod)).toBe(0);
+  });
+
+  it('hands the scene the cadence exactly when the HUD shows one', () => {
+    expect(turningCadence({ value: 88, live: true, paired: true })).toBe(88);
+    // Stale, and never paired: the HUD shows a dash for both.
+    expect(turningCadence({ value: 88, live: false, paired: true })).toBeUndefined();
+    expect(turningCadence({ value: undefined, live: false, paired: false })).toBeUndefined();
   });
 });

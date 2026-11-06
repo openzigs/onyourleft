@@ -448,6 +448,23 @@ describe('a front porch keeps #1540’s road clearance — #1589', () => {
     expect((free?.to ?? 0) + FRONT_PORCH.overhang).toBeGreaterThan(2);
   });
 
+  it('runs a full-width porch from the free end to the garage’s bay, not centred on the door — #1784', () => {
+    const spec = frontPorchOf(site(10, { full: true, garage: { along: 4, width: 4 } }), draws);
+    if (spec === undefined) throw new Error('no porch');
+    // 12 m front: 6 − endMargin free to the left; the bay at 2..6 keeps endMargin off the right.
+    expect(spec.from).toBeCloseTo(-(6 - FRONT_PORCH.endMargin), 9);
+    expect(spec.to).toBeCloseTo(2 - FRONT_PORCH.endMargin, 9);
+    expect(spec.posts).toHaveLength(4);
+    // The steps are in the middle bay, which is no longer at the door.
+    expect(spec.stepsAt).toBeCloseTo((spec.from + spec.to) / 2, 9);
+  });
+
+  it('drops a full-width porch on a front too narrow for four posts, rather than drawing three — #1784', () => {
+    expect(frontPorchOf(site(10, { full: true, length: 5 }), draws)).toBeUndefined();
+    // Control: a front just wide enough for the steps in the middle bay keeps its four.
+    expect(frontPorchOf(site(10, { full: true, length: 5.4 }), draws)?.posts).toHaveLength(4);
+  });
+
   it('ties its roof under a pitched roof’s gutter, and under the next storey’s floor', () => {
     // A storey up to the eaves: under the gutter's foot; four storeys: under the first floor.
     const eaveY = 3.2 - EAVES_OVERHANG_METRES * Math.tan((25 * Math.PI) / 180);

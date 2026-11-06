@@ -35,6 +35,7 @@ import {
 } from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
+import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
 import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
@@ -1747,6 +1748,24 @@ describe('GameView — the cranks turn at the rider’s own cadence (#349)', () 
     expect(afterwards).toHaveLength(4);
     expect(new Set(afterwards)).toEqual(new Set([0]));
   });
+
+  it('hands the renderer the cadence the rider’s position is chosen from, and none when it goes — #1999', async () => {
+    // ⚠️ `RiderMarker.riding` is optional the UNSAFE way round: a GameView
+    // that stopped supplying the cadence would never stand a rider for one.
+    // This reads what the renderer was handed.
+    let reported: SensorReading = LIVE_CADENCE;
+    const frames = await startRiding({ pacer: false, cadence: () => reported });
+    await pump(8, CRANK_FRAME_MS);
+    const cadence = (frame: SceneFrame): number | undefined =>
+      frame.markers.find((each) => each.kind === 'rider')?.riding?.cadence;
+    expect(new Set(frames.slice(-4).map(cadence))).toEqual(new Set([88]));
+    const seen = frames.length;
+    reported = { value: undefined, live: false, paired: true };
+    await pump(8, CRANK_FRAME_MS);
+    const afterwards = frames.slice(seen).slice(-4);
+    expect(afterwards).toHaveLength(4);
+    expect(new Set(afterwards.map(cadence))).toEqual(new Set([undefined]));
+  });
 });
 
 /**
@@ -2044,5 +2063,89 @@ describe('the touch lock on the HUD — #1482', () => {
 
     await clickThrough(rideButton());
     expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+/**
+ * The chase camera's heading is damped on the frames the renderer is handed —
+ * #1994. `camera.ts` §`dampedHeading` is unit-tested and ridden through bends
+ * in `chase-camera-bend.test.ts`; what only this file can see is that the loop
+ * applies it, by the wall clock between drawn frames, and passes it the
+ * rider's reduced-motion preference.
+ */
+describe('GameView — the chase camera turns at a bounded rate (#1994)', () => {
+  /**
+   * 60 m north, a U-turn (the two legs a metre apart), and back south: where
+   * the road 25 m on comes back past the rider, the heading the camera aims at
+   * goes through half a turn in a few frames — 29° in one 250 ms frame,
+   * measured with the damping taken out, against the 22.5° the cap allows.
+   */
+  function turnaroundRoute(): RidableRoute {
+    const perDegreeLongitude = 111_320 * Math.cos((51.5 * Math.PI) / 180);
+    const points: RoutePoint[] = [];
+    const push = (east: number, north: number): void => {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + north / 111_320),
+          degreesLongitude(-0.12 + east / perDegreeLongitude),
+        ),
+        elevation: altitudeMetres(0),
+      });
+    };
+    for (let north = 0; north <= 60; north += 10) push(0, north);
+    for (let step = 1; step < 6; step += 1) {
+      const angle = (step / 6) * Math.PI;
+      push(0.5 * (1 - Math.cos(angle)), 60 + 0.5 * Math.sin(angle));
+    }
+    for (let north = 60; north >= -400; north -= 10) push(1, north);
+    return { id: 'route-u', name: 'Turnaround', profile: routeProfile(points), attempts: 0 };
+  }
+
+  async function rideTheTurnaround(): Promise<readonly number[]> {
+    const frames: SceneFrame[] = [];
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(turnaroundRoute())}
+        renderer={() => Promise.resolve(capturingRenderer(frames))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(120);
+    return frames.map((frame) => Math.atan2(frame.camera.headingX, frame.camera.headingZ));
+  }
+
+  /** The largest turn between consecutive drawn frames, and the whole turn, radians. */
+  function turns(drawn: readonly number[]): { readonly largest: number; readonly whole: number } {
+    let largest = 0;
+    let whole = 0;
+    for (let index = 1; index < drawn.length; index += 1) {
+      const step = (drawn[index] as number) - (drawn[index - 1] as number);
+      const turn = Math.abs(Math.atan2(Math.sin(step), Math.cos(step)));
+      largest = Math.max(largest, turn);
+      whole += turn;
+    }
+    return { largest, whole };
+  }
+
+  it('turns through the turnaround no faster than the cap', async () => {
+    const { largest, whole } = turns(await rideTheTurnaround());
+    // It did turn round: a frozen camera would pass the bound below.
+    expect(whole).toBeGreaterThan(Math.PI * 0.9);
+    expect(largest).toBeLessThanOrEqual(CAMERA_MAXIMUM_YAW_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6);
+  });
+
+  it('and no faster than the reduced-motion cap for a rider who asked for reduced motion', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const { largest, whole } = turns(await rideTheTurnaround());
+    expect(whole).toBeGreaterThan(Math.PI * 0.9);
+    expect(largest).toBeLessThanOrEqual(
+      REDUCED_MOTION_MAXIMUM_YAW_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6,
+    );
   });
 });

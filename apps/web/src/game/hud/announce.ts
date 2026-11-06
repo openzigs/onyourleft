@@ -37,6 +37,7 @@
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
  * | 5g | a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2 | **yes** — #1812 |
+ * | 5h | a lap race's finish, a hit, a lap, an item and a place, in that order | event (#1904) | ADR 0060 | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -67,6 +68,7 @@
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
  * | `delivery-*` | `GameView`, on a ride running a round (#1816) | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
+ * | `lap-race-*` | nothing yet: #1906 runs a race inside a game ride | `hud/lap-race-announce.ts` §`lapRaceEvents` (#1904) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -209,6 +211,24 @@
  * owner's ruling of 2026-10-28 on #1812 ("Only when announcements on"), which
  * reversed this PR's first cut. It decides nothing about #1316's `lap-ended`.
  *
+ * ⚠️ **Rank 5h is #1904's**: a solo lap race (ADR 0060) — its finish, a hit
+ * taken, a lap done, an item gained and a change of place, ranked in that
+ * order among themselves. BELOW every other event, Delivery's included, for
+ * Delivery's reason: a lap race is a game laid over a ride, nothing it says
+ * is the machine under the rider (no game event reaches the trainer, ADR 0060
+ * D-2), and a ride runs one mode, so it never competes with a round. Among
+ * the five: the finish first, the race's last word; a hit next, because it is
+ * true of this second and explains a place lost in it; then a lap, an item
+ * and the place, which a window's wait costs least. **The place is rate-limited
+ * on top of the window** (`lap-race-announce.ts` §`PLACE_ANNOUNCE_SECONDS`):
+ * a close race changes places every second, and a sentence each time would be
+ * #396's continuous speech one kind at a time. The caller offers each on every
+ * call until it comes back as `kind`, Delivery's "owed" rule, one sentence
+ * per kind at most. ⚠️ **Not in {@link ALWAYS_SPOKEN}**, none of the five,
+ * on the owner's Delivery ruling of 2026-10-28 applied to this mode: they
+ * follow the rider's announcement setting. A ruling for this mode is the
+ * owner's, and reversing it is the membership of one array.
+ *
  * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
@@ -279,7 +299,12 @@ export type AnnouncementEvent =
   | { readonly kind: 'delivery-round-over'; readonly text: string }
   | { readonly kind: 'delivery-crash'; readonly text: string }
   | { readonly kind: 'delivery-missed'; readonly text: string }
-  | { readonly kind: 'delivery-delivered'; readonly text: string };
+  | { readonly kind: 'delivery-delivered'; readonly text: string }
+  | { readonly kind: 'lap-race-finish'; readonly text: string }
+  | { readonly kind: 'lap-race-hit'; readonly text: string }
+  | { readonly kind: 'lap-race-lap'; readonly text: string }
+  | { readonly kind: 'lap-race-item'; readonly text: string }
+  | { readonly kind: 'lap-race-place'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -322,6 +347,13 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'delivery-crash',
   'delivery-missed',
   'delivery-delivered',
+  // #1904: a lap race, below a Delivery round's and above every reading.
+  // Rank 5h; the module note says why this order among the five.
+  'lap-race-finish',
+  'lap-race-hit',
+  'lap-race-lap',
+  'lap-race-item',
+  'lap-race-place',
   'power-off-target',
   'distance-tick',
   'power',
@@ -341,6 +373,7 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
   // #1812: no Delivery kind. The owner's ruling of 2026-10-28: they follow the setting. Rank 5g.
+  // #1904: and no lap-race kind, on that ruling. Rank 5h.
 ];
 
 /**

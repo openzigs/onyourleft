@@ -387,6 +387,11 @@ The `backup` service takes an online snapshot every six hours into `OYL_BACKUP_D
 `OYL_OFFBOX_DIR`, and keeps the newest fourteen of each (`OYL_BACKUP_INTERVAL_SECONDS`,
 `OYL_BACKUP_KEEP`). A copy that cannot be written fails, and says so in `docker compose logs backup`.
 
+⚠️ **No backup may be older than 30 days** (#1381): a backup holds what the instance has since erased,
+and the privacy policy tells riders so. The defaults (fourteen, six hours apart) keep 3.5 days. If you
+change either number, keep `OYL_BACKUP_KEEP` × `OYL_BACKUP_INTERVAL_SECONDS` under 2 592 000 seconds;
+[Backup](../operating-an-instance.md#backup) lists the other copies to count.
+
 ⚠️ **On Windows, a USB stick cannot be `OYL_OFFBOX_DIR`.** Docker Desktop reaches Windows drives
 through WSL, and WSL does not mount a removable drive by itself, not even after `wsl --shutdown`
 with the stick plugged in. Docker still accepts `E:/onyourleft-backups`, but it gives the container

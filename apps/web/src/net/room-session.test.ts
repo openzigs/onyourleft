@@ -13,7 +13,14 @@ import {
   RoomSession,
   type RoomSample,
 } from './room-session';
-import { flush, frameRider, ManualClock, ScriptedRoom, standingsRider } from './testing';
+import {
+  flush,
+  frameRider,
+  lapFrameRider,
+  ManualClock,
+  ScriptedRoom,
+  standingsRider,
+} from './testing';
 
 function session(
   room: ScriptedRoom,
@@ -415,13 +422,109 @@ describe('a race’s standings, as the room sends them — #1347', () => {
     expect(s.standings()).toBeUndefined();
   });
 
-  it('says hello as version 2, the version that carries them', async () => {
+  it('says hello as version 3, the version that carries them and the lap race (#1908)', async () => {
     const room = new ScriptedRoom();
     const clock = new ManualClock();
     session(room, clock);
     await flush();
     room.accept();
-    expect(PROTOCOL_VERSION).toBe(2);
-    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 2 });
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(room.socket.sent[0]).toMatchObject({ type: 'hello', protocol: 4 });
+  });
+});
+
+describe('a lap race, from this client’s side — #1911', () => {
+  async function lapRace(
+    items: 'on' | 'off' = 'on',
+  ): Promise<{ room: ScriptedRoom; clock: ManualClock; s: RoomSession }> {
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const s = session(room, clock);
+    await flush();
+    room.accept();
+    room.welcome(3, 'race', 'on', { laps: 3, items });
+    return { room, clock, s };
+  }
+
+  it('keeps the room’s laps and items, and its newest frame’s slots and item events', async () => {
+    const { room, clock, s } = await lapRace();
+    expect(s.lapRace()).toEqual({
+      config: { laps: 3, items: 'on' },
+      frameIntervalMs: 1000,
+      riderId: 3,
+      newest: undefined,
+    });
+    await clock.advance(250);
+    room.frame(
+      4,
+      [
+        lapFrameRider(3, 120, { offsetMetres: -2.5, lane: 0, held: 'tow', lapsDone: 1 }),
+        lapFrameRider(5, 130, { held: 'none' }),
+      ],
+      { ackSequence: 9, itemEvents: [{ riderId: 3, event: 'hit', item: 'crosswind-gust' }] },
+    );
+    const newest = s.lapRace()?.newest;
+    expect(newest).toMatchObject({ tick: 4, atLocalMs: 250, ackSequence: 9 });
+    expect(newest?.riders.get(3)).toEqual({
+      effortMetres: 120,
+      raceOffsetMetres: -2.5,
+      lane: 0,
+      held: 'tow',
+      lapsDone: 1,
+    });
+    expect(newest?.events).toEqual([{ riderId: 3, event: 'hit', item: 'crosswind-gust' }]);
+  });
+
+  it('sends a lane and an item use as inputs, on the reports’ one sequence, and never an outcome', async () => {
+    const { room, clock, s } = await lapRace();
+    await clock.advance(KEEPALIVE_INTERVAL_MS);
+    const lane = s.changeLane(2);
+    const use = s.useItem();
+    await clock.advance(KEEPALIVE_INTERVAL_MS);
+    const sent = room.socket.sent.filter((m) => m.type !== 'hello');
+    expect(sent.map((m) => m.type)).toEqual(['report', 'lane', 'item-use', 'report']);
+    const sequences = sent.map((m) => ('sequence' in m ? m.sequence : -1));
+    // One increasing sequence, the inputs' numbers the ones answered.
+    expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+    expect(new Set(sequences).size).toBe(sequences.length);
+    expect(sent[1]).toMatchObject({ type: 'lane', lane: 2, sequence: lane });
+    expect(sent[2]).toMatchObject({ type: 'item-use', sequence: use });
+    // An input names no outcome and no item: the room decides those.
+    expect(keysOf(sent[2]).sort()).toEqual(['atMs', 'sequence', 'type']);
+  });
+
+  it('sends no item use with items off, and no input outside a lap race or before the welcome', async () => {
+    const off = await lapRace('off');
+    expect(off.s.useItem()).toBeUndefined();
+    expect(off.s.changeLane(0)).toBeDefined();
+    const room = new ScriptedRoom();
+    const clock = new ManualClock();
+    const plain = session(room, clock);
+    expect(plain.changeLane(0)).toBeUndefined();
+    await flush();
+    room.accept();
+    room.welcome(3, 'race');
+    expect(plain.lapRace()).toBeUndefined();
+    expect(plain.useItem()).toBeUndefined();
+    expect(plain.changeLane(0)).toBeUndefined();
+    expect(room.socket.sent.map((m) => m.type)).toEqual(['hello']);
+  });
+
+  it('forgets the lap slots on a rejoin until the room’s next frame says them again', async () => {
+    const { room, clock, s } = await lapRace();
+    room.frame(2, [lapFrameRider(3, 40, { lane: 0, held: 'tailwind' })]);
+    expect(s.lapRace()?.newest?.riders.get(3)?.held).toBe('tailwind');
+    room.closeFromServer(1006);
+    expect(s.status.kind).toBe('lost');
+    // Held while lost: the last word the room gave.
+    expect(s.lapRace()?.newest?.riders.get(3)?.held).toBe('tailwind');
+    expect(s.useItem()).toBeUndefined();
+    await clock.advance(BACKOFF_BASE_MS);
+    room.accept();
+    room.welcome(3, 'race', 'on', { laps: 3, items: 'on' });
+    expect(s.status.kind).toBe('joined');
+    expect(s.lapRace()?.newest).toBeUndefined();
+    room.frame(9, [lapFrameRider(3, 80, { lane: 0, held: 'tailwind' })]);
+    expect(s.lapRace()?.newest?.riders.get(3)).toMatchObject({ lane: 0, held: 'tailwind' });
   });
 });

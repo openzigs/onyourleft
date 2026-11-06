@@ -49,8 +49,10 @@ import {
   accessibleName,
   auditAccessibility,
   formatViolations,
+  keyboardReachableElements,
   tabbableElements,
 } from '../a11y/audit';
+import { stubAnalysis, type StubAnalysis } from '../analysis/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 
@@ -163,12 +165,13 @@ function busyRide(): StubDetail {
  * the view's, and both of which would train a reader to ignore this file's
  * failures.
  */
-async function openDetail(port: StubDetail | undefined): Promise<Mounted> {
+async function openDetail(port: StubDetail | undefined, analysis?: StubAnalysis): Promise<Mounted> {
   document.documentElement.lang = 'en';
+  await import('./PowerCurveChart');
   const result = await mount(
     <main>
       <h1>Ride details</h1>
-      <ActivityDetailView port={port} activityId={RIDE} />
+      <ActivityDetailView port={port} activityId={RIDE} analysis={analysis} />
     </main>,
   );
   // Twice: the first settles the store reads, the second the lazily imported
@@ -203,17 +206,31 @@ describe('the ride detail view passes the audit in every state it renders', () =
     expectClean('the detail view with the shared view open');
   });
 
-  it('with every series switched on', async () => {
+  it('with every recorded channel charted — #2068', async () => {
     await openDetail(busyRide());
-    for (const button of queryAll<HTMLButtonElement>(document, 'button')) {
-      if (button.textContent?.startsWith('Show ') === true) {
-        await activateWithKeyboard(button);
-        await settle();
-      }
-    }
+    // Six chartable channels stored (latitude and longitude are not charts).
+    expect(queryAll(document, 'svg.oyl-trace')).toHaveLength(6);
+    expectClean('the detail view with every chart drawn');
+  });
+
+  it('with the power curve and its all-time line, and the charts against distance — #2081', async () => {
+    const port = busyRide();
+    const activity = stubActivity({ hasPosition: true });
+    await openDetail(
+      port,
+      stubAnalysis(ATHLETE, [{ activity, power: powerSeries(400, 100, 120) }]),
+    );
+    const curve = document.querySelector('[data-oyl-curve-slot] svg.oyl-curve');
+    expect(curve?.getAttribute('role')).toBe('img');
+    expect(accessibleName(curve as Element)).toContain('Power curve.');
+    expect(document.querySelector('[data-oyl-curve-slot] table')).not.toBeNull();
+    const distance = document.querySelector<HTMLInputElement>(
+      'input[name="oyl-trace-axis"][value="distance"]',
+    );
+    await activateWithKeyboard(distance as HTMLInputElement);
     await settle();
-    expect(queryAll(document, 'svg.oyl-trace').length).toBeGreaterThan(2);
-    expectClean('the detail view with every series on');
+    expect(distance?.checked).toBe(true);
+    expectClean('the detail view with its power curve, drawn against distance');
   });
 
   it('with no local store, which is what a private window gets', async () => {
@@ -223,9 +240,11 @@ describe('the ride detail view passes the audit in every state it renders', () =
 });
 
 describe('every control on the detail view is reachable and named', () => {
-  it('is in the tab order and has an accessible name', async () => {
+  it('is reachable by keyboard and has an accessible name', async () => {
+    // Reachable rather than a tab stop since #2081: the charts' axis is a
+    // radio pair, one stop, the other radio an arrow key away (#698).
     await openDetail(busyRide());
-    const tabbable = new Set(tabbableElements(document));
+    const tabbable = new Set(keyboardReachableElements(document));
     const controls = queryAll(
       document,
       'a[href], button, input, select, textarea, [role="button"]',
@@ -233,20 +252,24 @@ describe('every control on the detail view is reachable and named', () => {
 
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
-      expect(tabbable.has(control), `not in the tab order: ${control.outerHTML}`).toBe(true);
+      expect(tabbable.has(control), `not reachable by keyboard: ${control.outerHTML}`).toBe(true);
       expect(accessibleName(control), `unnamed control: ${control.outerHTML}`).not.toBe('');
     }
   });
 
-  it('names each series toggle by what pressing it does', async () => {
-    // "Show cadence", not "Cadence" with the state carried by a colour. #48's
-    // sixth criterion: colour is never the sole carrier of meaning.
+  it('describes every stacked chart by its own channel — #2068', async () => {
+    // The series toggles are gone with #2068: every channel is drawn. Each
+    // chart is then a picture a reader is told about in words, by name.
     await openDetail(busyRide());
-    const toggles = queryAll<HTMLButtonElement>(document, '.oyl-library-controls button');
-    expect(toggles.length).toBeGreaterThan(0);
-    for (const toggle of toggles) {
-      expect(accessibleName(toggle)).toMatch(/^(Show|Hide) /);
-    }
+    const names = queryAll(document, 'svg.oyl-trace').map((svg) => accessibleName(svg));
+    expect(names.map((name) => name.split(' over ')[0])).toEqual([
+      'Power',
+      'Heart rate',
+      'Cadence',
+      'Speed',
+      'Altitude',
+      'Temperature',
+    ]);
   });
 });
 

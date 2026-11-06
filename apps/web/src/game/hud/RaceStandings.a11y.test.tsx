@@ -127,6 +127,21 @@ describe('a race’s standings on the HUD — #1347', () => {
     expect(list?.getAttribute('start')).toBe('29');
   });
 
+  it('numbers each line by its own place when the leader is kept above a window further back (#1967)', async () => {
+    await hud({
+      ...STANDINGS,
+      lines: STANDINGS.lines.map((line, at) => ({
+        ...line,
+        place: at === 0 ? 1 : line.place + 28,
+      })),
+    });
+    const items = [
+      ...document.querySelectorAll<HTMLLIElement>('section[aria-label="Race standings"] li'),
+    ];
+    expect(items.map((item) => item.value)).toEqual([1, 30, 31]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('is never a live region: the standings are read on request, not announced every second', async () => {
     await hud(STANDINGS);
     const section = document.querySelector('section[aria-label="Race standings"]');

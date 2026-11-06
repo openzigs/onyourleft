@@ -150,9 +150,23 @@ export async function startRoomGateInstance(): Promise<RoomGateInstance> {
  * hostname, and nothing on the page knows the instance's own port.
  */
 export async function startRoomGateInstanceBehindEdge(): Promise<EdgedRoomGateInstance> {
+  return behindEdge('group');
+}
+
+/**
+ * A LAP RACE behind the edge — #1911: the one room a race of 50 laps of a
+ * level 40 m loop, items on, no countdown, so a rider holds an item a few
+ * seconds after the start and is still racing a minute later. Any seated
+ * rider may start it: an operator's room has no creator (`RaceStarter`).
+ */
+export async function startLapRaceGateInstanceBehindEdge(): Promise<EdgedRoomGateInstance> {
+  return behindEdge('lap-race');
+}
+
+async function behindEdge(room: GateRoom): Promise<EdgedRoomGateInstance> {
   const port = await freePort();
   const edgePort = await freePort();
-  const started = await start(port, `http://127.0.0.1:${String(edgePort)}`);
+  const started = await start(port, `http://127.0.0.1:${String(edgePort)}`, room);
   const edge = await startEdge(edgePort, port);
   return {
     ...started,
@@ -164,7 +178,14 @@ export async function startRoomGateInstanceBehindEdge(): Promise<EdgedRoomGateIn
   };
 }
 
-async function start(port: number, origin: string): Promise<RoomGateInstance> {
+/** Which room the gate's instance holds: #782's group ride, or #1911's lap race. */
+type GateRoom = 'group' | 'lap-race';
+
+async function start(
+  port: number,
+  origin: string,
+  room: GateRoom = 'group',
+): Promise<RoomGateInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-room-gate-'));
   const database = join(directory, 'instance.sqlite');
   const roomId = 'gate-room';
@@ -174,19 +195,20 @@ async function start(port: number, origin: string): Promise<RoomGateInstance> {
   const store = await openSqlStore(database);
   await store.putRoom({
     id: roomId,
-    kind: 'group',
+    kind: room === 'group' ? 'group' : 'race',
     visibility: 'private',
     routeSha256: '0'.repeat(64),
     physicsVersion: PHYSICS_VERSION,
   });
   await store.putRoomCourse({
     roomId,
-    lengthMetres: 5_000,
+    lengthMetres: room === 'group' ? 5_000 : 40,
     grades: [[0, 0]],
     ridingPosition: 'hoods',
     capacity: null,
     countdownMs: 0,
     rejoinWindowMs: null,
+    ...(room === 'lap-race' ? { lapRace: { laps: 50, items: true, seed: 2 } } : {}),
     raceStartedAt: null,
   });
   await store.close();

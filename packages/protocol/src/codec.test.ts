@@ -30,11 +30,19 @@ import {
   type Report,
 } from './messages';
 import {
+  CLIENT_MESSAGE_TYPES,
+  CLIENT_OUTCOME_FIELDS,
+  ITEM_KEYS,
+  LANE_COUNT,
   MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ITEM_EVENTS,
+  MAXIMUM_LAPS,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
+  MAXIMUM_RACE_OFFSET_CENTIMETRES,
   MAXIMUM_REPORTED_POWER_WATTS,
   MAXIMUM_RIDERS,
+  MESSAGE_FIELDS,
 } from './schema';
 
 const PHYSICS = { physicsVersion: 1 };
@@ -45,6 +53,10 @@ const MESSAGES: readonly ProtocolMessage[] = [
   { type: 'hello', protocol: PROTOCOL_VERSION, physicsVersion: 1, ticket: 'room-7.ticket_ABC' },
   { type: 'report', sequence: 0, atMs: 0, powerWatts: 0 },
   { type: 'report', sequence: 41, atMs: 1_727_600_000_000, powerWatts: 312.5, cadenceRpm: 91 },
+  { type: 'item-use', sequence: 0, atMs: 0 },
+  { type: 'item-use', sequence: 17, atMs: 1_727_600_000_250 },
+  { type: 'lane', sequence: 18, atMs: 1_727_600_000_300, lane: 0 },
+  { type: 'lane', sequence: 19, atMs: 1_727_600_000_400, lane: LANE_COUNT - 1 },
   {
     type: 'welcome',
     riderId: 3,
@@ -57,8 +69,70 @@ const MESSAGES: readonly ProtocolMessage[] = [
       drafting: 'on',
     },
   },
+  {
+    type: 'welcome',
+    riderId: 4,
+    routeRef: { sha256: SHA },
+    roomConfig: {
+      kind: 'race',
+      ridingPosition: 'drops',
+      reportIntervalMs: REPORT_INTERVAL_MS,
+      frameIntervalMs: FRAME_INTERVAL_MS,
+      drafting: 'off',
+      lapRace: { laps: 3, items: 'on' },
+    },
+  },
+  {
+    type: 'welcome',
+    riderId: 5,
+    routeRef: { sha256: SHA },
+    roomConfig: {
+      kind: 'ride',
+      ridingPosition: 'upright',
+      reportIntervalMs: REPORT_INTERVAL_MS,
+      frameIntervalMs: FRAME_INTERVAL_MS,
+      drafting: 'on',
+    },
+    voiceInvite: 'https://discord.gg/Ab3-xyz9',
+  },
   { type: 'refuse', reason: 'physics-mismatch' },
+  { type: 'voice', voiceInvite: 'https://discord.gg/Ab3-new2' },
+  { type: 'voice' },
   { type: 'frame', tick: 0, riders: [] },
+  {
+    type: 'frame',
+    tick: 61,
+    ackSequence: 120,
+    riders: [
+      {
+        riderId: 3,
+        decimetres: 18_422,
+        centimetresPerSecond: 1_104,
+        draftPercent: 0,
+        flags: 0,
+        raceOffsetCentimetres: -MAXIMUM_RACE_OFFSET_CENTIMETRES,
+        lane: 0,
+        held: 'none',
+        lapsDone: 1,
+      },
+      {
+        riderId: 9,
+        decimetres: 18_395,
+        centimetresPerSecond: 998,
+        draftPercent: 12,
+        flags: FLAG_PLAUSIBILITY,
+        raceOffsetCentimetres: 250,
+        lane: 2,
+        held: 'crosswind-gust',
+        lapsDone: 0,
+      },
+    ],
+    itemEvents: [
+      { riderId: 9, event: 'pick-up', item: 'crosswind-gust' },
+      { riderId: 3, event: 'use', item: 'puddle' },
+      { riderId: 3, event: 'hit', item: 'tow' },
+    ],
+  },
   {
     type: 'frame',
     tick: 1_200,
@@ -114,6 +188,8 @@ describe('decode(encode(m)) ≡ m', () => {
       new Set([
         'hello',
         'report',
+        'item-use',
+        'lane',
         'welcome',
         'refuse',
         'frame',
@@ -121,6 +197,7 @@ describe('decode(encode(m)) ≡ m', () => {
         'name',
         'standings',
         'finish',
+        'voice',
       ]),
     );
   });
@@ -259,8 +336,22 @@ describe('what the decoder refuses — one check, one reason', () => {
     // Version 2 added the race's names and standings (ADR 0051). A build from
     // before them is told it is a different version, which the client says as
     // "update the app", rather than being seated in a race it cannot list.
-    expect(PROTOCOL_VERSION).toBe(2);
     expect(refusalOf(decodeClientMessage(hello({ protocol: 1 }), PHYSICS))).toBe(
+      'protocol-mismatch',
+    );
+  });
+
+  it('refuses a version-2 build, as version 2 refused version 1 — #1908', () => {
+    // Version 3 added the lap race's inputs, settings and frame slots. A
+    // version-2 build would be seated in a lap race it cannot steer or read.
+    expect(refusalOf(decodeClientMessage(hello({ protocol: 2 }), PHYSICS))).toBe(
+      'protocol-mismatch',
+    );
+  });
+
+  it('refuses a version-3 build, which would refuse a welcome carrying a voice link — #875', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(refusalOf(decodeClientMessage(hello({ protocol: 3 }), PHYSICS))).toBe(
       'protocol-mismatch',
     );
   });
@@ -284,7 +375,9 @@ describe('what the decoder refuses — one check, one reason', () => {
         ),
       ),
     ).toBe('unknown-key');
-    const welcome = JSON.parse(encodeMessage(MESSAGES[3] as ProtocolMessage)) as {
+    const welcome = JSON.parse(
+      encodeMessage(MESSAGES.find((m) => m.type === 'welcome') as ProtocolMessage),
+    ) as {
       routeRef: Record<string, unknown>;
     };
     welcome.routeRef['geometry'] = 'nope';
@@ -344,7 +437,9 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('refuses a welcome that does not say whether the room drafts, or says it otherwise — #787', () => {
-    const welcome = JSON.parse(encodeMessage(MESSAGES[3] as ProtocolMessage)) as {
+    const welcome = JSON.parse(
+      encodeMessage(MESSAGES.find((m) => m.type === 'welcome') as ProtocolMessage),
+    ) as {
       roomConfig: Record<string, unknown>;
     };
     expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome)))).toBe('accepted');
@@ -431,7 +526,7 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('names every reason it can give', () => {
-    expect(new Set(REFUSAL_REASONS).size).toBe(11);
+    expect(new Set(REFUSAL_REASONS).size).toBe(12);
   });
 });
 
@@ -443,5 +538,311 @@ describe('utf8ByteLength', () => {
     expect(utf8ByteLength('🚲')).toBe(4);
     expect(utf8ByteLength('\ud800')).toBe(3);
     expect(utf8ByteLength('\udc00x')).toBe(4);
+  });
+});
+
+/**
+ * #1908: a lap race's inputs in, the room's outcomes out, every field bounded
+ * (ADR 0060 D-5.4). Each case alters a message that is otherwise accepted, so
+ * the reason asserted is the one check that fired.
+ */
+describe('the lap race — #1908', () => {
+  const itemUse = (overrides: Record<string, unknown> = {}): string =>
+    JSON.stringify({ type: 'item-use', sequence: 1, atMs: 1, ...overrides });
+  const lane = (overrides: Record<string, unknown> = {}): string =>
+    JSON.stringify({ type: 'lane', sequence: 1, atMs: 1, lane: 1, ...overrides });
+  /** A lap race's nine-slot rider, with the named slots replaced. */
+  const lapRow = (overrides: Record<string, unknown> = {}): unknown[] => {
+    const row = MESSAGE_FIELDS.frame.riders.shape.row;
+    const valid: Record<string, unknown> = {
+      riderId: 1,
+      decimetres: 10,
+      centimetresPerSecond: 900,
+      draftPercent: 0,
+      flags: 0,
+      raceOffsetCentimetres: 0,
+      lane: 1,
+      held: 'none',
+      lapsDone: 0,
+      ...overrides,
+    };
+    return [...row.slots, ...row.tail].map((slot) => valid[slot.name]);
+  };
+  const frame = (fields: Record<string, unknown>): string =>
+    JSON.stringify({ type: 'frame', tick: 1, riders: [lapRow()], ...fields });
+
+  it('accepts the unaltered messages each case below alters', () => {
+    expect(refusalOf(decodeClientMessage(itemUse(), PHYSICS))).toBe('accepted');
+    expect(refusalOf(decodeClientMessage(lane(), PHYSICS))).toBe('accepted');
+    expect(refusalOf(decodeRoomMessage(frame({})))).toBe('accepted');
+    expect(refusalOf(decodeRoomMessage(frame({ itemEvents: [[1, 'hit', 'tailwind']] })))).toBe(
+      'accepted',
+    );
+  });
+
+  it('refuses an unknown item key, held or in an event', () => {
+    for (const key of ['banana', 'shell', 'Tailwind', '', 7, null]) {
+      expect(
+        refusalOf(decodeRoomMessage(frame({ riders: [lapRow({ held: key })] }))),
+        String(key),
+      ).toBe('bad-value');
+      expect(
+        refusalOf(decodeRoomMessage(frame({ itemEvents: [[1, 'pick-up', key]] }))),
+        String(key),
+      ).toBe('bad-value');
+    }
+    // `none` is a held item, never an event's.
+    expect(refusalOf(decodeRoomMessage(frame({ itemEvents: [[1, 'use', 'none']] })))).toBe(
+      'bad-value',
+    );
+    expect(refusalOf(decodeRoomMessage(frame({ itemEvents: [[1, 'teleport', 'tow']] })))).toBe(
+      'bad-value',
+    );
+    // Every key the schema states is one a rider may hold and an event may carry.
+    for (const key of ITEM_KEYS) {
+      expect(refusalOf(decodeRoomMessage(frame({ itemEvents: [[1, 'use', key]] })))).toBe(
+        'accepted',
+      );
+      expect(refusalOf(decodeRoomMessage(frame({ riders: [lapRow({ held: key })] })))).toBe(
+        'accepted',
+      );
+    }
+  });
+
+  it('refuses a lane outside the stated lanes, sent or framed', () => {
+    for (const value of [-1, LANE_COUNT, 1.5, '1', null]) {
+      expect(refusalOf(decodeClientMessage(lane({ lane: value }), PHYSICS)), String(value)).toBe(
+        'bad-value',
+      );
+      expect(
+        refusalOf(decodeRoomMessage(frame({ riders: [lapRow({ lane: value })] }))),
+        String(value),
+      ).toBe('bad-value');
+    }
+    for (let value = 0; value < LANE_COUNT; value += 1) {
+      expect(refusalOf(decodeClientMessage(lane({ lane: value }), PHYSICS))).toBe('accepted');
+    }
+    expect(refusalOf(decodeClientMessage(lane({ lane: undefined }), PHYSICS))).toBe('missing-key');
+  });
+
+  it('refuses an item-event list longer than the stated bound, and accepts one at it', () => {
+    const events = (count: number) =>
+      Array.from({ length: count }, (_, index) => [index % MAXIMUM_RIDERS, 'hit', 'tow']);
+    expect(refusalOf(decodeRoomMessage(frame({ itemEvents: events(MAXIMUM_ITEM_EVENTS) })))).toBe(
+      'accepted',
+    );
+    expect(
+      refusalOf(decodeRoomMessage(frame({ itemEvents: events(MAXIMUM_ITEM_EVENTS + 1) }))),
+    ).toBe('too-long');
+  });
+
+  it('refuses a negative sequence, or one that is not a whole number, on either input', () => {
+    for (const text of [
+      itemUse({ sequence: -1 }),
+      lane({ sequence: -1 }),
+      itemUse({ sequence: 0.5 }),
+      lane({ sequence: 2 ** 53 }),
+      itemUse({ atMs: -1 }),
+    ]) {
+      expect(refusalOf(decodeClientMessage(text, PHYSICS)), text).toBe('bad-value');
+    }
+  });
+
+  it('refuses any client message carrying an outcome, as an outcome and not an unknown key', () => {
+    const hello = (extra: Record<string, unknown>): string =>
+      JSON.stringify({
+        type: 'hello',
+        protocol: PROTOCOL_VERSION,
+        physicsVersion: 1,
+        ticket: 't',
+        ...extra,
+      });
+    const report = (extra: Record<string, unknown>): string =>
+      JSON.stringify({ type: 'report', sequence: 1, atMs: 1, powerWatts: 200, ...extra });
+    for (const [field, value] of [
+      ['hit', true],
+      ['raceOffset', 10],
+      ['position', 1],
+      ['raceOffsetCentimetres', 1_000],
+      ['held', 'tailwind'],
+      ['item', 'tailwind'],
+      ['lapsDone', 3],
+      ['decimetres', 99_999],
+    ] as const) {
+      for (const text of [
+        itemUse({ [field]: value }),
+        lane({ [field]: value }),
+        report({ [field]: value }),
+        hello({ [field]: value }),
+      ]) {
+        expect(refusalOf(decodeClientMessage(text, PHYSICS)), text).toBe('outcome-from-client');
+      }
+    }
+    // A detail names the key and never its value.
+    const decoded = decodeClientMessage(itemUse({ raceOffset: 987_654 }), PHYSICS);
+    expect(JSON.stringify(decoded)).not.toContain('987654');
+  });
+
+  it('counts every slot of the room’s rider as an outcome a client may not send', () => {
+    const row = MESSAGE_FIELDS.frame.riders.shape.row;
+    const slots = [...row.slots, ...row.tail].map((slot) => slot.name);
+    const inputs = new Set(
+      CLIENT_MESSAGE_TYPES.flatMap((type) => Object.keys(MESSAGE_FIELDS[type])),
+    );
+    expect(slots).toContain('raceOffsetCentimetres');
+    // The one slot a client also sends is the lane: the lane it ASKS for is an
+    // input, and the frame's is the room's answer to it.
+    expect(slots.filter((slot) => inputs.has(slot))).toEqual(['lane']);
+    for (const name of slots.filter((slot) => slot !== 'riderId' && !inputs.has(slot))) {
+      expect(CLIENT_OUTCOME_FIELDS, name).toContain(name);
+    }
+    // And no outcome is a field a client message carries.
+    for (const field of inputs) {
+      expect(CLIENT_OUTCOME_FIELDS, field).not.toContain(field);
+    }
+  });
+
+  it('refuses a rider row that carries part of the lap slots, or a lap slot past its bound', () => {
+    const row = (slots: readonly unknown[]) =>
+      refusalOf(decodeRoomMessage(frame({ riders: [slots] })));
+    // Five (no lap race) and nine (a lap race) are the two lengths.
+    expect(row(lapRow().slice(0, 5))).toBe('accepted');
+    expect(row(lapRow())).toBe('accepted');
+    for (const length of [4, 6, 7, 8, 10]) {
+      const slots = [...lapRow(), 0].slice(0, length);
+      expect(row(slots), String(length)).toBe('bad-value');
+    }
+    expect(row(lapRow({ raceOffsetCentimetres: MAXIMUM_RACE_OFFSET_CENTIMETRES }))).toBe(
+      'accepted',
+    );
+    expect(row(lapRow({ raceOffsetCentimetres: -MAXIMUM_RACE_OFFSET_CENTIMETRES }))).toBe(
+      'accepted',
+    );
+    for (const override of [
+      { raceOffsetCentimetres: MAXIMUM_RACE_OFFSET_CENTIMETRES + 1 },
+      { raceOffsetCentimetres: -MAXIMUM_RACE_OFFSET_CENTIMETRES - 1 },
+      { raceOffsetCentimetres: 0.5 },
+      { lapsDone: -1 },
+      { lapsDone: MAXIMUM_LAPS + 1 },
+    ]) {
+      expect(row(lapRow(override)), JSON.stringify(override)).toBe('bad-value');
+    }
+  });
+
+  it('refuses to encode a rider with part of the lap slots, rather than sending it', () => {
+    expect(() =>
+      encodeMessage({
+        type: 'frame',
+        tick: 1,
+        riders: [
+          {
+            riderId: 1,
+            decimetres: 1,
+            centimetresPerSecond: 1,
+            draftPercent: 0,
+            flags: 0,
+            lane: 1,
+          },
+        ],
+      }),
+    ).toThrow(ProtocolEncodeError);
+  });
+
+  it('takes a voice link on Discord’s invite host and nothing else — #875', () => {
+    const welcome = (voiceInvite: unknown) =>
+      refusalOf(
+        decodeRoomMessage(
+          JSON.stringify({
+            type: 'welcome',
+            riderId: 1,
+            routeRef: { sha256: SHA },
+            roomConfig: {
+              kind: 'ride',
+              ridingPosition: 'hoods',
+              reportIntervalMs: 500,
+              frameIntervalMs: 1000,
+              drafting: 'on',
+            },
+            voiceInvite,
+          }),
+        ),
+      );
+    expect(welcome(undefined)).toBe('accepted');
+    expect(welcome('https://discord.gg/ab')).toBe('accepted');
+    expect(welcome(`https://discord.gg/${'a'.repeat(32)}`)).toBe('accepted');
+    for (const bad of [
+      'http://discord.gg/abc123',
+      'https://discord.com/invite/abc123',
+      'https://discord.gg.evil.example/abc123',
+      'https://evil.example/https://discord.gg/abc123',
+      'https://discord.gg/abc123?next=https://evil.example',
+      'https://discord.gg/abc123#x',
+      'https://discord.gg/abc/../x',
+      'https://discord.gg/a',
+      `https://discord.gg/${'a'.repeat(33)}`,
+      'https://discord.gg/',
+      'javascript:alert(1)',
+      ' https://discord.gg/abc123',
+      'https://discord.gg/abc123\n',
+      42,
+      { url: 'https://discord.gg/abc123' },
+    ]) {
+      expect(welcome(bad), JSON.stringify(bad)).toBe('bad-value');
+    }
+  });
+
+  it('takes a changed voice link on Discord’s invite host only, or none — #876', () => {
+    const voice = (fields: Record<string, unknown>) =>
+      refusalOf(decodeRoomMessage(JSON.stringify({ type: 'voice', ...fields })));
+    expect(voice({})).toBe('accepted');
+    expect(voice({ voiceInvite: 'https://discord.gg/abc123' })).toBe('accepted');
+    for (const bad of [
+      'http://discord.gg/abc123',
+      'https://evil.example/abc123',
+      'javascript:x',
+      7,
+    ]) {
+      expect(voice({ voiceInvite: bad }), JSON.stringify(bad)).toBe('bad-value');
+    }
+    expect(voice({ voiceInvite: 'https://discord.gg/abc123', riderId: 1 })).toBe('unknown-key');
+    // A room's message: a client may not send one.
+    expect(refusalOf(decodeClientMessage(JSON.stringify({ type: 'voice' }), PHYSICS))).toBe(
+      'unknown-type',
+    );
+  });
+
+  it('refuses a lap race’s settings out of bounds, or one without the other', () => {
+    const welcome = (lapRace: unknown) =>
+      refusalOf(
+        decodeRoomMessage(
+          JSON.stringify({
+            type: 'welcome',
+            riderId: 1,
+            routeRef: { sha256: SHA },
+            roomConfig: {
+              kind: 'race',
+              ridingPosition: 'hoods',
+              reportIntervalMs: 500,
+              frameIntervalMs: 1000,
+              drafting: 'on',
+              lapRace,
+            },
+          }),
+        ),
+      );
+    expect(welcome({ laps: 1, items: 'off' })).toBe('accepted');
+    expect(welcome({ laps: MAXIMUM_LAPS, items: 'on' })).toBe('accepted');
+    for (const bad of [
+      { laps: 0, items: 'on' },
+      { laps: MAXIMUM_LAPS + 1, items: 'on' },
+      { laps: 2.5, items: 'on' },
+      { laps: 3, items: true },
+      { laps: 3, items: 'some' },
+    ]) {
+      expect(welcome(bad), JSON.stringify(bad)).toBe('bad-value');
+    }
+    expect(welcome({ laps: 3 })).toBe('missing-key');
+    expect(welcome({ items: 'on' })).toBe('missing-key');
+    expect(welcome({ laps: 3, items: 'on', seed: 4 })).toBe('unknown-key');
   });
 });

@@ -166,6 +166,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         `inputsha256` is the digest of the pixels drawn, which
                         `provenance.test.ts` redraws in CI. What each bicycle
                         part samples on them is `src/game/bicycle-surfaces.ts`
+    tools/basemap/      the project's own basemap build (#1557): upstream's
+                        Protomaps profile at a pinned commit, run by Planetiler,
+                        plus z15-only building fields (`profile/`, Java,
+                        whitelisted and clamped), `build.sh`, and the archive
+                        comparison (`basemap:compare`) that reads both archives
+                        through `decodeTile`. ⚠️ Like Blender, Planetiler and
+                        Maven are TOOLS: nothing in CI runs them. `mvn package`
+                        inside `build.sh` runs the JUnit suite, so a red suite
+                        stops the build. `building-fields.test.ts` does run in
+                        CI and holds the TypeScript rules to the Java lists, and
+                        `build.test.sh` holds `build.sh` with fake tools. It
+                        uploads nothing; publishing is the owner's step
     tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
                         v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no
                         list here admits), and the reader, the signed-distance
@@ -314,9 +326,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`playwright.config.ts` §`FOLLOW_THE_DEVICE`). A colour
                         drawn over the world or a camera picture (the stage, the
                         pairing code) uses a HUD token so it does not flip, and
-                        the HUD keeps the LIGHT palette whatever the page is in:
-                        `theme.css` §`.oyl-hud` restates every page colour token
-                        at its light value, for the controls and notices inside it.
+                        the HUD keeps the DARK palette whatever the page is in
+                        (#2042, ADR 0063 D-2; it kept the LIGHT one from #672
+                        until then): `theme.css` §`.oyl-hud` restates every page
+                        colour token at its dark value, for the controls and
+                        notices inside it, so a ride is dark on a light page.
                         Since #936 the menus' house style is tokens: five `illo*`
                         colours (decoration: what is drawn OVER one declares a
                         pair, and the focus ring is paired with each), a
@@ -423,7 +437,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         withheld ask keeps the earlier write-up and says why
                         ABOVE it (the owner's ruling of 2026-09-29); with no
                         instance it is one sentence (since #1103 no link to
-                        Camera: the device sets up no model of its own)
+                        Camera: the device sets up no model of its own).
+                        Since #2081 the stacked traces carry the ride's laps
+                        as bands, a tap or hover read-out and a distance axis
+                        (`axis.ts`), and the page draws a power curve
+                        (`curve.ts`, `PowerCurveChart.tsx`) beside the
+                        all-time one Analysis reads — from the power chart's
+                        own decode, never a second one
     src/instance/       the client half of signing in to an instance (#772) and
                         of linking this device to an athlete (#773): the local
                         athlete first, then the device key, then challenge →
@@ -455,7 +475,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`. ⚠️ Since #1010 Home
                         leads with ONE "Next up" card (the last route
-                        ridden, else a free ride, else the first ride) —
+                        ridden, else a free ride, else the first ride; since
+                        #2043 a compact row with no picture, which names no
+                        destination until both reads settle) —
                         at most ONE `getRoute` beyond #428's read
                         (`home.ts` §`loadNextUp`), and it opens the game on
                         that route through `#/game?route=…`, the one query
@@ -577,7 +599,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`theme-selection.ts` §`watchDocumentTheme`, a
                         `MutationObserver` on `data-theme`) that repaints a
                         live map through `MapView.setStyle` when the page
-                        changes palette, ended by the map's `destroy`
+                        changes palette, ended by the map's `destroy`. Since
+                        #2003 a chosen route's page draws its route through the
+                        same `MapPanel`, created `explorable`: drag and pinch,
+                        with buttons for every gesture, the canvas out of the
+                        tab order, and a sentence instead of a map offline
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
                         and since #14's fourth criterion the step that turns a
                         finished recording into an activity — the write order,
@@ -661,7 +687,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/routing/        planning a route (#70, #71, #72) — the draft and the
                         legs an edit makes stale, undo over whole drafts, what
                         a half-drawn route keeps across a reload, the elevation
-                        profile and where its numbers came from. ⚠️ The
+                        profile and where its numbers came from; since #2102
+                        `loop.ts`, a short loop for a lap race: Close the loop,
+                        a target length, and a drawn line that ends where it
+                        starts saved as a loop. ⚠️ The
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
@@ -702,6 +731,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         press in the shell goes to it and it alone decides —
                         off by default (`oyl.menuSounds.v1`), never on a ride
                         route, while recording or paused, or while immersive.
+                        Since #2055 its volume is the effects bus's gain in
+                        `game/web-audio.ts`, which its writer keeps in step.
+                        Since #2056 `HeaderMute.tsx` is the one-press mute in
+                        the header on every MENU route (none on a ride route):
+                        it keeps the master mute in `game/audio-mix.ts` and
+                        calls `applyMix()`, which never makes a context.
+                        Settings holds music's switch and volume beside the
+                        menus' and the ride's; every sound panel there calls
+                        `applyMix()` too, so a playing sound follows at once.
+                        Since #2058 `menu-music.ts` is the menus' music: only a
+                        press starts it (never the header's mute, never at
+                        load), the same `quiet` rule as the sounds stops it with
+                        a fade, a hidden page pauses it; an `<audio>` element
+                        made at that press, routed into the music bus. ⚠️ Silent
+                        until #2057 sets `MENU_MUSIC_TRACK`.
                         ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
                         detail with Motion (ADR 0041), reached only through
                         that lazily loaded chunk

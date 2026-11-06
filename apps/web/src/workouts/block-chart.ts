@@ -15,8 +15,8 @@
  * reference image was consulted. The bands are the seven power zones this
  * program already computes (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`,
  * published fractions), and their colours are this palette's own
- * (`tokens.ts` §`BAND_TOKENS`) — a teal ramp that darkens toward threshold and
- * then turns to brick and plum, chosen against the contrast pairs and for no
+ * (`tokens.ts` §`BAND_TOKENS`) — grey, blue, green, yellow, orange and red, with
+ * purple above red for sprint (#2039, ADR 0063 D-4), chosen against the contrast pairs and for no
  * other reason.
  *
  * ## Heights are shares of threshold, and the scale is fixed

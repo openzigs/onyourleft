@@ -6,7 +6,7 @@
  *
  * ```text
  * POST /v1/rooms                 { kind, ridingPosition, drafting?, loop, lengthMetres, grades, gpx,
- *                                    visibility?, startsAt? }
+ *                                    visibility?, startsAt?, lapRace? }
  *                                  → { roomId, code?, routeSha256 }     the creator is a member
  * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, drafting, loop, routeSha256,
  *                                             creator }
@@ -116,9 +116,26 @@
  *   sweep is done with it (`RoomRouter.claimForEnding`): a socket whose lookup
  *   read the room as open before it closed is refused `room-closed`, not
  *   seated in a room whose route is being deleted.
+ *
+ * A room's Discord voice channel, where the operator configured one (#874),
+ * is deleted by the same close (`voice/room-voice.ts`).
+ *
+ * ## A private lap race — #1910, ADR 0060
+ *
+ * A body's `lapRace: { laps, items }` makes the room a **lap race** on the
+ * creator's own loop: `lengthMetres` is one lap, and the race is `laps` of
+ * them, with items on or off. Both are fixed for the room, as `drafting` is,
+ * and stored with its course (migration 0037) beside a seed the instance
+ * draws for it from the CSPRNG and never sends. It is refused — naming
+ * `lapRace` and a reason — for a group ride, a route the creator's app did
+ * not call a loop (a lap race rides the same road round, so the road must end
+ * where it starts), a public room (not in #1910), or laps whose race would be
+ * longer than {@link MAXIMUM_COURSE_METRES}. The route stays the creator's
+ * own, relayed and never served as content (ADR 0028 D-7.1).
  */
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
+import { MAXIMUM_LAPS } from '@onyourleft/protocol';
 
 import { randomHex } from '../auth/crypto.ts';
 import type { Caller, Outcome } from '../auth/identity.ts';
@@ -133,6 +150,7 @@ import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type { RoomPhase } from '../room/core/room.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import type { RoomVoice } from '../voice/room-voice.ts';
 import { displayRoomCode, newRoomCode, normaliseRoomCode, roomCodeDigest } from './code.ts';
 import { publishedOrder, publishRace, type PublishedResult } from './publication.ts';
 
@@ -241,6 +259,11 @@ export interface JoinedRoom {
   readonly loop: boolean;
   readonly routeSha256: string;
   /**
+   * A lap race's laps and items — #1912: a joiner is told before the start,
+   * as the welcome tells them again. Never its seed. Absent for any other room.
+   */
+  readonly lapRace?: { readonly laps: number; readonly items: boolean };
+  /**
    * Whether the joiner made the room (#948, #929's N1): the rider who made it
    * may join it again by its code — after a reload, or on another device —
    * and is still the one offered *Start the race*.
@@ -337,6 +360,12 @@ export interface RoomsOptions {
    * the identity's own account read. Absent is nobody.
    */
   readonly eligible?: (caller: Caller) => Promise<boolean>;
+  /**
+   * The rooms' Discord voice channels (#874), when the operator configured a
+   * bot: a room that is over has its channel deleted by the ONE close. Absent
+   * is no voice, and a room works exactly as it did.
+   */
+  readonly voice?: RoomVoice;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -356,7 +385,44 @@ const CREATE_FIELDS = new Set([
   'gpx',
   'visibility',
   'startsAt',
+  'lapRace',
 ]);
+
+/** The most laps a rider's lap race may be: the wire's own bound (`@onyourleft/protocol` §`MAXIMUM_LAPS`). */
+export const MAXIMUM_ROOM_LAPS = MAXIMUM_LAPS;
+
+/**
+ * A body's `lapRace`, checked whole against the rest of the room, or the
+ * problem with it (#1910). `undefined` is no lap race.
+ */
+function checkedLapRace(
+  value: unknown,
+  room: { readonly kind: string; readonly loop: boolean; readonly visibility: unknown },
+  lengthMetres: number,
+): { readonly laps: number; readonly items: boolean } | undefined | string {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'must be { laps, items }';
+  }
+  const fields = value as Record<string, unknown>;
+  if (Object.keys(fields).some((key) => key !== 'laps' && key !== 'items')) {
+    return 'carries only laps and items';
+  }
+  const { laps, items } = fields;
+  if (typeof laps !== 'number' || !Number.isInteger(laps) || laps < 1 || laps > MAXIMUM_ROOM_LAPS) {
+    return `laps must be a whole number from 1 to ${String(MAXIMUM_ROOM_LAPS)}`;
+  }
+  if (typeof items !== 'boolean') return 'items must be true or false';
+  if (room.kind !== 'race') return 'is for a race, never a group ride';
+  if (!room.loop) {
+    return 'needs a loop route: a lap race rides the same road round, so it must end where it starts';
+  }
+  if (room.visibility !== 'private') return 'is for a private room only';
+  if (laps * lengthMetres > MAXIMUM_COURSE_METRES) {
+    return 'laps times the lap must be at most 1 000 km';
+  }
+  return { laps, items };
+}
 
 /** Metres climbed over a course once: each rising step's grade over its length. */
 export function climbOf(
@@ -459,12 +525,17 @@ export function createRooms(options: RoomsOptions): Rooms {
     const room = await store.getRoom(roomId);
     const made = await store.getPrivateRoom(roomId);
     if (room === undefined || made === undefined || made.closedAt !== null) return false;
-    return onRoute(room.routeSha256, async () => {
+    const closed = await onRoute(room.routeSha256, async () => {
       if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
         await routes.delete(room.routeSha256);
       }
       return store.closePrivateRoom(roomId, seconds());
     });
+    // #874: its voice channel goes with it, once the close has committed. It
+    // never throws, and a channel Discord would not delete is the voice
+    // sweep's to find (`voice/room-voice.ts`).
+    if (closed) await options.voice?.close(roomId);
+    return closed;
   }
 
   /** `caller` joins `roomId` — by its code, or from the listing — and is told what it is. */
@@ -487,6 +558,9 @@ export function createRooms(options: RoomsOptions): Rooms {
         loop,
         routeSha256: room.routeSha256,
         creator: (await store.getRoomCreator(roomId)) === caller.athleteId,
+        ...(course.lapRace === undefined
+          ? {}
+          : { lapRace: { laps: course.lapRace.laps, items: course.lapRace.items } }),
       },
     };
   }
@@ -528,6 +602,8 @@ export function createRooms(options: RoomsOptions): Rooms {
       }
       const grades = checkedGrades(body.grades);
       if (typeof grades === 'string') return invalid('grades', grades);
+      const lapRace = checkedLapRace(body.lapRace, { kind, loop, visibility }, lengthMetres);
+      if (typeof lapRace === 'string') return invalid('lapRace', lapRace);
       if (typeof gpx !== 'string' || gpx.length === 0) return invalid('gpx', 'must be the route');
       const bytes = new TextEncoder().encode(gpx);
       if (bytes.byteLength > MAXIMUM_ROUTE_BYTES) {
@@ -586,6 +662,10 @@ export function createRooms(options: RoomsOptions): Rooms {
               countdownMs: kind === 'race' ? null : 0,
               rejoinWindowMs: null,
               drafting,
+              // #1910: the room's own seed, 0 to 2³² − 1, never sent anywhere.
+              ...(lapRace === undefined
+                ? {}
+                : { lapRace: { ...lapRace, seed: Number.parseInt(randomHex(4), 16) } }),
               raceStartedAt: null,
             },
             codeSha256: await roomCodeDigest(drawn),

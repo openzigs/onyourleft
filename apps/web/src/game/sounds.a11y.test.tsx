@@ -45,12 +45,18 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { workoutStub } from '../workouts/testing';
 
-import { recordingOutput, type RecordingOutput } from './audio-testing';
+import type { CueOutput } from './audio-port';
+import { fakeAudioContext, recordingOutput, type RecordingOutput } from './audio-testing';
 import { CUES_STORAGE_KEY, DEFAULT_CUES } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
-import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
+import {
+  ANNOUNCEMENTS_STORAGE_KEY,
+  DEFAULT_ANNOUNCEMENTS,
+  deviceStorage,
+} from './hud/announce-preference';
 import type { GameRenderer } from './port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
+import { deviceAudioMix, webAudioOutput } from './web-audio';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -459,7 +465,11 @@ describe('a workout — #400', () => {
     };
   }
 
-  const panel = (workout: RideWorkoutSnapshot | undefined, power: number | undefined) => (
+  const panel = (
+    workout: RideWorkoutSnapshot | undefined,
+    power: number | undefined,
+    sounds: CueOutput,
+  ) => (
     <WorkoutPanel
       trainer={trainer}
       workout={workout}
@@ -468,13 +478,17 @@ describe('a workout — #400', () => {
       onStart={() => undefined}
       onEnd={() => undefined}
       power={power}
-      sounds={output}
+      sounds={sounds}
     />
   );
 
-  async function show(workout: RideWorkoutSnapshot | undefined, power: number | undefined) {
-    if (mounted === undefined) mounted = await mount(panel(workout, power));
-    else await mounted.rerender(panel(workout, power));
+  async function show(
+    workout: RideWorkoutSnapshot | undefined,
+    power: number | undefined,
+    sounds: CueOutput = output,
+  ) {
+    if (mounted === undefined) mounted = await mount(panel(workout, power, sounds));
+    else await mounted.rerender(panel(workout, power, sounds));
     await settle();
   }
 
@@ -677,10 +691,17 @@ describe('a workout — #400', () => {
 
   it('moves the volume mid-workout from the slider, independently of the system’s', async () => {
     chooseSounds();
-    await show(undefined, 150);
+    // #2055: the volume is the cue bus's gain, so it is read from the graph
+    // the app builds over this device's storage — not from what the port was told.
+    const fake = fakeAudioContext();
+    const graph = webAudioOutput(() => fake.context, deviceAudioMix(deviceStorage));
+    await show(undefined, 150, graph);
     await press(button('Ride Sweet spot'));
-    await show(riding(), 150);
-    const started = output.calls.find((call) => call.kind === 'startTone');
+    await show(riding(), 150, graph);
+    const [tone] = fake.oscillators;
+    const cueBus = fake.gains.find((gain) => tone?.outputs[0]?.outputs[0] === gain);
+    expect(fake.oscillators).toHaveLength(1);
+    expect(cueBus?.gain.value).toBe(0.5);
     const slider = document.querySelector<HTMLInputElement>('.oyl-sound input[type="range"]');
     expect(slider?.value).toBe('50');
     await act(async () => {
@@ -690,13 +711,10 @@ describe('a workout — #400', () => {
       slider?.dispatchEvent(new Event('input', { bubbles: true }));
       await Promise.resolve();
     });
-    // No new power reading: the volume must reach the tone on its own.
-    const moved = output.calls.filter((call) => call.kind === 'setTone').at(-1);
-    expect(moved?.kind).toBe('setTone');
-    const gain = (call: (typeof output.calls)[number] | undefined): number =>
-      call !== undefined && 'gain' in call ? call.gain : Number.NaN;
-    // Half volume to a tenth: a fifth of the level, same pitch.
-    expect(gain(moved) / gain(started)).toBeCloseTo(0.2);
+    // No new power reading: the volume must reach the tone on its own — the
+    // same tone, not a new one, now heard through a bus at a tenth.
+    expect(fake.oscillators).toHaveLength(1);
+    expect(cueBus?.gain.value).toBe(0.1);
     expect(JSON.parse(localStorage.getItem(CUES_STORAGE_KEY) ?? '{}')).toMatchObject({
       volume: 0.1,
     });

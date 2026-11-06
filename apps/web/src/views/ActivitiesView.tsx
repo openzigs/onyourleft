@@ -121,6 +121,8 @@ export interface ActivitiesViewProps {
   readonly basemap?: ActivityDetailViewProps['basemap'];
   readonly instanceWriteUp?: ActivityDetailViewProps['instanceWriteUp'];
   readonly riderText?: ActivityDetailViewProps['riderText'];
+  /** #2069: the ride's time in zone, read as `AnalysisView` reads it. */
+  readonly analysis?: ActivityDetailViewProps['analysis'];
   /** #1063: the chosen ride's side-camera snapshots, closed until opened. */
   readonly snapshots?: ActivityDetailViewProps['snapshots'];
 }
@@ -248,6 +250,7 @@ export function ActivitiesView({
   basemap,
   instanceWriteUp,
   riderText,
+  analysis,
   snapshots,
 }: ActivitiesViewProps): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
@@ -621,6 +624,7 @@ export function ActivitiesView({
               basemap={basemap}
               instanceWriteUp={instanceWriteUp}
               riderText={riderText}
+              analysis={analysis}
               {...(snapshots === undefined ? {} : { snapshots })}
               embedded
             />

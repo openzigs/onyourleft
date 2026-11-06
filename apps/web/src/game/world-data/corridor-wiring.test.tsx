@@ -27,7 +27,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
-import { corridorTileCover } from '@onyourleft/map-features';
+import { corridorTileCover, NO_BUILDING_FIELDS } from '@onyourleft/map-features';
 import { residentialBlockTile, sidewalkTile } from '@onyourleft/map-features/testing';
 import { openActivityStore, type ActivityStore, type RouteRecord } from '@onyourleft/store';
 import {
@@ -379,6 +379,7 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
           kind: 'building',
           heightMetres: 9,
           minHeightMetres: 0,
+          ...NO_BUILDING_FIELDS,
           rings: [Float32Array.of(0, 0, 10, 0, 10, 10)],
         },
       ],

@@ -51,6 +51,31 @@
  * `home.browser.spec.ts` §"#1429" measures it at a phone, a tablet and a
  * desktop.
  *
+ * ## Next up, compact — #2043
+ *
+ * Next up's picture is gone: the owner's *"a generic image that takes up a
+ * lot of real estate"* — at 1280×800 it was 28 % of the window and pushed its
+ * Ride to y = 641. What the card SAYS is unchanged — the ride it offers, one
+ * line, one **Ride** — and it is one compact row now, with a small drawing of
+ * the route's own climb beside the words where the frame is wide enough and
+ * no drawing otherwise. The kit's sky, hills and road stay in
+ * `design/illustration/` for the ride cards and other screens.
+ *
+ * Until both reads have settled the card names no destination — #1020 item 1:
+ * it used to say "A free ride" with a Ride to `#/ride` and then change its
+ * mind. A screen with no store, or whose read failed, still offers a free ride.
+ *
+ * ## A dashboard of modules — #2044
+ *
+ * Home was one column of cards with the last ride under the ride choices. It
+ * is a grid of modules now, in ONE reading order on every layout: Next up
+ * (the quick-launch), the sensors (today the Trainer card; #2045 fills the
+ * slot), the last ride (#2048) — or, on a first open, the other ways to start
+ * — and the week (#2049); then the ride choices, fitness and the badges. On a
+ * phone that is one column in that order; on a landscape tablet the first
+ * four are two rows of two inside the first screen. DOM order is the visual
+ * order and the tab order (`home.browser.spec.ts` §"#2044").
+ *
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
@@ -70,7 +95,7 @@ import { useEffect, useState, type JSX } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
-import { Hills, ProfileShape, RoadRibbon, SensorGlyph, Sky } from '../design/illustration';
+import { ProfileShape, SensorGlyph } from '../design/illustration';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
@@ -109,6 +134,9 @@ export interface HomeViewProps {
 }
 
 const wallClock = (): UnixSeconds => unixSeconds(Math.floor(Date.now() / 1000));
+
+/** What Next up offers where there is no read to wait for. */
+const FREE_RIDE: HomeNextUp = { kind: 'free' };
 
 export function HomeView(props: HomeViewProps): JSX.Element {
   const { analysis } = props;
@@ -150,16 +178,23 @@ export function HomeView(props: HomeViewProps): JSX.Element {
   const firstOpen =
     analysis !== undefined && !failed && data !== undefined && data.lastRide === undefined;
   const reading = analysis !== undefined && !failed && data === undefined;
+  // #1020 item 1: no destination until both reads settle. With no store, or
+  // a read that failed, there is nothing to wait for: a free ride.
+  const next = analysis === undefined || failed ? FREE_RIDE : nextUp;
   return (
     <div className="oyl-home-frame tw:@container">
       <div className="oyl-home">
         {props.controller === undefined ? null : <LeftUnfinished controller={props.controller} />}
-        <NextUp next={nextUp ?? { kind: 'free' }} />
+        {/* #2044: the modules in their reading order — quick-launch, sensors,
+            the last ride (or, on a first open, the other ways to start), the
+            week — and then the rest. `theme.css` §"#2044" lays them out. */}
+        <NextUp next={next} />
+        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
         {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
+        {data?.lastRide === undefined ? null : <LastRide last={data.lastRide} />}
         {data?.lastRide === undefined ? null : (
           <ThisWeek week={data.week} previous={data.previousWeek} />
         )}
-        {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
         {firstOpen || reading ? null : <RideChoices />}
 
         {analysis === undefined ? (
@@ -222,6 +257,68 @@ function GettingStarted({
   );
 }
 
+/**
+ * *Last ride* — the module slot #2048 fills. Since #2044 it is its own
+ * module, third in the reading order after Next up and the sensors, rather
+ * than the first of the cards under the ride choices: a `section` named by
+ * its own `h2`, as every module is — `a11y/audit.ts` §"landmarks are
+ * distinguishable" (#864) refuses an unnamed `section` beside another.
+ */
+function LastRide({ last }: { readonly last: NonNullable<HomeData['lastRide']> }): JSX.Element {
+  const units = useUnits();
+  const lastDistance = shownDistance(last.distance);
+  return (
+    <section className="oyl-panel oyl-home__last" aria-labelledby="oyl-home-last">
+      <h2 id="oyl-home-last">Last ride</h2>
+      <p>
+        <strong>{last.name}</strong>
+      </p>
+      <dl className="oyl-home__facts">
+        <div>
+          <dt>When</dt>
+          <dd>{formatStartedAt(last.startedAt, last.timeZone)}</dd>
+        </div>
+        <div>
+          <dt>{MOVING_TIME_LABEL}</dt>
+          <dd>
+            <Reading value={formatDuration(last.movingTime)} />
+          </dd>
+        </div>
+        {/* #1070: a ride recorded with no speed channel stored 0 m, which is
+            no distance known — no reading, as the Activities card. */}
+        {lastDistance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading {...formatDistance(lastDistance, units)} />
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt>Load</dt>
+          <dd>
+            {/* #1084: "not worked out yet" promises the backfill can; for a
+                ride with nothing to work a load out from it cannot. */}
+            {last.load === undefined ? (
+              last.noLoadToWorkOut ? (
+                'none: nothing on this ride to work one out from'
+              ) : (
+                'not worked out yet'
+              )
+            ) : (
+              <Reading value={String(Math.round(last.load))} />
+            )}
+          </dd>
+        </div>
+      </dl>
+      <p>
+        <a href={hrefFor(routeById('activities'))}>All your rides</a>
+      </p>
+    </section>
+  );
+}
+
+/** Fitness and freshness, and the progress badges: the rest, after the modules. */
 function Rides({
   data,
   analysis,
@@ -231,62 +328,9 @@ function Rides({
   readonly analysis: AnalysisPort;
   readonly onRead: () => void;
 }): JSX.Element {
-  const units = useUnits();
-  const last = data.lastRide;
-  const lastDistance = last === undefined ? undefined : shownDistance(last.distance);
   const readings = trendReadings(data.fitness);
   return (
     <>
-      {last === undefined ? null : (
-        <section className="oyl-panel" aria-labelledby="oyl-home-last">
-          <h2 id="oyl-home-last">Last ride</h2>
-          <p>
-            <strong>{last.name}</strong>
-          </p>
-          <dl className="oyl-home__facts">
-            <div>
-              <dt>When</dt>
-              <dd>{formatStartedAt(last.startedAt, last.timeZone)}</dd>
-            </div>
-            <div>
-              <dt>{MOVING_TIME_LABEL}</dt>
-              <dd>
-                <Reading value={formatDuration(last.movingTime)} />
-              </dd>
-            </div>
-            {/* #1070: a ride recorded with no speed channel stored 0 m, which is
-                no distance known — no reading, as the Activities card. */}
-            {lastDistance === undefined ? null : (
-              <div>
-                <dt>Distance</dt>
-                <dd>
-                  <Reading {...formatDistance(lastDistance, units)} />
-                </dd>
-              </div>
-            )}
-            <div>
-              <dt>Load</dt>
-              <dd>
-                {/* #1084: "not worked out yet" promises the backfill can; for a
-                    ride with nothing to work a load out from it cannot. */}
-                {last.load === undefined ? (
-                  last.noLoadToWorkOut ? (
-                    'none: nothing on this ride to work one out from'
-                  ) : (
-                    'not worked out yet'
-                  )
-                ) : (
-                  <Reading value={String(Math.round(last.load))} />
-                )}
-              </dd>
-            </div>
-          </dl>
-          <p>
-            <a href={hrefFor(routeById('activities'))}>All your rides</a>
-          </p>
-        </section>
-      )}
-
       <section className="oyl-panel" aria-labelledby="oyl-home-form">
         <h2 id="oyl-home-form">Fitness and freshness</h2>
         {readings.length === 0 ? (
@@ -355,6 +399,10 @@ function LeftUnfinished({
  * The trainer, from what the ride controller already knows. Its words and its
  * link to Devices (#659) are unchanged by #939: a rider with no trainer is
  * told so in a sentence, never by a picture alone.
+ *
+ * Since #2044 it is the sensor-status module's slot (#2045 fills it), second
+ * in the reading order, and — like the last ride's and the week's — a
+ * `section` named by its own `h2`.
  */
 function TrainerCard({ controller }: { readonly controller: RideController }): JSX.Element {
   const trainer = useRideSnapshot(controller).trainer;
@@ -440,51 +488,43 @@ function nextUpWords(
 }
 
 /**
- * *Next up* — #1010. The largest thing on the screen and the first control in
- * it: one card whose picture fills it (the route's own shape, or the kit's
- * sky, hills and road), the ride's name and one line on a solid band, and one
- * big **Ride**. The picture is `aria-hidden` and wordless; the band says
- * everything it shows, the climb included.
+ * *Next up* — #1010, compact since #2043. The first control on the screen and
+ * the view's one primary: the ride's name and one line, one big **Ride**
+ * beside them, and — on a route, where the frame is wide enough — the route's
+ * own climb as a small drawing, `aria-hidden` and wordless, because the line
+ * says the climb in words. `undefined` is a read still out: the heading and
+ * no destination (#1020 item 1).
  */
-function NextUp({ next }: { readonly next: HomeNextUp }): JSX.Element {
+function NextUp({ next }: { readonly next: HomeNextUp | undefined }): JSX.Element {
   const units = useUnits();
-  const words = nextUpWords(next, units);
+  const words = next === undefined ? undefined : nextUpWords(next, units);
   return (
     <section
-      className="oyl-next-up tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
+      className="oyl-next-up tw:rounded-card tw:bg-surface-raised"
       aria-labelledby="oyl-next-up-heading"
     >
-      <div className="oyl-next-up__art" aria-hidden="true">
-        {next.kind === 'route' ? (
-          <>
-            <Sky className="oyl-home__layer" clouds={false} />
-            <ProfileShape className="oyl-home__layer oyl-next-up__profile" profile={next.profile} />
-          </>
-        ) : (
-          <>
-            <Sky className="oyl-home__layer" />
-            <Hills className="oyl-home__layer" seed={NEXT_UP_SEED} />
-            <RoadRibbon className="oyl-home__layer" />
-          </>
-        )}
-      </div>
-      <div className="oyl-next-up__band tw:flex tw:flex-col tw:gap-sm tw:bg-surface-raised">
+      {next?.kind === 'route' ? (
+        <ProfileShape className="oyl-next-up__profile" profile={next.profile} />
+      ) : null}
+      <div className="oyl-next-up__words">
         {/* #1429: a first ride is not "next" after anything — one heading, its name. */}
-        {next.kind === 'first' ? null : (
+        {next?.kind === 'first' ? (
+          <h2 id="oyl-next-up-heading" className="oyl-next-up__name tw:m-0">
+            <span id="oyl-next-up-name">{words?.name}</span>
+          </h2>
+        ) : (
           <h2 id="oyl-next-up-heading" className="tw:m-0">
             Next up
           </h2>
         )}
-        {next.kind === 'first' ? (
-          <h2 id="oyl-next-up-heading" className="oyl-next-up__name tw:m-0">
-            <span id="oyl-next-up-name">{words.name}</span>
-          </h2>
-        ) : (
+        {words === undefined || next?.kind === 'first' ? null : (
           <p id="oyl-next-up-name" className="oyl-next-up__name tw:m-0">
             {words.name}
           </p>
         )}
-        <p className="oyl-muted tw:m-0">{words.line}</p>
+        {words === undefined ? null : <p className="oyl-muted tw:m-0">{words.line}</p>}
+      </div>
+      {words === undefined ? null : (
         <a
           className="oyl-button oyl-next-up__ride"
           href={words.href}
@@ -492,13 +532,10 @@ function NextUp({ next }: { readonly next: HomeNextUp }): JSX.Element {
         >
           {words.action}
         </a>
-      </div>
+      )}
     </section>
   );
 }
-
-/** Any whole number draws one set of hills; this one is "next up"'s. */
-const NEXT_UP_SEED = 11;
 
 /** The week before's figure, as the words under a reading — its own `dd`. */
 function weekBefore(value: string): string {
@@ -510,7 +547,8 @@ function weekBefore(value: string): string {
  * (`Reading`), each set against the seven days before, and the days ridden as
  * a ring beside the sentence that says the same. Numbers only — no streak
  * and no target (#935 D-6). Every figure is `home/home.ts`'s arithmetic over
- * the one read.
+ * the one read. Since #2044 the week module's slot (#2049 fills it), fourth
+ * in the reading order, a `section` named by its own `h2`.
  */
 function ThisWeek({
   week,

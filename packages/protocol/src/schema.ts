@@ -17,11 +17,14 @@ import type { ClientMessage, ProtocolMessage, RoomMessage } from './messages';
 /**
  * The most UTF-8 bytes a message may be, checked **before** it is parsed.
  *
- * The largest legal message is a frame of {@link MAXIMUM_RIDERS} riders, each
- * slot at its bound: 3 682 bytes, computed in `frame-size.test.ts`. 8 KiB
- * leaves room over that and refuses anything a real room would never send.
+ * The largest legal message is a lap race's frame of {@link MAXIMUM_RIDERS}
+ * riders, every slot at its bound, with {@link MAXIMUM_ITEM_EVENTS} item
+ * events: computed in `frame-size.test.ts`. 16 KiB since version 3 (#1908) —
+ * 8 KiB before it, when a frame had five slots a rider and no events — leaves
+ * room over that and refuses anything a real room would never send. It is
+ * also the room's ingest bound (`apps/instance` §`worker.ts` `maxPayload`).
  */
-export const MAXIMUM_MESSAGE_BYTES = 8192;
+export const MAXIMUM_MESSAGE_BYTES = 16_384;
 
 /**
  * The deepest a message nests, checked **before** it is parsed. A frame is
@@ -55,6 +58,14 @@ export const MAXIMUM_RIDERS = 100;
  */
 export const MAXIMUM_REPORTED_POWER_WATTS = 2500;
 
+/**
+ * What a welcome's `voiceInvite` may be (#875): an `https:` invite on
+ * Discord's own invite host, `discord.gg`, and its code — and nothing else, so
+ * no scheme, host, path, query or fragment of anybody else's choosing reaches
+ * a link a rider presses.
+ */
+export const VOICE_INVITE_PATTERN = /^https:\/\/discord\.gg\/[A-Za-z0-9-]{2,32}$/;
+
 /** The longest admission ticket, in characters. */
 export const MAXIMUM_TICKET_LENGTH = 1024;
 
@@ -76,6 +87,12 @@ export type Shape =
       readonly kind: 'tuple';
       /** Decoded as an object keyed by slot name; sent as an array in slot order. */
       readonly slots: readonly { readonly name: string; readonly shape: Shape }[];
+      /**
+       * Slots sent after {@link slots}, **all of them or none** (#1908): a
+       * tuple is `slots.length` values or `slots.length + tail.length`, never
+       * a length between. A decoded tuple sent short has none of their keys.
+       */
+      readonly tail?: readonly { readonly name: string; readonly shape: Shape }[];
     }
   | {
       /** An array of tuples, no two sharing the first slot. */
@@ -123,6 +140,40 @@ const DISPLAY_NAME = {
   maximumLength: 64,
 } as const;
 
+/**
+ * The items a lap race has, by key — `@onyourleft/domain` §`ITEM_KINDS`
+ * (#1899), restated because this package has no production dependency;
+ * `lap-race-agreement.test.ts` holds the two equal.
+ */
+export const ITEM_KEYS = ['tailwind', 'tow', 'puddle', 'crosswind-gust', 'rain-cape'] as const;
+
+/** How many lanes a lap race has — `@onyourleft/domain` §`LANE_COUNT` (ADR 0060 D-6.3). Lanes are `0` to this less one. */
+export const LANE_COUNT = 3;
+
+/**
+ * The most a race offset may be, either way, in whole centimetres: ADR 0060
+ * D-3.3's B = 10 m, `@onyourleft/domain` §`RACE_OFFSET_BOUND_METRES`.
+ */
+export const MAXIMUM_RACE_OFFSET_CENTIMETRES = 1_000;
+
+/**
+ * The most laps a lap race may be on the wire. A wire bound, above any room's
+ * own (the solo chooser offers up to 10, `apps/web` §`LAP_RACE_MOST_LAPS`): a
+ * room may offer fewer, never more.
+ */
+export const MAXIMUM_LAPS = 100;
+
+/**
+ * The most item events one frame carries: two a rider of a full room. An event
+ * is an announcement, never state — every outcome is also in the frame's rider
+ * slots — so a room with more on one tick sends the first this many in its own
+ * order and drops the rest (#1909), and a client loses a word, never a place.
+ */
+export const MAXIMUM_ITEM_EVENTS = 2 * MAXIMUM_RIDERS;
+
+const LANE = { kind: 'integer', minimum: 0, maximum: LANE_COUNT - 1 } as const;
+const ITEM_KEY = { kind: 'enum', values: ITEM_KEYS } as const;
+
 /** Everything a message carries beside its `type`, keyed by that type. */
 export const MESSAGE_FIELDS = {
   hello: {
@@ -137,6 +188,15 @@ export const MESSAGE_FIELDS = {
     atMs: { shape: COUNT },
     powerWatts: { shape: { kind: 'number', minimum: 0, maximum: MAXIMUM_REPORTED_POWER_WATTS } },
     cadenceRpm: { shape: { kind: 'number', minimum: 0, maximum: 255 }, optional: true },
+  },
+  'item-use': {
+    sequence: { shape: COUNT },
+    atMs: { shape: COUNT },
+  },
+  lane: {
+    sequence: { shape: COUNT },
+    atMs: { shape: COUNT },
+    lane: { shape: LANE },
   },
   welcome: {
     riderId: { shape: RIDER_ID },
@@ -157,8 +217,23 @@ export const MESSAGE_FIELDS = {
           reportIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
           frameIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
           drafting: { shape: { kind: 'enum', values: ['on', 'off'] } },
+          lapRace: {
+            shape: {
+              kind: 'object',
+              fields: {
+                laps: { shape: { kind: 'integer', minimum: 1, maximum: MAXIMUM_LAPS } },
+                items: { shape: { kind: 'enum', values: ['on', 'off'] } },
+              },
+            },
+            optional: true,
+          },
         },
       },
+    },
+    // #875: the room's Discord voice link, and only Discord's ({@link VOICE_INVITE_PATTERN}).
+    voiceInvite: {
+      shape: { kind: 'string', pattern: VOICE_INVITE_PATTERN, maximumLength: 51 },
+      optional: true,
     },
   },
   refuse: {
@@ -194,8 +269,37 @@ export const MESSAGE_FIELDS = {
             { name: 'draftPercent', shape: { kind: 'integer', minimum: 0, maximum: 100 } },
             { name: 'flags', shape: { kind: 'integer', minimum: 0, maximum: 3 } },
           ],
+          // A lap race's four, all or none (#1908).
+          tail: [
+            {
+              name: 'raceOffsetCentimetres',
+              shape: {
+                kind: 'integer',
+                minimum: -MAXIMUM_RACE_OFFSET_CENTIMETRES,
+                maximum: MAXIMUM_RACE_OFFSET_CENTIMETRES,
+              },
+            },
+            { name: 'lane', shape: LANE },
+            { name: 'held', shape: { kind: 'enum', values: ['none', ...ITEM_KEYS] } },
+            { name: 'lapsDone', shape: { kind: 'integer', minimum: 0, maximum: MAXIMUM_LAPS } },
+          ],
         },
       },
+    },
+    itemEvents: {
+      shape: {
+        kind: 'array',
+        maximumLength: MAXIMUM_ITEM_EVENTS,
+        items: {
+          kind: 'tuple',
+          slots: [
+            { name: 'riderId', shape: RIDER_ID },
+            { name: 'event', shape: { kind: 'enum', values: ['pick-up', 'use', 'hit'] } },
+            { name: 'item', shape: ITEM_KEY },
+          ],
+        },
+      },
+      optional: true,
     },
   },
   countdown: {
@@ -240,10 +344,54 @@ export const MESSAGE_FIELDS = {
       shape: { kind: 'array', items: RIDER_ID, maximumLength: MAXIMUM_RIDERS, distinct: true },
     },
   },
+  // #876: the room's voice link changed under riders already welcomed.
+  voice: {
+    voiceInvite: {
+      shape: { kind: 'string', pattern: VOICE_INVITE_PATTERN, maximumLength: 51 },
+      optional: true,
+    },
+  },
 } as const satisfies Record<ProtocolMessage['type'], Readonly<Record<string, Field>>>;
 
 /** The types a room may receive. A room refuses a `frame` from a client as an unknown type. */
-export const CLIENT_MESSAGE_TYPES: readonly ClientMessage['type'][] = ['hello', 'report'];
+export const CLIENT_MESSAGE_TYPES: readonly ClientMessage['type'][] = [
+  'hello',
+  'report',
+  'item-use',
+  'lane',
+];
+
+/**
+ * Keys a client message must never carry, because each names an OUTCOME the
+ * room decides (ADR 0060 D-5.4, ADR 0028 D-2): a hit, a pick-up, a held item,
+ * an offset, a distance, a lap count, a place or an order. Refused
+ * `outcome-from-client` — before `unknown-key`, so a room can count a client
+ * that claims a result apart from one that is merely a different build.
+ *
+ * Every slot of a frame's rider bar its `riderId` is here, which
+ * `codec.test.ts` holds, so a slot added to the room's answer is refused from
+ * a client the day it is added.
+ */
+export const CLIENT_OUTCOME_FIELDS: readonly string[] = [
+  'hit',
+  'hits',
+  'pickUp',
+  'item',
+  'held',
+  'raceOffset',
+  'raceOffsetCentimetres',
+  'position',
+  'place',
+  'distance',
+  'decimetres',
+  'centimetresPerSecond',
+  'draftPercent',
+  'flags',
+  'lapsDone',
+  'laps',
+  'order',
+  'itemEvents',
+];
 
 /** The types a client may receive. */
 export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
@@ -254,4 +402,5 @@ export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'name',
   'standings',
   'finish',
+  'voice',
 ];

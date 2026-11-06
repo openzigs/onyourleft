@@ -79,7 +79,8 @@ import type {
   Appeal,
   NoticeStep,
 } from '../store/sql-store.ts';
-import { exportRecord, type ModerationRecord } from './record.ts';
+import { exportRecord, stepsOf, type ModerationRecord } from './record.ts';
+import { noticeDetailsDueAt, undecidedNoticeDetailsDueAt } from './notice-retention.ts';
 import { parseModerationItem } from '@onyourleft/domain';
 import { publishedOrder } from '../rooms/publication.ts';
 import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
@@ -276,8 +277,8 @@ export interface Moderation {
    * room (`route:`) or one row of a race's result (`result:<room>:<row>`),
    * by the identifier a notice names it by — with a reason and a statement of
    * reasons its owner is shown, all in one transaction with the log entry.
-   * A display name (`rider:`) is hidden by `hide-display-name`. An item of
-   * a moderator's is refused, and the attempt logged, as `act` refuses.
+   * A display name has no identifier (#1381): it is hidden by
+   * `hide-display-name`. An item of a moderator's is refused, and the attempt logged, as `act` refuses.
    */
   hideItem(
     moderatorId: string,
@@ -301,6 +302,14 @@ export interface Moderation {
   ): Promise<ModerationResult<null>>;
   /** The record of every notice and appeal, with no personal detail of a notifier (#912). */
   record(): Promise<ModerationRecord>;
+  /**
+   * Erase the notifier details of every notice closed six months ago or more
+   * (#1381), and of every notice received twelve months ago or more with no
+   * decision recorded (#1923; both in `notice-retention.ts`), and answer how
+   * many were erased. The
+   * instance runs it on the hour; nobody asks for it.
+   */
+  eraseExpiredNoticeDetails(): Promise<number>;
   /** The moderators' queue of appeals, oldest first, each with the statement it appeals (#911). */
   openAppeals(): Promise<readonly OpenAppeal[]>;
   /**
@@ -774,11 +783,6 @@ export function createModeration(options: ModerationOptions): Moderation {
           { field: 'item', problem: 'must be an item’s identifier, as the app shows it' },
         ]);
       }
-      if (parsed.kind === 'rider') {
-        return refuse('validation_failed', [
-          { field: 'item', problem: 'a display name is hidden with hide-display-name' },
-        ]);
-      }
       const checked = checkReason(fields.reason);
       if (!checked.ok) {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
@@ -878,6 +882,24 @@ export function createModeration(options: ModerationOptions): Moderation {
         store.listEveryAppeal(),
       ]);
       return exportRecord(notices, steps, appeals);
+    },
+
+    async eraseExpiredNoticeDetails() {
+      const at = seconds();
+      const [notices, steps] = await Promise.all([store.listNotices(), store.listNoticeSteps()]);
+      let erased = 0;
+      for (const notice of notices) {
+        if (notice.erased !== null) continue;
+        const { decidedAt } = stepsOf(notice.id, steps);
+        const due =
+          decidedAt === null
+            ? undecidedNoticeDetailsDueAt(notice.receivedAt)
+            : noticeDetailsDueAt(decidedAt);
+        if (at < due) continue;
+        const after = decidedAt === null ? 'receipt' : 'decision';
+        if ((await store.eraseNoticeDetails(notice.id, at, after)) === 'erased') erased += 1;
+      }
+      return erased;
     },
 
     async appeal(athleteId, statementId, grounds) {

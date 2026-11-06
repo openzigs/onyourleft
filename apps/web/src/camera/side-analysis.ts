@@ -241,6 +241,13 @@ export interface SideAnalysisOptions {
    * §`chooseSideAnalyser` answers it together with {@link estimator} (#553).
    */
   readonly place?: 'tablet' | 'computer' | 'instance' | undefined;
+  /**
+   * The hosted service the rider's instance sends pictures on to, by host, or
+   * `undefined` (#2175): `instance-pose.ts` §`sideInstanceHostedService` in
+   * production. Read when the analysis is made and again after every picture,
+   * so a switch turned on or off mid-session is said at the next one.
+   */
+  readonly hostedService?: (() => string | undefined) | undefined;
   /** Where the reference lives. Without it there is no check and nothing is kept between sessions. */
   readonly references?: FramingReferenceKeeping | undefined;
   /**
@@ -254,6 +261,7 @@ export interface SideAnalysisOptions {
 export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSnapshotSource {
   readonly #control: SideCameraControlPort;
   readonly #makeEstimator: () => SidePoseEstimator;
+  readonly #hostedService: () => string | undefined;
   readonly #references: FramingReferenceKeeping | undefined;
   readonly #listeners = new Set<() => void>();
   /** Who is watching the live view (#1061). Nobody, and no picture is held. */
@@ -285,6 +293,7 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSna
     noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
     unreadable: 0,
     skipped: 0,
+    rateLimited: 0,
     framing: 'checking',
     finished: false,
   };
@@ -294,7 +303,12 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSna
     this.#makeEstimator = options.estimator;
     this.#references = options.references;
     this.#report = options.reports?.beginSideReportSession();
-    this.#state = { ...this.#state, place: options.place ?? 'tablet' };
+    this.#hostedService = options.hostedService ?? (() => undefined);
+    this.#state = {
+      ...this.#state,
+      place: options.place ?? 'tablet',
+      hostedService: this.#hostedService(),
+    };
     if (this.#references === undefined) {
       this.#state = { ...this.#state, framing: 'no-reference' };
     }
@@ -467,6 +481,10 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSna
   }
 
   #record(picture: SidePicture, outcome: SidePoseOutcome): void {
+    const hostedService = this.#hostedService();
+    if (hostedService !== this.#state.hostedService) {
+      this.#set({ hostedService });
+    }
     switch (outcome.kind) {
       case 'pose':
         this.#poses.offer({
@@ -489,6 +507,9 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSna
         return;
       case 'unreadable':
         this.#set({ model: 'ready', unreadable: this.#state.unreadable + 1 });
+        return;
+      case 'rate-limited':
+        this.#set({ model: 'ready', rateLimited: this.#state.rateLimited + 1 });
         return;
       case 'unavailable':
         this.#waiting = undefined;

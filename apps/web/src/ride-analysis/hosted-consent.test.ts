@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HOSTED_AGREED_TEXT,
   HOSTED_ANSWER_REFUSAL_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_KEY_OPERATOR_CAN_READ,
   HOSTED_KEY_SEALED_ONLY,
   HOSTED_MASKING_NOT_SENT,
@@ -54,7 +55,7 @@ describe('the hosted consent (#1104 B1), as drafted for the owner', () => {
         "If you agree, each time you ask for a ride analysis by this service, your instance sends that ride's numbers to https://api.example.com: your heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, it is also sent how a few measurements of your riding position changed between the start and the end of filming. While it writes, the model may look up more on your instance and be sent it: short summaries of your recent rides, summaries of older rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. The model decides during the analysis which of these it looks up, so the app cannot list them in advance.",
         "That is a company or a computer that is not yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it for you afterwards. It sees your instance's internet address, not this device's.",
         "A ride analysis never sends it a picture — not a photograph of you, and nothing made from one. The ride's numbers carry no name, no place and no date. But what you wrote yourself can say anything, so this cannot promise that your name, where you ride or when is never sent. Before anything is sent, your instance masks e-mail addresses, phone numbers, links, street addresses, postcodes, coordinates, the names of your privacy zones and everything on your list of words to mask. Masking reduces what is sent; it does not guarantee that nothing personal gets through.",
-        'So that your instance can mask, this device sends it your list of words to mask and your privacy zones — their names, where they are and how large — when you agree, and again each time you ask for a ride analysis by this service. They are sealed on the way, and your instance keeps them with your account. Your instance deletes them when you withdraw or remove your key.',
+        "So that your instance can mask, this device sends it your list of words to mask and your privacy zones — their names, where they are and how large — when you agree, and again each time you ask for a ride analysis by this service. They are sealed on the way, and your instance keeps them with your account. Your instance deletes them when you withdraw your agreement. It also deletes them when you remove your key, unless the operator's command set a key for your account: then they stay until you withdraw.",
         'Your key is held by your instance, encrypted, and is sent only to https://api.example.com. It is never sent back to this device and is never put in a file the app or your instance exports. Whoever runs your instance holds the secret your key is encrypted with, so they could read your key. If that is not you, only use a key you are willing to let them see.',
         "When you press 'Send a test question', your instance sends it one test question, containing none of your data, to check it answers.",
         "If the service's address changes, you are asked again before anything is sent to the new one.",
@@ -158,6 +159,7 @@ describe('the rest of what a rider reads (#1251), as drafted', () => {
     expect({
       ...HOSTED_ANSWER_REFUSAL_TEXT,
       unreadable: HOSTED_UNREADABLE,
+      changeUnknown: HOSTED_CHANGE_UNKNOWN,
       notOffered: HOSTED_NOT_OFFERED,
       notAccepted: HOSTED_NOT_ACCEPTED,
       maskingNotSent: HOSTED_MASKING_NOT_SENT,
@@ -177,6 +179,8 @@ describe('the rest of what a rider reads (#1251), as drafted', () => {
         'Enter a whole number from 1 to 16384 for the reasoning tokens, or leave the box empty.',
       unreadable:
         'Your instance did not answer, or answered something this app cannot read. Nothing was changed, and nothing was sent to a service.',
+      changeUnknown:
+        'Your instance did not answer, or answered something this app cannot read, so this app cannot tell whether your change was made. Nothing was sent to a service. Open this page again to see what your instance holds.',
       notOffered:
         'Your instance cannot hold a rider’s own key: it runs a version from before this, or its operator has not set it up to encrypt one. Nothing was stored, and nothing was sent to a service.',
       notAccepted:

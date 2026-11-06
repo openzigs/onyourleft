@@ -49,6 +49,7 @@ import type {
   InviteCodeTable,
   LinkCodeTable,
   ModerationLogTable,
+  NoticeErasureTable,
   NoticeTable,
   StatementTable,
   AppealTable,
@@ -136,6 +137,14 @@ export interface Room {
   readonly physicsVersion: number;
 }
 
+/** A lap race's settings, as its course holds them (#1910): `room/core/settings.ts`'s shape. */
+export interface LapRaceCourse {
+  readonly laps: number;
+  readonly items: boolean;
+  /** The room's own seed, 0 to 2³² − 1. Never sent to a client. */
+  readonly seed: number;
+}
+
 /** A room's course, as the room core needs it (#780): never geometry. */
 export interface RoomCourse {
   readonly roomId: string;
@@ -152,6 +161,12 @@ export interface RoomCourse {
    * a write is `true`, the default the ruling chose; always present on a read.
    */
   readonly drafting?: boolean;
+  /**
+   * A lap race's laps, items and the room's own seed (#1910, migration 0037):
+   * chosen when the room is made and fixed for it. Absent for every room that
+   * is not a lap race, on a write and on a read.
+   */
+  readonly lapRace?: LapRaceCourse;
   /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
   readonly raceStartedAt: number | null;
   /**
@@ -583,10 +598,41 @@ export interface Notice {
   readonly notifierEmail: string | null;
   /** Whether the notifier made the bona fide statement (DSA Art. 16(2)(d)). */
   readonly bonaFide: boolean;
+  /**
+   * When its notifier details were erased (#1381), and what the notifier had
+   * given — or `null` while they are held. Once erased, the explanation is
+   * empty and the location, name and email are `null`.
+   */
+  readonly erased: NoticeErasure | null;
 }
 
-/** What a notice is stored with: everything but the id the store gives it. */
-export type NewNotice = Omit<Notice, 'id'>;
+/** A notice's notifier details erased (#1381): when, and what the notifier had given. */
+export interface NoticeErasure {
+  /** Unix seconds. */
+  readonly at: number;
+  readonly gaveName: boolean;
+  readonly gaveEmail: boolean;
+}
+
+/** What a notice is stored with: everything but the id the store gives it, as received. */
+export type NewNotice = Omit<Notice, 'id' | 'erased'>;
+
+/**
+ * What a notice's notifier details are erased after: its decision (#1381), or
+ * its receipt when no decision is recorded on it (#1923).
+ */
+export type NoticeErasedAfter = 'decision' | 'receipt';
+
+/** What erasing a notice's notifier details did (#1381). */
+export type NoticeDetailsErased =
+  | 'erased'
+  | 'not_found'
+  /** Asked after its decision, and no decision is recorded on it. */
+  | 'not_closed'
+  /** Asked after its receipt (#1923), and a decision is recorded on it: that one counts. */
+  | 'not_open'
+  /** They were erased already. */
+  | 'already';
 
 /** A step taken on a notice after it was received (#912). */
 export type NoticeStepKind = 'acknowledged' | 'decided' | 'notifier_told';
@@ -713,7 +759,26 @@ export type LoggedActionKind =
   | `refused_${ModerationActionKind}`
   /** An appeal decided (#911): the restriction stands, or it is reversed. */
   | 'uphold_appeal'
-  | 'reverse_appeal';
+  | 'reverse_appeal'
+  /**
+   * The instance's, after a removal or a ban (#876): what it did to the
+   * room's Discord voice channel, in one of `voice/voice-moderation.ts`'s
+   * fixed sentences, naming the log entry it followed. Through
+   * {@link SqlStore.logVoiceAction}, never {@link SqlStore.moderate}: it
+   * applies nothing to anybody.
+   */
+  | 'rotate_voice';
+
+/** A voice action, as {@link SqlStore.logVoiceAction} appends it (#876). */
+export interface VoiceLogEntry {
+  /** Who took the action it followed: the moderator, or the room's host. */
+  readonly actorAthleteId: string;
+  /** Whom that action was about. */
+  readonly targetAthleteId: string;
+  readonly roomId: string;
+  readonly reason: string;
+  readonly at: number;
+}
 
 /** An appeal against a restriction (#911), with its decision once there is one. */
 export interface Appeal {
@@ -1384,7 +1449,11 @@ export interface SqlStore {
     limit: number,
   ): Promise<readonly ListedActivity[]>;
 
-  /** #776: store an item, or answer `unchanged` when the athlete already holds these exact bytes. */
+  /**
+   * #776: store an item, or answer `unchanged` when the athlete already holds
+   * these exact bytes. Replacing a live item with different bytes is SCRUBBED
+   * as {@link deleteSyncItem} is (#1944): a re-sent masking list drops a zone.
+   */
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
   /**
@@ -1395,7 +1464,10 @@ export interface SqlStore {
   listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
   /**
    * Replace a live item with its tombstone — an activity's record goes with
-   * it. `false` when the athlete holds no such live item.
+   * it. `false` when the athlete holds no such live item. SCRUBBED (#1796):
+   * the old body is zeroed in its page and the log truncated, as a cleared
+   * key is, because an item can hold a place — a masking list's privacy
+   * zones, a ride's record, a note naming a street.
    */
   deleteSyncItem(athleteId: string, kind: SyncKind, key: string, now: number): Promise<boolean>;
   /** #776: the manifest, after `after`, in `(receivedAt, seq)` order, tombstones included. */
@@ -1633,6 +1705,21 @@ export interface SqlStore {
   /** Every step taken on every notice, oldest first (#912). */
   listNoticeSteps(): Promise<readonly NoticeStep[]>;
   /**
+   * Erase a notice's notifier details (#1381), in ONE transaction with the
+   * checks it rests on: the notice exists, they are not erased already, and
+   * a decision is recorded on it when `after` is `'decision'` — or none is,
+   * when it is `'receipt'` (#1923). When each is due is the caller's
+   * (`moderation/notice-retention.ts`). The explanation is emptied and the location,
+   * name and email set to `null`; whether a name and an email were given is
+   * kept, with `at` (Unix seconds). The decision, its dates, the items and
+   * the notice's id stay. Scrubbed, as {@link SqlStore.eraseAthlete} is.
+   */
+  eraseNoticeDetails(
+    noticeId: number,
+    at: number,
+    after: NoticeErasedAfter,
+  ): Promise<NoticeDetailsErased>;
+  /**
    * Hide one item (#913), in ONE transaction: the log entry, the statement of
    * reasons its owner is shown, and the hidden item — or, for an item already
    * hidden, nothing.
@@ -1697,6 +1784,11 @@ export interface SqlStore {
    * `refused_<action>`, changing nothing else. Answers the log entry's id.
    */
   logRefusedAction(action: ModerationAction): Promise<number>;
+  /**
+   * Log what the instance did to a room's voice channel after a removal or a
+   * ban (#876), as `rotate_voice`, changing nothing else. Answers its id.
+   */
+  logVoiceAction(entry: VoiceLogEntry): Promise<number>;
   /**
    * One page of the moderation log, NEWEST first (#961): at most `limit`
    * entries whose id is below `beforeId`, or the newest when it is `undefined`.
@@ -1966,7 +2058,13 @@ function noticeItems(text: string): readonly string[] {
   return Array.isArray(parsed) ? parsed.filter((each) => typeof each === 'string') : [];
 }
 
-const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
+const noticeFrom = (
+  row: Selectable<NoticeTable> & {
+    readonly erased_at: number | null;
+    readonly gave_name: NoticeErasureTable['gave_name'] | null;
+    readonly gave_email: NoticeErasureTable['gave_email'] | null;
+  },
+): Notice => ({
   id: row.id,
   receivedAt: row.received_at,
   kind: row.kind,
@@ -1976,6 +2074,10 @@ const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
   notifierName: row.notifier_name,
   notifierEmail: row.notifier_email,
   bonaFide: row.bona_fide === 1,
+  erased:
+    row.erased_at === null
+      ? null
+      : { at: row.erased_at, gaveName: row.gave_name === 1, gaveEmail: row.gave_email === 1 },
 });
 
 const statementFrom = (
@@ -2470,10 +2572,25 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
   drafting: row.drafting === 1,
+  // All three or none (0037's CHECK). Read by type, so a database rolled back
+  // past 0037 — no such columns — reads as the room it was.
+  ...(typeof row.lap_laps === 'number' &&
+  typeof row.lap_items === 'number' &&
+  typeof row.lap_seed === 'number'
+    ? { lapRace: { laps: row.lap_laps, items: row.lap_items === 1, seed: row.lap_seed } }
+    : {}),
   raceStartedAt: row.race_started_at,
   ...(row.finishers === null ? {} : { finishers: row.finishers }),
   ...(row.race_finished_at === null ? {} : { raceFinishedAt: row.race_finished_at }),
 });
+
+/** A lap race's three columns: all three set, or all three NULL for any other room (0037). */
+const lapRaceColumns = (
+  lapRace: LapRaceCourse | undefined,
+): { lap_laps: number | null; lap_items: number | null; lap_seed: number | null } =>
+  lapRace === undefined
+    ? { lap_laps: null, lap_items: null, lap_seed: null }
+    : { lap_laps: lapRace.laps, lap_items: lapRace.items ? 1 : 0, lap_seed: lapRace.seed };
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
   roomId: row.room_id,
@@ -3702,35 +3819,51 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       }),
 
     putSyncItem: (item) =>
-      exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          if ((item.kind as SyncKind) === 'activity') {
-            throw new Error(
-              'An activity is synced through ingestActivity, with its signature checked.',
-            );
-          }
-          const held = await trx
-            .selectFrom('sync_item')
-            .select(['digest', 'deleted_at'])
-            .where('athlete_id', '=', item.athleteId)
-            .where('kind', '=', item.kind)
-            .where('item_key', '=', item.key)
-            .executeTakeFirst();
-          if (held !== undefined && held.deleted_at === null && held.digest === item.digest) {
-            return 'unchanged' as const;
-          }
-          await replaceSyncRow(trx, {
-            athleteId: item.athleteId,
-            kind: item.kind,
-            key: item.key,
-            digest: item.digest,
-            body: item.body,
-            now: item.now,
-            deletedAt: null,
+      exclusive(async () => {
+        if ((item.kind as SyncKind) === 'activity') {
+          throw new Error(
+            'An activity is synced through ingestActivity, with its signature checked.',
+          );
+        }
+        const write = () =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('sync_item')
+              .select(['digest', 'deleted_at'])
+              .where('athlete_id', '=', item.athleteId)
+              .where('kind', '=', item.kind)
+              .where('item_key', '=', item.key)
+              .executeTakeFirst();
+            if (held !== undefined && held.deleted_at === null && held.digest === item.digest) {
+              return 'unchanged' as const;
+            }
+            await replaceSyncRow(trx, {
+              athleteId: item.athleteId,
+              kind: item.kind,
+              key: item.key,
+              digest: item.digest,
+              body: item.body,
+              now: item.now,
+              deletedAt: null,
+            });
+            return 'stored' as const;
           });
-          return 'stored' as const;
-        }),
-      ),
+        // #1944: replacing a live body scrubs the old one, as a delete does
+        // (#1796), for every kind and not a list of them. The device rewrites
+        // its masking list before every hosted job, so a zone the rider removed
+        // would otherwise stay in a free page and the log. A first write, a
+        // write over a tombstone (scrubbed when it was deleted) and an unchanged
+        // one have no old body, so they pay no checkpoint.
+        const live = await db
+          .selectFrom('sync_item')
+          .select('digest')
+          .where('athlete_id', '=', item.athleteId)
+          .where('kind', '=', item.kind)
+          .where('item_key', '=', item.key)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        return live !== undefined && live.digest !== item.digest ? scrubbing(write) : write();
+      }),
 
     getSyncItem: (athleteId, kind, key) =>
       exclusive(async () => {
@@ -3761,33 +3894,37 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     deleteSyncItem: (athleteId, kind, key, now) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('sync_item')
-            .select('deleted_at')
-            .where('athlete_id', '=', athleteId)
-            .where('kind', '=', kind)
-            .where('item_key', '=', key)
-            .executeTakeFirst();
-          if (held === undefined || held.deleted_at !== null) return false;
-          if (kind === 'activity') {
-            await trx
-              .deleteFrom('activity_record')
+        // #1796: every kind, not a list of the ones that hold a place — a new
+        // kind cannot fall out of a rule that names none.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('sync_item')
+              .select('deleted_at')
               .where('athlete_id', '=', athleteId)
-              .where('content_sha256', '=', key)
-              .execute();
-          }
-          await replaceSyncRow(trx, {
-            athleteId,
-            kind,
-            key,
-            digest: null,
-            body: null,
-            now,
-            deletedAt: now,
-          });
-          return true;
-        }),
+              .where('kind', '=', kind)
+              .where('item_key', '=', key)
+              .executeTakeFirst();
+            if (held === undefined || held.deleted_at !== null) return false;
+            if (kind === 'activity') {
+              await trx
+                .deleteFrom('activity_record')
+                .where('athlete_id', '=', athleteId)
+                .where('content_sha256', '=', key)
+                .execute();
+            }
+            await replaceSyncRow(trx, {
+              athleteId,
+              kind,
+              key,
+              digest: null,
+              body: null,
+              now,
+              deletedAt: now,
+            });
+            return true;
+          }),
+        ),
       ),
 
     listSyncManifest: (athleteId, after, limit) =>
@@ -3863,6 +4000,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           countdown_ms: course.countdownMs,
           rejoin_window_ms: course.rejoinWindowMs,
           drafting: course.drafting === false ? 0 : 1,
+          ...lapRaceColumns(course.lapRace),
         };
         await db
           .insertInto('room_course')
@@ -3945,6 +4083,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               countdown_ms: course.countdownMs,
               rejoin_window_ms: course.rejoinWindowMs,
               drafting: course.drafting === false ? 0 : 1,
+              ...lapRaceColumns(course.lapRace),
               race_started_at: null,
             })
             .execute();
@@ -4627,6 +4766,51 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ),
       ),
 
+    eraseNoticeDetails: (noticeId, at, after) =>
+      exclusive(() =>
+        // Scrubbed (#1097): what the notifier typed is not left in a free page or the log.
+        scrubbing(() =>
+          db.transaction().execute(async (trx): Promise<NoticeDetailsErased> => {
+            const notice = await trx
+              .selectFrom('notice')
+              .select(['id', 'notifier_name', 'notifier_email'])
+              .where('id', '=', noticeId)
+              .executeTakeFirst();
+            if (notice === undefined) return 'not_found';
+            const erased = await trx
+              .selectFrom('notice_erasure')
+              .select('notice_id')
+              .where('notice_id', '=', noticeId)
+              .executeTakeFirst();
+            if (erased !== undefined) return 'already';
+            const decided = await trx
+              .selectFrom('notice_step')
+              .select('id')
+              .where('notice_id', '=', noticeId)
+              .where('step', '=', 'decided')
+              .executeTakeFirst();
+            if (after === 'decision' && decided === undefined) return 'not_closed';
+            if (after === 'receipt' && decided !== undefined) return 'not_open';
+            // The erasure row first: migration 0036's trigger allows the update only after it.
+            await trx
+              .insertInto('notice_erasure')
+              .values({
+                notice_id: noticeId,
+                gave_name: notice.notifier_name === null ? 0 : 1,
+                gave_email: notice.notifier_email === null ? 0 : 1,
+                at,
+              })
+              .execute();
+            await trx
+              .updateTable('notice')
+              .set({ explanation: '', location: null, notifier_name: null, notifier_email: null })
+              .where('id', '=', noticeId)
+              .execute();
+            return 'erased';
+          }),
+        ),
+      ),
+
     hideItem: (hide) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -4699,7 +4883,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     listNotices: () =>
       exclusive(async () =>
-        (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
+        (
+          await db
+            .selectFrom('notice')
+            .leftJoin('notice_erasure', 'notice_erasure.notice_id', 'notice.id')
+            .selectAll('notice')
+            .select([
+              'notice_erasure.at as erased_at',
+              'notice_erasure.gave_name',
+              'notice_erasure.gave_email',
+            ])
+            .orderBy('notice.id')
+            .execute()
+        ).map(noticeFrom),
       ),
 
     moderate: (action) =>
@@ -4793,6 +4989,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             reason: action.reason,
             at: action.at,
             room_id: action.roomId ?? null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return logged.id;
+      }),
+
+    logVoiceAction: (entry) =>
+      exclusive(async () => {
+        const logged = await db
+          .insertInto('moderation_log')
+          .values({
+            actor_athlete_id: entry.actorAthleteId,
+            action: 'rotate_voice',
+            target_athlete_id: entry.targetAthleteId,
+            report_id: null,
+            reason: entry.reason,
+            at: entry.at,
+            room_id: entry.roomId,
           })
           .returning('id')
           .executeTakeFirstOrThrow();

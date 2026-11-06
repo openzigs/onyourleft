@@ -34,7 +34,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
-import type { RoomHarness, RoomSample } from './room-harness';
+import type { LapSample, RoomHarness, RoomSample } from './room-harness';
 
 interface RoomGateInstance {
   readonly origin: string;
@@ -50,6 +50,7 @@ interface RoomGateEdge {
 interface RoomGateTesting {
   startRoomGateInstance(): Promise<RoomGateInstance>;
   startRoomGateInstanceBehindEdge(): Promise<RoomGateInstance & { readonly edge: RoomGateEdge }>;
+  startLapRaceGateInstanceBehindEdge(): Promise<RoomGateInstance & { readonly edge: RoomGateEdge }>;
 }
 
 const ROOM_GATE_TESTING = new URL('../../instance/src/room/room-gate-testing.ts', import.meta.url)
@@ -272,7 +273,7 @@ test.describe('a group ride made, shared by its code, joined and ridden — #784
 
     const maker = await signedIn('Dee');
     const made = await maker.evaluate(() => (window.__oylRoom as RoomHarness).make());
-    expect(made.kind).toBe('made');
+    expect(made, JSON.stringify(made)).toMatchObject({ kind: 'made' });
     if (made.kind !== 'made') return;
     expect(made.code).toMatch(/^[0-9A-Z]{5}-[0-9A-Z]{5}-[0-9A-Z]{5}$/);
 
@@ -313,6 +314,154 @@ test.describe('a group ride made, shared by its code, joined and ridden — #784
     expect(await seesAnotherMove(friend, 2.5)).toBe(true);
 
     for (const page of [maker, friend, control]) {
+      await page.evaluate(() => {
+        (window.__oylRoom as RoomHarness).leave();
+      });
+      await page.context().close();
+    }
+  });
+});
+
+test.describe('a lap race in a room, through an edge restart — #1911', () => {
+  // An instance of its own, as the describes above: three registrations an address an hour.
+  let racing: RoomGateInstance & { readonly edge: RoomGateEdge };
+  test.beforeAll(async () => {
+    const testing = (await import(ROOM_GATE_TESTING)) as RoomGateTesting;
+    racing = await testing.startLapRaceGateInstanceBehindEdge();
+  });
+  test.afterAll(async () => {
+    await racing.close();
+  });
+
+  const lap = (page: Page): Promise<LapSample | undefined> =>
+    page.evaluate(() => (window.__oylRoom as RoomHarness).lap());
+
+  test('the rider is seen lost, comes back on their own, and the ROOM gives back their item and lane', async ({
+    browser,
+  }) => {
+    const pages = [
+      await rider(browser, 'Ivy', true, racing),
+      await rider(browser, 'Jo', true, racing),
+    ] as const;
+    const [ivy] = pages;
+    await expect
+      .poll(async () => (await Promise.all(pages.map(sample))).map((s) => s.status), {
+        timeout: 15_000,
+      })
+      .toEqual(['joined', 'joined']);
+    // A seated rider starts the race; it has no countdown.
+    expect(await ivy.evaluate(() => (window.__oylRoom as RoomHarness).start())).toBe('started');
+    // A quarter of the 40 m loop in, Ivy picks an item up: the room's frame says so.
+    await expect
+      .poll(async () => (await lap(ivy))?.held ?? 'none', { timeout: 20_000 })
+      .not.toBe('none');
+    // She steers left, an input the room takes into its next frame.
+    expect(await ivy.evaluate(() => (window.__oylRoom as RoomHarness).changeLane(0))).toBeDefined();
+    await expect.poll(async () => (await lap(ivy))?.lane, { timeout: 10_000 }).toBe(0);
+    const before = await lap(ivy);
+
+    // The edge restarts mid-race: every socket through it closes.
+    expect(racing.edge.restart(3_000)).toBe(2);
+    await expect.poll(async () => (await sample(ivy)).status, { timeout: 3_000 }).toBe('lost');
+    // Back on her own, through a fresh socket, to her own seat …
+    await expect.poll(async () => (await sample(ivy)).status, { timeout: 30_000 }).toBe('joined');
+    // … where the slots this client kept were forgotten on the welcome (`room-session.ts`),
+    // so what it reads now is the room's next frame: the same item, the same lane.
+    await expect
+      .poll(() => lap(ivy), { timeout: 10_000 })
+      .toMatchObject({
+        held: before?.held,
+        lane: 0,
+      });
+    // No lane was asked for since: the lane is the one the room kept.
+    for (const page of pages) {
+      await page.evaluate(() => {
+        (window.__oylRoom as RoomHarness).leave();
+      });
+      await page.context().close();
+    }
+  });
+});
+
+test.describe('a private lap race made, joined by its code, ridden and published — #1912', () => {
+  // An instance of its own, as the describes above: three registrations an address an hour.
+  let own: RoomGateInstance;
+  test.beforeAll(async () => {
+    const testing = (await import(ROOM_GATE_TESTING)) as RoomGateTesting;
+    own = await testing.startRoomGateInstance();
+  });
+  test.afterAll(async () => {
+    await own.close();
+  });
+
+  const lap = (page: Page): Promise<LapSample | undefined> =>
+    page.evaluate(() => (window.__oylRoom as RoomHarness).lap());
+
+  test('two simulated riders race three laps with items, read the same finish order, and the published result is it', async ({
+    browser,
+  }) => {
+    test.setTimeout(150_000);
+    const signedIn = async (name: string): Promise<Page> => {
+      const context = await browser.newContext({ baseURL: HARNESS_ORIGIN });
+      const page = await context.newPage();
+      expect((await page.goto('/room.html'))?.status()).toBe(200);
+      await page.waitForFunction(() => window.__oylRoom !== undefined);
+      const connected = await page.evaluate(
+        ([address, who]) => (window.__oylRoom as RoomHarness).signIn(address, who),
+        [own.origin, name] as const,
+      );
+      expect(connected.kind, `${name} signed in`).toBe('connected');
+      return page;
+    };
+    const kim = await signedIn('Kim');
+    const lee = await signedIn('Lee');
+    // Kim makes a private lap race of three laps of her loop, items on …
+    const made = await kim.evaluate(() => (window.__oylRoom as RoomHarness).makeLapRace(3));
+    expect(made, JSON.stringify(made)).toMatchObject({ kind: 'made' });
+    const code = made.kind === 'made' ? made.code : '';
+    // … and Lee joins it by the code she shares.
+    const entered = await lee.evaluate(
+      (shared) => (window.__oylRoom as RoomHarness).enter(shared, false),
+      code,
+    );
+    expect(entered.kind).toBe('entered');
+    // Both ride on a simulated power meter's readings.
+    await kim.evaluate(() => (window.__oylRoom as RoomHarness).rideSimulated(260));
+    await lee.evaluate(() => (window.__oylRoom as RoomHarness).rideSimulated(240));
+    const pages = [kim, lee] as const;
+    await expect
+      .poll(async () => (await Promise.all(pages.map(sample))).map((s) => s.status), {
+        timeout: 15_000,
+      })
+      .toEqual(['joined', 'joined']);
+    // Kim made it, so Kim starts it.
+    expect(await kim.evaluate(() => (window.__oylRoom as RoomHarness).start())).toBe('started');
+    // The room is a lap race: once it runs, its frames carry the lap slots.
+    await expect.poll(async () => (await lap(kim)) !== undefined, { timeout: 30_000 }).toBe(true);
+    // Three laps of a 113 m loop, after the room’s countdown.
+    await expect
+      .poll(() => kim.evaluate(() => (window.__oylRoom as RoomHarness).finishNames() ?? []), {
+        timeout: 120_000,
+        intervals: [1_000],
+      })
+      .toHaveLength(2);
+    const order = await kim.evaluate(() => (window.__oylRoom as RoomHarness).finishNames());
+    expect([...(order ?? [])].sort()).toEqual(['Kim', 'Lee']);
+    // Both clients read the same order from the room's Finish …
+    await expect
+      .poll(() => lee.evaluate(() => (window.__oylRoom as RoomHarness).finishNames()), {
+        timeout: 10_000,
+      })
+      .toEqual(order);
+    // … and the result the instance published, read through its result route, is it.
+    for (const page of pages) {
+      await expect
+        .poll(() => page.evaluate(() => (window.__oylRoom as RoomHarness).resultNames()), {
+          timeout: 15_000,
+        })
+        .toEqual(order);
+    }
+    for (const page of pages) {
       await page.evaluate(() => {
         (window.__oylRoom as RoomHarness).leave();
       });

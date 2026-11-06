@@ -80,7 +80,8 @@ export interface PluginService {
 }
 
 /**
- * The twelve plugin calls this adapter makes.
+ * The plugin calls this adapter makes: twelve, and since #1825 a thirteenth,
+ * {@link CapacitorBlePort.requestConnectionPriority}.
  *
  * Every one returns a promise, including the ones the plugin documents as
  * fire-and-forget, because `SensorTransport`'s contract is that nothing throws
@@ -182,6 +183,30 @@ export interface CapacitorBlePort {
    * a trainer.
    */
   readRssi(deviceId: string): Promise<number>;
+
+  /**
+   * Ask Android for a connection interval on this link — #1825, for an
+   * OpenBikeControl controller, whose presses should not wait on a slow
+   * interval.
+   *
+   * Read from `@capacitor-community/bluetooth-le` 8.3.0 itself:
+   * `BleClient.requestConnectionPriority(deviceId, ConnectionPriority)`,
+   * documented "Only available on **Android**", and on Android
+   * `BluetoothLe.kt` §`requestConnectionPriority` calls
+   * `BluetoothGatt.requestConnectionPriority` and rejects with
+   * `requestConnectionPriority failed.` when the stack declines. A request,
+   * not a guarantee: the controller's firmware and the OS still settle the
+   * interval, so a caller treats a refusal as harmless.
+   *
+   * ⚠️ Sends nothing to the device's attributes: it is a link-layer parameter
+   * request, and it may be asked of a controller only. Nothing here asks it of
+   * a trainer. Its caller is `open-bike-control-client.ts`, which
+   * `apps/web/src/main.tsx` builds for the Devices screen (#1826).
+   */
+  requestConnectionPriority(
+    deviceId: string,
+    priority: 'balanced' | 'high' | 'low-power',
+  ): Promise<void>;
 
   disconnect(deviceId: string): Promise<void>;
 

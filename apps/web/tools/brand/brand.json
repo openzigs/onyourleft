@@ -34,7 +34,7 @@
     },
     "wordmark": {
       "source": "apps/web/tools/brand/sources/gemini-assets-v2.jpeg",
-      "modified": "the ON YOUR LEFT wordmark cut out of the sheet by colour from the checkerboard painted into its pixels, its letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9) and its arrow kept, then resized"
+      "modified": "the ON YOUR LEFT wordmark cut out of the sheet by colour from the checkerboard painted into its pixels, its letters set in one flat navy (or, for the dark palette, in the app's dark ink #edeef1) and its arrow kept, then resized"
     },
     "logo": {
       "source": "apps/web/tools/brand/sources/gemini-logo-green.jpeg",
@@ -179,6 +179,42 @@
       "family": "icon",
       "kind": "foreground",
       "size": 432
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-mdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 288
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-hdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 432
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 576
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xxhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 864
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/drawable-xxxhdpi/oyl_splash_mark.png",
+      "family": "icon",
+      "kind": "splash",
+      "size": 1152
+    },
+    {
+      "path": "apps/web/src/brand/splash-mark.webp",
+      "family": "icon",
+      "kind": "splash",
+      "size": 576
     }
   ]
 }

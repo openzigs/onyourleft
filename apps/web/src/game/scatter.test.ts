@@ -54,6 +54,7 @@ import {
   type ScatterItem,
   type SceneryKind,
 } from './scatter';
+import { distanceToDrawnRoad } from './road-grid';
 import {
   DEGENERATE_TANGENT_METRES,
   ROAD_WIDTH_METRES,
@@ -1449,5 +1450,172 @@ describe("which of its kind's shapes an item is — #367", () => {
     for (const shapes of [1, 2, 3]) {
       expect(SCATTER_VARIANT_SLOTS % shapes).toBe(0);
     }
+  });
+});
+
+describe('the inside of a tight bend is a cleared sightline — #545', () => {
+  // The owner's ruling of 2026-11-02 on #545: no scatter within 8 m of the road
+  // edge on the inside of a bend whose radius is under 30 m. Both numbers are
+  // literals here, per this file's habit, so a constant moved in `scatter.ts`
+  // goes red rather than following in silence.
+  const LATITUDE = 45;
+  const STRAIGHT_METRES = 300;
+
+  interface Hairpin {
+    readonly profile: RouteProfile;
+    /** How far the road's edge is from an item, measured as a rider sees it. */
+    readonly edge: (item: ScatterItem) => number;
+    /** On the inside: within the bend's circle, or between its two legs. */
+    readonly inside: (item: ScatterItem) => boolean;
+    /** On the bend's own half-turn, north of its centre. */
+    readonly onTheArc: (item: ScatterItem) => boolean;
+    /** How far south of the bend's centre, along its legs. */
+    readonly south: (item: ScatterItem) => number;
+  }
+
+  /**
+   * North for {@link STRAIGHT_METRES}, a half-turn of `radiusMetres` to the
+   * west (`turn` −1) or the east (`turn` 1), then south again: a hairpin,
+   * sampled every 5 m. A half-turn rather than a quarter, because the
+   * clustering left a 17 m quarter-turn bare on this seed.
+   */
+  const hairpin = (radiusMetres: number, turn: -1 | 1): Hairpin => {
+    const metresPerDegreeLongitude = 111_320 * Math.cos((LATITUDE * Math.PI) / 180);
+    const at = (north: number, east: number): GeographicPosition =>
+      geographicPosition(
+        degreesLatitude(LATITUDE + north / 111_320),
+        degreesLongitude(east / metresPerDegreeLongitude),
+      );
+    const plan: (readonly [number, number])[] = [];
+    for (let along = 0; along < STRAIGHT_METRES; along += 5) plan.push([along, 0]);
+    for (let along = 0; along < radiusMetres * Math.PI; along += 5) {
+      const angle = along / radiusMetres;
+      plan.push([
+        STRAIGHT_METRES + radiusMetres * Math.sin(angle),
+        turn * radiusMetres * (1 - Math.cos(angle)),
+      ]);
+    }
+    for (let along = 0; along <= STRAIGHT_METRES; along += 5) {
+      plan.push([STRAIGHT_METRES - along, turn * 2 * radiusMetres]);
+    }
+    const profile = routeProfile(
+      plan.map(([north, east]) => ({ position: at(north, east), elevation: altitudeMetres(0) })),
+    );
+    const origin = corridorOrigin(profile);
+    const centre = localGroundPosition(origin, at(STRAIGHT_METRES, turn * radiusMetres));
+    const ahead = localGroundPosition(origin, at(STRAIGHT_METRES + 1, turn * radiusMetres));
+    // A unit vector north, in local metres.
+    const northX = ahead.x - centre.x;
+    const northZ = ahead.z - centre.z;
+    const south = (item: ScatterItem): number =>
+      -((item.x - centre.x) * northX + (item.z - centre.z) * northZ);
+    const across = (item: ScatterItem): number =>
+      Math.abs((item.x - centre.x) * northZ - (item.z - centre.z) * northX);
+    const onTheArc = (item: ScatterItem): boolean => south(item) < 0;
+    return {
+      profile,
+      // ⚠️ Through `distanceToDrawnRoad`, the drawn road the rider sees, and
+      // not off the route's circle: the drawn road is the route averaged over
+      // 10 m either side, which on a 17 m half-turn runs a metre inside it.
+      edge: (item) =>
+        distanceToDrawnRoad(profile, origin, item.x, item.z, 40) - ROAD_WIDTH_METRES / 2,
+      inside: (item) =>
+        onTheArc(item)
+          ? Math.hypot(item.x - centre.x, item.z - centre.z) < radiusMetres
+          : across(item) < radiusMetres,
+      onTheArc,
+      south,
+    };
+  };
+
+  const everything = (profile: RouteProfile): readonly ScatterItem[] =>
+    place(profile, 0, profile.totalDistance);
+
+  /** Every field of an item, at a precision a float round trip cannot move. */
+  const serialise = (item: ScatterItem): string =>
+    [
+      item.kind,
+      item.x.toFixed(3),
+      item.y.toFixed(3),
+      item.z.toFixed(3),
+      item.rotation.toFixed(3),
+      item.scale.toFixed(3),
+      String(item.variant),
+    ].join(' ');
+
+  /** FNV-1a, 32-bit, as `arrangement-unchanged.test.ts` takes it. */
+  const digest = (items: readonly ScatterItem[]): string => {
+    let hash = 0x811c9dc5;
+    for (const line of items.map(serialise)) {
+      for (let index = 0; index < line.length; index += 1) {
+        hash ^= line.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+      }
+      hash ^= 0x0a;
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+  };
+
+  // ⚠️ **Every digest below was taken on this branch BEFORE the clearing was
+  // written** (9cc08401, `scatter.ts` as it was) and committed unchanged: a
+  // golden taken after a change describes it rather than guarding against it.
+  //
+  // `cleared` is how many items stood in the cleared ground on that commit —
+  // the control that each fixture has something there to clear. "In the
+  // cleared ground" is read below 7.9 m rather than 8: `distanceToDrawnRoad`
+  // measures to two-metre chords, which on the inside of a bend read a few
+  // centimetres near, and an item 7.97 m out by that measure is one placed 8 m
+  // out, kept by the ruling's "within".
+  //
+  // `kept` is everything the ruling does not touch: the outside of the bend,
+  // both legs more than 40 m from it, and anything on the inside farther than
+  // 8.5 m from the edge. It is held to its digest item for item, so the rule
+  // can neither move nor remove anything there.
+  it.each([
+    [17, 'west', -1, 5, 390, '7617876e'],
+    [17, 'east', 1, 5, 390, '7da92c8f'],
+    [25, 'west', -1, 8, 395, '8e08e7a9'],
+    [25, 'east', 1, 9, 397, '3e592827'],
+  ] as const)(
+    'clears the inside of a %d m hairpin to the %s within 8 m of the edge, and moves nothing else',
+    (radiusMetres, _, turn, clearedBefore, keptCount, keptDigest) => {
+      const bend = hairpin(radiusMetres, turn);
+      const placed = everything(bend.profile);
+      const kept = placed.filter(
+        (item) => !bend.inside(item) || bend.south(item) > 40 || bend.edge(item) > 8.5,
+      );
+
+      expect(clearedBefore).toBeGreaterThan(0);
+      expect(
+        placed
+          .filter((item) => bend.onTheArc(item) && bend.inside(item) && bend.edge(item) < 7.9)
+          .map(serialise),
+      ).toEqual([]);
+      expect({ count: kept.length, digest: digest(kept) }).toEqual({
+        count: keptCount,
+        digest: keptDigest,
+      });
+      // The control that the bend is planted at all, on the side the rule
+      // leaves alone.
+      expect(
+        placed.filter((item) => bend.onTheArc(item) && !bend.inside(item)).length,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  // The whole arrangement, not a part of it: on a straight road and round a
+  // bend of 40 m, either way, the rule moves and removes nothing at all.
+  it.each([
+    ['a straight road', () => eastRoute({ latitude: LATITUDE, altitude: 0 }), 1018, '8289e97a'],
+    ['a 40 m hairpin to the west', () => hairpin(40, -1).profile, 384, '0a299903'],
+    ['a 40 m hairpin to the east', () => hairpin(40, 1).profile, 384, '4d526ed3'],
+  ] as const)('places exactly what it placed before on %s', (_, route, count, expected) => {
+    const placed = everything(route());
+
+    expect({ count: placed.length, digest: digest(placed) }).toEqual({
+      count,
+      digest: expected,
+    });
   });
 });

@@ -62,16 +62,42 @@ import type { WorldStyle } from './world';
  */
 export interface CameraPose {
   /**
-   * The rider's position on the road — ⚠️ since #499 on their LINE, moved
-   * across the road with them (`scene.ts` §`cameraPose`), so the rider stays
-   * in the middle of the frame where `camera.ts` §`riderFrameBox` puts them.
+   * The point the eye stands `CAMERA_BEHIND_METRES` behind, along the heading.
+   *
+   * On a straight it is the rider's position on the road — ⚠️ since #499 on
+   * their LINE, moved across the road with them (`scene.ts` §`cameraPose`), so
+   * the rider stays in the middle of the frame where `camera.ts`
+   * §`riderFrameBox` puts them. ⚠️ **In a bend it is not the rider since
+   * #1994**: the eye stays straight back from the rider along the road's
+   * tangent, the camera looks from there at the road ahead, and this is the
+   * point on that sight line. `scene.ts` §`chaseRider` is the rider.
    */
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Which way the rider is facing, as a unit vector in the ground plane. */
+  /**
+   * Which way the camera LOOKS, as a unit vector in the ground plane: from the
+   * eye toward the point on the road it looks at (`scene.ts` §`cameraPose`).
+   *
+   * ⚠️ **Not the road's tangent at the rider since #1994**, and a reviewer who
+   * remembers it as "which way the rider is facing" is reading the old file.
+   * On a straight the two are the same; in a bend this one points through the
+   * bend at the road ahead, and `GameView` damps it from frame to frame
+   * (`camera.ts` §`dampedHeading`, §`turnedPose`). A marker's own front is
+   * {@link RiderMarker.headingX}, never this.
+   */
   readonly headingX: number;
   readonly headingZ: number;
+  /**
+   * How far past {@link x}/{@link z}, over the ground along the heading, the
+   * camera's target is — #1994: the point on the road it looks at, which is
+   * `CAMERA_TARGET_AHEAD_METRES` up the route on a straight and nearer in a
+   * bend (`scene.ts` §`cameraPose` says how much nearer, and why).
+   *
+   * Required for {@link eyeRoadY}'s reason: a pose that left it out would
+   * compile and aim every bend's camera past the road into the field.
+   */
+  readonly targetAheadMetres: number;
   /**
    * The road's height under the CAMERA — `CAMERA_BEHIND_METRES` back along the
    * route from the rider — #424.
@@ -85,8 +111,28 @@ export interface CameraPose {
    * heights are for.
    */
   readonly eyeRoadY: number;
-  /** The road's height where the camera LOOKS, `CAMERA_TARGET_AHEAD_METRES` up the route. */
+  /** The road's height where the camera LOOKS: up to `CAMERA_TARGET_AHEAD_METRES` up the route, nearer in a bend (`scene.ts` §`cameraPose`). @see targetAheadMetres */
   readonly targetRoadY: number;
+}
+
+/**
+ * What a rider is doing, as far as anyone can tell — #1999's inputs to
+ * `posture.ts`. Each rider carries what it has: the rider their sensors, the
+ * pacer its simulated power, the ghost and a room's riders their speed alone.
+ */
+export interface RidingInputs {
+  /**
+   * The cadence turning the cranks, in rpm — `bicycle.ts` §`turningCadence`,
+   * so `undefined` exactly when the HUD shows none, and always on a rider with
+   * no cadence sensor.
+   */
+  readonly cadence: number | undefined;
+  /** The live power, in watts; `undefined` when there is no live reading. */
+  readonly power: number | undefined;
+  /** The grade under the rider, in per cent. */
+  readonly grade: number;
+  /** How fast the rider is going, in metres per second. */
+  readonly speed: number;
 }
 
 /** A marker on the road: the rider, the bot (#92), the ghost (#93), or another real rider in a room (#783). */
@@ -115,7 +161,10 @@ export interface RiderMarker {
    * Where the bicycle's origin is — on the road surface between its two tyre
    * contacts. ⚠️ **On the rider's LINE since #499, not on the centreline**: up
    * to 3.2 m across the road (`scene.ts` §`lateralOf`). How far along the road
-   * it is has not changed: that is still the odometer.
+   * it is has not changed: that is still the odometer. ⚠️ **Except in a sharp
+   * bend, since #1998**: along the road it is the odometer EASED off for the
+   * bend (`bend-easing.ts`) — behind it by the speed the drawn rider lost, and
+   * back on it once that is given back after the bend. Never ahead of it.
    */
   readonly x: number;
   readonly y: number;
@@ -130,11 +179,32 @@ export interface RiderMarker {
    * obviously wrong thing this frame could carry.
    *
    * ⚠️ Taken from the corridor by `scene.ts`, at the marker's **own** distance,
-   * rather than from {@link CameraPose.headingX} — the two agree for the rider
-   * by construction and cannot for the bot or the ghost, which are somewhere
-   * else on the road and may be round a bend. Reading the camera's heading here
-   * would be correct today and silently wrong the day anything but the rider
-   * grows a front.
+   * rather than from {@link CameraPose.headingX}. The two agreed for the rider
+   * until #1994 and do not in a bend now: the camera looks through the bend at
+   * the road ahead, while the bicycle points along the road it is on. The bot
+   * and the ghost were always elsewhere on the road, round a bend of their own.
+   *
+   * ⚠️ **Since #1995 it is the LINE's direction, not the road's**, and a
+   * reviewer who remembers it equal to the road's heading is reading the old
+   * contract: it is the direction from where the rider's rear wheel is to
+   * where its front wheel is (`scene.ts` §`facingAt`, across the road by
+   * `racing-line.ts` §`lineSlopeAt`'s chord — a turn per metre of CENTRELINE,
+   * which in a tight bend is only approximately the turn per metre of the
+   * offset path the bicycle travels, a simplification kept on purpose: it
+   * matters only below the hold and is no step), held to at most 12° off the
+   * road under the bicycle by a smooth saturation (`scene.ts` §`facingTurn`),
+   * because a hairpin's line can cross the road far faster than a bicycle
+   * turns. It has no step where the line reaches the road's edge, and since
+   * #2017 none where a marker crosses a corridor point: until then a bot or a
+   * ghost a metre or more off the rider, which unlike the rider does cross
+   * one, turned by up to 7° in a 2 cm step of a tight hairpin. Measured, not
+   * proved: `line-on-the-road.test.ts` walks the rider, a bot and a ghost
+   * through hairpins of radius 8 to 20 m, 2 cm at a time, and holds each step
+   * under 0.5°. Facing the road while the
+   * line crossed it drew every rider sliding sideways. A position across the
+   * road is still measured along the ROAD's normal, the corridor's — never
+   * this one's, and since #1994 never the camera's, which in a bend is turned
+   * toward the road ahead.
    */
   readonly headingX: number;
   readonly headingZ: number;
@@ -196,6 +266,18 @@ export interface RiderMarker {
    */
   readonly rideSeconds: number;
   /**
+   * What this rider is doing, which their drawn position on the bicycle is
+   * chosen from — #1999 (`posture.ts`): standing, the drops, the tops or the
+   * hoods, and how hard the body rocks.
+   *
+   * ⚠️ **Optional, and absent draws the rider as before #1999: seated on the
+   * hoods, at an ordinary effort.** That is the UNSAFE way round
+   * `check-wiring.mjs` §Limits names, so `scene.test.ts` reads it back off
+   * every kind of marker `sceneFrame` builds. Absent where nothing is riding:
+   * a harness frame, a test's literal marker.
+   */
+  readonly riding?: RidingInputs | undefined;
+  /**
    * How far the cranks have turned, in radians — #349, #368.
    *
    * ⚠️ **All three carry one now, and this note used to say only the rider's
@@ -235,6 +317,37 @@ export interface RiderMarker {
    * HUD's gap is to. Only ever on a `remote` rider; never an order.
    */
   readonly followed?: boolean | undefined;
+  /**
+   * How this rider's lap-race hit effect looks on this frame — #1902, only
+   * while an item's slow-down runs on them (`lap-race/in-view.ts`
+   * §`hitLook`). Carried on the marker so the effect is drawn exactly where
+   * the rider is, wherever `scene.ts` moved them across the road.
+   * `three-renderer.ts` §`LapRaceBelt` draws every marker's in ONE instanced
+   * call. Absent on every ordinary ride and on a racer nothing has hit.
+   */
+  readonly hit?: RaceHitLook | undefined;
+  /**
+   * A lap race's bot — #1971: a `bot` marker that `scene.ts` §`raceBots`
+   * placed, rather than the one pacer (#92), which is a `bot` too. Read by
+   * `three-renderer.ts` §`realisticRemoteSplit` alone, which draws a race's
+   * bots in the realistic world as #783 draws a room's riders: the nearest
+   * two in the realistic body, the next ones stylised. Absent on every other
+   * marker.
+   */
+  readonly racer?: true | undefined;
+}
+
+/**
+ * A lap-race hit effect on one frame — #1902: a ring of spray about the
+ * wheels. Numbers only; how it looks is `three-renderer.ts`' choice.
+ */
+export interface RaceHitLook {
+  /** How bright, `0` to `1`: the instance colour it is drawn in. */
+  readonly glow: number;
+  /** How large, as a multiple of its full size. */
+  readonly scale: number;
+  /** How far it is turned about the vertical, radians. */
+  readonly spin: number;
 }
 
 /** One frame's worth of scene. */
@@ -363,6 +476,38 @@ export interface SceneFrame {
    * `delivery-harness.ts` hands a view one too.
    */
   readonly delivery?: DeliveryInView | undefined;
+  /**
+   * A lap race's pick-up points and the puddles on the road — #1902
+   * (`lap-race/in-view.ts` §`lapRaceInView`). Drawn with every marker's
+   * {@link RiderMarker.hit} in at most three instanced calls
+   * (`three-renderer.ts` §`LapRaceBelt`), whatever the count, and the view
+   * builds nothing of it until a frame carries one. **Absent on every
+   * ordinary ride.** The race's bots are ordinary `bot` markers, in the
+   * riders' own instanced meshes (`scene.ts` §`SceneInput.raceBots`).
+   */
+  readonly lapRace?: LapRaceInView | undefined;
+}
+
+/**
+ * One lap-race piece, in the corridor's local metres, and its yaw — #1902,
+ * {@link DeliveryPiece}'s shape.
+ */
+export interface LapRacePiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/**
+ * What {@link SceneFrame.lapRace} carries — #1902: placements, never meshes,
+ * on {@link SceneFrame.scatter}'s argument.
+ */
+export interface LapRaceInView {
+  /** Each pick-up point on the frame's road: one piece across the whole carriageway. */
+  readonly pickUps: readonly LapRacePiece[];
+  /** Each puddle still on the road, in the middle of its lane. */
+  readonly hazards: readonly LapRacePiece[];
 }
 
 /** What {@link SceneFrame.water} carries. */

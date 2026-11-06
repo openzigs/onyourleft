@@ -132,6 +132,12 @@ export interface RoomCourseTable {
   readonly race_finished_at: Generated<number | null>;
   /** `1` when the room drafts its riders, `0` when its maker turned drafting off (#787, 0024). */
   readonly drafting: Generated<number>;
+  /** A lap race's laps, 1–100; `null` for any other room. Set with the next two or not at all (#1910, 0037). */
+  readonly lap_laps: Generated<number | null>;
+  /** A lap race's items: `1` on, `0` off; `null` for any other room (#1910, 0037). */
+  readonly lap_items: Generated<number | null>;
+  /** A lap race's own seed, 0 to 2³² − 1; `null` for any other room. Never sent to a client (#1910, 0037). */
+  readonly lap_seed: Generated<number | null>;
 }
 
 /** One athlete's result in one room. */
@@ -328,7 +334,8 @@ export interface ModerationLogTable {
 
 /**
  * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
- * the schema refuses an UPDATE or a DELETE. No column is a client address.
+ * the schema refuses a DELETE, and every UPDATE but the erasure of its notifier
+ * details (#1381, migration 0036). No column is a client address.
  */
 export interface NoticeTable {
   readonly id: Generated<number>;
@@ -386,6 +393,17 @@ export interface NoticeStepTable {
   readonly actor_athlete_id: string;
   readonly decision: string | null;
   readonly log_id: number | null;
+  readonly at: number;
+}
+
+/**
+ * A notice whose notifier details were erased (#1381, migration 0036): when,
+ * and whether the notifier had given a name and an email. Append-only.
+ */
+export interface NoticeErasureTable {
+  readonly notice_id: number;
+  readonly gave_name: 0 | 1;
+  readonly gave_email: 0 | 1;
   readonly at: number;
 }
 
@@ -687,5 +705,6 @@ export interface InstanceDatabase {
   readonly statement: StatementTable;
   readonly appeal: AppealTable;
   readonly notice_step: NoticeStepTable;
+  readonly notice_erasure: NoticeErasureTable;
   readonly hidden_item: HiddenItemTable;
 }

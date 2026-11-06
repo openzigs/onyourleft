@@ -13,7 +13,8 @@ It has the same authority as the root file. Where the text below says "this file
 ### 4c. What CI runs, and what it deliberately does not
 
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
-shards side by side — `checks`, `tests` and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
+shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
+shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
 the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
@@ -21,19 +22,20 @@ and "a second job could not block a merge" in the dated sections below: each was
 written and is kept as the record. §"Shards — #1285" is what is true now — which step runs where,
 every stop and its arithmetic, and what was measured.
 
-[`.github/workflows/rules.yml`](../../.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
+[`.github/workflows/rules.yml`](../../.github/workflows/rules.yml) runs on every pull request, on every
+push to `main` and, since [#2198](https://github.com/openzigs/onyourleft/issues/2198), on every
+merge-queue entry (`merge_group`; §"The merge queue — #2198"). It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:required` (since [#1280](https://github.com/openzigs/onyourleft/issues/1280); `test:coverage` until then — §"Coverage out of the required job — #1280" below), `check:test-split` and its suite
+`typecheck`, `test:required` (as its two parts `test:required:shard-1` and `-2` since [#2154](https://github.com/openzigs/onyourleft/issues/2154); since [#1280](https://github.com/openzigs/onyourleft/issues/1280); `test:coverage` until then — §"Coverage out of the required job — #1280" below), `check:test-split` and its suite
 `bash scripts/check-test-split.test.sh` (both since [#852](https://github.com/openzigs/onyourleft/issues/852); #852's
 `test:uninstrumented` runs nightly since [#866](https://github.com/openzigs/onyourleft/issues/866) — below), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
 `bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
 `bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
-`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
+`playwright install --only-shell chromium` (with `--with-deps` until [#2207](https://github.com/openzigs/onyourleft/issues/2207)), `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
 `bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
 [#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
 suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841),
@@ -212,6 +214,139 @@ same 25 % the first 9V74 sample on #833's own pull request showed, and in the tw
 touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
 not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
 from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### The merge queue — #2198
+
+⚠️ **`main` merges through GitHub's merge queue, and the update-branch-then-merge procedure is
+replaced.** That procedure (the 2026-09-29 rule, after pull requests green on stale bases broke
+`main`) was: update the pull request with `main`, wait for a fresh `Repository rules` run, merge —
+and every merge put the next pull request behind again, so about twenty took eight to ten hours. The
+queue tests the merged result itself: it builds a `gh-readonly-queue/main/...` ref holding `main`,
+every entry ahead and this pull request, runs the required check there, and merges only if it is
+green. A pull request that goes red there leaves the queue and `main` never sees it.
+
+- **To add a reviewed pull request:** `gh pr merge N --merge`, or the **Merge when ready** button.
+  With its checks still running, `gh` turns on auto-merge and the pull request joins the queue when
+  they pass; with them green, it joins at once. **Never `--admin`**: it merges past the queue, which
+  is the stale-base merge the queue exists to stop. Pass the number — a bare `gh pr merge` in a
+  shared checkout acts on whatever branch is checked out.
+- **Do not update a queued pull request with `main`**, or wait for a fresh run before queuing it:
+  the queue's own run is that fresh run, on the result that will land. A push to a queued pull
+  request removes it from the queue.
+- **Combined batches.** Reviewed pull requests may still be merged into one combined pull request
+  to save CI (the owner's ruling of 2026-10-19); the combined one is queued like any other. How many
+  entries the queue groups into one run is a repository setting, not this file.
+
+What makes the queue work is in `rules.yml`, and
+[`apps/web/browser/nightly-split.test.ts`](../../apps/web/browser/nightly-split.test.ts) fails on
+the loss of each: the `merge_group:` trigger with no filter under it, because the queue merges
+nothing until `Repository rules` has reported on its ref and without the trigger every queued pull
+request waits until the queue's timeout removes it; `cancel-in-progress` true for `pull_request`
+alone, because a cancelled queue run is a failed required check; and no step reading the pull
+request's payload (`github.event.pull_request.*`, `github.base_ref`, `github.head_ref`), which is
+absent under `merge_group`. No step read it when the trigger was added, so every job runs there
+unchanged.
+
+**`nightly.yml` does not run on `merge_group`, by decision.** It is not a required check, so a
+queue run of it could not hold a pull request back; its `report` job runs on every event but
+`pull_request`, so a red queue run would open the nightly issue for a change that has not merged;
+and the pull requests that change what it runs already run it, through its `paths:` filter. The
+same test file fails if the trigger is added there.
+
+⚠️ **Turning the queue on is a repository setting, and it comes after `merge_group` is on
+`main`**: switched on first, every queued pull request waits for a check that never reports. It is
+the owner's step, not a pull request's.
+
+#### The browser install — #2207
+
+⚠️ **Each browser shard's `Install the pinned Chromium` is `playwright install --only-shell
+chromium` since [#2207](https://github.com/openzigs/onyourleft/issues/2207), with no
+`--with-deps`, and a reviewer who remembers `--with-deps chromium` there is reading the old file.**
+On 2026-11-05 the step reached its ten-minute stop three times before any test ran (runs
+[42057183592](https://github.com/openzigs/onyourleft/actions/runs/42057183592) `browser-1`,
+[42056612186](https://github.com/openzigs/onyourleft/actions/runs/42056612186) and
+[42061599294](https://github.com/openzigs/onyourleft/actions/runs/42061599294) `browser-2`, each
+attempt 1), and twice more came within a minute of it (563 s and 575 s). Every one of those logs
+spent its time in apt: `--with-deps` installs nine packages the runner image lacks, all fonts or font tools
+(`fonts-freefont-ttf`, `fonts-ipafont-gothic`, `fonts-wqy-zenhei`, `fonts-unifont` and five more),
+**21.9 MB from the runner's Ubuntu mirror at 30 to 40 kB/s**, after an `apt-get update` that took up
+to three minutes. Playwright's own CDN served the full Chromium, the headless shell and FFmpeg in
+about 6 s on the same runners. Every shared library a headless Chromium needs was already on the
+image — apt reported each one `already the newest version` — so the step now asks apt for nothing.
+
+- **`--only-shell`**: a headless run with no `channel` launches Playwright's headless shell and
+  never the full Chromium, so the full build (the larger download) was fetched for nobody.
+  `nightly-split.test.ts` holds each browser shard to exactly this command, the workflow to no
+  `--with-deps`, `install-deps` or `apt-get`, and the Playwright config to no `channel` and no
+  headed run — a project given either would launch a browser the step did not install.
+- **The fonts were not load-bearing**: the app bundles its own font, Barlow, and every browser shard
+  was green without them on this change's runs below.
+- **A library a future image drops** fails the gate's first launch with Playwright's `Host system is
+  missing dependencies`, red and named, rather than slowly. The answer then is `--with-deps` back on
+  this step, measured, not a longer stop.
+- **Not a cache**: the slow half was apt, never the CDN, and a step-level `if:` to skip a cache hit
+  is something `nightly-split.test.ts` forbids in this workflow. No stop moved: the step keeps its
+  `timeout-minutes: 10`, now only a stop on a hung CDN.
+- `nightly.yml` and `demo-video.yml` install the same way since
+  [#2209](https://github.com/openzigs/onyourleft/issues/2209) (§"The nightly and demo installs —
+  #2209" below). Until then they ran `--with-deps`, so a nightly frame was drawn with fonts the
+  required gate's frame was not.
+
+**Measured.** Before: 57 readings of the step over 19 runs of 2026-11-05 (16 completed runs and the
+first attempts of the three that timed out), **13 to 35 s on 50 of them**, a median of 19 s, then
+64, 86, 563 and 575 s, and the three stops at 612 to 613 s. After, on this change's pull request (each shard's
+step, `completed_at` less `started_at`):
+
+| Run | `browser-1` | `browser-2` | `browser-3` |
+|---|--:|--:|--:|
+| [42067675664](https://github.com/openzigs/onyourleft/actions/runs/42067675664) attempt 1 | 5 s | 4 s | 6 s |
+| attempt 2 | 6 s | 5 s | 4 s |
+| attempt 3 | 5 s | 5 s | 5 s |
+
+**4 to 6 s on all nine**, against a median of 19 s before: the step no longer has an apt half,
+which is where all five readings of 563 s and over spent their time. Every shard of all three
+attempts was green. A slow day on Playwright's CDN is still possible and still
+inside the ten-minute stop; nothing here measured one.
+
+#### The nightly and demo installs — #2209
+
+⚠️ **`nightly.yml`'s five browser installs and `demo-video.yml`'s two are `playwright install
+--only-shell chromium` since [#2209](https://github.com/openzigs/onyourleft/issues/2209)**, as the
+required shards' are since #2207, and a reviewer who remembers `--with-deps` there is reading the
+old file. Every nightly project and the demo's `render-video.ts` launch the headless shell, and
+neither workflow now asks apt for the fonts the required gate draws without, so a nightly frame and
+a required one are drawn with the same fonts. `demo-video.yml` still asks apt for **ffmpeg**: the
+image has none, and Playwright's own is built to record a page's video as WebM, with no libx264 for
+the render's MP4. It is installed with `--no-install-recommends`, so it brings no fonts, and the
+apt-source step stays load-bearing in that workflow alone.
+
+`nightly-split.test.ts` holds each of them to the one install command, the nightly workflow to no
+command that asks apt, and the demo's to ffmpeg's two. Since #2209 its apt rule reads each command a
+workflow runs, a `run: |` block line by line, for `apt` or `apt-get` in any spelling (`sudo apt -y
+install …`, `apt update`) as well as `--with-deps` and `install-deps`, and not a path through
+`/etc/apt/`. Its channel and headed-run rule covers the launches a spec or a tool makes for itself
+(`offline.browser.spec.ts`' persistent contexts, `tools/demo/render-video.ts`) as well as the
+Playwright config.
+
+**Measured.** Before, the step (`completed_at` less `started_at`) on the four scheduled nightly runs
+of 2026-11-02 to 05 ([41434484136](https://github.com/openzigs/onyourleft/actions/runs/41434484136),
+[41623071258](https://github.com/openzigs/onyourleft/actions/runs/41623071258),
+[41817542650](https://github.com/openzigs/onyourleft/actions/runs/41817542650),
+[42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562)): **16 to 30 s on all
+20**, a median of 19 s. On the demo's last five `Demo video checks`: 18, 20, 23 and 32 s, and
+**684 s** on run [42121778580](https://github.com/openzigs/onyourleft/actions/runs/42121778580),
+the stall #2207 measured. After, on this change's pull request, three attempts of each:
+
+| Run | `2 of 5` | `3 of 5` | `4 of 5` | `5 of 5` | heavy | Run | `Demo video checks` |
+|---|--:|--:|--:|--:|--:|---|--:|
+| [42129669442](https://github.com/openzigs/onyourleft/actions/runs/42129669442) attempt 1 | 3 s | 5 s | 4 s | 5 s | 4 s | [42129669303](https://github.com/openzigs/onyourleft/actions/runs/42129669303) attempt 1 | 3 s |
+| attempt 2 | 5 s | 4 s | 4 s | 6 s | 4 s | attempt 2 | 3 s |
+| attempt 3 | 5 s | 5 s | 4 s | 3 s | 3 s | attempt 3 | 4 s |
+
+**3 to 6 s on all 18**, against 16 to 30 s and one 684 s before. Every nightly browser job and the
+demo check was green on every attempt. The nightly coverage report, which installs no browser, reached
+its 30-minute stop on attempt 1 as the scheduled runs of 2026-11-04 and 05 did; it is not this
+change's.
 
 #### Where the time comes from next — owed before B9 and B12
 
@@ -1311,6 +1446,8 @@ climb, went to the shard with the most room, `browser-3` (its `chromium` part 3.
 **And 14 since [#1816](https://github.com/openzigs/onyourleft/issues/1816)**:
 `ride-delivery.browser.spec.ts`, three cases that ride a Delivery round in the real game stage (one
 of them on Playwright's clock, about 25 s on a Mac), beside `ride-room.browser.spec.ts`.
+**And `browser-1` names `realistic-lap-race.browser.spec.ts` since [#1972](https://github.com/openzigs/onyourleft/issues/1972)**:
+three cases, one stylised load each (about 4 s on a Mac), beside the other realistic-page specs.
 
 `playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
 files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files
@@ -1335,19 +1472,17 @@ that the game spec is in no list and the `game` run in exactly one script, and t
 [40223475813](https://github.com/openzigs/onyourleft/actions/runs/40223475813), attempts 2 to 4.
 Columns as in §"Shards — #1285" (job seconds, `started_at` to `completed_at`; `Wall` is the attempt
 starting to `Repository rules` completing); `Gate starts` is the latest of the three shards'
-`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. **This is the
-table `nightly-split.test.ts` reads**: a row added here moves every bound, a cell that is not a
-whole number fails the test, and a shard with no column fails it too. ⚠️ The `tests` column is from
-runs whose `tests` shard was red on the one case that reads this table, before it existed; every
-other case passed.
+`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. This was the
+table `nightly-split.test.ts` reads until #2154 divided the `tests` shard in two: the table it reads
+is §"Two Vitest shards — #2154"'s now, in the same shape, and this one is the record. ⚠️ The `tests`
+column is from runs whose `tests` shard was red on the one case that reads this table, before it
+existed; every other case passed.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
 | 40223475813 attempt 2 | 491 | EPYC 9V45 | 223 | EPYC 9V74 | 476 | **EPYC 7763** | 424 | EPYC 9V45 | 295 | EPYC 9V74 | 388 | 34 | 389 | 258 | 352 |
 | attempt 3 | 525 | EPYC 7763 | 315 | EPYC 9V74 | 509 | Xeon 8573C | 413 | **EPYC 7763** | 435 | EPYC 9V45 | 260 | 36 | 377 | 397 | 229 |
 | attempt 4 | 653 | EPYC 9V74 | 320 | EPYC 7763 | 636 | **EPYC 7763** | 514 | **EPYC 7763** | 401 | Xeon 8573C | 389 | 51 | 459 | 360 | 344 |
-<!-- shard-measurements:end -->
 
 **Each part's `chromium` run against its 720 s stop** (Playwright's own `passed (…)` figure; the
 `game` run after `browser-3`'s part against its 85 s):
@@ -1391,6 +1526,90 @@ row of the table brings any part within 1.4 times of its 720 s stop, re-read the
 from that run's log and re-divide the files, or add a fourth script and job (in `needs:`, with a
 column here). Not a longer stop, and not a check moved to nightly without the owner's ruling.
 
+#### Two Vitest shards — #2154
+
+⚠️ **The Vitest suite is two jobs since [#2154](https://github.com/openzigs/onyourleft/issues/2154),
+`tests-1` and `tests-2`, and a reviewer who remembers one `tests` shard is reading the old file.**
+The one job took 739 to 954 s of its 960 s stop on `main` on 2026-11-04 (887, 901 and 954 s on the
+EPYC 7763; 739 and 821 s on a 9V74), and on run
+[41911049968](https://github.com/openzigs/onyourleft/actions/runs/41911049968) it was cancelled at
+the stop with every one of its 20 113 tests green, which turned `Repository rules` red on two pull
+requests at once. **Its stop did not move**: both jobs keep `timeout-minutes: 16`, because a stop is
+a bound on a hang and not a budget (§"Shards — #1285").
+
+**How the suite was divided.** From the log of `main` run
+[41886972871](https://github.com/openzigs/onyourleft/actions/runs/41886972871) (the 954 s one, on
+the EPYC 7763), each file's case time as the reporter prints it, summed by Vitest project: of
+1 940 s in 983 files, the `web` project held **1 170 s in 606 files** and every other project **770 s
+in 377** (`instance` 608 s, `store` 75 s, `physics` 39 s, the rest under 21 s each). The two
+heaviest files are `web`'s — `landform.test.ts` 273 s and `near-tree-fade.test.ts` 140 s — and each
+runs in one worker whichever job it is in. So:
+
+| Script | Job | What it adds to `test:required` | Files |
+|---|---|---|--:|
+| `test:required:shard-1` | `tests-1` | `--project web` | 606 |
+| `test:required:shard-2` | `tests-2`, after the `Accessibility` step | `--project '!web'` | 377 |
+
+The accessibility gate (`check:a11y-suite` and `test:a11y`, 87 files of the `web` project, 64 to
+88 s on those `main` runs) went beside the smaller part. **Divided by project, not with Vitest's
+`--shard`**: `--shard` sorts the files by a hash of their path and cuts the list into equal COUNTS,
+so it cannot be balanced by time, and `vitest list` does not apply it, so `check:test-split` could
+not see what each part selects. A project filter is a selection `vitest list` reports, and `!web`
+(Vitest's negated project filter) puts a NEW project in `tests-2` without an edit anywhere.
+`pnpm run test:required` is unchanged and is still the whole run locally; each part is `pnpm run
+test:required --project …`, so a part cannot keep an exclude the whole run does not.
+
+**What holds it.** `check:test-split` (rule 5 in its header) fails a part that is not `pnpm run
+test:required` followed only by `--project <pattern>` pairs, fewer than two parts, a gap in their
+numbering, a part that selects no file, and a file the required run selects that is in no part or
+in two; on this change it printed `the required run's 983 are 606 in test:required:shard-1, 377 in
+test:required:shard-2`, and each job's own run reported 606 (`tests-1`) and 377 (`tests-2`) test
+files, beside the Accessibility step's 87. `nightly-split.test.ts` holds that each part runs in a
+job of its own with no concurrent step and no browser, that the accessibility gate is in exactly
+one of them, that `rules` needs both, and — from the table below — that each job's stop is five
+minutes clear of its slowest measured run.
+
+**Measured** on this change's own pull request: run
+[41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6, and
+run [41934894471](https://github.com/openzigs/onyourleft/actions/runs/41934894471), the first with
+every shard green.
+Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
+a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
+with no column fails it too. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
+the one case that reads this table, before it had their columns; every other case passed.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
+| 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
+| attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
+| attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
+| 41934894471 attempt 1 | 769 | **EPYC 7763** | 373 | Xeon 8370C | 586 | **EPYC 7763** | 411 | EPYC 9V45 | 283 | Xeon 6975P-C | 384 | **EPYC 7763** | 508 | 48 | 250 | 332 | 466 |
+<!-- shard-measurements:end -->
+
+- **`tests-1` took 536 to 586 s, 374 s inside its 960 s stop at the slowest (a Xeon 8370C; 567 s
+  on the EPYC 7763), and `tests-2` 279 to 411 s (the slowest on the 7763)**, against the one job's
+  887 to 954 s on the 7763. Over all seven readings `tests-1` took 438 to 586 s and `tests-2` 275
+  to 411 s. `tests-1` is now the longest shard on
+  some runs, so it is what bounds `Wall` when the browser shards land on fast CPUs.
+- ⚠️ **Attempts 1 to 3 are not in the table, as #1720 left out its slow-mirror attempt.** Each
+  waited for runners — the longest wait between a job being created and starting was 428 s, 468 s
+  and 564 s, and ten workflow runs were queued across the repository when it was read during
+  attempt 3 — so `Wall` was 1 305, 1 291 and 1 019 s and the
+  `Wall` bound (under 900 s) would be red on a queue this repository does not control. Their shards
+  themselves: `tests-1` 438 s (Xeon 6973P-C), 466 s (Xeon 8573C) and 443 s (EPYC 9V74), `tests-2`
+  275, 309 and 397 s. Attempts 4 to 6 waited 3 to 123 s, and run 41934894471 up to 294 s (its `Wall` 769 s).
+- ⚠️ **In attempt 5 `browser-3`'s `Install the pinned Chromium` took 412 s**, and in attempt 1
+  `browser-2`'s about 340 s: the Ubuntu mirror again, inside the step's ten-minute stop. That is
+  the 430 s `Gate starts`, still 226 s inside the three minutes `nightly-split.test.ts` holds.
+- **No stop moved and nothing left the required check**: every test file runs in exactly one of
+  `tests-1`, `tests-2` and the Accessibility step on every pull request, as before in one job.
+
+⚠️ **When a row of this table brings either Vitest shard within five minutes of its stop**, re-read
+the per-project times from that run's log and move a project between the parts (a part may name
+several, `--project a --project b`), or add a third part and job (in `needs:`, with a column
+here). Not a longer stop.
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
@@ -1428,7 +1647,9 @@ repository uses that source: the browser is the one the lockfile pins, fetched f
 own CDN, and `--with-deps` takes its shared libraries from Ubuntu's archives. Removing it
 therefore makes CI trust **less** than it did, which is why it is a safe answer to an outage and
 not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
-deleting the step is a one-line revert if the trade is ever judged wrong.
+deleting the step is a one-line revert if the trade is ever judged wrong. ⚠️ Since #2207 no step in
+`rules.yml` runs apt (§"The browser install — #2207"), and since #2209 none in `nightly.yml`, so
+there it is a no-op kept as a guard; `demo-video.yml` still asks apt for ffmpeg and still needs it.
 
 From #1231's stop-gap of 2026-10-09 to its GHCR mirror there was a third, `Log in to Docker Hub`
 (with a `Log out of Docker Hub` at the end of the job), reading a read-only Docker Hub token, the
@@ -1478,7 +1699,7 @@ reloads a harness that takes ten seconds" is reading the old file.** They did re
 the whole critical path: 43 cases at 9.1 s each, run in one worker, came to 6.0 to 7.3 minutes of a
 browser gate that took 271 to 449 s, in a job that ran 8m40s to 13m44s on `main`. The harness does
 all of its work in one `run()` and publishes one object, so a worker-scoped fixture now loads it
-once per query (`''`, `?shadow-map`, `?realistic` and `?realistic&trees`) and every case reads that result, with every assertion
+once per query (`''`, `?shadow-map`, `?realistic`, `?realistic&trees` and, since #1947, `?realistic&town`) and every case reads that result, with every assertion
 unchanged. On #456's pull request that made the game spec 32 s, the browser gate 88 s and the job
 **7m44s**. The browser gate's slowest spec is now `ride.browser.spec.ts` at about 45 s of case time,
 and the job's largest step is Vitest with coverage at about 150 s. ⚠️ **What this does NOT change**:
@@ -1502,6 +1723,14 @@ past its 150 s, which turned `main` red. Their own load also asserts the realist
 (`trees.drawnWorld`), which the shared load had asserted for them. Every phase of a harness run is
 printed as it ends (`game-harness.ts` §`phaseEnds`) and never asserted; read those lines before
 raising a budget.
+⚠️ **Since [#1947](https://github.com/openzigs/onyourleft/issues/1947) the mapped town's cases
+(#1549 to #1665) and the near field (#545, #1835) read a load of their own, `game.html?realistic&town`
+(`game.browser.spec.ts` §`paysForTheTownLoad`, `TOWN_LOAD_BUDGET_MS`), and a reviewer who remembers
+them reading `?realistic` is reading the old file.** They had grown the `?realistic` `beforeAll` to its
+275 s budget on the AMD EPYC 7763; on their own the two loads read about 151–156 s and 169–170 s there.
+`?realistic` publishes the town's fields as their `NO_*` defaults, so a case pointed at the wrong load
+goes red. As #644's did, the new load asserts the realistic world loaded and drew (`loaded`,
+`drawnWorld`, in the describe's `measuredBy`), which the shared load had asserted for them.
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) every load has a budget of
 its own, every describe pays for the load it reads, the game spec runs LAST, and the whole gate
 has a `globalTimeout`** — a reviewer who remembers the plain page and `?shadow-map` loaded inside a
@@ -1746,6 +1975,14 @@ commit than the one running.
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
+
+[`.github/workflows/demo-video.yml`](../../.github/workflows/demo-video.yml) — **`Demo video`**
+([#1655](https://github.com/openzigs/onyourleft/issues/1655)) — on `workflow_dispatch` it runs
+`demo:video:check` and then renders the three demo presets on `ubuntu-latest`, uploading each as an
+artefact. On a pull request it runs only when the video tooling or the demo code it renders (`apps/web/src/demo/**`,
+`apps/web/tools/demo/**` and the files they import from the gate) changes, and then runs only the
+checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
+check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
 
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs

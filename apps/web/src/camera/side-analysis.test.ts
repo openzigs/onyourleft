@@ -228,6 +228,50 @@ describe('each picture, as it arrives', () => {
     expect(analysis.poseSamples()).toEqual([]);
   });
 
+  it('counts a picture the instance turned away for coming too often on its own, and keeps going — #2175', async () => {
+    const { link, model, analysis } = setUp();
+    link.picture();
+    await model.answer({ kind: 'rate-limited' });
+    link.picture();
+    await model.answer({ kind: 'rate-limited' });
+    expect(analysis.sideAnalysisState()).toMatchObject({
+      model: 'ready',
+      rateLimited: 2,
+      unreadable: 0,
+      noRider: 0,
+      posed: 0,
+    });
+    // Still looking: the next picture goes to the model.
+    link.picture();
+    await model.answer();
+    expect(analysis.sideAnalysisState()).toMatchObject({ posed: 1, rateLimited: 2 });
+  });
+
+  it('says which hosted service the pictures go on to, from the start and after each picture — #2175', async () => {
+    const link = scriptedControl();
+    const model = scriptedModel();
+    let host: string | undefined = 'models.example';
+    const analysis = new SideAnalysis({
+      control: link.control,
+      estimator: model.make,
+      place: 'instance',
+      hostedService: () => host,
+    });
+    expect(analysis.sideAnalysisState().hostedService).toBe('models.example');
+    host = undefined;
+    link.picture();
+    await model.answer();
+    expect(analysis.sideAnalysisState().hostedService).toBeUndefined();
+    host = 'other.example';
+    link.picture();
+    await model.answer();
+    expect(analysis.sideAnalysisState().hostedService).toBe('other.example');
+  });
+
+  it('names no hosted service when it is not told of one', () => {
+    expect(setUp().analysis.sideAnalysisState().hostedService).toBeUndefined();
+  });
+
   it('counts each picture with nobody in it by why, and the causes sum to the count — #761', async () => {
     const { link, model, analysis } = setUp();
     for (const cause of ['said-nobody', 'implausible', 'implausible', 'too-few-points'] as const) {

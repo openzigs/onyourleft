@@ -21,7 +21,7 @@ import {
   terrainCorridor,
 } from './landform';
 import { hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
-import { cameraRig } from './camera';
+import { CAMERA_TARGET_AHEAD_METRES, cameraRig } from './camera';
 import {
   directionalFogColour,
   REALISTIC_HORIZON_HAZE_SHARE,
@@ -203,6 +203,7 @@ describe('the distant hills a view draws — #458', () => {
     headingZ: 1,
     eyeRoadY: 12,
     targetRoadY: 12,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
   };
   /**
    * The horizon a view hands the ring, in linear light — deliberately NOT
@@ -396,6 +397,37 @@ describe('the distant hills a view draws — #458', () => {
     expect(colours.getX(2)).toBeCloseTo(ground + (HORIZON.r - ground) * 0.8, 6);
     ring.update(relief, world, pose, HORIZON);
     expect(colours.getX(2)).toBeCloseTo(ground + (HORIZON.r - ground) * 0.7, 6);
+  });
+
+  it('hazes the ridge from the ground it is handed, and from the world’s without one — #1686', () => {
+    // The view hands it the ground under the route's winter; a white one here,
+    // which no world's own ground is, so a ring that read the world's again is
+    // told apart from one that took what it was handed.
+    const SNOWED = 0xf2f4f7;
+    expect(SNOWED).not.toBe(world.groundColour);
+    const ring = new HorizonRing();
+    const air = { table: [[0.5, 0.5, 0.5] as const], share: 0.5, turn: 0 };
+    const hazed = (ground: number, foot: readonly number[]): readonly number[] =>
+      [16, 8, 0].map((shift, channel) => {
+        const from = srgbToLinear((ground >> shift) & 0xff);
+        return from + ((foot[channel] as number) - from) * 0.8;
+      });
+    // Both paths: the stylised (no air) and the realistic (#622's air).
+    for (const withAir of [undefined, air]) {
+      ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8, withAir, SNOWED);
+      for (const segment of [0, HORIZON_SEGMENTS / 2]) {
+        const expected = hazed(SNOWED, ring.footAt(segment));
+        ring
+          .ridgeAt(segment)
+          .forEach((channel, index) => expect(channel).toBeCloseTo(expected[index] as number, 6));
+      }
+      // Left out, the ground is the world's own: the season-free picture.
+      ring.update(relief, world, pose, HORIZON, Number.NEGATIVE_INFINITY, 0.8, withAir);
+      const own = hazed(world.groundColour, ring.footAt(0));
+      ring
+        .ridgeAt(0)
+        .forEach((channel, index) => expect(channel).toBeCloseTo(own[index] as number, 6));
+    }
   });
 });
 
@@ -595,7 +627,16 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
 
   it('draws every wall, hedge and fence of a kind in one instanced mesh', () => {
     const belt = new ScatterBelt(new Map());
-    const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+    const pose = {
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+    };
     const items = (['wall', 'hedge', 'fence'] as const).flatMap((kind, at) =>
       Array.from({ length: 40 }, (_, index) => ({
         kind,
@@ -618,7 +659,16 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
 });
 
 describe('the buildings a view draws, since #500', () => {
-  const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+  const pose = {
+    x: 0,
+    y: 0,
+    z: 0,
+    headingX: 0,
+    headingZ: 1,
+    eyeRoadY: 0,
+    targetRoadY: 0,
+    targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+  };
 
   it('draws each building in the shape its own variant names, two shapes a kind', () => {
     const belt = new ScatterBelt(new Map());

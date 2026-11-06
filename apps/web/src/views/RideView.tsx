@@ -52,7 +52,8 @@ import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { SensorGlyph } from '../design/illustration';
 import { Reading } from '../design/Reading';
-import { formatDuration } from '../format';
+import { formatDuration, formatTimeOfDay } from '../format';
+import { useTimeOfDay } from '../design/time-of-day';
 import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
 import { useTouchLock } from '../design/touch-lock';
@@ -1184,7 +1185,8 @@ function NoSensorsBanner(): JSX.Element {
 
 /**
  * The ride's clock — #1029. Elapsed and moving time as two big readings
- * (`design/Reading.tsx`), and the seconds recorded beside them in small type.
+ * (`design/Reading.tsx`), and the time of day (#2072) and the seconds
+ * recorded beside them in small type.
  *
  * ⚠️ **It used to be one body-sized line**, "0:00 elapsed · 0:00 moving · 0
  * seconds recorded", and a reviewer who remembers that sentence is reading
@@ -1200,6 +1202,7 @@ function NoSensorsBanner(): JSX.Element {
  * half of a phone.
  */
 function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
+  const timeOfDay = useTimeOfDay();
   return (
     <dl className="oyl-ride__clock">
       <div className="oyl-ride__time">
@@ -1214,7 +1217,17 @@ function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Eleme
           <Reading value={formatDuration(snapshot.movingSeconds)} />
         </dd>
       </div>
-      <div className="oyl-ride__time oyl-ride__time--recorded">
+      {/*
+        #2072: the time of day, as the ride HUD says it (`fields.ts`
+        §`clockReading`) — the device's clock, never the ride's. In small
+        type, as the seconds recorded are: on a landscape tablet it is a
+        column of its own beside them and costs the Live group no height.
+      */}
+      <div className="oyl-ride__time oyl-ride__time--small">
+        <dt>Clock</dt>
+        <dd>{formatTimeOfDay(timeOfDay)}</dd>
+      </div>
+      <div className="oyl-ride__time oyl-ride__time--small oyl-ride__time--recorded">
         <dt>Recorded</dt>
         <dd>{snapshot.sampleCount} seconds</dd>
       </div>

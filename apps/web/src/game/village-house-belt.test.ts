@@ -21,6 +21,7 @@ import {
   VILLAGE_HOUSE_MODELS,
 } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose } from './port';
 import { REALISTIC_STRUCTURE_ITEMS, REALISTIC_TRIANGLES } from './realistic-budget';
 import type { ScatterItem } from './scatter';
@@ -41,6 +42,7 @@ const POSE: CameraPose = {
   headingZ: 1,
   eyeRoadY: 0,
   targetRoadY: 0,
+  targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
 };
 
 /**

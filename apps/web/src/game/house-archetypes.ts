@@ -36,8 +36,26 @@
  * neither a clean rectangle nor a clean L: a T, U or Z is no archetype's.
  * "At the edge of a village" is read as #1633's `rural` class, the stretch
  * past a village's built-up run. Where an archetype wants a feature not built
- * yet — a full-width porch, a gambrel, a shed dormer — it takes the nearest
- * one there is, and the gap is a sibling issue under #1656.
+ * yet — a full-width porch, a shed dormer — it takes the nearest one there
+ * is, and the gap is a sibling issue under #1656. Since #1785 the gambrel,
+ * the saltbox and the half-hipped and side-hipped roofs are built
+ * ({@link ARCHETYPE_FEATURES}' `roofVariant`).
+ *
+ * ## A mapped start year (#1793, the owner's ruling D4 of 2026-10-27)
+ *
+ * Where a footprint carries #1789's `startYear`, the year **narrows** the
+ * choice to the archetypes of its era ({@link ARCHETYPE_ERAS}): every
+ * archetype whose cue the footprint fits is a candidate, in
+ * {@link HOUSE_ARCHETYPES}' order ({@link archetypeCandidates}); the year
+ * removes each candidate whose era does not hold it, and of those left an
+ * archetype **of** that era — one whose era is bounded, as the Colonial's and
+ * the farmhouse's are not — is chosen before a timeless one. So a rural
+ * near-square two-storey house of 1915, which #1782's bands admit as a
+ * farmhouse and a Foursquare, is a Foursquare, and one of 1965 a farmhouse.
+ * The choice is always among the candidates, so a year never admits an
+ * archetype the footprint's shape, storeys and use do not; and where it would
+ * remove every one, it is ignored and the first candidate is chosen, as with
+ * no year. It is the building's own tag, not a region, so D3 is unaffected.
  *
  * Plan-time only, built once at the press: no draw call, no byte, and no
  * shader term. Formats no string, so names no vertex (ADR 0004 D).
@@ -62,7 +80,11 @@ export const HOUSE_ARCHETYPES = [
 /** A footprint's outline: four clean corners, six in an L, or anything else. */
 export type FootprintShape = 'rectangle' | 'L' | 'other';
 
-/** What {@link houseArchetypeOf} reads: only what the plan already has (D3: no region, no era). */
+/**
+ * What {@link houseArchetypeOf} reads: only what the plan already has (D3: no
+ * region, and no era but since #1793 the building's own mapped year, which is
+ * passed beside it).
+ */
 export interface ArchetypeInput {
   /** The footprint's area, m². */
   readonly area: number;
@@ -159,16 +181,64 @@ function fits(input: ArchetypeInput, cue: ArchetypeCue): boolean {
 }
 
 /**
+ * The years each archetype was built in, inclusive — #1793: a sketch, taken
+ * as facts from public US style guides, with no text copied. The Colonial and
+ * the farmhouse were built in every year, so a year never removes them.
+ */
+export const ARCHETYPE_ERAS: Readonly<
+  Record<Exclude<HouseArchetype, 'unknown'>, readonly [from: number, to: number]>
+> = {
+  foursquare: [1895, 1930],
+  bungalow: [1905, 1930],
+  cape: [1930, 1950],
+  ranch: [1945, Number.POSITIVE_INFINITY],
+  colonial: [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY],
+  farmhouse: [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY],
+};
+
+/**
+ * Every archetype a footprint admits — each of `admits` whose cue it fits, in
+ * {@link HOUSE_ARCHETYPES}' order, ranked: the first is its archetype with no
+ * year (#1782). None for a terraced, non-residential or flat one, nor for one
+ * that is no clean rectangle or L.
+ */
+export function archetypeCandidates(
+  input: ArchetypeInput,
+  admits: readonly Exclude<HouseArchetype, 'unknown'>[] = HOUSE_ARCHETYPES,
+): readonly Exclude<HouseArchetype, 'unknown'>[] {
+  if (input.terraced || !input.residential || !input.pitched) return [];
+  if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
+    return [];
+  }
+  return admits.filter((archetype) => fits(input, ARCHETYPE_CUES[archetype]));
+}
+
+/**
  * The archetype a footprint is — the first of {@link HOUSE_ARCHETYPES} whose
  * cue it fits — or `unknown`: always for a terraced, non-residential or flat
- * one, and for one that is no clean rectangle or L.
+ * one, and for one that is no clean rectangle or L. Since #1791 a mapped
+ * building type may narrow the archetypes it `admits`: a `bungalow` admits
+ * the bungalow alone, where its cue fits. Since #1793 a mapped `year` narrows
+ * the candidates to its era ({@link ARCHETYPE_ERAS}), one of that era before a
+ * timeless one, and is ignored where it would leave none; `null`, as before.
  */
-export function houseArchetypeOf(input: ArchetypeInput): HouseArchetype {
-  if (input.terraced || !input.residential || !input.pitched) return 'unknown';
-  if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
-    return 'unknown';
-  }
-  return HOUSE_ARCHETYPES.find((archetype) => fits(input, ARCHETYPE_CUES[archetype])) ?? 'unknown';
+export function houseArchetypeOf(
+  input: ArchetypeInput,
+  admits: readonly Exclude<HouseArchetype, 'unknown'>[] = HOUSE_ARCHETYPES,
+  year: number | null = null,
+): HouseArchetype {
+  const candidates = archetypeCandidates(input, admits);
+  if (year === null) return candidates[0] ?? 'unknown';
+  const dated = candidates.filter((archetype) => {
+    const [from, to] = ARCHETYPE_ERAS[archetype];
+    return year >= from && year <= to;
+  });
+  // Of the era's own, the first; else the first timeless one; else, the year ignored, as before.
+  const ofTheEra = dated.find((archetype) => {
+    const [from, to] = ARCHETYPE_ERAS[archetype];
+    return Number.isFinite(from) || Number.isFinite(to);
+  });
+  return ofTheEra ?? dated[0] ?? candidates[0] ?? 'unknown';
 }
 
 /**
@@ -188,6 +258,39 @@ export function footprintShapeOf(corners: number, rectangles: number | undefined
  * before #1782, `footprint-buildings.ts`' own constant.
  */
 export type FeatureShare = number | 'seeded';
+
+/**
+ * Every pitched roof's shape beyond #1581's gable and hip — #1785, built by
+ * `footprint-buildings.ts` §`variantRoof` on a rectangle and on each of
+ * #1660's split rectangles: a two-pitch `gambrel`, a `half-hipped` gable
+ * clipped at its top, a `saltbox` whose ridge stands toward the front, and a
+ * `side-hipped` roof, a hip at one end and a gable at the other.
+ */
+export const ROOF_VARIANTS = ['gambrel', 'half-hipped', 'saltbox', 'side-hipped'] as const;
+
+/** One of {@link ROOF_VARIANTS}, or `plain`: the gable or hip the plan drew before. */
+export type RoofVariant = 'plain' | (typeof ROOF_VARIANTS)[number];
+
+/** A variant an archetype may wear, and how likely, drawn on the footprint's own stream; or none. */
+export type VariantShare =
+  readonly [variant: Exclude<RoofVariant, 'plain'>, share: number] | 'none';
+
+/**
+ * A dormer's kind — #1786, built by `footprint-buildings.ts` §`dormers` and
+ * §`dormerOf`: #1588's `gabled` dormer, a `shed` dormer (one wide front under
+ * a single slope lower than the roof's), and a `hipped` one (its roof hipped
+ * at its front).
+ */
+export const DORMER_KINDS = ['gabled', 'shed', 'hipped'] as const;
+
+/** One of {@link DORMER_KINDS}. */
+export type DormerKind = (typeof DORMER_KINDS)[number];
+
+/**
+ * The dormers an archetype calls for — #1786: their kind, and how many on the
+ * roof's front slope; or none, where its `dormer` share and #1588's rule hold.
+ */
+export type DormerCall = readonly [kind: DormerKind, count: number] | 'none';
 
 /** The features one archetype admits; `planFootprint` draws only inside them. */
 export interface ArchetypeFeatures {
@@ -215,6 +318,25 @@ export interface ArchetypeFeatures {
   readonly siding: FeatureShare;
   /** Under clapboard, a brick foundation rather than block — `BRICK_FOUNDATION_SHARE`. */
   readonly brickFoundation: FeatureShare;
+  /** #1785: the roof variant it may wear in place of its gable or hip. */
+  readonly roofVariant: VariantShare;
+  /**
+   * #1786: the dormers it calls for, which take the place of `dormer`'s share
+   * and #1588's count by the ridge's reach; with `-dormer-variants`, `dormer` as before.
+   */
+  readonly dormers: DormerCall;
+  /**
+   * #1784: how far its pitched roof's eaves overhang the walls across a slope,
+   * metres; `seeded`, `EAVES_OVERHANG_METRES` as before. With
+   * `-archetype-porches`, as before.
+   */
+  readonly eaves: number | 'seeded';
+  /**
+   * #1784: its front porch the front wall's whole width, less its end margins
+   * and any garage's bay, on four posts (`full`); or #1589's seeded width.
+   * With `-archetype-porches`, #1589's.
+   */
+  readonly porchWidth: 'full' | 'seeded';
 }
 
 /**
@@ -234,13 +356,29 @@ export const SEEDED_FEATURES: ArchetypeFeatures = {
   dormer: 'seeded',
   siding: 'seeded',
   brickFoundation: 'seeded',
+  roofVariant: 'none',
+  dormers: 'none',
+  eaves: 'seeded',
+  porchWidth: 'seeded',
 };
 
 /**
  * What each archetype admits — the "together" column of the module's table.
- * A feature its row does not name keeps its seeded share. The Foursquare's
- * one front dormer waits for the dormers issue under #1656: the gabled dormer
- * there is stands only on `DORMER_MIN_PITCH_DEGREES`, which its 30–35° is not.
+ * A feature its row does not name keeps its seeded share. Since #1786 each
+ * row also names its dormers ({@link DormerCall}): two gabled ones on a Cape,
+ * one hipped one on a Foursquare's route-facing slope — its 30–35° under the
+ * gabled dormer's 40° — and one wide shed dormer on a bungalow.
+ *
+ * Since #1784 its eaves and its porch's width too: wide eaves (**0.65 m**) on a
+ * bungalow and a Foursquare, tight ones (**0.15 m**) on a Cape, and a
+ * full-width front porch on posts on a Foursquare, a bungalow and a
+ * farmhouse. A sketch, tuned on the look pair (`levers=-archetype-porches`).
+ *
+ * Since #1785 four of them may wear a {@link RoofVariant} in its gable's or
+ * hip's place, on a share of their footprints: the farmhouse a gambrel, the
+ * Colonial a saltbox, the bungalow a half-hipped gable, and the ranch — whose
+ * roof is a low hip or a gable — a side-hipped one, half of each. The shares
+ * are a sketch, tuned on the owner's look pair (`levers=-roof-variants`).
  */
 export const ARCHETYPE_FEATURES: Readonly<
   Record<Exclude<HouseArchetype, 'unknown'>, ArchetypeFeatures>
@@ -253,6 +391,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 1,
     garage: 1,
     dormer: 0,
+    roofVariant: ['side-hipped', 0.3],
   },
   cape: {
     ...SEEDED_FEATURES,
@@ -264,6 +403,8 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 0,
     garage: 0,
     dormer: 1,
+    dormers: ['gabled', 2],
+    eaves: 0.15,
   },
   colonial: {
     ...SEEDED_FEATURES,
@@ -275,6 +416,7 @@ export const ARCHETYPE_FEATURES: Readonly<
     frontPorch: 0,
     shutters: 1,
     dormer: 0,
+    roofVariant: ['saltbox', 0.35],
   },
   foursquare: {
     ...SEEDED_FEATURES,
@@ -286,6 +428,9 @@ export const ARCHETYPE_FEATURES: Readonly<
     picture: 0,
     garage: 0,
     dormer: 0,
+    dormers: ['hipped', 1],
+    eaves: 0.65,
+    porchWidth: 'full',
   },
   bungalow: {
     ...SEEDED_FEATURES,
@@ -297,6 +442,10 @@ export const ARCHETYPE_FEATURES: Readonly<
     shutters: 0,
     dormer: 0,
     siding: 1,
+    roofVariant: ['half-hipped', 0.4],
+    dormers: ['shed', 1],
+    eaves: 0.65,
+    porchWidth: 'full',
   },
   farmhouse: {
     ...SEEDED_FEATURES,
@@ -309,6 +458,8 @@ export const ARCHETYPE_FEATURES: Readonly<
     garage: 0,
     siding: 1,
     brickFoundation: 1,
+    roofVariant: ['gambrel', 0.4],
+    porchWidth: 'full',
   },
 };
 
@@ -324,7 +475,7 @@ export function droppedFeatures(features: ArchetypeFeatures, dropped: number): A
   const gone = new Set(ARCHETYPE_DROPS.slice(0, dropped));
   return {
     ...features,
-    ...(gone.has('dormers') ? { dormer: 0 } : {}),
+    ...(gone.has('dormers') ? { dormer: 0, dormers: 'none' as const } : {}),
     ...(gone.has('porch') ? { canopy: 0, frontPorch: 0 } : {}),
   };
 }

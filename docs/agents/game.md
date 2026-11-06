@@ -143,7 +143,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pacer 50 m ahead stays put on a 20 % hill where a level
                         gaze put it behind the rider's back. Since #783
                         `projectToFrame` restates the renderer's camera
-                        without `three`, for the names below
+                        without `three`, for the names below. ⚠️ Since #1994
+                        it LOOKS AT THE ROAD through a bend (`scene.ts`
+                        §`cameraPose`: up to 25 m up the route, nearer where
+                        that would push the rider past 20° off the axis) from
+                        the eye it always had, so in a bend the pose's x/z are
+                        not the rider; `GameView` damps its heading
+                        (`dampedHeading`, frame-rate independent, slower under
+                        reduced motion); `chase-camera-bend.test.ts` rides it
     src/game/name-tags.ts
                         other riders' names on the road (#783): DOM laid over
                         the world, so no draw call and no triangle in either
@@ -231,6 +238,85 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         marker's `pedalling` says a reading turns the cranks,
                         and a breath on the RIDE's clock (`rideSeconds`), so a
                         held ride holds it. The stylised rider does not move
+                        ⚠️ **Since #1999 it is not always on the hoods**:
+                        `riderJoints` takes a `RiderStance` (hips, shoulders,
+                        hands, elbows) per `DrawnPosture` — the tops, the
+                        hoods, the drops, the aero tuck, or out of the saddle
+                        — and `riderMotion` scales the rock by effort and
+                        rocks a standing rider's bicycle. Absent a stance it
+                        is the hoods. Exaggerated on the owner's rulings of
+                        2026-11-03 and 2026-11-04 so they read from the chase
+                        camera: the back 64° on the tops, 58° on the hoods,
+                        22° in the drops and 12° tucked, the head turned down
+                        or up (`headPitch`), a 6° trunk rock and the elbows
+                        swinging out with each downstroke (`RiderMotion.elbow`).
+                        ⚠️ **The grip is where the drawn HAND's middle goes,
+                        not the wrist** (2026-11-04, "Fix hands on bars
+                        first"): `RealisticRiderBelt` measures each hand off
+                        the body's rest pose and solves the forearm and hand
+                        as one segment to the grip, across the bar as well as
+                        along it. The wrist on the grip had left the hand on
+                        the hips. Each elbow bends down and back
+                        (`elbowOut`, `elbowBack`), never out to the side. The
+                        minimums are held by tests on the real body.
+                        ⚠️ **PR #2116's second pass** ("Fix again first"):
+                        the bar is 7 cm lower (`HEAD_TUBE_TOP_Y` 0.89 m), so
+                        every grip is under the hips, and the brake hood the
+                        hoods' hand holds is drawn (`bar hood ±1`, a box).
+                        The wrist bends the hand down round the drop
+                        (`wristDown`), the head lifts to look up the road in
+                        the drops and the tuck so the helmet faces the camera
+                        (half of `headPitch` at `neck01`), and a standing
+                        rider's elbows do not swing out.
+                        ⚠️ **PR #2116's third pass** ("Third pass on the
+                        arms"): the left/right difference was the elbow swing,
+                        12°–18° ADDED to each position's turn out (the drops'
+                        12° went to 30° on the left's downstroke, the right's
+                        clamped in) — the model and the pose are mirror images
+                        at rest. `RiderMotion.elbow` is now a SHARE of the
+                        position's own turn (`ELBOW_SWING_SHARE`). The hoods'
+                        back is 58° and the standing one 63°
+                        (`STANDING_BACK_DEGREES`), so the elbow opens from
+                        109° to 150°; the tops' hands are beside the stem
+                        (`TOPS_GRIP_ACROSS` 0.09 m), elbows out; and each hand
+                        lies on its own line in the bicycle's frame
+                        (`handDown`, which replaces `wristDown`), so the
+                        drops' fingers lie forward round the bend.
+    src/game/posture.ts which position each realistic rider is DRAWN in (#1999,
+                        the owner's ruling of 2026-11-02): standing on a climb
+                        (under 65 rpm with 300 W, or over 7 %), the aero tuck
+                        for a hard seated effort on flat or rolling ground
+                        (over 280 W and 90 rpm within ±3 %, at any speed — the
+                        ruling of 2026-11-04, chosen figures), the drops when
+                        fast, the tops when easy or coasting, else the hoods —
+                        each with a gentler threshold to keep it, a 0.75 s
+                        dwell before a change, and a 0.8 s eased move from
+                        wherever the body is. On the RIDE's clock, from
+                        `RiderMarker.riding` (`scene.ts` §`ridingOf`), whose
+                        speed is each rider's OWN — never the drawn speed,
+                        which runs 15 % over it giving a bend's lag back. ⚠️
+                        **Drawn only**: the drag area follows the rider's own
+                        `RidingPosition`, never this. The realistic belt holds
+                        one tracker per body slot; the stylised rider is one
+                        merged posture and does not change
+    src/game/bend-easing.ts
+                        the drawn rider eases off for a sharp bend (#1998, the
+                        owner's ruling of 2026-11-02): each rider is DRAWN at
+                        its odometer less a lag, at a speed whose lean on the
+                        line is at most 25°, braking at 3 m/s² and picking up
+                        at 1 m/s², and the lag is given back after the bend at
+                        up to 15 % over the rider's speed. ⚠️ **A drawing,
+                        never physics**: the simulation, the trainer's grade,
+                        recording, the HUD, the ghost's replay and the pacer's
+                        gap stay on the odometer, and `bend-easing.test.ts`
+                        holds a ride's distance, speed and grades identical
+                        eased or not. Stateless — the lag a rider holding this
+                        speed would have here — so a pacer or ghost level with
+                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        or a lap race (`scene.ts` §`easingLine`), where the
+                        drawn place is where the game meets the rider; there
+                        #546's 38.7° cap and its parked cranks still bind.
+                        `SceneInput.uneased` is the control
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -271,7 +357,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         negative side" did, and a test that measured the old
                         drawing now rides the MIRRORED fixture
                         (`route-fixtures-testing.ts`' `hand`), which reproduces
-                        its digests to the digit
+                        its digests to the digit. ⚠️ **Since #1995 a rider
+                        FACES the line, not the road**: `RiderMarker.headingX`
+                        points from the rear wheel to the front wheel
+                        (`facingAt`, `lineSlopeAt`'s chord), held to 12° off
+                        the road under the bicycle (`facingTurn`), so a rider
+                        crossing it no longer slides sideways. No step at the
+                        edge hold, nor since #2017 where a bot or ghost crosses
+                        a corridor point (the rider never does): held off the
+                        corridor SEGMENT's heading, which steps there, it
+                        turned up to 7° in 2 cm. Measure across the road
+                        with the road's normal, never a marker's heading
     src/game/contact-shadow.ts
                         where each rider's contact shadow lies (#426) — thrown
                         from `world.ts`'s ONE sun, never a second light
@@ -377,7 +473,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         named 225° where it was 135°: the same light, which
                         under the mirror stood in the south-west — and
                         nothing measured along the road can move, because none
-                        of it is read off `x`
+                        of it is read off `x`. ⚠️ **Since #1996 a road ridden
+                        twice is drawn once**: `RoadCorridor.retraced` marks
+                        the points of the pass further from where the camera
+                        looks (§`retracedRows`: within half a road of another
+                        pass, along it, much further apart along the road than
+                        across), and their road quads and marks are folded to
+                        nothing in a fresh index list. A point where the road
+                        doubles back keeps the arriving normal
+                        (§`ribbonNormals`). `out-and-back.test.ts` holds it on
+                        `route-fixtures-testing.ts` §`outAndBackRoute`, which
+                        the realistic page rides as `route=out-and-back`
     src/game/world.ts   the ground, the sky and the depth cue (#241), and since
                         #286 the one light direction — the two axes a route is
                         read on, the one number that is physics rather than
@@ -565,7 +671,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         as well). ⚠️ Since #617's review only
                         trees the CAMERA can see are ranked
                         (`three-renderer.ts` §`treeCanBeSeen`) — a tree behind
-                        the camera used to take the one full slot — and
+                        the camera used to take the one full slot — and, since
+                        #545, not one faded to nothing within
+                        `NEAR_TREE_FADE_METRES` of the eye
+                        (`near-tree-fade.ts`), and
                         `TreeHandOver` paces each tree's move between levels
                         inside the same slots, because a swap of ranks is
                         continuous and the ranked SET changing is not; the
@@ -699,7 +808,131 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `gradient.ts`, `ride/trainer.ts` or any module
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
-                        and on a worker it cannot name
+                        and on a worker it cannot name. Since #1898 the walk
+                        is `src/game/cannot-reach-trainer-testing.ts`, shared
+    src/game/lap-race/lap-race-cannot-reach-trainer.test.ts
+                        ADR 0060 D-2.2 (#1898): the same walk and forbidden
+                        set over the lap race's roots, `game/lap-race/` and
+                        `packages/domain/src/lap-race/`
+    src/game/lap-race/ride-race.ts
+                        a solo lap race inside a game ride (#1906, ADR 0060):
+                        `GameView` holds one per ride, asked for by the
+                        chooser (#1907: `StageChooser.tsx` §`LapRaceControl`
+                        offers *Ride a lap race* on a loop only, first in
+                        *Your ride* so a tablet shows it unscrolled (#1970),
+                        saying why in words, last, on any other, with its
+                        laps, field, tier and
+                        items from `lap-race/choice.ts`, and turns a Delivery
+                        round off as it is turned on) or a test's `lapRace`
+                        prop, on a LOOP route,
+                        solo (no room, D-7.3) and never beside a Delivery
+                        round. Since #1971 a race rides the world Settings
+                        chose: in the realistic one its frame is held to
+                        `realistic-budget.ts` §`LAP_RACE_VILLAGE_DRAW_CALLS`
+                        (approved 58), never the village's frozen 50, and its
+                        bots are split as a room's riders are (#783), and
+                        it rides without the pacer a rider chose. Started at
+                        the press (assist read from the device, ONE seed
+                        nothing keeps), stepped one
+                        tick a simulation step that ran (bots through
+                        `@onyourleft/physics` §`stepBotRace`: a field of
+                        mixed personalities from the seed, at the `canny`
+                        skill, #1959; each on its tier's course-only race
+                        plan, domain `lap-race/plan.ts`, #1960, ADR 0061),
+                        the rider
+                        DRAWN at effort distance plus race offset (D-3.3)
+                        and the bots in their lanes, the HUD's place, item
+                        and standings, its sentences owed. Nothing kept at
+                        the end. ⚠️ **Nothing of it reaches the trainer**:
+                        the grade is still sampled at the simulation's
+                        odometer, BEFORE the race steps;
+                        `game/lap-race-wiring.test.tsx` rides one power trace
+                        as an ordinary ride and as a race with items off and
+                        on (the rider hit), and holds every write and its time
+                        equal, and the recorded ride's channels and laps. ⚠️
+                        The bots ride still air on a windy ride: stated
+    src/game/lap-race/room-race.ts
+                        a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
+                        the room's first frame of a room whose welcome says
+                        `lapRace`, `GameView` sends the rider's lane and
+                        item-use INPUTS (`room-port.ts` §`changeLane`,
+                        §`useItem`), shows them at once (lane, item gone, a
+                        tailwind's own offset) until a frame covers the input
+                        (`ackSequence` past it, or a frame interval after),
+                        then the room's; the rider's offset is DRAWN eased to
+                        the room's. The HUD reads `roomLapRaceState`, the
+                        room's frame as `@onyourleft/domain` shapes a race.
+                        ⚠️ **Nothing of it reaches the trainer**:
+                        `room-lap-race-wiring.test.tsx` holds every write
+                        equal to a solo race with items off while the room
+                        overrules three predictions
+    src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
+                        a lap race's lanes and item use (#1901, ADR 0060
+                        D-5.4, D-13): race INPUTS only, a lane and "use the
+                        held item" handed to `stepRace`'s next tick. The
+                        lanes and keys are Delivery's (`lanes.ts`); the item
+                        key is W, the HUD's `hud/ItemControl.tsx` is one
+                        button inside the touch lock (never exempt),
+                        `aria-disabled` while nothing is held (#1968; the key
+                        and a pad are left to the race), and a
+                        pad's throw buttons use the item. `race-input.test.ts`
+                        rides one power trace with and without presses and
+                        reads every tick's effort distance and speed back
+                        equal. Since #1906 `GameView`'s steer and item ports
+                        hand it the presses, through `ride-race.ts`
+    src/game/lap-race/assist-preference.ts, src/game/lap-race/assist.ts
+                        the lap race's assisted setting (#1905, Delivery's
+                        #1813 pattern): items off, auto-use, no knock-back on
+                        me, gentler bots. Kept on the device, read only by
+                        Settings and `game/lap-race/`. "No knock-back" is the
+                        model's own: `createItemRace`'s `shieldedIds`, and a
+                        hit on a shielded racer does nothing (`items.ts`
+                        §"A shielded racer"), solo races only. Since #1906
+                        `ride-race.ts` applies it at the press and each tick
+    src/game/lap-race/in-view.ts
+                        what a lap-race frame draws (#1902, ADR 0060 D-10.4):
+                        every pick-up point of every lap on the frame's road,
+                        each puddle in its lane until it dries, and each
+                        racer's hit effect (`hitLook`) while a slow-down runs
+                        on them. #1899's items resolve on the tick they are
+                        used, so NOTHING is ever in flight to draw. It reaches
+                        the view on `port.ts` §`SceneFrame.lapRace`, the hit on
+                        `RiderMarker.hit` (so it is drawn where `scene.ts` drew
+                        the racer), and the bots as `bot` markers through
+                        `SceneInput.raceBots`, in their lane and moved aside
+                        only to make room for the rider. `three-renderer.ts`
+                        §`LapRaceBelt` draws it in THREE instanced calls
+                        whatever the count, and the bots cost none: they are
+                        instances of the riders' meshes (#368). ⚠️ **WCAG
+                        2.3.1**: the hit's brightness swings on the RACE's
+                        clock at 0.4 Hz, so a second hit never restarts it,
+                        and under reduced motion it is steady; `in-view.test.ts`
+                        counts the luminance changes over the timeline in both
+                        forms. Since #1906 `ride-race.ts` is its caller.
+                        ⚠️ **Its own ceiling is the STYLISED world's** (#1903,
+                        ADR 0060 D-10.2, stylised first by D-14 Q5):
+                        `realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`,
+                        14 — approved by the owner, 2026-10-31 (desktop
+                        measurement; tablet reading after #1906) — the
+                        scenery-free start-line frame's 11
+                        (§`STYLISED_SCENE_DRAW_CALLS`, held equal to
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS`) and the
+                        belt's three, only while a frame carries a race;
+                        §`stylisedSceneDrawCallCeiling` is the one place that
+                        choice is made. The village's 50 and Delivery's 53
+                        are unchanged, and `villageDrawCallCeiling` never
+                        returns 14. `game.browser.spec.ts` §"#1903" counts the
+                        race's frame. Since #1972 the owner's realistic page
+                        draws it for the tablet reading:
+                        `?world=stylised&race=worst` (REFUSED in the realistic
+                        world, and beside `delivery`, `town` and `route`)
+                        hands every frame the worst case on the scenery-free
+                        frame (`browser/realistic/lap-race.ts`) and publishes
+                        the 14 as `raceCeiling` (and no `villageCeiling`),
+                        what the belt drew as `race`, and both on its
+                        `OYL-REALISTIC` line and readout;
+                        `realistic-lap-race.browser.spec.ts` holds it
+                        (required, not nightly: the stylised world)
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
@@ -768,10 +1001,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
                         `realistic-budget-village.test.ts`
-    src/game/delivery/steer.ts
+    src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
-                        D through `hud/SteerKeys.tsx` and `steer-port.ts`. A
+                        D through `hud/SteerKeys.tsx` and `steer-port.ts`.
+                        Since #1901 the lanes, keys, steer state and port
+                        are `game/lanes.ts` and `game/steer-port.ts`, which
+                        the lap race shares; `delivery/steer.ts` re-exports
+                        them and keeps its own two refusals (#1817 counts
+                        them there). A
                         DRAWING: it reaches `scene.ts` §`lateralOf` through
                         `SceneInput.steeredLateral` (the rider only) and the
                         obstacles through their rider offset, never
@@ -793,6 +1031,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one press is one intent; an axis outside −1..1 or not
                         finite asks for nothing. ⚠️ Whether the Android
                         shell delivers pads is spike 0027 (#1819), unmeasured
+    src/game/delivery/controller-port.ts
+                        a paired steering controller's events (#1826), as
+                        #1822's codec reads them. `ride/steering-controller.ts`
+                        implements it; the game is handed the port, never the
+                        client, because the clients write to the controller
+                        and so may not be imported under `game/delivery/`
+    src/game/delivery/controller-input.ts, lane-input-port.ts,
+    src/game/hud/ControllerIntents.tsx
+                        a controller's steer buttons, handlebar angle and
+                        throws as Delivery's intents (#1827), handed on once
+                        an animation frame, at most one of each, by the HUD on
+                        a solo round only. ⚠️ The angle SELECTS one of the
+                        three lanes (10° to a side, back to the centre within
+                        5°); it is not a proportional offset, because
+                        `lanes.ts` and ADR 0060 D-6.3 need spike 0030's
+                        reading re-run before any continuous steer
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -867,7 +1121,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         names `AudioContext`; `SoundControls.tsx` is the mute and
                         the volume a rider reaches DURING a ride (WCAG 2.2 SC
                         1.4.2). ⚠️ No dependency and no speech engine, and
-                        nothing claims a sound beats the screen
+                        nothing claims a sound beats the screen. Since #2055
+                        `web-audio.ts` builds a master, a duck on music, and
+                        music, effects and cue buses, set from `audio-mix.ts`
+                        (`oyl.audioMix.v1`, taken from the two old keys the
+                        first time): ⚠️ the volume is the BUS's gain and is
+                        multiplied nowhere else, or it would be squared.
+                        #2056 adds `applyMix()` to the port: it sets the buses
+                        on a graph that exists and never makes a context;
+                        #2058 adds `attachMusic()` (one media element source
+                        per element, into the music bus) and `setMusicOn()`,
+                        a ramp: the music bus is 0 whenever music is not playing.
+                        #2059: every short sound while music plays ramps the
+                        duck to `MUSIC_DUCK_LEVEL` and back after it ends
+                        (`setTargetAtTime`, never a step; `music-duck.test.ts`)
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from
@@ -887,6 +1154,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`ride-round.ts` §`DeliveryRide.score`), never
                         `round.ts` §`RoundTally.score`, which counts
                         deliveries only
+    src/game/hud/lap-race-hud.ts, src/game/hud/lap-race-announce.ts
+                        a solo lap race on the HUD (#1904, ADR 0060): *Place*
+                        (with `lap-text.ts` §`lapOfLaps` under it) and *Item*
+                        (with a hit coming under it, outlined dashed: a shape,
+                        never a tint), last and absent on any other ride; the
+                        standings in a room's panel (`RaceStandings.tsx`, W/kg,
+                        never watts, never a live region), with the leader
+                        always its first line (#1967). Its five sentences
+                        are rank 5h, OWED as Delivery's are, the place at most
+                        once every 10 s. `GameView` feeds `HudInput.lapRace`
+                        on a ride running a race (#1906);
+                        `browser/lap-race-hud.browser.spec.ts` holds the
+                        layout on the HUD harness's stage, not in a real ride
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost
@@ -913,7 +1193,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         built-up land (`land-class.ts` §`builtUpDistances`),
                         so a mapped town is level with the road; the mask is
                         a REQUIRED argument of `terrainCorridor` and
-                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly.
+                        ⚠️ **Since #1996 a later pass of a road reads its
+                        earlier pass's relief** (§`reliefFields`, sides swapped
+                        where it runs the other way), so changing pass at an
+                        out-and-back's turn changes no hill in view; the other
+                        pass's ground is sunk out of sight with the turning
+                        point closed round the road's end (§`retracedRoles`),
+                        or drawn a metre under where it only lies alongside.
+                        ⚠️ Since #2149 a sharp bend's inside, where the fold
+                        stops the rows short of the bend's centre, is closed
+                        on one point (`closeFans`): within the clear band
+                        only, and in the band just past each row's end, which
+                        every quality rung draws
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -1015,16 +1307,155 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pitch, porch, shutters, picture window, dormers,
                         garage and cladding together, `unknown` planned as
                         before (`-house-archetypes`, `town=houses`);
+                        since #1793 a mapped start year narrowing the ranked
+                        candidates to its era (`ARCHETYPE_ERAS`,
+                        `archetypeCandidates`), one of the era before a
+                        timeless Colonial or farmhouse, never widening and
+                        ignored where it leaves none (`-start-year`,
+                        `town=dated`);
+                        since #1785 a gambrel, half-hipped, saltbox or
+                        side-hipped roof (`variantRoof`) on a share of the
+                        farmhouses, bungalows, Colonials and ranches, on a
+                        rectangle or each split one, the eaves at the mapped
+                        height, plain over a cap (`-roof-variants`);
+                        since #1786 each archetype's dormers — two gabled on
+                        a Cape, a hipped one on a Foursquare's route-facing
+                        slope, a wide shed one on a bungalow — each kind on
+                        its own least pitch (`dormerOf`, `-dormer-variants`);
+                        since #1784 a full-width front porch on posts on a
+                        Foursquare, a bungalow and a farmhouse, and each
+                        archetype's eaves — 0.65 m on a bungalow and a
+                        Foursquare, 0.15 m on a Cape, 0.4 m on the rest
+                        (`-archetype-porches`). ⚠️ **Known gap**: the
+                        eave's shadow on the wall (`facade.ts`
+                        §`OVERHANG_SHADOW`, `eavesShadeAt`) is still cast
+                        from the constant `EAVES_OVERHANG_METRES`, so a
+                        0.65 m eave casts a 0.4 m eave's shadow and a
+                        0.15 m one too deep a shadow: #1784's answer (b),
+                        no float carries the depth to the shader;
+                        since #1783 a commercial or multi-family footprint's
+                        archetype (`building-archetypes.ts`) — a brick
+                        main-street block (sash windows over its shop front,
+                        an awning on two in three), a strip front (its sign
+                        band kept, one storey) or a garden apartment (a low
+                        hip or gable over 300–1 200 m², clapboard or brick,
+                        one door, no garage) — `unknown`, industry and towers
+                        planned as before (`-commercial-archetypes`,
+                        `town=commercial`);
+                        since #1790 a mapped `roof:shape` drawn as tagged
+                        (`MAPPED_ROOFS`: flat, gable, hip, a variant or a
+                        skillion), on a rectangle or an L, T, U or Z and never
+                        on a terraced footprint; `roof:orientation` and
+                        `roof:direction` turning a rectangle's gable ridge
+                        (`roofTurnedOf`); `building:levels` the storey count,
+                        the eaves at the mapped height (`storeyMetresOf`);
+                        `roof:levels` ≥ 1 admitting dormers below their pitch;
+                        untagged footprints planned as before
+                        (`-mapped-roof-shape`, `town=roofs`);
+                        since #1791 a mapped `building_type` or `landmark`
+                        (`building-types.ts`) over the land-use guess: a
+                        house or bungalow by #1782's rule (a bungalow the
+                        bungalow alone), a terrace by #1635's in any class,
+                        apartments a garden apartment, a garage or shed one
+                        windowless storey (a garage door, a plain door), a
+                        barn planks under a gambrel, a shop or warehouse as
+                        commercial or industrial, and a church, school or
+                        any landmark a plain civic block whose plain painted
+                        door takes no wreath; where a typed footprint also
+                        carries #1790's tags, its `roof:shape` and
+                        `building:levels` win over the type's default roof
+                        and storey (the type keeps its walls, pitch, doors);
+                        untyped planned as before
+                        (`-building-type`, `town=typed`);
+                        since #2021 a mapped place of worship (`worship`
+                        landmark, church, chapel, cathedral) a steeple: a
+                        square tower and pyramidal spire at the long axis's
+                        end away from the front door, stepped onto the
+                        footprint, 12 triangles
+                        in `wall` and `roof`, left off before holes over a
+                        cap (`STEEPLE`, `-steeples`, `town=typed`); since
+                        #2100 24 (12 far) with a belfry's band 0.8 m deep
+                        painted in `trim`, 6 m over the roof, the spire
+                        shaded as a 60° slope and the church roofed in
+                        `slate`;
+                        since #1794 one whose footprint holds a nave
+                        (≥ 80 m², rectangularity ≥ 0.6, a rectangle or
+                        #1660's rectangles, its tower standing on it) a
+                        church (`mapped-landmarks.ts`): the nave under a 45°
+                        gable at any size, with that tower and spire, the
+                        spire's top at a mapped height ≥ 1.6 times the
+                        nave's walls (then 2 storeys) or else at 1.8 times
+                        the ridge, at most 40 m, never under 3 m over the
+                        tower; every other one as before
+                        (`-landmark-churches`, `town=churches`);
+                        since #1795 a mapped town hall or school
+                        (`civicLandmarkOf`) of ≥ 100 m² and rectangularity
+                        ≥ 0.6 as itself: brick, its front an odd number of
+                        bays (`Windows.oddFront`) so the door is the middle
+                        one; a town hall's entry under a posted canopy and a
+                        cupola (`CUPOLA`, #2021's tower and spire small: 24
+                        triangles, 12 far) on its ridge or roof; a school
+                        none (`-landmark-civic`, `town=civic`);
+                        since #2023 an untagged footprint inferred a shed
+                        (12–20 m²) or a garage (20–75 m², aspect ≤ 1.75,
+                        rectangularity ≥ 0.9, a house-sized footprint within
+                        40 m, one the planner keeps, standing nearer the
+                        nearest non-service street)
+                        by `footprintKindOf`, spike 0033's thresholds, and
+                        drawn as #1791's; a mapped type is never inferred
+                        over, and a mapped roof or storey count beats the
+                        inferred one's; the plan says so (`family`,
+                        `inferred`); only while the type is read
+                        (`-inferred-outbuildings`, `town=untagged`);
+                        since #2024 on a `rural` stretch one of ≥ 100 m²,
+                        rectangularity ≥ 0.9, ≥ 40 m back from the street,
+                        behind a house-sized footprint within 80 m, a plank
+                        barn (a gambrel on a seeded half, else a steep
+                        gable), and over 250 m² a pole building (corrugated,
+                        blind, a 20° gable in `slate` at any size)
+                        (`-inferred-barns`, `town=untagged` past 2 150 m);
+                        since #2026 on a `village` or `town` stretch one of
+                        ≥ 1 000 m² within 50 m of a primary, secondary or
+                        tertiary street commercial, drawn as a mapped shop;
+                        no parking half (`-inferred-commercial`,
+                        `town=untagged` at 400–700 m);
+                        since #1792 a mapped `building:material` and, on a
+                        pitched roof, `roof:material` on the belt's own
+                        surfaces (`MAPPED_WALL_SURFACES`,
+                        `MAPPED_ROOF_SURFACES`: brick, plaster render,
+                        concrete, metal corrugated, wood clapboard, glass a
+                        tower's curtain wall, asphalt shingles, slate,
+                        roof tiles; stone and a concrete roof unread), over
+                        the archetype's cladding, and a mapped colour the
+                        nearest paint its surface already has
+                        (`building-paint.ts` §`MAPPED_PALETTE`,
+                        §`mappedPaintEntry`, linear RGB over the list's
+                        ground), which `paintTown` never moves
+                        (`-mapped-paint`, `town=painted`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-landmarks.ts
+                        the mapped landmarks drawn as themselves (#1794): a
+                        church's fit (`churchFits`), its steep nave's
+                        features (`CHURCH_FEATURES`) and its spire's height
+                        rule (`spireIsMapped`, `spireApexOf`); since #1795 a
+                        town hall's and a school's (`civicLandmarkOf`,
+                        `civicLandmarkFits`, `CUPOLA`), read by
+                        `footprint-buildings.ts`; pure, plan-time, no draw
+                        call, byte or shader term
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in
-                        400 m first, ≤ 36 (ADR 0054 D-5.6's cap, the owner's
-                        ruling), ranked by distance with the frame's procedural
+                        400 m first — since #2094 after the nearest 4
+                        landmarks in reach (a place of worship, a school, a
+                        town hall: `MAPPED_LANDMARKS_AHEAD`, inside the same
+                        count, budget and calls; `footprint-census-testing.ts`
+                        counts why each kind is not drawn) — ≤ 36 (ADR 0054
+                        D-5.6's cap, the owner's ruling), ranked by distance
+                        with the frame's procedural
                         structures inside the 23 040-triangle term (#1586), the far
                         level past 150 m, in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
@@ -1060,6 +1491,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `oylRevealOf`, reading the face frame `oylFaceN`,
                         `oylFaceU`, `oylFaceUp`, `oylToSunV`, `oylToEyeV`);
                         the realistic page's `-window-reveals` builds it out.
+                        Since #1662 every pane shows a procedural room
+                        behind it (`interiorAt`, the shader's `oylInterior`,
+                        whose signature #1636 and #1665 call) and gives back
+                        the sky by Schlick's Fresnel at metalness 0, not 0.35;
+                        `-window-rooms` builds it out.
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
@@ -1099,7 +1535,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         shops are painted as a lot is, a model wears its wall
                         entry as a hue (`lotModelPaint`), and the joinery's
                         timber (`planks`) is stained by its `trim` entry, the
-                        wall's and roof's summed
+                        wall's and roof's summed. Since #1665 a lot's lit walls
+                        and roofs carry #1661's weathering (`withLotPaint`
+                        calls `oylWeatherTile`, `oylWeatherGrime`,
+                        `oylWeatherMoss`) and its lit glass #1662's rooms
+                        (`withLotGlass`, `oylInterior`), each pane's rectangle
+                        in the glass's otherwise unread `uv`
+                        (`buildings.ts` §`glassPaneCoordinates`);
+                        `-lot-realism` builds both out
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
@@ -1155,6 +1598,29 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
                         (`people.ts`). No crossing is either
+    src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
+                        Poly Haven's `trashbag` beside some bins and one
+                        `old_tyre` laid flat by a lamp post, placed from the
+                        street's own furniture (never a new placement), never
+                        by a front path, none on a city centre's street.
+                        Realistic only: merged into `FurnitureBelt`'s painted
+                        mesh and admitted only beside an anchor the frame
+                        draws, so 0 calls; ≤ `LITTER_CAPACITY` a frame,
+                        inside `REALISTIC_STREET_TRIANGLES`. Lever `-litter`
+    src/game/chain-link.ts
+                        the chain-link fence (#1274, owner ruling 2026-11-05)
+                        — along mapped `industrial`, `school` and `pitch`
+                        outlines within 40 m of the road, a ground drawn to
+                        the road's line fenced on the field verge's line;
+                        `fence` items with `ScatterItem.chainLink`, built once
+                        a route by `MappedTown.chainLinkAt`, in the
+                        boundaries' budget. ⚠️ Drawn IN the field fence's one
+                        instanced mesh (`ScatterFold`: both shapes, the vertex
+                        shader folds the other away; the wire a cut-out of the
+                        kit's opacity map), so 0 new calls, and every
+                        realistic fence instance submits both shapes. A field
+                        fence keeps its planks. No corridor, none. Lever
+                        `-chain-link`, page `town=grounds`
     src/game/people.ts  people walking and running (#1541) — on a village's
                         pavements and front paths (`streets.ts`'s `walks`
                         and `DoorPath.walk`) and the mapped footways, never
@@ -1190,8 +1656,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         every procedural village's centre, whose middle plots
                         are empty for it (`settlements.ts`). ⚠️ **Drawn in the
                         ROAD's material** by one mesh in both worlds
-                        (`three-renderer.ts` §`SideRoadBelt`), and it fades by
-                        sinking under the ground, not by transparency. Every
+                        (`three-renderer.ts` §`SideRoadBelt`); it blends from
+                        the road's height to the ground's and then follows the
+                        ground, never held level over it (#1993), and it fades
+                        by narrowing and sinking under the ground, not by
+                        transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
@@ -1276,6 +1745,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         valley, a hairpin, a circuit. Test support, never shipped
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
+    src/game/simulated-rider.ts
+                        the simulated rider (#1992), a developer's debug mode:
+                        `#/game?simulate=<watts>` (with `&speedup=<1–32>` and
+                        `&at=<metres>`) rides a rider's own route at a steady
+                        power with no trainer or sensor, faster than real time
+                        and from a distance if asked. `GameView` §`useSimulatedRide`
+                        builds the ride with NO trainer port, room or rooms and
+                        no Delivery round, so nothing is written to a machine,
+                        recorded, saved or posted; the HUD's `oyl-hud__simulated`
+                        line marks it. `simulated-rider-wiring.test.tsx` holds it.
+                        The picker offers the same ride as *Preview without a
+                        trainer* (PR #2113's ruling; `StageChooser.tsx`
+                        §`PreviewControl`): a power and a 1–8× speed-up, ridden
+                        on a NEW screen `GameView` mounts with none of those
+                        ports; ending it mounts an ordinary picker again.
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

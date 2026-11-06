@@ -2338,7 +2338,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       })),
       sensors: [...sensors.values()].map((entry) => ({
         id: entry.device.identity.id,
-        name: entry.device.name ?? 'Unnamed sensor',
+        // #2133: an empty or whitespace-only advertised name is no name, so
+        // the row never reads ": Connected" and "Forget ".
+        name:
+          entry.device.name === undefined || entry.device.name.trim() === ''
+            ? 'Unnamed sensor'
+            : entry.device.name,
         role: entry.role,
         capabilities: [...entry.device.capabilities].filter(
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',
@@ -3209,9 +3214,22 @@ export function createRideController(options: RideControllerOptions): RideContro
     return said.kind === 'confirmed' && said.target === holding ? holding : undefined;
   };
 
-  /** A channel's reading if it is live at `at`, by the rule the metric grid shows it under. */
+  /**
+   * A channel's reading if it is live at `at`, by the rule the metric grid
+   * shows it under.
+   *
+   * ⚠️ The SAME rule, link included (#1313). This passed `true` for paired,
+   * so for up to {@link METRIC_STALE_AFTER_SECONDS} after a trainer's link
+   * dropped the graph said "You 250 W", and drew it, while the grid beside
+   * it showed no power at all.
+   */
   const liveReading = (capability: MeasurementCapability, at: UnixSeconds): number | undefined => {
-    const state = metricStateFor(latest.get(capability), true, at, staleAfterSeconds);
+    const state = metricStateFor(
+      latest.get(capability),
+      isPaired(capability),
+      at,
+      staleAfterSeconds,
+    );
     return state.kind === 'live' ? state.value : undefined;
   };
 

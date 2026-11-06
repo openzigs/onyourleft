@@ -21,14 +21,15 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, and since #1626 the mapped doors' winter wreath, for a cost pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-weathering`, `-facade-trims`, `-facade-wreath`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1782 the mapped houses' US archetypes, for both, since #1785 the archetypes' roof variants, for both, since #1786 the archetypes' dormers, for both, since #1784 the archetypes' porches and eaves, for both, since #1783 the commercial and multi-family archetypes, for both, since #1790 the mapped roof shapes, roof directions and storeys, for both, since #1791 the mapped building type, for both, since #2021 the mapped places of worship's steeples, for both, since #1794 the mapped churches' naves and spires, for both, since #1795 the mapped town halls and schools, for both, since #2023 the untagged footprints' inferred garages and sheds, for both, since #2024 their inferred barns and pole buildings, for both, since #2026 their inferred shops, for both, since #1792 the mapped colours and materials, for both, since #1793 the mapped houses' start years, for both, since #1661 the mapped facades' weathering, for both, since #1663 the mapped facades' lintels, quoins and string courses, for both, since #1626 the mapped doors' winter wreath, for a cost pair, since #1662 the rooms behind mapped glass, for both, since #1665 the village lots' weathering and rooms, for both, since #545 the trees' fade near the camera, for a by-eye pair, since #1274 the roadside models (the lamp posts and the gantries' barriers), for a by-eye pair, and since the owner's ruling of 2026-11-05 on #1274 a village's litter and the chain-link fence, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-house-archetypes`, `-roof-variants`, `-dormer-variants`, `-archetype-porches`, `-commercial-archetypes`, `-mapped-roof-shape`, `-building-type`, `-steeples`, `-landmark-churches`, `-landmark-civic`, `-inferred-outbuildings`, `-inferred-barns`, `-inferred-commercial`, `-mapped-paint`, `-start-year`, `-weathering`, `-facade-trims`, `-facade-wreath`, `-window-rooms`, `-lot-realism`, `-near-tree-fade`, `-roadside-models`, `-litter`, `-chain-link`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
- * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`; default none |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityStreetscapeFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class`; since #1782 `houses`, `footprint-fixtures-testing.ts` §`houseStreetFixture`'s street of each US house archetype in turn and its rural farmhouses, from 900 m to 2 100 m, whose before is `levers=-house-archetypes`; since #1783 `commercial`, `footprint-fixtures-testing.ts` §`commercialStreetFixture`'s main street of brick blocks and its strip of stores and garden apartments, from 900 m to 2 700 m, whose before is `levers=-commercial-archetypes`; since #1790 `roofs`, `footprint-fixtures-testing.ts` §`mappedRoofStreetFixture`'s street of houses each tagged with a `roof:shape`, a roof direction or `building:levels`, from 1 000 m to 1 500 m, whose before is `levers=-mapped-roof-shape`; since #1791 `typed`, `footprint-fixtures-testing.ts` §`typedStreetFixture`'s street of a footprint for each mapped building type — a house, a bungalow, a terrace, apartments, garages, a shed, a barn, a shop, a warehouse, a church and a school — from 900 m to 1 900 m, whose before is `levers=-building-type`; since #2023 `untagged`, `footprint-fixtures-testing.ts` §`untaggedStreetFixture`'s street of untagged footprints behind and beside houses — garages and sheds the rule infers, and the footprints it must not — from 1 000 m to 2 100 m, whose before is `levers=-inferred-outbuildings`, and since #2024 its rural stretch of barns, a pole building and the footprints that rule must not call, from 2 150 m to 2 950 m, whose before is `levers=-inferred-barns`, and since #2026 its main street of big untagged footprints, from 380 m to 720 m, whose before is `levers=-inferred-commercial` (the page rides from 900 m: hold `at` on them); since #1792 `painted`, `footprint-fixtures-testing.ts` §`mappedPaintStreetFixture`'s street of houses each tagged with a `building:material`, a `roof:material`, a `building:colour` or a `roof:colour`, from 1 000 m to 1 500 m, whose before is `levers=-mapped-paint`; since #1793 `dated`, `footprint-fixtures-testing.ts` §`datedStreetFixture`'s rural road of houses each tagged with a start year, from 1 700 m to 2 100 m, whose before is `levers=-start-year`; since #1794 `churches`, `footprint-fixtures-testing.ts` §`churchStreetFixture`'s street of mapped churches — a rectangle, an L, a cross, one whose mapped height is its spire's, a wide one, and a chapel and a triangle a nave does not fit — from 1 000 m to 1 450 m, whose before is `levers=-landmark-churches`; since #1795 `civic`, `footprint-fixtures-testing.ts` §`civicStreetFixture`'s street of mapped town halls and schools — a hipped and a flat-roofed town hall, a school, and a small town hall and a thin school the block does not fit — from 1 000 m to 1 300 m, whose before is `levers=-landmark-civic`; since #1274 `grounds`, `footprint-fixtures-testing.ts` §`fencedGroundsFixture`'s industrial estate, school, pitches and fields, from 900 m to 2 100 m, whose before is `levers=-chain-link` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`, `houses`, `commercial`, `roofs`, `typed`, `untagged`, `painted`, `dated`, `churches`, `civic`, `grounds`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
  * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`: since #1625 Halloween's pumpkins, and nothing yet for winter lights). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
- * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
+ * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame); since #1996 `out-and-back`, `route-fixtures-testing.ts` §`outAndBackRoute`, a road ridden out and back again, turning at half its length (`at=1475` holds the turning point 30 m ahead, `at=1512` just past it). Refused beside `town`, which is a road of its own | `village`, `out-and-back`; default none |
  * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
+ * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles (`realistic/lap-race.ts`), drawn by the product's own belt. With `world=stylised`, in the scenery-free STYLISED frame, and REFUSED beside `route`; since #1971 in the realistic world too, on the route's own frame with its scenery (`route=village` is #1689's hold), held to §`LAP_RACE_VILLAGE_DRAW_CALLS`. REFUSED beside `delivery` and `town` in both | `worst`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -50,6 +51,7 @@ import {
   type Hemisphere,
   type Season,
 } from '../../src/game/season';
+import type { NearTreeFade } from '../../src/game/near-tree-fade';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
 import { PLACES, type Facing, type Place } from '../../src/demo/synthetic-road';
@@ -94,6 +96,23 @@ export type Layer = (typeof LAYERS)[number];
  *   haze off, which is the picture before #622 — for the owner's BY-EYE
  *   comparison only. ⚠️ **Not a cost pair**: the shader runs either way, so
  *   #622's cost is two builds (validation 0002 Part AH §"The #622 rows").
+ * - `roadside-models` — #1274: the lamp posts and the gantries' barriers as
+ *   Poly Haven's `street_lamp_01` and `concrete_road_barrier`. Off loads the
+ *   world without them, which draws the stylised world's shapes in the same
+ *   calls — the picture before #1274 — for the owner's BY-EYE pair. Read at
+ *   load, as `generated-trees` is: off, neither file is fetched.
+ * - `litter` — #1274, the owner's ruling of 2026-11-05: a village's litter,
+ *   Poly Haven's `trashbag` beside its bins and `old_tyre` by a lamp post
+ *   (`litter.ts`). Off loads the world without them, which is the street
+ *   before it — for the owner's BY-EYE pair; pair it with `route=village`.
+ *   Read at load: off, neither file is fetched.
+ * - `chain-link` — #1274, the same ruling: the chain-link fence beside
+ *   industrial, school and sports grounds (`chain-link.ts`). Off places none
+ *   and loads neither of its files, which is the town before it — for the
+ *   owner's BY-EYE pair; pair it with `town=grounds`, whose industrial estate
+ *   is on the right from 950 m to 1 250 m and whose school is on the left
+ *   from 1 300 m. On `route.ts`' road there is no mapped ground, and so no
+ *   chain-link.
  * - `crag` — #1274: the rock face a steep bank wears, ambientCG's. Off draws
  *   the bank in the scree's photograph, which is the picture before #1274 —
  *   for the owner's BY-EYE comparison. ⚠️ **Not a cost pair either**: the
@@ -136,6 +155,13 @@ export type Layer = (typeof LAYERS)[number];
  *   Off draws the firs as they were before it, which is the same picture (the
  *   browser gate holds the two to one) — the tablet's before/after pair for
  *   the fix on one build. The product always draws the pre-pass.
+ *
+ * - `near-tree-fade` — #545, the owner's ruling of 2026-11-02: a realistic
+ *   tree whose trunk comes within 6 m of the camera's eye fades out, gone by
+ *   4.5 m (`near-tree-fade.ts`). Off draws every tree whole however near, as
+ *   before the ruling — the owner's BY-EYE before/after pair for the fade.
+ *   Pair it with `at` where a tree stands beside the road. The product always
+ *   fades.
  *
  * - `people` — #1541: the people on the pavements, front paths and footways
  *   (`people.ts`, `three-renderer.ts` §`PeopleBelt`). Off places nobody, so the
@@ -210,6 +236,8 @@ export type Layer = (typeof LAYERS)[number];
  *   has a class; on `route.ts`' road the two are the same picture. The
  *   product always builds the class. Since #1637 off also takes a city
  *   centre's street and terraced blocks with it — `town=city-street`'s before.
+ *   Since #2024 off also takes every inferred barn and pole building with it:
+ *   their rule needs a `rural` stretch, and `NO_URBAN_CLASS` reads `unknown`.
  *
  * - `split-roofs` — #1660: L-, T-, U- and Z-shaped mapped houses pitched over
  *   their 2–3 rectangles (`rectilinear-roofs.ts`), and no roof over a notch.
@@ -228,6 +256,148 @@ export type Layer = (typeof LAYERS)[number];
  *   pair and the tablet's cost pair (plan-time only: no call, no byte, no
  *   shader term); pair it with `town=houses`, which has every archetype, or
  *   `town=mixed`, which has four. The product always chooses them.
+ *
+ * - `roof-variants` — #1785: the archetypes' roof variants (`footprint-buildings.ts`
+ *   §`variantRoof`) — a gambrel on some farmhouses, a saltbox on some
+ *   Colonials, a half-hipped gable on some bungalows and a side-hipped roof on
+ *   some ranches. Off, no variant is chosen and every plan is as before, byte
+ *   for byte. Read at load, as `house-archetypes` is. The owner's BY-EYE pair
+ *   and the tablet's cost pair (plan-time only: no call, no byte, no shader
+ *   term); pair it with `town=houses`, which has all four. The product always
+ *   chooses them.
+ *
+ * - `dormer-variants` — #1786: the archetypes' dormers (`footprint-buildings.ts`
+ *   §`dormerOf`) — two gabled dormers on a Cape, a hipped one on a
+ *   Foursquare's route-facing slope and a wide shed one on a bungalow. Off,
+ *   every dormer is #1588's and every plan is as before, byte for byte. Read
+ *   at load, as `roof-variants` is. The owner's BY-EYE pair and the tablet's
+ *   cost pair (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=houses`. The product always builds them.
+ *
+ * - `archetype-porches` — #1784: the archetypes' full-width front porches on
+ *   posts (a Foursquare's, a bungalow's, a farmhouse's) and their own eaves
+ *   (`footprint-buildings.ts` §`FootprintPlanOptions`), 0.65 m on a bungalow
+ *   and a Foursquare and 0.15 m on a Cape. Off, every porch is #1589's seeded
+ *   width and every eave #1581's 0.4 m, every plan as before, byte for byte.
+ *   Read at load, as `dormer-variants` is. The owner's BY-EYE pair and the
+ *   tablet's cost pair; pair it with `town=houses`. The eave's shadow on the
+ *   wall stays at 0.4 m's either way (`docs/agents/game.md`). The product
+ *   always builds them.
+ *
+ * - `commercial-archetypes` — #1783: each mapped commercial or multi-family
+ *   footprint's archetype (`building-archetypes.ts`) — a brick main-street
+ *   block, a strip front, a garden apartment — setting its cladding, roof,
+ *   ground floor and upper windows together. Off, every plan is as before,
+ *   byte for byte. Read at load, as `house-archetypes` is. The owner's BY-EYE
+ *   pair and the tablet's cost pair (plan-time only: no call, no byte, no
+ *   shader term); pair it with `town=commercial`, which has all three, or
+ *   `town=mixed`, whose high street is main-street blocks. The product always
+ *   chooses them. ⚠️ The pair's planting differs in one place, by design
+ *   (#1922): a garden apartment has no garage, so where the control's seeded
+ *   garage has a driveway, whose ground is cleared, the product plants trees
+ *   (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`).
+ *
+ * - `building-type` — #1791: each mapped footprint's `building_type` and
+ *   `landmark` (`building-types.ts`) deciding what it is drawn as, over the
+ *   land-use guess — a garage, a shed and a barn as no house, a shop on
+ *   residential land as a shop, a church or a school as a plain civic block.
+ *   Off, every footprint is planned untyped, as before, byte for byte. Read at
+ *   load, as `house-archetypes` is. The owner's BY-EYE pair and the tablet's
+ *   cost pair (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=typed`, which has a footprint of every row. The product always
+ *   reads the type.
+ * - `steeples` — #2021: a mapped place of worship (the `worship` landmark, or
+ *   a church, a chapel or a cathedral) given a square tower and a pyramidal
+ *   spire at the end of its long axis away from its front door
+ *   (`footprint-buildings.ts` §`STEEPLE`), 12 triangles in its walls and roof;
+ *   since #2100 24 near and 12 far, with a belfry's band painted in `trim`,
+ *   and its roof and spire slate.
+ *   Off, every one is #1791's plain civic block, as before, byte for byte.
+ *   Read at load, as `building-type` is, and only while it is on. The owner's
+ *   BY-EYE pair and the tablet's cost pair (plan-time only: no call, no byte,
+ *   no shader term); pair it with `town=typed`, whose church has one. The
+ *   product always builds them.
+ * - `landmark-churches` — #1794: a mapped place of worship whose footprint
+ *   holds a nave and a tower drawn as a church (`mapped-landmarks.ts`): a nave
+ *   under a 45° gable, over #1660's rectangles on an L or a cross, with
+ *   #2021's tower and spire, the spire's top at the mapped height where that
+ *   is a spire's, else at 1.8 times the ridge, at most 40 m. Off, every one is
+ *   planned as before — #1791's civic block with #2021's steeple — byte for
+ *   byte. Read at load, as `steeples` is, and only while it and
+ *   `building-type` are on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=churches`. The product always builds them.
+ * - `landmark-civic` — #1795: a mapped town hall or school (`townhall` or
+ *   `school` landmark; `townhall`, `civic`, `government` or `school` type)
+ *   whose footprint holds the block (≥ 100 m², rectangularity ≥ 0.6) drawn
+ *   as one (`mapped-landmarks.ts`): brick, its front an odd number of bays
+ *   with the door in the middle one; a town hall's entry under a posted
+ *   canopy and a cupola on its ridge or roof; a school without. Off, every
+ *   one is #1791's civic block, as before, byte for byte. Read at load, as
+ *   `landmark-churches` is, and only while `building-type` is on. The owner's
+ *   BY-EYE pair and the tablet's cost pair (plan-time only: no call, no byte,
+ *   no shader term); pair it with `town=civic`. The product always builds
+ *   them.
+ * - `inferred-outbuildings` — #2023: an untagged footprint inferred a garage
+ *   (20 to 75 m², roughly square, a house within 40 m and set back behind it
+ *   from the street) or a shed (12 to 20 m²), spike 0033's thresholds, and
+ *   drawn as #1791's (`footprint-buildings.ts` §`footprintKindOf`). Off, every
+ *   untagged footprint is planned as before, byte for byte; a mapped type is
+ *   never inferred over either way. Read at load, as `building-type` is, and
+ *   only while it is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged`, or a ride's corridor. The product always infers them.
+ * - `inferred-commercial` — #2026: an untagged footprint of 1 000 m² or more
+ *   on a `village` or `town` stretch, within 50 m of a primary, secondary or
+ *   tertiary street, inferred commercial and drawn as a mapped shop
+ *   (`footprint-buildings.ts` §`footprintKindOf`). Off, every such footprint
+ *   is planned as before, byte for byte; a mapped type is never inferred over
+ *   either way. Read at load, as `inferred-outbuildings` is, and only while
+ *   `building-type` is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged` held at 400 m to 700 m, or a ride's corridor. The product
+ *   always infers them.
+ * - `inferred-barns` — #2024: an untagged footprint on a `rural` stretch
+ *   inferred a barn (100 m² or more, rectangular, at least 40 m back from the
+ *   street, a house within 80 m standing nearer it) — a gambrel or a steep
+ *   gable on planks, by a seeded share — or over 250 m² a metal pole building
+ *   (`footprint-buildings.ts` §`footprintKindOf`). Off, every such footprint
+ *   is planned as before, byte for byte; a mapped type is never inferred over
+ *   either way. Read at load, as `inferred-outbuildings` is, and only while
+ *   `building-type` is on. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=untagged` past 2 150 m, or a ride's corridor. The product always
+ *   infers them. Needs `urban-class` on: a barn stands on a `rural` stretch, so
+ *   with `-urban-class` (every stretch `unknown`) none is inferred either.
+ * - `mapped-roof-shape` — #1790: each mapped footprint's `roof:shape`,
+ *   `roof:orientation`, `roof:direction`, `building:levels` and `roof:levels`,
+ *   where #1789 carries them (`footprint-buildings.ts` §`MAPPED_ROOFS`,
+ *   §`storeyMetresOf`), setting its roof, its ridge's run and its storeys of
+ *   windows. Off, every tag is ignored and the archetype's roof or today's
+ *   rule applies, every plan as before, byte for byte. Read at load, as
+ *   `roof-variants` is. The owner's BY-EYE pair and the tablet's cost pair
+ *   (plan-time only: no call, no byte, no shader term); pair it with
+ *   `town=roofs`, whose every house is tagged. The product always reads them.
+ * - `mapped-paint` — #1792: each mapped footprint's `building:colour`,
+ *   `roof:colour`, `building:material` and `roof:material`, where #1789
+ *   carries them, painting and cladding it on the belt's own surfaces and
+ *   paints (`footprint-buildings.ts` §`MAPPED_WALL_SURFACES`,
+ *   §`MAPPED_ROOF_SURFACES`, `building-paint.ts` §`mappedPaintEntry`): brick
+ *   is brick, wood clapboard, a metal roof corrugated, and a colour the
+ *   nearest paint its surface already has. Off, the four tags are ignored,
+ *   every plan as before, byte for byte. Read at load, as `mapped-roof-shape`
+ *   is. The owner's BY-EYE pair and the tablet's cost pair (plan-time only: no
+ *   call, no byte, no shader term); pair it with `town=painted`, whose every
+ *   house is tagged. The product always reads them.
+ * - `start-year` — #1793: each mapped house's start year, where #1789 carries
+ *   it, narrowing its archetype to those of its era (`house-archetypes.ts`
+ *   §`ARCHETYPE_ERAS`) — a rural near-square two-storey house of 1915 a
+ *   Foursquare, where untagged it is a farmhouse — and ignored where it would
+ *   leave none. Off, every year is ignored, every plan as before, byte for
+ *   byte. Read at load, as `house-archetypes` is, and only while that is on.
+ *   The owner's BY-EYE pair and the tablet's cost pair (plan-time only: no
+ *   call, no byte, no shader term); pair it with `town=dated`, whose every
+ *   house but its controls is dated. The product always reads them.
  *
  * - `facade-trims` — #1663: the mapped facades' trims — a lintel over each
  *   window's head (stone on brick, the trim's paint on render and clapboard,
@@ -251,6 +421,29 @@ export type Layer = (typeof LAYERS)[number];
  *   owner's BY-EYE pair. Pair it with `town=mixed`: on `route.ts`' road there
  *   is no mapped building. The product always builds the weathering.
  *
+ * - `window-rooms` — #1662: the rooms behind every mapped pane — each pane's
+ *   ray followed into a procedural room, painted from a seeded palette — and
+ *   the glass's reflection weighted by Schlick's Fresnel rather than a
+ *   constant metalness (`three-renderer.ts` §`windowRoomsOf`). Off builds the
+ *   facade program without the term — the function, its calls and the
+ *   finish's change left out, not a uniform at zero, as `road-wear` does — so
+ *   every pane is #1581's dark room and gradient at metalness 0.35: the
+ *   tablet's COST pair and the owner's BY-EYE pair. Pair it with `town=mixed`:
+ *   on `route.ts`' road there is no mapped building. The product always
+ *   builds the rooms.
+ *
+ * - `lot-realism` — #1665: #1661's weathering on the procedural lots' walls
+ *   and roofs — the photograph's repeat broken, splash grime at a wall's
+ *   foot, moss on a roof — and #1662's rooms behind their glass
+ *   (`three-renderer.ts` §`lotRealismOf`). Off builds the lots' wall, roof and
+ *   glass programs without the terms — their functions and splices left out,
+ *   not a uniform at zero, as `road-wear` does — so every lot is drawn as
+ *   before #1665: the tablet's COST pair and the owner's BY-EYE pair. Pair it
+ *   with `route=village` and `-village-models`: on `route=village` the houses
+ *   are #1585's models, which this lever does not touch, so the pair is
+ *   identical there until the models are off (the models' weathering is a
+ *   follow-up under #1656). The product always builds it.
+ *
  * - `village-models` — #1566: the procedural villages' houses and
  *   main-street blocks drawn as #1585's models (`three-renderer.ts`
  *   §`VillageHouseBelt`). Off draws every plot as its procedural building,
@@ -270,8 +463,13 @@ export type Layer = (typeof LAYERS)[number];
  */
 export const LEVERS = [
   'air',
+  'archetype-porches',
+  'building-type',
+  'chain-link',
+  'commercial-archetypes',
   'crag',
   'decorations',
+  'dormer-variants',
   'facade-trims',
   'facade-wreath',
   'fir-prepass',
@@ -282,21 +480,36 @@ export const LEVERS = [
   'ground-clutter',
   'hedge-breaks',
   'house-archetypes',
+  'inferred-barns',
+  'inferred-commercial',
+  'inferred-outbuildings',
   'land-boundaries',
+  'landmark-churches',
+  'landmark-civic',
   'land-planting',
+  'litter',
+  'lot-realism',
   'mapped-blobs',
+  'mapped-paint',
+  'mapped-roof-shape',
+  'near-tree-fade',
   'overhang-shadows',
   'people',
   'road-wear',
+  'roadside-models',
+  'roof-variants',
   'settlement-clearing',
   'small-stones',
   'split-roofs',
+  'start-year',
+  'steeples',
   'surface-bounds',
   'texture-bias',
   'urban-class',
   'village-models',
   'weathering',
   'window-reveals',
+  'window-rooms',
 ] as const;
 
 /** One of {@link LEVERS}. */
@@ -332,12 +545,22 @@ export interface RealisticPageConfig {
     | 'city'
     | 'city-street'
     | 'houses'
+    | 'commercial'
+    | 'roofs'
+    | 'typed'
+    | 'untagged'
+    | 'painted'
+    | 'dated'
+    | 'churches'
+    | 'civic'
+    | 'grounds'
     | undefined;
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
-   * validation 0002 AE2. `undefined` is the default road, unchanged.
+   * validation 0002 AE2; since #1996 `out-and-back`, for the turning point's
+   * frames. `undefined` is the default road, unchanged.
    */
-  readonly route: 'village' | undefined;
+  readonly route: 'village' | 'out-and-back' | undefined;
   /**
    * #1622: the rider's local day the ride starts on. `undefined` is this
    * device's own day, as a ride reads it (`season.ts` §`deviceToday`).
@@ -359,6 +582,13 @@ export interface RealisticPageConfig {
    * @see realistic/delivery.ts
    */
   readonly delivery: number | undefined;
+  /**
+   * #1972: a lap race's worst case on every frame — in the stylised world's
+   * scenery-free frame, or since #1971 on the realistic world's own frame.
+   * `undefined` is a frame with no race, as an ordinary ride's.
+   * @see realistic/lap-race.ts
+   */
+  readonly race: 'worst' | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -379,6 +609,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   decorations: undefined,
   place: undefined,
   delivery: undefined,
+  race: undefined,
 };
 
 const KNOWN = new Set([
@@ -398,6 +629,7 @@ const KNOWN = new Set([
   'decorations',
   'place',
   'delivery',
+  'race',
 ]);
 
 /**
@@ -478,6 +710,48 @@ export function treesWithLevers(leversOff: readonly Lever[]): RealisticTrees {
 }
 
 /**
+ * Whether this run's world reads the roadside models — #1274: yes, as the
+ * product does, unless `roadside-models` is off. `realistic-harness.ts` hands
+ * it to `three-renderer.ts` §`setRealisticRoadside` before the world is loaded.
+ */
+export function roadsideWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('roadside-models');
+}
+
+/**
+ * Whether this run's world reads a village's litter — #1274: yes, as the
+ * product does, unless `litter` is off. `realistic-harness.ts` hands it to
+ * `three-renderer.ts` §`setRealisticLitter` before the world is loaded.
+ */
+export function litterWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('litter');
+}
+
+/**
+ * Whether this run places and draws the chain-link fence — #1274: yes, as the
+ * product does, unless `chain-link` is off. `realistic-harness.ts` hands it to
+ * `three-renderer.ts` §`setRealisticChainLink` before the world is loaded, and
+ * leaves the town's pieces out with it ({@link townWithChainLink}).
+ */
+export function chainLinkWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('chain-link');
+}
+
+/**
+ * `town` as this run's frames read it — #1274: as built, or, with
+ * `chain-link` off, with no chain-link pieces, which is the town before them.
+ */
+export function townWithChainLink<T extends { readonly chainLinkAt?: unknown }>(
+  town: T,
+  leversOff: readonly Lever[],
+): T {
+  if (chainLinkWithLevers(leversOff)) return town;
+  const without: { chainLinkAt?: unknown } = { ...town };
+  delete without.chainLinkAt;
+  return without as T;
+}
+
+/**
  * Which of the realistic surfaces' shaders this run builds — #1523: both,
  * bounded, as the product does, unless `ground-blend`, `road-wear` or
  * `surface-bounds` is off.
@@ -498,6 +772,15 @@ export function surfacesWithLevers(leversOff: readonly Lever[]): RealisticSurfac
  */
 export function firPrepassWithLevers(leversOff: readonly Lever[]): DepthPrepassMode {
   return leversOff.includes('fir-prepass') ? 'off' : 'drawn';
+}
+
+/**
+ * How this run draws a tree near the camera — #545: faded out, as the product
+ * does, unless `near-tree-fade` is off. `realistic-harness.ts` hands it to
+ * `three-renderer.ts` §`nearTreeFadeOf`.
+ */
+export function nearTreeFadeWithLevers(leversOff: readonly Lever[]): NearTreeFade {
+  return leversOff.includes('near-tree-fade') ? 'off' : 'fade';
 }
 
 /**
@@ -546,6 +829,24 @@ export function weatheringWithLevers(leversOff: readonly Lever[]): boolean {
 }
 
 /**
+ * Whether this run builds the rooms behind mapped glass — #1662: as the
+ * product does, unless `window-rooms` is off. `realistic-harness.ts` hands it
+ * to `three-renderer.ts` §`windowRoomsOf`.
+ */
+export function windowRoomsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('window-rooms');
+}
+
+/**
+ * Whether this run builds the procedural lots' weathering and rooms — #1665:
+ * as the product does, unless `lot-realism` is off. `realistic-harness.ts`
+ * hands it to `three-renderer.ts` §`lotRealismOf`.
+ */
+export function lotRealismWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('lot-realism');
+}
+
+/**
  * Whether this run plans the town's footprints with its urban class — #1634:
  * as the product's press does, unless `urban-class` is off.
  * `realistic-harness.ts` hands the class, or `NO_URBAN_CLASS`, to
@@ -572,6 +873,134 @@ export function splitRoofsWithLevers(leversOff: readonly Lever[]): boolean {
  */
 export function houseArchetypesWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('house-archetypes');
+}
+
+/**
+ * Whether this run gives the archetypes their roof variants — #1785: the
+ * product always does; `-roof-variants` chooses none, every plan as before.
+ * Read at load, as `house-archetypes` is.
+ */
+export function roofVariantsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('roof-variants');
+}
+
+/**
+ * Whether this run gives the archetypes their dormers — #1786: the product
+ * always does; `-dormer-variants` builds #1588's alone, every plan as before.
+ * Read at load, as `roof-variants` is.
+ */
+export function dormerVariantsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('dormer-variants');
+}
+
+/**
+ * Whether this run gives the archetypes their porches and eaves — #1784: the
+ * product always does; `-archetype-porches` builds #1589's porches and
+ * #1581's eaves, every plan as before. Read at load, as `dormer-variants` is.
+ */
+export function archetypePorchesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('archetype-porches');
+}
+
+/**
+ * Whether this run gives the town's commercial and multi-family footprints
+ * their archetypes — #1783: the product always does; `-commercial-archetypes`
+ * plans every one as before. Read at load, as `house-archetypes` is.
+ */
+export function commercialArchetypesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('commercial-archetypes');
+}
+
+/**
+ * Whether this run draws each mapped footprint as its building type says —
+ * #1791: the product always does; `-building-type` plans every footprint
+ * untyped, as before. Read at load, as `house-archetypes` is.
+ */
+export function buildingTypesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('building-type');
+}
+
+/**
+ * Whether this run gives the town's mapped places of worship their steeples —
+ * #2021: the product always does; `-steeples` plans every one as #1791's plain
+ * civic block. Read at load, as `building-type` is.
+ */
+export function steeplesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('steeples');
+}
+
+/**
+ * Whether this run draws the town's mapped places of worship as churches —
+ * #1794: the product always does; `-landmark-churches` plans every one as
+ * before, #1791's civic block with #2021's steeple. Read at load, as
+ * `steeples` is.
+ */
+export function landmarkChurchesWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('landmark-churches');
+}
+
+/**
+ * Whether this run draws the town's mapped town halls and schools as
+ * themselves — #1795: the product always does; `-landmark-civic` plans every
+ * one as before, #1791's civic block. Read at load, as `landmark-churches` is.
+ */
+export function landmarkCivicWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('landmark-civic');
+}
+
+/**
+ * Whether this run infers an untagged rural footprint a barn or a pole
+ * building — #2024: the product always does; `-inferred-barns` plans every one
+ * as before. Read at load, as `inferred-outbuildings` is.
+ */
+export function inferredBarnsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-barns');
+}
+
+/**
+ * Whether this run infers a big untagged footprint on a main street
+ * commercial — #2026: the product always does; `-inferred-commercial` plans
+ * every one as before. Read at load, as `inferred-outbuildings` is.
+ */
+export function inferredCommercialWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-commercial');
+}
+
+/**
+ * Whether this run infers an untagged footprint a garage or a shed — #2023:
+ * the product always does; `-inferred-outbuildings` plans every untagged
+ * footprint as before. Read at load, as `building-type` is.
+ */
+export function inferredOutbuildingsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('inferred-outbuildings');
+}
+
+/**
+ * Whether this run reads the town's mapped roof and storey tags — #1790: the
+ * product always does; `-mapped-roof-shape` ignores every one, every plan as
+ * before. Read at load, as `roof-variants` is.
+ */
+export function mappedRoofShapeWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('mapped-roof-shape');
+}
+
+/**
+ * Whether this run paints and clads the town's mapped buildings from their
+ * colour and material tags — #1792: the product always does; `-mapped-paint`
+ * ignores the four tags, every plan as before. Read at load, as
+ * `mapped-roof-shape` is.
+ */
+export function mappedPaintWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('mapped-paint');
+}
+
+/**
+ * Whether this run reads the town's mapped start years — #1793: the product
+ * always does; `-start-year` ignores every one, every plan as before. Read at
+ * load, as `house-archetypes` is.
+ */
+export function startYearWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('start-year');
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */
@@ -614,7 +1043,24 @@ export function parseConfig(search: string): RealisticPageConfig {
     town: params.has('town')
       ? oneOf(
           'town',
-          ['mixed', 'richmond', 'countryside', 'terrace', 'city', 'city-street', 'houses'] as const,
+          [
+            'mixed',
+            'richmond',
+            'countryside',
+            'terrace',
+            'city',
+            'city-street',
+            'houses',
+            'commercial',
+            'roofs',
+            'typed',
+            'untagged',
+            'painted',
+            'dated',
+            'churches',
+            'civic',
+            'grounds',
+          ] as const,
           'mixed',
         )
       : undefined,
@@ -625,6 +1071,7 @@ export function parseConfig(search: string): RealisticPageConfig {
       : undefined,
     place: params.has('place') ? oneOf('place', PLACES, 'south') : undefined,
     delivery: params.has('delivery') ? deliveryFrom(params.get('delivery') ?? '') : undefined,
+    race: params.has('race') ? raceFrom(params) : undefined,
   };
 }
 
@@ -648,6 +1095,29 @@ function deliveryFrom(value: string): number {
     );
   }
   return count;
+}
+
+/**
+ * `?race=worst` — #1972, and since #1971 in either world. With
+ * `world=stylised` the race is drawn on the scenery-free frame
+ * `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of, so it is REFUSED beside
+ * `route`, whose frame is a village's. In the realistic world it is drawn on
+ * the route's own frame with its scenery — `route=village` for #1689's hold,
+ * as Delivery's measurement is — and held to `LAP_RACE_VILLAGE_DRAW_CALLS`.
+ * In both it is refused beside `delivery` (a ride runs one mode) and `town`
+ * (a frame it is not).
+ */
+function raceFrom(params: URLSearchParams): 'worst' {
+  const value = params.get('race');
+  if (value !== 'worst') throw new Error(`realistic: race is one of worst, not "${String(value)}"`);
+  const others =
+    params.get('world') === 'stylised' ? ['delivery', 'town', 'route'] : ['delivery', 'town'];
+  for (const other of others) {
+    if (params.has(other)) {
+      throw new Error(`realistic: race and ${other} are two frames; name one of them, not both`);
+    }
+  }
+  return value;
 }
 
 /**
@@ -708,13 +1178,14 @@ export function decorationsWithConfig(config: Pick<RealisticPageConfig, 'decorat
 }
 
 /**
- * `?route=village` — #1559. Refused beside `town`, which rides a road of its
- * own: a URL naming both would measure one of them under the other's name.
+ * `?route=village` — #1559, and `?route=out-and-back` — #1996. Refused beside
+ * `town`, which rides a road of its own: a URL naming both would measure one
+ * of them under the other's name.
  */
-function routeFrom(params: URLSearchParams): 'village' {
+function routeFrom(params: URLSearchParams): 'village' | 'out-and-back' {
   const value = params.get('route');
-  if (value !== 'village')
-    throw new Error(`realistic: route is one of village, not "${String(value)}"`);
+  if (value !== 'village' && value !== 'out-and-back')
+    throw new Error(`realistic: route is one of village, out-and-back, not "${String(value)}"`);
   if (params.has('town')) {
     throw new Error('realistic: route and town are two roads; name one of them, not both');
   }
@@ -750,6 +1221,7 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.decorations !== undefined) params.set('decorations', config.decorations);
   if (config.place !== undefined) params.set('place', config.place);
   if (config.delivery !== undefined) params.set('delivery', String(config.delivery));
+  if (config.race !== undefined) params.set('race', config.race);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

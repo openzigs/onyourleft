@@ -47,6 +47,7 @@ import { INSTANCE_AGREEMENT_STORAGE_KEYS, type HeldSealedSession } from '../inst
 import { InstanceUnreachableError, type SealedCallOptions } from '../instance/instance-transport';
 import {
   HOSTED_ANSWER_REFUSAL_TEXT,
+  HOSTED_CHANGE_UNKNOWN,
   HOSTED_MASKING_NOT_SENT,
   HOSTED_NOT_ACCEPTED,
   HOSTED_NOT_OFFERED,
@@ -320,17 +321,21 @@ export function createHostedSettingsPort(options: HostedSettingsPortOptions): Ho
     path: string,
     extra: Omit<SealedCallOptions, 'token'> = {},
   ): Promise<HostedSettingsOutcome> {
+    // #1796: a change whose answer was lost may have been made — a call that
+    // timed out after it left, an answer that cannot be read — so it is never
+    // said to have changed nothing. A read changed nothing whatever happened.
+    const unreadable = method === 'GET' ? HOSTED_UNREADABLE : HOSTED_CHANGE_UNKNOWN;
     let answer: { readonly status: number; readonly body: unknown };
     try {
       answer = await held.sealed.call(method, path, { token: held.token, ...extra });
     } catch (error) {
       if (!(error instanceof InstanceUnreachableError)) throw error;
-      return failed(HOSTED_UNREADABLE);
+      return failed(unreadable);
     }
     if (answer.status === 404 || answer.status === 503) return failed(HOSTED_NOT_OFFERED);
     if (answer.status === 400) return failed(HOSTED_NOT_ACCEPTED);
     const settings = answer.status === 200 ? hostedSettingsFrom(answer.body) : undefined;
-    if (settings === undefined) return failed(HOSTED_UNREADABLE);
+    if (settings === undefined) return failed(unreadable);
     noteHostedOffer(options.storage, held.account.origin, settings);
     return { kind: 'held', settings };
   }
