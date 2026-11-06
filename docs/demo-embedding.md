@@ -182,3 +182,36 @@ not crop, cover or restyle away any of these.
   demo publicly conveys that data, so **serve the output unchanged**: the route's `.bin` file and
   `routes/LICENCE-ODbL.txt` with it. Serving the demo's routes without their notice file is not
   allowed (ADR 0056 D-4.4).
+
+## The route data as a release asset
+
+ADR 0056 D-4.2 offers each preset route's map data (ODbL §4.6 a) in two places: beside the demo,
+which the output above already does, and **as an asset on a GitHub release of the demo**
+([#1932](https://github.com/openzigs/onyourleft/issues/1932)). A video is often seen far from the
+demo, so its post names the release asset rather than a site that may move (D-4.3, D-8.3).
+
+The workflow [`demo-release.yml`](../.github/workflows/demo-release.yml), **Demo route release**,
+builds a release. It runs by hand and only from `main`, never on a pull request (ADR 0056 D-9):
+
+```sh
+gh workflow run demo-release.yml --ref main -f tag=demo-YYYY-MM-DD
+```
+
+It bakes every preset route with `demo:bake`, builds the demo, and runs `demo:release`
+(`tools/demo/demo-release.ts`), which checks each file against the digest `routes.json` names. It
+then publishes the release with three kinds of asset: each route's `<id>.<digest>.bin`, `routes.json`
+and `LICENCE-ODbL.txt`. Its notes carry the ODbL notice and each file's SHA-256. A bake that
+disagrees with its route's committed record fails the run, so nothing is published. The release
+is never marked the repository's latest, which stays the app's. The workflow never replaces a
+release's files: a later bake is a new tag (`demo-YYYY-MM-DD.2` for a second one that day).
+
+A video's post cites the release it was made from:
+
+| What                  | URL                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| the release           | `https://github.com/openzigs/onyourleft/releases/tag/<tag>`                         |
+| a route's data file   | `https://github.com/openzigs/onyourleft/releases/download/<tag>/<id>.<digest>.bin`  |
+| the notice            | `https://github.com/openzigs/onyourleft/releases/download/<tag>/LICENCE-ODbL.txt`   |
+
+`<id>.<digest>.bin` is the file name in the release's `routes.json`, the same name the demo output
+uses.
