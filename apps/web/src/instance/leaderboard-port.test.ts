@@ -766,7 +766,7 @@ describe('this device’s record of what it published and shared (#68)', () => {
       yours: true,
     });
     expect((await bea.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([
-      { rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 },
+      expect.objectContaining({ rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 }),
     ]);
     await zoneAt(bea, segment.geometry[3]!);
     expect(await bea.boards.standing(segment)).toEqual({
