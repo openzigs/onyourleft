@@ -295,13 +295,13 @@ const BANDS: Partial<Record<WorkoutCategory, Band>> = {
   // #2301 asks for 1.06–1.30. 1.30 is not a boundary in the table, and a
   // short-short set at 1.20–1.30 crosses into Anaerobic at 1.21, so the band
   // is VO₂ and Anaerobic together: the nearest the table comes.
-  vo2: { lower: zone(5), upper: zone(7) },
+  vo2: { lower: zone(5), upper: zone(7), easyBetween: true },
   anaerobic: { lower: zone(6), upper: zone(7) },
   // Every sprint is a free ride (ruling 6), so a sprint's held targets are
   // only the easy spinning between, which `workTargets` leaves out; this band
   // is what an ERG-held sprint would have to be in.
-  sprint: { lower: zone(7), upper: Infinity },
-  pyramid: { lower: zone(4), upper: zone(7) },
+  sprint: { lower: zone(7), upper: Infinity, easyBetween: true, mayRelease: true },
+  pyramid: { lower: zone(4), upper: zone(7), easyBetween: true },
   'race-simulation': { lower: zone(3), upper: zone(7) },
 };
 
@@ -367,7 +367,10 @@ function categoryFaults(template: WorkoutTemplate, band: Band): string[] {
   }
   for (const target of targets) {
     if (!inBand(target, band)) {
-      faults.push(`${String(target)} in ${JSON.stringify(band)}`);
+      // JSON.stringify would print an unbounded `upper` as null.
+      faults.push(
+        `${String(target)} in [${String(band.lower)}, ${String(band.upper)}${band.upperInclusive === true ? ']' : ')'}`,
+      );
     }
   }
   const set = template.mainSet;
@@ -599,6 +602,40 @@ describe('the catalogue: every category matches its main set', () => {
       expect(categoryFaults(released, band)).not.toEqual([]);
     });
 
+    it.each(['anaerobic', 'race-simulation'] as const)(
+      'holds %s strictly: easy riding in its main set is a fault',
+      (category) => {
+        const template = BUILT_IN_WORKOUTS.find((t) => t.category === category);
+        const strict = BANDS[category];
+        if (template === undefined || strict === undefined) {
+          throw new Error('the fixture template is missing');
+        }
+        expect(strict.easyBetween).toBeUndefined();
+        expect(strict.mayRelease).toBeUndefined();
+        expect(categoryFaults(template, strict)).toEqual([]);
+        const set = template.mainSet;
+        const sagging: WorkoutTemplate = {
+          ...template,
+          mainSet:
+            set.scaling === 'repeat'
+              ? { ...set, rep: [...set.rep, rep] }
+              : { ...set, blocks: [...set.blocks, rep] },
+        };
+        expect(categoryFaults(sagging, strict)).not.toEqual([]);
+      },
+    );
+
+    it('opts in only the categories whose sets are written with easy riding between', () => {
+      const opted = Object.entries(BANDS)
+        .filter(([, b]) => b.easyBetween === true)
+        .map(([category]) => category);
+      expect(opted.sort()).toEqual(['pyramid', 'sprint', 'vo2']);
+      const released = Object.entries(BANDS)
+        .filter(([, b]) => b.mayRelease === true)
+        .map(([category]) => category);
+      expect(released).toEqual(['sprint']);
+    });
+
     it('lets a band that says so leave easy riding and release in', () => {
       if (threshold === undefined || band === undefined || threshold.mainSet.scaling !== 'repeat') {
         throw new Error('the fixture template is missing');
@@ -700,7 +737,8 @@ describe('the catalogue: sprints', () => {
         tailorWorkout(template, { intensityPercent: MAXIMUM_INTENSITY_PERCENT }),
       );
       for (const segment of main) {
-        if (segment.from !== undefined && segment.from >= zone(7)) {
+        // A ramp that ends in the Sprint zone is a sprint too.
+        if (segment.from !== undefined && Math.max(segment.from, segment.to ?? 0) >= zone(7)) {
           expect(segment.endsAt - segment.startsAt).toBeGreaterThan(FREE_RIDE_SPRINT_SECONDS);
         }
       }
