@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 import { THRESHOLD_TEST_RULES } from '../../analysis/threshold-estimate';
 import { WorkoutError } from '../errors';
-import { tailorWorkout } from '../template';
+import { tailorWorkout, type TemplateBlock } from '../template';
 import { expandWorkout } from '../timeline';
-import { MAXIMUM_SHARE, type WorkoutBlock } from '../workout';
+import { MAXIMUM_SHARE } from '../workout';
 
 import {
   RAMP_MAXIMUM_SHARE,
@@ -30,9 +30,9 @@ function refusedChoice(run: () => unknown): string {
   throw new Error('expected the choice to be refused');
 }
 
-const steps = (): readonly WorkoutBlock[] => RAMP_TEST.template.mainSet.blocks;
+const steps = (): readonly TemplateBlock[] => RAMP_TEST.template.mainSet.blocks;
 
-const stepShare = (block: WorkoutBlock | undefined): number => {
+const stepShare = (block: TemplateBlock | undefined): number => {
   if (block?.kind !== 'steady') {
     throw new Error('every ramp step is a steady block');
   }
