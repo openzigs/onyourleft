@@ -9,14 +9,16 @@
  * and read back through the card, not handed to it.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
 
 import { COURSE_TEXT } from '../game/courses';
 import { writeDeliveryProgress } from '../game/delivery/delivery-progress';
+import { deliveryTown } from '../game/delivery/delivery-town-testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import { circuitRoute, northRoute } from '../game/route-fixtures-testing';
+import { DELIVERY_COURSE_TEXT } from '../game/StageChooser';
 import { writeRealisticWorldChoice } from '../game/world-preference';
 import { AppShell } from '../shell/AppShell';
 import { gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
@@ -280,6 +282,73 @@ describe('a lap race with no loop to race on — the owner’s ruling of 2026-11
     await open('/games/lap-race', [OUT, LOOP_A]);
     expect(document.querySelector('.oyl-game-courses__none')).toBeNull();
     expect(document.querySelector('main')?.textContent).not.toContain(GAME_COURSES_TEXT.noLoops);
+  });
+});
+
+describe('Delivery’s courses, counted — #2294 through the picker', () => {
+  // Two towns the count is proved on (`delivery/courses.test.ts`): a whole
+  // street of houses, and one ended after two.
+  const FULL = deliveryTown('full-town');
+  const SHORT = deliveryTown('short-town', { lastAlong: 220 });
+  const TOWNS: readonly RidableRoute[] = [
+    { id: 'short-town', name: 'Short street', profile: SHORT.profile, attempts: 0 },
+    { id: 'full-town', name: 'High street', profile: FULL.profile, attempts: 0 },
+  ];
+
+  async function openCounted(): Promise<void> {
+    writeRealisticWorldChoice(localStorage, true);
+    writeDeliveryProgress(localStorage, { day: 2, houses: 5, score: 3 });
+    const corridors = new Map([
+      ['full-town', FULL.corridor],
+      ['short-town', SHORT.corridor],
+    ]);
+    const port: GamePort = {
+      ...portOf(TOWNS),
+      loadWorldCorridor: (route) => {
+        const corridor = corridors.get(route.id);
+        return Promise.resolve(
+          corridor === undefined
+            ? { kind: 'unavailable', why: 'outside-coverage' }
+            : { kind: 'ready', corridor },
+        );
+      },
+    };
+    globalThis.location.hash = '#/games/delivery';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
+    await settle();
+  }
+
+  function entry(name: string): Element | undefined {
+    return [...document.querySelectorAll('.oyl-game-courses__course')].find(
+      (each) => each.querySelector('h3')?.textContent === name,
+    );
+  }
+
+  it('says up to how many houses a route holds, and greys one that holds no round with why', async () => {
+    await openCounted();
+    await vi.waitFor(() => {
+      expect(entry('High street')?.textContent).toContain('Delivery: up to 5 houses on the round');
+    });
+    await vi.waitFor(() => {
+      expect(entry('Short street')?.textContent).toContain(
+        `${DELIVERY_COURSE_TEXT.noRound}: 2 mapped houses in reach, and a round needs 3`,
+      );
+    });
+    // The order given: counts arrive one at a time, and no card moves.
+    expect(
+      [...document.querySelectorAll('.oyl-game-courses__course h3')].map((h) => h.textContent),
+    ).toEqual(['Short street', 'High street']);
+    expect(entry('Short street')?.querySelector('a')).toBeNull();
+    const choose = link(`${GAME_COURSES_TEXT.choose}: High street`);
+    expect(gamePlayFromHash(choose?.getAttribute('href') ?? '')).toBe('delivery');
+  });
+
+  it('counts nothing, and greys nothing, with no corridor port — the control', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open('/games/delivery', TOWNS);
+    expect(document.querySelector('main')?.textContent).not.toContain('Delivery: up to');
+    expect(document.querySelector('main')?.textContent).not.toContain(DELIVERY_COURSE_TEXT.noRound);
+    expect(link(`${GAME_COURSES_TEXT.choose}: Short street`)).toBeDefined();
   });
 });
 

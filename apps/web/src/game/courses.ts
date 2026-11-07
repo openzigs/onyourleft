@@ -13,24 +13,28 @@
  *
  * - **#2293**, the lap race's built-in circuits, adds its loops to the lap
  *   race's list.
- * - **#2294**, Delivery's picker, marks a saved route that passes fewer than
- *   `FEWEST_DELIVERY_HOUSES` mapped houses as unavailable with the count, and
- *   adds the built-in town rounds.
+ * - **#2294**, Delivery's counts (merged): each saved route's houses for a
+ *   round, counted on the device by `delivery/courses.ts` §`countCourses`
+ *   and handed in as {@link DeliveryCounts}. A route that cannot hold one is
+ *   unavailable with the reason in words, and one that can says "up to N
+ *   houses", both in the ride setup's own words (`StageChooser.tsx`
+ *   §`deliveryCourseLine`). The built-in town rounds are still to come.
  *
- * Until then the lap race lists every saved route, a loop as a course and any
- * other route with the reason it is not one (a race is laps of a loop, ADR
- * 0060 D-11.1), and Delivery lists every saved route: the ride decides at the
- * press whether a route's towns hold a round, as it does from the setup today
- * (`StageChooser.tsx` §`DeliveryOffer`).
+ * The lap race lists every saved route, a loop as a course and any other
+ * route with the reason it is not one (a race is laps of a loop, ADR 0060
+ * D-11.1). Delivery with no counts (no corridor port) lists every saved
+ * route, and the ride decides at the press, as from the setup.
  *
- * ⚠️ **Pure, and importing nothing of the game but a type**, so the Games
- * group's chunk carries no renderer, map or network (the stage chooser's own
- * rule, `stage-chooser-imports.test.ts`).
+ * ⚠️ **Pure, and importing nothing but the stage chooser's words**, which
+ * import no planner (`stage-chooser-imports.test.ts`), so the Games group's
+ * chunk carries no renderer, map or network. The count itself is loaded by
+ * the picker with `import()`, only when Delivery's courses are counted.
  */
 
 import type { GameMode } from '../shell/routes';
 
-import type { RidableRoute } from './StageChooser';
+import type { WeekProgress } from './delivery/round';
+import { deliveryCourseLine, type DeliveryCourse, type RidableRoute } from './StageChooser';
 
 /** One entry on a course picker. */
 export interface GameCourse {
@@ -40,6 +44,19 @@ export interface GameCourse {
    * with no way to choose it. `undefined`: it can be chosen.
    */
   readonly unavailable?: string | undefined;
+  /**
+   * What the course holds for the game, for one that can be chosen — #2294's
+   * "Delivery: up to N houses on the round", or that it is still counted.
+   */
+  readonly line?: string | undefined;
+}
+
+/** Delivery's counts, as the picker has them so far — #2294. */
+export interface DeliveryCounts {
+  /** Each route's count by id; a route not in it is still being counted. */
+  readonly courses: ReadonlyMap<string, DeliveryCourse>;
+  /** Today's round, which a route must hold (`deliveryCourseLine`). */
+  readonly week: Pick<WeekProgress, 'houses'>;
 }
 
 /** The rider-facing words of the lists' refusals: the project's own, naming no other game. */
@@ -48,12 +65,24 @@ export const COURSE_TEXT = {
 } as const;
 
 /**
- * The courses a game's picker offers, those that can be chosen first and in
- * the order they were given; those that cannot after them, each with why.
+ * The courses a game's picker offers. The lap race's: those that can be
+ * chosen first and in the order they were given, those that cannot after
+ * them, each with why. Delivery's: in the order given, each with what it
+ * holds or why it holds no round. ⚠️ Not re-sorted, because its counts arrive
+ * one route at a time and a sort would move a card under the rider's finger
+ * (#2294's own reason in the setup).
  */
-export function coursesFor(mode: GameMode, saved: readonly RidableRoute[]): readonly GameCourse[] {
+export function coursesFor(
+  mode: GameMode,
+  saved: readonly RidableRoute[],
+  delivery?: DeliveryCounts,
+): readonly GameCourse[] {
   if (mode === 'delivery') {
-    return saved.map((route) => ({ route }));
+    if (delivery === undefined) return saved.map((route) => ({ route }));
+    return saved.map((route) => {
+      const line = deliveryCourseLine(delivery.courses.get(route.id), delivery.week);
+      return line.holds === false ? { route, unavailable: line.text } : { route, line: line.text };
+    });
   }
   const loops = saved.filter((route) => route.profile.loop).map((route) => ({ route }));
   const others = saved

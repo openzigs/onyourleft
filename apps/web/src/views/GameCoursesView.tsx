@@ -17,7 +17,8 @@
  * a setup with no Delivery in it.
  */
 
-import { useEffect, useId, useState, type JSX } from 'react';
+import type { RouteProfile } from '@onyourleft/domain';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
@@ -25,8 +26,9 @@ import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { choosableCourses, coursesFor, type GameCourse } from '../game/courses';
 import type { GamePort } from '../game/GameView';
+import { readDeliveryProgress } from '../game/delivery/delivery-progress';
 import { deviceStorage } from '../game/hud/announce-preference';
-import { routeFacts, type RidableRoute } from '../game/StageChooser';
+import { routeFacts, type DeliveryCourse, type RidableRoute } from '../game/StageChooser';
 import { readRealisticWorldChoice } from '../game/world-preference';
 import { hrefFor, hrefForGamePlay, routeById, type GameMode } from '../shell/routes';
 import { useUnits } from '../units/context';
@@ -74,6 +76,36 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       cancelled = true;
     };
   }, [port]);
+  // #2294's counts, through `courses.ts` §`coursesFor`: each saved route's
+  // houses for today's round, counted on this device one route at a time
+  // through the setup's own corridor port, and abandoned when the page goes.
+  // Only where a round is offered (the realistic world, DL6). The count is
+  // loaded with `import()`, so the Games chunk carries no planner.
+  const [week] = useState(() => readDeliveryProgress(deviceStorage()));
+  const [counts, setCounts] = useState<ReadonlyMap<string, DeliveryCourse> | undefined>(undefined);
+  const known = useRef(new WeakMap<RouteProfile, number>());
+  const countsWanted = mode === 'delivery' && worldChosen && routes !== undefined;
+  useEffect(() => {
+    setCounts(undefined);
+    const load = port?.loadWorldCorridor?.bind(port);
+    if (!countsWanted || load === undefined || routes === undefined) return;
+    const controller = new AbortController();
+    setCounts(new Map());
+    void import('../game/delivery/courses').then(async ({ countCourses }) =>
+      countCourses(
+        routes,
+        load,
+        controller.signal,
+        (routeId, count) => {
+          setCounts((before) => new Map(before).set(routeId, count));
+        },
+        known.current,
+      ),
+    );
+    return () => {
+      controller.abort();
+    };
+  }, [port, routes, countsWanted]);
   if (mode === 'delivery' && !worldChosen) {
     return (
       <div className="oyl-game-courses">
@@ -117,7 +149,11 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       </div>
     );
   }
-  const courses = coursesFor(mode, routes);
+  const courses = coursesFor(
+    mode,
+    routes,
+    counts === undefined ? undefined : { courses: counts, week },
+  );
   return (
     <div className="oyl-game-courses">
       <BackToGames />
@@ -157,11 +193,12 @@ function BackToGames(): JSX.Element {
 
 function CourseEntry(props: { readonly course: GameCourse; readonly mode: GameMode }): JSX.Element {
   const units = useUnits();
-  const { route, unavailable } = props.course;
+  const { route, unavailable, line } = props.course;
   return (
     <li className="oyl-panel oyl-game-courses__course">
       <h3 className="oyl-game-courses__name">{route.name}</h3>
       <p className="oyl-muted">{routeFacts(route.profile, units)}</p>
+      {line === undefined ? null : <p className="oyl-game-courses__holds">{line}</p>}
       {unavailable === undefined ? (
         <p className="tw:mb-0">
           <ButtonLink variant="secondary" href={hrefForGamePlay(props.mode, route.id)}>
