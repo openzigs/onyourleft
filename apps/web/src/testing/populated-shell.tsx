@@ -236,7 +236,7 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
   more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
-  // #2292: the fixture's one route is not a loop and its week is a fresh one,
+  // #2292: the fixture's routes are not loops and its week is a fresh one,
   // so both cards say the same in both walks.
   games: {
     kind: 'constant',
@@ -777,8 +777,12 @@ function unpairedSideCamera(): SidePairingPort {
 
 /**
  * The trainer game's routes. Populated: one route with a long name, which the
- * picker lists with its ghost checkbox. No ride is started — this page has no
- * renderer — so the sensors are never read.
+ * picker lists with its ghost checkbox, and since #2335 a second, so a Games
+ * course picker (#2292) is a screen of two sections that
+ * `sections.browser.spec.ts` can find in columns and rows: with one it had
+ * a single card and no column to count. Neither is a loop, so the lap race's
+ * page still says it has none to race on. No ride is started — this page has
+ * no renderer — so the sensors are never read.
  */
 function gamePort(populated: boolean): GamePort {
   return {
@@ -789,6 +793,12 @@ function gamePort(populated: boolean): GamePort {
               {
                 id: 'route-1',
                 name: 'Box Hill, Leith Hill and every lane between them the long way round',
+                profile: routeProfile(routePoints()),
+                attempts: 0,
+              },
+              {
+                id: 'route-2',
+                name: 'Richmond Park and back',
                 profile: routeProfile(routePoints()),
                 attempts: 0,
               },
