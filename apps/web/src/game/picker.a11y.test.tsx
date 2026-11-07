@@ -110,11 +110,12 @@ describe('the route picker', () => {
     mounted = await mountPicker();
 
     // Every control the rule above audits is present — if one disappeared the
-    // rule would have nothing to audit and would pass. Three number boxes:
-    // #326's wind speed and direction, and the power of PR #2113's *Preview
-    // without a trainer*. The pacer's intensity is not among them since #2338:
-    // it shows only with the pacer on, and the test below audits it there.
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
+    // rule would have nothing to audit and would pass. One number box: the
+    // power of PR #2113's *Preview without a trainer*. #326's wind speed and
+    // direction are on the screen only while a wind is asked for (#2330), so
+    // the wind block below audits them; the pacer's intensity shows only with
+    // the pacer on since #2338, and the test below audits it there.
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(1);
     for (const words of ['pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
@@ -367,9 +368,10 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
   it('says nothing about validity while the rider has not asked for a wind', async () => {
     mounted = await mountPicker();
 
-    const box = boxLabelled(mounted.container, 'Wind speed');
-    expect(box?.getAttribute('aria-invalid')).toBeNull();
-    expect(box?.getAttribute('aria-describedby')).toBeNull();
+    // #2330: with no wind asked for there is no speed box to mark at all, and
+    // no refusal for anything on the screen to point at.
+    expect(boxLabelled(mounted.container, 'Wind speed')).toBeUndefined();
+    expect(document.getElementById('oyl-game-wind-problem')).toBeNull();
   });
 
   it('blocks every ride control and tells it why, without taking its tab stop', async () => {
@@ -405,6 +407,28 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
   it('audits clean while refusing, which is a different tree again', async () => {
     mounted = await windRefused();
 
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+
+  it('names, audits and reaches both wind boxes once a usable wind is asked for', async () => {
+    // #2330 took the two boxes off the screen while the switch is off, so the
+    // picker's own audit above no longer sees them. This is the tree they are
+    // in when nothing is wrong.
+    mounted = await windRefused();
+    const speed = boxLabelled(mounted.container, 'Wind speed');
+    expect(speed).toBeDefined();
+    await typeInto(speed as HTMLInputElement, '12');
+    await settle();
+
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(4);
+    const reachable = keyboardReachableElements(document);
+    for (const words of ['Wind speed', 'Wind direction']) {
+      const box = boxLabelled(mounted.container, words);
+      expect(box, words).toBeDefined();
+      expect(reachable).toContain(box);
+    }
+    expect(document.getElementById('oyl-game-wind-problem')).toBeNull();
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
   });

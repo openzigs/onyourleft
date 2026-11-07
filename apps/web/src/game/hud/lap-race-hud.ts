@@ -38,10 +38,14 @@
  *
  * ## The standings, as a room's (ADR 0051, ADR 0060 D-12.2)
  *
- * The same panel a room's race uses (`RaceStandings.tsx`), windowed the same
- * way (`room-ride.ts` §`windowedStandings`) but for one line: the leader is
- * always the first (#1967, the owner's ruling of 2026-10-31), so a rider at
- * the back of eight still sees who is winning. A solo race reads like a
+ * The same panel a room's race uses (`RaceStandings.tsx`), but **every
+ * racer of a solo field is on it** (#2328): {@link LAP_RACE_STANDINGS_LINES}
+ * is the most a field holds, the rider and {@link LAP_RACE_MOST_BOTS} bots,
+ * where a room's seven-line window (`room-ride.ts` §`windowedStandings`)
+ * dropped place 2 for a rider at the back of eight — the line the rider is
+ * likeliest to be chasing. A longer field than a solo race can start is
+ * windowed as a room's is, but with the leader always the first (#1967, the
+ * owner's ruling of 2026-10-31). A solo race reads like a
  * room's: a place, a name, a time gap **to the rider**, and **W/kg, never
  * watts**. Not a live region: ADR 0051 D-7. The time gap is this file's,
  * because there is no room to compute it: the drawn distance between the two
@@ -77,6 +81,8 @@ import {
   type RaceStandingsView,
   type StandingsLine,
 } from '../room-ride';
+
+import { LAP_RACE_MOST_BOTS } from '../lap-race/choice';
 
 import { NO_READING, type HudReading } from './fields';
 import { lapOfLaps } from './lap-text';
@@ -301,9 +307,17 @@ function powerToWeight(value: number | undefined): string {
 }
 
 /**
+ * The most lines of a solo race's standings: the whole of the largest field,
+ * the rider and {@link LAP_RACE_MOST_BOTS} bots — eight — so no bot is ever
+ * left off (#2328). One more than a room's `STANDINGS_LINES`.
+ */
+export const LAP_RACE_STANDINGS_LINES = LAP_RACE_MOST_BOTS + 1;
+
+/**
  * The field's standings, as a room's panel shows them — every racer in
- * `standings` order, the rider's own line marked, windowed around it with
- * the leader always on the first line (#1967).
+ * `standings` order, the rider's own line marked: the whole field, up to
+ * {@link LAP_RACE_STANDINGS_LINES} (#2328), and past that windowed around the
+ * rider with the leader always on the first line (#1967).
  * @see the module note §"The standings"
  */
 export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
@@ -341,5 +355,5 @@ export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
       you,
     };
   });
-  return windowedStandings(lines, { keepLeader: true });
+  return windowedStandings(lines, { keepLeader: true, lines: LAP_RACE_STANDINGS_LINES });
 }

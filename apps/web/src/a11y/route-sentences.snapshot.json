@@ -1225,6 +1225,7 @@
     "Box Hill, Leith Hill and every lane between them the long way round",
     "Chosen",
     "3.0 km · climb 30 m · steepest 1%",
+    "Out to the old mill and back",
     "Your ride",
     "Help with your ride",
     "Your ghost is your own fastest ride of the chosen route, replayed beside you.",
@@ -1242,8 +1243,6 @@
     "On the hoods",
     "In the drops",
     "Ride in a wind",
-    "Wind speed, km/h",
-    "Wind direction, degrees it blows from",
     "No lap race on this route: a lap race needs a loop, a route that ends where it starts.",
     "Preview without a trainer",
     "Ride this route at a steady power with nothing paired.",
@@ -3031,7 +3030,8 @@
     "Courses",
     "Box Hill, Leith Hill and every lane between them the long way round",
     "3.0 km · climb 30 m · steepest 1%",
-    "Not a loop."
+    "Not a loop.",
+    "Out to the old mill and back"
   ],
   "side-camera populated": [
     "Side camera",
