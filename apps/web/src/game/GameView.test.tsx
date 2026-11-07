@@ -2059,3 +2059,82 @@ describe('the rider’s W/kg and zone on the HUD — #2077', () => {
     expect(hudField('W/kg')).toBe(NO_READING);
   });
 });
+
+/**
+ * #2078 — the recent graph, wired: written from the frame loop once a second
+ * of the ride's clock, from the readings the HUD shows, and drawn in the
+ * route panel. `recent-trace.test.ts` holds the ring; `RecentGraph.test.tsx`
+ * the drawing.
+ */
+describe('the last ten minutes on the HUD — #2078', () => {
+  it('writes one second of power and heart rate per second ridden, however many frames', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    // 40 frames at 250 ms: ten seconds of ride, and 40 frames that could each
+    // have drawn the graph.
+    await pump(40);
+    const graph = mounted.container.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]');
+    expect(graph).not.toBeNull();
+    const written = Number(graph?.getAttribute('data-oyl-graph-written'));
+    expect(written).toBeGreaterThanOrEqual(8);
+    expect(written).toBeLessThanOrEqual(11);
+    // The port's live 220 W and 142 bpm, as one unbroken run each.
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-power')).toHaveLength(1);
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-heart')).toHaveLength(1);
+  });
+
+  /**
+   * PR #2231's review: the frame loop is what decides a reading "dropped",
+   * and it is the ring's only production writer. Each sensor goes quiet for
+   * three seconds of the ride, as `sensors.ts` §`gameSensors` reports a
+   * paired sensor that stopped — power `0` and not live, heart rate no value
+   * and not live — and the drawn line is read back: two runs with a gap
+   * between them, and no point on the zero line (`y` 100 in the drawing's
+   * units; heart rate's floor clamps a zero there too).
+   */
+  for (const dropped of ['power', 'heart rate'] as const) {
+    it(`draws a gap where ${dropped} dropped mid-ride, never a zero`, async () => {
+      let quiet = false;
+      const port: GamePort = {
+        ...pedallingPort(testRoute()),
+        readSensors: () => ({
+          rider:
+            quiet && dropped === 'power'
+              ? { power: watts(0), live: false, paired: true }
+              : { power: watts(220), live: true, paired: true },
+          cadence: LIVE_CADENCE,
+          heartRate:
+            quiet && dropped === 'heart rate'
+              ? { value: undefined, live: false, paired: true }
+              : { value: 142, live: true, paired: true },
+        }),
+      };
+      mounted = await mount(<GameView port={port} now={() => nowMs} />);
+      await settle();
+      const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      );
+      await clickThrough(ride);
+      // Three seconds live, three dropped, three live again, at 250 ms a frame.
+      await pump(12);
+      quiet = true;
+      await pump(12);
+      quiet = false;
+      await pump(12);
+      const graph = mounted.container.querySelector(
+        '.oyl-hud__route [data-testid="oyl-hud-recent"]',
+      );
+      const line = dropped === 'power' ? '.oyl-hud__recent-power' : '.oyl-hud__recent-heart';
+      const other = dropped === 'power' ? '.oyl-hud__recent-heart' : '.oyl-hud__recent-power';
+      const runs = queryAll(graph ?? document, line).map((path) => path.getAttribute('d') ?? '');
+      expect(runs).toHaveLength(2);
+      for (const run of runs) expect(run).not.toMatch(/ 100\.00(?: |$)/);
+      // The other sensor never dropped: one unbroken run.
+      expect(queryAll(graph ?? document, other)).toHaveLength(1);
+    });
+  }
+});
