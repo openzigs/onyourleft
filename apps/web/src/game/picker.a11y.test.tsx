@@ -110,10 +110,11 @@ describe('the route picker', () => {
     mounted = await mountPicker();
 
     // Every control the rule above audits is present — if one disappeared the
-    // rule would have nothing to audit and would pass. Four number boxes: the
-    // pacer's intensity, #326's wind speed and direction, and the power of
-    // PR #2113's *Preview without a trainer*.
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(4);
+    // rule would have nothing to audit and would pass. Three number boxes:
+    // #326's wind speed and direction, and the power of PR #2113's *Preview
+    // without a trainer*. The pacer's intensity is not among them since #2338:
+    // it shows only with the pacer on, and the test below audits it there.
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
     for (const words of ['pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
@@ -200,12 +201,46 @@ describe('the pacer refusal reaches the rider it stops (#255)', () => {
     expect(describedText(intensity as HTMLInputElement)).toContain('70');
   });
 
-  it('says nothing about validity while the number is one the rule accepts', async () => {
-    mounted = await mountPicker();
+  /** The pacer's switch, pressed, so the intensity box is on the screen (#2338). */
+  async function pacerOn(): Promise<Mounted> {
+    const tree = await mountPicker();
+    const box = queryAll<HTMLInputElement>(tree.container, 'input[type="checkbox"]').find((input) =>
+      (input.closest('label')?.textContent ?? '').includes('pacer'),
+    );
+    expect(box).toBeDefined();
+    await activateWithKeyboard(box as HTMLInputElement);
+    await settle();
+    return tree;
+  }
 
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+  /** The intensity box, found by its label rather than by its position. */
+  function intensityBox(root: ParentNode): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(root, 'input[type="number"]').find((input) =>
+      (input.labels?.[0]?.textContent ?? '').includes('Pacer intensity'),
+    );
+  }
+
+  it('says nothing about validity while the number is one the rule accepts', async () => {
+    // ⚠️ With the pacer on: since #2338 the box is not rendered with it off,
+    // and an absent box would read `null` for both attributes and pass.
+    mounted = await pacerOn();
+
+    const intensity = intensityBox(mounted.container);
+    expect(intensity).toBeDefined();
     expect(intensity?.getAttribute('aria-invalid')).toBeNull();
     expect(intensity?.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('with the pacer on, the intensity box is reachable and the tree audits clean (#2338)', async () => {
+    // The picker's own audit runs with the pacer off, so it no longer sees
+    // this box; this one does.
+    mounted = await pacerOn();
+
+    const intensity = intensityBox(mounted.container);
+    expect(intensity).toBeDefined();
+    expect(keyboardReachableElements(document)).toContain(intensity);
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
   });
 
   it('leaves every blocked ride control in the tab order, not behind it', async () => {

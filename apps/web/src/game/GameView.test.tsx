@@ -968,14 +968,79 @@ describe('the ride’s moving time while the GAME is paused — #1111’s review
 });
 
 describe('the choice itself', () => {
+  /** The pacer's switch, found by the words beside it. */
+  function pacerSwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(
+      mounted?.container ?? document,
+      'input[type="checkbox"]',
+    ).find((input) => (input.closest('label')?.textContent ?? '').includes('pacer'));
+  }
+
+  /** The intensity box, found by its label rather than by its position. */
+  function intensityBox(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="number"]').find(
+      (input) => (input.labels?.[0]?.textContent ?? '').includes('Pacer intensity'),
+    );
+  }
+
+  function rideButton(): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
+
   it('offers the pacer the way the ghost is offered, with a default already in the box', async () => {
     mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
     await settle();
 
     const text = mounted.container.textContent ?? '';
     expect(text).toContain('pacer');
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
-    expect(intensity?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+  });
+
+  it('shows the intensity box only while the pacer is on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    const toggle = pacerSwitch();
+    expect(toggle?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+
+    await clickThrough(toggle);
+    expect(intensityBox()).toBeDefined();
+
+    await clickThrough(pacerSwitch());
+    expect(pacerSwitch()?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+  });
+
+  it('keeps a typed intensity for when the pacer is switched back on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('1.8');
+    expect(intensityBox()?.value).toBe('1.8');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe('1.8');
+  });
+
+  it('does not let a refused intensity in the hidden box block the ride (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('70');
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    expect(rideButton()?.getAttribute('aria-disabled')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-game__problem')).toBeNull();
   });
 
   it('refuses to start on an intensity the rule would reject, and says why', async () => {
