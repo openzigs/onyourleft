@@ -32,6 +32,7 @@ import { expandWorkout } from '../timeline';
 import { MAXIMUM_HOLD_CEILING_SHARE, validateWorkout, type Workout } from '../workout';
 
 import { BUILT_IN_WORKOUTS } from '.';
+import { minutes, share } from './frame';
 
 /** How many templates each category must hold, at least: #2300's table. */
 const MINIMUM_COUNTS: Partial<Record<WorkoutCategory, number>> = {
@@ -201,10 +202,12 @@ function bare(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Every banned term in a template's name or summary; empty when it is clear. */
-function bannedTermsIn(template: Pick<WorkoutTemplate, 'name' | 'summary'>): string[] {
+/** Every banned term in a template's name, summary or block labels; empty when it is clear. */
+function bannedTermsIn(
+  template: Pick<WorkoutTemplate, 'name' | 'summary'> & { readonly labels?: readonly string[] },
+): string[] {
   const found: string[] = [];
-  for (const text of [template.name, template.summary]) {
+  for (const text of [template.name, template.summary, ...(template.labels ?? [])]) {
     for (const word of UPPER_CASE_WORDS) {
       if (new RegExp(`(?<![A-Za-z0-9])${escaped(word)}(?![A-Za-z0-9])`).test(text)) {
         found.push(word);
@@ -232,6 +235,15 @@ interface Band {
   /** Exclusive, like a zone's, unless {@link upperInclusive}. */
   readonly upper: number;
   readonly upperInclusive?: boolean;
+  /**
+   * Targets below Tempo are easy riding between the work (the easy half of a
+   * 30/30, the spinning between sprints), not work. Set only for a category
+   * whose sets are written that way; no band below sets it, so a Tempo-or-
+   * harder category holds every target to its band.
+   */
+  readonly easyBetween?: boolean;
+  /** An effort with the trainer released counts as the work. Same rule as above. */
+  readonly mayRelease?: boolean;
 }
 
 /** Zone `n`'s lower bound (1-based), read from the zone table. */
@@ -298,16 +310,37 @@ function workBlocks(template: WorkoutTemplate): readonly TemplateBlock[] {
 /**
  * The main set's working targets.
  *
- * For a category whose band starts at Tempo or above, a target below Tempo's
- * lower bound is **easy riding between the work** — the easy half of a
- * 30/30, the spinning between sprints — and not work, so it is left out; a
- * Tempo-or-harder target is work and must be in the band, so a threshold set
- * with a block at 0.85 still fails. For recovery and endurance, every target
- * is work. The line is the zone table's, not a new number.
+ * Every target is work and must lie in the band, unless the band says
+ * {@link Band.easyBetween}: then a target below Tempo's lower bound is easy
+ * riding between the work and is left out. The line is the zone table's, not
+ * a new number.
  */
 function workTargets(template: WorkoutTemplate, band: Band): number[] {
   const all = workBlocks(template).flatMap(targetsOf);
-  return band.lower >= zone(3) ? all.filter((target) => target >= zone(3)) : all;
+  return band.easyBetween === true ? all.filter((target) => target >= zone(3)) : all;
+}
+
+/** What is wrong with a template's main set for its category's band; empty when nothing is. */
+function categoryFaults(template: WorkoutTemplate, band: Band): string[] {
+  const faults: string[] = [];
+  const targets = workTargets(template, band);
+  const released =
+    band.mayRelease === true && workBlocks(template).some((block) => block.kind === 'free-ride');
+  if (targets.length === 0 && !released) {
+    faults.push('a main set with work in it');
+  }
+  for (const target of targets) {
+    if (!inBand(target, band)) {
+      faults.push(`${String(target)} in ${JSON.stringify(band)}`);
+    }
+  }
+  const set = template.mainSet;
+  if (set.scaling === 'repeat' && set.recovery !== undefined) {
+    if (set.recovery.block.target >= band.lower) {
+      faults.push('a recovery below the band');
+    }
+  }
+  return faults;
 }
 
 /** The zone holds a template's main set carries. */
@@ -321,6 +354,18 @@ function zoneHolds(template: WorkoutTemplate): HeartRateZoneHoldBlock[] {
 
 function tolerance(minutes: number): number {
   return Math.max(minutes * 60 * LENGTH_TOLERANCE_SHARE, LENGTH_TOLERANCE_SECONDS);
+}
+
+/** Every label a template's blocks carry; each reaches the rider as text. */
+function labelsOf(template: WorkoutTemplate): string[] {
+  const set = template.mainSet;
+  const main =
+    set.scaling === 'repeat'
+      ? [...set.rep, ...(set.recovery ? [set.recovery.block] : [])]
+      : set.blocks;
+  return [...template.warmUp, ...main, ...template.coolDown].flatMap((block) =>
+    'label' in block && block.label !== undefined ? [block.label] : [],
+  );
 }
 
 /** The tailored workout, or the refusal it was given. */
@@ -389,9 +434,13 @@ describe('the catalogue: the banned names (spike 0038 §3)', () => {
   it.each(BUILT_IN_WORKOUTS.map((t) => [t.id, t] as const))(
     '%s names no other product, title or mark',
     (_, template) => {
-      expect(bannedTermsIn(template)).toEqual([]);
+      expect(bannedTermsIn({ ...template, labels: labelsOf(template) })).toEqual([]);
     },
   );
+
+  it('finds a banned term in a block label', () => {
+    expect(bannedTermsIn({ ...clean, labels: ['Zwift Long Haul, 50 TSS'] })).toContain('TSS');
+  });
 
   /** A fixture with a clean name and summary, for the checker to be tried on. */
   const clean = { name: 'Tempo, two by twenty', summary: 'Twenty-minute tempo blocks.' };
@@ -473,19 +522,59 @@ describe('the catalogue: every category matches its main set', () => {
       if (band === undefined) {
         return;
       }
-      const targets = workTargets(template, band);
-      // Work to do: a working target, or an effort with the trainer released.
-      const released = workBlocks(template).some((block) => block.kind === 'free-ride');
-      expect(targets.length > 0 || released, 'a main set with work in it').toBe(true);
-      for (const target of targets) {
-        expect(inBand(target, band), `${String(target)} in ${JSON.stringify(band)}`).toBe(true);
-      }
-      const set = template.mainSet;
-      if (set.scaling === 'repeat' && set.recovery !== undefined) {
-        expect(set.recovery.block.target).toBeLessThan(band.lower);
-      }
+      expect(categoryFaults(template, band)).toEqual([]);
     },
   );
+
+  describe('the gate itself', () => {
+    const threshold = BUILT_IN_WORKOUTS.find((t) => t.id === 'threshold-2x20');
+    const band = BANDS.threshold;
+    const rep: TemplateBlock = {
+      kind: 'steady',
+      seconds: minutes(10),
+      target: share(0.7),
+      label: 'Easy',
+    };
+
+    it('refuses a target below the band in a Tempo-or-harder category', () => {
+      if (threshold === undefined || band === undefined || threshold.mainSet.scaling !== 'repeat') {
+        throw new Error('the fixture template is missing');
+      }
+      expect(categoryFaults(threshold, band)).toEqual([]);
+      const sagging = {
+        ...threshold,
+        mainSet: { ...threshold.mainSet, rep: [...threshold.mainSet.rep, rep] },
+      };
+      expect(categoryFaults(sagging, band)).not.toEqual([]);
+    });
+
+    it('refuses a free ride standing in for the work', () => {
+      if (threshold === undefined || band === undefined) {
+        throw new Error('the fixture template is missing');
+      }
+      const released: WorkoutTemplate = {
+        ...threshold,
+        mainSet: {
+          scaling: 'stretch',
+          blocks: [{ kind: 'free-ride', seconds: minutes(30) }],
+          stretch: { minimum: 0.66, maximum: 1.34 },
+        },
+      };
+      expect(categoryFaults(released, band)).not.toEqual([]);
+    });
+
+    it('lets a band that says so leave easy riding and release in', () => {
+      if (threshold === undefined || band === undefined || threshold.mainSet.scaling !== 'repeat') {
+        throw new Error('the fixture template is missing');
+      }
+      const easy = { ...band, easyBetween: true, mayRelease: true };
+      const mixed = {
+        ...threshold,
+        mainSet: { ...threshold.mainSet, rep: [...threshold.mainSet.rep, rep] },
+      };
+      expect(categoryFaults(mixed, easy)).toEqual([]);
+    });
+  });
 
   it.each(
     BUILT_IN_WORKOUTS.filter((t) => t.category === 'over-under').map((t) => [t.id, t] as const),
@@ -534,19 +623,24 @@ describe('the catalogue: heart-rate holds', () => {
   it.each(held.map((t) => [t.id, t] as const))(
     '%s rides a hold the player can read, inside the rider’s own endurance zone',
     (_, template) => {
+      const declared = zoneHolds(template);
       for (const thresholdHeartRate of [140, THRESHOLD_HEART_RATE, 200]) {
         const timeline = expandWorkout(tailorWorkout(template, { thresholdHeartRate }));
         const holds = timeline.segments.flatMap((segment) => segment.hold ?? []);
-        expect(holds.length).toBe(zoneHolds(template).length);
-        for (const hold of holds) {
+        expect(holds.length).toBe(declared.length);
+        holds.forEach((hold, at) => {
+          // The zone the template wrote the hold in, not a fixed one.
+          const index = HEART_RATE_ZONE_LOWER_FRACTIONS.findLastIndex(
+            (lower) => lower <= (declared[at]?.rangeShare.low ?? Infinity),
+          );
           expect(hold.ceilingShare).toBeLessThanOrEqual(MAXIMUM_HOLD_CEILING_SHARE);
           expect(hold.range.low).toBeGreaterThanOrEqual(
-            (HEART_RATE_ZONE_LOWER_FRACTIONS[1] ?? Infinity) * thresholdHeartRate,
+            (HEART_RATE_ZONE_LOWER_FRACTIONS[index] ?? Infinity) * thresholdHeartRate,
           );
           expect(hold.range.high).toBeLessThan(
-            (HEART_RATE_ZONE_LOWER_FRACTIONS[2] ?? 0) * thresholdHeartRate,
+            (HEART_RATE_ZONE_LOWER_FRACTIONS[index + 1] ?? 0) * thresholdHeartRate,
           );
-        }
+        });
       }
     },
   );
