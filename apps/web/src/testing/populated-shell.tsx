@@ -188,7 +188,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   home: { kind: 'fixture', marker: '.oyl-main .oyl-home__facts' },
   ride: { kind: 'fixture', marker: '.oyl-main .oyl-metric--live' },
   game: { kind: 'fixture', marker: '.oyl-chooser__card input[type="radio"]' },
-  workouts: { kind: 'fixture', marker: '.oyl-main a[data-oyl-select]' },
+  // The rider's own list: the built-ins after it (#2304) are there with no fixture.
+  workouts: { kind: 'fixture', marker: '.oyl-main [data-oyl-list="saved"] a[data-oyl-select]' },
   activities: { kind: 'fixture', marker: '.oyl-main a[href^="#/activities/"]' },
   analysis: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   segments: { kind: 'fixture', marker: '.oyl-main a[href^="#/segments/"]' },

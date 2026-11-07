@@ -805,6 +805,13 @@ export interface RouteMatch {
    * the Games tab and the navigation marks Games ({@link navGroupOf}).
    */
   readonly play?: GameMode;
+  /**
+   * The hash's query on the Workouts route, and on no other — #2304: the
+   * built-in list's filter (`workouts/built-in.ts` §`builtInFilterFromQuery`),
+   * kept in the address so a reload, a shared link and Back all show the list
+   * as it was filtered. Absent where there is no query.
+   */
+  readonly query?: string;
 }
 
 /**
@@ -836,8 +843,17 @@ export interface RouteMatch {
  */
 export function matchHash(hash: string): RouteMatch {
   const match = matchHashAmong(MATCHABLE_ROUTES, hash);
+  if (match.route.id === 'workouts') {
+    const query = hashQuery(hash);
+    return query === undefined || query === '' ? match : { ...match, query };
+  }
   const play = match.route.id === 'game' ? gamePlayFromHash(hash) : undefined;
   return play === undefined ? match : { ...match, play };
+}
+
+/** The part of a hash between its `?` and any nested `#`, or `undefined` with no `?`. */
+function hashQuery(hash: string): string | undefined {
+  return /^[^?]*\?([^#]*)/.exec(hash)?.[1];
 }
 
 /**
@@ -929,9 +945,10 @@ export function routeForHash(hash: string): RouteDefinition {
  *
  * The query and any nested fragment are dropped: no route is chosen by its
  * query, and silently matching `'/activities?x=1'` against nothing would
- * send a perfectly good deep link to the not-found page. (One query is READ,
- * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010, and
- * {@link gameDeliveryFromHash}, #1816, and {@link gamePlayFromHash}, #2292.) A **path** parameter
+ * send a perfectly good deep link to the not-found page. (Two routes READ a
+ * query: the trainer game — {@link gameRouteFromHash}, #1010,
+ * {@link gameDeliveryFromHash}, #1816, and {@link gamePlayFromHash}, #2292 —
+ * and Workouts, whose built-in filter is {@link RouteMatch.query}, #2304.) A **path** parameter
  * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {

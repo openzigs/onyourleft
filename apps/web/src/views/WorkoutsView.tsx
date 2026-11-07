@@ -37,10 +37,19 @@ import {
   type BuildRefusal,
 } from '../workouts/build';
 import { blockChartPaths, type BlockChartPaths } from '../workouts/block-chart';
-import { BlockChart, BlockChartDrawing } from '../workouts/BlockChart';
+import { BlockChart } from '../workouts/BlockChart';
+import {
+  builtInFilterFromQuery,
+  hrefForSavedWorkouts,
+  hrefForWorkouts,
+  isBuiltInId,
+  workoutsListOf,
+  type WorkoutsList,
+} from '../workouts/built-in';
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
+import { WorkoutCardArt } from '../workouts/WorkoutCardArt';
 import {
   CREATE_HEADING_ID,
   CreateLink,
@@ -48,6 +57,7 @@ import {
   SELECTED_HEADING_ID,
 } from '../shell/ListDetail';
 import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
+import { BuiltInDetail, BuiltInWorkouts } from './BuiltInWorkouts';
 
 /**
  * Workouts (#14) — the ones this device holds, and building a new one.
@@ -114,8 +124,14 @@ export interface WorkoutsViewProps {
    * rather than offered and inert — `RoutesView.tsx`'s rule.
    */
   readonly save?: ((file: DownloadableFile) => void) | undefined;
-  /** The selected workout's id, from `#/workouts/selected/<id>` — #670. */
+  /**
+   * The selected workout's id, from `#/workouts/selected/<id>` — #670. Since
+   * #2304 it may name a built-in (`workouts/built-in.ts` §`BUILT_IN_ID_PREFIX`),
+   * which is never looked up in the store.
+   */
   readonly selected?: string | undefined;
+  /** The address's query, the built-in list's filter — #2304, `routes.ts` §`RouteMatch.query`. */
+  readonly query?: string | undefined;
 }
 
 /** A selected workout that was not in the list, read on its own. */
@@ -149,29 +165,6 @@ interface ListedWorkout extends WorkoutEntry {
    */
   readonly chart: BlockChartPaths;
 }
-
-/**
- * A card's drawing — #941: the workout as the builder's block chart draws it
- * (`workouts/BlockChart.tsx`), each block in its zone's colour, at the card's
- * size. Decoration: no number reaches it, and the card's words carry the
- * workout. Its zones are named once, by the list's key, not on each card.
- *
- * `memo`, because the paths are the ones the list read set into state, and
- * the builder beside the list re-renders this view on every keystroke: without
- * it every card's chart (up to `WORKOUT_LIST_LIMIT` of them) is drawn again
- * for a character typed into a name.
- */
-const WorkoutCardArt = memo(function WorkoutCardArt({
-  chart,
-}: {
-  readonly chart: BlockChartPaths;
-}): JSX.Element {
-  return (
-    <div className="oyl-shape-card__art tw:h-(--oyl-shape-card-art-height)">
-      <BlockChartDrawing paths={chart} className="oyl-block-chart--card" />
-    </div>
-  );
-});
 
 /**
  * The zones any card in the list paints, lowest first — what the list's one
@@ -220,8 +213,14 @@ const WorkoutBlockChart = memo(function WorkoutBlockChart({
  */
 const newWorkoutId = (): WorkoutId => `workout-${globalThis.crypto.randomUUID()}` as WorkoutId;
 
-export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
+export function WorkoutsView({ port, now, save, selected, query }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
+  // One object per address, so the built-in list (a `memo`) draws again only when it changes.
+  const filter = useMemo(() => builtInFilterFromQuery(query), [query]);
+  // #2304: a built-in is chosen by the same address and never read from the store.
+  const builtIn = isBuiltInId(selected);
+  // #2304: the rider's own workouts or the built-ins, from the address.
+  const shownList = workoutsListOf(query, selected);
   // Not on every keystroke the builder causes: only when the list is read again.
   const cardZones = useMemo(() => zonesOnCards(entries ?? []), [entries]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -325,8 +324,11 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   }, [selected]);
 
   const inList =
-    selected === undefined ? undefined : entries?.find((entry) => entry.row.id === selected);
-  const readAlone = selected !== undefined && entries !== undefined && inList === undefined;
+    selected === undefined || builtIn
+      ? undefined
+      : entries?.find((entry) => entry.row.id === selected);
+  const readAlone =
+    selected !== undefined && !builtIn && entries !== undefined && inList === undefined;
   useEffect(() => {
     if (!readAlone || port === undefined || selected === undefined) {
       return undefined;
@@ -516,7 +518,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     entries === undefined ? (
       <p>Reading your workouts…</p>
     ) : (
-      <>
+      // #2304: the rider's own, apart from the built-ins below them.
+      <div data-oyl-list="saved">
         {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
         {entries.length === 0 ? (
           // #943: with nothing saved, *Build a workout* is the empty state's
@@ -563,24 +566,28 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             </ul>
           </>
         )}
-      </>
+      </div>
     );
 
   const list = (
     <>
-      {entries?.length === 0 ? null : (
+      {entries?.length === 0 && shownList === 'saved' ? null : (
         <p>
           <CreateLink route={routeById('workouts')} selection={selected}>
             Build a workout
           </CreateLink>
         </p>
       )}
-      {listed}
+      {/* #2304: after the way to the builder, so that keeps its place. */}
+      <ListSwitch shown={shownList} />
+      {shownList === 'saved' ? listed : <BuiltInWorkouts filter={filter} selected={selected} />}
     </>
   );
 
   const chosen =
-    selected === undefined ? null : shown === undefined ? (
+    selected === undefined ? null : builtIn ? (
+      <BuiltInDetail id={selected} />
+    ) : shown === undefined ? (
       <p>Reading this workout…</p>
     ) : shown.kind === 'found' ? (
       <div className="oyl-selected">
@@ -673,10 +680,11 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     <ListDetail
       route={routeById('workouts')}
       selection={selected}
-      listLabel="Saved workouts"
+      listLabel={shownList === 'saved' ? 'Saved workouts' : 'Built-in workouts'}
       detailLabel="Workout"
       backLabel="All workouts"
       detailWithoutSelection
+      query={query}
       list={list}
       detail={
         chosen ?? (
@@ -1020,6 +1028,41 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         )
       }
     />
+  );
+}
+
+/**
+ * The two lists the list pane can show — #2304: the rider's own, or the
+ * built-ins. Links, as the section tabs are (`AppShell.tsx` §`SectionNav`),
+ * because each list is an address: Back, a reload and a shared link keep it.
+ * Drawn as those tabs, and the current one is told the same ways — filled,
+ * bold and underlined — with `aria-current="true"`, since it is a choice of
+ * list on one page rather than a page of its own.
+ */
+function ListSwitch({ shown }: { readonly shown: WorkoutsList }): JSX.Element {
+  return (
+    <nav aria-label="Which workouts" className="oyl-list-switch">
+      <ul className="oyl-subnav-list">
+        <li>
+          <a
+            className="oyl-subnav-link"
+            href={hrefForSavedWorkouts()}
+            aria-current={shown === 'saved' ? 'true' : undefined}
+          >
+            Your workouts
+          </a>
+        </li>
+        <li>
+          <a
+            className="oyl-subnav-link"
+            href={hrefForWorkouts({})}
+            aria-current={shown === 'built-in' ? 'true' : undefined}
+          >
+            Built-in workouts
+          </a>
+        </li>
+      </ul>
+    </nav>
   );
 }
 
