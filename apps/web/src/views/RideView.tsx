@@ -46,7 +46,7 @@
 
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
-import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
+import type { Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -65,6 +65,7 @@ import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
+import { useOwnThresholds } from '../analysis/own-thresholds';
 import type { RecoverableRide } from '../recording/recovery';
 import type { RecordingSessionId } from '@onyourleft/store';
 import {
@@ -469,54 +470,6 @@ function LiveRide({
       {snapshot.sensors.length === 0 && snapshot.phase === 'idle' ? <OtherRides /> : null}
     </div>
   );
-}
-
-/** The rider's own thresholds, each `undefined` when they have not set it. */
-interface OwnThresholds {
-  readonly power: Watts | undefined;
-  readonly heartRate: BeatsPerMinute | undefined;
-}
-
-const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
-
-/**
- * Read the athlete's thresholds once, for the workout panel — threshold
- * heart rate too since #1240, which a heart-rate hold needs.
- *
- * `undefined` while it is being read and `undefined` when it is not set, and
- * the two are deliberately the same value: the panel's answer to both is the
- * same sentence, and a screen that distinguished "loading" from "not set" would
- * be offering a rider a state they cannot act on.
- */
-function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
-  const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
-  useEffect(() => {
-    if (analysis === undefined) {
-      return;
-    }
-    let live = true;
-    void analysis.store
-      .getAthlete(analysis.athleteId)
-      .then((athlete) => {
-        if (live) {
-          // The rider's own, and nothing substituted: `analysis/thresholds.ts`
-          // is the one place a default is, and it is not for this screen.
-          setThreshold({
-            power: athlete?.thresholdPower,
-            heartRate: athlete?.thresholdHeartRate,
-          });
-        }
-      })
-      .catch(() => {
-        // A store that cannot be read leaves the threshold absent, which the
-        // panel already explains. There is nothing else this screen can say
-        // that a rider could act on.
-      });
-    return () => {
-      live = false;
-    };
-  }, [analysis]);
-  return threshold;
 }
 
 /**

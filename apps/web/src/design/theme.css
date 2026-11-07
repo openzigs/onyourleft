@@ -2075,6 +2075,26 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * THE TAILOR PANE — #2305 (`views/TailorBuiltIn.tsx`). Its controls are 48 px
+ * targets too, the issue's floor, as the filters above: the length select,
+ * the steppers' two buttons and their boxes, and *Save a copy*. The stepper
+ * rules are the stage chooser's (§"the loadout's preview") in this pane.
+ */
+.oyl-tailor select,
+.oyl-tailor__save .oyl-button {
+  min-height: 3rem;
+}
+
+.oyl-tailor .oyl-stepper__step,
+.oyl-tailor .oyl-stepper > input {
+  min-block-size: 3rem;
+}
+
+.oyl-tailor .oyl-stepper__step {
+  min-inline-size: 3rem;
+}
+
+/*
  * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
  * screen's own sentences and one action, in that order, on a quiet surface so
  * it reads as one thing rather than three paragraphs and a button.

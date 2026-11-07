@@ -748,3 +748,37 @@ test.describe('#2304 — the built-in workouts’ filters', () => {
     await expect(page.getByLabel('Category')).toHaveValue('sweet-spot');
   });
 });
+
+/*
+ * #2305: the tailor pane's controls are 48 px targets too — the length select,
+ * the steppers' buttons and boxes, and *Save a copy* (`theme.css` §"THE TAILOR
+ * PANE") — measured #316's three ways on a built-in chosen by its address.
+ */
+test.describe('#2305 — the tailor pane’s controls', () => {
+  const TAILOR_TARGET = 48;
+
+  for (const viewport of [PHONE, TABLET]) {
+    test(`are 48 px targets at ${String(viewport.width)}×${String(viewport.height)}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      const seen = await page.evaluate(
+        async (target) => window.__oylReflow?.visit(target),
+        '#/workouts/selected/built-in%3Asweet-spot-3x12',
+      );
+      expect(seen?.routeId).toBe('workouts');
+      await expect(page.locator('main [data-oyl-built-in-detail]')).toBeVisible();
+      const controls = await threeWays(
+        page,
+        '.oyl-tailor select, .oyl-tailor .oyl-stepper__step, .oyl-tailor .oyl-stepper > input, ' +
+          '.oyl-tailor__save .oyl-button',
+        { height: 'min-height' },
+      );
+      // The length select, three steppers of two buttons and a box, and Save a copy.
+      expect(controls.count).toBe(11);
+      for (const box of controls.shipped) expect(box.height).toBeGreaterThanOrEqual(TAILOR_TARGET);
+      expect(new Set(controls.declared)).toEqual(new Set([`${String(TAILOR_TARGET)}px`]));
+      for (const height of controls.stripped) expect(height).toBeLessThan(TAILOR_TARGET);
+    });
+  }
+});

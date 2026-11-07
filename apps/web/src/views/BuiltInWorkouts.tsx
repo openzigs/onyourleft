@@ -2,9 +2,11 @@
 
 import { memo, useId, useMemo, type JSX } from 'react';
 
+import type { Workout } from '@onyourleft/domain';
+
+import type { OwnThresholds } from '../analysis/own-thresholds';
 import { ZoneKey, zonesPainted } from '../design/ZoneKey';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
-import { BlockChartDrawing } from '../workouts/BlockChart';
 import {
   BUILT_IN_CARDS,
   builtInById,
@@ -20,6 +22,7 @@ import {
   type LengthChoice,
 } from '../workouts/built-in';
 import { WorkoutCardArt } from '../workouts/WorkoutCardArt';
+import { TailorBuiltIn } from './TailorBuiltIn';
 
 /**
  * The built-in workouts on the Workouts screen — #2304, under the library epic
@@ -205,12 +208,20 @@ export const BuiltInWorkouts = memo(function BuiltInWorkouts({
 });
 
 /**
- * A chosen built-in in the detail pane — #2304: what it is, as its card says,
- * with its drawing. Tailoring it and saving a copy are #2305's. Nothing here
- * reads the store: a built-in is not in it, and an id that names no built-in
- * is "not found", as a saved workout's would be.
+ * A chosen built-in in the detail pane — #2304, tailored since #2305
+ * (`TailorBuiltIn.tsx`). Nothing here reads the store: a built-in is not in
+ * it, and an id that names no built-in is "not found", as a saved workout's
+ * would be.
  */
-export function BuiltInDetail({ id }: { readonly id: string }): JSX.Element {
+export function BuiltInDetail({
+  id,
+  thresholds,
+  onSaveCopy,
+}: {
+  readonly id: string;
+  readonly thresholds: OwnThresholds;
+  readonly onSaveCopy: (name: string, workout: Workout) => Promise<string>;
+}): JSX.Element {
   const card = builtInById(id);
   if (card === undefined) {
     return (
@@ -222,35 +233,8 @@ export function BuiltInDetail({ id }: { readonly id: string }): JSX.Element {
       </div>
     );
   }
+  // Keyed, so choosing another built-in starts from its own defaults.
   return (
-    <div className="oyl-selected" data-oyl-built-in-detail={card.template.id}>
-      <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
-        {card.name}
-      </h2>
-      <p>{card.summary}</p>
-      <dl className="oyl-activity-card__facts">
-        <div>
-          <dt>Length</dt>
-          <dd>{card.duration}</dd>
-        </div>
-        <div>
-          <dt>Category</dt>
-          <dd>{card.categoryName}</dd>
-        </div>
-        <div>
-          <dt>Hardest</dt>
-          <dd>{hardestText(card)}</dd>
-        </div>
-        <div>
-          <dt>Shape</dt>
-          <dd>{card.shape}</dd>
-        </div>
-      </dl>
-      <p className="oyl-muted">
-        Built into the app: it is not saved on this device, and it cannot be changed or deleted.
-      </p>
-      <BlockChartDrawing paths={card.chart} />
-      <ZoneKey zones={zonesPainted(card.chart.bands)} />
-    </div>
+    <TailorBuiltIn key={card.id} card={card} thresholds={thresholds} onSaveCopy={onSaveCopy} />
   );
 }
