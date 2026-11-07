@@ -11,8 +11,10 @@
  * {@link coursesFor} is the one place the list is decided, so the issues that
  * make each list better change this function and nothing that draws it:
  *
- * - **#2293**, the lap race's built-in circuits, adds its loops to the lap
- *   race's list.
+ * - **#2293**, the lap race's built-in circuits (ADR 0064): handed in as
+ *   `circuits`, from `GamePort.listCircuits`, and listed after the rider's
+ *   own loops and before the routes that are not one. Never Delivery's: a
+ *   circuit is a solo lap race and nothing else (D-8.1).
  * - **#2294**, Delivery's counts (merged): each saved route's houses for a
  *   round, counted on the device by `delivery/courses.ts` §`countCourses`
  *   and handed in as {@link DeliveryCounts}. A route that cannot hold one is
@@ -22,8 +24,9 @@
  *
  * The lap race lists every saved route, a loop as a course and any other
  * route with the reason it is not one (a race is laps of a loop, ADR 0060
- * D-11.1). Delivery with no counts (no corridor port) lists every saved
- * route, and the ride decides at the press, as from the setup.
+ * D-11.1), and the built-in circuits between them. Delivery with no counts
+ * (no corridor port) lists every saved route, and the ride decides at the
+ * press, as from the setup.
  *
  * ⚠️ **Pure, and importing nothing but the stage chooser's words**, which
  * import no planner (`stage-chooser-imports.test.ts`), so the Games group's
@@ -65,17 +68,19 @@ export const COURSE_TEXT = {
 } as const;
 
 /**
- * The courses a game's picker offers. The lap race's: those that can be
- * chosen first and in the order they were given, those that cannot after
- * them, each with why. Delivery's: in the order given, each with what it
- * holds or why it holds no round. ⚠️ Not re-sorted, because its counts arrive
- * one route at a time and a sort would move a card under the rider's finger
- * (#2294's own reason in the setup).
+ * The courses a game's picker offers. The lap race's: the rider's loops
+ * first and in the order they were given, then the built-in `circuits`
+ * (#2293), then the routes that cannot be chosen, each with why. Delivery's:
+ * in the order given, each with what it holds or why it holds no round, and
+ * no circuit. ⚠️ Not re-sorted, because its counts arrive one route at a time
+ * and a sort would move a card under the rider's finger (#2294's own reason
+ * in the setup).
  */
 export function coursesFor(
   mode: GameMode,
   saved: readonly RidableRoute[],
   delivery?: DeliveryCounts,
+  circuits: readonly RidableRoute[] = [],
 ): readonly GameCourse[] {
   if (mode === 'delivery') {
     if (delivery === undefined) return saved.map((route) => ({ route }));
@@ -88,7 +93,8 @@ export function coursesFor(
   const others = saved
     .filter((route) => !route.profile.loop)
     .map((route) => ({ route, unavailable: COURSE_TEXT.notALoop }));
-  return [...loops, ...others];
+  const builtIn = circuits.map((route) => ({ route }));
+  return [...loops, ...builtIn, ...others];
 }
 
 /** How many of the courses can be chosen. */

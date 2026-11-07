@@ -1040,6 +1040,15 @@ test.describe('#1970 — the lap race’s switch is on the screen on a loop, on 
     page,
   }) => {
     await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser', 'promise', '&lap=riding');
+    // #2330: the wind's speed and direction boxes show only while its switch
+    // is on, and before #1970 they always showed. On, with a speed it
+    // accepts, this is the loadout #1970 moved the race out from under, with
+    // no refusal adding height that loadout did not have. Off, the race last
+    // ends 743 px down on a 768 px fold, and this control would measure
+    // nothing.
+    await page.getByRole('switch', { name: 'Ride in a wind' }).click();
+    await page.getByRole('spinbutton', { name: /^Wind speed/ }).fill('12');
+    await expect(page.locator('#oyl-game-wind-problem')).toHaveCount(0);
     const seen = await readRaceSwitch(page, true);
     console.log(
       `#1970 — the control: the race switch at ${seen.top.toFixed(1)} px, the fold at ${seen.fold.toFixed(1)} px`,

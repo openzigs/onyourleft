@@ -83,6 +83,7 @@ import type {
   WorkoutId,
   SegmentId,
 } from './ids';
+import { isCircuitRouteId } from './ids';
 import {
   fromPersistedActivityRecord,
   fromPersistedDeviceKey,
@@ -2992,6 +2993,9 @@ export class ActivityStore {
    * Refuses a corridor for a route that is not this owner's, inside the same
    * transaction as the write, so a read that finishes after the rider deleted
    * the route cannot leave a corridor that no route deletion will reach.
+   * A built-in circuit's `circuit:` key (ADR 0064 D-2.2) is the exception: it
+   * has no route to own it, so it is admitted without one and its corridor
+   * stays until the athlete is deleted.
    *
    * @throws {WorldCorridorTooLargeError} if `features` is over
    * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.
@@ -3012,6 +3016,14 @@ export class ActivityStore {
       );
     }
     await this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
+      // #2293, ADR 0064 D-2.2: a built-in circuit has no route record to
+      // refer to; its key is in the namespace no route id may carry
+      // (`ids.ts` §`routeId`), so the two can never share one. The owner is
+      // still half of the key, and the read below still takes it.
+      if (isCircuitRouteId(record.routeId)) {
+        await this.#worldCorridors.put(record);
+        return;
+      }
       const route = await this.#routes
         .where(INDEX.routeByOwnerAndId)
         .equals([record.owner, record.routeId])

@@ -178,6 +178,14 @@
  * on both walks — `07:05`, the fixed local time this file now reads every
  * route at. No sentence is dropped or reworded.
  *
+ * ⚠️ **Re-recorded by #2330, awaiting the owner's approval with that pull
+ * request's screenshots**, for two dropped lines and nothing else: the game's
+ * picker shows its wind speed and direction boxes only while *Ride in a wind*
+ * is on, so "Wind speed, km/h" and "Wind direction, degrees it blows from"
+ * are no longer on the populated walk, which leaves the switch off. They are
+ * not gone from the product: `wind-wiring.test.tsx` §"#2330" turns the switch
+ * on and finds both. Nothing is added or reworded.
+ *
  * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
  * request's screenshots**, for added lines and nothing else: Workouts lists
  * the built-in workouts under its own list, on both walks — their heading,
