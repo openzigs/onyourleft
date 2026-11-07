@@ -81,6 +81,7 @@ import {
 import { ConnectedSensors } from '../ride/SensorPairing';
 import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
+import { ThresholdOffer } from '../ride/ThresholdOffer';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
@@ -191,7 +192,9 @@ function LiveRide({
   readonly query: string | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  const own = useOwnThresholds(analysis);
+  // #2307: read again once the rider accepts a test's estimate.
+  const [thresholdVersion, setThresholdVersion] = useState(0);
+  const own = useOwnThresholds(analysis, thresholdVersion);
   const thresholdPower = own.power;
   /*
    * #2306: the tailored built-in the address asks for, made again here from
@@ -328,6 +331,20 @@ function LiveRide({
           notice before them since #647.
         */}
         <RideControls
+          // #2307: a threshold test's estimate, under the result card.
+          thresholdOffer={
+            snapshot.savedRide?.thresholdTest === undefined ? undefined : (
+              <ThresholdOffer
+                key={snapshot.savedRide.activityId}
+                offer={snapshot.savedRide.thresholdTest}
+                current={thresholdPower}
+                analysis={analysis}
+                onAccepted={() => {
+                  setThresholdVersion((version) => version + 1);
+                }}
+              />
+            )
+          }
           controller={controller}
           snapshot={snapshot}
           zoom={zoom}
@@ -717,9 +734,15 @@ function RideControls({
   snapshot,
   zoom,
   touchLockHelp,
+  thresholdOffer,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
+  /**
+   * #2307: a threshold test's estimate and its two answers, drawn under the
+   * result card, which it belongs to and goes with.
+   */
+  readonly thresholdOffer?: JSX.Element | undefined;
   /**
    * #1433: the zoom, set at the END of the row the ride's own controls stand
    * in — beside them where the row has room, which on a landscape tablet it
@@ -838,6 +861,7 @@ function RideControls({
             }}
           />
         )}
+        {result === undefined ? null : thresholdOffer}
         {canStartNewRide(snapshot) ? (
           <Button
             ref={startNewRide}
