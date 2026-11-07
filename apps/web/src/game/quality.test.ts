@@ -26,6 +26,7 @@ import {
   INITIAL_REALISTIC_QUALITY,
   QUALITY_LADDER,
   REALISTIC_LADDER,
+  REALISTIC_ARRIVAL_LIMIT_MS,
   REALISTIC_SETTLING_SAMPLES,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
@@ -38,6 +39,7 @@ import {
   nextWorldQuality,
   qualitySettings,
   readShadowMapChoice,
+  realisticArrivalLapsed,
   realisticWorldArrived,
   rungFor,
   worldRung,
@@ -76,7 +78,7 @@ const withForecast = (frameMs: number, thermalHeadroom: number): QualitySample =
   ({ frameMs, thermalHeadroom }) as QualitySample;
 
 describe('the reduction path', () => {
-  it('drops a level once the forecast has been high for long enough', () => {
+  it('drops a level once frame time has been over the limit for long enough', () => {
     const reduced = sustain(INITIAL_QUALITY, HOT, SUSTAINED_SAMPLES);
 
     expect(reduced.level).toBe(1);
@@ -97,7 +99,7 @@ describe('the reduction path', () => {
     expect(third.frameCap).toBeLessThan(TARGET_FRAMES_PER_SECOND);
   });
 
-  it('walks all the way down under sustained heat, and stops at the bottom', () => {
+  it('walks all the way down under sustained slow frames, and stops at the bottom', () => {
     let state = INITIAL_QUALITY;
     for (let rung = 0; rung < QUALITY_LADDER.length + 3; rung += 1) {
       state = sustain(state, HOT, SUSTAINED_SAMPLES);
@@ -717,6 +719,36 @@ describe('the realistic ladder waits for its world — #2289', () => {
     expect(REALISTIC_SETTLING_SAMPLES).toBe(SUSTAINED_SAMPLES);
     expect(FRAME_MS_REDUCE_ABOVE).toBe(45);
     expect(SUSTAINED_SAMPLES).toBe(30);
+  });
+
+  it('stops holding the ladder off once the arrival window has lapsed, and not a millisecond before — #2289’s review', () => {
+    // A generous, stated bound, not a frame threshold.
+    expect(REALISTIC_ARRIVAL_LIMIT_MS).toBe(120_000);
+    const before = realisticArrivalLapsed(
+      ARRIVING_REALISTIC_QUALITY,
+      REALISTIC_ARRIVAL_LIMIT_MS - 1,
+    );
+    expect(before).toBe(ARRIVING_REALISTIC_QUALITY);
+    const lapsed = realisticArrivalLapsed(ARRIVING_REALISTIC_QUALITY, REALISTIC_ARRIVAL_LIMIT_MS);
+    // No settling window: no world was swapped in, so the next sample counts.
+    expect(lapsed).toEqual({ ...INITIAL_REALISTIC_QUALITY, settling: 0 });
+    const almost = sustainWorld(lapsed, HOT, SUSTAINED_SAMPLES - 1);
+    expect(almost.quality.level).toBe(0);
+    expect(nextWorldQuality(almost, HOT).quality.level).toBe(1);
+  });
+
+  it('leaves an arrived, settling, settled or stylised state alone when the window lapses', () => {
+    const late = REALISTIC_ARRIVAL_LIMIT_MS * 10;
+    const settling = realisticWorldArrived(ARRIVING_REALISTIC_QUALITY);
+    expect(realisticArrivalLapsed(settling, late)).toBe(settling);
+    const settled: WorldQualityState = { ...INITIAL_REALISTIC_QUALITY, settling: 0 };
+    expect(realisticArrivalLapsed(settled, late)).toBe(settled);
+    const stylised: WorldQualityState = {
+      realistic: false,
+      quality: INITIAL_QUALITY,
+      settling: Number.POSITIVE_INFINITY,
+    };
+    expect(realisticArrivalLapsed(stylised, late)).toBe(stylised);
   });
 
   it('leaves a stylised state alone when the world arrives after the ride left realism', () => {

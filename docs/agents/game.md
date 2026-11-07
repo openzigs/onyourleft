@@ -34,8 +34,9 @@ run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting t
 decision — §8's "read the issue's revision block first" applies.
 
 **The split that does hold is by capability, not by folder.** Computation and UI in `apps/web`;
-only what genuinely cannot be web — such as the foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
-`apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
+only what genuinely cannot be web — such as the foreground-service wake lock — behind ports in
+`apps/web` with Capacitor implementations in `apps/mobile`, exactly as #39's sensor interface
+relates to #40's Web Bluetooth transport.
 
 ⚠️ **`apps/mobile` had no importers at all until #85's wiring branch, and that sentence used to
 stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in

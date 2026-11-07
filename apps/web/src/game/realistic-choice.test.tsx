@@ -30,6 +30,7 @@ import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } f
 import type { GameRenderer, SceneFrame } from './port';
 import {
   FRAME_MS_REDUCE_ABOVE,
+  REALISTIC_ARRIVAL_LIMIT_MS,
   REALISTIC_LADDER,
   REALISTIC_SETTLING_SAMPLES,
   SUSTAINED_SAMPLES,
@@ -88,6 +89,8 @@ let rendered: SceneFrame[] = [];
 let asked = 0;
 /** Settles the load the renderer was last asked for. */
 let answer: (outcome: RealisticWorldOutcome) => void = () => undefined;
+/** Rejects the load the renderer was last asked for. */
+let refuse: (error: unknown) => void = () => undefined;
 
 const RENDERER: GameRenderer = {
   create: (_canvas, settings) => {
@@ -109,8 +112,9 @@ const RENDERER: GameRenderer = {
   },
   loadRealisticWorld: () => {
     asked += 1;
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       answer = resolve;
+      refuse = reject;
     });
   },
 };
@@ -127,6 +131,7 @@ beforeEach(() => {
   asked = 0;
   clock = 0;
   answer = () => undefined;
+  refuse = () => undefined;
   localStorage.clear();
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -304,6 +309,41 @@ describe('which world a ride draws — #475', () => {
     // …and gets out of the way once it has been up for a standing notice's time.
     await frames(1000, STANDING_NOTICE_SECONDS + 2);
     expect(mounted?.container.textContent).not.toContain(said);
+  });
+
+  it('falls back to the stylised top and says so when the load REJECTS — D-7, #2289’s review', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await act(async () => {
+      refuse(new Error('chunk failed'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(told.at(-1)).toEqual(qualitySettings(0));
+    const said = realisticWorldNotice({ loaded: false, offline: false, detail: '' }, false);
+    expect(mounted?.container.textContent).toContain(said);
+    // …and the ladder is fed again at once: a whole run of slow frames steps
+    // the stylised world down, with no arrival window in the way.
+    told = [];
+    await frames(FRAME_MS_REDUCE_ABOVE + 10, SUSTAINED_SAMPLES + 1);
+    expect(told).toEqual([qualitySettings(1)]);
+  });
+
+  it('feeds the ladder once a load that never settles has been arriving for the stated bound — #2289’s review', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    // The load starts at clock 0 and is never answered.
+    await ride();
+    const before = told.length;
+    const second = 1000;
+    // Every one of these frames is slow, and none counts until the bound.
+    await frames(second, REALISTIC_ARRIVAL_LIMIT_MS / second - 1);
+    expect(told.length).toBe(before);
+    // The frame AT the bound is the first one fed, and a whole run of them
+    // steps down — the same 30 samples over the same 45 ms as ever.
+    await frames(second, SUSTAINED_SAMPLES - 1);
+    expect(told.length).toBe(before);
+    await frames(second, 1);
+    expect(told.at(-1)).toEqual(REALISTIC_LADDER[1]);
   });
 
   it('leaves realism for the stylised top when the device runs hot, says so, and never returns', async () => {

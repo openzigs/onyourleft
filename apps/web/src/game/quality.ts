@@ -713,7 +713,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
   },
 ];
 
-/** The frame time above which quality is reduced regardless of the thermal API. */
+/** The frame time above which a sample is hot — the ladder's only input since #2289. */
 export const FRAME_MS_REDUCE_ABOVE = 45;
 
 /** The frame time below which quality is allowed back up. */
@@ -836,8 +836,9 @@ export function qualitySettings(level: QualityLevel): QualitySettings {
  *
  * **This one, and no other.** A stylised ride starts here unless the device
  * has turned the map off ({@link readShadowMapChoice}); the first reduction
- * the ladder takes — on frame time, as for every other rung — lands on level 1, which has no map, and {@link keepsShadowMap}
- * keeps it off for the rest of that ride however cool the device gets. So the
+ * the ladder takes — on frame time, as for every other rung — lands on level
+ * 1, which has no map, and {@link keepsShadowMap} keeps it off for the rest of
+ * that ride however cool the device gets. So the
  * map is still the FIRST thing given up, which is where #426 put it, and
  * #547's owner ruling moves only where a ride starts. Level 1 does not keep
  * it, on the evidence rather than against it: Part T measured the map as
@@ -1102,6 +1103,34 @@ export const ARRIVING_REALISTIC_QUALITY: WorldQualityState = {
  */
 export function realisticWorldArrived(state: WorldQualityState): WorldQualityState {
   return state.realistic ? { ...state, settling: REALISTIC_SETTLING_SAMPLES } : state;
+}
+
+/**
+ * How long a realistic world may arrive before the ladder is fed anyway, from
+ * the moment the load starts — #2289's review. A load that never settles would
+ * otherwise leave {@link ARRIVING_REALISTIC_QUALITY} in place for the whole
+ * ride, and a device that is slow on the stylised world it draws meanwhile
+ * would never be stepped down. Generous on purpose: the ~33 MiB set on a slow
+ * connection takes tens of seconds, and two minutes is several times that. The
+ * frame thresholds are not touched.
+ */
+export const REALISTIC_ARRIVAL_LIMIT_MS = 120_000;
+
+/**
+ * The state once {@link REALISTIC_ARRIVAL_LIMIT_MS} has passed since the load
+ * started with the world still arriving: the ladder is fed from the next
+ * sample, with no settling window, because no world was swapped in. Any other
+ * state is returned as it is.
+ */
+export function realisticArrivalLapsed(
+  state: WorldQualityState,
+  msSinceLoadStart: number,
+): WorldQualityState {
+  return state.realistic &&
+    state.settling === Number.POSITIVE_INFINITY &&
+    msSinceLoadStart >= REALISTIC_ARRIVAL_LIMIT_MS
+    ? { ...state, settling: 0 }
+    : state;
 }
 
 /**

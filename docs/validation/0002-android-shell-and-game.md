@@ -201,7 +201,7 @@ Run by the owner from the afternoon of 2026-09-25 into the morning of 2026-09-26
 
 | | |
 |---|---|
-| An Android phone, API 30+ | API 30 is the floor for `getThermalHeadroom()`; the app's `minSdkVersion` is 24 |
+| An Android phone, API 30+ | The app's `minSdkVersion` is 24. API 30 was the floor for `getThermalHeadroom()`, which the app no longer reads since #2289 (Part AK); `adb`'s `dumpsys thermalservice` below still wants a recent Android |
 | **A second Android phone from a different OEM** | #87's Definition of Done says *tested on at least two OEMs*. One phone leaves that open |
 | A USB cable and `adb` | `platform-tools` is installed; `adb devices` must list the phone |
 | Developer options + USB debugging | On the phone. `adb` sees nothing without it |
@@ -433,22 +433,18 @@ load nothing told them about.
 
 ### ⚠️ Read this before planning the measurement
 
-**`getThermalHeadroom()` is not wired up, and the procedure works around it rather than around the
-truth.** `apps/web/src/game/quality.ts` takes `thermalHeadroom` as an optional field of
-`QualitySample` and documents it as *"Android's own forecast — `PowerManager.getThermalHeadroom()`,
-API 30+"*. **Nothing in `apps/mobile` provides it.** `apps/mobile/src/index.ts` exports the BLE
-transport and the permission notice and nothing else; there is no thermal port implementation.
+**The app does not read the thermal forecast, and the procedure measures heat outside it.** Since
+#2289 (2026-11-06, Part AK) the owner's ruling is that the quality ladder decides on **frame time
+alone**: `apps/web/src/game/quality.ts`'s `QualitySample` is `{ frameMs }`, and nothing in
+`apps/web` or `apps/mobile` asks `PowerManager.getThermalHeadroom()` for anything. Android throttles
+a hot device itself, and the ladder sees that only as slower frames.
 
-Two consequences, both of which shape this part:
+One consequence shapes this part:
 
-- In the shipped app `thermalHeadroom` is always `undefined`, so `nextQuality` degrades on **frame
-  timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`, `SUSTAINED_SAMPLES = 30`). The
-  `HEADROOM_REDUCE_ABOVE`/`HEADROOM_RESTORE_BELOW` hysteresis **cannot fire at all**.
-- ⚠️ docs/agents/game.md §4h describes the thermal port as having "Capacitor implementations in
-  `apps/mobile`". For the foreground service that has been true since
-  [#524](https://github.com/openzigs/onyourleft/issues/524) — before it the service existed and
-  nothing started it; **for thermal headroom it describes the
-  design and not the tree.**
+- `nextQuality` degrades on **frame timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`,
+  `SUSTAINED_SAMPLES = 30`) and recovers below `FRAME_MS_RESTORE_BELOW = 30`. There is no thermal
+  threshold to fire. A reading taken before #2289 that names a thermal hysteresis is describing code
+  that no longer exists.
 
 So thermal state is measured **externally, with `adb`**, which needs no app change:
 
@@ -466,7 +462,7 @@ Sample all three every five minutes for the hour.
 | E2 | Start a ride on a route with the game visible; pedal | — |
 | E3 | Every 5 min for 60 min | the three `adb` readings, plus the quality level the HUD is showing |
 | E4 | Watch for a quality drop | **when** it first dropped, and to which level |
-| E5 | Note whether it ever recovered | `HEADROOM_RESTORE_BELOW` cannot fire; a frame-timing recovery can |
+| E5 | Note whether it ever recovered | Only frame timing can recover it (below `FRAME_MS_RESTORE_BELOW`) |
 | E6 | ⚠️ Read the HUD in sunlight, phone on the bars | Is it legible at a glance? #94's contrast is gated in CI, **legibility at arm's length in daylight is not** |
 | E7 | Note battery % at the end | A rider needs the ride to outlast the phone |
 

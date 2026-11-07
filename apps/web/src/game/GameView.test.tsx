@@ -1379,9 +1379,7 @@ describe('the ride’s season is the rider’s day at ride start (#1622)', () =>
  *
  * The frames are long on purpose: {@link FRAME_PERIOD_MS} is already well past
  * `FRAME_MS_REDUCE_ABOVE`, so a phone this slow is a sustained hot measurement
- * and nothing has to reach for the thermal API — which, per
- * `docs/validation/0002-android-shell-and-game.md` Part E, is `undefined` in
- * the shipped app in any case.
+ * — and since #2289 frame time is the ladder's only input.
  */
 describe('GameView — a hot phone sheds scenery before frame rate (#245)', () => {
   it('tells the renderer a leaner rung, and stops placing what it stops drawing', async () => {
@@ -1446,9 +1444,9 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     // own scope — and React invokes an updater during the *next* render, by
     // which time the loop had already moved it to `at`. So the ladder was fed
     // `frameMs: 0` on every frame of every ride: permanently "cool", never
-    // once hot. With `thermalHeadroom` `undefined` in the shipped app
-    // (validation 0002 Part E) that was the only live input to the policy, so
-    // #91's whole reduction path was unreachable — and every test of it passed,
+    // once hot. Frame time was the only live input to the policy then (the
+    // thermal forecast was `undefined` in the shipped app, and since #2289 it
+    // is not read at all), so #91's whole reduction path was unreachable — and every test of it passed,
     // because `quality.ts` is pure and was being asked the right question by
     // nobody.
     //

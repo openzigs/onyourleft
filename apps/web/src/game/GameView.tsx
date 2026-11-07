@@ -73,6 +73,7 @@ import {
   keepsShadowMap,
   nextWorldQuality,
   qualitySettings,
+  realisticArrivalLapsed,
   realisticWorldArrived,
   readShadowMapChoice,
   rungFor,
@@ -81,7 +82,11 @@ import {
   type QualitySettings,
   type WorldQualityState,
 } from './quality';
-import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from './realistic-assets';
+import {
+  REALISTIC_WORLD_LEFT_NOTICE,
+  realisticWorldNotice,
+  type RealisticWorldOutcome,
+} from './realistic-assets';
 import { writeRealisticReport } from './realistic-report';
 import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
@@ -1079,6 +1084,12 @@ function GameScreen({
    */
   const realisticWatchRef = useRef<RealisticWatch | undefined>(undefined);
   /**
+   * The loop clock's reading when this ride's realistic load started, or
+   * undefined for a ride that has not started one — #2289's review.
+   * @see REALISTIC_ARRIVAL_LIMIT_MS
+   */
+  const arrivingSinceRef = useRef<number | undefined>(undefined);
+  /**
    * The kit colour THIS ride is drawn in — #623. Read when the ride starts, as
    * the mass is, and handed to the view when the view exists: the view may be
    * built after `start`, because `three` arrives asynchronously.
@@ -1934,6 +1945,7 @@ function GameScreen({
       // arrived and settled. @see quality.ts REALISTIC_SETTLING_SAMPLES
       qualityRef.current = realistic ? ARRIVING_REALISTIC_QUALITY : STYLISED_START;
       realisticWatchRef.current = realistic ? new RealisticWatch() : undefined;
+      arrivingSinceRef.current = undefined;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
       setWorldNotice(undefined);
@@ -2341,10 +2353,12 @@ function GameScreen({
           // MiB arrive rather than a black canvas, and the swap is one whole
           // world for another (ADR 0026 D-3) the moment it is all here.
           if (realisticWantedRef.current) {
-            void renderer.loadRealisticWorld().then((outcome) => {
-              // The ride this was for may have ended while the files arrived.
-              // The realism check is defence only: since #2289 nothing steps
-              // the ladder out of realism before this lands.
+            // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
+            arrivingSinceRef.current = clock();
+            const arrived = (outcome: RealisticWorldOutcome): void => {
+              // The ride this was for may have ended while the files arrived,
+              // or the arrival window may have lapsed and the ladder left
+              // realism on the stylised world's frames.
               if (viewRef.current !== view || !qualityRef.current.realistic) {
                 return;
               }
@@ -2362,6 +2376,13 @@ function GameScreen({
               if (text !== undefined) {
                 setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
               }
+            };
+            // #2289's review: a load that REJECTS takes D-7's fallback too, as
+            // a failed one does — otherwise the ride would stay arriving until
+            // the window lapsed, drawing the stylised world under a realistic
+            // rung. The port does not promise never to reject.
+            void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
+              arrived({ loaded: false, offline: false, detail: String(error) });
             });
           }
         }
@@ -3099,7 +3120,13 @@ function GameScreen({
       const frameMs = paced.frameMs;
       lastFrameAt = at;
       if (frameMs !== undefined) {
-        const previous = qualityRef.current;
+        // #2289's review: a load that never settles stops holding the ladder
+        // off once REALISTIC_ARRIVAL_LIMIT_MS has passed since it started.
+        const since = arrivingSinceRef.current;
+        const previous =
+          since === undefined
+            ? qualityRef.current
+            : realisticArrivalLapsed(qualityRef.current, at - since);
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
