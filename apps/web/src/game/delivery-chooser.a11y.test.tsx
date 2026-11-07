@@ -165,6 +165,47 @@ describe('#1818 — the Delivery choice in the chooser', () => {
   });
 });
 
+describe('#2294 — each route card says what it holds for a round', () => {
+  it('describes the radio and the switch by the reason in words, announces the summary once, with no violation', async () => {
+    mounted = await mount(
+      <main>
+        <h1>Trainer game</h1>
+        <GameView
+          port={{
+            ...PORT,
+            // The device is offline and keeps no corridor: the route cannot hold a round.
+            loadWorldCorridor: () => Promise.resolve({ kind: 'unavailable', why: 'offline' }),
+          }}
+          renderer={() => Promise.resolve(RENDERER)}
+        />
+      </main>,
+    );
+    await settle();
+    await click(deliverySwitch());
+    await settle();
+    const reason =
+      'No Delivery round on this route: its map cannot be read while this device is offline';
+    const radio = document.querySelector<HTMLInputElement>(
+      '.oyl-chooser__card input[type="radio"]',
+    );
+    expect(radio).not.toBeNull();
+    if (radio === null) return;
+    expect(described(radio)).toBe(`1.0 km · climb 0 m · steepest 0% ${reason}`);
+    const box = deliverySwitch();
+    if (box === undefined) throw new Error('no Delivery switch');
+    expect(described(box)).toBe(
+      `${reason}. Ridden with the round on, it is an ordinary ride. ` +
+        `Day 3 of 7 · up to 9 houses on the round ${DELIVERY_CHOICE_TEXT.hint}`,
+    );
+    // The summary is said once, settled; nothing announces the counting.
+    const status = document.querySelector('.oyl-chooser__courses [role="status"]');
+    expect(status?.textContent).toBe(
+      'Your route cannot hold today’s Delivery round: its card says why.',
+    );
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+});
+
 describe('#1818 — the notice for a ride whose map’s houses were not ready', () => {
   it('is shown on the HUD without a region of its own, said once by the one region, with no violation', async () => {
     await game();
