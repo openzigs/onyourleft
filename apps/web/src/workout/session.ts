@@ -152,7 +152,7 @@ export type WorkoutTrainer = Pick<TrainerControl, 'setTargetPower' | 'stop' | 't
    *
    * ⚠️ **The step-down and the Stop are written together, in that order, by
    * the ride controller's one release** (`ride/controller.ts`
-   * §`releaseTrainer`), not here: it is the release that is joined with any
+   * §`beginRelease`), not here: it is the release that is joined with any
    * other already on the wire, and a `0x05` written after a Stop would take
    * the machine back into ERG after the rider was told it had been let go.
    * Rejects when the Stop could not be sent at all, as `letGo` does.

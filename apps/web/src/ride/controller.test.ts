@@ -2226,6 +2226,19 @@ describe('the end of a workout steps the trainer down before it lets go — #234
     rig.controller.dispose();
   });
 
+  it('a step-down AND a Stop both refused: the notice is the step-down, not the release', async () => {
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1, refuseStop: true });
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    rig.controller.dispose();
+  });
+
   it('a workout that finishes with its step-down refused says so on the workout too', async () => {
     const rig = await riding({ refuseTargetsBelow: FLOOR + 1 });
     rig.controller.startWorkout(rampTest(), THRESHOLD);

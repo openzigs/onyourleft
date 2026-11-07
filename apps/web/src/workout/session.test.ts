@@ -2021,6 +2021,30 @@ describe('the end of a workout asks for a step-down to the floor — #2348', () 
     expect(riding.state().holding).toBe(250);
   });
 
+  it('a step-down unconfirmed AND a Stop refused is told as the step-down, the one instruction', async () => {
+    const trainer = heldTrainer();
+    trainer.answerWith({
+      stop: {
+        kind: 'incomplete',
+        refusal: new SensorError('control-rejected', 'the machine refused op code 0x8'),
+      },
+      steppedDown: false,
+    });
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+    trainer.answers[0]?.(250);
+    await flush();
+
+    riding.stop();
+    await flush();
+
+    expect(riding.state().lastFault).toBe(STEP_DOWN_UNCONFIRMED);
+    // The early return: the Stop's own notice does not replace it.
+    expect(riding.state().lastFault).not.toBe(RELEASE_INCOMPLETE);
+    expect(riding.state().holding).toBe(250);
+  });
+
   it('a step-down confirmed but a Stop refused is the release notice, as before', async () => {
     const trainer = heldTrainer();
     trainer.answerWith({
