@@ -307,6 +307,16 @@ export interface TrainerSnapshot {
    * next confirmed release and by taking control again.
    */
   readonly releaseFault: string | undefined;
+  /**
+   * The floor the end of a workout eased the trainer off to, when the trainer
+   * confirmed that step-down AND the Stop after it — #2348, the owner's
+   * ruling of 2026-11-07. The panel then says the trainer was eased off to its
+   * lowest setting and released, instead of "may still be holding N W". ⚠️
+   * `undefined` after every other release (End ERG, a game ride, a workout
+   * that needed no step-down, an unconfirmed step-down or Stop), and cleared
+   * by the next target, gradient, workout or grant of control.
+   */
+  readonly easedOffTo: Watts | undefined;
   /** Why the last setpoint was refused, for a screen that says more than "failed". */
   readonly refusal: string | undefined;
   /**
@@ -1510,6 +1520,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let releaseFault: string | undefined;
+  /** @see TrainerSnapshot.easedOffTo */
+  let easedOffTo: Watts | undefined;
   /** The last *Set* the rescue deferred, and how many it has deferred. @see TrainerSnapshot.ergHeld */
   let held: { readonly target: Watts; readonly press: number } | undefined;
   let heldPresses = 0;
@@ -2229,12 +2241,19 @@ export function createRideController(options: RideControllerOptions): RideContro
             : outcome.kind === 'stopped'
               ? undefined
               : RELEASE_INCOMPLETE;
+        // #2348, the owner's ruling of 2026-11-07: only when both the
+        // step-down and the Stop were confirmed may the panel say so.
+        easedOffTo =
+          eased === true && outcome.kind === 'stopped' && stepDown !== undefined
+            ? stepDown.to
+            : undefined;
         // A setpoint the rider asked for can no longer be answered.
         requested = undefined;
         return outcome;
       },
       (error: unknown) => {
         releaseFault = `${RELEASE_INCOMPLETE} (${describe(error)})`;
+        easedOffTo = undefined;
         throw error;
       },
     );
@@ -2533,6 +2552,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         lost: controlLost,
         refusal,
         releaseFault,
+        easedOffTo,
         ergRescue: manual?.erg.rescue(),
         // #655: only while that press is still what the rescue is holding.
         ergHeld:
@@ -4267,6 +4287,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       endWorkoutSession('replace');
+      // #2348: the last workout's "eased off and released" is about to stop being true.
+      easedOffTo = undefined;
       // #567: the workout owns the target from here. A hand-set target's rescue
       // left running would be a second writer on one control point.
       endManualErg();
@@ -4411,6 +4433,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         // Control is the rider's again; a notice about the last release would
         // now be describing a machine this client is driving.
         releaseFault = undefined;
+        easedOffTo = undefined;
       } catch (error) {
         // #1435: a refusal a rider can act on, chosen by its code.
         refusal = controlRefusalWords(error);
@@ -4444,6 +4467,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       requested = target;
       refusal = undefined;
+      // #2348: a hand-set target replaces "eased off and released".
+      easedOffTo = undefined;
       changed();
       try {
         // #567: through the hand-set target's own ERG writer, so its stall
@@ -4514,6 +4539,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
           endManualErg();
+          // #2348: a gradient replaces "eased off and released".
+          easedOffTo = undefined;
           return client.setSimulationParameters(parameters);
         },
         letGo: () => releaseTrainer(client),

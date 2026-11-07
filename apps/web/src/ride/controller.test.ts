@@ -2119,8 +2119,10 @@ describe('the end of a workout steps the trainer down before it lets go — #234
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.trainer.releaseFault).toBeUndefined();
     expect(snapshot.trainer.lost).toBeUndefined();
+    // The owner's ruling of 2026-11-07: a confirmed step-down and Stop are said as such.
+    expect(snapshot.trainer.easedOffTo).toBe(FLOOR);
     expect(targetSentence(snapshot.trainer)).toBe(
-      `The trainer may still be holding ${String(FLOOR)} W — this app can no longer tell.`,
+      `The trainer was eased off to its lowest setting, ${String(FLOOR)} W, and released.`,
     );
     // The finished workout says what was last confirmed: the floor.
     expect(snapshot.workout?.holdingWatts).toBe(FLOOR);
