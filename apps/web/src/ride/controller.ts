@@ -110,6 +110,7 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
+import { rideTotals, type RideTotals } from '../recording/totals';
 import {
   recoverableRides,
   unreadableRecordings,
@@ -554,6 +555,14 @@ export interface RideSnapshot {
     readonly last: { readonly number: number; readonly lap: LapFigures } | undefined;
   };
   readonly sampleCount: number;
+  /**
+   * The ride so far — how far, how much climbing and what average power —
+   * #2076. `recording/totals.ts` §`rideTotals` over the recorder's own series
+   * and laps, the function and the source the saved ride's totals are written
+   * from, so the HUD's figures and the saved ride's are one answer.
+   * `undefined` with no recorder.
+   */
+  readonly totals: RideTotals | undefined;
   readonly metrics: readonly RideMetric[];
   readonly sensors: readonly PairedSensor[];
   readonly trainer: TrainerSnapshot;
@@ -2325,6 +2334,43 @@ export function createRideController(options: RideControllerOptions): RideContro
     return true;
   };
 
+  /**
+   * #2076: the ride's totals, worked out again only when the recording has
+   * moved on — a new sample, or a lap kept or advanced. A snapshot is built
+   * for every reading and every tick, and the series is the whole ride.
+   */
+  let totalsMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly laps: readonly RecordedCourseLap[];
+        readonly open: RecordedCourseLap | undefined;
+        readonly totals: RideTotals;
+      }
+    | undefined;
+  const totalsOf = (current: Recorder | undefined): RideTotals | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    const laps = current.courseLaps;
+    const open = current.openCourseLap;
+    if (
+      totalsMemo?.recorder !== current ||
+      totalsMemo.samples !== samples ||
+      totalsMemo.laps !== laps ||
+      totalsMemo.open !== open
+    ) {
+      const ridden = open === undefined ? laps : [...laps, open];
+      totalsMemo = {
+        recorder: current,
+        samples,
+        laps,
+        open,
+        totals: rideTotals(current.session.series(), ridden),
+      };
+    }
+    return totalsMemo.totals;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -2345,6 +2391,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         last: lastManualLap,
       },
       sampleCount: session?.sampleCount ?? 0,
+      totals: totalsOf(recorder),
       metrics: RIDE_METRIC_IDS.map((id) => ({
         id,
         state: metricStateFor(

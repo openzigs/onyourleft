@@ -83,6 +83,7 @@ import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
+import type { RideTotals } from '../recording/totals';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
@@ -435,6 +436,16 @@ export interface GameTrainerPort {
    */
   rideElapsedSeconds?(): number | undefined;
   /**
+   * The ride so far — distance, climb and average power — of the ride being
+   * recorded, or `undefined` when no ride is in progress — #2076. The
+   * recorder's own, `RideSnapshot.totals`: `recording/totals.ts` §`rideTotals`
+   * over the series and laps the saved ride is written from, so the HUD's
+   * *Distance*, *Climbed* and *Avg power* are the saved ride's. Read through
+   * {@link watchRide}, as the moving time is. Optional, as
+   * {@link rideElapsedSeconds} is; `gameTrainerPortOver` always supplies it.
+   */
+  rideTotals?(): RideTotals | undefined;
+  /**
    * Be told whenever the ride controller's state changes — #1111's review.
    * Returns the call that stops telling.
    *
@@ -538,6 +549,8 @@ interface GameTrainerSource {
     readonly elapsedSeconds?: number;
     /** #1312. @see GameTrainerPort.rideLapSeconds */
     readonly courseLapSeconds?: number | undefined;
+    /** #2076. @see GameTrainerPort.rideTotals */
+    readonly totals?: RideTotals | undefined;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -687,6 +700,15 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       const snapshot = controller?.getSnapshot();
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? snapshot.elapsedSeconds
+        : undefined;
+    },
+    rideTotals: () => {
+      // #2076: the phase and the totals from one snapshot. The same object
+      // until the recording moves on (`controller.ts` §`totalsOf`), which is
+      // what lets `useSyncExternalStore` hold it.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.totals
         : undefined;
     },
   };

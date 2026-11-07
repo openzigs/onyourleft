@@ -47,7 +47,15 @@ import {
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration, formatTimeOfDay } from '../../format';
-import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
+import type { RideTotals } from '../../recording/totals';
+import {
+  distanceUnit,
+  formatDistance,
+  formatSmallDistance,
+  formatSpeed,
+  smallDistanceUnit,
+  type Measurement,
+} from '../../units/format';
 import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
@@ -428,6 +436,18 @@ export interface HudInput {
    */
   readonly elapsedSeconds?: number | undefined;
   /**
+   * The ride so far — how far, how much climbing, what average power — #2076.
+   * **The recorder's**, as the two times are: `RideSnapshot.totals`, read
+   * through `trainer-port.ts` §`GameTrainerPort.rideTotals`, which is
+   * `recording/totals.ts` §`rideTotals` over the series and laps the saved
+   * ride is written from. Never the simulation's odometer: *To go* is the
+   * course's, and *Distance* is what the saved ride will say.
+   *
+   * `undefined` where nothing is being recorded, and then each of the three
+   * fields shows {@link NO_READING}.
+   */
+  readonly rideTotals?: RideTotals | undefined;
+  /**
    * The device's own time, now — #2072: the time of day, shown `HH:MM` under
    * the label *Clock* ({@link clockReading}). Not a ride figure and not a
    * clock of the ride's: what a rider with the phone's own status bar hidden
@@ -554,6 +574,13 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // gap, room and wind field two places along, once.
     elapsedTimeReading(input.elapsedSeconds),
     ...clockReading(input.timeOfDay),
+    // #2076: the ride so far, after the clock and before every gap. Present
+    // on every ride (a dash with nothing recorded), so their indices are the
+    // same on every ride; they moved every gap, room and wind field three
+    // places along, once. After the three times rather than beside *To go*,
+    // so the moving time stays the third secondary reading, which is the
+    // track `theme.css` sizes from its content (§"THE MOVING TIME'S OWN WIDTH").
+    ...rideTotalReadings(input.rideTotals, units),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
@@ -590,6 +617,61 @@ function gradientReading(grade: number): HudReading {
   const magnitude = Math.abs(shown).toFixed(1);
   const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
   return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
+}
+
+/** The keys of the ride-so-far fields — #2076. @see rideTotalReadings */
+export const RIDE_TOTAL_KEYS: ReadonlySet<string> = new Set([
+  'distance',
+  'climbed',
+  'averagePower',
+]);
+
+/** Whether a reading is one of the ride-so-far fields — #2076. */
+export function isRideTotalReading(reading: HudReading): boolean {
+  return RIDE_TOTAL_KEYS.has(reading.key);
+}
+
+/**
+ * *Distance*, *Climbed* and *Avg power* — the ride so far, #2076.
+ *
+ * Formats of the recorder's figures ({@link HudInput.rideTotals}) and nothing
+ * else: the distance to one decimal in the rider's unit as a ride's distance
+ * is shown everywhere, the climb in the rider's small unit (metres or feet),
+ * the power in whole watts. Never stale — none is a sensor's — and each a dash
+ * with nothing to say: nothing recording, or a climb nobody measured (a ride
+ * with no altitude and no course under it), or a ride with no power reading.
+ * No load metric of any name (CLAUDE.md §6).
+ */
+function rideTotalReadings(
+  totals: RideTotals | undefined,
+  units: UnitSystem,
+): readonly HudReading[] {
+  const dash = (key: string, label: string, unit: string): HudReading => ({
+    key,
+    label,
+    value: NO_READING,
+    unit,
+    stale: false,
+  });
+  const distance =
+    totals === undefined
+      ? dash('distance', 'Distance', distanceUnit(units))
+      : measured('distance', 'Distance', formatDistance(totals.distance, units));
+  const climbed =
+    totals?.climbed === undefined
+      ? dash('climbed', 'Climbed', smallDistanceUnit(units))
+      : measured('climbed', 'Climbed', formatSmallDistance(totals.climbed, units));
+  const power =
+    totals?.averagePower === undefined
+      ? dash('averagePower', 'Avg power', 'W')
+      : {
+          key: 'averagePower',
+          label: 'Avg power',
+          value: String(Math.round(totals.averagePower)),
+          unit: 'W',
+          stale: false,
+        };
+  return [distance, climbed, power];
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */
