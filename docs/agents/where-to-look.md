@@ -53,14 +53,16 @@ It has the same authority as the root file. Where the text below says "this file
 | How a rider records a second ride after stopping one, and when that is refused | `apps/web/src/ride/controller.ts` §`canStartNewRide`, §`startNewRide`, [#548](https://github.com/openzigs/onyourleft/issues/548) |
 | Why a ride the rider already stopped is not offered back to be continued | `apps/web/src/recording/recovery.ts`, `apps/web/src/ride/controller.ts` §`continueRecovered` |
 | Why the offer says "up to" a length rather than a length | `apps/web/src/recording/recovery.ts` §"What this deliberately does not read" |
-| Why a recorded ride's distance is integrated from speed, and what a dropout does to it | `apps/web/src/recording/finish.ts` §`distanceOf` |
+| Why a recorded ride's distance is integrated from speed, and what a dropout does to it | `apps/web/src/recording/totals.ts` §`rideDistance` |
+| Where the HUD's *W/kg* and zone indicator come from: the physics' weight, the rider's own threshold, and the recorder's time in each zone | `apps/web/src/game/hud/fields.ts` §`wattsPerKilogramReading`, §`zoneReading`, `apps/web/src/ride/controller.ts` §`zoneTimeOf`, [#2077](https://github.com/openzigs/onyourleft/issues/2077) |
+| Where the HUD's *Distance*, *Climbed* and *Avg power* come from, why they equal the saved ride's, and why a game ride's climb is its laps' | `apps/web/src/recording/totals.ts`, `apps/web/src/ride/controller.ts` §`totalsOf`, [#2076](https://github.com/openzigs/onyourleft/issues/2076) |
 | What a rider is told when a finished ride cannot be added to their activities | `apps/web/src/views/RideView.tsx`, and the four cases in `RideView.test.tsx` |
 | Why a ride whose power readings were all 0 shows no average power rather than "0 W", and why the stored 0 is kept | `apps/web/src/format.ts` §`shownAveragePower`, `apps/web/src/recording/finish.test.ts` §"#1054", [#1054](https://github.com/openzigs/onyourleft/issues/1054) |
 | What proves an ERG workout's targets survive all the way into a FIT file | `apps/web/src/workout/erg-to-file.test.ts` |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](../../packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 | How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |
-| Why an imported ride's distance is derived from its positions where a recorded one is integrated from speed | `apps/web/src/transfer/track-distance.ts`, `apps/web/src/recording/finish.ts` §`distanceOf` |
+| Why an imported ride's distance is derived from its positions where a recorded one is integrated from speed | `apps/web/src/transfer/track-distance.ts`, `apps/web/src/recording/totals.ts` §`rideDistance` |
 | Which steps of an imported track are not summed, and why a rejected step does not move the anchor | `apps/web/src/transfer/track-distance.ts` §`POSITION_GAP_SECONDS`, §`STATIONARY_SPEED_METRES_PER_SECOND`, §`IMPLAUSIBLE_SPEED_METRES_PER_SECOND` |
 | What an export tells a rider it could not carry, and why altitude can never be the answer | `apps/web/src/transfer/export-activity.ts` §`EXPORT_FAULT_TEXT`, and the finding in `export-activity.test.ts` §"what the file could not carry" |
 | How a signed activity record leaves the device, what the manifest says about a ride that has none, and which of the two verify functions applies to an archive | [ADR 0019](../adr/0019-signed-records-in-an-export.md), `apps/web/src/transfer/export-everything.ts` §`signedRecordFile`, [`docs/architecture.md`](../architecture.md) §"The signed activity record" |
@@ -226,6 +228,7 @@ It has the same authority as the root file. Where the text below says "this file
 | What makes "the bot and the rider go through the same physics" a fact about the call graph rather than a comment | `packages/physics/src/pacer.ts` §`advanceBot` |
 | Why a bot a full lap ahead reads as a lap ahead rather than as level with you | `packages/domain/src/pacer/gap.ts` |
 | Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
+| What a built-in workout may be called and what it may take from other products' libraries; which open workout corpora are lawfully reusable; the names a template must not use | [spike 0038](../spikes/0038-built-in-workout-library.md) §1–§3 |
 | Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
 | Why a target typed into the Ride screen's ERG form is eased when the rider stalls, and why it goes back on by itself | `apps/web/src/ride/manual-erg.ts`, `packages/domain/src/workout/erg-safety.ts` §`createErgRescue`, [#567](https://github.com/openzigs/onyourleft/issues/567) |

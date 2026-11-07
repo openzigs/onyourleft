@@ -59,6 +59,12 @@ export interface CameraFrameStore {
    */
   countCameraFrames(owner: AthleteId): Promise<number>;
   /**
+   * How many of those are side-camera snapshots kept with a ride (#1063) —
+   * which {@link deleteCameraFrames} takes too, so the screen names the count
+   * before it does. A count, never a picture.
+   */
+  countSnapshots(owner: AthleteId): Promise<number>;
+  /**
    * Deletes every picture this athlete kept.
    *
    * All of them rather than one, and `packages/store`'s own

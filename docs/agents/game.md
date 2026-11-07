@@ -776,11 +776,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and houses from `delivery-progress.ts` beside it, worded
                         "up to N houses" (#1878); it
                         cannot know the town's houses (no map in its graph),
-                        so the press decides and the HUD's *Houses* may be fewer. Since #2292 the
-                        Games tab reaches the same switch, ON, through its course
-                        picker (`courses.ts` §`coursesFor`, `?play=delivery`),
-                        and offers no course without the realistic world.
-                        **The press**, in `GameView`:
+                        so the press decides and the HUD's *Houses* may be fewer.
+                        **The course picker** (#2294): with the round
+                        switched on, `GameView` counts every saved route
+                        through `courses.ts` (the same corridor port, planned
+                        as the press plans, counted by `targets.ts`
+                        §`countRoundHouses`, a ceiling on any seeded pick)
+                        and each card says "up to N houses", or is greyed
+                        with the reason in words; a greyed route is still
+                        choosable, for an ordinary ride, and the switch says
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and

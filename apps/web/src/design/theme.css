@@ -104,6 +104,13 @@
   --oyl-color-hud-ink-muted: #9da3a8;
   --oyl-color-hud-border: #787c82;
   --oyl-color-hud-stale-ink: #f1af48;
+  --oyl-color-hud-zone1: #949aa1;
+  --oyl-color-hud-zone2: #2d74ca;
+  --oyl-color-hud-zone3: #5fc372;
+  --oyl-color-hud-zone4: #f9df5d;
+  --oyl-color-hud-zone5: #f59441;
+  --oyl-color-hud-zone6: #cb574d;
+  --oyl-color-hud-zone7: #cf91f3;
   --oyl-color-hud-grade-descent: #4f9fe0;
   --oyl-color-hud-grade-flat: #6b7177;
   --oyl-color-hud-grade-climb: #d8b630;
@@ -3790,9 +3797,10 @@ a.oyl-button {
 
 @container oyl-live (min-width: 40rem) {
   /* #2072: the time of day a column of its own, beside the seconds
-     recorded, so the Live group is no taller for it. */
+     recorded, so the Live group is no taller for it — and since #2076 the
+     ride's distance a third, before them. */
   .oyl-ride__clock {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto auto;
   }
 
   .oyl-ride__clock .oyl-reading__value {
@@ -6092,6 +6100,17 @@ select.oyl-input {
 .oyl-chooser__shape {
   block-size: 7rem;
   align-self: end;
+}
+
+/*
+ * #2294: a route that cannot hold the Delivery round chosen is GREYED — its
+ * drawing faded and drained of colour. Only the drawing: it is `aria-hidden`
+ * and says nothing the words do not, while the name and both bands keep their
+ * declared text pairs, and the band under the facts says why in words.
+ */
+.oyl-chooser__card--no-round > .oyl-chooser__shape {
+  opacity: 0.35;
+  filter: grayscale(1);
 }
 
 /*
@@ -10941,6 +10960,68 @@ select.oyl-input {
 }
 
 /*
+ * THE RIDE SO FAR — #2076: *Distance*, *Climbed* and *Avg power*.
+ *
+ * Three secondary readings after the clock (`fields.ts` §`hudReadings`),
+ * drawn where the secondary tier has the rows for them: a TABLET's corners
+ * layout (47 rem tall or more), a laptop's or a desktop's window, and every
+ * stacked layout, which scrolls.
+ *
+ * ⚠️ **What gives way, recorded as #419 asks: on a PHONE's overlay — the
+ * column layout upright and the short corners layout on its side, 30 rem
+ * tall or less — the three are visually hidden by clip**, as a room's
+ * give-way readings are
+ * (§"A ROOM RIDE ON A PHONE"), and a screen reader still reads them in their
+ * place in #94's order. Those layouts are measured to within a few pixels of
+ * the leaning rider at the rows they have (§"THE CLOCK ROW", §"THE MOVING
+ * TIME ON AN UPRIGHT PHONE"), and three more readings are a third secondary
+ * row on every one of them. The saved ride states all three, and the Ride
+ * screen shows the distance in its clock row (`views/RideView.tsx`
+ * §`RideClock`). The owner's ruling of 2026-11-06 (#2034) ties this to
+ * phones only, the query `main` gives a room's give-way: a laptop window
+ * under 47 rem tall (1280×720, 1366×657) shows all three.
+ *
+ * ⚠️ **And on a tablet, in a room's LAP RACE, they give way too** — the one
+ * tablet state with no row for them: the room's three readings and the
+ * race's two already make the tier four tracks by three rows, and a fourth
+ * row put the race's standings over *Pause* at 1280×800 and 1024×768
+ * (`ride-room.browser.spec.ts` §"#1912"). In a room's lap race what a racer
+ * rides against is the field, as #1912 has it on a phone.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race):has(> .oyl-hud__field--room)
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--total, .oyl-hud__field--effort) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
  * THE TABLET'S READINGS AT ARM'S LENGTH — #2130, ADR 0063 D-5.
  *
  * On the corners layout of a TABLET (46 rem wide and 47 rem tall or more:
@@ -11160,6 +11241,304 @@ select.oyl-input {
       left: calc(var(--oyl-space-xs) + 1px);
       top: calc(var(--oyl-space-sm) + 1px);
     }
+  }
+}
+
+/*
+ * THE RIDE SO FAR AT ARM'S LENGTH — #2076 at #2130's sizes (PR #2213).
+ *
+ * #2076's *Distance*, *Climbed* and *Avg power* were cut for 1.5 rem
+ * secondary numerals; at #2130's 2.45 rem, with #2130's 8 px between
+ * readings (the owner's ruling of 2026-11-06), measured in the pinned
+ * Chromium with the widest ordinary values set:
+ * - `199.9 km` is 116 px with its unit on its line, and its track was a
+ *   5.5 rem one: the unit fell under the number. So from 50 rem tall the
+ *   fourth track, which the distance takes on every ride (after *Speed*, *To
+ *   go* and the moving time), has *To go*'s 7.25 rem floor, and the fifth,
+ *   the climb's, 6.25 rem for `4850 m` (99 px); the sixth takes the rest;
+ * - on the 4:3 tablet the five tracks have no width for those floors, so
+ *   *Avg power* (`425 W`, 78 px) takes the first row's last, narrowest track,
+ *   and the distance and the climb the second row's third and fourth: the
+ *   first is #2130's 7 rem gradient cell, 112 px, under `199.9 km`'s 116;
+ * - a room's followed rider, named in its label, landed in the moving time's
+ *   content-sized track and took it, and the two readings after it, past the
+ *   stage's edge at 1280×800 and 800×1280: a room's readings size their track
+ *   by its width, never their label, as a round's and a race's do — on every
+ *   corners layout but a phone's, so on a laptop's window (1280×720,
+ *   1366×657, 1024×600) too, where it was the same.
+ *
+ * ⚠️ **What gives way, recorded as #419 asks — the owner's rulings of
+ * 2026-11-06 (#2034):**
+ * - **in a ROOM, where space runs out, the pacer's and the ghost's gaps and
+ *   the wind give way first**: on the 4:3 tablet, the upright tablet, a
+ *   window under 40 rem tall (and under 45 rem with a side camera's row), and
+ *   every tablet at #2079's large text sizes; in a group ride as in a race. That is `main`'s room order on a
+ *   phone (§"A ROOM RIDE ON A PHONE": they are references a rider chose for a
+ *   ride alone). Where they fit — 1280×800 at the normal size, a 1280×720 or
+ *   1366×657 window — they stay (the owner's second ruling of 2026-11-06, on the
+ *   screenshots). The rider's own readings always stay;
+ * - **on the 4:3 tablet, in a room, the ride so far gives way too**, as it
+ *   does in a room's lap race on every tablet: a room's three readings were a
+ *   third row of the tier there, and a race's standings under it ran over
+ *   *Pause*. The saved ride states all three.
+ * All are hidden by clip and still read by a screen reader, in #94's order.
+ */
+/* Every corners layout but a phone's: a tablet, and since the owner's ruling
+   of 2026-11-06 a laptop's window, which draws the ride so far too. */
+@media (min-width: 46rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__field--room {
+    contain: inline-size;
+  }
+}
+
+/* Where a room's readings leave no row for them (the owner's second ruling of
+   2026-11-06, and the review of PR #2220): the 4:3 tablet, the upright
+   tablet, and a window under 40 rem tall (1024×600); and a window under
+   45 rem tall (1366×657) while a side camera's row stands in the actions
+   panel, where *Report*'s reasons and that row ran the route panel off the
+   stage. At 1280×800 and in a 1280×720 or 1366×657 window otherwise, they
+   stay, as `main` draws them there. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem),
+  (min-width: 46rem) and (width < 51rem) and (min-height: 47rem),
+  (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--gives-way {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (height > 30rem) and (height < 45rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__actions > .oyl-hud__side-camera-row)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--gives-way {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      minmax(6.25rem, 1fr) minmax(5rem, 1fr);
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--average-power {
+    grid-area: 1 / 5;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--distance {
+    grid-area: 2 / 3;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--climbed {
+    grid-area: 2 / 4;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
+ * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
+ *
+ * Two secondary readings after the ride so far, drawn where it is drawn and
+ * given way on a PHONE's overlay with it (the rule above names both
+ * classes), for the same reason: a phone's overlay has no row for them. A
+ * laptop's window shows them (the owner's ruling of 2026-11-06, #2034).
+ *
+ * ⚠️ **On a tablet they never give way**, in a room or out of one — the
+ * owner's ruling of 2026-11-06 (#2034): they are the rider's own, and in a
+ * group ride there are no standings that say them. In a room the pacer's and
+ * the ghost's gaps and the wind give way first (§"THE RIDE SO FAR AT ARM'S
+ * LENGTH"), and then the ride so far on the 4:3 tablet and in a room's lap
+ * race. This PR's first cut hid these two in every tablet room instead,
+ * which reversed `main`'s room order.
+ *
+ * The zone's NUMBER is the reading, in the HUD's ink, beside a SWATCH of its
+ * zone's colour — an SVG, as the gauges are, so the panel stays its one
+ * opaque surface (`hud-surface.a11y.test.ts`). Every `hudZone*` is a declared
+ * 3:1 against `hudSurface` (SC 1.4.11; 3.99 the least, zone 2). The NAME is
+ * under it in the label's colour. Under that, this
+ * ride's time in each zone as a thin bar, each segment its zone's colour over
+ * the panel, in an outline of the label's colour that is the bar's full scale.
+ * The bar is `aria-hidden`; the number and the name are never colour alone.
+ */
+/* ⚠️ **At 1280×800, and in a laptop's window, in a room, the tier spans two
+   rows of the HUD's grid.** The owner's second ruling of 2026-11-06 (#2034)
+   keeps the pacer's and the ghost's gaps and the wind there beside these
+   two, which makes the tier a third row: a notice under it met the sound and
+   side-camera rows above the route panel (`ride-room.browser.spec.ts`
+   §"#1409"), and in a 1366×657 window ran into the route panel. So a notice
+   starts under the primary panel, and a race's standings under the tier,
+   whichever is taller. */
+@media (min-width: 51rem) and (min-height: 50rem),
+  (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) {
+    grid-template-areas:
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) :is(.oyl-hud__standings, .oyl-hud__laps) {
+    grid-area: beside;
+  }
+}
+
+/* ⚠️ **On a tablet, the followed rider's name is one line, cut with an
+   ellipsis** — recorded as #419 asks, the owner's ruling of 2026-11-06
+   (#2034): it is the label of the room's first reading, and long, it wrapped
+   over three lines and made the tier's row as tall, so a race's standings
+   under it came within 9 px of the actions panel at 1280×800 with *Report*'s
+   reasons open. As on a phone (§"A ROOM RIDE ON A PHONE"), the whole name is
+   still in the document, where a screen reader reads it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room .oyl-hud__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* The swatch: a square of the zone's colour beside its number, the height of
+   the digits' x-height or so, so the number is still the reading. */
+.oyl-hud__zone-swatch {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-end: 0.2em;
+  vertical-align: baseline;
+}
+
+.oyl-hud__zone-swatch--1 {
+  fill: var(--oyl-color-hud-zone1);
+}
+
+.oyl-hud__zone-swatch--2 {
+  fill: var(--oyl-color-hud-zone2);
+}
+
+.oyl-hud__zone-swatch--3 {
+  fill: var(--oyl-color-hud-zone3);
+}
+
+.oyl-hud__zone-swatch--4 {
+  fill: var(--oyl-color-hud-zone4);
+}
+
+.oyl-hud__zone-swatch--5 {
+  fill: var(--oyl-color-hud-zone5);
+}
+
+.oyl-hud__zone-swatch--6 {
+  fill: var(--oyl-color-hud-zone6);
+}
+
+.oyl-hud__zone-swatch--7 {
+  fill: var(--oyl-color-hud-zone7);
+}
+
+.oyl-hud__zone-bar {
+  display: block;
+  width: 100%;
+  height: 0.375rem;
+  margin-top: var(--oyl-space-xs);
+  overflow: visible;
+}
+
+.oyl-hud__zone-bar-scale {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__zone-bar-part--1 {
+  fill: var(--oyl-color-hud-zone1);
+}
+
+.oyl-hud__zone-bar-part--2 {
+  fill: var(--oyl-color-hud-zone2);
+}
+
+.oyl-hud__zone-bar-part--3 {
+  fill: var(--oyl-color-hud-zone3);
+}
+
+.oyl-hud__zone-bar-part--4 {
+  fill: var(--oyl-color-hud-zone4);
+}
+
+.oyl-hud__zone-bar-part--5 {
+  fill: var(--oyl-color-hud-zone5);
+}
+
+.oyl-hud__zone-bar-part--6 {
+  fill: var(--oyl-color-hud-zone6);
+}
+
+.oyl-hud__zone-bar-part--7 {
+  fill: var(--oyl-color-hud-zone7);
+}
+
+/* ⚠️ **And in a laptop's or a desktop's window under 40 rem tall (1024×600),
+   while two notices are drawn, the ride so far gives way** — recorded as #419
+   asks. The owner's ruling of 2026-11-06 (#2034) draws it in a laptop's
+   window; there the three readings are a third row of the tier, and two
+   notices under it (*Keep the screen on* and the road notice) ran 14 px into
+   the route panel, measured in the pinned Chromium. The rider's own W/kg and
+   zone (#2077) stay, as in a room. */
+@media (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices > :not(.oyl-visually-hidden) ~ :not(.oyl-visually-hidden))
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

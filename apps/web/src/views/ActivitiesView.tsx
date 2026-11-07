@@ -123,6 +123,8 @@ export interface ActivitiesViewProps {
   readonly riderText?: ActivityDetailViewProps['riderText'];
   /** #2069: the ride's time in zone, read as `AnalysisView` reads it. */
   readonly analysis?: ActivityDetailViewProps['analysis'];
+  /** #1063: the chosen ride's side-camera snapshots, closed until opened. */
+  readonly snapshots?: ActivityDetailViewProps['snapshots'];
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -249,6 +251,7 @@ export function ActivitiesView({
   instanceWriteUp,
   riderText,
   analysis,
+  snapshots,
 }: ActivitiesViewProps): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
@@ -622,6 +625,7 @@ export function ActivitiesView({
               instanceWriteUp={instanceWriteUp}
               riderText={riderText}
               analysis={analysis}
+              {...(snapshots === undefined ? {} : { snapshots })}
               embedded
             />
           </>
@@ -675,7 +679,7 @@ export function ActivitiesView({
  * Average power is shown only where the ride has it. A ride with no power
  * meter is not drawn as "0 W" or "—": the reading is simply absent. So is
  * distance where the ride stored none — a ride recorded with no speed channel
- * stores 0 (`recording/finish.ts` §`distanceOf`), and "0.0 km" would be an
+ * stores 0 (`recording/totals.ts` §`rideDistance`), and "0.0 km" would be an
  * invented reading (#1041's review).
  */
 function RideCard({

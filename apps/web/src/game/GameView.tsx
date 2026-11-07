@@ -52,6 +52,7 @@ import {
   sideCameraOnRide,
   sideCameraStoppable,
 } from '../ride/side-camera';
+import type { RideTotals } from '../recording/totals';
 import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
 import {
   KEEP_SCREEN_ON_LABEL,
@@ -189,7 +190,12 @@ import {
   type CuePreference,
 } from './cue-preference';
 import { SoundControls } from './SoundControls';
-import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
+import {
+  RoutePicker,
+  type DeliveryCourse,
+  type RecordingOffer,
+  type RidableRoute,
+} from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
@@ -209,6 +215,7 @@ import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
 import { gameDeliveryFromHash, gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
 import { readDeliveryProgress } from './delivery/delivery-progress';
+import { countCourses } from './delivery/courses';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -273,6 +280,8 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type TimeInZones,
+  type Watts,
   type Wind,
   type WorkoutRescue,
 } from '@onyourleft/domain';
@@ -322,6 +331,14 @@ export interface GamePort {
    * drawn. A rider with no instance loses this and nothing else.
    */
   riderGhostOffered?(): boolean;
+  /**
+   * The rider's OWN threshold power, or `undefined` when they have set none —
+   * #2077: the zone indicator is drawn from it and from nothing substituted
+   * (`analysis/thresholds.ts` is the one place a default is, and it is not for
+   * the HUD: a zone of a threshold the rider never set is a guess). Read once
+   * as the game opens. Absent, there is no zone indicator.
+   */
+  ownThresholdPower?(): Promise<Watts | undefined>;
   /**
    * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
    * 0039. Fetched from the instance by the route's digest
@@ -709,6 +726,66 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * The rider's own threshold power, read once as the game opens — #2077.
+ * `undefined` while it is read and when none is set: the zone indicator's
+ * answer to both is not to be drawn. @see GamePort.ownThresholdPower
+ */
+function useOwnThresholdPower(port: GamePort | undefined): Watts | undefined {
+  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void port
+      ?.ownThresholdPower?.()
+      .then((found) => {
+        if (live) setThreshold(found);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves no threshold, and so no zone
+        // indicator: there is nothing else the HUD could say a rider could act on.
+      });
+    return () => {
+      live = false;
+    };
+  }, [port]);
+  return threshold;
+}
+
+/**
+ * The recorder's time in each power zone of the rider's threshold, kept
+ * current — #2077. Subscribed for {@link useRideMovingSeconds}'s reason; the
+ * port hands back the same object until the recording moves on.
+ */
+function useRidePowerZoneTime(
+  trainer: GameTrainerPort | undefined,
+  threshold: Watts | undefined,
+): TimeInZones | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(
+    () => (threshold === undefined ? undefined : trainer?.ridePowerZoneTime?.(threshold)),
+    [trainer, threshold],
+  );
+  return useSyncExternalStore(watch, read);
+}
+
+/**
+ * The ride so far — distance, climb and average power — kept current: #2076.
+ * The recorder's figures (`recording/totals.ts` §`rideTotals`), subscribed for
+ * {@link useRideMovingSeconds}'s reason. The port hands back the same object
+ * until the recording moves on, as `useSyncExternalStore` requires.
+ */
+function useRideTotals(trainer: GameTrainerPort | undefined): RideTotals | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideTotals?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * Whether the recording under the ride is paused, kept current — #1360's
  * review (N1). Subscribed for {@link useRideMovingSeconds}'s reason: the
  * rider's Pause and Resume are the Ride screen's, and the game must see them
@@ -918,6 +995,16 @@ function GameScreen({
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
   const [withDelivery, setWithDelivery] = useState(() => played === 'delivery');
+  /**
+   * Each saved route's houses for a round, by route id, once the round is
+   * chosen — #2294, `delivery/courses.ts`. In memory only, and one number a
+   * route. `courseCountsRef` keeps the counts made by profile, for the next
+   * time the round is switched on.
+   */
+  const [courses, setCourses] = useState<ReadonlyMap<string, DeliveryCourse> | undefined>(
+    undefined,
+  );
+  const courseCountsRef = useRef(new WeakMap<RouteProfile, number>());
   /**
    * Whether the rider switched on a lap race in the chooser, and which race
    * — #1907. Per ride, like the round beside it; one mode a ride, so turning
@@ -1219,6 +1306,12 @@ function GameScreen({
   const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
+  /** @see useRideTotals */
+  const rideTotals = useRideTotals(props.trainer);
+  /** @see useOwnThresholdPower */
+  const thresholdPower = useOwnThresholdPower(props.port);
+  /** @see useRidePowerZoneTime */
+  const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
@@ -1717,6 +1810,33 @@ function GameScreen({
       controller.abort();
     };
   }, [port, corridorRoute, choosing]);
+
+  // #2294: with a Delivery round chosen, every saved route's houses for a
+  // round, counted on this device through the same corridor port, one route
+  // at a time, while the rider chooses — and abandoned, as the read above
+  // is, when a ride starts or the round is switched off. Only with the
+  // realistic world chosen, where the round is offered (DL6).
+  const coursesWanted =
+    choosing && withDelivery && routes !== undefined && readRealisticWorldChoice(deviceStorage());
+  useEffect(() => {
+    setCourses(undefined);
+    const load = port?.loadWorldCorridor?.bind(port);
+    if (load === undefined || routes === undefined || !coursesWanted) return;
+    const controller = new AbortController();
+    setCourses(new Map());
+    void countCourses(
+      routes,
+      load,
+      controller.signal,
+      (routeId, count) => {
+        setCourses((before) => new Map(before).set(routeId, count));
+      },
+      courseCountsRef.current,
+    );
+    return () => {
+      controller.abort();
+    };
+  }, [port, routes, coursesWanted]);
 
   useEffect(() => teardown, [teardown]);
 
@@ -3189,6 +3309,8 @@ function GameScreen({
             chosen: withDelivery,
             onChoose: chooseDelivery,
             week: readDeliveryProgress(deviceStorage()),
+            // #2294: what each saved route holds for the round, as counted.
+            courses,
           }}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
@@ -3389,6 +3511,14 @@ function GameScreen({
         elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
+        // #2076: the ride so far, the recorder's again. @see useRideTotals
+        rideTotals={rideTotals}
+        // #2077: the rider's W/kg from the weight the physics rides (`undefined`
+        // when none is set, never the default), and the zone indicator from
+        // their own threshold and the recorder's time in each zone.
+        riderMass={props.riderMass}
+        thresholdPower={thresholdPower}
+        powerZoneTime={powerZoneTime}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.

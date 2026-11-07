@@ -138,6 +138,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradeAt,
+  kilograms,
   metres,
   metresPerSecond,
   pacerGap,
@@ -147,6 +148,7 @@ import {
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   type RoutePoint,
   type RouteProfile,
+  type TimeInZones,
 } from '@onyourleft/domain';
 
 import {
@@ -162,6 +164,7 @@ import { HudPanel } from '../src/game/hud/HudPanel';
 import { RIDER_MARK_MINIMUM_PIXELS } from '../src/game/hud/plan';
 import { SoundControls } from '../src/game/SoundControls';
 import type { GameState } from '../src/game/simulation';
+import type { RideTotals } from '../src/recording/totals';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
@@ -507,6 +510,30 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
 const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 
 /**
+ * #2076: the ride so far on every panel, at the widest figures a ride under
+ * ten hours plausibly reaches — `199.9 km`, `4850 m` and `425 W` — so where
+ * the three are drawn they are measured at their widest.
+ */
+const RIDE_TOTALS: RideTotals = {
+  distance: metres(199_900),
+  climbed: metres(4850),
+  averagePower: watts(425),
+};
+
+/**
+ * #2077: a weight and a threshold of the rider's own, so W/kg and the zone
+ * indicator are measured — 342 W over 72 kg is `4.8`, and over a 250 W
+ * threshold zone 6, *Anaerobic*, the longest name but one — and some time in
+ * each of the seven zones, so the bar is drawn whole.
+ */
+const RIDER_MASS = kilograms(72);
+const THRESHOLD = watts(250);
+const ZONE_TIME: TimeInZones = {
+  perZone: [600, 1200, 900, 600, 300, 120, 30].map((spent) => seconds(spent)),
+  covered: seconds(3750),
+};
+
+/**
  * The one piece of geometry here that is this file's — see the header.
  *
  * `position: relative` puts the stage in the flow, so six of them stack; the
@@ -537,6 +564,10 @@ function Harness(): JSX.Element {
               heartRate={{ value: 168, live: true }}
               movingSeconds={MOVING_SECONDS}
               elapsedSeconds={MOVING_SECONDS}
+              rideTotals={RIDE_TOTALS}
+              riderMass={RIDER_MASS}
+              thresholdPower={THRESHOLD}
+              powerZoneTime={ZONE_TIME}
               chases={[BOT_GAP, ghostChase(outcome)]}
               paused={false}
               onPause={() => undefined}
@@ -560,6 +591,10 @@ function Harness(): JSX.Element {
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[]}
             paused={false}
             onPause={() => undefined}
@@ -583,6 +618,10 @@ function Harness(): JSX.Element {
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[]}
             paused={false}
             onPause={() => undefined}
@@ -610,6 +649,10 @@ function Harness(): JSX.Element {
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[BOT_GAP, ghostChase('level')]}
             paused={false}
             onPause={() => undefined}
@@ -747,6 +790,16 @@ function measure(): HudMeasurement {
     for (const field of panel.querySelectorAll('.oyl-hud__field')) {
       const value = field.querySelector('.oyl-hud__value');
       if (value === null) {
+        continue;
+      }
+      // #2076: the ride so far, where a phone's overlay hides it by clip
+      // (`theme.css` §"THE RIDE SO FAR"), is not a value laid out in a track:
+      // a 1 px box overflows by construction. Where it is drawn it is measured.
+      const box = field.getBoundingClientRect();
+      const givesWay = ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
+        field.classList.contains(name),
+      );
+      if (givesWay && box.width * box.height <= 1) {
         continue;
       }
       values.push({
