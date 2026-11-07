@@ -25,6 +25,7 @@ import { slopeAhead, slopesOf } from './climb-ahead';
 import {
   GRADE_BANDS,
   LOOK_AHEAD_METRES,
+  MINIMUM_BAND_METRES,
   LOOK_AHEAD_RISE_METRES,
   climbAhead,
   gradeBand,
@@ -32,6 +33,7 @@ import {
   nextClimbLabel,
   nextClimbText,
   routeBands,
+  withoutSlivers,
 } from './look-ahead';
 
 const STEP = 10;
@@ -354,6 +356,121 @@ describe('the whole route in grade bands (#2291)', () => {
 
   it('is nothing on a route with one cell or none', () => {
     expect(routeBands(route([100, 100])).length).toBeLessThanOrEqual(1);
+  });
+});
+
+/**
+ * #2291, the owner's screenshots of 2026-11-06: the caption's average read
+ * low (a 10 % climb "9 %", a 4.5 % one "4 %"), and a thin extra band showed
+ * at the change of slope before the top marker. Synthetic climbs at 4.5, 7
+ * and 10 %, through the real `routeProfile`.
+ */
+describe('a steady climb, as the owner’s screenshots asked — #2291', () => {
+  /** 1 km flat, 600 m at `grade` %, 1.4 km flat. */
+  const climbAt = (grade: number): RouteProfile =>
+    route([
+      100,
+      ...rise(100, 1000, 0),
+      ...rise(100, 600, grade),
+      ...rise(100 + 6 * grade, 1400, 0),
+    ]);
+  const CASES = [
+    [4.5, '5 %', 'climb'],
+    [7, '7 %', 'steep'],
+    [10, '10 %', 'wall'],
+  ] as const;
+
+  it.each(CASES)('says a %s per cent climb is "%s", before it and on it', (grade, said) => {
+    const profile = climbAt(grade);
+    const before = nextClimbText(lookAhead(profile, 900).climb, 'metric');
+    expect(before?.startsWith('Climb in ')).toBe(true);
+    expect(before?.endsWith(` · ${said}`)).toBe(true);
+    const on = lookAhead(profile, 1300).climb;
+    expect(nextClimbText(on, 'metric')?.endsWith(` · ${said}`)).toBe(true);
+    expect(nextClimbLabel(on, 'metric')).toContain(`, ${said.replace(' %', '')} per cent average`);
+  });
+
+  it.each(CASES)(
+    'draws a %s per cent climb as one band, with no sliver at its foot or its crest',
+    (grade, _said, band) => {
+      const profile = climbAt(grade);
+      expect(lookAhead(profile, 900).runs.map((run) => run.band)).toEqual(['flat', band, 'flat']);
+      for (const at of [1300, 1560]) {
+        const ahead = lookAhead(profile, at);
+        expect(ahead.runs.map((run) => run.band)).toEqual([band, 'flat']);
+        // The band ends at the top marker, to within a sample.
+        expect(
+          Math.abs((ahead.runs[0]?.end ?? 0) - (ahead.climb?.topIn ?? -99)),
+        ).toBeLessThanOrEqual(10);
+      }
+      const total = profile.totalDistance as number;
+      const route = routeBands(profile);
+      expect(route.map((run) => run.band)).toEqual(['flat', band, 'flat']);
+      const slope = slopesOf(profile)[0];
+      const top = (slope?.start ?? 0) + (slope?.length ?? 0);
+      expect(Math.abs((route[1]?.to ?? 0) * total - top)).toBeLessThanOrEqual(10);
+    },
+  );
+
+  it('still draws a real change of band: 300 m at 6 % then 300 m at 10 %', () => {
+    const profile = route([
+      100,
+      ...rise(100, 1000, 0),
+      ...rise(100, 300, 6),
+      ...rise(118, 300, 10),
+      ...rise(148, 1400, 0),
+    ]);
+    expect(lookAhead(profile, 900).runs.map((run) => run.band)).toEqual([
+      'flat',
+      'steep',
+      'wall',
+      'flat',
+    ]);
+    expect(routeBands(profile).map((run) => run.band)).toEqual(['flat', 'steep', 'wall', 'flat']);
+  });
+});
+
+describe('a band too short to be road — #2291', () => {
+  const span = (band: (typeof GRADE_BANDS)[number]['key'], from: number, to: number) => ({
+    band,
+    from,
+    to,
+  });
+
+  it('merges a sliver into the neighbour further from flat, the shortest first', () => {
+    expect(
+      withoutSlivers(
+        [
+          span('flat', 0, 100),
+          span('climb', 100, 130),
+          span('steep', 130, 150),
+          span('wall', 150, 600),
+          span('steep', 600, 620),
+          span('climb', 620, 640),
+          span('flat', 640, 1000),
+        ],
+        MINIMUM_BAND_METRES,
+      ),
+    ).toEqual([span('flat', 0, 100), span('wall', 100, 640), span('flat', 640, 1000)]);
+  });
+
+  it('merges into the longer neighbour when both are as far from flat', () => {
+    expect(
+      withoutSlivers(
+        [span('descent', 0, 100), span('flat', 100, 120), span('climb', 120, 400)],
+        MINIMUM_BAND_METRES,
+      ),
+    ).toEqual([span('descent', 0, 100), span('climb', 100, 400)]);
+  });
+
+  it('keeps a band at least the minimum long, and the first and last whatever their length', () => {
+    const kept = [
+      span('climb', 0, 20),
+      span('flat', 20, 20 + MINIMUM_BAND_METRES),
+      span('wall', 20 + MINIMUM_BAND_METRES, 900),
+      span('steep', 900, 910),
+    ];
+    expect(withoutSlivers(kept, MINIMUM_BAND_METRES)).toEqual(kept);
   });
 });
 

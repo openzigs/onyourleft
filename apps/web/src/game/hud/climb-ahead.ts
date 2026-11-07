@@ -43,7 +43,7 @@
  * `aria-hidden`, and a climb ahead is a fact about the route.
  */
 
-import { FEET_PER_MILE, type RouteProfile } from '@onyourleft/domain';
+import { FEET_PER_MILE, GRADIENT_WINDOW_METRES, type RouteProfile } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import {
@@ -60,6 +60,12 @@ import { planProgress } from './plan';
 export const SLOPE_GRADE_PERCENT = 3;
 /** The shortest stretch at that grade worth a sentence. */
 export const MINIMUM_SLOPE_METRES = 100;
+/**
+ * How much of each end of a slope its mean leaves out — #2291: half the
+ * gradient window, the reach of a sample's window past the slope's edge
+ * ({@link slopesOf}).
+ */
+export const BODY_TRIM_METRES = GRADIENT_WINDOW_METRES / 2;
 
 export type SlopeKind = 'climb' | 'descent';
 
@@ -70,8 +76,22 @@ export interface Slope {
   readonly start: number;
   /** How long it is. On a loop it may run past the line into the next lap. */
   readonly length: number;
-  /** Its mean grade, in percent, signed as the profile signs it. */
+  /**
+   * Its mean grade, in percent, signed as the profile signs it — over the
+   * slope's BODY, not its ramps (#2291, {@link slopesOf}).
+   */
   readonly grade: number;
+}
+
+/**
+ * A slope's grade as the rider is told it, in whole percent — #2291. Rounded
+ * first to the tenth the HUD's gradient field shows (`fields.ts`
+ * §`gradientReading`), then half up, so the number is the big gradient
+ * number rounded: a 4.5 % climb is "5", whatever float the mean lands on.
+ * The announcer and the strip's caption both say this one.
+ */
+export function wholePercent(grade: number): number {
+  return Math.round(Math.round(Math.abs(grade) * 10) / 10);
 }
 
 type Band = SlopeKind | 'flat';
@@ -95,6 +115,17 @@ interface Run {
  * sample stands for the cell it starts. Runs of flat shorter than the minimum
  * between two runs of the same kind are absorbed, then any climb or descent
  * still shorter than the minimum is dropped.
+ *
+ * ⚠️ **The mean leaves out the ramps — #2291.** A grade is a least-squares
+ * slope over `GRADIENT_WINDOW_METRES` (`@onyourleft/domain` §profile), so at
+ * a change of slope it ramps across the window from one grade to the other,
+ * and a slope's run starts and ends partway up those ramps, where the grade
+ * crosses {@link SLOPE_GRADE_PERCENT}. Averaged in, they pulled a steady 10 %
+ * climb to 9.4 % and a 4.5 % one to 4.44 %, and the caption said "9 %" and
+ * "4 %". A sample within half the window of the run's edge is measured over a
+ * window that reaches the road beyond it, so the mean is taken without those
+ * samples ({@link BODY_TRIM_METRES}); a slope too short to have a body keeps
+ * the mean over all of it.
  */
 export function slopesOf(profile: RouteProfile): readonly Slope[] {
   const resolution = profile.resolution as number;
@@ -126,13 +157,17 @@ export function slopesOf(profile: RouteProfile): readonly Slope[] {
     }
   }
 
-  const slopeOf = (run: Run, extra = 0): Slope => {
-    const samples = grades.slice(run.first, run.last + 1);
-    const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+  const trim = Math.round(BODY_TRIM_METRES / resolution);
+  const samplesOf = (run: Run): number[] => grades.slice(run.first, run.last + 1);
+  const slopeOf = (run: Run, across?: Run): Slope => {
+    // Across the line on a loop, the head's samples follow the tail's.
+    const samples = [...samplesOf(run), ...(across === undefined ? [] : samplesOf(across))];
+    const body = samples.length > 2 * trim ? samples.slice(trim, samples.length - trim) : samples;
+    const mean = body.reduce((sum, value) => sum + value, 0) / body.length;
     return {
       kind: run.band as SlopeKind,
       start: run.first * resolution,
-      length: (run.last - run.first + 1) * resolution + extra,
+      length: samples.length * resolution,
       grade: mean,
     };
   };
@@ -158,7 +193,7 @@ export function slopesOf(profile: RouteProfile): readonly Slope[] {
     kept[0] === head &&
     kept.at(-1) === tail
   ) {
-    const joined = slopeOf(tail, (head.last - head.first + 1) * resolution);
+    const joined = slopeOf(tail, head);
     return [...slopes.slice(1, -1), joined];
   }
   return slopes;
@@ -228,7 +263,7 @@ export function slopeSentence(ahead: SlopeAhead, units: UnitSystem): string {
   // Rounded to tens of the rider's own unit: "in 250 metres", not "in 249".
   const measured = formatSmallDistance(ahead.metresAhead, units);
   const tens = Math.max(10, Math.round(Number(measured.value) / 10) * 10);
-  const percent = Math.round(Math.abs(ahead.slope.grade));
+  const percent = wholePercent(ahead.slope.grade);
   // #1440's review: a quarter of a mile or more is said in miles, to one
   // decimal as the distance to go is ("0.5 miles to go"), from the same tens
   // of feet — so a climb first seen at the 0.25 mi step (1320 ft) is "0.3

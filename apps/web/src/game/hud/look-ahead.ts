@@ -55,7 +55,13 @@
  * the gradient's own number (its first).
  */
 
-import { elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
+import {
+  GRADIENT_WINDOW_METRES,
+  PROFILE_RESOLUTION_METRES,
+  elevationAt,
+  gradeAt,
+  type RouteProfile,
+} from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatSmallDistance, measurementText, spokenSmallDistanceUnit } from '../../units/format';
@@ -64,6 +70,7 @@ import {
   SLOPE_GRADE_PERCENT,
   slopeAhead,
   slopesOf,
+  wholePercent,
   type Slope,
   type SlopeAhead,
 } from './climb-ahead';
@@ -135,6 +142,75 @@ export function gradeBand(grade: number): GradeBand {
     if (grade >= each.from) band = each;
   }
   return band;
+}
+
+/**
+ * The shortest band either strip draws, in metres — #2291, the owner's
+ * screenshots of 2026-11-06: a thin extra band at a climb's crest. A grade is
+ * a slope over `GRADIENT_WINDOW_METRES`, so at a change of slope it ramps
+ * across the window, and a 10 % climb's ramp crosses the climb and steep
+ * bands on its way to flat: 20 to 40 m of each, at the foot and at the top,
+ * which is the window's transition and not road. A band shorter than this,
+ * with a band on each side, is drawn as its neighbour ({@link withoutSlivers}).
+ * Half the window, so a real stretch the window can resolve stays drawn, and
+ * half a sample more: the road ahead counts in 10 m samples and the whole
+ * route in its grid's cells, which are up to half a metre either side of
+ * 10 m, so five of either (50 m, the half window) is merged on both strips
+ * and six of either is drawn on both. On the threshold itself the two strips
+ * disagreed about a 6 % climb's foot.
+ */
+export const MINIMUM_BAND_METRES = GRADIENT_WINDOW_METRES / 2 + PROFILE_RESOLUTION_METRES / 2;
+
+/** How far a band is from flat: the descent and the climb 1, the wall 3. */
+function steepness(band: GradeBandKey): number {
+  return Math.abs(GRADE_BANDS.findIndex((each) => each.key === band) - 1);
+}
+
+/** A run of one band, from `from` to `to`, in whatever unit its strip counts in. */
+interface BandSpan {
+  readonly band: GradeBandKey;
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * The runs with every sliver merged into a neighbour — #2291. A run shorter
+ * than `minimum` between two others takes the band of the neighbour further
+ * from flat (the longer, when they are as far), so a climb's ramps are drawn
+ * as the climb and its band ends where `slopesOf` ends it, at the top marker.
+ * The shortest goes first, and neighbours left in one band are joined. The
+ * first and last runs are never merged: there the strip cuts the road, and a
+ * short run at its edge is the start of what lies beyond. Pure.
+ */
+export function withoutSlivers(spans: readonly BandSpan[], minimum: number): BandSpan[] {
+  const out = [...spans];
+  const length = (span: BandSpan): number => span.to - span.from;
+  for (;;) {
+    let shortest = -1;
+    for (let index = 1; index < out.length - 1; index += 1) {
+      const span = out[index] as BandSpan;
+      if (
+        length(span) < minimum &&
+        (shortest < 0 || length(span) < length(out[shortest] as BandSpan))
+      ) {
+        shortest = index;
+      }
+    }
+    if (shortest < 0) return out;
+    const before = out[shortest - 1] as BandSpan;
+    const after = out[shortest + 1] as BandSpan;
+    const lean = steepness(before.band) - steepness(after.band);
+    const band = (lean !== 0 ? lean > 0 : length(before) >= length(after))
+      ? before.band
+      : after.band;
+    out[shortest] = { ...(out[shortest] as BandSpan), band };
+    // Join every pair of neighbours now in one band.
+    for (let index = out.length - 1; index > 0; index -= 1) {
+      const left = out[index - 1] as BandSpan;
+      const right = out[index] as BandSpan;
+      if (left.band === right.band) out.splice(index - 1, 2, { ...left, to: right.to });
+    }
+  }
 }
 
 /** One stretch of the strip in one band, from `start` to `end` metres ahead. */
@@ -218,16 +294,21 @@ export function lookAhead(profile: RouteProfile, distance: number): LookAhead {
   raw.push({ ahead: length, elevation: elevationAt(profile, distance + length) });
   const floor = Math.min(...raw.map((each) => each.elevation));
 
-  const runs: LookAheadRun[] = [];
+  const spans: BandSpan[] = [];
   for (let index = 0; index < raw.length - 1; index += 1) {
-    const start = (raw[index] as { ahead: number }).ahead;
-    const end = (raw[index + 1] as { ahead: number }).ahead;
+    const from = (raw[index] as { ahead: number }).ahead;
+    const to = (raw[index + 1] as { ahead: number }).ahead;
     // The grade at the middle of the stretch, as the trainer would be sent it.
-    const band = gradeBand(gradeAt(profile, distance + (start + end) / 2)).key;
-    const open = runs.at(-1);
-    if (open?.band === band) runs[runs.length - 1] = { ...open, end };
-    else runs.push({ band, start, end });
+    const band = gradeBand(gradeAt(profile, distance + (from + to) / 2)).key;
+    const open = spans.at(-1);
+    if (open?.band === band) spans[spans.length - 1] = { ...open, to };
+    else spans.push({ band, from, to });
   }
+  const runs: LookAheadRun[] = withoutSlivers(spans, MINIMUM_BAND_METRES).map((span) => ({
+    band: span.band,
+    start: span.from,
+    end: span.to,
+  }));
 
   const nextClimb = slopeAhead(climbsOf(profile), profile, distance, LOOK_AHEAD_METRES);
   return {
@@ -291,7 +372,9 @@ const bandsByProfile = new WeakMap<RouteProfile, readonly RouteBandRun[]>();
  * is banded by the grade at its middle, as {@link lookAhead} bands its
  * stretches, and neighbours in one band are one run. In fractions of the
  * route, so a cell is where the whole route's strip draws it (`HudCore.tsx`
- * §`strip`: grid point `i` of `n` at `i / (n − 1)`). Pure, cached per profile.
+ * §`strip`: grid point `i` of `n` at `i / (n − 1)`). A band shorter than
+ * {@link MINIMUM_BAND_METRES} is merged as the road ahead's is
+ * ({@link withoutSlivers}). Pure, cached per profile.
  */
 export function routeBands(profile: RouteProfile): readonly RouteBandRun[] {
   const cached = bandsByProfile.get(profile);
@@ -308,8 +391,10 @@ export function routeBands(profile: RouteProfile): readonly RouteBandRun[] {
     if (open?.band === band) runs[runs.length - 1] = { ...open, to };
     else runs.push({ band, from, to });
   }
-  bandsByProfile.set(profile, runs);
-  return runs;
+  const total = profile.totalDistance as number;
+  const merged = total > 0 ? withoutSlivers(runs, MINIMUM_BAND_METRES / total) : runs;
+  bandsByProfile.set(profile, merged);
+  return merged;
 }
 
 /**
@@ -317,7 +402,9 @@ export function routeBands(profile: RouteProfile): readonly RouteBandRun[] {
  * none: `Climb in 350 m · 6 %` before it, as #2075 wrote it and the
  * announcer says it, and `Top in 420 m · 7 %` on it (#2291). The distance is
  * the rider's own unit, as everywhere on the HUD; the grade is the whole
- * climb's average, in whole percent, as the announcer says it.
+ * climb's average, in whole percent rounded half up from the tenth the
+ * gradient field shows (`climb-ahead.ts` §`wholePercent`), as the announcer
+ * says it.
  *
  * ⚠️ **Before a climb its top is on the strip, not in this phrase**: a dashed
  * line where the window reaches it (`HudCore.tsx` §`LookAheadStrip`), and in
@@ -334,7 +421,7 @@ export function nextClimbText(
   units: UnitSystem,
 ): string | undefined {
   if (climb === undefined) return undefined;
-  const grade = `${String(Math.round(Math.abs(climb.slope.grade)))} %`;
+  const grade = `${String(wholePercent(climb.slope.grade))} %`;
   if (climb.where === 'on') {
     return `Top in ${measurementText(formatSmallDistance(roundedAhead(climb.topIn), units))} · ${grade}`;
   }
@@ -347,7 +434,7 @@ export function nextClimbLabel(climb: ClimbAhead | undefined, units: UnitSystem)
   if (climb === undefined) return `no climb in the ${LOOK_AHEAD_WORDS}`;
   const spoken = (metres: number): string =>
     `${formatSmallDistance(roundedAhead(metres), units).value} ${spokenSmallDistanceUnit(units)}`;
-  const grade = `${String(Math.round(Math.abs(climb.slope.grade)))} per cent average`;
+  const grade = `${String(wholePercent(climb.slope.grade))} per cent average`;
   if (climb.where === 'on') return `on a climb, top in ${spoken(climb.topIn)}, ${grade}`;
   return `next climb in ${spoken(climb.startsIn)}, ${grade}, top in ${spoken(climb.topIn)}`;
 }
