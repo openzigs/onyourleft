@@ -799,6 +799,13 @@ function buildGamePort(
         return { kind: 'none' };
       }
     },
+    // #2293, ADR 0064: the built-in lap-race circuits, from the bundle — no
+    // store, no instance, no request. Imported when the game asks, so the
+    // files are chunks of their own. ⚠️ An optional member, so dropping this
+    // line is green in `check:wiring`; `game/circuits/circuits-wiring.test.tsx`
+    // is what goes red.
+    listCircuits: async (): Promise<readonly RidableRoute[]> =>
+      (await import('./game/circuits/circuits')).loadBuiltInCircuits(),
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];

@@ -19,7 +19,10 @@
  *   race keeps nothing once a ride ends (`lap-race/ride-race.ts`). "Your
  *   best" is the rider's fastest moving time over a ride on any of those
  *   loops, read from the attempt summaries the route list already holds
- *   (`RidableRoute.bestSeconds`), so it costs no stream decode.
+ *   (`RidableRoute.bestSeconds`), so it costs no stream decode. The owner's
+ *   ruling of 2026-11-07 (#2293): the card counts the built-in circuits too,
+ *   as many as `GamePort.listCircuits` lists, never a number written down
+ *   here; a failed read of them leaves the loop count alone, as before.
  *
  * Both *Play*s are secondary: two games on one page are two equal choices,
  * and the one-primary rule (`a11y/button-hierarchy.ts`) holds a page to one
@@ -75,6 +78,24 @@ export function lapRaceLoopsText(loops: number, bestSeconds?: number): string {
   return bestSeconds === undefined ? count : `${count} · your best ${formatDuration(bestSeconds)}`;
 }
 
+/**
+ * The lap race's courses, as a reading — the owner's ruling of 2026-11-07:
+ * *"4 built-in circuits, 2 of your loops"*, *"1 of your loops"* for one, and
+ * *"4 built-in circuits"* alone when the rider has no loop. With no circuits
+ * listed (none offered, or their read failed), the loop count alone.
+ */
+export function lapRaceCoursesText(circuits: number, loops: number, bestSeconds?: number): string {
+  if (circuits === 0) {
+    return lapRaceLoopsText(loops, bestSeconds);
+  }
+  const builtIn = `${String(circuits)} built-in ${circuits === 1 ? 'circuit' : 'circuits'}`;
+  if (loops === 0) {
+    return builtIn;
+  }
+  const count = `${builtIn}, ${String(loops)} of your loops`;
+  return bestSeconds === undefined ? count : `${count} · your best ${formatDuration(bestSeconds)}`;
+}
+
 /** The fastest moving time over the loops among `routes`; none if no loop has been ridden. */
 function bestOnLoops(routes: readonly RidableRoute[]): number | undefined {
   let best: number | undefined;
@@ -95,14 +116,21 @@ export function GamesView(props: GamesViewProps): JSX.Element {
   const [week] = useState(() => readDeliveryProgress(deviceStorage()));
   const [loops, setLoops] = useState<number | undefined>(undefined);
   const [best, setBest] = useState<number | undefined>(undefined);
+  const [circuits, setCircuits] = useState(0);
   useEffect(() => {
     if (port === undefined) {
       setLoops(0);
       return;
     }
     let cancelled = false;
-    void port.listRoutes().then((routes) => {
+    // The circuits the course picker lists, read as it reads them: a failed
+    // read costs the circuit count and never the loops.
+    const builtIn = (port.listCircuits?.() ?? Promise.resolve([])).catch(
+      (): readonly RidableRoute[] => [],
+    );
+    void Promise.all([port.listRoutes(), builtIn]).then(([routes, circuitsFound]) => {
       if (cancelled) return;
+      setCircuits(circuitsFound.length);
       setLoops(choosableCourses(coursesFor('lap-race', routes)));
       setBest(bestOnLoops(routes));
     });
@@ -125,7 +153,9 @@ export function GamesView(props: GamesViewProps): JSX.Element {
         id="oyl-games-lap-race"
         heading={GAMES_TEXT.lapRace}
         what={GAMES_TEXT.lapRaceWhat}
-        standing={loops === undefined ? GAMES_TEXT.loading : lapRaceLoopsText(loops, best)}
+        standing={
+          loops === undefined ? GAMES_TEXT.loading : lapRaceCoursesText(circuits, loops, best)
+        }
         href={hrefFor(coursesRouteFor('lap-race'))}
       />
     </div>

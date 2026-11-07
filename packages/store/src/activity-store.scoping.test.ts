@@ -112,7 +112,7 @@ import type {
   SegmentEffortRecord,
 } from './records';
 import type { AthleteId } from './ids';
-import { privacyZoneId, segmentEffortId } from './ids';
+import { circuitRouteId, privacyZoneId, segmentEffortId } from './ids';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -194,6 +194,12 @@ interface World {
   readonly workoutGoals: WorkoutGoalsRecord;
   /** #1545: the map features around {@link World.route}. */
   readonly corridor: WorldCorridorRecord;
+  /**
+   * #2293, ADR 0064 D-2.2: the map features around a built-in circuit, kept
+   * under the SAME `circuit:` key by every athlete — a circuit is the app's,
+   * so its key is shared, and only the owner half of it tells them apart.
+   */
+  readonly circuitCorridor: WorldCorridorRecord;
   /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
   readonly binned: ReturnType<typeof rideFor>;
 }
@@ -284,6 +290,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const binned = rideFor(owner, { name: `Deleted by ${owner}` });
   // #1545. Different features per athlete, around this athlete's own route.
   const corridor = await worldCorridorFor(owner, route.id);
+  // #2293. The same circuit key for every athlete, different features each.
+  const circuitCorridor = await worldCorridorFor(owner, SCOPING_CIRCUIT, { seed: 5 });
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -325,6 +333,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putRiderText(riderTextFor(owner, 'note', binned.id));
     await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
     await store.putWorldCorridor(corridor);
+    await store.putWorldCorridor(circuitCorridor);
   });
 
   return {
@@ -350,9 +359,13 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     trustedKey,
     workoutGoals,
     corridor,
+    circuitCorridor,
     binned,
   };
 }
+
+/** #2293: the built-in circuit every athlete keeps a corridor for. */
+const SCOPING_CIRCUIT = circuitRouteId('scoping-fixture');
 
 /**
  * One member of the scoped surface, and what a missing `owner` filter on it
@@ -1078,6 +1091,16 @@ const PROBES: readonly ScopingProbe[] = [
       // row and handed back another's blob would pass on the key fields.
       expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
         worldCorridorFeaturesFor(mine.owner),
+      );
+      // #2293, ADR 0064 D-2.2: a built-in circuit's corridor is kept under a
+      // key every athlete shares, so the owner filter is all that keeps
+      // another athlete's — read round THEIR privacy zones — from being mine.
+      const circuit = await store.getWorldCorridor(mine.owner, SCOPING_CIRCUIT);
+      expect(circuit?.owner).toBe(mine.owner);
+      expect(circuit?.routeDigest).toBe(mine.circuitCorridor.routeDigest);
+      expect(circuit?.routeDigest).not.toBe(theirs.circuitCorridor.routeDigest);
+      expect(circuit && (await unpackWorldCorridorFeatures(circuit.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(mine.circuitCorridor.features),
       );
     },
   },

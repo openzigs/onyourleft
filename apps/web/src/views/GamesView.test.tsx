@@ -12,21 +12,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
+import { circuitRouteId } from '@onyourleft/store';
 
 import { COURSE_TEXT } from '../game/courses';
 import { writeDeliveryProgress } from '../game/delivery/delivery-progress';
 import { deliveryTown } from '../game/delivery/delivery-town-testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import { circuitRoute, northRoute } from '../game/route-fixtures-testing';
-import { DELIVERY_COURSE_TEXT } from '../game/StageChooser';
+import { BUILT_IN_CIRCUITS_TEXT, DELIVERY_COURSE_TEXT } from '../game/StageChooser';
+import { OSM_ATTRIBUTION } from '../map/basemap';
 import { writeRealisticWorldChoice } from '../game/world-preference';
 import { AppShell } from '../shell/AppShell';
-import { gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
+import { gamePlayFromHash, gameRouteFromHash, hrefFor, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
-import { GAME_COURSES_TEXT } from './GameCoursesView';
-import { deliveryWeekProgressText, GAMES_TEXT, lapRaceLoopsText } from './GamesView';
+import { GAME_COURSES_TEXT, GameCoursesView } from './GameCoursesView';
+import {
+  deliveryWeekProgressText,
+  GAMES_TEXT,
+  lapRaceCoursesText,
+  lapRaceLoopsText,
+} from './GamesView';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -49,8 +56,20 @@ const OUT: RidableRoute = {
   attempts: 0,
 };
 
-function portOf(routes: readonly RidableRoute[]): GamePort {
+/**
+ * A synthetic built-in circuit, keyed as `circuits.ts` keys a shipped one —
+ * never a shipped one (ADR 0064 D-6.4).
+ */
+const RING: RidableRoute = {
+  id: circuitRouteId('fixture-ring'),
+  name: 'Fixture ring',
+  profile: circuitRoute(70),
+  attempts: 0,
+};
+
+function portOf(routes: readonly RidableRoute[], circuits?: readonly RidableRoute[]): GamePort {
   return {
+    ...(circuits === undefined ? {} : { listCircuits: () => Promise.resolve(circuits) }),
     listRoutes: () => Promise.resolve(routes),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
@@ -74,9 +93,13 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-async function open(path: string, routes: readonly RidableRoute[]): Promise<void> {
+async function open(
+  path: string,
+  routes: readonly RidableRoute[],
+  circuits?: readonly RidableRoute[],
+): Promise<void> {
   globalThis.location.hash = `#${path}`;
-  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={portOf(routes)} />);
+  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={portOf(routes, circuits)} />);
   await settle();
 }
 
@@ -130,6 +153,35 @@ describe('the Games tab — #2292', () => {
     const out = { ...OUT, bestSeconds: 60 };
     await open('/games', [slow, out, fast]);
     expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on · your best 12:34');
+  });
+
+  it('counts the built-in circuits the port lists beside several of the rider’s loops', async () => {
+    const second = { ...RING, id: circuitRouteId('fixture-oval'), name: 'Fixture oval' };
+    await open('/games', [LOOP_A, OUT, LOOP_B], [RING, second]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 built-in circuits, 2 of your loops');
+  });
+
+  it('counts one of the rider’s loops beside the circuits as “1 of your loops”', async () => {
+    await open('/games', [LOOP_A, OUT], [RING]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('1 built-in circuit, 1 of your loops');
+  });
+
+  it('counts the circuits alone when the rider has no loop', async () => {
+    await open('/games', [OUT], [RING]);
+    const standing = card(GAMES_TEXT.lapRace)?.querySelector('.oyl-games__standing');
+    expect(standing?.textContent).toBe('1 built-in circuit');
+  });
+
+  it('shows the loop count alone, as before, when the circuits cannot be read', async () => {
+    globalThis.location.hash = '#/games';
+    const port: GamePort = {
+      ...portOf([LOOP_A, LOOP_B]),
+      listCircuits: () => Promise.reject(new Error('a damaged bundle')),
+    };
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
+    await settle();
+    const standing = card(GAMES_TEXT.lapRace)?.querySelector('.oyl-games__standing');
+    expect(standing?.textContent).toBe('2 loops to race on');
   });
 
   it('says nothing of a best before the rider has ridden a loop — the control', async () => {
@@ -204,6 +256,97 @@ describe('a game’s course picker — #2292', () => {
       GAME_COURSES_TEXT.noRoutes,
     );
     expect(link(GAME_COURSES_TEXT.importRoute)?.getAttribute('href')).toBe('#/routes');
+  });
+});
+
+describe('the built-in circuits on the lap race’s picker — #2293 through #2292’s seam', () => {
+  function names(): (string | null | undefined)[] {
+    return [...document.querySelectorAll('.oyl-game-courses__course')].map(
+      (each) => each.querySelector('h3')?.textContent,
+    );
+  }
+
+  it('lists them after the rider’s loops, each leading to the setup with the race on', async () => {
+    await open('/games/lap-race', [OUT, LOOP_A], [RING]);
+    expect(names()).toEqual([LOOP_A.name, RING.name, OUT.name]);
+    const href = link(`${GAME_COURSES_TEXT.choose}: ${RING.name}`)?.getAttribute('href') ?? '';
+    expect(gameRouteFromHash(href)).toBe(RING.id);
+    expect(gamePlayFromHash(href)).toBe('lap-race');
+  });
+
+  it('shows the OpenStreetMap credit beside them, with the way to the licence (D-5.1)', async () => {
+    await open('/games/lap-race', [LOOP_A], [RING]);
+    const credit = document.querySelector('[data-credit="circuits"]');
+    expect(credit?.textContent).toContain(OSM_ATTRIBUTION);
+    expect(credit?.querySelector('a')?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.licence);
+    expect(credit?.querySelector('a')?.getAttribute('href')).toBe(hrefFor(routeById('credits')));
+  });
+
+  it('offers them to a rider with no routes of their own, rather than the empty state', async () => {
+    await open('/games/lap-race', [], [RING]);
+    expect(document.querySelector('[data-oyl-empty-state]')).toBeNull();
+    expect(names()).toEqual([RING.name]);
+    expect(link(`${GAME_COURSES_TEXT.choose}: ${RING.name}`)).toBeDefined();
+    expect(document.querySelector('.oyl-game-courses__none')).toBeNull();
+  });
+
+  it('lists none, and no credit, on Delivery’s picker', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open('/games/delivery', [OUT], [RING]);
+    expect(names()).toEqual([OUT.name]);
+    expect(document.querySelector('[data-credit="circuits"]')).toBeNull();
+  });
+
+  it('leaves Delivery’s picker with no routes at its empty state, circuits or not', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open('/games/delivery', [], [RING]);
+    expect(document.querySelector('[data-oyl-empty-state]')?.textContent).toContain(
+      GAME_COURSES_TEXT.noRoutes,
+    );
+  });
+
+  it('lists none, and no credit, with no circuits member on the port — the control', async () => {
+    await open('/games/lap-race', [LOOP_A]);
+    expect(names()).toEqual([LOOP_A.name]);
+    expect(document.querySelector('[data-credit="circuits"]')).toBeNull();
+  });
+
+  it('keeps the rider’s routes when the circuits cannot be read', async () => {
+    globalThis.location.hash = '#/games/lap-race';
+    const port: GamePort = {
+      ...portOf([LOOP_A]),
+      listCircuits: () => Promise.reject(new Error('a damaged bundle')),
+    };
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
+    await settle();
+    expect(names()).toEqual([LOOP_A.name]);
+  });
+
+  it('drops them at once when the picker is handed Delivery in place of the lap race', async () => {
+    // The review of #2326. AppShell keys its view by route today
+    // (`ViewBoundary key={route.id}`), so each game gets a picker of its
+    // own; this renders one picker and changes its game, which is the case
+    // that key would no longer cover. The second read of the routes never
+    // answers, holding open the moment the circuits could linger.
+    writeRealisticWorldChoice(localStorage, true);
+    let reads = 0;
+    const port: GamePort = {
+      ...portOf([], [RING]),
+      listRoutes: () => {
+        reads += 1;
+        return reads === 1 ? Promise.resolve([]) : new Promise(() => undefined);
+      },
+    };
+    mounted = await mount(<GameCoursesView mode="lap-race" port={port} />);
+    await settle();
+    expect(names()).toEqual([RING.name]);
+    await mounted.rerender(<GameCoursesView mode="delivery" port={port} />);
+    await settle();
+    expect(reads).toBe(2);
+    expect(names()).toEqual([]);
+    expect(document.querySelector('[data-oyl-empty-state]')?.textContent).toContain(
+      GAME_COURSES_TEXT.noRoutes,
+    );
   });
 });
 
@@ -359,5 +502,16 @@ describe('the cards’ words', () => {
     );
     expect(lapRaceLoopsText(1)).toBe('1 loop to race on');
     expect(lapRaceLoopsText(0)).toBe('No loops to race on yet');
+  });
+
+  it('counts the lap race’s courses as the owner ruled on 2026-11-07', () => {
+    expect(lapRaceCoursesText(4, 0)).toBe('4 built-in circuits');
+    expect(lapRaceCoursesText(4, 1)).toBe('4 built-in circuits, 1 of your loops');
+    expect(lapRaceCoursesText(4, 3)).toBe('4 built-in circuits, 3 of your loops');
+    expect(lapRaceCoursesText(4, 3, 754)).toBe(
+      '4 built-in circuits, 3 of your loops · your best 12:34',
+    );
+    expect(lapRaceCoursesText(0, 2)).toBe('2 loops to race on');
+    expect(lapRaceCoursesText(0, 0)).toBe('No loops to race on yet');
   });
 });

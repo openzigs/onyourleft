@@ -2486,3 +2486,66 @@ inputsha256 = "d55f4dbbe6a5565f585aac6e922509ebb94c2991826917dcaacccaf4a6e90682"
 script = "apps/web/tools/realistic/encode-ktx2.ts"
 tool = "KTX-Software v4.4.2"
 
+
+# ⚠️ **The built-in lap-race circuits (#2293, ADR 0064) are DATABASES, not art.**
+# Each line follows streets drawn from this project's own basemap archive, so
+# each file is a database derived from OpenStreetMap and is offered under
+# `ODbL-1.0` (D-3), with the licence fields inside it and `LICENCE-ODbL.txt`
+# beside it (D-3.2). A JSON file is not discovered by ASSET001 or ASSET008;
+# they are named here on purpose (D-6.2), which buys each one ASSET002 to
+# ASSET004 and ASSET007, and ASSET004 admits `ODbL-1.0` for this one
+# directory's `.json` files and for nothing else. `sha256` is the digest D-6.3
+# records with the archive build each was drawn through (`input`), so a redraw
+# after an archive refresh is a reviewable change. `inputsha256` is the
+# authoring script's own digest of every tile it read and every 3DEP answer, in
+# order: 3DEP's service is not pinned, so it records what was read rather than
+# promising a byte-identical redraw. No `creator` key: the Credits screen's Map
+# data entry carries the OpenStreetMap credit, not the art list.
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/bellwether.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "fdeb87a9995c9584cb7395607a9ef3f8886d62205f4d26cbcc982923e3e706fc"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "c340639baf4c64479c4ff11954711f9ccbed5400b59a71b8188f9974a3e056cc"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/ember.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "0ccb630edf9f1ad978b8a26b4cced68e5b64629e1da093ae72a4fdcdb6763252"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "9f6fb38ef7394f04cb91ae392f5c4f83bdce66dad0637b1040b8c16eef644344"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/fieldfare.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "5d89abfbc7383211d3dfe547bcf77a713ae72f2c0bca040f2aa7cba9cea15a1f"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "eeb118d2e956d4c70d92f4749befb9f19285c2991ef3d181bd996ee3f848953d"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/kestrel.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "4811733664fcd3dcc8b92f2dbe14b18b92ba3da3f5ccca03bf3e413b1f04b6ff"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "3712a11785134d1a96ef6e05892c595a4c65bd78b01abf076eb27284d256d651"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
