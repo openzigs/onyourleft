@@ -286,6 +286,11 @@ import {
   type TraceSample,
 } from './hud/recent-trace';
 import {
+  DEFAULT_HUD_LAYOUT,
+  readHudLayout,
+  type HudLayoutPreference,
+} from './hud/hud-layout-preference';
+import {
   ghostDistanceAt,
   pacerGap,
   type BotPacerPlan,
@@ -1658,6 +1663,8 @@ function GameScreen({
    * of each ride, like the announcements.
    */
   const draftShownRef = useRef(false);
+  /** #2079: the HUD's panels and text size, read as each ride begins. */
+  const [hudLayout, setHudLayout] = useState<HudLayoutPreference>(DEFAULT_HUD_LAYOUT);
   /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
   const inDraftRef = useRef(false);
   /**
@@ -1979,6 +1986,8 @@ function GameScreen({
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
       draftShownRef.current = readDraftReadingChoice(deviceStorage());
+      // #2079: the rider's panels and text size, as Settings left them.
+      setHudLayout(readHudLayout(deviceStorage()));
       // #551: a link already lost when the ride starts is on the HUD's line,
       // and is not news — only a link that goes DURING this ride is said.
       sideLostRef.current = sideCameraLost(
@@ -3624,6 +3633,8 @@ function GameScreen({
         rideTotals={rideTotals}
         // #2078: the last ten minutes, written once a second by the loop.
         recent={recentTrace}
+        // #2079: the rider's panels and text size.
+        layout={hudLayout}
         // #2077: the rider's W/kg from the weight the physics rides (`undefined`
         // when none is set, never the default), and the zone indicator from
         // their own threshold and the recorder's time in each zone.

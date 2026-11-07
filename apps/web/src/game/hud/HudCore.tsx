@@ -72,6 +72,7 @@ import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { RecentGraph } from './RecentGraph';
+import { DEFAULT_HUD_LAYOUT, panelShown } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -170,14 +171,39 @@ export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
   secondary: 'Ride readings',
 };
 
+/**
+ * What stays of the secondary tier when a rider turns its readings off —
+ * #2079: the ride's three times (drawn beside the controls and in the primary
+ * panel's clock row on most layouts) and whatever the ride's mode is about —
+ * a room's, a Delivery round's, a lap race's — which are the ride itself
+ * rather than a reading of it.
+ */
+function keptWithReadingsHidden(reading: HudReading): boolean {
+  return (
+    reading.key === MOVING_TIME_KEY ||
+    reading.key === ELAPSED_TIME_KEY ||
+    reading.key === CLOCK_KEY ||
+    isRoomReading(reading) ||
+    isDeliveryReading(reading) ||
+    isLapRaceReading(reading)
+  );
+}
+
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
+  // #2079: the rider's own choice of panels and text size, as the ride began.
+  const layout = props.layout ?? DEFAULT_HUD_LAYOUT;
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
       !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
-      !(props.withoutTotals === true && isRideTotalReading(reading)),
+      !(props.withoutTotals === true && isRideTotalReading(reading)) &&
+      !(
+        !panelShown(layout, 'readings') &&
+        readingTier(reading) === 'secondary' &&
+        !keptWithReadingsHidden(reading)
+      ),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
@@ -195,7 +221,14 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   useTouchLock(hud, touchLocked);
 
   return (
-    <section ref={hud} className="oyl-hud" aria-label="Ride metrics">
+    <section
+      ref={hud}
+      className={
+        layout.textSize === 'normal' ? 'oyl-hud' : `oyl-hud oyl-hud--text-${layout.textSize}`
+      }
+      aria-label="Ride metrics"
+      data-oyl-hud-text={layout.textSize}
+    >
       {/*
         A description list, because that is what these are: a label and its
         value, seven times. It was an `ol` of `span`s first, which needed
@@ -214,25 +247,36 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       <FieldList tier="primary" readings={readings} />
       <FieldList tier="secondary" readings={readings} />
 
-      <div className="oyl-hud__panel oyl-hud__route">
-        <ElevationStrip
-          reading={elevation}
-          profile={props.profile}
-          distance={props.state.ride.distance}
-          units={props.units}
-        />
+      {/*
+        #2079: the route panel holds the strip and the plan, and the recent
+        graph; each may be turned off, and with both off there is no panel.
+      */}
+      {!panelShown(layout, 'route') &&
+      (props.recent === undefined || !panelShown(layout, 'graph')) ? null : (
+        <div className="oyl-hud__panel oyl-hud__route">
+          {panelShown(layout, 'route') ? (
+            <>
+              <ElevationStrip
+                reading={elevation}
+                profile={props.profile}
+                distance={props.state.ride.distance}
+                units={props.units}
+              />
 
-        {props.routeFigure}
+              {props.routeFigure}
+            </>
+          ) : null}
 
-        {/* #2078: the last ten minutes of power and heart rate. */}
-        {props.recent === undefined ? null : (
-          <RecentGraph
-            samples={props.recent.samples}
-            written={props.recent.written}
-            threshold={props.thresholdPower}
-          />
-        )}
-      </div>
+          {/* #2078: the last ten minutes of power and heart rate. */}
+          {props.recent === undefined || !panelShown(layout, 'graph') ? null : (
+            <RecentGraph
+              samples={props.recent.samples}
+              written={props.recent.written}
+              threshold={props.thresholdPower}
+            />
+          )}
+        </div>
+      )}
 
       <div className="oyl-hud__panel oyl-hud__actions">
         {/*
