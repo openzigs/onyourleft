@@ -421,7 +421,9 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
     await typeInto(speed as HTMLInputElement, '12');
     await settle();
 
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(4);
+    // Three boxes: the two wind boxes and the trainer-free preview's power.
+    // The pacer is off here, so its intensity box is not on the screen (#2338).
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
     const reachable = keyboardReachableElements(document);
     for (const words of ['Wind speed', 'Wind direction']) {
       const box = boxLabelled(mounted.container, words);
