@@ -79,6 +79,8 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
 
+import { BUILT_IN_WORKOUTS } from '@onyourleft/domain';
+
 import { HARNESS_ORIGIN, LAUNCH_ARGS, PRODUCT_ORIGIN } from '../playwright.config';
 
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
@@ -470,6 +472,40 @@ test.describe('a cold start with the network off', () => {
         fromWorker.every(Boolean),
         'an offline response did not come from the service worker, so this may be a disk-cached page',
       ).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('lists every built-in workout on Workouts, with no instance and nothing saved — #2304', async () => {
+    // The built-in library is a constant in the bundle (`workouts/built-in.ts`),
+    // so a rider who has never saved a workout and has no instance still finds
+    // every one of them in a basement. The profile is the primed one: no
+    // instance was ever set up in it and nothing was saved.
+    const second = await session(profile);
+    await second.context.setOffline(true);
+    try {
+      await second.page.goto(`${PRODUCT_ORIGIN}/#/workouts`);
+      await expect(second.page.locator('h1')).toHaveText('Workouts');
+      const cards = second.page.locator('main [data-oyl-built-in]');
+      await expect(cards).toHaveCount(BUILT_IN_WORKOUTS.length);
+      expect(await cards.locator('a').allTextContents()).toEqual(
+        BUILT_IN_WORKOUTS.map((template) => template.name),
+      );
+      // Nothing of the rider's own: the list is the empty state.
+      await expect(second.page.locator('main [data-oyl-list="saved"]')).toContainText(
+        'No workouts saved on this device yet',
+      );
+      // The control: the network really is off in this session.
+      const control = await second.page.evaluate(async (path: string) => {
+        try {
+          await fetch(path);
+          return 'succeeded';
+        } catch {
+          return 'failed';
+        }
+      }, CONTROL_PATH);
+      expect(control, 'the browser was not offline').toBe('failed');
     } finally {
       await second.close();
     }

@@ -178,6 +178,14 @@
  * on both walks — `07:05`, the fixed local time this file now reads every
  * route at. No sentence is dropped or reworded.
  *
+ * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
+ * request's screenshots**, for added lines and nothing else: Workouts lists
+ * the built-in workouts under its own list, on both walks — their heading,
+ * line, filters and cards. One line MOVES rather than goes: on the populated
+ * walk "Length" was the chosen workout's fact, and is now said first by the
+ * length filter's label, so the recorder lists it there. No sentence is
+ * dropped or reworded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -696,3 +696,55 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
     });
   }
 });
+
+/*
+ * #2304: the built-in workouts' three filters on Workouts are 48 px targets,
+ * the issue's own floor (`theme.css` §"THE BUILT-IN WORKOUTS' FILTERS"), four
+ * over every other select and checkbox row. Measured #316's three ways, and
+ * the filter is the address: Back undoes the last one and a reload keeps it.
+ */
+test.describe('#2304 — the built-in workouts’ filters', () => {
+  const FILTER_TARGET = 48;
+  const FILTERS = '.oyl-filters select, .oyl-filters label:has(> input[type="checkbox"])';
+
+  for (const viewport of [PHONE, TABLET]) {
+    test(`are 48 px targets at ${String(viewport.width)}×${String(viewport.height)}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await visit(page, 'workouts');
+      const filters = await threeWays(page, FILTERS, { height: 'min-height' });
+      expect(filters.count, 'not the three filters').toBe(3);
+      for (const box of filters.shipped) expect(box.height).toBeGreaterThanOrEqual(FILTER_TARGET);
+      expect(new Set(filters.declared)).toEqual(new Set([`${String(FILTER_TARGET)}px`]));
+      for (const height of filters.stripped) expect(height).toBeLessThan(FILTER_TARGET);
+    });
+  }
+
+  test('change which cards render, and Back and a reload keep the address’s filter', async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await visit(page, 'workouts');
+    const cards = page.locator('main [data-oyl-built-in]');
+    const every = await cards.count();
+    expect(every, 'no built-in on Workouts').toBeGreaterThan(10);
+
+    await page.getByLabel('Category').selectOption('sweet-spot');
+    await expect(cards).toHaveCount(6);
+    await page.getByLabel('Length').selectOption('45');
+    await expect(cards.locator('a')).toHaveText([
+      'Sweet spot, rising block',
+      'Sweet spot, one long block',
+    ]);
+
+    await page.goBack();
+    await expect(cards).toHaveCount(6);
+    await expect(page.getByLabel('Length')).toHaveValue('');
+
+    await page.reload();
+    await page.waitForFunction(() => window.__oylReflow?.ready === true);
+    await expect(cards).toHaveCount(6);
+    await expect(page.getByLabel('Category')).toHaveValue('sweet-spot');
+  });
+});
