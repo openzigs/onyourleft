@@ -500,9 +500,28 @@ function narrowGaps(lines: readonly UnitLine[]): string[] {
 
 const TABLETS = new Set(TABLET_VIEWPORTS.map((each) => each.name));
 
+/**
+ * #2079's text sizes, PR #2235's re-review: the owner's 8 px between readings
+ * (2026-11-06) holds at *large* and *extra large* too, where the primary
+ * readings are 4.375 and 5 rem — on the tablets, the only screens the setting
+ * changes.
+ */
+const TEXT_SIZES = [
+  { size: '', query: (base: string) => base },
+  ...(['large', 'extra-large'] as const).map((size) => ({
+    size: ` at ${size} text`,
+    query: (base: string) => `${base === '' ? '?' : `${base}&`}text=${size}`,
+  })),
+];
+
 for (const viewport of OVERLAY_VIEWPORTS) {
-  for (const query of ['', '?room=following']) {
-    test(`#2130 every unit is on its number's line — ${viewport.name}${query === '' ? '' : ', in a room'}`, async ({
+  for (const [base, { size, query: sized }] of ['', '?room=following'].flatMap((each) =>
+    TEXT_SIZES.filter((text) => text.size === '' || TABLETS.has(viewport.name)).map(
+      (text) => [each, text] as const,
+    ),
+  )) {
+    const query = sized(base);
+    test(`#2130 every unit is on its number's line — ${viewport.name}${base === '' ? '' : ', in a room'}${size}`, async ({
       page,
     }) => {
       await openRide(page, viewport, query);

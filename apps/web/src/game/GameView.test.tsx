@@ -47,6 +47,7 @@ import {
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
 import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
+import { HUD_LAYOUT_STORAGE_KEY, writeHudLayout } from './hud/hud-layout-preference';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -2263,4 +2264,66 @@ describe('the last ten minutes on the HUD — #2078', () => {
       expect(queryAll(graph ?? document, other)).toHaveLength(1);
     });
   }
+});
+
+/**
+ * #2079 — the rider's panels and text size, read from this device as the ride
+ * starts: the choice Settings keeps (`SettingsView.hud-layout.test.tsx`) is
+ * the one the next ride draws.
+ */
+describe('the HUD the rider chose — #2079', () => {
+  afterEach(() => {
+    localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  });
+
+  async function rideOnce(): Promise<HTMLElement> {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(6);
+    const hud = mounted.container.querySelector<HTMLElement>('.oyl-hud');
+    if (hud === null) throw new Error('the ride did not start');
+    return hud;
+  }
+
+  it('draws every panel at the normal size with nothing chosen', async () => {
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('normal');
+    expect(hud.querySelector('.oyl-hud__route')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hudField('Speed')).not.toBe('');
+  });
+
+  it('draws what the device says the rider chose', async () => {
+    writeHudLayout(localStorage, { hidden: ['route', 'graph', 'readings'], textSize: 'large' });
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('large');
+    expect(hud.classList).toContain('oyl-hud--text-large');
+    // The route panel and the graph are gone…
+    expect(hud.querySelector('.oyl-hud__route')).toBeNull();
+    // …and the secondary readings but the ride's times…
+    expect(queryAll(hud, '.oyl-hud__fields--secondary dt').map((dt) => dt.textContent)).toEqual([
+      'Moving',
+      'Elapsed',
+      'Clock',
+    ]);
+    // …while power, the controls and the notices' cell are the HUD's still.
+    expect(hudField('Power')).not.toBe('');
+    expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
+  });
+
+  it('keeps the graph when only the route is turned off, and the route when only the graph is', async () => {
+    writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal' });
+    let hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hud.querySelector('.oyl-hud__profile-svg')).toBeNull();
+    mounted?.unmount();
+    writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'normal' });
+    hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route .oyl-hud__profile-svg')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).toBeNull();
+  });
 });

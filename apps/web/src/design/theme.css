@@ -11603,6 +11603,245 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE HUD'S TEXT SIZE — #2079, cut against #2130's tablet sizes (PR #2213).
+ *
+ * *Large* and *extra large* (`game/hud/hud-layout-preference.ts`) set the
+ * primary readings a rider steers the effort by — power, cadence, heart rate
+ * and the gradient — at 4.375 and 5 rem on a TABLET's corners layout (46 rem
+ * wide and 47 rem tall or more): 1.15 and 1.31 times #2130's 3.815 rem, which
+ * is the NORMAL size there and larger than this block's first cut (3.125 and
+ * 3.75 rem, PR #2235's review). The panels are re-cut for them, every number
+ * measured in the pinned Chromium with the widest ordinary values set
+ * (`1999` W, `199` rpm and bpm, `-19.9` %): at 5 rem `1999` is 174 px, in a
+ * 180 px track at 1280×800, 183 at 1024×768 and 181 upright, and `199` is
+ * 131 px in 137, 138 and 181 — with #2130's 8 px between every reading (the
+ * owner's ruling of 2026-11-06), which `metric-numerals.browser.spec.ts` holds
+ * at both sizes:
+ *
+ * - LANDSCAPE (51 rem wide or more) the primary readings stay one row, so the
+ *   row the secondary tier shares with them stays short and a race's
+ *   standings (#1347) and a notice hang under it as they do at the normal
+ *   size, clear of *Pause*: the four in a 41.5 rem column at 1280×800, power
+ *   and the gradient the wider tracks, and on the 4:3 tablet the three in
+ *   30.25 rem with the gradient in the secondary tier's first cell, as #2130
+ *   draws it there. The secondary tier is four tracks beside them;
+ * - UPRIGHT (800×1280) there is no width for four in a row and the tier, so
+ *   the four stand two by two in 24 rem, the tier spans the stage under them,
+ *   and a race's standings stand BESIDE the four at the top end edge rather
+ *   than under the tier: hung under it at the first cut's sizes they were 2
+ *   and 26 px over the leaning rider (`[504,422 → 792,665]` at large).
+ *
+ * ⚠️ **What it costs, recorded as #419 asks: on a phone the setting changes
+ * nothing**, and Settings says so beside it. Every phone layout is measured
+ * to within a few pixels of the leaning rider and of its own tracks at the
+ * size it has (§"THE CLOCK ROW", §"THE MOVING TIME ON AN UPRIGHT PHONE"), and
+ * a primary reading a quarter larger is a third primary row or a value past
+ * its track on every one. ⚠️ **And only the primary readings grow**, and on
+ * the 4:3 tablet the gradient stays the secondary size, as it is there at the
+ * normal size: the secondary tier's tracks and rows are what a room's
+ * standings and a Delivery round are fitted around on a tablet, and the
+ * primary readings are the numbers a tired rider looks for.
+ * `ride-hud-layout.browser.spec.ts` lays the HUD out at both sizes at all
+ * nine overlay viewports, on a plain ride, in a room, in a lap race, in a
+ * Delivery round and in a workout.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud--text-large .oyl-hud__fields--primary .oyl-hud__value {
+    font-size: 4.375rem;
+  }
+
+  .oyl-game--riding .oyl-hud--text-extra-large .oyl-hud__fields--primary .oyl-hud__value {
+    font-size: 5rem;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr)
+      minmax(7.25rem, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--average-power {
+    grid-area: auto;
+  }
+}
+
+/* Landscape: the tier beside the primary readings spans two rows, so a
+   notice starts under the primary panel and a race's standings under the
+   tier, whichever is the taller: at four tracks the tier is a third row in a
+   room, and a notice under it met the sound and side-camera rows above the
+   route panel (`ride-room.browser.spec.ts` §"#1409"). */
+@media (min-width: 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-areas:
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
+  }
+}
+
+/* ⚠️ **What gives way at these sizes, in a ROOM, on every tablet — the
+   owner's rulings of 2026-11-06 (#2034), recorded as #419 asks:**
+   - the pacer's and the ghost's gaps and the wind, first, as where space
+     runs out at the normal size (§"THE RIDE SO FAR AT ARM'S LENGTH"). The
+     rider's own W/kg and zone stay;
+   - and, as on every tablet, the followed rider's name is one line (#2077).
+   With them, a race's standings under the tier keep 16 px or more above the
+   actions panel with *Report*'s reasons open at 1024×768 and 1280×800 (the
+   owner's 16 px, `ride-hud-layout.browser.spec.ts`). The standings' lines
+   give up their own padding here too, 28 px over seven lines. Nothing else
+   gives way and no control moves. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--room)
+    > .oyl-hud__field--gives-way {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings-line {
+    padding-block: 0;
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 41.5rem) minmax(0, 1fr);
+  }
+}
+
+/* The 4:3 tablet: three in a row, and the gradient's cell first in the tier. */
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-columns: minmax(0, 30.25rem) minmax(0, 1fr);
+  }
+
+  /* 30.25 rem and 1.33 to 1, from 29.75 and 1.3: at 5 rem `1999` sat 7.2 px
+     from `199`, under the owner's 8 px between readings (2026-11-06,
+     `metric-numerals.browser.spec.ts`), and 1.35 to 1 in 29.75 left `199`
+     7.8 px from the next. The tier gives the 8 px back from its gradient
+     cell, 7 rem as #2130's is here at the normal size (110.4 px drawn). */
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.33fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    grid-template-columns:
+      minmax(7rem, 1fr) minmax(6.875rem, 1fr) minmax(7.25rem, 1fr)
+      minmax(max-content, 1fr);
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary
+    > .oyl-hud__field--gradient
+    .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+}
+
+/* Upright: two by two, the tier under them, and a race's standings beside. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large) {
+    grid-template-areas:
+      'primary beside'
+      'secondary secondary'
+      'notices notices'
+      'route actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding
+    :is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary {
+    width: 100%;
+    grid-template-columns:
+      minmax(6.875rem, 1fr) minmax(7.25rem, 1fr) minmax(max-content, 1fr) minmax(7.25rem, 1fr)
+      repeat(2, minmax(5.5rem, 1fr));
+  }
+
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__standings {
+    grid-area: beside;
+  }
+}
+
+/*
+ * The Ride HUD panel in Settings — #2079: every choice a 48 px target, as
+ * every ride-time control is (`ride-targets.browser.spec.ts`).
+ */
+.oyl-hud-layout__group {
+  margin: var(--oyl-space-sm) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.oyl-hud-layout__group > legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+/* Two classes, to outrank the design system's `label:has(> input)` row
+   (2.75 rem): these are set from the bars, where 48 px is the floor. */
+.oyl-hud-layout .oyl-hud-layout__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+  /* In CSS px as well as rem: a rider who sets the page's text smaller still
+     gets the 48 px. */
+  min-height: max(3rem, 48px);
+}
+
+.oyl-hud-layout__choice > input {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+
 /* ⚠️ **And on an upright tablet, in a room with sounds on and a side camera
    paired, it gives way too** — recorded as #419 asks. The sound row and the
    side camera's row both stand on the route panel there (§"#1409"), and with

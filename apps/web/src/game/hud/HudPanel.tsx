@@ -69,6 +69,7 @@ import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
+import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
 import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
@@ -91,6 +92,12 @@ import type { WorkoutGraphInput } from '../../workout/workout-graph';
  * same reason (#2072): this component reads the device's clock itself.
  */
 export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
+  /**
+   * Which panels the rider turned off and how large the numbers are — #2079,
+   * `hud-layout-preference.ts`, read from this device as the ride began.
+   * Absent, every panel at the normal size.
+   */
+  readonly layout?: HudLayoutPreference | undefined;
   /**
    * The last ten minutes of power and heart rate — #2078, `recent-trace.ts`'s
    * ring as `GameView` last read it, written once a second. Absent, no graph
@@ -522,7 +529,11 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         document, so a screen reader meets Pause and End ride first, and
         never a live region (`RaceStandings.tsx` says why).
         */
-        standings === undefined ? null : <RaceStandings standings={standings} />
+        // #2079: and not at all when the rider turned the standings off.
+        standings === undefined ||
+        !panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings') ? null : (
+          <RaceStandings standings={standings} />
+        )
       }
     />
   );
