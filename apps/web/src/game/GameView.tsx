@@ -274,6 +274,12 @@ import {
 } from './hud/delivery-announce';
 import { lineOffsetAt, racingLine } from './racing-line';
 import {
+  createRecentTrace,
+  sampleSecond,
+  type RecentTrace,
+  type TraceSample,
+} from './hud/recent-trace';
+import {
   ghostDistanceAt,
   pacerGap,
   type BotPacerPlan,
@@ -1067,6 +1073,11 @@ function GameScreen({
   /** The words last set, so an unchanged notice costs no render at all (#482's rule). */
   const raceShownRef = useRef('');
   const [state, setState] = useState<GameState | undefined>(undefined);
+  /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
+  const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
+  const [recentTrace, setRecentTrace] = useState<
+    { readonly samples: readonly TraceSample[]; readonly written: number } | undefined
+  >(undefined);
   /**
    * The rung the ride is drawing at. Only the LEVEL is state — #482.
    *
@@ -2017,6 +2028,11 @@ function GameScreen({
         ...startOf(simulated, profile.totalDistance),
       });
       simulationRef.current = simulation;
+      // #2078: a new ride, a new ring — its clock starts again from nought —
+      // and the graph drawn empty from the first frame, so the route panel is
+      // the height it will be and nothing moves when the first second lands.
+      recentTraceRef.current = createRecentTrace();
+      setRecentTrace({ samples: [], written: 0 });
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
@@ -2555,6 +2571,22 @@ function GameScreen({
         ghostRef.current,
         simulation.state,
       );
+      // #2078: the last ten minutes of power and heart rate, one sample a
+      // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
+      // no whole second writes nothing, so the graph changes at most once a
+      // second, and a reading that is not live is a gap, never a zero.
+      const traceSecond = sampleSecond(recentTraceRef.current.second, simulation.state.elapsed);
+      if (traceSecond !== undefined) {
+        const trace = recentTraceRef.current;
+        trace.write(traceSecond, {
+          power: sensors.rider.live ? sensors.rider.power : undefined,
+          heartRate:
+            sensors.heartRate.live && sensors.heartRate.value !== undefined
+              ? sensors.heartRate.value
+              : undefined,
+        });
+        setRecentTrace({ samples: trace.read(), written: trace.written });
+      }
       if (paced.draw) {
         setState(simulation.state);
       }
@@ -3508,6 +3540,8 @@ function GameScreen({
         lapSeconds={lapSeconds}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
         rideTotals={rideTotals}
+        // #2078: the last ten minutes, written once a second by the loop.
+        recent={recentTrace}
         // #2077: the rider's W/kg from the weight the physics rides (`undefined`
         // when none is set, never the default), and the zone indicator from
         // their own threshold and the recorder's time in each zone.

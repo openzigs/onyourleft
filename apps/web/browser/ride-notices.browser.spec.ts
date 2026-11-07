@@ -86,6 +86,31 @@ test.describe('a ride that may stop with the screen off — #647', () => {
     }
   }
 
+  // #2078, the owner's ruling of 2026-11-06: on the 4:3 tablet the recent
+  // graph gives way while two notices are DRAWN in their cell — and the road
+  // notice folded away, its wrapper still in the cell and visually hidden, is
+  // not one of them.
+  test('#2078 the graph gives way to two drawn notices, and comes back when the road notice folds — 1024×768', async ({
+    page,
+  }) => {
+    const viewport = OVERLAY_VIEWPORTS.find((each) => each.width === 1024) as Viewport;
+    await openRide(page, viewport, '?keepalive=failed&trainer=workout');
+    await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(true);
+    const graphDrawn = async (): Promise<boolean> =>
+      page.evaluate(() => {
+        const box = document.querySelector('.oyl-hud__recent')?.getBoundingClientRect();
+        return box !== undefined && box.width * box.height > 1;
+      });
+    expect(await graphDrawn()).toBe(false);
+    await page.getByRole('button', { name: 'Trainer notice' }).click();
+    await expect.poll(async () => (await keepScreenOnNotice(page)).roadNoticeShown).toBe(false);
+    expect(await graphDrawn()).toBe(true);
+    for (const [how, seen] of await bothWays(page)) {
+      const { collisions } = keepScreenOnLaidOut(seen, viewport, `road notice folded, ${how}`);
+      expect(collisions, how).toEqual([]);
+    }
+  });
+
   // The control: the rule taken away. `matchMedia` answers "no" to
   // ONE_NOTICE_ONLY_QUERY before the page loads, so at the two 360 px
   // upright phones the road notice opens beside it as it does elsewhere — and

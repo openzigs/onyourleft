@@ -331,6 +331,21 @@ export const COLOUR_TOKENS = {
   hudZone5: '#f59441',
   hudZone6: '#cb574d',
   hudZone7: '#cf91f3',
+  /*
+   * The same seven dimmed onto the panel — #2078's graph: the bands behind
+   * the last ten minutes of power, each zone's colour at three tenths over
+   * `hudSurface`, so the power line (`hudInk`) and the heart-rate line
+   * (`hudInkMuted`) over them keep their 3:1 (SC 1.4.11), declared in
+   * {@link CONTRAST_REQUIREMENTS}. A band is never the only carrier: the zone
+   * indicator says the zone in words.
+   */
+  hudZoneBand1: '#383b3f',
+  hudZoneBand2: '#192f4b',
+  hudZoneBand3: '#284731',
+  hudZoneBand4: '#564f2b',
+  hudZoneBand5: '#553922',
+  hudZoneBand6: '#482726',
+  hudZoneBand7: '#493858',
   /**
    * The look-ahead strip's grade bands (#2075, `game/hud/look-ahead.ts`
    * §`GRADE_BANDS`), on the HUD's surface. Our own five, and the order a
@@ -1429,6 +1444,34 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: { light: ratio, dark: ratio },
     where: `power zone ${String(index + 1)} on the HUD: the zone indicator's swatch and its segment of the time-in-zone bar (SC 1.4.11, #2077)`,
   })),
+  // #2078: the graph's two lines over each zone's band — power in `hudInk`,
+  // heart rate dashed in `hudInkMuted` (SC 1.4.11).
+  ...(
+    [
+      ['hudZoneBand1', 10.46, 4.42],
+      ['hudZoneBand2', 12.6, 5.32],
+      ['hudZoneBand3', 9.59, 4.05],
+      ['hudZoneBand4', 7.66, 3.23],
+      ['hudZoneBand5', 9.79, 4.13],
+      ['hudZoneBand6', 12.25, 5.17],
+      ['hudZoneBand7', 9.81, 4.14],
+    ] as const
+  ).flatMap(([band, ink, muted], index) => [
+    {
+      foreground: 'hudInk' as const,
+      background: band,
+      minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+      measured: { light: ink, dark: ink },
+      where: `the recent graph's power line over zone ${String(index + 1)}'s band (SC 1.4.11, #2078)`,
+    },
+    {
+      foreground: 'hudInkMuted' as const,
+      background: band,
+      minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+      measured: { light: muted, dark: muted },
+      where: `the recent graph's dashed heart-rate line over zone ${String(index + 1)}'s band (SC 1.4.11, #2078)`,
+    },
+  ]),
   {
     foreground: 'hudGradeDescent',
     background: 'hudSurface',

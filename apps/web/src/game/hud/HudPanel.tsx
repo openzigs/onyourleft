@@ -68,6 +68,7 @@ import type { ControllerPort } from '../delivery/controller-port';
 import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
+import type { TraceSample } from './recent-trace';
 import { StreetMap } from './StreetMap';
 import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
@@ -92,6 +93,13 @@ import type { WorldCorridor } from '../world-data/corridor';
  * same reason (#2072): this component reads the device's clock itself.
  */
 export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
+  /**
+   * The last ten minutes of power and heart rate — #2078, `recent-trace.ts`'s
+   * ring as `GameView` last read it, written once a second. Absent, no graph
+   * (the demo, and a ride before its first second).
+   */
+  readonly recent?:
+    { readonly samples: readonly TraceSample[]; readonly written: number } | undefined;
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
   /** Ends it. Same. */
