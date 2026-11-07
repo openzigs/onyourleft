@@ -73,11 +73,13 @@ export type {
   ChoiceRange,
   ChoiceRangeWithDefault,
   FixedMainSet,
+  HeartRateZoneHoldBlock,
   MainSet,
   Recovery,
   RepeatMainSet,
   StretchMainSet,
   TailorChoices,
+  TemplateBlock,
   TemplateParameters,
   WorkoutCategory,
   WorkoutTemplate,
@@ -92,6 +94,8 @@ export {
   tailorWorkout,
   TEMPLATE_LENGTHS_MINUTES,
 } from './template';
+
+export { BUILT_IN_WORKOUTS } from './library';
 
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
