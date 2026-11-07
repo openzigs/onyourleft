@@ -3,7 +3,8 @@
 - **Status**: **Accepted, 2026-11-06**, on the owner's
   [ruling of that day](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818)
   on pull request #2297: Q0 accept before merge; Q1 (a), lines drawn on our basemap's streets; Q2 (a), line and heights only; Q3 (a), heights from USGS 3DEP; Q4 yes, ODbL
-  1.0. Q5 was not ruled on, so D-9.1's default holds. D-11 records each answer. Proposed 2026-11-06;
+  1.0; and Q5 yes, in a [later comment](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700630598) that day: the circuits are kept out of the owner's home
+  area. D-11 records each answer. Proposed 2026-11-06;
   the pull request flipped this line before merge, because an amendment cannot change a Status line
   afterwards (ADR 0013). [#2293](https://github.com/openzigs/onyourleft/issues/2293) builds the
   circuits
@@ -300,9 +301,9 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    person's home and not beside one. The circuits are the project's, not any rider's, so no rider's
    location is published. **Where they are drawn is also a disclosure**: loops authored by one
    identifiable maintainer on roads they know reveal that maintainer's home area, and committed
-   history is permanent. So the circuits are **not drawn in the owner's home area, or the owner
-   accepts that they may be** (Q5). The owner's ruling of 2026-11-06 did not answer Q5, so until
-   the owner says otherwise the first half holds: no circuit is drawn in the owner's home area.
+   history is permanent. So **no circuit is drawn in or near the owner's home area**; the circuits
+   use other regions (Q5, the owner's [ruling of 2026-11-06](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700630598)). The area is never named, here or
+   in any other public text (D-9.2).
 2. **No coordinate and no place name in public text** (the ruling): not in an issue, a pull request,
    a commit message, a review, this ADR, `docs/`, or a rider-facing word. The files' own points are
    the only coordinates, and a circuit's name is ours and is not a place name.
@@ -319,8 +320,9 @@ guideline was read on 2026-11-06.
 
 The owner answered on 2026-11-06, in a [comment on pull request #2297](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818): *"Q0: accept before
 merge. Q1 (a): lines drawn on our basemap's streets. Q2 (a): line and heights only. Q3 (a): heights
-from USGS 3DEP. Q4: yes, treat the circuits as ODbL 1.0."* Each answer is the recommendation. Q5 was
-not answered (D-9.1 says what holds).
+from USGS 3DEP. Q4: yes, treat the circuits as ODbL 1.0."* Q5 was answered the same day in a
+[later comment](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700630598): keep the built-in circuits out of the owner's home area, none drawn in or near
+it. Each answer is the recommendation.
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
    merge**; the pull request flips the Status line. **Answered: accept before merge.**
@@ -338,7 +340,7 @@ not answered (D-9.1 says what holds).
 5. **Q4 — Treat the circuits as ODbL 1.0 whatever the Substantial guideline says (D-3.3)?**
    Recommended: **yes**. **Answered: yes**, ODbL 1.0.
 6. **Q5 — Are the circuits kept out of the owner's home area (D-9.1)?** Recommended: **yes**.
-   **Not answered** on 2026-11-06; D-9.1's first half holds until the owner rules.
+   **Answered: yes**, no circuit is drawn in or near the owner's home area (D-9.1).
 
 ---
 
