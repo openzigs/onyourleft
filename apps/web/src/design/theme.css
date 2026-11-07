@@ -907,7 +907,8 @@ html {
 }
 
 /*
- * NAVIGATION — #427. Five destinations at most, each an icon and a word, as a
+ * NAVIGATION — #427. Five destinations at most (six since #2292, the owner's
+ * ruling of 2026-11-06 that added Games), each an icon and a word, as a
  * BAR on a compact window and a RAIL on a medium or expanded one (Material 3's
  * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
  * decides which it is, on the window's size.
@@ -967,8 +968,9 @@ html {
  * The larger icon on the current destination is a `transform`, so it moves
  * nothing around it: a `width` would have grown the bar for one item.
  *
- * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem.**
- * Five of them share a 320 px row (#427's row at 320×256, and the bar at
+ * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem**
+ * (2.75rem on a compact window since #2292, §"SIX IN A ROW").
+ * Five of them shared a 320 px row (#427's row at 320×256, and the bar at
  * 320×640), and a label is as wide as the platform's font makes it. #944's
  * first version padded the pill 8 px a side and the link 4 px more: five
  * items came to 299 px on a Mac and wrapped onto a second line on the CI
@@ -1140,6 +1142,85 @@ html {
 
 .oyl-more p {
   margin: 0;
+}
+
+/*
+ * The Games tab — #2292 (`views/GamesView.tsx`, `views/GameCoursesView.tsx`):
+ * a card for each game, and each game's courses, a card each. The page is a
+ * screen of sections (`.oyl-sections`), so on a tablet the cards stand in
+ * rows. A course that cannot hold the game is the same filled tile (#992's
+ * look: no outline, `look.browser.spec.ts`), told apart by having no control
+ * and the reason in words in its place.
+ */
+.oyl-games__card,
+.oyl-game-courses__course {
+  padding: var(--oyl-space-md);
+}
+
+.oyl-games__card > h2,
+.oyl-game-courses__name {
+  margin-top: 0;
+}
+
+/* The two cards one above the other on a phone; `--halves`' two columns on a tablet. */
+.oyl-games {
+  display: grid;
+  gap: var(--oyl-space-md);
+}
+
+/*
+ * The courses: as many columns of at least 18rem as the pane holds, and the
+ * tracks a short list leaves empty folded away, so one course spans the row
+ * rather than standing in a third of it (`sections.browser.spec.ts` §"#2067").
+ * `ul` and both classes, to be more specific than `.oyl-sections`' own tracks.
+ */
+ul.oyl-sections.oyl-game-courses__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+  gap: var(--oyl-space-md);
+  align-items: start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * The way back to the Games page from a course picker — the owner's ruling of
+ * 2026-11-06, at every width. A 44×44 target (SC 2.5.5, as the buttons above
+ * say), held by its own floor rather than by the line-height it happens to sit
+ * on; `shell.browser.spec.ts` measures it at a phone's width.
+ */
+.oyl-game-courses__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+/*
+ * SIX IN A ROW — #2292. The Games tab made the destinations six, and six
+ * pills at the 3rem floor with the link's 2 px a side and the list's gap came
+ * to 338 px against a 320 px row, which wrapped: the row 115.7 px tall at
+ * 320×256, caught by `shell.browser.spec.ts` §`NAV_BOX_BEFORE_944`. On a
+ * compact window — the row and the bar — the list has no gap and spreads its
+ * items instead, the link has no inline padding, and the pill's floor is the
+ * 44 px target itself, so a short label's pill (Ride) is still a 44 px
+ * target with the link's own floor stripped (§4f's third measurement). The
+ * rail is untouched: each item has the rail's width.
+ */
+@media (max-width: 37.49rem) {
+  .oyl-nav-list {
+    gap: 0;
+    justify-content: space-around;
+  }
+
+  .oyl-nav-link {
+    padding-inline: 0;
+  }
+
+  .oyl-nav-indicator {
+    min-width: 2.75rem;
+  }
 }
 
 /* BAR — a compact window with the height to spare for it. */

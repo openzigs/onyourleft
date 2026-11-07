@@ -114,6 +114,12 @@ export interface RidableRoute {
    * is the read budget every other screen in this app is careful about.
    */
   readonly attempts: number;
+  /**
+   * The moving time, in seconds, of the rider's fastest attempt: the figure
+   * the Games tab reads as "your best" (#2292). Each attempt's summary already
+   * carries it, so it costs no stream decode. Absent: no attempt yet.
+   */
+  readonly bestSeconds?: number | undefined;
 }
 
 /**
