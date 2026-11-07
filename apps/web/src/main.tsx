@@ -127,13 +127,11 @@ import type { SideSnapshotPort } from './camera/side-snapshot-port';
 import type { RideSnapshotsPort } from './detail/ride-snapshots-port';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
-import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
 import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
-import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
@@ -288,12 +286,6 @@ interface ClientPlatform {
   /** `undefined` in a browser, where `DevicesView` reads {@link capabilities}. */
   readonly shell: ShellSupportPort | undefined;
   /**
-   * Android's thermal forecast for the game's ladder (#247). `undefined` in a
-   * browser, where `GameView` falls back to `BROWSER_THERMAL`'s honest
-   * `undefined`.
-   */
-  readonly thermal: ThermalPort | undefined;
-  /**
    * Each connected device's signal strength, for the Devices screen (#1435).
    * `undefined` in a browser: Web Bluetooth gives none for a connected device.
    */
@@ -445,14 +437,6 @@ async function buildPlatform(
         resolvedUuids: async (deviceId) => mobile.readCapacitorResolvedUuids(plugin, deviceId),
       }),
     });
-    // #247. Its own plugin, not the BLE one: the forecast has nothing to do
-    // with a link, and `ThermalPlugin.java` is registered beside the recording
-    // service in `MainActivity`.
-    const thermalPlugin = mobile.capacitorThermalPlugin();
-    const thermal: ThermalPort = {
-      readThermalHeadroom: async () =>
-        mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
-    };
     // #1435. The same `plugin`, for the reason `openTrainer` above gives: the
     // link whose signal is read is the one this object holds.
     const signal: SignalStrengthPort = {
@@ -482,7 +466,6 @@ async function buildPlatform(
     return {
       rideController,
       shell,
-      thermal,
       signal,
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
@@ -498,7 +481,6 @@ async function buildPlatform(
     return {
       rideController: undefined,
       shell: undefined,
-      thermal: undefined,
       signal: undefined,
       bluetoothAsk: undefined,
       systemSettings: undefined,
@@ -529,7 +511,6 @@ async function buildPlatform(
     // absence is the decision, taken here, in the one file that may read a
     // global.
     shell: undefined,
-    thermal: undefined,
     signal: undefined,
     bluetoothAsk: undefined,
     systemSettings: undefined,
@@ -1793,7 +1774,6 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
           rideSnapshots={buildRideSnapshotsPort(secureWindow)}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
-          {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           otherPlayer={platform.otherPlayer}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}

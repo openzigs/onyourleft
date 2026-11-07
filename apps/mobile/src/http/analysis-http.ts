@@ -37,7 +37,7 @@
  * | `connectTimeout`, `readTimeout` | a native request has no abort from here; these are what stop a dead address holding a socket for ever |
  *
  * ⚠️ **Not verified here**: this runs only on a device, so what is tested is
- * the mapping against a scripted `http`, the limit `thermal/thermal.ts` states.
+ * the mapping against a scripted `http`, the limit `ble/ble-client.ts` states.
  * Validation 0002 Part AF is where the tablet runs it.
  */
 

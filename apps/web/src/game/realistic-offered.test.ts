@@ -75,6 +75,10 @@ const DEFINING = new Set([
 const WAYS_IN: readonly RegExp[] = [
   /\bREALISTIC_LADDER\b/,
   /\bINITIAL_REALISTIC_QUALITY\b/,
+  // #2289: the realistic start a ride takes while its world arrives, and the
+  // state it takes when the world is here.
+  /\bARRIVING_REALISTIC_QUALITY\b/,
+  /\brealisticWorldArrived\b/,
   /\bnextWorldQuality\b/,
   /\bworldRung\b/,
   /\bloadRealisticWorld\b/,
