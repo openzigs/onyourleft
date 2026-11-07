@@ -44,9 +44,12 @@ import {
   LARGEST_RAISE_WATTS,
   raiseRefusedText,
   RELEASE_INCOMPLETE,
+  STEP_DOWN_UNCONFIRMED,
+  type WorkoutRelease,
   type WorkoutSession,
   type WorkoutTrainer,
 } from './session';
+import { workoutTrainerOver } from './session-testing';
 import { TargetHeldBack } from '../ride/held-back';
 
 /** Control point op codes, FTMS Table 4.15 — written out so a test reads the wire. */
@@ -99,7 +102,7 @@ async function loop(timelineFactory = TWO_INTERVALS, spec?: SimulatedDeviceSpec)
   const session = createWorkoutSession({
     timeline: timelineFactory(),
     thresholdPower: THRESHOLD,
-    control: trainer.control,
+    control: workoutTrainerOver(trainer.control),
     powerFloor: trainer.powerRange.minimum,
   });
   return { trainer, session };
@@ -255,12 +258,18 @@ describe('a completed ERG workout holds the target profile', () => {
 
     expect(session.state().player.status).toBe('finished');
     const writes = trainer.wire.filter((entry) => entry.direction === 'write');
-    expect(writes.at(-1)?.bytes).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+    // #2348: the last interval is stepped down to the floor, and THEN the
+    // Stop — so what the measured machine keeps through it is the floor.
+    expect(writes.slice(-2).map((entry) => [...entry.bytes])).toStrictEqual([
+      targetWrite(trainer.powerRange.minimum),
+      [STOP_OR_PAUSE, 0x01],
+    ]);
     expect(writes.filter((entry) => entry.bytes[0] === RESET)).toHaveLength(0);
     expect(trainer.control.hasControl()).toBe(true);
     // The measured machine's behaviour, stated rather than hidden: it is still
-    // holding the last interval.
-    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+    // holding a target — the floor, no longer the last interval's 250 W.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(trainer.powerRange.minimum);
+    expect(session.state().holding).toBe(trainer.powerRange.minimum);
     expect(session.state().lastFault).toBeUndefined();
   });
 });
@@ -421,7 +430,7 @@ describe('the trainer is eased whenever the rider is not riding to a target — 
         },
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -455,9 +464,9 @@ describe('ending the workout releases the trainer — #372', () => {
         setTargetPower: (target) => trainer.control.setTargetPower(target),
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => {
+        letGo: (stepDownTo) => {
           released.push('letGo');
-          return trainer.control.letGo();
+          return workoutTrainerOver(trainer.control).letGo(stepDownTo);
         },
       },
     });
@@ -483,7 +492,11 @@ describe('ending the workout releases the trainer — #372', () => {
     await session.settled();
 
     const after = trainer.wire.slice(before).filter((entry) => entry.direction === 'write');
-    expect(after.map((entry) => [...entry.bytes])).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    // #2348: the step-down to the floor first, then the Stop, and nothing after.
+    expect(after.map((entry) => [...entry.bytes])).toStrictEqual([
+      targetWrite(trainer.powerRange.minimum),
+      [STOP_OR_PAUSE, 0x01],
+    ]);
   });
 
   it('releases once however many times it is ended', async () => {
@@ -529,8 +542,11 @@ describe('ending the workout releases the trainer — #372', () => {
         targetPower: () => trainer.control.targetPower(),
         letGo: () =>
           Promise.resolve({
-            kind: 'incomplete' as const,
-            refusal: new SensorError('control-rejected', 'the machine refused op code 0x8'),
+            stop: {
+              kind: 'incomplete' as const,
+              refusal: new SensorError('control-rejected', 'the machine refused op code 0x8'),
+            },
+            steppedDown: undefined,
           }),
       },
     });
@@ -896,7 +912,7 @@ describe('a workout target under the trainer’s minimum is written as that mini
             : trainer.control.setTargetPower(target),
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1010,7 +1026,7 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     const session = createWorkoutSession({
       timeline: EASY(),
       thresholdPower: THRESHOLD,
-      control: trainer.control,
+      control: workoutTrainerOver(trainer.control),
       powerFloor: trainer.powerRange.minimum,
     });
     session.start(seconds(0));
@@ -1168,7 +1184,7 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     const session = createWorkoutSession({
       timeline: EASY(),
       thresholdPower: THRESHOLD,
-      control: trainer.control,
+      control: workoutTrainerOver(trainer.control),
       powerFloor: watts(150),
     });
     session.start(seconds(0));
@@ -1287,7 +1303,7 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
         setTargetPower,
         stop: () => Promise.resolve(),
         targetPower: () => ({ kind: 'none' }),
-        letGo: () => Promise.resolve({ kind: 'stopped' }),
+        letGo: () => Promise.resolve({ stop: { kind: 'stopped' }, steppedDown: undefined }),
       },
     });
   const neverAnswers = (): Promise<never> => new Promise<never>(() => undefined);
@@ -1514,7 +1530,7 @@ describe('a target the ride controller held back — #721, #724', () => {
         setTargetPower: () => Promise.reject(new TargetHeldBack('forget-running', reason)),
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1550,7 +1566,7 @@ describe('a target held back by one of the game handle’s holds — #729', () =
         setTargetPower: () => Promise.reject(new TargetHeldBack(hold, reason)),
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1648,7 +1664,7 @@ describe('an acknowledged, unchanged target is written once — #542', () => {
         },
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1700,7 +1716,7 @@ describe('an acknowledged, unchanged target is written once — #542', () => {
         },
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1750,7 +1766,7 @@ describe('an acknowledged, unchanged target is written once — #542', () => {
         },
         stop: () => trainer.control.stop(),
         targetPower: () => trainer.control.targetPower(),
-        letGo: () => trainer.control.letGo(),
+        letGo: (stepDownTo) => workoutTrainerOver(trainer.control).letGo(stepDownTo),
       },
     });
     session.start(seconds(0));
@@ -1882,5 +1898,148 @@ describe('a revised plan is written at the next block, by the workout’s own wr
     session.resume(seconds(10));
     await ride(session, 10, 15);
     expect(targetsWritten(trainer).at(-1)).toBe(250);
+  });
+});
+
+describe('the end of a workout asks for a step-down to the floor — #2348', () => {
+  // What the session decides. What is SENT for it, through the real
+  // controller and the simulated trainer, is `ride/controller.test.ts` §"#2348".
+  /** A trainer whose targets are answered only when the test says, and whose release is recorded. */
+  function heldTrainer() {
+    const calls: Array<readonly ['set' | 'letGo', number | undefined]> = [];
+    const answers: Array<(value: number) => void> = [];
+    let release: WorkoutRelease = { stop: { kind: 'stopped' }, steppedDown: true };
+    const control: WorkoutTrainer = {
+      setTargetPower: (target) => {
+        calls.push(['set', target]);
+        return new Promise((resolve) => {
+          answers.push((value) => resolve(watts(value)));
+        });
+      },
+      stop: () => Promise.resolve(),
+      targetPower: () => ({ kind: 'none' }),
+      letGo: (stepDownTo) => {
+        calls.push(['letGo', stepDownTo]);
+        return Promise.resolve(release);
+      },
+    };
+    return {
+      calls,
+      answers,
+      control,
+      answerWith(next: WorkoutRelease) {
+        release = next;
+      },
+    };
+  }
+  const session = (control: WorkoutTrainer) =>
+    createWorkoutSession({
+      timeline: expandWorkout(workout([steady(60, 1.0)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control,
+    });
+
+  it('a target still on the wire counts as held: the step-down is asked for', async () => {
+    // The client says `none` — nothing confirmed yet — but 250 W is in flight
+    // and will land, so the end must step down behind it.
+    const trainer = heldTrainer();
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+
+    riding.stop();
+    await flush();
+
+    expect(trainer.calls).toStrictEqual([
+      ['set', 250],
+      ['letGo', FLOOR_WATTS],
+    ]);
+  });
+
+  it('a workout that never wrote anything is not stepped down', async () => {
+    const trainer = heldTrainer();
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+
+    riding.stop();
+    await flush();
+
+    expect(trainer.calls).toStrictEqual([['letGo', undefined]]);
+  });
+
+  it('a target waiting behind the one on the wire is dropped, never written after the Stop', async () => {
+    // 250 W in flight, then a pause queues the ease behind it. Ending the
+    // workout closes the writer first, so when 250 W is answered nothing that
+    // was waiting follows the release.
+    const trainer = heldTrainer();
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+    riding.pause(seconds(1));
+
+    riding.stop();
+    trainer.answers[0]?.(250);
+    await flush();
+    await riding.settled();
+
+    expect(trainer.calls).toStrictEqual([
+      ['set', 250],
+      ['letGo', FLOOR_WATTS],
+    ]);
+  });
+
+  it('a confirmed step-down is what the finished session says it holds', async () => {
+    const trainer = heldTrainer();
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+    trainer.answers[0]?.(250);
+    await flush();
+    expect(riding.state().holding).toBe(250);
+
+    riding.stop();
+    await flush();
+
+    expect(riding.state().holding).toBe(FLOOR_WATTS);
+    expect(riding.state().lastFault).toBeUndefined();
+  });
+
+  it('an unconfirmed step-down is told as one instruction, and the old target is not unsaid', async () => {
+    const trainer = heldTrainer();
+    trainer.answerWith({ stop: { kind: 'stopped' }, steppedDown: false });
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+    trainer.answers[0]?.(250);
+    await flush();
+
+    riding.stop();
+    await flush();
+
+    expect(riding.state().lastFault).toBe(STEP_DOWN_UNCONFIRMED);
+    expect(riding.state().holding).toBe(250);
+  });
+
+  it('a step-down confirmed but a Stop refused is the release notice, as before', async () => {
+    const trainer = heldTrainer();
+    trainer.answerWith({
+      stop: {
+        kind: 'incomplete',
+        refusal: new SensorError('control-rejected', 'the machine refused op code 0x8'),
+      },
+      steppedDown: true,
+    });
+    const riding = session(trainer.control);
+    riding.start(seconds(0));
+    riding.tick(seconds(0));
+    trainer.answers[0]?.(250);
+    await flush();
+
+    riding.stop();
+    await flush();
+
+    expect(riding.state().lastFault).toBe(RELEASE_INCOMPLETE);
+    expect(riding.state().holding).toBe(FLOOR_WATTS);
   });
 });

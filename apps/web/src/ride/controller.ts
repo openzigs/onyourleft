@@ -156,7 +156,13 @@ import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import type { TrainerTargetMemory } from './trainer-target-memory';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
-import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
+import {
+  createWorkoutSession,
+  RELEASE_INCOMPLETE,
+  STEP_DOWN_UNCONFIRMED,
+  type WorkoutRelease,
+  type WorkoutSession,
+} from '../workout/session';
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
@@ -2171,18 +2177,58 @@ export function createRideController(options: RideControllerOptions): RideContro
    * listener in `wire` — which shows "Control lost" and pauses a workout — is
    * never reached from a path that meant to let go. Nothing re-requests
    * control after this either: rule 2 at the top of the file.
+   *
+   * ⚠️ **`stepDown` is the end of a workout's, and it is written FIRST**
+   * (#2348). A Stop leaves the last ERG target applied on the trainer
+   * measured, and a ramp test's last target is the hardest of the ride. So a
+   * workout hands in its trainer's floor, and it is written as a `0x05`
+   * immediately before the Stop: both are put on the control client's one
+   * queue in this call, in that order, behind whatever target is already on
+   * it, so nothing can land between them. It goes through
+   * {@link gatedTargets} like every ERG target (an ease to the floor always
+   * passes the forget rule), so the device's memory of what the trainer
+   * holds is the floor afterwards. A release already on the wire is joined
+   * and NOT stepped down: a `0x05` after its Stop would take the machine
+   * back into ERG. A step-down the trainer did not confirm is
+   * {@link STEP_DOWN_UNCONFIRMED} on {@link TrainerSnapshot.releaseFault},
+   * ahead of anything the Stop said.
    */
-  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> => {
+  const beginRelease = (
+    client: TrainerControl,
+    stepDown?: { readonly to: Watts; readonly floor: Watts },
+  ): {
+    readonly stop: Promise<TrainerRelease>;
+    /** Whether the trainer confirmed the step-down; `undefined` when none was written. */
+    readonly steppedDown: Promise<boolean | undefined>;
+  } => {
     // A release ends a hand-set target too, and its rescue with it (#567): a
     // stall rescue writing a 0x05 after the Stop would be taking the machine
     // back into ERG after the rider was told it had been let go.
     endManualErg();
     if (releasing !== undefined) {
-      return releasing;
+      return { stop: releasing, steppedDown: Promise.resolve(undefined) };
     }
+    // ⚠️ Called before `letGo` below, in the same synchronous run: the order
+    // of the two calls is the order on the wire.
+    const steppedDown: Promise<boolean | undefined> =
+      stepDown === undefined
+        ? Promise.resolve(undefined)
+        : gatedTargets(client, stepDown.floor)
+            .setTargetPower(stepDown.to)
+            .then(
+              () => true,
+              () => false,
+            );
     const attempt = client.letGo().then(
-      (outcome) => {
-        releaseFault = outcome.kind === 'stopped' ? undefined : RELEASE_INCOMPLETE;
+      async (outcome) => {
+        // Settled already: it was ahead of the Stop on the one queue.
+        const eased = await steppedDown;
+        releaseFault =
+          eased === false
+            ? STEP_DOWN_UNCONFIRMED
+            : outcome.kind === 'stopped'
+              ? undefined
+              : RELEASE_INCOMPLETE;
         // A setpoint the rider asked for can no longer be answered.
         requested = undefined;
         return outcome;
@@ -2199,8 +2245,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         changed();
       })
       .catch(() => undefined);
-    return attempt;
+    return { stop: attempt, steppedDown };
   };
+  /** {@link beginRelease} with no step-down: every release but a workout's. */
+  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> =>
+    beginRelease(client).stop;
 
   /** Whether any **connected** sensor supplies this channel. */
   const isPaired = (capability: MeasurementCapability): boolean =>
@@ -4232,7 +4281,17 @@ export function createRideController(options: RideControllerOptions): RideContro
           // `stop` and `letGo` are not: a release is never held back.
           setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
           stop: () => client.stop(),
-          letGo: () => releaseTrainer(client),
+          // #2348: the step-down, when the session asks for one, is written
+          // by the same release, immediately before its Stop.
+          letGo: async (stepDownTo): Promise<WorkoutRelease> => {
+            const release = beginRelease(
+              client,
+              stepDownTo === undefined
+                ? undefined
+                : { to: stepDownTo, floor: connection.powerRange.minimum },
+            );
+            return { stop: await release.stop, steppedDown: await release.steppedDown };
+          },
           // #1305: a read. What the client believes the trainer holds, a
           // hand-set target from before this workout included, and what
           // this app last had acknowledged where the client has forgotten.

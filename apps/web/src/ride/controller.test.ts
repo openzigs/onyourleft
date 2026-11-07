@@ -162,6 +162,7 @@ import {
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
+import { STEP_DOWN_UNCONFIRMED } from '../workout/session';
 import {
   linkNotMade,
   NOT_FOUND,
@@ -1764,6 +1765,12 @@ describe('pausing and resuming by hand', () => {
 /** The octets of a write, by op code: FTMS Table 4.15. */
 const RESET = 0x01;
 const STOP_OR_PAUSE = 0x08;
+/**
+ * The end of a workout's step-down to the trainer's floor, which is the
+ * simulator's default of 0 W — #2348. Written immediately before the Stop of
+ * every release that ends a workout holding a target above the floor.
+ */
+const STEP_DOWN_TO_ZERO = [0x05, 0, 0];
 // FTMS Set Indoor Bike Simulation Parameters.
 const SET_SIMULATION = 0x11;
 
@@ -1912,7 +1919,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     // And the recording carries on: ending a workout is not ending a ride.
     expect(snapshot.phase).toBe('recording');
     rig.controller.dispose();
@@ -1937,7 +1944,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     rig.controller.dispose();
   });
 
@@ -1953,7 +1960,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     await rig.controller.confirmStop();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.written.some((write) => write[0] === RESET)).toBe(false);
     expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
@@ -2041,6 +2048,218 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
   });
 });
 
+describe('the end of a workout steps the trainer down before it lets go — #2348', () => {
+  // ⚠️ Seen on the simulated trainer at the end of a ramp test: the Ride
+  // screen said the trainer "may still be holding 373 W — this app can no
+  // longer tell". The end of the workout is the release, a Stop, and the
+  // measured machine keeps its last ERG target through a Stop (#372) — which
+  // after a ramp test is the hardest of the ride, under a spent rider. So the
+  // end now writes the machine's floor, THEN the Stop. Every assertion reads
+  // the wire and the device, through the real controller.
+  const THRESHOLD = watts(250);
+  const FLOOR = 40;
+
+  const workout = (blocks: readonly WorkoutBlock[]): WorkoutRecord => ({
+    id: workoutId('w2348'),
+    createdBy: ATHLETE_A,
+    name: 'Ramp',
+    workout: { name: 'Ramp', blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+  /** A ramp test's shape: climbing well past threshold, and over at the top. */
+  const rampTest = (): WorkoutRecord =>
+    workout([
+      { kind: 'ramp', seconds: seconds(20), from: thresholdShare(0.6), to: thresholdShare(1.8) },
+    ]);
+  const hardAndLong = (): WorkoutRecord =>
+    workout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(1.2) }]);
+
+  const targetsIn = (writes: readonly number[][]): number[] =>
+    writes
+      .filter((write) => write[0] === 0x05)
+      .map((write) => (write[1] ?? 0) + ((write[2] ?? 0) << 8));
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(FLOOR) },
+      ...options,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('a ramp test ridden to its end: its top target, then the floor, then the Stop', async () => {
+    const rig = await riding();
+    const before = rig.written.length;
+    expect(rig.controller.startWorkout(rampTest(), THRESHOLD)).toBe(true);
+    await ride(rig, 25);
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout?.status).toBe('finished');
+    const sent = rig.written.slice(before);
+    const targets = targetsIn(sent);
+    // The climb was ridden: its last target is the highest of the ride.
+    const top = targets.at(-2) ?? 0;
+    expect(top).toBeGreaterThan(350);
+    expect(Math.max(...targets)).toBe(top);
+    // …and the end is the floor and then the Stop, with nothing after them.
+    expect(sent.slice(-2)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    // Read from the device: what the machine keeps through the Stop is the
+    // floor, not the ramp's top.
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    expect(snapshot.trainer.hasControl).toBe(true);
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(targetSentence(snapshot.trainer)).toBe(
+      `The trainer may still be holding ${String(FLOOR)} W — this app can no longer tell.`,
+    );
+    // The finished workout says what was last confirmed: the floor.
+    expect(snapshot.workout?.holdingWatts).toBe(FLOOR);
+    expect(snapshot.workout?.fault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a workout the rider ends at a hard interval: the floor, then one Stop', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(snapshot.trainer.target).toEqual({ kind: 'unknown', attempted: FLOOR });
+    rig.controller.dispose();
+  });
+
+  it('a ride stopped with a workout in it: the floor, then ONE Stop, joined with the ride’s', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    rig.controller.dispose();
+  });
+
+  it('a trainer already eased to its floor is not stepped down again: one Stop', async () => {
+    // The ride paused, which eases the workout to the floor (#441). The
+    // session knows the trainer confirmed it, so ending writes only the Stop.
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    await rig.controller.pause();
+    await ride(rig, 2);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a step-down the trainer refuses: still the Stop, and one instruction — stop pedalling', async () => {
+    // Every 0x05 under 41 W is refused at the ATT layer, so the floor is the
+    // one write that does not land; the workout's own 300 W did.
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1 });
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    // The Stop is still sent: the end of the workout is still a release.
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    // Read from the device: the hard target is still on the machine…
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const snapshot = rig.controller.getSnapshot();
+    // …and the rider is told one thing to do, on the trainer panel's notice.
+    expect(snapshot.trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    expect(STEP_DOWN_UNCONFIRMED).toMatch(/^The trainer did not confirm .*Stop pedalling/);
+    expect(targetSentence(snapshot.trainer)).toBe(
+      'The trainer may still be holding 300 W — this app can no longer tell.',
+    );
+    // Taking control again clears it, as it clears every release notice.
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a workout that finishes with its step-down refused says so on the workout too', async () => {
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1 });
+    rig.controller.startWorkout(rampTest(), THRESHOLD);
+    await ride(rig, 25);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout?.status).toBe('finished');
+    expect(rig.written.at(-1)).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+    expect(rig.targetOnTheTrainer()).toBeGreaterThan(350);
+    expect(snapshot.trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    expect(snapshot.workout?.fault).toBe(STEP_DOWN_UNCONFIRMED);
+    // Not "Holding <floor>": the floor was never confirmed.
+    expect(snapshot.workout?.holdingWatts).not.toBe(FLOOR);
+    rig.controller.dispose();
+  });
+
+  it('one workout replacing another is not stepped down: the next one writes straight on', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.startWorkout(rampTest(), THRESHOLD);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    await flushMicrotasks(20);
+
+    expect(targetsIn(rig.written.slice(before))).not.toContain(FLOOR);
+    rig.controller.dispose();
+  });
+});
+
 describe('forgetting the trainer lets it go first — #659’s review', () => {
   // ⚠️ `detach` unsubscribes `onControlLost` and then closes the client, and
   // `close()` writes nothing. Forget used to detach first, so a workout kept
@@ -2084,7 +2303,7 @@ describe('forgetting the trainer lets it go first — #659’s review', () => {
     await flushMicrotasks(20);
 
     const snapshot = rig.controller.getSnapshot();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.paired).toBe(false);
     expect(snapshot.trainer.lost).toBeUndefined();
@@ -2344,7 +2563,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     rig.deliverHeldStopAnswer();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
     // A release is not a loss: no "Control lost".
@@ -2371,7 +2590,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     rig.deliverHeldStopAnswer();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
     expect(rig.controller.getSnapshot().workout).toBeUndefined();
   });
@@ -2723,7 +2942,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     await stopping;
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(await closed(rig)).toBe(true);
   });
 
@@ -6275,7 +6494,12 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
       await ride(rig, 40);
       await flushMicrotasks(20);
       rig.controller.dispose();
-      return rig.written;
+      // #2348: the release is a step-down and then a Stop, and the Stop lands
+      // a few microtasks after `dispose` returns. Read once it has, and as a
+      // copy: `written` is the rig's own live array, which went on growing
+      // during the next script's awaits.
+      await flushMicrotasks(20);
+      return [...rig.written];
     };
     const none = await script(undefined);
     expect(await script(() => 'unknown')).toStrictEqual(none);
@@ -9356,7 +9580,7 @@ describe('a running workout owns the ERG target — #542’s review', () => {
 
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.phase).toBe('recording');
@@ -10271,7 +10495,7 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     await ride(rig, 30);
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().workout).toBeUndefined();
     rig.controller.dispose();
   }, 30_000);
@@ -11373,7 +11597,8 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       const writes = rig.written.length;
       await rideOn(rig, 300);
       expect(rig.written.length).toBe(writes);
-      expect(targetsSent(rig, from)).toEqual([125, 175]);
+      // #2348: and then the end of the workout's step-down to the floor.
+      expect(targetsSent(rig, from)).toEqual([125, 175, 0]);
       rig.controller.dispose();
     });
   });
