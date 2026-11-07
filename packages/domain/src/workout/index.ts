@@ -73,11 +73,13 @@ export type {
   ChoiceRange,
   ChoiceRangeWithDefault,
   FixedMainSet,
+  HeartRateZoneHoldBlock,
   MainSet,
   Recovery,
   RepeatMainSet,
   StretchMainSet,
   TailorChoices,
+  TemplateBlock,
   TemplateParameters,
   WorkoutCategory,
   WorkoutTemplate,
@@ -92,6 +94,8 @@ export {
   tailorWorkout,
   TEMPLATE_LENGTHS_MINUTES,
 } from './template';
+
+export { BUILT_IN_WORKOUTS } from './library';
 
 // The two threshold tests and the player that ends them (#2303).
 export type { ThresholdTest } from './library/test';

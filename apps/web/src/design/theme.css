@@ -111,6 +111,13 @@
   --oyl-color-hud-zone5: #f59441;
   --oyl-color-hud-zone6: #cb574d;
   --oyl-color-hud-zone7: #cf91f3;
+  --oyl-color-hud-zone-band1: #383b3f;
+  --oyl-color-hud-zone-band2: #192f4b;
+  --oyl-color-hud-zone-band3: #284731;
+  --oyl-color-hud-zone-band4: #564f2b;
+  --oyl-color-hud-zone-band5: #553922;
+  --oyl-color-hud-zone-band6: #482726;
+  --oyl-color-hud-zone-band7: #493858;
   --oyl-color-hud-grade-descent: #4f9fe0;
   --oyl-color-hud-grade-flat: #6b7177;
   --oyl-color-hud-grade-climb: #d8b630;
@@ -900,7 +907,8 @@ html {
 }
 
 /*
- * NAVIGATION — #427. Five destinations at most, each an icon and a word, as a
+ * NAVIGATION — #427. Five destinations at most (six since #2292, the owner's
+ * ruling of 2026-11-06 that added Games), each an icon and a word, as a
  * BAR on a compact window and a RAIL on a medium or expanded one (Material 3's
  * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
  * decides which it is, on the window's size.
@@ -960,8 +968,9 @@ html {
  * The larger icon on the current destination is a `transform`, so it moves
  * nothing around it: a `width` would have grown the bar for one item.
  *
- * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem.**
- * Five of them share a 320 px row (#427's row at 320×256, and the bar at
+ * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem**
+ * (2.75rem on a compact window since #2292, §"SIX IN A ROW").
+ * Five of them shared a 320 px row (#427's row at 320×256, and the bar at
  * 320×640), and a label is as wide as the platform's font makes it. #944's
  * first version padded the pill 8 px a side and the link 4 px more: five
  * items came to 299 px on a Mac and wrapped onto a second line on the CI
@@ -1133,6 +1142,85 @@ html {
 
 .oyl-more p {
   margin: 0;
+}
+
+/*
+ * The Games tab — #2292 (`views/GamesView.tsx`, `views/GameCoursesView.tsx`):
+ * a card for each game, and each game's courses, a card each. The page is a
+ * screen of sections (`.oyl-sections`), so on a tablet the cards stand in
+ * rows. A course that cannot hold the game is the same filled tile (#992's
+ * look: no outline, `look.browser.spec.ts`), told apart by having no control
+ * and the reason in words in its place.
+ */
+.oyl-games__card,
+.oyl-game-courses__course {
+  padding: var(--oyl-space-md);
+}
+
+.oyl-games__card > h2,
+.oyl-game-courses__name {
+  margin-top: 0;
+}
+
+/* The two cards one above the other on a phone; `--halves`' two columns on a tablet. */
+.oyl-games {
+  display: grid;
+  gap: var(--oyl-space-md);
+}
+
+/*
+ * The courses: as many columns of at least 18rem as the pane holds, and the
+ * tracks a short list leaves empty folded away, so one course spans the row
+ * rather than standing in a third of it (`sections.browser.spec.ts` §"#2067").
+ * `ul` and both classes, to be more specific than `.oyl-sections`' own tracks.
+ */
+ul.oyl-sections.oyl-game-courses__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+  gap: var(--oyl-space-md);
+  align-items: start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * The way back to the Games page from a course picker — the owner's ruling of
+ * 2026-11-06, at every width. A 44×44 target (SC 2.5.5, as the buttons above
+ * say), held by its own floor rather than by the line-height it happens to sit
+ * on; `shell.browser.spec.ts` measures it at a phone's width.
+ */
+.oyl-game-courses__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+/*
+ * SIX IN A ROW — #2292. The Games tab made the destinations six, and six
+ * pills at the 3rem floor with the link's 2 px a side and the list's gap came
+ * to 338 px against a 320 px row, which wrapped: the row 115.7 px tall at
+ * 320×256, caught by `shell.browser.spec.ts` §`NAV_BOX_BEFORE_944`. On a
+ * compact window — the row and the bar — the list has no gap and spreads its
+ * items instead, the link has no inline padding, and the pill's floor is the
+ * 44 px target itself, so a short label's pill (Ride) is still a 44 px
+ * target with the link's own floor stripped (§4f's third measurement). The
+ * rail is untouched: each item has the rail's width.
+ */
+@media (max-width: 37.49rem) {
+  .oyl-nav-list {
+    gap: 0;
+    justify-content: space-around;
+  }
+
+  .oyl-nav-link {
+    padding-inline: 0;
+  }
+
+  .oyl-nav-indicator {
+    min-width: 2.75rem;
+  }
 }
 
 /* BAR — a compact window with the height to spare for it. */
@@ -11435,6 +11523,132 @@ select.oyl-input {
 
 .oyl-hud__zone-bar-part--7 {
   fill: var(--oyl-color-hud-zone7);
+}
+
+/*
+ * THE LAST TEN MINUTES — #2078: power and heart rate, under the route plan.
+ *
+ * In the route panel, its full width, 4 rem tall: the power line solid in the
+ * HUD's ink, the heart-rate line dashed in the label's colour (told apart by
+ * pattern as well as colour), over the power zones' bands dimmed onto the
+ * panel. Every line is 2 px whatever box it is given.
+ *
+ * ⚠️ **Not drawn on a phone's overlay** — the column layout upright and the
+ * short corners layout on its side, 30 rem tall or less (the owner's ruling
+ * of 2026-11-06, #2034: a laptop's window draws it) — recorded as #419 asks,
+ * and as #2078
+ * itself allows (*"hidden on phone portrait if it does not fit the layout
+ * rules"*): a phone's route panel is measured to within a few pixels of the
+ * leaning rider and of the primary panel above it, and 4 rem more does not
+ * fit. `display: none`, because the graph is `aria-hidden` and carries
+ * nothing a reading on the HUD does not say in numbers. Drawn on a tablet and
+ * wherever the HUD stacks.
+ */
+.oyl-hud__recent {
+  display: block;
+  width: 100%;
+  height: 4rem;
+}
+
+.oyl-hud__recent-power,
+.oyl-hud__recent-heart {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__recent-power {
+  stroke: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__recent-heart {
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 4 3;
+}
+
+.oyl-hud__recent-band--1 {
+  fill: var(--oyl-color-hud-zone-band1);
+}
+
+.oyl-hud__recent-band--2 {
+  fill: var(--oyl-color-hud-zone-band2);
+}
+
+.oyl-hud__recent-band--3 {
+  fill: var(--oyl-color-hud-zone-band3);
+}
+
+.oyl-hud__recent-band--4 {
+  fill: var(--oyl-color-hud-zone-band4);
+}
+
+.oyl-hud__recent-band--5 {
+  fill: var(--oyl-color-hud-zone-band5);
+}
+
+.oyl-hud__recent-band--6 {
+  fill: var(--oyl-color-hud-zone-band6);
+}
+
+.oyl-hud__recent-band--7 {
+  fill: var(--oyl-color-hud-zone-band7);
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__recent {
+    display: none;
+  }
+}
+
+/* ⚠️ **And on an upright tablet, in a room with sounds on and a side camera
+   paired, it gives way too** — recorded as #419 asks. The sound row and the
+   side camera's row both stand on the route panel there (§"#1409"), and with
+   the graph's 4 rem in the panel the side camera's row was 45 px into the
+   leaning rider's box at 800×1280 (`ride-room.browser.spec.ts` §"#1409",
+   `[8,861 → 264,916]`), measured on PR #2231's tree merged with #2213. */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__actions > .oyl-sound):has(
+      > .oyl-hud__actions > .oyl-hud__side-camera-row
+    )
+    .oyl-hud__recent {
+    display: none;
+  }
+}
+
+/* ⚠️ **And on the 4:3 tablet — and a laptop's window — while two notices
+   share their cell, it gives way too** — recorded as #419 asks. #2130's secondary tier is three rows
+   there, the notices start under it, and the route panel with the graph's
+   4 rem starts at 414 px: *Keep the screen on* beside the road notice
+   (`[8,270 → 360,440]` on the CI runner's fonts, 32 px shorter on a Mac's)
+   ran over the route panel (`ride-notices.browser.spec.ts`
+   §"#647") and under the map's credit at 386 px (`ride-attribution.browser.spec.ts`
+   §"#1552"), measured in CI on PR #2231's tree merged with #2213. Two
+   DRAWN notices: the road notice folded away keeps its wrapper in the cell,
+   visually hidden (`HudCore.tsx` §`STANDING_NOTICE_ID`), and does not count
+   (the owner's ruling of 2026-11-06, `ride-notices.browser.spec.ts`). */
+@media (min-width: 46rem) and (height > 30rem) and (height < 50rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices > :not(.oyl-visually-hidden) ~ :not(.oyl-visually-hidden))
+    .oyl-hud__recent {
+    display: none;
+  }
+}
+
+/* ⚠️ **And on a laptop's or a desktop's window under 40 rem tall (1024×600),
+   it gives way** — recorded as #419 asks. The owner's ruling of 2026-11-06
+   (#2034) draws it in a laptop's window, and from 1280×720 up it fits; at
+   1024×600 its 4 rem ran the route panel 24 px below the stage on a
+   Delivery round and 46 px into a workout's notice, measured on PR #2231's
+   tree. The rule above holds it there too, and at 1366×657, while two
+   notices are drawn. */
+@media (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
+  .oyl-game--riding .oyl-hud__recent {
+    display: none;
+  }
 }
 
 /* ⚠️ **And in a laptop's or a desktop's window under 40 rem tall (1024×600),

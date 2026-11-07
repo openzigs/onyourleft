@@ -785,7 +785,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and each card says "up to N houses", or is greyed
                         with the reason in words; a greyed route is still
                         choosable, for an ordinary ride, and the switch says
-                        so. **The press**, in `GameView`:
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
@@ -1152,6 +1156,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/recent-trace.ts, RecentGraph.tsx
+                        the last ten minutes of power and heart rate (#2078):
+                        a fixed ring of 600 one-second slots, written from the
+                        frame loop only when the ride's clock crosses a whole
+                        second, a dropped reading a gap (`NaN`), never a
+                        zero; the SVG is memoised on the count written, so it
+                        is redrawn at most once a second
     src/game/hud/look-ahead.ts
                         the next kilometre of road on the HUD (#2075): the
                         road a line at a FIXED scale (100 m of height across the

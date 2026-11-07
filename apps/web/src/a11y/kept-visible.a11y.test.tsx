@@ -291,6 +291,10 @@ const KEPT: Record<RouteId, Kept> = {
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   more: { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of links (#1429)` },
+  // #2292: two cards, and each game's list of courses.
+  games: { sentences: [], reason: `${NOTHING_TUCKED}: it is a card for each game` },
+  'delivery-courses': { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of courses` },
+  'lap-race-courses': { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of courses` },
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
   // #1251: and, signed in with a key held, the hosted service's section —
