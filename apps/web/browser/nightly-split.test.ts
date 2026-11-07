@@ -759,8 +759,11 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
       if (id === 'report') continue;
       const stop = Number(jobField(job, 'timeout-minutes')) * 60;
       const slowest = Math.max(...measured(id));
-      // A figure under a minute is a typo, not a job that installs.
-      expect(slowest, id).toBeGreaterThan(60);
+      // A figure under 20 s is a typo, not a job that installs: #2285's
+      // `coverage` installs and merges the halves in 27 to 36 s, and every
+      // other job runs a suite and takes minutes (a minute was the floor
+      // until then).
+      expect(slowest, id).toBeGreaterThan(20);
       expect(slowest, id).toBeLessThanOrEqual(NIGHTLY_SHARE * stop);
     }
   });
