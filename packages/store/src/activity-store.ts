@@ -83,6 +83,7 @@ import type {
   WorkoutId,
   SegmentId,
 } from './ids';
+import { isCircuitRouteId } from './ids';
 import {
   fromPersistedActivityRecord,
   fromPersistedDeviceKey,
@@ -3012,6 +3013,14 @@ export class ActivityStore {
       );
     }
     await this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
+      // #2293, ADR 0064 D-2.2: a built-in circuit has no route record to
+      // refer to; its key is in the namespace no route id may carry
+      // (`ids.ts` §`routeId`), so the two can never share one. The owner is
+      // still half of the key, and the read below still takes it.
+      if (isCircuitRouteId(record.routeId)) {
+        await this.#worldCorridors.put(record);
+        return;
+      }
       const route = await this.#routes
         .where(INDEX.routeByOwnerAndId)
         .equals([record.owner, record.routeId])

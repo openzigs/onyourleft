@@ -45,7 +45,9 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
 - **The ride screen** shows the same line, small, in the HUD's actions panel, **for the whole ride**
   whenever the ride's world was given map data when it started (`GameView.tsx`, #1552). It is keyed
   on the corridor the ride started with, never on "the realistic world is chosen" and never on what
-  is in frame: the notice is for the work. A ride drawn wholly from the procedural world (the
+  is in frame: the notice is for the work. Since #2293 it has a second key: a ride on a **built-in
+  circuit** shows it for the whole ride in every world, because the road itself is the circuit's
+  line (ADR 0064 D-5.3). A ride on the rider's own route drawn wholly from the procedural world (the
   stylised world, no archive, map tiles off, offline with nothing kept, outside coverage, a read
   still running at the press) shows **no** credit, because it owes none and saying otherwise is
   false.
@@ -106,29 +108,35 @@ synthetic road and draws no OpenStreetMap data.
 
 ⚠️ **The on-device store is unchanged.** ADR 0054 D-3.5 still binds `worldCorridors` whole: nothing
 in it leaves the device, the bake never reads it, and the share-alike reasoning in the section above
-still holds for it. The bundle is a separate database, made at build time from the archive, and it
-is the only OpenStreetMap-derived database this project publishes.
+still holds for it. The bundle is a separate database, made at build time from the archive. Since
+#2293 it is not the only OpenStreetMap-derived database this project publishes: the built-in
+circuits below are the other.
 
 ## The lap race's built-in circuits
 
 [ADR 0064](adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md), **Accepted** on
 2026-11-06 on the owner's [ruling of that day](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818) on #2297, after the ruling of the same day on
-[#2293](https://github.com/openzigs/onyourleft/issues/2293). Nothing below is built until #2293
-lands; until then the sentence above stays true.
+[#2293](https://github.com/openzigs/onyourleft/issues/2293). Built by #2293.
 
-- **What is in it.** Three or four short loops for solo races against bots, one JSON file each:
-  the loop's line, drawn on the project's own archive's streets, and its heights, with no corridor,
-  no OSM identifier and no name but the circuit's own. Committed, and shipped inside the app.
+- **What is in it.** Four short loops for solo races against bots, one JSON file each, in
+  `apps/web/src/game/circuits/data/`: the loop's line, drawn on the project's own archive's
+  streets by `apps/web/tools/circuits/author-circuit.ts` (run by hand, never in CI), and its
+  heights from USGS 3DEP, with no corridor, no OSM identifier and no name but the circuit's own.
+  Committed, named in `ASSETS.toml` with a digest each, and shipped inside the app.
 - **Its licence.** Each file is treated as a Derivative Database that is Publicly Conveyed, so it is
   offered under ODbL 1.0 with the licence, source and §4.3 notice inside it and a
-  `LICENCE-ODbL.txt` beside it. §4.6 a is the files themselves, in the repository and in every build.
-- **Where attribution is shown.** Beside the circuits in the course picker, on the credits screen,
+  `LICENCE-ODbL.txt` beside it, copied byte for byte into `apps/web/public/licences/`.
+  `ASSET004` admits `ODbL-1.0` for that directory's `.json` files and nothing else, and
+  `circuits.test.ts` holds the fields inside each file and the notice beside them. §4.6 a is the
+  files themselves, in the repository and in every build.
+- **Where attribution is shown.** Beside the circuits in the course picker, with a link to the
+  credits screen, whose *Map data* entry says the app ships them and reads their notice in place;
   and on the ride screen for the whole of a ride on a circuit, in every world.
-- **The no-credit sentence above changes when it is built.** A stylised-world ride on a circuit
-  shows the credit, so the list of worlds that show none loses that parenthesis then, and not
-  before.
+- **Solo races only.** A circuit's id is in a `circuit:` namespace no route id may carry; it is never
+  saved as a route, synced, exported, shared or a room's course.
 - **The on-device store is unchanged.** A circuit's corridor, with the realistic world chosen, is
-  read and kept like any route's, and never leaves the device.
+  read and kept like any route's, under its `circuit:` key and the owner, and never leaves the
+  device.
 
 ## What does not change
 

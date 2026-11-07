@@ -37,7 +37,7 @@ import {
   type JSX,
 } from 'react';
 
-import type { KitColour } from '@onyourleft/store';
+import { isCircuitRouteId, type KitColour } from '@onyourleft/store';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
@@ -321,6 +321,15 @@ export const RIDER_GHOST_REFUSAL_TEXT: Readonly<Record<'none' | 'unavailable', s
 export interface GamePort {
   /** The rider's saved routes (#89, #73). */
   listRoutes(): Promise<readonly RidableRoute[]>;
+  /**
+   * The app's built-in lap-race circuits — #2293, ADR 0064: shipped in the
+   * bundle (`circuits/circuits.ts` §`loadBuiltInCircuits`), each with an id
+   * in the `circuit:` namespace, raced solo against bots and never anything
+   * else. Absent, the chooser offers none. ⚠️ An optional member threaded
+   * through JSX, so a `main.tsx` that stopped supplying it is GREEN in
+   * `check:wiring`; `circuits/circuits-wiring.test.tsx` is what goes red.
+   */
+  listCircuits?(): Promise<readonly RidableRoute[]>;
   /**
    * The ghost for the rider's best previous attempt on a route, if any.
    *
@@ -968,6 +977,12 @@ function GameScreen({
   // the control that shows the refusal and the button the refusal blocks.
   const units = useUnits();
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
+  /**
+   * The app's built-in lap-race circuits — #2293, ADR 0064: `GamePort.listCircuits`,
+   * read with the routes. Never in {@link routes}: a room's course list is
+   * the rider's routes, and a circuit is never a room's course (D-8.1).
+   */
+  const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
@@ -1656,6 +1671,9 @@ function GameScreen({
   // `setChosen` so the credit's render depends on it explicitly rather than on
   // the ref having been written before `setPhase` re-rendered.
   const [rideHasCorridor, setRideHasCorridor] = useState(false);
+  // #2293: whether THIS ride is on a built-in circuit, set beside the one above
+  // for the same reason: the credit's render reads it (ADR 0064 D-5.3).
+  const [rideOnCircuit, setRideOnCircuit] = useState(false);
   /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
   /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
@@ -1669,8 +1687,16 @@ function GameScreen({
       return;
     }
     let cancelled = false;
-    void port.listRoutes().then((found) => {
+    // #2293: the built-in circuits with the routes, so a rider with none of
+    // their own sees the circuits at once rather than an empty chooser that
+    // fills a moment later. A circuit that cannot be read costs the circuits
+    // and never the rider's routes.
+    const builtIn = (port.listCircuits?.() ?? Promise.resolve([])).catch(
+      (): readonly RidableRoute[] => [],
+    );
+    void Promise.all([port.listRoutes(), builtIn]).then(([found, circuitsFound]) => {
       if (!cancelled) {
+        setCircuits(circuitsFound);
         setRoutes(found);
       }
     });
@@ -1797,8 +1823,13 @@ function GameScreen({
   // port decides whether anything is requested at all (the world chosen, the
   // tiles switch, the store); this only says which route and when to stop.
   const choosing = phase === 'choosing';
+  // #2293: a built-in circuit's corridor is read like any route's, under its
+  // `circuit:` key (ADR 0064 D-2.2); the chooser's first choice is the
+  // rider's first route, or the first circuit when they have none.
   const corridorRoute =
-    routes === undefined ? undefined : (routes.find((route) => route.id === picked) ?? routes[0]);
+    routes === undefined
+      ? undefined
+      : ([...routes, ...circuits].find((route) => route.id === picked) ?? routes[0] ?? circuits[0]);
   useEffect(() => {
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
@@ -1866,6 +1897,22 @@ function GameScreen({
       lapRace: LapRaceChoice | undefined = undefined,
     ): Promise<void> => {
       const profile = route.profile;
+      // #2293, ADR 0064 D-8.1: a built-in circuit is a solo race against bots
+      // and nothing else — never a free ride, a preview, a round or a room's
+      // ride. A press on one that would not race is refused HERE, before
+      // anything is asked of the trainer or drawn, rather than ridden as
+      // something the circuit is not offered for.
+      const onCircuit = isCircuitRouteId(route.id);
+      const circuitRace = props.lapRace ?? lapRace;
+      if (
+        onCircuit &&
+        (circuitRace === undefined ||
+          !profile.loop ||
+          props.roomId !== undefined ||
+          !lapRaceChoiceRaceable(circuitRace))
+      ) {
+        return;
+      }
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
       // rider's press on *Ride*, and after an `await` it would not. A browser
       // refuses audio that starts outside a gesture, silently, so this is
@@ -1876,7 +1923,8 @@ function GameScreen({
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
       ghostRiderRef.current = undefined;
-      if (riderGhost) {
+      // #2293: a circuit has no attempts and no other rider's either.
+      if (riderGhost && !onCircuit) {
         // #331: ONE other rider's ghost, in place of the rider's own. Asked
         // for at the press, and never kept: it lives in this ref for this ride.
         const asked: RiderGhostLoad = (await port?.loadRiderGhost?.(route.id)) ?? {
@@ -1896,7 +1944,8 @@ function GameScreen({
         ghostRef.current = asked.track;
         ghostRiderRef.current = asked.rider;
       } else {
-        ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
+        ghostRef.current =
+          ghost && !onCircuit && port !== undefined ? await port.loadGhost(route.id) : undefined;
       }
       // #509: the rider may have left while the ghost loaded. @see unmountedRef
       if (unmountedRef.current) {
@@ -1941,8 +1990,10 @@ function GameScreen({
       // and nor does a choice that cannot be raced, which is refused
       // HERE, before the trainer is asked or a session made, as an ordinary
       // ride rather than a throw from a ride already begun.
+      // #2293: never on a built-in circuit, whatever the address says.
       const deliveryWanted =
-        props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
+        !onCircuit &&
+        (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash)));
       // #784: the room entered on the picker's panel — but only for a ride
       // started from the panel, on the room's own road: a rider in a room who
       // presses *Ride* on one of their own routes rides it alone. Else the
@@ -2163,6 +2214,9 @@ function GameScreen({
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
+      // #2293, ADR 0064 D-5.3: the road this ride draws is a circuit's line,
+      // drawn from OpenStreetMap, so the credit is owed in every world.
+      setRideOnCircuit(onCircuit);
       // #1546: the mask every placement rule reads, built ONCE, here — never
       // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
       landClassRef.current =
@@ -3348,6 +3402,9 @@ function GameScreen({
             onChoice: setLapRaceChoice,
             assisted: lapRaceAssisted(deviceStorage()),
           }}
+          // #2293: the built-in circuits, beside the race they are raced in,
+          // with the OpenStreetMap credit the chooser cannot import.
+          circuits={{ circuits, credit: OSM_ATTRIBUTION }}
           onStart={start}
           // PR #2113: *Preview without a trainer*, on an ordinary screen only.
           onPreview={
@@ -3723,7 +3780,11 @@ function GameScreen({
         // with no footprint in it (D-5.3: no procedural village there). A
         // procedural world owes nothing, and a credit there would be false.
         // Since #1549 the realistic world draws its mapped buildings from it.
-        attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
+        // ⚠️ Since #2293 (ADR 0064 D-5.3) a SECOND key: a ride on a built-in
+        // circuit, in every world, the stylised one included, because the
+        // road itself is the circuit's line drawn from OpenStreetMap. A ride
+        // on the stylised world on the rider's own route still shows none.
+        attribution={rideHasCorridor || rideOnCircuit ? OSM_ATTRIBUTION : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}

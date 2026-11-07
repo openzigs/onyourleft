@@ -1538,6 +1538,19 @@ ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 ASSET_LICENCES_FONT="OFL-1.1"
 ASSET_FONT_FILES="woff2 woff ttf otf"
 
+# ADR 0064 D-6.2, #2293. The Open Database License 1.0, admitted for the
+# built-in lap-race circuits' `.json` files, directly in their one directory,
+# and for nothing else -- not a file in a subdirectory of it, not another
+# extension there, not a file anywhere else under `apps/`, and never under
+# `packages/`, whose consumers must be able to take a package with no ODbL
+# obligation. Each circuit's line follows streets drawn from OpenStreetMap,
+# so the file is a database derived from it and is offered under ODbL 1.0
+# (D-3). The licence fields inside each file and the notice beside them are
+# held by `apps/web/src/game/circuits/circuits.test.ts`, because nothing here
+# reads JSON.
+ASSET_LICENCES_DATABASE="ODbL-1.0"
+ASSET_DATABASE_DIR="apps/web/src/game/circuits/data"
+
 # `shasum` is what docs/agents/commands.md §4a documents and what macOS ships; `sha256sum` is
 # what the GNU coreutils on the CI runner ship. The same pair, and the same
 # order, as check-licence-hashes.sh -- a second spelling of "take a digest"
@@ -1874,6 +1887,14 @@ asset_licence_permitted() {
     done
     return 1
   done
+  # A database licence admits a circuit file in its directory and nothing
+  # else (ADR 0064 D-6.2): the directory is the path's whole parent, so a
+  # file one level further down is refused, and the name must end `.json`.
+  for candidate in ${ASSET_LICENCES_DATABASE}; do
+    [ "${candidate}" = "${licence}" ] || continue
+    [ "${path%/*}" = "${ASSET_DATABASE_DIR}" ] && [ "${path##*.}" = "json" ] && return 0
+    return 1
+  done
   return 1
 }
 
@@ -1971,7 +1992,7 @@ check_assets() {
         if [ -z "${licence}" ]; then
           report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no licence recorded; an asset whose terms nobody wrote down is an asset nobody has read (#339)"
         elif ! asset_licence_permitted "${licence}" "${path}"; then
-          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) and attribution-requiring (${ASSET_LICENCES_ATTRIBUTED}) under apps/ only, a font licence (${ASSET_LICENCES_FONT}) for a font file (${ASSET_FONT_FILES}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2, ADR 0023 D-1, ADR 0043 D-1)"
+          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) and attribution-requiring (${ASSET_LICENCES_ATTRIBUTED}) under apps/ only, a font licence (${ASSET_LICENCES_FONT}) for a font file (${ASSET_FONT_FILES}) under apps/ only, a database licence (${ASSET_LICENCES_DATABASE}) for a .json file directly in ${ASSET_DATABASE_DIR}/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2, ADR 0023 D-1, ADR 0043 D-1, ADR 0064 D-6.2)"
         elif asset_attribution_required "${licence}" && [ -n "${absent}" ]; then
           # ⚠️ Reported for a PERMITTED licence, which is what makes it a rule
           # of its own rather than a branch of ASSET004: the entry's licence is
