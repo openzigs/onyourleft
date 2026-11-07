@@ -252,6 +252,8 @@ export interface TailorChoices {
    * {@link HeartRateZoneHoldBlock} resolves its range from. Pass it only when
    * it is the rider's own: an assumed default makes a hold that could not run
    * anyway (H1). Absent, every zone hold rides as its steady fallback.
+   * A template with no zone hold ignores it, because heart rate is a property
+   * of the rider and not of the workout, unlike a repeat count it cannot offer.
    */
   readonly thresholdHeartRate?: number | undefined;
 }
