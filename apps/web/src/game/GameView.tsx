@@ -52,6 +52,7 @@ import {
   sideCameraOnRide,
   sideCameraStoppable,
 } from '../ride/side-camera';
+import type { LapFigures } from '../recording/laps';
 import type { RideTotals } from '../recording/totals';
 import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
 import {
@@ -1197,6 +1198,12 @@ function GameScreen({
   const [lapNotice, setLapNotice] = useState<
     { readonly summary: LapSummary; readonly from: number; readonly status: boolean } | undefined
   >(undefined);
+  /**
+   * Every lap the recording has stated on this ride — #2080, the last answer
+   * of `courseLine` that had laps in it — for the HUD's lap splits panel.
+   * Emptied as each ride starts, as the recording's own laps are.
+   */
+  const [rideLaps, setRideLaps] = useState<readonly LapFigures[]>([]);
   /** How many times this ride has completed its course. @see course-laps.ts */
   const lapsDoneRef = useRef(0);
   /** The ride second the recording was last told how far round its lap is — #1322. */
@@ -2118,6 +2125,7 @@ function GameScreen({
       lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
       setLapNotice(undefined);
+      setRideLaps([]);
       props.trainer?.courseLine?.({ kind: 'started' });
       // ⚠️ #362: the line that makes #90's whole gradient path reachable from a
       // ride. `createSimulationDriver` and `createSimulationWriter` were both
@@ -2869,6 +2877,9 @@ function GameScreen({
       if (crossed !== undefined) {
         lapsDoneRef.current = courseLapsDone(chosen.profile, simulation.state.ride.distance);
         const laps = trainerPortRef.current?.courseLine?.(crossed);
+        if (laps !== undefined) {
+          setRideLaps(laps);
+        }
         const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
         if (summary !== undefined) {
           setLapNotice({
@@ -3629,6 +3640,8 @@ function GameScreen({
         elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
+        // #2080: and every lap it has stated, for the lap splits panel.
+        laps={rideLaps}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
         rideTotals={rideTotals}
         // #2078: the last ten minutes, written once a second by the loop.
