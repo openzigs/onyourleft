@@ -274,7 +274,17 @@ describe('#1907 — the lap race in the chooser', () => {
     const group = tierRadio(BOT_TIER_TEXT.steady)?.closest('fieldset');
     expect(group?.querySelector('legend')?.textContent).toBe(LAP_RACE_CHOICE_TEXT.tier);
     expect(described(tierRadio(BOT_TIER_TEXT.hard) as HTMLInputElement)).toBe(
-      `${BOT_TIERS.map((tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`).join(', ')} watts per kilogram.`,
+      `${BOT_TIERS.map((tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`).join(', ')} watts per kilogram, on average over a race.`,
+    );
+    // #2329: why a bot's figure in the race moves round its tier, in words,
+    // right after the tiers and outside each chip's description.
+    const explained = document.getElementById(
+      tierRadio(BOT_TIER_TEXT.hard)?.getAttribute('aria-describedby') ?? '',
+    )?.nextElementSibling;
+    expect(explained?.tagName).toBe('P');
+    expect(explained?.textContent).toBe(
+      'The figure beside a bot in the race moves around that: a bot saves a little on the flat ' +
+        'and more downhill, then spends it on climbs and in the final sprint.',
     );
     for (const tier of BOT_TIERS) expect(tierRadio(BOT_TIER_TEXT[tier])).toBeDefined();
     expect(tierRadio(BOT_TIER_TEXT[DEFAULT_LAP_RACE_CHOICE.tier])?.checked).toBe(true);
