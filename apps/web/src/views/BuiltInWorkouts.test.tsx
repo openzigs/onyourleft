@@ -40,7 +40,7 @@ const SAVED: WorkoutRecord = {
 let mounted: Mounted | undefined;
 
 beforeEach(() => {
-  globalThis.location.hash = '#/workouts';
+  globalThis.location.hash = '#/workouts?list=built-in';
 });
 
 afterEach(() => {
@@ -114,20 +114,42 @@ function linkSaying(root: ParentNode, text: string): HTMLAnchorElement {
   return link;
 }
 
+/** The list pane's heading: the list it shows. */
+function paneHeading(): string {
+  return document.querySelector('[data-oyl-pane="list"] h2')?.textContent ?? '';
+}
+
 describe('the built-ins are listed with nothing saved and no instance — #2304', () => {
-  it('lists every built-in the app ships, under its own heading, apart from the rider’s own', async () => {
+  it('opens on the rider’s own, and the switch shows every built-in the app ships apart from them', async () => {
+    globalThis.location.hash = '#/workouts';
     await open(workoutStub(OWNER, [SAVED]));
-    expect(cardNames()).toEqual(BUILT_IN_WORKOUTS.map((template) => template.name));
-    expect(builtIns().querySelector('h2')?.textContent).toBe('Built-in workouts');
-    // The rider's own workout is in their list and not among the built-ins.
+    expect(paneHeading()).toBe('Saved workouts');
     expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain('My own hour');
+    expect(document.querySelector('[data-oyl-built-ins]')).toBeNull();
+
+    await follow(linkSaying(document, 'Built-in workouts'));
+    expect(globalThis.location.hash).toBe('#/workouts?list=built-in');
+    expect(paneHeading()).toBe('Built-in workouts');
+    expect(cardNames()).toEqual(BUILT_IN_WORKOUTS.map((template) => template.name));
+    // The rider's own workout is in their list and not among the built-ins.
+    expect(document.querySelector('[data-oyl-list="saved"]')).toBeNull();
     expect(builtIns().textContent).not.toContain('My own hour');
+
+    await follow(linkSaying(document, 'Your workouts'));
+    expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain('My own hour');
   });
 
   it('lists them for a rider with no saved workout at all', async () => {
     await open();
     expect(cardNames()).toHaveLength(BUILT_IN_WORKOUTS.length);
-    expect(document.body.textContent).toContain('No workouts saved on this device yet');
+  });
+
+  it('says which list is shown by more than its colour', async () => {
+    await open();
+    const current = queryAll(document, 'nav[aria-label="Which workouts"] a[aria-current]');
+    expect(current.map((link) => [link.textContent, link.getAttribute('aria-current')])).toEqual([
+      ['Built-in workouts', 'true'],
+    ]);
   });
 
   it('says on each card the length, the category, the hardest share and the shape', async () => {
@@ -158,11 +180,11 @@ describe('filtering changes which cards render — #2304', () => {
     await chooseOption(select('Length'), '45');
     await settle();
     expect(cardNames()).toEqual(['Sweet spot, rising block', 'Sweet spot, one long block']);
-    expect(globalThis.location.hash).toBe('#/workouts?category=sweet-spot&length=45');
+    expect(globalThis.location.hash).toBe('#/workouts?list=built-in&category=sweet-spot&length=45');
 
     await follow(linkSaying(builtIns(), 'Clear filters'));
     expect(cardNames()).toHaveLength(BUILT_IN_WORKOUTS.length);
-    expect(globalThis.location.hash).toBe('#/workouts');
+    expect(globalThis.location.hash).toBe('#/workouts?list=built-in');
   });
 
   it('leaves only the workouts with a heart-rate target', async () => {
@@ -176,15 +198,17 @@ describe('filtering changes which cards render — #2304', () => {
   });
 
   it('says when nothing matches, and offers to clear', async () => {
-    globalThis.location.hash = '#/workouts?category=recovery&length=90';
+    globalThis.location.hash = '#/workouts?list=built-in&category=recovery&length=90';
     await open();
     expect(cardNames()).toEqual([]);
     expect(builtIns().textContent).toContain('No built-in workout matches these filters.');
-    expect(linkSaying(builtIns(), 'Clear filters').getAttribute('href')).toBe('#/workouts');
+    expect(linkSaying(builtIns(), 'Clear filters').getAttribute('href')).toBe(
+      '#/workouts?list=built-in',
+    );
   });
 
   it('renders the filtered list on a fresh load of an address with a filter in it', async () => {
-    globalThis.location.hash = '#/workouts?category=sweet-spot&length=45';
+    globalThis.location.hash = '#/workouts?list=built-in&category=sweet-spot&length=45';
     await open();
     expect(cardNames()).toEqual(['Sweet spot, rising block', 'Sweet spot, one long block']);
     expect(select('Category').value).toBe('sweet-spot');
@@ -195,11 +219,11 @@ describe('filtering changes which cards render — #2304', () => {
 
 describe('choosing a built-in — #2304', () => {
   it('opens it in the detail pane and keeps the list filtered beside it', async () => {
-    globalThis.location.hash = '#/workouts?category=tempo';
+    globalThis.location.hash = '#/workouts?list=built-in&category=tempo';
     await open();
     await follow(linkSaying(builtIns(), 'Tempo, two by twenty'));
     expect(globalThis.location.hash).toBe(
-      '#/workouts/selected/built-in%3Atempo-2x20?category=tempo',
+      '#/workouts/selected/built-in%3Atempo-2x20?list=built-in&category=tempo',
     );
     const detail = document.querySelector('[data-oyl-built-in-detail="tempo-2x20"]');
     expect(detail?.querySelector('h2')?.textContent).toBe('Tempo, two by twenty');
@@ -207,7 +231,7 @@ describe('choosing a built-in — #2304', () => {
     expect(cardNames()).toHaveLength(5);
     // At one pane the way back is to the list as it was filtered.
     expect(linkSaying(document, 'All workouts').getAttribute('href')).toBe(
-      '#/workouts?category=tempo',
+      '#/workouts?list=built-in&category=tempo',
     );
   });
 
@@ -216,8 +240,17 @@ describe('choosing a built-in — #2304', () => {
     await open();
     await chooseOption(select('Length'), '75');
     await settle();
-    expect(globalThis.location.hash).toBe('#/workouts/selected/built-in%3Atempo-2x20?length=75');
+    expect(globalThis.location.hash).toBe(
+      '#/workouts/selected/built-in%3Atempo-2x20?list=built-in&length=75',
+    );
     expect(document.querySelector('[data-oyl-built-in-detail="tempo-2x20"]')).not.toBeNull();
+  });
+
+  it('shows the built-in list beside a built-in opened by its address alone', async () => {
+    globalThis.location.hash = '#/workouts/selected/built-in%3Atempo-2x20';
+    await open();
+    expect(paneHeading()).toBe('Built-in workouts');
+    expect(cardNames()).toHaveLength(BUILT_IN_WORKOUTS.length);
   });
 
   it('says a built-in that does not exist is not found, without asking the store', async () => {

@@ -55,7 +55,7 @@ async function screen(options: { readonly query?: string; readonly selected?: st
       <h1>Workouts</h1>
       <WorkoutsView
         port={workoutStub(athleteId('athlete-a'))}
-        query={options.query}
+        query={options.query === undefined ? 'list=built-in' : `list=built-in&${options.query}`}
         selected={options.selected}
       />
     </main>,
@@ -89,6 +89,21 @@ describe('the built-in workouts pass the audit — #2304', () => {
       });
     });
   }
+});
+
+describe('the two lists are a named choice — #2304', () => {
+  it('is a navigation landmark of two links, the shown list current', async () => {
+    await screen();
+    const nav = document.querySelector('nav[aria-label="Which workouts"]');
+    expect(queryAll(nav as HTMLElement, 'a').map((link) => link.textContent)).toEqual([
+      'Your workouts',
+      'Built-in workouts',
+    ]);
+    expect(nav?.querySelector('[aria-current="true"]')?.textContent).toBe('Built-in workouts');
+    expect(document.querySelector('[data-oyl-pane="list"] h2')?.textContent).toBe(
+      'Built-in workouts',
+    );
+  });
 });
 
 describe('every card’s shape is readable as text — #2304', () => {

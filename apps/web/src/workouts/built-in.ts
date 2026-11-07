@@ -258,16 +258,48 @@ export function builtInFilterQuery(filter: BuiltInFilter): string {
 }
 
 /**
- * The Workouts address with a filter, and a selection when there is one —
- * `#/workouts?category=tempo` or `#/workouts/selected/built-in%3Atempo-2x20?category=tempo`.
+ * Which list the Workouts screen's list pane shows: the rider's own, or the
+ * built-ins (#2304). A two-way choice rather than one list under the other,
+ * because a phone's one pane puts the builder AFTER the list, and thirty-odd
+ * built-in cards above it took *Save workout* 7,000 px under the fold
+ * (`controls-first.browser.spec.ts` §"#1050, #1087").
+ */
+export type WorkoutsList = 'saved' | 'built-in';
+
+/** The query key and value that choose the built-ins: `?list=built-in`. */
+const LIST_KEY = 'list';
+const BUILT_IN_LIST = 'built-in';
+
+/**
+ * The list an address shows: the built-ins when its query says so, or when
+ * the selection is a built-in (a shared link to one opens beside its list);
+ * otherwise the rider's own, which is where the screen opens.
+ */
+export function workoutsListOf(
+  query: string | undefined,
+  selected: string | undefined,
+): WorkoutsList {
+  const asked = new URLSearchParams(query ?? '').get(LIST_KEY);
+  return asked === BUILT_IN_LIST || isBuiltInId(selected) ? 'built-in' : 'saved';
+}
+
+/** The rider's own workouts: the screen's own address, with nothing chosen. */
+export function hrefForSavedWorkouts(): string {
+  return hrefFor(routeById('workouts'));
+}
+
+/**
+ * The built-in list's address with a filter, and a selection when there is
+ * one — `#/workouts?list=built-in&category=tempo` or
+ * `#/workouts/selected/built-in%3Atempo-2x20?list=built-in&category=tempo`.
  *
- * The filter rides in the query of EVERY workouts link that should keep it, so
- * choosing a card at two panes leaves the list as filtered beside it, and
- * Back steps to the list as it was.
+ * The list and the filter ride in the query of EVERY link that should keep
+ * them, so choosing a card at two panes leaves the list as filtered beside it,
+ * and Back steps to the list as it was.
  */
 export function hrefForWorkouts(filter: BuiltInFilter, selection?: string): string {
   const route = routeById('workouts');
   const base = selection === undefined ? hrefFor(route) : hrefForSelection(route, selection);
   const query = builtInFilterQuery(filter);
-  return query === '' ? base : `${base}?${query}`;
+  return `${base}?${LIST_KEY}=${BUILT_IN_LIST}${query === '' ? '' : `&${query}`}`;
 }

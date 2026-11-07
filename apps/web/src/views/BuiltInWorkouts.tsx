@@ -34,6 +34,11 @@ import { WorkoutCardArt } from '../workouts/WorkoutCardArt';
  * workouts under its own heading, so nobody wonders whether deleting one of
  * theirs could remove a built-in, and choosing a card saves nothing.
  *
+ * ⚠️ **The other half of a two-way choice**, not a list under the rider's own
+ * (`workouts/built-in.ts` §`WorkoutsList`): on a phone's one pane the builder
+ * follows the list, and a list this long above it put *Save workout* 7,000 px
+ * under the fold.
+ *
  * ## The filter is the address
  *
  * Every filter is in the hash's query (`#/workouts?category=tempo&length=45`),
@@ -76,7 +81,6 @@ export const BuiltInWorkouts = memo(function BuiltInWorkouts({
   filter,
   selected,
 }: BuiltInWorkoutsProps): JSX.Element {
-  const headingId = useId();
   const captionId = useId();
   const categoryId = useId();
   const lengthId = useId();
@@ -89,8 +93,8 @@ export const BuiltInWorkouts = memo(function BuiltInWorkouts({
   const filtered = isFiltered(filter);
 
   return (
-    <section aria-labelledby={headingId} data-oyl-built-ins="">
-      <h2 id={headingId}>Built-in workouts</h2>
+    // Under the list pane's own heading, "Built-in workouts" (`WorkoutsView.tsx`).
+    <div data-oyl-built-ins="">
       <p>
         Sessions that come with the app, so they work with no connection. Choosing one saves
         nothing.
@@ -200,7 +204,7 @@ export const BuiltInWorkouts = memo(function BuiltInWorkouts({
           </ul>
         </>
       )}
-    </section>
+    </div>
   );
 });
 

@@ -22,12 +22,14 @@ import {
   CATEGORY_NAMES,
   filterBuiltIns,
   hasHeartRateTarget,
+  hrefForSavedWorkouts,
   hrefForWorkouts,
   isBuiltInId,
   isFiltered,
   LENGTH_CHOICES,
   lengthChoiceOf,
   lengthChoiceText,
+  workoutsListOf,
 } from './built-in';
 
 const names = (cards: readonly { readonly name: string }[]): string[] =>
@@ -173,21 +175,38 @@ describe('a filter — #2304', () => {
   });
 });
 
+describe('which list the screen shows — #2304', () => {
+  it('is the rider’s own unless the address asks for the built-ins or chose one', () => {
+    expect(workoutsListOf(undefined, undefined)).toBe('saved');
+    expect(workoutsListOf('category=tempo', undefined)).toBe('saved');
+    expect(workoutsListOf(undefined, 'workout-4f1c')).toBe('saved');
+    expect(workoutsListOf('list=built-in', undefined)).toBe('built-in');
+    expect(workoutsListOf('list=built-in', 'workout-4f1c')).toBe('built-in');
+    expect(workoutsListOf(undefined, 'built-in:tempo-2x20')).toBe('built-in');
+    expect(workoutsListOf('list=other', undefined)).toBe('saved');
+  });
+
+  it('is an address each, the rider’s own being the screen’s own', () => {
+    expect(hrefForSavedWorkouts()).toBe('#/workouts');
+    expect(workoutsListOf(matchHash(hrefForWorkouts({})).query, undefined)).toBe('built-in');
+  });
+});
+
 describe('the address a filter lives at — #2304', () => {
-  it('is the list’s, with the filter as its query', () => {
-    expect(hrefForWorkouts({})).toBe('#/workouts');
+  it('is the built-in list’s, with the filter as its query', () => {
+    expect(hrefForWorkouts({})).toBe('#/workouts?list=built-in');
     expect(hrefForWorkouts({ category: 'sweet-spot', length: 45 })).toBe(
-      '#/workouts?category=sweet-spot&length=45',
+      '#/workouts?list=built-in&category=sweet-spot&length=45',
     );
     expect(hrefForWorkouts({ length: 30 }, 'built-in:tempo-2x20')).toBe(
-      '#/workouts/selected/built-in%3Atempo-2x20?length=30',
+      '#/workouts/selected/built-in%3Atempo-2x20?list=built-in&length=30',
     );
   });
 
   it('is read back by the router as the Workouts route, its selection and its query', () => {
-    expect(matchHash('#/workouts?category=sweet-spot&length=45')).toEqual({
+    expect(matchHash('#/workouts?list=built-in&category=sweet-spot&length=45')).toEqual({
       route: matchHash('#/workouts').route,
-      query: 'category=sweet-spot&length=45',
+      query: 'list=built-in&category=sweet-spot&length=45',
     });
     const selected = matchHash(hrefForWorkouts({ length: 30 }, 'built-in:tempo-2x20'));
     expect(selected.route.id).toBe('workouts');
