@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The built-in workout library — #2300, under the library epic #2295.
+ * The built-in workout library — #2300 (recovery to over-unders) and #2301
+ * (VO₂ to race simulation), under the library epic #2295.
  *
  * ## What this is
  *
@@ -32,12 +33,17 @@
 
 import type { WorkoutTemplate } from '../template';
 
+import { ANAEROBIC_WORKOUTS } from './anaerobic';
 import { ENDURANCE_WORKOUTS } from './endurance';
 import { OVER_UNDER_WORKOUTS } from './over-under';
+import { PYRAMID_WORKOUTS } from './pyramid';
+import { RACE_SIMULATION_WORKOUTS } from './race-simulation';
 import { RECOVERY_WORKOUTS } from './recovery';
+import { SPRINT_WORKOUTS } from './sprint';
 import { SWEET_SPOT_WORKOUTS } from './sweet-spot';
 import { TEMPO_WORKOUTS } from './tempo';
 import { THRESHOLD_WORKOUTS } from './threshold';
+import { VO2_WORKOUTS } from './vo2';
 
 /** Every built-in workout, easiest category first. */
 export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
@@ -47,4 +53,9 @@ export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...SWEET_SPOT_WORKOUTS,
   ...THRESHOLD_WORKOUTS,
   ...OVER_UNDER_WORKOUTS,
+  ...VO2_WORKOUTS,
+  ...ANAEROBIC_WORKOUTS,
+  ...SPRINT_WORKOUTS,
+  ...PYRAMID_WORKOUTS,
+  ...RACE_SIMULATION_WORKOUTS,
 ];
