@@ -96,7 +96,6 @@ import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
-import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
 import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
@@ -332,11 +331,6 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
-  /**
-   * Android's thermal forecast, for the game's quality ladder (#247). Absent
-   * in a browser. @see game/thermal-port.ts
-   */
-  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -771,8 +765,6 @@ function viewFor(
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
-          // #247. The forecast half of the ladder; only the shell supplies one.
-          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
           // #1827. The steering controller paired on Devices; a Delivery
           // round's HUD reads it, through the game's controller port.
           {...(props.steering === undefined ? {} : { controller: props.steering })}

@@ -349,8 +349,10 @@ describe('which world a ride draws — #475', () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await ride();
     const before = told.length;
-    // Three whole runs of slow frames while the ~33 MB arrive: on the Pixel 8
-    // on 2026-11-06 two were enough to leave before a realistic frame was drawn.
+    // Three whole runs of slow frames while the ~33 MB arrive. ⚠️ The Pixel 8's
+    // own reading on 2026-11-06 was that load pressure peaked at 3 of 30 and heat
+    // took it out of realism (since removed from the ladder), so this guards
+    // the gate, not that incident.
     const slow = FRAME_MS_REDUCE_ABOVE + 10;
     await frames(slow, 3 * (SUSTAINED_SAMPLES + 2));
     expect(told.length).toBe(before);
@@ -372,9 +374,9 @@ describe('which world a ride draws — #475', () => {
       worstMs: 300,
     });
     expect(report?.steps).toEqual([]);
-    expect(
-      realisticReportLines(report ?? { frameMsLimit: 0, headroomLimit: 0, steps: [] }),
-    ).toContain('It did not leave the realistic world.');
+    expect(realisticReportLines(report ?? { frameMsLimit: 0, steps: [] })).toContain(
+      'It did not leave the realistic world.',
+    );
   });
 
   it('keeps why it left on the device: the signal, the readings and the rung — #2289', async () => {
@@ -393,15 +395,13 @@ describe('which world a ride draws — #475', () => {
       [1, true],
     ]);
     const left = report?.steps[1];
-    // Frame time fired, every sample of the window; jsdom reports no forecast.
+    // Frame time fired, every sample of the window.
     expect(left).toMatchObject({
       frames: SUSTAINED_SAMPLES,
       overFrameMs: SUSTAINED_SAMPLES,
-      overHeadroom: 0,
       medianMs: hot,
       worstMs: hot,
     });
-    expect(left?.headroomMax).toBeUndefined();
     expect(left?.rideSeconds).toBeGreaterThan(0);
   });
 

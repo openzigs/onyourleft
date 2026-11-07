@@ -18,19 +18,21 @@
  * phone at minute fifty of a ride. Written here it is a pure function from two
  * numbers to a quality level, and every rung of the ladder gets a test.
  *
- * ## Two inputs, because either alone lies
+ * ## One input: the frame time — #2289
  *
- * **`thermalHeadroom`** is Android's own forecast — `PowerManager.
- * getThermalHeadroom()`, API 30+, 0.0 to 1.0, where 1.0 means throttling is
- * imminent. It is the leading indicator, and it is the one Google's guidance
- * says to act on. ⚠️ It is **absent** on the web platform, absent below API 30,
- * and can return `NaN` on devices whose vendor never implemented it — so it is
- * optional here and its absence is not treated as "cool".
+ * **`recentFrameMs`** is what actually happened. It cannot be missing, because
+ * we measure it ourselves. A phone whose thermal API says nothing but whose
+ * frames have gone to 60 ms is throttling regardless of what any API declines
+ * to tell us.
  *
- * **`recentFrameMs`** is what actually happened. It is the lagging indicator and
- * it cannot be missing, because we measure it ourselves. A phone whose thermal
- * API says nothing but whose frames have gone to 60 ms is throttling regardless
- * of what any API declines to tell us.
+ * ⚠️ **Until 2026-11-06 there was a second input, Android's thermal forecast**
+ * (`PowerManager.getThermalHeadroom()`), and the owner ruled it out on #2289:
+ * *"ignore heat entirely. The quality ladder decides on frame time alone, and
+ * Android throttles the device itself if it gets too hot."* The Pixel 8 left
+ * the realistic world on the forecast at 46 s and 66 s while its frames ran at
+ * 59–60 fps (median 16.7 ms, p99 under 25 ms), so a forecast that argued for
+ * less work took a ride off a world the device was drawing comfortably. The
+ * ladder reads no thermal figure, and {@link QualitySample} carries none.
  *
  * Google's guidance also warns that once a device has overheated the workload
  * must drop **below** the sustainable level to recover, not merely back to it —
@@ -105,7 +107,7 @@ export interface QualitySettings {
    * - **Not before**, as a rung of its own. The slice that is nearly free to
    *   lose is also the slice that buys the least back, so a rung spent on it
    *   alone would be a rung spent for almost nothing — and every rung costs a
-   *   visible change, which is the whole of {@link HEADROOM_RESTORE_BELOW}'s
+   *   visible change, which is the whole of {@link FRAME_MS_RESTORE_BELOW}'s
    *   argument for the hysteresis. Fewer rungs that each do something beat
    *   more rungs that each do little.
    * - **Not after the frame rate.** #245's FR-4 fixes that outer bound
@@ -594,12 +596,11 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
  * #91's arithmetic — *"30 fps is the right target, not a compromise"*, and 60
  * *"doubles the thermal bill for the entire ride"* — is not contradicted; the
  * rulings move who pays it. A cool device draws at the display's rate, and it
- * now takes TWO steps down (thermal forecast or frame time, the same two
- * signals as always) to return to #91's 30. **What "sustains it" means is the
- * ladder's existing policy, unchanged**: a device is stepped down when its
- * forecast or its frame times say it is hot ({@link HEADROOM_REDUCE_ABOVE},
- * {@link FRAME_MS_REDUCE_ABOVE}); a device drawing 40 fps at the top rung that
- * is neither is left there, which is still smoother than the 30 it would be
+ * now takes TWO steps down (on frame time, the one signal since #2289) to
+ * return to #91's 30. **What "sustains it" means is the ladder's policy**: a
+ * device is stepped down when its frame times say it is hot
+ * ({@link FRAME_MS_REDUCE_ABOVE}); a device drawing 40 fps at the top rung that
+ * is not is left there, which is still smoother than the 30 it would be
  * stepped down to.
  *
  * ## What "frame rate given up" means, precisely — #482
@@ -712,25 +713,6 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
   },
 ];
 
-/**
- * The headroom at which the next reduction is taken.
- *
- * 0.85 rather than 1.0: the forecast reaching 1.0 means throttling is happening,
- * and reducing then is reacting rather than avoiding. The whole value of a
- * *forecast* is spent by waiting for it to be right.
- */
-export const HEADROOM_REDUCE_ABOVE = 0.85;
-
-/**
- * The headroom below which quality is allowed back up.
- *
- * Well under {@link HEADROOM_REDUCE_ABOVE}, and that gap is the hysteresis. A
- * single threshold would oscillate: reduce, cool a little, restore, heat again —
- * and the oscillation is more visible to a rider than the lower setting would
- * have been, because each change is a visible resolution pop.
- */
-export const HEADROOM_RESTORE_BELOW = 0.6;
-
 /** The frame time above which quality is reduced regardless of the thermal API. */
 export const FRAME_MS_REDUCE_ABOVE = 45;
 
@@ -765,7 +747,7 @@ export const FRAME_MS_RESTORE_BELOW = 30;
  * descends asks a hot device to be hot for longer before it gives up more,
  * which is the direction Google's recovery guidance leans, and it lengthens
  * the recovery window by the same factor, which damps the 30 ↔ 24 flicker
- * {@link HEADROOM_RESTORE_BELOW} exists to prevent. (2) A duration would need a
+ * {@link FRAME_MS_RESTORE_BELOW} exists to prevent. (2) A duration would need a
  * clock inside {@link nextQuality}, which is pure and is handed two numbers;
  * the time between samples is the pacer's, not the ladder's, and a second
  * clock is how the two would come to disagree. (3) Since #482 the first two
@@ -789,8 +771,6 @@ export const INITIAL_QUALITY: QualityState = { level: 0, pressure: 0 };
 
 /** One measurement. @see nextQuality */
 export interface QualitySample {
-  /** Android's forecast, 0–1, or `undefined` where the platform has none. */
-  readonly thermalHeadroom?: number | undefined;
   /** A recent frame time in milliseconds. */
   readonly frameMs: number;
 }
@@ -856,8 +836,7 @@ export function qualitySettings(level: QualityLevel): QualitySettings {
  *
  * **This one, and no other.** A stylised ride starts here unless the device
  * has turned the map off ({@link readShadowMapChoice}); the first reduction
- * the ladder takes — thermal or frame time, the same two signals as every
- * other rung — lands on level 1, which has no map, and {@link keepsShadowMap}
+ * the ladder takes — on frame time, as for every other rung — lands on level 1, which has no map, and {@link keepsShadowMap}
  * keeps it off for the rest of that ride however cool the device gets. So the
  * map is still the FIRST thing given up, which is where #426 put it, and
  * #547's owner ruling moves only where a ride starts. Level 1 does not keep
@@ -1079,12 +1058,12 @@ export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
  *
  * The view builds the realistic world on the first frame drawn after the swap
  * (`three-renderer.ts` §`#applyWorld`): its programs are linked and its
- * textures uploaded on the frame that first draws them, as three does unasked
- * (`three-renderer.ts` §`uploadRealisticTexturesOf` is the browser gate's,
- * not the product's). Those frames measure the swap, not the world, and on the
- * owner's Pixel 8 on 2026-11-06 they were enough, with the stylised frames
- * drawn while the ~33 MB arrived, to take a ride out of realism within about
- * three seconds — before it had drawn the realistic world at all.
+ * textures uploaded on the frame that first draws them, as three does unasked.
+ * Those frames measure the swap, not the world. ⚠️ **That the swap was what
+ * took the Pixel 8 out of realism is NOT what was measured**: the owner's
+ * 2026-11-06 reading on #2289 put load-phase pressure at a peak of 3 of 30,
+ * and the heat forecast, since removed from the ladder, was the cause. This
+ * window is kept because it is cheap and tested, not because it fixed that.
  *
  * ## Why this number
  *
@@ -1168,43 +1147,19 @@ export function worldRung(state: WorldQualityState): QualitySettings {
     : qualitySettings(state.quality.level);
 }
 
-/** Whether this sample argues for less work. */
+/** Whether this sample argues for less work. Frame time alone — #2289. */
 function isHot(sample: QualitySample): boolean {
-  return thermallyHot(sample) || frameTimeHot(sample);
+  return frameTimeHot(sample);
 }
 
-/**
- * Whether this sample's thermal forecast argues for less work — one of
- * {@link isHot}'s two signals, exported so `realistic-watch.ts` names the one
- * that fired by the same test the ladder applies (#2289).
- */
-export function thermallyHot(sample: QualitySample): boolean {
-  const headroom = sample.thermalHeadroom;
-  // ⚠️ `NaN > x` is false, so a vendor returning NaN reads as "not hot" here and
-  // the frame time is what decides. That is the intended behaviour and it is
-  // stated because the opposite reading — NaN as hot — would throttle every
-  // device whose vendor never implemented the API.
-  return headroom !== undefined && Number.isFinite(headroom) && headroom > HEADROOM_REDUCE_ABOVE;
-}
-
-/** Whether this sample's frame time argues for less work — {@link isHot}'s other signal. */
+/** Whether this sample's frame time argues for less work. */
 export function frameTimeHot(sample: QualitySample): boolean {
   return sample.frameMs > FRAME_MS_REDUCE_ABOVE;
 }
 
-/** Whether this sample argues for more. Both signals must agree. */
+/** Whether this sample argues for more: the frames are comfortable. */
 function isCool(sample: QualitySample): boolean {
-  const headroom = sample.thermalHeadroom;
-  // Frames must be comfortable AND, where the platform reports it, the forecast
-  // must be well clear. Restoring on frame time alone is how a device that is
-  // hot but keeping up gets pushed back into throttling.
-  if (sample.frameMs >= FRAME_MS_RESTORE_BELOW) {
-    return false;
-  }
-  if (headroom === undefined || !Number.isFinite(headroom)) {
-    return true;
-  }
-  return headroom < HEADROOM_RESTORE_BELOW;
+  return sample.frameMs < FRAME_MS_RESTORE_BELOW;
 }
 
 function decayToward(pressure: number, target: number): number {

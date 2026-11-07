@@ -58,8 +58,6 @@ import {
   RIDE_MAY_STOP_SPOKEN,
   RIDE_MAY_STOP_WITH_SCREEN_OFF,
 } from '../ride/controller';
-import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
-import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
 import { advanceCrank, cadenceTurns, turningCadence } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
@@ -374,20 +372,11 @@ export interface GameViewProps {
    */
   readonly camera?: CameraThrottle | undefined;
   /**
-   * The platform's thermal forecast — #247. @see thermal-port.ts
-   *
-   * `BROWSER_THERMAL` when absent, which answers `undefined`: the honest answer
-   * everywhere but the Android shell. ⚠️ An optional prop threaded through JSX,
-   * so a `main.tsx` that stopped passing the Android port is GREEN in
-   * `check:wiring` (§Limits); `GameView.test.tsx` §"#247" drives this half.
-   */
-  readonly thermal?: ThermalPort | undefined;
-  /**
    * A steering controller paired on the Devices screen — #1826, #1827. A
    * Delivery round's HUD hands its lane changes, lanes and throws to the
    * round's ports (`hud/ControllerIntents.tsx`); no other ride reads it, and
-   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX, as
-   * {@link thermal} is: `delivery-wiring.test.tsx` §"#1827" drives it.
+   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX:
+   * `delivery-wiring.test.tsx` §"#1827" drives it.
    */
   readonly controller?: ControllerPort | undefined;
   /**
@@ -2236,13 +2225,6 @@ function GameScreen({
     // #476: which animation frames are drawn under the rung's cap, and what the
     // ladder is told about them. @see FramePacer
     const pacer = new FramePacer();
-    // #247. Read on its own slow clock and held for the frame, because the
-    // forecast is a bridge round trip that Android rate-limits. @see thermal.ts
-    const headroom = watchThermalHeadroom(props.thermal ?? BROWSER_THERMAL, everyInterval);
-    // The last reading held when the ladder moved. One reading moves it one
-    // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
-    // spent reading is neutral rather than absent.
-    let spentReading = 0;
     // #1994: the chase camera's heading on the last DRAWN frame, and when it
     // was drawn, which `camera.ts` §`dampedHeading` turns from. Undefined until
     // the first, which takes the road's own: a resumed ride starts afresh.
@@ -2283,8 +2265,9 @@ function GameScreen({
           // world for another (ADR 0026 D-3) the moment it is all here.
           if (realisticWantedRef.current) {
             void renderer.loadRealisticWorld().then((outcome) => {
-              // The ride this was for may have ended, or stepped out of
-              // realism, while the files arrived.
+              // The ride this was for may have ended while the files arrived.
+              // The realism check is defence only: since #2289 nothing steps
+              // the ladder out of realism before this lands.
               if (viewRef.current !== view || !qualityRef.current.realistic) {
                 return;
               }
@@ -3035,17 +3018,14 @@ function GameScreen({
       // render, by which time the line below has already moved it to `at`. The
       // ladder was therefore fed `frameMs: 0` on every frame of every ride:
       // always "cool", never hot, so the reduction path #91 asks for could not
-      // fire at all. `thermalHeadroom` was `undefined` in the shipped app
-      // until #247 (`docs/validation/0002-android-shell-and-game.md` Part E),
-      // so this was the only live input to the whole policy. Since #247 the
-      // Android shell supplies the forecast too, and outside it this is still
-      // the only live input.
+      // fire at all. Since #2289 it is the ladder's only input.
       const frameMs = paced.frameMs;
       lastFrameAt = at;
       if (frameMs !== undefined) {
         const previous = qualityRef.current;
-        const forecast = headroom.latest();
-        const sample = { frameMs, thermalHeadroom: forecastForFrame(forecast, spentReading) };
+        // #2289: frame time alone. The thermal forecast is not read — the
+        // owner's ruling; Android throttles a hot device itself.
+        const sample = { frameMs };
         const next = nextWorldQuality(previous, sample);
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
@@ -3056,12 +3036,6 @@ function GameScreen({
         );
         if (report !== undefined) {
           writeRealisticReport(deviceStorage(), report);
-        }
-        if (
-          next.quality.level !== previous.quality.level ||
-          next.realistic !== previous.realistic
-        ) {
-          spentReading = forecast.reading;
         }
         qualityRef.current = next;
         // A render only when the RUNG changes — #482. @see qualityLevel
@@ -3082,7 +3056,6 @@ function GameScreen({
       loopRunningRef.current = false;
       cancelAnimationFrame(frame);
       observer?.disconnect();
-      headroom.stop();
     };
     // ⚠️ The quality level is read inside `tick` and is deliberately NOT a
     // dependency. Re-running this effect on every quality change would cancel
@@ -3091,7 +3064,7 @@ function GameScreen({
     // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
     // updater form until then), and the level is applied to the live renderer
     // by the effect below instead.
-  }, [phase, chosen, port, props.renderer, props.now, props.frameNow, props.thermal]);
+  }, [phase, chosen, port, props.renderer, props.now, props.frameNow]);
 
   useEffect(() => {
     // #426, the latch: a step down takes the shadow map away for the rest of

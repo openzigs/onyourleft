@@ -13,7 +13,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ARRIVING_REALISTIC_QUALITY,
   FRAME_MS_REDUCE_ABOVE,
-  HEADROOM_REDUCE_ABOVE,
   INITIAL_QUALITY,
   REALISTIC_SETTLING_SAMPLES,
   SUSTAINED_SAMPLES,
@@ -48,7 +47,8 @@ const times = (count: number, sample: QualitySample): QualitySample[] =>
 
 const SLOW: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 15 };
 const COMFORTABLE: QualitySample = { frameMs: 16 };
-const WARM: QualitySample = { frameMs: 20, thermalHeadroom: HEADROOM_REDUCE_ABOVE + 0.05 };
+// Comfortable frames and a hot thermal forecast, as the owner's Pixel 8 gave them.
+const WARM = { frameMs: 20, thermalHeadroom: 0.97 } as QualitySample;
 
 describe('a realistic ride’s record — #2289', () => {
   it('records nothing while the world is arriving, nor for a stylised ride', () => {
@@ -76,7 +76,6 @@ describe('a realistic ride’s record — #2289', () => {
     expect(reports).toEqual([
       {
         frameMsLimit: FRAME_MS_REDUCE_ABOVE,
-        headroomLimit: HEADROOM_REDUCE_ABOVE,
         settling: { frames: REALISTIC_SETTLING_SAMPLES, slow: 2, worstMs: 400 },
         steps: [],
       },
@@ -101,7 +100,6 @@ describe('a realistic ride’s record — #2289', () => {
       rideSeconds: SUSTAINED_SAMPLES * 0.05,
       frames: SUSTAINED_SAMPLES,
       overFrameMs: SUSTAINED_SAMPLES,
-      overHeadroom: 0,
       medianMs: 70,
       worstMs: 70,
     });
@@ -115,25 +113,15 @@ describe('a realistic ride’s record — #2289', () => {
     expect(reports.at(-1)).not.toHaveProperty('settling');
   });
 
-  it('names the thermal forecast when it is what fired, with its highest reading', () => {
+  it('records nothing for a hot thermal forecast: the ladder does not read it — #2289', () => {
     const settled = { ...ARRIVING_REALISTIC_QUALITY, settling: 0 };
-    const { reports } = ride(new RealisticWatch(), settled, [
-      ...times(SUSTAINED_SAMPLES - 1, WARM),
-      { ...WARM, thermalHeadroom: 0.97 },
-    ]);
-    expect(reports.at(-1)?.steps).toEqual([
-      {
-        rung: 0,
-        left: false,
-        rideSeconds: SUSTAINED_SAMPLES * 0.05,
-        frames: SUSTAINED_SAMPLES,
-        overFrameMs: 0,
-        overHeadroom: SUSTAINED_SAMPLES,
-        medianMs: 20,
-        worstMs: 20,
-        headroomMax: 0.97,
-      },
-    ]);
+    const { state, reports } = ride(
+      new RealisticWatch(),
+      settled,
+      times(SUSTAINED_SAMPLES * 4, WARM),
+    );
+    expect(state).toMatchObject({ realistic: true, quality: { level: 0 } });
+    expect(reports).toEqual([]);
   });
 
   it('reads at most one decision window, though pressure built over more samples', () => {

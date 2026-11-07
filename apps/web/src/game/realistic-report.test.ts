@@ -33,7 +33,6 @@ function disk(): PreferenceStorage & { readonly values: Map<string, string> } {
 
 const LEFT: RealisticWorldReport = {
   frameMsLimit: 45,
-  headroomLimit: 0.85,
   settling: { frames: 30, slow: 4, worstMs: 312.4 },
   steps: [
     {
@@ -42,7 +41,6 @@ const LEFT: RealisticWorldReport = {
       rideSeconds: 41.6,
       frames: 30,
       overFrameMs: 30,
-      overHeadroom: 0,
       medianMs: 61.2,
       worstMs: 88.7,
     },
@@ -52,10 +50,8 @@ const LEFT: RealisticWorldReport = {
       rideSeconds: 47.2,
       frames: 30,
       overFrameMs: 12,
-      overHeadroom: 30,
       medianMs: 41,
       worstMs: 52,
-      headroomMax: 0.914,
     },
   ],
 };
@@ -68,7 +64,7 @@ describe('the last realistic ride’s record — #2289', () => {
     expect(store.values.has(REALISTIC_REPORT_STORAGE_KEY)).toBe(true);
     expect(readRealisticReport(store)).toEqual(LEFT);
     // A record with no settling window and no step reads back as itself too.
-    const bare: RealisticWorldReport = { frameMsLimit: 45, headroomLimit: 0.85, steps: [] };
+    const bare: RealisticWorldReport = { frameMsLimit: 45, steps: [] };
     writeRealisticReport(store, bare);
     expect(readRealisticReport(store)).toEqual(bare);
   });
@@ -80,13 +76,11 @@ describe('the last realistic ride’s record — #2289', () => {
       'null',
       '[]',
       JSON.stringify({ ...LEFT, frameMsLimit: 'x' }),
-      JSON.stringify({ ...LEFT, headroomLimit: null }),
       JSON.stringify({ ...LEFT, steps: 'x' }),
       JSON.stringify({ ...LEFT, settling: { frames: 30, slow: 4 } }),
       JSON.stringify({ ...LEFT, settling: 3 }),
       JSON.stringify({ ...LEFT, steps: [{ ...LEFT.steps[0], left: 'yes' }] }),
       JSON.stringify({ ...LEFT, steps: [{ ...LEFT.steps[0], medianMs: null }] }),
-      JSON.stringify({ ...LEFT, steps: [{ ...LEFT.steps[1], headroomMax: 'hot' }] }),
       JSON.stringify({ ...LEFT, steps: [7] }),
     ];
     for (const text of malformed) {
@@ -107,35 +101,17 @@ describe('the last realistic ride’s record — #2289', () => {
     expect(writeRealisticReport(undefined, LEFT)).toBe(false);
   });
 
-  it('says which signal fired, the readings and the rung, rounded as a person reads them', () => {
+  it('says the reason, the readings and the rung, rounded as a person reads them', () => {
     expect(realisticReportLines(LEFT)).toEqual([
       'Its first 30 realistic frames were not counted while the world was handed over: 4 took longer than 45 ms, the longest 312 ms.',
-      'It stepped down within the realistic world 42 s into the ride, from realistic rung 1, on frame time: of the last 30 frames 30 took longer than 45 ms (median 61 ms, longest 89 ms), and the device reported no thermal forecast.',
-      'It left the realistic world 47 s into the ride, from realistic rung 2, on frame time and the thermal forecast: of the last 30 frames 12 took longer than 45 ms (median 41 ms, longest 52 ms), and 30 had a thermal forecast over 0.85, the highest 0.91.',
+      'It stepped down within the realistic world 42 s into the ride, from realistic rung 1, on frame time: of the last 30 frames 30 took longer than 45 ms (median 61 ms, longest 89 ms).',
+      'It left the realistic world 47 s into the ride, from realistic rung 2, on frame time: of the last 30 frames 12 took longer than 45 ms (median 41 ms, longest 52 ms).',
     ]);
   });
 
-  it('names the thermal forecast alone when only it fired, and says when the ride stayed', () => {
-    const thermal: RealisticWorldReport = {
-      frameMsLimit: 45,
-      headroomLimit: 0.85,
-      steps: [
-        {
-          rung: 0,
-          left: false,
-          rideSeconds: 600,
-          frames: 30,
-          overFrameMs: 0,
-          overHeadroom: 30,
-          medianMs: 20,
-          worstMs: 24,
-          headroomMax: 0.9,
-        },
-      ],
-    };
-    expect(realisticReportLines(thermal)).toEqual([
-      'It stepped down within the realistic world 600 s into the ride, from realistic rung 1, on the thermal forecast: of the last 30 frames 0 took longer than 45 ms (median 20 ms, longest 24 ms), and 30 had a thermal forecast over 0.85, the highest 0.90.',
-      'It did not leave the realistic world.',
-    ]);
+  it('says when the ride stayed, and never names a thermal forecast — #2289', () => {
+    const stayed: RealisticWorldReport = { frameMsLimit: 45, steps: [] };
+    expect(realisticReportLines(stayed)).toEqual(['It did not leave the realistic world.']);
+    expect(realisticReportLines(LEFT).join(' ')).not.toMatch(/thermal|forecast/i);
   });
 });

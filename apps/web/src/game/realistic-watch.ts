@@ -7,18 +7,15 @@
  * side, so it may import `quality.ts`.
  *
  * It is handed each sample the ride feeds the ladder with the state either
- * side of it, and decides nothing: which signal fired is read with
- * `quality.ts`' own {@link frameTimeHot} and {@link thermallyHot}, the ladder's
- * two halves of `isHot`, so the record cannot name a reason the ladder did not
- * act on.
+ * side of it, and decides nothing. Since the owner's 2026-11-06 ruling on
+ * #2289 the ladder decides on frame time alone, so the only reason a record can
+ * give is frame time, counted with `quality.ts`' own {@link frameTimeHot}.
  */
 
 import {
   FRAME_MS_REDUCE_ABOVE,
-  HEADROOM_REDUCE_ABOVE,
   SUSTAINED_SAMPLES,
   frameTimeHot,
-  thermallyHot,
   type QualitySample,
   type WorldQualityState,
 } from './quality';
@@ -75,7 +72,6 @@ export class RealisticWatch {
   #report(): RealisticWorldReport {
     return {
       frameMsLimit: FRAME_MS_REDUCE_ABOVE,
-      headroomLimit: HEADROOM_REDUCE_ABOVE,
       ...(this.#settling === undefined ? {} : { settling: this.#settling }),
       steps: [...this.#steps],
     };
@@ -89,19 +85,14 @@ function stepOf(
   rideSeconds: number,
 ): RealisticStepReading {
   const times = window.map((sample) => sample.frameMs).sort((a, b) => a - b);
-  const headrooms = window
-    .map((sample) => sample.thermalHeadroom)
-    .filter((value): value is number => value !== undefined && Number.isFinite(value));
   return {
     rung,
     left,
     rideSeconds,
     frames: window.length,
     overFrameMs: window.filter(frameTimeHot).length,
-    overHeadroom: window.filter(thermallyHot).length,
     medianMs: median(times),
     worstMs: times.at(-1) ?? 0,
-    ...(headrooms.length === 0 ? {} : { headroomMax: Math.max(...headrooms) }),
   };
 }
 

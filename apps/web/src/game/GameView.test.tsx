@@ -53,7 +53,6 @@ import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../
 import { tap } from '../design/touch-lock-testing';
 import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { CameraThrottle } from '../camera/session';
-import type { ThermalPort } from './thermal-port';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -280,8 +279,6 @@ async function startRiding(options: {
   readonly cadence?: () => SensorReading;
   /** The camera the ladder throttles — #514. @see recordingCamera */
   readonly camera?: CameraThrottle;
-  /** The platform's thermal forecast — #247. */
-  readonly thermal?: ThermalPort;
   /** The rider's local day — #1622. @see GameViewProps.today */
   readonly today?: () => CalendarDay;
 }): Promise<SceneFrame[]> {
@@ -297,7 +294,6 @@ async function startRiding(options: {
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
       camera={options.camera}
-      thermal={options.thermal}
       today={options.today}
     />,
   );
@@ -1863,126 +1859,6 @@ describe('GameView — leaving the game hands the camera back (#514)', () => {
     expect(first.presenceAllowed()).toBe(true);
     expect(second.captureAllowed()).toBe(false);
     expect(second.presenceAllowed()).toBe(false);
-  });
-});
-
-/**
- * The thermal forecast reaches the ladder — #247.
- *
- * Until #247 `quality.ts`'s headroom half had no caller: the ladder was asked
- * `{ frameMs }` and nothing else, so `HEADROOM_REDUCE_ABOVE` could not fire on
- * any device. These drive the real loop at comfortable frame times, so frame
- * time alone would never step down, and read the rung the renderer was told.
- */
-describe('GameView — a hot forecast steps the world down (#247)', () => {
-  /** A port that always answers the same forecast. */
-  const forecasting = (headroom: number | undefined): ThermalPort => ({
-    readThermalHeadroom: () => Promise.resolve(headroom),
-  });
-  const COMFORTABLE_MS = 1000 / 60;
-
-  it('steps down on a hot forecast even though every frame is comfortable', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(0.95) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
-  });
-
-  /**
-   * The review finding on #523. The forecast is read every ten seconds and the
-   * ladder counts pressure per FRAME, so one reading handed to every frame
-   * until the next was hundreds of samples: one hot reading walked the ride to
-   * the floor, and one cool one climbed it straight back. A reading may now
-   * move the ladder one rung at most.
-   */
-  describe('one reading moves the ladder one rung at most', () => {
-    /** The poll `GameView` starts, run by the test. @see thermal.ts §everyInterval */
-    let polls: (() => void)[] = [];
-    beforeEach(() => {
-      polls = [];
-      vi.stubGlobal('setInterval', (task: () => void) => {
-        polls.push(task);
-        return polls.length;
-      });
-      vi.stubGlobal('clearInterval', () => undefined);
-    });
-
-    /** A port answering whatever the test last set. */
-    function settable(first: number): ThermalPort & { set: (next: number) => void } {
-      let headroom = first;
-      return {
-        readThermalHeadroom: () => Promise.resolve(headroom),
-        set: (next) => {
-          headroom = next;
-        },
-      };
-    }
-
-    /** Take the next reading, as the ten-second poll would. */
-    async function poll(): Promise<void> {
-      await act(async () => {
-        for (const task of polls) {
-          task();
-        }
-        await Promise.resolve();
-      });
-    }
-
-    /**
-     * Long enough for a reading that was NOT spent to take three more steps,
-     * which is what these tests catch. ⚠️ It was twenty times the sample count
-     * until CI's coverage run timed two of these out at Vitest's 5 s default.
-     */
-    const LONG_AFTER = 4 * SUSTAINED_SAMPLES;
-
-    it('steps down one rung on one hot reading, however many frames it is held for', async () => {
-      await startRiding({ pacer: false, thermal: settable(0.95) });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1]]);
-    });
-
-    it('steps down one more rung on the next hot reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
-    });
-
-    // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
-    // for this case: under coverage on CI it took 1.1 s to 3.0 s over thirteen green `main` runs on
-    // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
-    // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
-    // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
-    // that never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
-    it('climbs one rung, not all of them, on one cool reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      port.set(0.2);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
-    }, 10_000);
-  });
-
-  it('stays on the top rung under a cool forecast', async () => {
-    // The control: the same ride, the same frames, a forecast well clear.
-    await startRiding({ pacer: false, thermal: forecasting(0.2) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
-  });
-
-  it('reads a NaN forecast as no opinion, so comfortable frames keep the top rung', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(Number.NaN) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
   });
 });
 

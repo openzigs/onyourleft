@@ -1097,7 +1097,6 @@ describe('the game world — #475', () => {
     expect(nothing).toBeNull();
     writeRealisticReport(store, {
       frameMsLimit: 45,
-      headroomLimit: 0.85,
       settling: { frames: 30, slow: 3, worstMs: 280 },
       steps: [
         {
@@ -1106,7 +1105,6 @@ describe('the game world — #475', () => {
           rideSeconds: 92,
           frames: 30,
           overFrameMs: 30,
-          overHeadroom: 0,
           medianMs: 58,
           worstMs: 71,
         },

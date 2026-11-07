@@ -3,26 +3,26 @@
 /**
  * Why the last realistic ride stepped down, or left the realistic world — #2289.
  *
- * On 2026-11-06 the owner's Pixel 8 left the realistic world within seconds
- * and nothing anywhere said which signal had fired: `quality.ts`'s ladder
- * reads a frame time and a thermal forecast and keeps neither. This is the
+ * On 2026-11-06 the owner's Pixel 8 left the realistic world within a minute
+ * and nothing anywhere said why: `quality.ts`'s ladder reads a frame time and
+ * keeps none. (The owner's measurement found it was the thermal forecast, which
+ * the ladder no longer reads — it decides on frame time alone.) This is the
  * record a ride keeps instead, on the device, and the sentences Settings ›
  * Game world shows from it.
  *
  * ## What it holds, and what it never does
  *
- * Counts and milliseconds, the thermal forecast's 0–1 figure, the realistic
- * rung, and how far into the ride a step came, in seconds. **No coordinate,
+ * Counts and milliseconds, the realistic rung, and how far into the ride a step came, in seconds. **No coordinate,
  * and nothing that could become one**: the route's name and the distance
  * ridden are left out too, because a distance from a route's start is a
  * position on it (`SECURITY.md`, ADR 0004 D).
  *
- * ⚠️ **The limits travel inside the record** (`frameMsLimit`, `headroomLimit`)
+ * ⚠️ **The limit travels inside the record** (`frameMsLimit`)
  * rather than being imported from `quality.ts`, because the Settings chunk
  * reads this file and `quality.ts` carries the scenery, the landform and the
  * settlements for its constants — `world-preference.ts` §"A module of its
  * own" makes the same split. `realistic-watch.ts`, on the ride's side, writes
- * the ladder's own limits into it.
+ * the ladder's own limit into it.
  *
  * On the DEVICE, as the choice itself is: what a GPU can hold is a property of
  * the machine. One record, the most recent; a ride that never settled into the
@@ -56,22 +56,16 @@ export interface RealisticStepReading {
   readonly frames: number;
   /** Of them, how many were over the frame-time limit. */
   readonly overFrameMs: number;
-  /** Of them, how many had a thermal forecast over the headroom limit. */
-  readonly overHeadroom: number;
   /** Their median frame time, in milliseconds. */
   readonly medianMs: number;
   /** Their longest frame time, in milliseconds. */
   readonly worstMs: number;
-  /** The highest thermal forecast among them; absent where the platform reported none. */
-  readonly headroomMax?: number;
 }
 
 /** The last realistic ride's record. */
 export interface RealisticWorldReport {
   /** The frame time the ladder reads as hot, in milliseconds. */
   readonly frameMsLimit: number;
-  /** The thermal forecast the ladder reads as hot. */
-  readonly headroomLimit: number;
   /** The settling window, once it has ended. */
   readonly settling?: RealisticSettlingReading;
   /** Each step down, in order. The last one left the world when `left` says so. */
@@ -105,8 +99,8 @@ export function readRealisticReport(
     return undefined;
   }
   if (!isRecord(raw)) return undefined;
-  const { frameMsLimit, headroomLimit, settling, steps } = raw;
-  if (!isNumber(frameMsLimit) || !isNumber(headroomLimit) || !Array.isArray(steps)) {
+  const { frameMsLimit, settling, steps } = raw;
+  if (!isNumber(frameMsLimit) || !Array.isArray(steps)) {
     return undefined;
   }
   const readSteps = steps.map(stepOf);
@@ -115,7 +109,6 @@ export function readRealisticReport(
   if (settling !== undefined && readSettling === undefined) return undefined;
   return {
     frameMsLimit,
-    headroomLimit,
     ...(readSettling === undefined ? {} : { settling: readSettling }),
     steps: readSteps as RealisticStepReading[],
   };
@@ -123,8 +116,7 @@ export function readRealisticReport(
 
 /**
  * The record as sentences, one per line — what Settings › Game world shows.
- * Numbers rounded as a person reads them: whole milliseconds and seconds, the
- * forecast to two places.
+ * Numbers rounded as a person reads them: whole milliseconds and seconds.
  */
 export function realisticReportLines(report: RealisticWorldReport): readonly string[] {
   const limit = `${ms(report.frameMsLimit)} ms`;
@@ -139,18 +131,8 @@ export function realisticReportLines(report: RealisticWorldReport): readonly str
     const what = step.left
       ? 'It left the realistic world'
       : 'It stepped down within the realistic world';
-    const signal =
-      step.overFrameMs > 0 && step.overHeadroom > 0
-        ? 'on frame time and the thermal forecast'
-        : step.overHeadroom > 0
-          ? 'on the thermal forecast'
-          : 'on frame time';
-    const headroom =
-      step.headroomMax === undefined
-        ? 'the device reported no thermal forecast'
-        : `${String(step.overHeadroom)} had a thermal forecast over ${report.headroomLimit.toFixed(2)}, the highest ${step.headroomMax.toFixed(2)}`;
     lines.push(
-      `${what} ${ms(step.rideSeconds)} s into the ride, from realistic rung ${String(step.rung + 1)}, ${signal}: of the last ${String(step.frames)} frames ${String(step.overFrameMs)} took longer than ${limit} (median ${ms(step.medianMs)} ms, longest ${ms(step.worstMs)} ms), and ${headroom}.`,
+      `${what} ${ms(step.rideSeconds)} s into the ride, from realistic rung ${String(step.rung + 1)}, on frame time: of the last ${String(step.frames)} frames ${String(step.overFrameMs)} took longer than ${limit} (median ${ms(step.medianMs)} ms, longest ${ms(step.worstMs)} ms).`,
     );
   }
   if (!report.steps.some((step) => step.left)) {
@@ -181,18 +163,15 @@ function settlingOf(value: unknown): RealisticSettlingReading | undefined {
 
 function stepOf(value: unknown): RealisticStepReading | undefined {
   if (!isRecord(value)) return undefined;
-  const { rung, left, rideSeconds, frames, overFrameMs, overHeadroom, medianMs, worstMs } = value;
-  const headroomMax = value['headroomMax'];
+  const { rung, left, rideSeconds, frames, overFrameMs, medianMs, worstMs } = value;
   if (
     !isNumber(rung) ||
     typeof left !== 'boolean' ||
     !isNumber(rideSeconds) ||
     !isNumber(frames) ||
     !isNumber(overFrameMs) ||
-    !isNumber(overHeadroom) ||
     !isNumber(medianMs) ||
-    !isNumber(worstMs) ||
-    (headroomMax !== undefined && !isNumber(headroomMax))
+    !isNumber(worstMs)
   ) {
     return undefined;
   }
@@ -202,9 +181,7 @@ function stepOf(value: unknown): RealisticStepReading | undefined {
     rideSeconds,
     frames,
     overFrameMs,
-    overHeadroom,
     medianMs,
     worstMs,
-    ...(headroomMax === undefined ? {} : { headroomMax }),
   };
 }

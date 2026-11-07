@@ -2743,8 +2743,8 @@ lake or a stone wall at all. #501 changed each, and each has a gate in CI that s
 
 - **That the scene looks right.** There is no reference image and ADR 0009 forbids deriving one from
   another product.
-- **That the thermal half of the quality ladder works.** It cannot fire, because nothing feeds it.
-  Wiring the port is a separate piece of work; measuring it is impossible until that lands.
+- **That the thermal half of the quality ladder works.** There is none: the owner ruled heat out of
+  the ladder on 2026-11-06 (#2289, Part AK), which now decides on frame time alone.
 - **Anything about iOS.** [ADR 0018](../adr/0018-native-client-platform.md) decides the platform;
   #15 owns the reach.
 - **Anything about a release build.** This is a debug APK. #95 owns signing and distribution.
@@ -4131,35 +4131,42 @@ limit with people on and inside it with `-people` is **no room**: `QualitySettin
 the last, and AK was free. It changes no resistance: no trainer is needed, and no debugger either.
 
 On 2026-11-06 the owner's Pixel 8 (Android 17, WebView 156, `main` at `d1df5f74`) left the realistic
-world within seconds of a ride starting. Two things counted against the realistic ladder that were
-not the realistic world: the stylised frames drawn while the ~33 MB arrived, and the frames that
-upload it. Since #2289 the ladder is not fed until the world is here, and then ignores
-`quality.ts` §`REALISTIC_SETTLING_SAMPLES` (30) drawn frames; the 45 ms and 30-frame thresholds are
-unchanged. **The 30 is chosen, not measured** — the lane that wrote it ran no phone — and this Part
-is its measurement. Each realistic ride now keeps what its ladder read (`realistic-report.ts`), and
-Settings › Game world shows it under the switch: what the settling window cost, and each step down,
-with the signal that fired (frame time, the thermal forecast, or both), the readings and the rung.
-It holds no coordinate.
+world at 46 s and 66 s into two rides. **The cause was the thermal forecast, not frame time**: the
+forecast passed 0.85 after 35–65 s, and one reading over it made every frame "hot" until the next, so
+the 30-frame count was met in about half a second. Frame time never came near the 45 ms trigger
+(realistic rung 0 ran at 59–60 fps: median 16.7 ms, p99 21.5–24.7 ms) and load-phase pressure peaked
+at 3 of 30.
+
+**Owner ruling on #2289, 2026-11-06: ignore heat entirely.** The quality ladder decides on frame
+time alone, and Android throttles the device itself if it gets too hot. Since #2289 `quality.ts`
+reads no thermal figure; the 45 ms and 30-frame thresholds are unchanged. The earlier statement in
+this document (Part E) that the thermal half of the ladder is a thing to measure is superseded by
+that ruling. Separately, the ladder is not fed until the realistic world is here, and then ignores
+`quality.ts` §`REALISTIC_SETTLING_SAMPLES` (30) drawn frames; that window is kept because it is
+cheap, **not because it fixed this**, and the 30 is chosen, not measured. Each realistic ride keeps
+what its ladder read (`realistic-report.ts`), and Settings › Game world shows it under the switch:
+what the settling window cost, and each step down, always on frame time, with the readings and the
+rung. It holds no coordinate.
 
 | Step | What to do |
 |---|---|
 | AK1 | Install #2289's merge on the Pixel 8. Settings › Game world: **Ride in the realistic world** on |
-| AK2 | Ride any route for **5 minutes**, on charge, from a cool start (AH3's band) |
+| AK2 | Ride any route for **10 minutes**, on charge, from a cool start (AH3's band). The ruling's bar is that realism holds for the whole ten |
 | AK3 | Open Settings › Game world and copy the lines under the switch into the table below, word for word |
-| AK4 | Only if the ride left: a second 5-minute ride, cooled first, to see whether the reading repeats |
+| AK4 | Only if the ride left: a second 10-minute ride, cooled first, to see whether the reading repeats |
 
 | Reading (AK3) | Ride 1 | Ride 2 (AK4) |
 |---|---|---|
 | Settling: frames over 45 ms of the 30, and the longest, ms | | |
-| Stayed realistic for 5 minutes? | | |
-| If it stepped down: after how many seconds, from which rung, on which signal | | |
+| Stayed realistic for 10 minutes? | | |
+| If it stepped down: after how many seconds, from which rung | | |
 | If it stepped down: frames over 45 ms of the last 30, median and longest, ms | | |
-| If it stepped down: the highest thermal forecast, or "none reported" | | |
 
 **Reading it.** If more than about half the settling frames are over 45 ms and the longest is
 several hundred milliseconds, the swap is longer than the window: raise
 `REALISTIC_SETTLING_SAMPLES` to cover it, never the thresholds. If the settling is cheap and the ride
 still leaves **on frame time** with a median well over 45 ms from the reduced rung (the report's
 "realistic rung 2"), the phone is genuinely too slow for it, and the proposal for the owner is a lower one — for example no
-people near and a lower render scale — rather than leaving. If it leaves **on the thermal
-forecast**, that is heat, which #2289 does not change. Post the table on #2289.
+people near and a lower render scale — rather than leaving. The thermal
+forecast is not an input any more (the owner's ruling above), so heat alone cannot end a ride; if the
+phone still leaves, the lines name frame time. Post the table on #2289.

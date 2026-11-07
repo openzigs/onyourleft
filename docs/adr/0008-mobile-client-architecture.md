@@ -540,3 +540,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   unchanged and is now load-bearing for a third visual change in a row**: nothing in #341 has been
   measured on a device, the geometry a building submits went from 36 vertex indices to 2 310, and
   `docs/validation/0002-android-shell-and-game.md` Part H is where that measurement is owed.
+- **2026-11-06** — **The quality ladder no longer reads the thermal forecast.** #91's criterion, and
+  the "thermal-headroom reading" this ADR names among the genuinely native capabilities, had the
+  renderer reduce on `PowerManager.getThermalHeadroom()` as well as on frame time. On
+  [#2289](https://github.com/openzigs/onyourleft/issues/2289) the owner measured the Pixel 8 leaving
+  the realistic world at 46 s and 66 s on that forecast while frame time stayed at 59–60 fps, and
+  ruled: *"ignore heat entirely. The quality ladder decides on frame time alone, and Android
+  throttles the device itself if it gets too hot."* `apps/web/src/game/quality.ts` therefore feeds
+  nothing thermal into its decisions. The thermal port and the native reading are not removed by this
+  entry; they have no consumer in the ladder. #91's 60-minute run (above) is read on frame times
+  alone.
