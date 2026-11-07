@@ -10,6 +10,11 @@
  * A course that cannot hold the game is drawn without a way to choose it,
  * with the reason in words beside it, never as a control that does nothing.
  *
+ * The lap race's list also holds the app's built-in circuits (#2293, ADR
+ * 0064), from `GamePort.listCircuits`, with the OpenStreetMap credit and the
+ * way to their licence beside them (D-5.1), as the setup's chooser shows
+ * them. So a rider with no routes of their own still has courses to race.
+ *
  * ⚠️ **Delivery rides in the realistic world only** (the owner's ruling DL6:
  * its houses are the mapped houses a realistic town draws), so with the
  * stylised world chosen the setup offers no round. This page says so, with
@@ -28,8 +33,14 @@ import { choosableCourses, coursesFor, type GameCourse } from '../game/courses';
 import type { GamePort } from '../game/GameView';
 import { readDeliveryProgress } from '../game/delivery/delivery-progress';
 import { deviceStorage } from '../game/hud/announce-preference';
-import { routeFacts, type DeliveryCourse, type RidableRoute } from '../game/StageChooser';
+import {
+  BUILT_IN_CIRCUITS_TEXT,
+  routeFacts,
+  type DeliveryCourse,
+  type RidableRoute,
+} from '../game/StageChooser';
 import { readRealisticWorldChoice } from '../game/world-preference';
+import { OSM_ATTRIBUTION } from '../map/basemap';
 import { hrefFor, hrefForGamePlay, routeById, type GameMode } from '../shell/routes';
 import { useUnits } from '../units/context';
 
@@ -63,19 +74,30 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
   const headingId = useId();
   const [worldChosen] = useState(() => readRealisticWorldChoice(deviceStorage()));
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
+  // #2293: the built-in circuits, the lap race's only, read with the routes
+  // as the setup reads them, so the list does not fill a moment later. A
+  // circuit that cannot be read costs the circuits and never the routes.
+  const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   useEffect(() => {
     if (port === undefined) {
       setRoutes([]);
       return;
     }
     let cancelled = false;
-    void port.listRoutes().then((found) => {
-      if (!cancelled) setRoutes(found);
+    const builtIn =
+      mode === 'lap-race'
+        ? (port.listCircuits?.() ?? Promise.resolve([])).catch((): readonly RidableRoute[] => [])
+        : Promise.resolve([]);
+    void Promise.all([port.listRoutes(), builtIn]).then(([found, circuitsFound]) => {
+      if (!cancelled) {
+        setCircuits(circuitsFound);
+        setRoutes(found);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [port]);
+  }, [port, mode]);
   // #2294's counts, through `courses.ts` §`coursesFor`: each saved route's
   // houses for today's round, counted on this device one route at a time
   // through the setup's own corridor port, and abandoned when the page goes.
@@ -129,7 +151,7 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       </div>
     );
   }
-  if (routes.length === 0) {
+  if (routes.length === 0 && circuits.length === 0) {
     return (
       <div className="oyl-game-courses">
         <BackToGames />
@@ -153,7 +175,9 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
     mode,
     routes,
     counts === undefined ? undefined : { courses: counts, week },
+    circuits,
   );
+  const listsCircuits = courses.some((course) => circuits.includes(course.route));
   return (
     <div className="oyl-game-courses">
       <BackToGames />
@@ -171,6 +195,14 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
           <CourseEntry key={course.route.id} course={course} mode={mode} />
         ))}
       </ul>
+      {listsCircuits ? (
+        // ADR 0064 D-5.1: the credit beside the built-in circuits, and the way
+        // to the notice they are offered under, in the chooser's own words.
+        <p className="oyl-game-courses__credit" data-credit="circuits">
+          {OSM_ATTRIBUTION} ·{' '}
+          <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+        </p>
+      ) : null}
     </div>
   );
 }

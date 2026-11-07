@@ -12,16 +12,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
+import { circuitRouteId } from '@onyourleft/store';
 
 import { COURSE_TEXT } from '../game/courses';
 import { writeDeliveryProgress } from '../game/delivery/delivery-progress';
 import { deliveryTown } from '../game/delivery/delivery-town-testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import { circuitRoute, northRoute } from '../game/route-fixtures-testing';
-import { DELIVERY_COURSE_TEXT } from '../game/StageChooser';
+import { BUILT_IN_CIRCUITS_TEXT, DELIVERY_COURSE_TEXT } from '../game/StageChooser';
+import { OSM_ATTRIBUTION } from '../map/basemap';
 import { writeRealisticWorldChoice } from '../game/world-preference';
 import { AppShell } from '../shell/AppShell';
-import { gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
+import { gamePlayFromHash, gameRouteFromHash, hrefFor, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
@@ -49,8 +51,20 @@ const OUT: RidableRoute = {
   attempts: 0,
 };
 
-function portOf(routes: readonly RidableRoute[]): GamePort {
+/**
+ * A synthetic built-in circuit, keyed as `circuits.ts` keys a shipped one —
+ * never a shipped one (ADR 0064 D-6.4).
+ */
+const RING: RidableRoute = {
+  id: circuitRouteId('fixture-ring'),
+  name: 'Fixture ring',
+  profile: circuitRoute(70),
+  attempts: 0,
+};
+
+function portOf(routes: readonly RidableRoute[], circuits?: readonly RidableRoute[]): GamePort {
   return {
+    ...(circuits === undefined ? {} : { listCircuits: () => Promise.resolve(circuits) }),
     listRoutes: () => Promise.resolve(routes),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
@@ -74,9 +88,13 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-async function open(path: string, routes: readonly RidableRoute[]): Promise<void> {
+async function open(
+  path: string,
+  routes: readonly RidableRoute[],
+  circuits?: readonly RidableRoute[],
+): Promise<void> {
   globalThis.location.hash = `#${path}`;
-  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={portOf(routes)} />);
+  mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={portOf(routes, circuits)} />);
   await settle();
 }
 
@@ -204,6 +222,70 @@ describe('a game’s course picker — #2292', () => {
       GAME_COURSES_TEXT.noRoutes,
     );
     expect(link(GAME_COURSES_TEXT.importRoute)?.getAttribute('href')).toBe('#/routes');
+  });
+});
+
+describe('the built-in circuits on the lap race’s picker — #2293 through #2292’s seam', () => {
+  function names(): (string | null | undefined)[] {
+    return [...document.querySelectorAll('.oyl-game-courses__course')].map(
+      (each) => each.querySelector('h3')?.textContent,
+    );
+  }
+
+  it('lists them after the rider’s loops, each leading to the setup with the race on', async () => {
+    await open('/games/lap-race', [OUT, LOOP_A], [RING]);
+    expect(names()).toEqual([LOOP_A.name, RING.name, OUT.name]);
+    const href = link(`${GAME_COURSES_TEXT.choose}: ${RING.name}`)?.getAttribute('href') ?? '';
+    expect(gameRouteFromHash(href)).toBe(RING.id);
+    expect(gamePlayFromHash(href)).toBe('lap-race');
+  });
+
+  it('shows the OpenStreetMap credit beside them, with the way to the licence (D-5.1)', async () => {
+    await open('/games/lap-race', [LOOP_A], [RING]);
+    const credit = document.querySelector('[data-credit="circuits"]');
+    expect(credit?.textContent).toContain(OSM_ATTRIBUTION);
+    expect(credit?.querySelector('a')?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.licence);
+    expect(credit?.querySelector('a')?.getAttribute('href')).toBe(hrefFor(routeById('credits')));
+  });
+
+  it('offers them to a rider with no routes of their own, rather than the empty state', async () => {
+    await open('/games/lap-race', [], [RING]);
+    expect(document.querySelector('[data-oyl-empty-state]')).toBeNull();
+    expect(names()).toEqual([RING.name]);
+    expect(link(`${GAME_COURSES_TEXT.choose}: ${RING.name}`)).toBeDefined();
+    expect(document.querySelector('.oyl-game-courses__none')).toBeNull();
+  });
+
+  it('lists none, and no credit, on Delivery’s picker', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open('/games/delivery', [OUT], [RING]);
+    expect(names()).toEqual([OUT.name]);
+    expect(document.querySelector('[data-credit="circuits"]')).toBeNull();
+  });
+
+  it('leaves Delivery’s picker with no routes at its empty state, circuits or not', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open('/games/delivery', [], [RING]);
+    expect(document.querySelector('[data-oyl-empty-state]')?.textContent).toContain(
+      GAME_COURSES_TEXT.noRoutes,
+    );
+  });
+
+  it('lists none, and no credit, with no circuits member on the port — the control', async () => {
+    await open('/games/lap-race', [LOOP_A]);
+    expect(names()).toEqual([LOOP_A.name]);
+    expect(document.querySelector('[data-credit="circuits"]')).toBeNull();
+  });
+
+  it('keeps the rider’s routes when the circuits cannot be read', async () => {
+    globalThis.location.hash = '#/games/lap-race';
+    const port: GamePort = {
+      ...portOf([LOOP_A]),
+      listCircuits: () => Promise.reject(new Error('a damaged bundle')),
+    };
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
+    await settle();
+    expect(names()).toEqual([LOOP_A.name]);
   });
 });
 
