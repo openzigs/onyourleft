@@ -23,7 +23,7 @@ import { ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { coursesFor, type GameCourse } from '../game/courses';
+import { choosableCourses, coursesFor, type GameCourse } from '../game/courses';
 import type { GamePort } from '../game/GameView';
 import { deviceStorage } from '../game/hud/announce-preference';
 import { routeFacts, type RidableRoute } from '../game/StageChooser';
@@ -42,6 +42,9 @@ export const GAME_COURSES_TEXT = {
   deliveryNeedsWorld:
     'A Delivery round rides in the realistic world, and this device has the standard one chosen.',
   changeWorld: 'Choose the realistic world in Settings',
+  back: 'Back to Games',
+  noLoops: 'None of your routes is a loop yet. A lap race needs a route that ends where it starts.',
+  openRoutes: 'Open Routes',
 } as const;
 
 export interface GameCoursesViewProps {
@@ -74,6 +77,7 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
   if (mode === 'delivery' && !worldChosen) {
     return (
       <div className="oyl-game-courses">
+        <BackToGames />
         <StatusMessage tone="info" label="Delivery">
           {GAME_COURSES_TEXT.deliveryNeedsWorld}
         </StatusMessage>
@@ -86,11 +90,17 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
     );
   }
   if (routes === undefined) {
-    return <p role="status">{GAME_COURSES_TEXT.loading}</p>;
+    return (
+      <div className="oyl-game-courses">
+        <BackToGames />
+        <p role="status">{GAME_COURSES_TEXT.loading}</p>
+      </div>
+    );
   }
   if (routes.length === 0) {
     return (
       <div className="oyl-game-courses">
+        <BackToGames />
         <EmptyState
           art="road"
           seed={7}
@@ -107,15 +117,41 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       </div>
     );
   }
+  const courses = coursesFor(mode, routes);
   return (
     <div className="oyl-game-courses">
+      <BackToGames />
+      {mode === 'lap-race' && choosableCourses(courses) === 0 ? (
+        // The owner's ruling of 2026-11-06: said once, above the greyed
+        // cards, with the way to a loop, so the page is not a dead end.
+        <p className="oyl-game-courses__none">
+          {GAME_COURSES_TEXT.noLoops}{' '}
+          <a href={hrefFor(routeById('routes'))}>{GAME_COURSES_TEXT.openRoutes}</a>
+        </p>
+      ) : null}
       <h2 id={headingId}>{GAME_COURSES_TEXT.heading}</h2>
       <ul className="oyl-game-courses__list oyl-sections" aria-labelledby={headingId}>
-        {coursesFor(mode, routes).map((course) => (
+        {courses.map((course) => (
           <CourseEntry key={course.route.id} course={course} mode={mode} />
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The way back to the Games page — the owner's ruling of 2026-11-06: in
+ * every state of the picker and at every width, a phone's included, where
+ * the navigation is a bar at the bottom. A 44 px target (`theme.css`
+ * §`.oyl-game-courses__back`), as every control a rider taps here is.
+ */
+function BackToGames(): JSX.Element {
+  return (
+    <p className="tw:mt-0">
+      <a className="oyl-game-courses__back" href={hrefFor(routeById('games'))}>
+        {GAME_COURSES_TEXT.back}
+      </a>
+    </p>
   );
 }
 

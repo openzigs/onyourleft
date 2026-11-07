@@ -799,6 +799,12 @@ export interface RouteMatch {
    * not, rather than opening a detail view for a ride with no id.
    */
   readonly parameter?: string;
+  /**
+   * The game a course picker switched on — #2292, {@link gamePlayFromHash} on
+   * the trainer game's route and on no other. Set, the setup was opened from
+   * the Games tab and the navigation marks Games ({@link navGroupOf}).
+   */
+  readonly play?: GameMode;
 }
 
 /**
@@ -829,7 +835,20 @@ export interface RouteMatch {
  * and a way out.
  */
 export function matchHash(hash: string): RouteMatch {
-  return matchHashAmong(MATCHABLE_ROUTES, hash);
+  const match = matchHashAmong(MATCHABLE_ROUTES, hash);
+  const play = match.route.id === 'game' ? gamePlayFromHash(hash) : undefined;
+  return play === undefined ? match : { ...match, play };
+}
+
+/**
+ * The navigation group a match is under — its route's, except the trainer
+ * game's setup opened from a course picker (`play=`, #2292): that setup lives
+ * in the Ride group and is still reached from Games, so Games stays the tab
+ * the rider is under (the owner's ruling of 2026-11-06). An ordinary ride's
+ * setup, with no `play=`, is Ride's as before.
+ */
+export function navGroupOf(match: RouteMatch): NavGroupId | undefined {
+  return match.play === undefined ? match.route.group : 'games';
 }
 
 /**

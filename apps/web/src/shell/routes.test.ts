@@ -15,6 +15,7 @@ import {
   hrefForGameRoute,
   hrefForActivity,
   hrefForSelection,
+  navGroupOf,
   matchHash,
   matchHashAmong,
   MAXIMUM_SUMMARY_CHARACTERS,
@@ -245,6 +246,16 @@ describe('a game switched on from the Games tab — #2292', () => {
 
   it('is never the developer route, which is read at the press whatever the switch says', () => {
     expect(gameDeliveryFromHash(hrefForGamePlay('delivery', 'x'))).toBe(false);
+  });
+
+  it('puts the setup a course opened under Games, and nothing else that names a game', () => {
+    expect(navGroupOf(matchHash(hrefForGamePlay('lap-race', 'x')))).toBe('games');
+    expect(navGroupOf(matchHash(hrefForGamePlay('delivery', 'x')))).toBe('games');
+    // An ordinary ride's setup, and one asking for no game we have, stay Ride's.
+    expect(navGroupOf(matchHash(hrefForGameRoute('x')))).toBe('ride');
+    expect(navGroupOf(matchHash('#/game?route=x&play=golf'))).toBe('ride');
+    // `play=` is the trainer game's query and no other page's.
+    expect(navGroupOf(matchHash('#/routes?play=delivery'))).toBe('routes');
   });
 
   it('gives Games a tab of one page, and each game a course picker under it', () => {

@@ -1171,6 +1171,19 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * The way back to the Games page from a course picker — the owner's ruling of
+ * 2026-11-06, at every width. A 44×44 target (SC 2.5.5, as the buttons above
+ * say), held by its own floor rather than by the line-height it happens to sit
+ * on; `shell.browser.spec.ts` measures it at a phone's width.
+ */
+.oyl-game-courses__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+/*
  * SIX IN A ROW — #2292. The Games tab made the destinations six, and six
  * pills at the 3rem floor with the link's 2 px a side and the list's gap came
  * to 338 px against a 320 px row, which wrapped: the row 115.7 px tall at

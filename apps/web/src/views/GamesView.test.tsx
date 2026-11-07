@@ -205,6 +205,84 @@ describe('a game’s course picker — #2292', () => {
   });
 });
 
+describe('the navigation through a game — the owner’s ruling of 2026-11-06', () => {
+  function primary(name: string): HTMLAnchorElement | undefined {
+    return [...document.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Primary"] a')].find(
+      (each) => (each.textContent ?? '').trim() === name,
+    );
+  }
+
+  it('keeps Games current from the tab through the course picker to the setup it opens', async () => {
+    await open('/', [LOOP_A]);
+    await activateWithKeyboard(primary('Games') as HTMLAnchorElement);
+    expect(primary('Games')?.getAttribute('aria-current')).toBe('page');
+    await activateWithKeyboard(link('Play Lap race') as HTMLAnchorElement);
+    expect(primary('Games')?.getAttribute('aria-current')).toBe('true');
+    await activateWithKeyboard(
+      link(`${GAME_COURSES_TEXT.choose}: ${LOOP_A.name}`) as HTMLAnchorElement,
+    );
+    // The setup, which lives in the Ride group, opened from Games.
+    expect(document.querySelector('h1')?.textContent).toBe('Trainer game');
+    expect(primary('Games')?.getAttribute('aria-current')).toBe('true');
+    expect(primary('Ride')?.hasAttribute('aria-current')).toBe(false);
+    // Games is a group of one page, so the setup draws no row of Ride's pages.
+    expect(document.querySelector('nav[aria-label="Ride pages"]')).toBeNull();
+    expect(document.querySelectorAll('a[aria-current]')).toHaveLength(1);
+  });
+
+  it('leaves an ordinary ride’s setup under Ride — the control', async () => {
+    await open(`/game?route=${LOOP_A.id}`, [LOOP_A]);
+    expect(document.querySelector('h1')?.textContent).toBe('Trainer game');
+    expect(primary('Ride')?.getAttribute('aria-current')).toBe('true');
+    expect(primary('Games')?.hasAttribute('aria-current')).toBe(false);
+    expect(document.querySelector('nav[aria-label="Ride pages"]')).not.toBeNull();
+  });
+});
+
+describe('the way back from a course picker — the owner’s ruling of 2026-11-06', () => {
+  it('offers Back to Games on both pickers, in every state, and it goes there', async () => {
+    // The lap race's list, Delivery's realistic-world notice, and the empty state.
+    for (const [path, routes] of [
+      ['/games/lap-race', [LOOP_A]],
+      ['/games/delivery', [OUT]],
+      ['/games/lap-race', []],
+    ] as const) {
+      await open(path, routes);
+      const back = link(GAME_COURSES_TEXT.back);
+      expect(back?.getAttribute('href'), path).toBe('#/games');
+      mounted?.unmount();
+      mounted = undefined;
+    }
+    await open('/games/delivery', [OUT]);
+    await activateWithKeyboard(link(GAME_COURSES_TEXT.back) as HTMLAnchorElement);
+    expect(document.querySelector('h1')?.textContent).toBe('Games');
+  });
+});
+
+describe('a lap race with no loop to race on — the owner’s ruling of 2026-11-06', () => {
+  it('says none of the rider’s routes is a loop, with the way to Routes, above the greyed cards', async () => {
+    await open('/games/lap-race', [OUT]);
+    const none = document.querySelector('.oyl-game-courses__none');
+    expect(none?.textContent).toContain(GAME_COURSES_TEXT.noLoops);
+    expect(none?.querySelector('a')?.getAttribute('href')).toBe('#/routes');
+    expect(none?.querySelector('a')?.textContent).toBe(GAME_COURSES_TEXT.openRoutes);
+    const course = document.querySelector('.oyl-game-courses__course');
+    expect(course?.textContent).toContain(COURSE_TEXT.notALoop);
+    // Above them: the line comes before the first card in the document.
+    expect(
+      none !== null &&
+        course !== null &&
+        (none.compareDocumentPosition(course) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+  });
+
+  it('says nothing of it when one route is a loop — the control', async () => {
+    await open('/games/lap-race', [OUT, LOOP_A]);
+    expect(document.querySelector('.oyl-game-courses__none')).toBeNull();
+    expect(document.querySelector('main')?.textContent).not.toContain(GAME_COURSES_TEXT.noLoops);
+  });
+});
+
 describe('the cards’ words', () => {
   it('counts parcels and loops in the singular and the plural', () => {
     expect(deliveryWeekProgressText({ day: 2, score: 1 })).toBe(

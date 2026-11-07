@@ -981,12 +981,14 @@
   "delivery-courses empty": [
     "Delivery: choose a course",
     "Choose a route for your Delivery round, then set up the ride.",
+    "Back to Games",
     "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
     "Choose the realistic world in Settings"
   ],
   "lap-race-courses empty": [
     "Lap race: choose a course",
     "Choose a loop to race laps of against bots, then set up the ride.",
+    "Back to Games",
     "No saved routes yet",
     "You have no saved routes yet.",
     "Each game is ridden on one of your saved routes.",
@@ -3014,17 +3016,21 @@
   "delivery-courses populated": [
     "Delivery: choose a course",
     "Choose a route for your Delivery round, then set up the ride.",
+    "Back to Games",
     "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
     "Choose the realistic world in Settings"
   ],
   "lap-race-courses populated": [
     "Lap race: choose a course",
     "Choose a loop to race laps of against bots, then set up the ride.",
+    "Back to Games",
+    "None of your routes is a loop yet.",
+    "A lap race needs a route that ends where it starts.",
+    "Open Routes",
     "Courses",
     "Box Hill, Leith Hill and every lane between them the long way round",
     "3.0 km · climb 30 m · steepest 1%",
-    "Not a loop.",
-    "A lap race needs a route that ends where it starts."
+    "Not a loop."
   ],
   "side-camera populated": [
     "Side camera",
