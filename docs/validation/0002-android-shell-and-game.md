@@ -1837,8 +1837,8 @@ adb logcat | grep -i "BluetoothLe"
 | Step | What to do | What should happen |
 |---|---|---|
 | R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | In logcat: one **`0x08`** (`08 01`) answered `80 08 01`, **no `0x01`**, and **no `0x00`** after it. Record power as cadence fell — on the owner's trainer, expect it to **hold or rise** (accepted). Then set a new target of 150 W and confirm the trainer holds 150 W: **the app can still drive it**, which is the condition the acceptance rests on |
-| R2 | Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | `0x05` writes during the workout, then one `0x08`, no `0x01`, no `0x00` after it. The workout **ends** — it is not shown paused, and there is no *Control lost*. Record power as cadence fell |
-| R3 | Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x08` after the last `0x05` |
+| R2 | Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | `0x05` writes during the workout, then a **`0x05` at the trainer's lowest target** and one `0x08` (#2348), no `0x01`, no `0x00` after it. The workout **ends** — it is not shown paused, and there is no *Control lost*. Record power as cadence fell |
+| R3 | Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x08`, straight after the `0x05` at the lowest target |
 | R4 | Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a **`0x05` at the trainer's lowest target** and no `0x08` — that is #441's ease, and Part S is where it is measured. At the end of the workout there is **one `0x08`** — the release the old code skipped because the free ride had already sent a Stop |
 
 ⚠️ **R4 used to expect a `0x08` during the free ride, and a reviewer who remembers that is reading the
@@ -1846,6 +1846,11 @@ old procedure.** Since [#441](https://github.com/openzigs/onyourleft/issues/441)
 trainer — a free-ride block, a stalled rider, a paused ride — by writing its **lowest target**, because
 on the owner's trainer a Stop does not ease an ERG target and a `0x05` is honoured to within ±2 W.
 What R4 checks here is that the **end** of such a workout still reaches the release.
+
+⚠️ **R2 and R3 used to expect the `0x08` straight after the workout's last target.** Since
+[#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout steps the trainer down
+to its lowest target first, so what the Stop leaves applied is the floor rather than the last block's
+target. R4's workout is already at the floor when it ends, so it still sends the `0x08` alone.
 
 ### R results
 
