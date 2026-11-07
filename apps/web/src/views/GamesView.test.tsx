@@ -121,6 +121,21 @@ describe('the Games tab — #2292', () => {
     expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on');
   });
 
+  it('shows the rider’s best time round a loop, the fastest over every loop and no other route', async () => {
+    const fast = { ...LOOP_B, bestSeconds: 754 };
+    const slow = { ...LOOP_A, bestSeconds: 900 };
+    // A route that is not a loop is no lap race, however fast the rider was on it.
+    const out = { ...OUT, bestSeconds: 60 };
+    await open('/games', [slow, out, fast]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on · your best 12:34');
+  });
+
+  it('says nothing of a best before the rider has ridden a loop — the control', async () => {
+    await open('/games', [LOOP_A]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('1 loop to race on');
+    expect(card(GAMES_TEXT.lapRace)?.textContent).not.toContain('best');
+  });
+
   it('leads each card’s Play to that game’s course picker, the game named in it', async () => {
     await open('/games', [LOOP_A]);
     await activateWithKeyboard(link('Play Lap race') as HTMLAnchorElement);

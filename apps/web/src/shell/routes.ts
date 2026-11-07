@@ -170,7 +170,7 @@ export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail' 
  * Delivery and the lap race were each a switch at the bottom of a game ride's
  * setup, and hard to find. Six is one over Material 3's ceiling for a bar, and
  * that was the owner's call to make, not this table's; what holds the bar to
- * one row at 320 px is `theme.css` §"BAR", measured by `shell.browser.spec.ts`
+ * one row at 320 px is `theme.css` §"SIX IN A ROW", measured by `shell.browser.spec.ts`
  * against the chrome area and the navigation box from before. Games is a
  * group of one page, its menu (`views/GamesView.tsx`), with each game's course
  * picker under it ({@link DELIVERY_COURSES_ROUTE}, {@link LAP_RACE_COURSES_ROUTE}).

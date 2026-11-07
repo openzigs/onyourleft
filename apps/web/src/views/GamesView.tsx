@@ -16,8 +16,10 @@
  * - **The lap race**: how many of the rider's routes are loops it can be
  *   raced on, from the course picker's own list (`game/courses.ts`). ⚠️ Not a
  *   best finish: ADR 0060 D-12.2 stores no position against bots, and the
- *   race keeps nothing once a ride ends (`lap-race/ride-race.ts`). The PR
- *   for #2292 puts the "your best" line to the owner.
+ *   race keeps nothing once a ride ends (`lap-race/ride-race.ts`). "Your
+ *   best" is the rider's fastest moving time over a ride on any of those
+ *   loops, read from the attempt summaries the route list already holds
+ *   (`RidableRoute.bestSeconds`), so it costs no stream decode.
  *
  * Both *Play*s are secondary: two games on one page are two equal choices,
  * and the one-primary rule (`a11y/button-hierarchy.ts`) holds a page to one
@@ -26,12 +28,14 @@
 
 import { useEffect, useState, type JSX } from 'react';
 
+import { formatDuration } from '../format';
 import { ButtonLink } from '../design/Button';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { choosableCourses, coursesFor } from '../game/courses';
 import { readDeliveryProgress } from '../game/delivery/delivery-progress';
 import { DAYS_IN_WEEK, type WeekProgress } from '../game/delivery/round';
 import type { GamePort } from '../game/GameView';
+import type { RidableRoute } from '../game/StageChooser';
 import { deviceStorage } from '../game/hud/announce-preference';
 import { coursesRouteFor, hrefFor } from '../shell/routes';
 
@@ -59,12 +63,26 @@ export function deliveryWeekProgressText(week: Pick<WeekProgress, 'day' | 'score
   return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · ${delivered}`;
 }
 
-/** How many loops the rider can race on, as a reading: *"2 loops to race on"*. */
-export function lapRaceLoopsText(loops: number): string {
+/**
+ * How many loops the rider can race on, as a reading: *"2 loops to race on"*,
+ * and with a best time round one, *"2 loops to race on · your best 12:34"*.
+ */
+export function lapRaceLoopsText(loops: number, bestSeconds?: number): string {
   if (loops === 0) {
     return 'No loops to race on yet';
   }
-  return `${String(loops)} ${loops === 1 ? 'loop' : 'loops'} to race on`;
+  const count = `${String(loops)} ${loops === 1 ? 'loop' : 'loops'} to race on`;
+  return bestSeconds === undefined ? count : `${count} · your best ${formatDuration(bestSeconds)}`;
+}
+
+/** The fastest moving time over the loops among `routes`; none if no loop has been ridden. */
+function bestOnLoops(routes: readonly RidableRoute[]): number | undefined {
+  let best: number | undefined;
+  for (const { route } of coursesFor('lap-race', routes)) {
+    if (!route.profile.loop || route.bestSeconds === undefined) continue;
+    if (best === undefined || route.bestSeconds < best) best = route.bestSeconds;
+  }
+  return best;
 }
 
 export interface GamesViewProps {
@@ -76,6 +94,7 @@ export function GamesView(props: GamesViewProps): JSX.Element {
   const { port } = props;
   const [week] = useState(() => readDeliveryProgress(deviceStorage()));
   const [loops, setLoops] = useState<number | undefined>(undefined);
+  const [best, setBest] = useState<number | undefined>(undefined);
   useEffect(() => {
     if (port === undefined) {
       setLoops(0);
@@ -83,7 +102,9 @@ export function GamesView(props: GamesViewProps): JSX.Element {
     }
     let cancelled = false;
     void port.listRoutes().then((routes) => {
-      if (!cancelled) setLoops(choosableCourses(coursesFor('lap-race', routes)));
+      if (cancelled) return;
+      setLoops(choosableCourses(coursesFor('lap-race', routes)));
+      setBest(bestOnLoops(routes));
     });
     return () => {
       cancelled = true;
@@ -104,7 +125,7 @@ export function GamesView(props: GamesViewProps): JSX.Element {
         id="oyl-games-lap-race"
         heading={GAMES_TEXT.lapRace}
         what={GAMES_TEXT.lapRaceWhat}
-        standing={loops === undefined ? GAMES_TEXT.loading : lapRaceLoopsText(loops)}
+        standing={loops === undefined ? GAMES_TEXT.loading : lapRaceLoopsText(loops, best)}
         href={hrefFor(coursesRouteFor('lap-race'))}
       />
     </div>
