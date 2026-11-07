@@ -106,7 +106,8 @@ describe('the threshold-estimate offer — #2307', () => {
     await press('Set my threshold to 247 W');
     const said = queryAll(document, '[role="status"]');
     expect(said).toHaveLength(1);
-    expect(said[0]?.textContent).toContain(THRESHOLD_OFFER_TEXT.accepted(watts(247)));
+    // The owner's ruling of 2026-11-07 (b): the sentence alone, no "Done:" before it.
+    expect(said[0]?.textContent).toBe(THRESHOLD_OFFER_TEXT.accepted(watts(247)));
     expect(queryAll(document, 'button')).toHaveLength(0);
     // The question as it was asked, not the answer: the threshold before.
     expect(document.body.textContent).toContain('(it is 230 W now)');
@@ -130,8 +131,9 @@ describe('the threshold-estimate offer — #2307', () => {
   it('says the answer to Keep once, live, and writes nothing', async () => {
     const analysis = await offer(ESTIMATE);
     await press(THRESHOLD_OFFER_TEXT.keep);
+    // The owner's ruling of 2026-11-07 (b): the sentence alone, no "Done:" before it.
     expect(queryAll(document, '[role="status"]').map((each) => each.textContent)).toEqual([
-      expect.stringContaining(THRESHOLD_OFFER_TEXT.kept),
+      THRESHOLD_OFFER_TEXT.kept,
     ]);
     expect(analysis.thresholdWrites).toEqual([]);
     expect(audit()).toBe('');

@@ -277,6 +277,8 @@ describe('after a ramp test, the estimate is offered — #2307', () => {
     await activateWithKeyboard(buttonSaying(THRESHOLD_OFFER_TEXT.keep));
     await settle();
     expect(document.body.textContent).toContain(THRESHOLD_OFFER_TEXT.kept);
+    // The owner's ruling of 2026-11-07 (b): no "Done:" before the answer.
+    expect(document.body.textContent).not.toContain(`Done: ${THRESHOLD_OFFER_TEXT.kept}`);
     controller.dispose();
 
     expect(await analysisThresholdAfterReload()).toBe(String(THRESHOLD_NOW));

@@ -112,7 +112,9 @@ export function ThresholdOffer({
           {answer !== undefined ? null : analysis === undefined ? (
             <p>{THRESHOLD_OFFER_TEXT.noStore}</p>
           ) : (
-            <p>
+            // The ruling of 2026-11-07 (f): the two answers the same width,
+            // stacked on a phone, side by side where both fit (`theme.css`).
+            <p className="oyl-threshold-offer__answers">
               <Button
                 variant="secondary"
                 type="button"
@@ -136,14 +138,23 @@ export function ThresholdOffer({
           )}
         </>
       )}
-      {answer === undefined || estimate === undefined ? null : (
-        // The answer to the rider's own press, so it is `live` (#445's rule).
-        <StatusMessage tone={answer === 'failed' ? 'warning' : 'success'} live>
+      {/*
+        The answer to the rider's own press, so it is live (#445's rule). The
+        owner's ruling of 2026-11-07 (b): Keep's and Set's answers are plain
+        sentences, with no "Done:" in front. Keep did nothing to be done, Set's
+        sentence already says what changed, and the result card's own *Done*
+        button is just above. Each sentence says its answer in words, so no
+        colour or label is needed to carry it. A failure keeps its warning.
+      */}
+      {answer === undefined || estimate === undefined ? null : answer !== 'failed' ? (
+        <p role="status" data-oyl-threshold-answer="">
           {answer === 'accepted'
             ? THRESHOLD_OFFER_TEXT.accepted(estimate)
-            : answer === 'kept'
-              ? THRESHOLD_OFFER_TEXT.kept
-              : THRESHOLD_OFFER_TEXT.failed}
+            : THRESHOLD_OFFER_TEXT.kept}
+        </p>
+      ) : (
+        <StatusMessage tone="warning" live>
+          {THRESHOLD_OFFER_TEXT.failed}
         </StatusMessage>
       )}
     </section>

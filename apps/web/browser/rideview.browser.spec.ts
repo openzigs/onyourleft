@@ -3387,3 +3387,33 @@ test('#1433 — the control — unzoomed, a reading’s digit is under the glanc
     expect(each.digitHeight).toBeLessThan(ZOOMED_DIGIT_FLOOR_PIXELS);
   }
 });
+
+/*
+ * #2307, the owner's ruling of 2026-11-07 (f): after a ramp test the offer's
+ * two answers, *Set my threshold to 269 W* and *Keep my threshold as it is*,
+ * wrapped unevenly on a phone, one long and one short. They are the same
+ * width now: stacked, each the offer's full width, where two do not fit.
+ */
+test('#2307 — the threshold offer’s two answers are the same width on a phone, 412×915', async ({
+  page,
+}) => {
+  await open(page, { name: 'a phone — 412×915', width: 412, height: 915 }, '?ride=saved&test=ramp');
+  const offer = page.locator('[data-oyl-threshold-offer]');
+  await expect(offer).toBeVisible();
+  const seen = await offer.evaluate((section) => {
+    const width = (element: Element | null): number => element?.getBoundingClientRect().width ?? 0;
+    const buttons = [...section.querySelectorAll('button')];
+    return {
+      names: buttons.map((each) => each.textContent),
+      widths: buttons.map(width),
+      tops: buttons.map((each) => each.getBoundingClientRect().top),
+      row: width(buttons[0]?.parentElement ?? null),
+    };
+  });
+  expect(seen.names).toEqual(['Set my threshold to 269 W', 'Keep my threshold as it is']);
+  const [set = 0, keep = 0] = seen.widths;
+  expect(Math.abs(set - keep)).toBeLessThanOrEqual(1);
+  // Stacked on a phone, each the row's full width.
+  expect(seen.tops[1] ?? 0).toBeGreaterThan(seen.tops[0] ?? 0);
+  expect(set).toBeGreaterThanOrEqual(seen.row - 1);
+});
