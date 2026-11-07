@@ -902,28 +902,29 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     const mergeAt = mergeSteps.findIndex((step) =>
       step.includes('run: pnpm run test:coverage:merge'),
     );
+    // Each line of a step, trimmed: compared as text, not built into a pattern.
+    const linesOf = (step: string | undefined): string[] =>
+      (step ?? '').split('\n').map((line) => line.trim());
     const halves = coverageShardScripts();
     for (const [index, [name, script]] of halves.entries()) {
       const n = String(index + 1);
       const file = `${directory}/coverage-${n}.json`;
-      expect(script, name).toMatch(
-        new RegExp(` --outputFile\\.blob=${file.replace(/[.]/g, '\\.')}$`),
-      );
+      expect(script.split(' ').at(-1), name).toBe(`--outputFile.blob=${file}`);
       const [, job = ''] = jobs.find(([, one]) => one.includes(`run: pnpm run ${name}\n`)) ?? [];
       const upload =
         stepsOf(job).find((step) => /^ +uses: actions\/upload-artifact@/m.test(step)) ?? '';
-      expect(upload, name).toMatch(new RegExp(`^ +name: coverage-blob-${n}$`, 'm'));
-      expect(upload, name).toMatch(new RegExp(`^ +path: ${file.replace(/[.]/g, '\\.')}$`, 'm'));
+      expect(linesOf(upload), name).toContain(`name: coverage-blob-${n}`);
+      expect(linesOf(upload), name).toContain(`path: ${file}`);
       // A red half still counts in the report; a half that wrote nothing is red.
       expect(upload, name).toMatch(/^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
       expect(upload, name).toMatch(/^ +if-no-files-found: error$/m);
       const downloadAt = mergeSteps.findIndex(
         (step) =>
           /^ +uses: actions\/download-artifact@[0-9a-f]{40} /m.test(step) &&
-          new RegExp(`^ +name: coverage-blob-${n}$`, 'm').test(step),
+          linesOf(step).includes(`name: coverage-blob-${n}`),
       );
       expect(downloadAt, name).toBeGreaterThanOrEqual(0);
-      expect(mergeSteps[downloadAt], name).toMatch(new RegExp(`^ +path: ${directory}$`, 'm'));
+      expect(linesOf(mergeSteps[downloadAt]), name).toContain(`path: ${directory}`);
       // A download must not be skipped while the merge runs: the report would
       // be of the other half alone.
       expect(mergeSteps[downloadAt], name).not.toMatch(/^ {8}if:/m);
