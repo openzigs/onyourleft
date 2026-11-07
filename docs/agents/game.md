@@ -34,9 +34,9 @@ run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting t
 decision — §8's "read the issue's revision block first" applies.
 
 **The split that does hold is by capability, not by folder.** Computation and UI in `apps/web`;
-only what genuinely cannot be web — `PowerManager.getThermalHeadroom()` (API 30+) and the
-foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
-`apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
+only what genuinely cannot be web — such as the foreground-service wake lock — behind ports in
+`apps/web` with Capacitor implementations in `apps/mobile`, exactly as #39's sensor interface
+relates to #40's Web Bluetooth transport.
 
 ⚠️ **`apps/mobile` had no importers at all until #85's wiring branch, and that sentence used to
 stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in
@@ -785,7 +785,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and each card says "up to N houses", or is greyed
                         with the reason in words; a greyed route is still
                         choosable, for an ordinary ride, and the switch says
-                        so. **The press**, in `GameView`:
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
@@ -1170,12 +1174,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the saved ride's rows; on a loop only, in a race's
                         standings' place and swapped with them
     src/game/hud/look-ahead.ts
-                        the next kilometre of road on the HUD (#2075): the
-                        road a line at a FIXED scale (100 m of height across the
+                        the next 2 km of road on the HUD (#2075, #2291): the
+                        road a line at a FIXED scale (200 m of height across the
                         strip) over five grade bands of our own, each the
                         strip's full height with its own fill pattern;
                         the next climb is `climb-ahead.ts`'s own `slopeAhead`,
-                        so the strip and the voice name the same one
+                        so the strip and the voice name the same one, and
+                        `climbAhead` adds the climb under the rider and the top
+                        of either (#2291). The same bands shade the whole
+                        route's strip (`routeBands`) and colour the gradient's
+                        digits (`gradeBand`, `HudCore.tsx`)
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's
@@ -1196,8 +1204,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (with a hit coming under it, outlined dashed: a shape,
                         never a tint), last and absent on any other ride; the
                         standings in a room's panel (`RaceStandings.tsx`, W/kg,
-                        never watts, never a live region), with the leader
-                        always its first line (#1967). Its five sentences
+                        never watts, never a live region), every racer of a
+                        solo field on it (#2328: eight lines, where a room's
+                        window is seven) and past that the leader always
+                        its first line (#1967). Its five sentences
                         are rank 5h, OWED as Delivery's are, the place at most
                         once every 10 s. `GameView` feeds `HudInput.lapRace`
                         on a ride running a race (#1906);

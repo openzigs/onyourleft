@@ -96,7 +96,6 @@ import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
-import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
 import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
@@ -111,7 +110,9 @@ import {
   groupDestination,
   hrefFor,
   NAV_GROUPS,
+  navGroupOf,
   routesInGroup,
+  type NavGroupId,
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
@@ -142,6 +143,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * not be reachable from the entry chunk.
  */
 const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const GAMES_GROUP = viewGroup(async () => import('./lazy/games'));
 const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
 const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
 const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
@@ -149,6 +151,7 @@ const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
 /** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
 export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
   RIDE_GROUP,
+  GAMES_GROUP,
   HISTORY_GROUP,
   ROUTES_GROUP,
   MORE_GROUP,
@@ -157,6 +160,8 @@ export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
 const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
 const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
 const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const GamesView = lazyView(GAMES_GROUP, (group) => group.GamesView);
+const GameCoursesView = lazyView(GAMES_GROUP, (group) => group.GameCoursesView);
 const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
 const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
 const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
@@ -332,11 +337,6 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
-  /**
-   * Android's thermal forecast, for the game's quality ladder (#247). Absent
-   * in a browser. @see game/thermal-port.ts
-   */
-  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -771,8 +771,6 @@ function viewFor(
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
-          // #247. The forecast half of the ladder; only the shell supplies one.
-          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
           // #1827. The steering controller paired on Devices; a Delivery
           // round's HUD reads it, through the game's controller port.
           {...(props.steering === undefined ? {} : { controller: props.steering })}
@@ -786,6 +784,13 @@ function viewFor(
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
+    case 'games':
+      // #2292: a card for each game, the lap race's reading the rider's loops.
+      return <GamesView port={props.game} />;
+    case 'delivery-courses':
+      return <GameCoursesView mode="delivery" port={props.game} />;
+    case 'lap-race-courses':
+      return <GameCoursesView mode="lap-race" port={props.game} />;
     case 'segment-detail':
       return (
         <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
@@ -1161,9 +1166,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
           </header>
         )}
 
-        {immersive ? null : <PrimaryNav route={route} />}
+        {immersive ? null : <PrimaryNav route={route} group={navGroupOf(match)} />}
 
-        {immersive ? null : <SectionNav route={route} />}
+        {immersive ? null : <SectionNav route={route} group={navGroupOf(match)} />}
 
         <main
           id={MAIN_ID}
@@ -1291,7 +1296,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * §"THE MARK" draws it only on a rail with the height to spare; whether a
  * phone's bar carries one is the owner's open question on #2030.
  */
-function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
+function PrimaryNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /** The group the rider is under: {@link navGroupOf}, not always the route's own. */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
       <img
@@ -1307,7 +1319,7 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
-          const here = route.group === group.id;
+          const here = under === group.id;
           // `page` where no section row will say which page this is: a group
           // of one, or the group's own menu page (#1429), which has none.
           const current = !here
@@ -1338,15 +1350,25 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
  * list tells it apart from the primary one (`audit.ts`'s
  * `landmarks-are-distinguishable`).
  */
-function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element | null {
-  if (route.group === undefined) {
+function SectionNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /**
+   * The group the rider is under ({@link navGroupOf}). #2292: a setup opened
+   * from Games is under Games, a group of one page, so it has no Ride row.
+   */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element | null {
+  if (under === undefined) {
     return null;
   }
-  const group = NAV_GROUPS.find((each) => each.id === route.group);
-  const pages = routesInGroup(route.group);
+  const group = NAV_GROUPS.find((each) => each.id === under);
+  const pages = routesInGroup(under);
   // #1429: the group's menu page lists the same pages itself, with a line
   // each, so a row of them above it would be the list twice.
-  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  const menu = route.id === groupDestination(under).id && !pages.includes(route);
   if (group === undefined || pages.length < 2 || menu) {
     return null;
   }

@@ -447,6 +447,18 @@ export {
   predictedPower,
 } from './analysis/critical-power';
 
+// A threshold estimate from a ramp or a 20-minute test (#2303). The two
+// multipliers are conventions from the literature, stated once in
+// `analysis/threshold-estimate.ts`; an unfinished test is refused, not guessed.
+
+export type {
+  ThresholdEstimate,
+  ThresholdTestKind,
+  ThresholdTestRecording,
+  ThresholdTestRule,
+} from './analysis/threshold-estimate';
+export { estimateThreshold, THRESHOLD_TEST_RULES } from './analysis/threshold-estimate';
+
 // --- Training zones (#78) ----------------------------------------------------
 //
 // Here rather than in `apps/web` for the reason above, and one more: the
@@ -465,6 +477,7 @@ export {
   POWER_ZONE_LOWER_FRACTIONS,
   POWER_ZONE_NAMES,
   powerZones,
+  SWEET_SPOT_FRACTIONS,
   timeInZones,
   zoneOf,
 } from './analysis/zones';

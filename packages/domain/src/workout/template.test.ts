@@ -416,3 +416,116 @@ describe('a tailored workout is an ordinary workout file', () => {
     },
   );
 });
+
+/** An endurance ride held by heart rate, written as shares of threshold heart rate. */
+const zoneHold: WorkoutTemplate = {
+  id: 'zone-hold-fixture',
+  name: 'Zone hold fixture',
+  summary: 'A heart-rate hold written as shares of threshold heart rate.',
+  category: 'endurance',
+  warmUp,
+  mainSet: {
+    scaling: 'stretch',
+    blocks: [
+      { kind: 'steady', seconds: seconds(300), target: share(0.65), label: 'Settle' },
+      {
+        kind: 'heart-rate-zone-hold',
+        seconds: seconds(1800),
+        rangeShare: { low: 0.81, high: 0.89 },
+        startShare: share(0.62),
+        ceilingShare: share(0.75),
+        label: 'Hold',
+      },
+    ],
+    stretch: { minimum: 0.5, maximum: 2 },
+  },
+  coolDown,
+  parameters: { intensityPercent: { minimum: -25, maximum: 10 } },
+};
+
+describe('tailorWorkout: a heart-rate zone hold, read through the expanded timeline', () => {
+  /** The one hold segment, as the player reads it. */
+  function holdSegment(choices: TailorChoices) {
+    const segments = expandWorkout(tailorWorkout(zoneHold, choices)).segments;
+    return segments.find((segment) => segment.label === 'Hold');
+  }
+
+  it('resolves the range from the rider’s threshold heart rate, rounding inward', () => {
+    // 0.81 × 170 = 137.7 → 138 (up); 0.89 × 170 = 151.3 → 151 (down).
+    expect(holdSegment({ thresholdHeartRate: 170 })?.hold).toEqual({
+      kind: 'heart-rate-hold',
+      seconds: 1800,
+      range: { low: 138, high: 151 },
+      startShare: 0.62,
+      ceilingShare: 0.75,
+      label: 'Hold',
+    });
+  });
+
+  it('rounds a product that floating point nudges off a whole number as the whole number', () => {
+    // 0.82 × 150 is 122.99999999999999; rounding that down would give 122.
+    const nudged: WorkoutTemplate = {
+      ...zoneHold,
+      mainSet: {
+        scaling: 'fixed',
+        blocks: [
+          {
+            kind: 'heart-rate-zone-hold',
+            seconds: seconds(1800),
+            rangeShare: { low: 0.76, high: 0.82 },
+            startShare: share(0.62),
+            ceilingShare: share(0.75),
+          },
+        ],
+      },
+    };
+    const [, hold] = tailorWorkout(nudged, { thresholdHeartRate: 150 }).blocks;
+    expect(hold).toMatchObject({ kind: 'heart-rate-hold', range: { low: 114, high: 123 } });
+  });
+
+  it('rides the steady fallback at the start share when no threshold heart rate is given', () => {
+    const segment = holdSegment({});
+    expect(segment?.hold).toBeUndefined();
+    expect(segment).toMatchObject({ from: 0.62, to: 0.62, label: 'Hold' });
+  });
+
+  it('never scales a zone hold or its fallback by intensity', () => {
+    expect(holdSegment({ intensityPercent: 10 })).toMatchObject({ from: 0.62, to: 0.62 });
+    const held = holdSegment({ intensityPercent: -25, thresholdHeartRate: 170 })?.hold;
+    expect(held).toMatchObject({ startShare: 0.62, ceilingShare: 0.75 });
+    // The steady block beside it is scaled, so the offset did run.
+    const [, settle] = tailorWorkout(zoneHold, { intensityPercent: 10 }).blocks;
+    expect(settle).toMatchObject({ kind: 'steady' });
+    expect(settle?.kind === 'steady' ? settle.target : Number.NaN).toBeCloseTo(0.715, 12);
+  });
+
+  it('stretches a zone hold with the rest of the main set', () => {
+    // (3600 − 1200) / 2100 = 8/7 of each block's length.
+    const workout = tailorWorkout(zoneHold, { targetMinutes: 60, thresholdHeartRate: 170 });
+    expect(workout.blocks[2]).toMatchObject({ kind: 'heart-rate-hold', seconds: 2057 });
+  });
+
+  it('refuses a range too narrow to hold, rather than widening it', () => {
+    // 0.81 × 60 = 48.6 → 49; 0.89 × 60 = 53.4 → 53: four beats wide.
+    expectRefused(zoneHold, { thresholdHeartRate: 60 }, 'invalid-heart-rate-range', /49 to 53/);
+  });
+
+  it.each([0, -150, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses a threshold heart rate of %d',
+    (value) => {
+      expectRefused(
+        zoneHold,
+        { thresholdHeartRate: value },
+        'invalid-choice',
+        /a threshold heart rate must be a number of beats per minute above zero/,
+      );
+    },
+  );
+
+  it('round-trips the resolved hold through format.ts at version 2', () => {
+    const tailored = tailorWorkout(zoneHold, { thresholdHeartRate: 170 });
+    const text = encodeWorkoutFile(tailored);
+    expect((JSON.parse(text) as { onYourLeftWorkout: number }).onYourLeftWorkout).toBe(2);
+    expect(decodeWorkoutFile(text)).toEqual(tailored);
+  });
+});
