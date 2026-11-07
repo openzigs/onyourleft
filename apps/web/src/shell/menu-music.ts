@@ -67,8 +67,8 @@
  * An `<audio>` element made at the first press that starts the loop, with
  * `preload="none"`, so the file is fetched then and never at load, and is
  * never in the entry chunk's graph: it is a URL, not an import. Which file is
- * #2057's, an owner's choice; until it is committed {@link MENU_MUSIC_TRACK}
- * is `undefined` and nothing here does anything.
+ * #2057's, an owner's choice: {@link MENU_MUSIC_FILE}. A `track` of
+ * `undefined` still means nothing here does anything, which the tests use.
  */
 
 import type { AudioMix } from '../game/audio-mix';
@@ -78,12 +78,21 @@ import { MUSIC_FADE_MS } from '../game/web-audio';
 import { quiet, type PressContext } from './menu-sounds';
 
 /**
- * The menus' loop, served from the app's own origin — #2057 commits it, with
- * its `ASSETS.toml` row and its credit. ⚠️ `undefined` until then, and the music
- * is then silent by design: no file has been chosen (ADR 0023; the owner
- * hears the shortlist first).
+ * The menus' loop, under `public/` — #2057: *Upbeat Game Loop - Aurora Ride*
+ * by Venus17 (Freesound 841299, CC0), the owner's choice of 2026-11-06. Ogg
+ * Opus, made from the original WAV by `tools/audio/encode-menu-music.sh`, with
+ * its `ASSETS.toml` row (so Credits lists it as a courtesy). Chromium and
+ * Android WebView decode it; Safari only from 18.4, and an older one refuses
+ * the file, which {@link MenuMusic.press} already treats as silence.
  */
-export const MENU_MUSIC_TRACK: string | undefined = undefined;
+export const MENU_MUSIC_FILE = 'audio/upbeat-game-loop-aurora-ride.ogg';
+
+/**
+ * The loop's URL, from the app's own origin and under its base, as the
+ * header's mark is (`AppShell.tsx` §`NAV_MARK_FILE`): never another host, and
+ * a URL rather than an import, so it is in no chunk.
+ */
+export const MENU_MUSIC_TRACK = `${import.meta.env.BASE_URL}${MENU_MUSIC_FILE}`;
 
 /**
  * The control whose press never STARTS the music: the header's *Mute all
