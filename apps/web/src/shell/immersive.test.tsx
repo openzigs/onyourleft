@@ -235,6 +235,8 @@ describe('a ride takes the screen over — #423', () => {
     await openTheGame();
     await press('Ride ');
     await press('End ride');
+    await press('Discard ride');
+    await press('Discard ride');
 
     for (const [name, element] of Object.entries(chrome())) {
       expect(element, name).not.toBeNull();
@@ -302,6 +304,8 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     await press('Ride ');
     expect(updateOffer()).toBeNull();
     await press('End ride');
+    await press('Discard ride');
+    await press('Discard ride');
 
     expect(updateOffer()).not.toBeNull();
     expect(button('Update now')).toBeDefined();

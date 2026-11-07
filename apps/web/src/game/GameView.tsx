@@ -220,7 +220,15 @@ import {
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
-import { gameDeliveryFromHash, gamePlayFromHash, gameRouteFromHash } from '../shell/routes';
+import {
+  gameDeliveryFromHash,
+  gamePlayFromHash,
+  gameRouteFromHash,
+  hrefFor,
+  routeById,
+} from '../shell/routes';
+import { useRideBack } from '../shell/ride-back';
+import { END_RIDE_TEXT, EndRideQuestion, type EndRideStep } from '../ride/EndRideQuestion';
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { countCourses } from './delivery/courses';
 import { deliveryInView } from './delivery/in-view';
@@ -641,6 +649,46 @@ function roomRouteId(roomId: string): string {
  * judgement, stated as one; the control reopens it at any time.
  */
 export const STANDING_NOTICE_SECONDS = 15;
+
+/** How the last game ride was ended, as the picker says it — #2349. */
+type RideEndedAs = 'saved' | 'discarded' | 'not-deleted' | 'not-recorded';
+
+/** What the picker says of a ride the rider just ended — #2349. ⚠️ Draft wording for the owner. */
+export const RIDE_ENDED_TEXT: Readonly<Record<RideEndedAs, string>> = {
+  saved:
+    'Your ride is stopped and being saved to your activities. Its result is on the Ride screen.',
+  discarded: 'Your ride is discarded. It was deleted from this device, and nothing was saved.',
+  'not-deleted':
+    'Your ride was not saved, but it could not be deleted from this device. It is still on the Ride screen.',
+  'not-recorded': 'Your ride is ended. Nothing was being recorded, so there was nothing to save.',
+};
+
+/**
+ * The picker's one sentence about the ride that just ended — #2349. Live,
+ * because it appears in answer to the rider's press. A way to the Ride screen
+ * where that is where the ride now is: the result card of a saved ride, or a
+ * ride whose delete did not go through.
+ */
+function RideEndedNotice({ ended }: { readonly ended: RideEndedAs }): JSX.Element {
+  const toRide = ended === 'saved' || ended === 'not-deleted';
+  return (
+    <StatusMessage
+      // The save itself is still running: its outcome is the Ride screen's
+      // to say (`RideView.tsx` §`StoppedNotice`), so this claims only the stop.
+      tone={ended === 'not-deleted' ? 'warning' : 'info'}
+      label={ended === 'saved' ? 'Stopped' : ended === 'not-deleted' ? 'Not deleted' : 'Ride ended'}
+      live
+    >
+      {RIDE_ENDED_TEXT[ended]}
+      {toRide ? (
+        <>
+          {' '}
+          <a href={hrefFor(routeById('ride'))}>Go to the Ride screen</a>
+        </>
+      ) : null}
+    </StatusMessage>
+  );
+}
 
 /**
  * The upright phones whose ONE notice cell cannot hold #647's *"Keep the
@@ -1084,6 +1132,17 @@ function GameScreen({
       }
     | undefined
   >(undefined);
+  /**
+   * The end-of-ride question, while it is open — #2349. *End ride* opens it
+   * (and so does Android's back, `shell/ride-back.ts`); nothing ends the ride
+   * but an answer to it. ⚠️ The game's own state rather than the ride
+   * controller's `stopArmed`: a game ride need not be recording, and one that
+   * is not is asked too (#2349, item 6). Opening it changes nothing about the
+   * ride: the simulation runs on as it was and nothing is sent to the trainer.
+   */
+  const [endAsk, setEndAsk] = useState<EndRideStep | undefined>(undefined);
+  /** How the last game ride was ended, said on the picker — #2349. */
+  const [rideEnded, setRideEnded] = useState<RideEndedAs | undefined>(undefined);
   /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
   const [starting, setStarting] = useState<'asking' | 'refused' | undefined>(undefined);
   /**
@@ -2197,6 +2256,9 @@ function GameScreen({
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
+      // #2349: a new ride starts with no question open and nothing said of the last.
+      setEndAsk(undefined);
+      setRideEnded(undefined);
       // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
       // The panel's room says whether this rider made it — made here, or as
@@ -3367,6 +3429,79 @@ function GameScreen({
     };
   }, [props.camera]);
 
+  /**
+   * *End ride*, and back on the stage — #2349: open the question, and say it
+   * through the HUD's one region, as a press's answer (#445: the HUD speaks
+   * through nothing else). Nothing about the ride changes.
+   */
+  const askToEnd = (): void => {
+    setEndAsk('ask');
+    const savable = props.trainer?.rideRecording?.()?.savable === true;
+    setAnnouncement(
+      `${END_RIDE_TEXT.askLabel} ${savable ? END_RIDE_TEXT.ask : END_RIDE_TEXT.askNothingRecorded}`,
+    );
+  };
+  /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
+  const keepRiding = (): void => {
+    setEndAsk(undefined);
+  };
+  useRideBack(onTheStage, () => {
+    if (endAsk === undefined) {
+      askToEnd();
+    } else {
+      keepRiding();
+    }
+  });
+  /**
+   * An answer that ends the ride — #2349: *Save ride*, or *Discard ride*
+   * confirmed. The game ride ends exactly as *End ride* ended it before the
+   * question existed — the race's result kept, `teardown`'s release of the
+   * gradient first, back to the picker — and then the recording under it, if
+   * any, is ended through the ride controller's own Stop: saved, with its
+   * result card on the Ride screen, or deleted from this device.
+   *
+   * ⚠️ `teardown` BEFORE the recording ends, so the ride's race outcome and
+   * its part lap reach the recording (`gameRideEnded`, `courseLine`) before it
+   * is saved with them.
+   */
+  const endRide = (answer: 'save' | 'discard'): void => {
+    // #785: a race the room said is over has a result, shown on the
+    // picker once the ride has ended — and only then. A race the rider
+    // left while it ran has one too, kept for them: the picker offers
+    // to ask for it, and the instance answers once the race is over
+    // (#785's review, N5).
+    const over = roomRef.current?.race();
+    const roomId = roomIdRef.current;
+    if ((over?.kind === 'finished' || over?.kind === 'running') && roomId !== undefined) {
+      const { wattSeconds, seconds } = raceWattsRef.current;
+      setRaceOver({
+        roomId,
+        finishers: over.kind === 'finished' ? over.order.length : undefined,
+        ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
+      });
+    }
+    const trainerPort = props.trainer;
+    const recorded = trainerPort?.rideRecording?.() !== undefined;
+    teardown();
+    setEndAsk(undefined);
+    setPhase('choosing');
+    setChosen(undefined);
+    // PR #2113: a preview ends back on an ordinary picker, a new screen.
+    if (preview !== undefined) onPreviewEnd();
+    if (!recorded) {
+      setRideEnded('not-recorded');
+      return;
+    }
+    if (answer === 'save') {
+      setRideEnded('saved');
+      void trainerPort?.saveRideRecording?.();
+      return;
+    }
+    void trainerPort?.discardRideRecording?.().then((gone) => {
+      setRideEnded(gone ? 'discarded' : 'not-deleted');
+    });
+  };
+
   if (!onTheStage && preview !== undefined) {
     // PR #2113: the preview's own screen, between the press and its first
     // frame — never a picker, whose Ride this screen has no trainer for.
@@ -3377,6 +3512,7 @@ function GameScreen({
     const trainerNow = props.trainer?.readTrainer();
     return (
       <>
+        {rideEnded === undefined ? null : <RideEndedNotice ended={rideEnded} />}
         {raceOver === undefined || props.rooms === undefined ? undefined : (
           // #785: the result of the race this rider just rode, once the room
           // said it was over — and never while it ran.
@@ -3541,6 +3677,10 @@ function GameScreen({
   // #647: read during render, like `rescue` — a later successful ask for the
   // recording service clears it mid-ride.
   const mayStop = props.trainer?.recordingMayStop() ?? false;
+  // #2349: the recording under this ride, for the question's *Save ride* —
+  // read during render like `mayStop`, so a ride that has just recorded its
+  // first second is offered it.
+  const recordedUnder = props.trainer?.rideRecording?.();
   // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
   // road notice while a rescue is in force** — PR #599's review, finding B1.
   // A running workout ALWAYS has a road notice, and on a phone both sentences
@@ -3843,28 +3983,32 @@ function GameScreen({
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
-        onEnd={() => {
-          // #785: a race the room said is over has a result, shown on the
-          // picker once the ride has ended — and only then. A race the rider
-          // left while it ran has one too, kept for them: the picker offers
-          // to ask for it, and the instance answers once the race is over
-          // (#785's review, N5).
-          const over = roomRef.current?.race();
-          const roomId = roomIdRef.current;
-          if ((over?.kind === 'finished' || over?.kind === 'running') && roomId !== undefined) {
-            const { wattSeconds, seconds } = raceWattsRef.current;
-            setRaceOver({
-              roomId,
-              finishers: over.kind === 'finished' ? over.order.length : undefined,
-              ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
-            });
-          }
-          teardown();
-          setPhase('choosing');
-          setChosen(undefined);
-          // PR #2113: a preview ends back on an ordinary picker, a new screen.
-          if (preview !== undefined) onPreviewEnd();
-        }}
+        // #2349: *End ride* ASKS, and never ends the ride on one press.
+        onEnd={askToEnd}
+        endQuestion={
+          endAsk === undefined ? undefined : (
+            <EndRideQuestion
+              className="oyl-end-ride oyl-end-ride--hud"
+              step={endAsk}
+              canSave={recordedUnder?.savable === true}
+              // Opened by a press — *End ride*, or back — every time.
+              focusOnOpen
+              // The HUD's ONE region says it (#445): @see askToEnd
+              surface="hud"
+              onSave={() => {
+                endRide('save');
+              }}
+              onDiscard={() => {
+                setEndAsk('discard');
+                setAnnouncement(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+              }}
+              onConfirmDiscard={() => {
+                endRide('discard');
+              }}
+              onKeepRiding={keepRiding}
+            />
+          )
+        }
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices
         standingNotice={

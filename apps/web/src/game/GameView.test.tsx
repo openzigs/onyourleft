@@ -28,12 +28,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   GameView,
+  RIDE_ENDED_TEXT,
   RIDER_GHOST_REFUSAL_TEXT,
   type GamePort,
   type RidableRoute,
   type RiderGhostLoad,
 } from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
+import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
+import { rideBack, RideBackContext, type RideBack } from '../shell/ride-back';
 import type { GameRenderer, SceneFrame } from './port';
 import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
 import type { CalendarDay, Season } from './season';
@@ -72,6 +75,7 @@ import type { KitColour } from '@onyourleft/store';
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
 import { START_WORD, toGoText } from './gantry-wording';
+import { endRideAnswer } from './end-ride-testing';
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(samples = 200): RidableRoute {
@@ -366,6 +370,18 @@ function endRideButton(): HTMLButtonElement | undefined {
   );
 }
 
+/**
+ * #2349: *End ride*, then *Discard ride* twice — how a game ride with nothing
+ * recorded under it ends now that *End ride* asks first.
+ */
+async function endTheRide(
+  press: (element: HTMLElement | undefined) => Promise<void> = clickThrough,
+): Promise<void> {
+  await press(endRideButton());
+  await press(endRideAnswer(document, 'Discard ride'));
+  await press(endRideAnswer(document, 'Discard ride'));
+}
+
 /** The value a HUD field is showing, found by its label. */
 function hudField(label: string): string {
   const rows = queryAll(mounted?.container ?? document, '.oyl-hud__field');
@@ -515,7 +531,7 @@ describe('racing another rider’s ghost (#331)', () => {
     );
     await pump(60);
     expect(hudField('Bea')).toBe('Beaten by you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     // A comparison with another rider is never a result about the rider's own best.
     expect(handed).toEqual([undefined]);
@@ -785,7 +801,7 @@ describe('your own best crossing the line (#259)', () => {
     await pump(60);
     expect(hudField('Your best')).toBe('Beaten by you');
 
-    await clickThrough(endRideButton());
+    await endTheRide();
     // ⚠️ `cancelAnimationFrame` is stubbed to do nothing, so the frame the
     // ended ride had already requested is still in the queue and would advance
     // the *new* simulation under the *old* loop's closure. A rider's browser
@@ -844,7 +860,7 @@ describe('your own best crossing the line (#259)', () => {
     await clickThrough(rideButton());
     await pump(60);
     expect(hudField('Your best')).toBe('Beaten by you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     expect(handed).toEqual(['beaten']);
 
@@ -852,7 +868,7 @@ describe('your own best crossing the line (#259)', () => {
     await pump(20);
     await pump(40);
     expect(hudField('Your best')).toBe('Finished ahead of you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     expect(handed).toEqual(['beaten', 'not-beaten']);
 
@@ -1390,7 +1406,7 @@ describe('the ride’s season is the rider’s day at ride start (#1622)', () =>
     let day: CalendarDay = { year: 2026, month: 11, day: 1 };
     await startRiding({ pacer: false, today: () => day });
     await pump(5);
-    await clickThrough(endRideButton());
+    await endTheRide();
     day = { year: 2026, month: 12, day: 1 };
     await clickThrough(rideButton());
     await pump(2, 1000 / 30);
@@ -1994,7 +2010,7 @@ describe('the touch lock on the HUD — #1482', () => {
     await pump(4);
     await tapThrough(hudButton(TOUCH_LOCK_NAME));
 
-    await tapThrough(endRideButton());
+    await endTheRide(tapThrough);
     pending = [];
 
     expect(ended.count).toBe(1);
@@ -2003,6 +2019,214 @@ describe('the touch lock on the HUD — #1482', () => {
 
     await clickThrough(rideButton());
     expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+/**
+ * #2349 — *End ride* asks first: *Keep riding*, *Save ride* or *Discard ride*,
+ * and a discard is asked once more. Read off the HUD and the trainer port, as
+ * the rider and the ride controller see them.
+ */
+describe('ending a game ride asks first — #2349', () => {
+  interface Seen {
+    ended: number;
+    saved: number;
+    discarded: number;
+    /** What happened, in order: `ended` is `gameRideEnded`, then the recording's. */
+    readonly order: string[];
+  }
+
+  function recordingTrainer(
+    seen: Seen,
+    recording: { readonly savable: boolean } | undefined,
+    gone = true,
+  ): GameTrainerPort {
+    return {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => {
+        seen.ended += 1;
+        seen.order.push('ended');
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+      rideRecording: () => recording,
+      saveRideRecording: () => {
+        seen.saved += 1;
+        seen.order.push('saved');
+        return Promise.resolve();
+      },
+      discardRideRecording: () => {
+        seen.discarded += 1;
+        seen.order.push('discarded');
+        return Promise.resolve(gone);
+      },
+    };
+  }
+
+  const fresh = (): Seen => ({ ended: 0, saved: 0, discarded: 0, order: [] });
+  const answers = (): string[] =>
+    queryAll<HTMLButtonElement>(document, '[data-oyl-end-ride] button').map((button) =>
+      (button.textContent ?? '').trim(),
+    );
+  const hudRegion = (): string =>
+    document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+  const picker = (): string => mounted?.container.textContent ?? '';
+
+  async function onTheStage(trainer: GameTrainerPort, back?: RideBack): Promise<void> {
+    const view = <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />;
+    mounted = await mount(
+      back === undefined ? view : <RideBackContext value={back}>{view}</RideBackContext>,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+  }
+
+  it('opens the question on End ride and ends nothing: the stage stays, Pause and End ride give way, the one region says it', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(document.activeElement?.textContent).toBe('Keep riding');
+    expect(endRideButton()).toBeUndefined();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
+    // The HUD keeps its one region (#445): the question is no second one.
+    expect(queryAll(document, '.oyl-game [role="status"], .oyl-game [aria-live]').length).toBe(1);
+    expect(seen).toEqual(fresh());
+  });
+
+  it('keeps riding on Keep riding: nothing ends, and focus goes back to End ride', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Keep riding'));
+
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(document.activeElement).toBe(endRideButton());
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('keeps riding on Escape, from the discard step too', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('offers no Save ride with nothing recorded under the ride', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, undefined));
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'Discard ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.askNothingRecorded}`);
+  });
+
+  it('offers no Save ride for a recording with nothing in it', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: false }));
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'Discard ride']);
+  });
+
+  it('saves on Save ride: the game ride ends first, then the recording is saved, and the picker says where its result is', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Save ride'));
+    pending = [];
+
+    expect(seen.order).toEqual(['ended', 'saved']);
+    expect(seen.discarded).toBe(0);
+    expect(rideButton()).toBeDefined();
+    expect(picker()).toContain(RIDE_ENDED_TEXT.saved);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
+  });
+
+  it('asks once more on Discard ride, and discards only on the second', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+
+    expect(answers()).toEqual(['Discard ride', 'Keep riding']);
+    expect(document.activeElement?.textContent).toBe('Keep riding');
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(seen).toEqual(fresh());
+
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(seen.order).toEqual(['ended', 'discarded']);
+    expect(seen.saved).toBe(0);
+    expect(picker()).toContain(RIDE_ENDED_TEXT.discarded);
+  });
+
+  it('says so when the delete did not go through, and where the ride still is', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: true }, false));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-deleted']);
+    expect(picker()).not.toContain(RIDE_ENDED_TEXT.discarded);
+  });
+
+  it('ends a ride with nothing recorded on Discard twice, touching no recording', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, undefined));
+    await endTheRide();
+    pending = [];
+    expect(seen.order).toEqual(['ended']);
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+  });
+
+  it('takes Android’s back on the stage: it opens the question, then is Keep riding', async () => {
+    const back = rideBack();
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }), back);
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('says nothing of the last ride once the next begins', async () => {
+    await onTheStage(recordingTrainer(fresh(), undefined));
+    await endTheRide();
+    pending = [];
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+    await clickThrough(rideButton());
+    await pump(2);
+    await endTheRide();
+    pending = [];
+    expect(picker().split(RIDE_ENDED_TEXT['not-recorded']).length).toBe(2);
   });
 });
 

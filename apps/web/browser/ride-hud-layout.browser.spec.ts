@@ -228,3 +228,35 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     }
   });
 }
+
+/**
+ * #2349 — the end-of-ride question, standing in the actions panel where
+ * *Pause* and *End ride* were (`ride/EndRideQuestion.tsx`): its answers on the
+ * stage, uncovered, with no scrolling, and the panel holding them whole, over
+ * no other panel and not over the leaning rider, at every overlay viewport and
+ * both ways — the layout's own invariants, as above — for the question and
+ * for its discard step, whose warning makes it the tallest.
+ */
+const END_STEPS = [
+  ['the question', '?end=asked', ['Keep riding', 'Save ride', 'Discard ride']],
+  ['its discard step', '?end=discard', ['Discard ride', 'Keep riding']],
+] as const;
+
+for (const [step, query, answers] of END_STEPS) {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`#2349 ${step} holds the HUD’s layout — ${viewport.name}`, async ({ browser }) => {
+      const page = await sharedRide(browser, viewport, query);
+      for (const [how, seen] of await bothWays(page)) {
+        const { faults, clipped } = sizeFaults(seen, viewport);
+        expect(faults, how).toEqual([]);
+        const names = seen.items.map((each) => each.name);
+        for (const answer of answers) {
+          expect(names, how).toContain(`end ride: ${answer}`);
+          expect(clipped, how).not.toContain(`end ride: ${answer}`);
+        }
+        // Pause and End ride give way to it, rather than standing beside it.
+        expect(names, how).not.toContain('control: End ride');
+      }
+    });
+  }
+}

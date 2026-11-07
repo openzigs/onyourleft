@@ -596,6 +596,8 @@ describe('the game’s HUD — #647', () => {
     expect(spokenTimes()).toBe(1);
 
     await press('End ride');
+    await press('Discard ride');
+    await press('Discard ride');
     await rideOnce();
     expect(await listen(12)).toContain(RIDE_MAY_STOP_SPOKEN);
     expect(spokenTimes()).toBe(2);

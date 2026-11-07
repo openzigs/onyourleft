@@ -537,8 +537,8 @@ const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepa
  * #1430: a paused ride with no stop armed, for the row Lap, Resume, Stop). The ride-time controls
  * that the fullest state does not render: *Start recording* and *Ask the
  * trainer for control* before a ride (a trainer paired, control not yet
- * granted), and *Resume*, *Yes, stop the ride* and *Keep riding* on a paused
- * ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
+ * granted), and *Resume* and the end-of-ride question's *Keep riding*, *Save
+ * ride* and *Discard ride* (#2349) on a paused ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
  * geometry cases in `rideview.browser.spec.ts` never ask for either.
  */
 const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');

@@ -524,8 +524,21 @@ export const RIDE_REPLAN_RECORDS_LIMIT = 200;
 /** Everything the view renders, and nothing it has to derive. */
 export interface RideSnapshot {
   readonly phase: RidePhase;
-  /** Whether the rider has pressed Stop once. A second press is what stops. */
+  /**
+   * Whether the end-of-ride question is open — #49, #2349: the rider pressed
+   * *Stop* (or *End ride* in the game) and has not yet answered *Save ride*,
+   * *Discard ride* or *Keep riding*. Opening it changes nothing else: the ride
+   * records on, and nothing is written to the trainer.
+   */
   readonly stopArmed: boolean;
+  /**
+   * Whether the rider answered *Discard ride* and is being asked once more —
+   * #2349. Only ever `true` while {@link stopArmed} is: discarding is the one
+   * answer that deletes the device copy (ADR 0036 D-3), so it takes a second
+   * press of its own, and {@link RideController.confirmDiscard} refuses
+   * without it.
+   */
+  readonly discardArmed: boolean;
   /**
    * Whether the ride screen's touch lock is on — #1432. Held HERE, above the
    * router, rather than in the screen, so a rider who taps away from the Ride
@@ -676,6 +689,9 @@ export interface RideSnapshot {
  * save beginning, the phase says `stopped` while `saveState` can still say
  * the previous ride's `unavailable` — see {@link RideSnapshot.stopping}.
  *
+ * ⚠️ **A discarded ride (#2349) is allowed whatever its storage says**: the
+ * rider asked twice for it to go, so nothing in this tab is being protected.
+ *
  * One rule, read by the controller that enforces it and by the screen that
  * decides whether to offer the control. Every input it reads is on the
  * snapshot — `stopping` included, which until #565's review was a flag only
@@ -688,10 +704,15 @@ export function canStartNewRide(
   return (
     state.phase === 'stopped' &&
     !state.stopping &&
-    state.storage === 'ok' &&
-    (state.saveState === 'saved' ||
-      state.saveState === 'empty' ||
-      state.saveState === 'unavailable')
+    // #2349: a ride the rider DISCARDED leaves nothing in this tab to protect,
+    // whatever the storage says — they asked twice for it to go. Its recording
+    // is deleted, or (a leftover, whose failed delete is what set `storage`)
+    // still on the device and offered back.
+    (state.saveState === 'discarded' ||
+      (state.storage === 'ok' &&
+        (state.saveState === 'saved' ||
+          state.saveState === 'empty' ||
+          state.saveState === 'unavailable')))
   );
 }
 
@@ -977,7 +998,14 @@ export type RideSaveState =
   | 'saved'
   /** Stopped with no samples. Not a failure — see `finish.ts`. */
   | 'empty'
-  | 'failed';
+  | 'failed'
+  /**
+   * #2349: the rider ended the ride with *Discard ride*, confirmed it, and its
+   * recording was deleted from this device. Nothing was saved. With
+   * {@link RideSnapshot.leftover} set the delete did not go through and the
+   * recording is still on the device, offered back like any other.
+   */
+  | 'discarded';
 
 export interface RideControllerOptions {
   readonly transport: SensorTransport;
@@ -1104,9 +1132,33 @@ export interface RideController {
   start(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
-  /** First press of Stop. Arms the confirmation; changes nothing else. */
+  /**
+   * First press of Stop, or of the game's *End ride*: opens the end-of-ride
+   * question (#2349) — *Save ride*, *Discard ride* or *Keep riding*. Changes
+   * nothing else: the ride records on and the trainer is sent nothing.
+   */
   armStop(): void;
+  /** *Keep riding*: closes the question, the discard step too. Changes nothing else. */
   cancelStop(): void;
+  /**
+   * *Discard ride*, the first time — #2349. Asks once more, and changes
+   * nothing else. Refused unless the question is open on a ride in progress.
+   */
+  armDiscard(): void;
+  /**
+   * *Discard ride*, confirmed — #2349. Ends the ride exactly as
+   * {@link confirmStop} does up to the save — the workout ended, the trainer
+   * released through the same `stopTrainer`, the recording stopped — and then
+   * deletes its recording from this device instead of saving it.
+   *
+   * ⚠️ **Refused unless {@link armDiscard} happened**, for {@link confirmStop}'s
+   * reason: a single press can never lose the device copy.
+   *
+   * @returns whether the recording is gone. `false` when it was refused, or
+   * when the delete did not go through — then the ride is still on this device
+   * ({@link RideSnapshot.leftover}) and is offered back, never lost silently.
+   */
+  confirmDiscard(): Promise<boolean>;
   /** #1432: turn the touch lock on. Refused unless a ride is in progress. */
   lockTouch(): void;
   /**
@@ -1114,7 +1166,10 @@ export interface RideController {
    * (`design/TouchLockButton.tsx`).
    */
   unlockTouch(): void;
-  /** Second press. Stops the recording and checkpoints it. */
+  /**
+   * *Save ride* — the second press. Stops the recording, checkpoints it and
+   * saves it to the rider's activities (`recording/finish.ts`).
+   */
   confirmStop(): Promise<void>;
   /**
    * A trainer-game ride ended while this recording was running, and this is
@@ -1487,6 +1542,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let unreadable: readonly RecordingSessionId[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
+  /** @see RideSnapshot.discardArmed */
+  let discardArmed = false;
   /** @see RideSnapshot.touchLocked */
   let touchLocked = false;
   /**
@@ -2423,6 +2480,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     return {
       phase,
       stopArmed,
+      discardArmed,
       touchLocked,
       elapsedSeconds: session?.elapsedTime ?? 0,
       movingSeconds: session?.movingTime ?? 0,
@@ -3929,7 +3987,62 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     cancelStop(): void {
       stopArmed = false;
+      discardArmed = false;
       changed();
+    },
+
+    armDiscard(): void {
+      if (!stopArmed || (phase !== 'recording' && phase !== 'paused')) {
+        return;
+      }
+      discardArmed = true;
+      changed();
+    },
+
+    async confirmDiscard(): Promise<boolean> {
+      if (!discardArmed || (phase !== 'recording' && phase !== 'paused')) {
+        // ⚠️ The guard, for `confirmStop`'s reason: one press never deletes.
+        return false;
+      }
+      stopArmed = false;
+      discardArmed = false;
+      touchLocked = false;
+      phase = 'stopped';
+      const at = now();
+      finishing = true;
+      changed();
+      let gone: boolean;
+      try {
+        // The same order as `confirmStop`, and the same release: the workout,
+        // then the trainer, then the recording. A discard is still a ride
+        // ending under somebody who may be pedalling.
+        endWorkoutSession();
+        await stopTrainer();
+        const current = recording();
+        await current.stop(at);
+        // Nothing is saved, so there is no activity to wait for: the
+        // recording is the ride's only copy, and the rider asked twice for it
+        // to go. Snapshots and side-camera reports held for this ride are
+        // never written (`camera/snapshot-keeper.ts`, `side-report-keeper.ts`
+        // read `discarded`).
+        gone = await current.discard();
+        saveState = 'discarded';
+        saveError = undefined;
+        savedActivityId = undefined;
+        savedRide = undefined;
+        // A delete that did not go through leaves the ride on this device,
+        // offered back by `startNewRide` like a save's leftover.
+        leftover = !gone;
+      } catch (error: unknown) {
+        // Fail closed, as `confirmStop` does: whatever threw, the checkpoint
+        // is where it was and is offered back.
+        saveState = 'failed';
+        throw error;
+      } finally {
+        finishing = false;
+        changed();
+      }
+      return gone;
     },
 
     lockTouch(): void {
@@ -3957,6 +4070,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       stopArmed = false;
+      discardArmed = false;
       // #1432: the lock is for riding. A stopped ride's screen is the result
       // card and *Start a new ride*, which a rider presses off the bike.
       touchLocked = false;
@@ -4031,6 +4145,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       recorder = undefined;
       phase = 'idle';
       stopArmed = false;
+      discardArmed = false;
       saveState = 'unavailable';
       saveError = undefined;
       savedActivityId = undefined;

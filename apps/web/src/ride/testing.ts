@@ -58,6 +58,9 @@ export interface RecordedCalls {
   resume: number;
   armStop: number;
   cancelStop: number;
+  /** #2349 — *Discard ride*, the first press and the confirmed one. */
+  armDiscard: number;
+  confirmDiscard: number;
   /** #1432 — the touch lock. */
   lockTouch: number;
   unlockTouch: number;
@@ -96,6 +99,7 @@ export function idleSnapshot(): RideSnapshot {
   return {
     phase: 'idle',
     stopArmed: false,
+    discardArmed: false,
     touchLocked: false,
     elapsedSeconds: 0,
     movingSeconds: 0,
@@ -211,6 +215,8 @@ export function stubRideController(
     resume: 0,
     armStop: 0,
     cancelStop: 0,
+    armDiscard: 0,
+    confirmDiscard: 0,
     lockTouch: 0,
     unlockTouch: 0,
     confirmStop: 0,
@@ -286,6 +292,13 @@ export function stubRideController(
     },
     cancelStop: () => {
       calls.cancelStop += 1;
+    },
+    armDiscard: () => {
+      calls.armDiscard += 1;
+    },
+    confirmDiscard: async () => {
+      calls.confirmDiscard += 1;
+      return Promise.resolve(true);
     },
     lockTouch: () => {
       calls.lockTouch += 1;

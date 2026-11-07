@@ -688,6 +688,17 @@ const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 
 const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
 
 /**
+ * `ride.html?end=asked` — #2349: *End ride* pressed, so the HUD holds the
+ * end-of-ride question in place of *Pause* and *End ride*, with something
+ * recorded under the ride so all three answers are offered.
+ * `ride-targets.browser.spec.ts` measures them as ride-time controls.
+ * `?end=discard` presses *Discard ride* as well, for the discard step and the
+ * owner's warning, the question's tallest state.
+ */
+const END_QUERY = new URLSearchParams(window.location.search).get('end');
+const END_ASKED = END_QUERY === 'asked' || END_QUERY === 'discard';
+
+/**
  * `ride.html?room=race` — #785: the ride is in a private race that is waiting
  * on its start line, made by this rider, so the HUD carries the race's notice
  * and *Start the race* — the room's maker's alone since the owner's ruling of
@@ -964,6 +975,8 @@ const TRAINER: GameTrainerPort = {
   // #2077: time in every one of the seven zones, so the bar is drawn whole.
   ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
   recordGameRide: () => Promise.resolve(false),
+  // #2349: something to save under the ride, only on the page that asks.
+  rideRecording: () => (END_ASKED ? { savable: true } : undefined),
   watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
@@ -1108,6 +1121,10 @@ function measure(): StageMeasurement {
       continue;
     }
     items.push(item(`control: ${textOf(control)}`, control));
+  }
+  // #2349: the end-of-ride question's answers, while it stands where Pause did.
+  for (const control of document.querySelectorAll('[data-oyl-end-ride] button')) {
+    items.push(item(`end ride: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
   for (const control of document.querySelectorAll('.oyl-hud__room-row button')) {
@@ -1621,6 +1638,31 @@ async function run(): Promise<void> {
         (each) => each.textContent === 'Resume',
       ),
     );
+  }
+  // #2349: the question, reached the way a rider reaches it.
+  if (END_ASKED) {
+    const end = await until('the HUD’s End ride', () =>
+      [...document.querySelectorAll<HTMLButtonElement>('.oyl-hud__control')].find(
+        (each) => each.textContent === 'End ride',
+      ),
+    );
+    end.click();
+    await until('the question’s Keep riding', () =>
+      [...document.querySelectorAll('[data-oyl-end-ride] button')].find(
+        (each) => each.textContent === 'Keep riding',
+      ),
+    );
+    if (END_QUERY === 'discard') {
+      const discard = await until('the question’s Discard ride', () =>
+        [...document.querySelectorAll<HTMLButtonElement>('[data-oyl-end-ride] button')].find(
+          (each) => each.textContent === 'Discard ride',
+        ),
+      );
+      discard.click();
+      await until('the discard step', () =>
+        document.querySelector('[data-oyl-end-ride="discard"]'),
+      );
+    }
   }
   // ⚠️ Before anything is measured. @see hud-harness.tsx
   await document.fonts.ready;

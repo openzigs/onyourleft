@@ -763,6 +763,64 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     }).not.toThrow();
   });
 
+  describe('the end-of-ride question’s three — #2349', () => {
+    type Phase = 'idle' | 'recording' | 'paused' | 'stopped';
+    function sourceAt(phase: Phase, sampleCount: number) {
+      const calls: string[] = [];
+      const port = gameTrainerPortOver({
+        getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined, phase, sampleCount }),
+        simulationControl: () => undefined,
+        requestTrainerControl: () => Promise.resolve(),
+        noteGameRideEnded: () => undefined,
+        subscribe: () => () => undefined,
+        armStop: () => {
+          calls.push('armStop');
+        },
+        confirmStop: () => {
+          calls.push('confirmStop');
+          return Promise.resolve();
+        },
+        armDiscard: () => {
+          calls.push('armDiscard');
+        },
+        confirmDiscard: () => {
+          calls.push('confirmDiscard');
+          return Promise.resolve(true);
+        },
+      });
+      return { port, calls };
+    }
+
+    it('says whether a recording is under the ride, and whether it has anything to save', () => {
+      expect(sourceAt('idle', 0).port.rideRecording?.()).toBeUndefined();
+      expect(sourceAt('stopped', 40).port.rideRecording?.()).toBeUndefined();
+      expect(sourceAt('recording', 0).port.rideRecording?.()).toEqual({ savable: false });
+      expect(sourceAt('recording', 1).port.rideRecording?.()).toEqual({ savable: true });
+      expect(sourceAt('paused', 40).port.rideRecording?.()).toEqual({ savable: true });
+      expect(gameTrainerPortOver(undefined).rideRecording?.()).toBeUndefined();
+    });
+
+    it('saves through the controller’s own two steps, in order, and only a ride in progress', async () => {
+      const riding = sourceAt('paused', 40);
+      await riding.port.saveRideRecording?.();
+      expect(riding.calls).toEqual(['armStop', 'confirmStop']);
+      const idle = sourceAt('idle', 0);
+      await idle.port.saveRideRecording?.();
+      expect(idle.calls).toEqual([]);
+    });
+
+    it('discards through the controller’s own three steps, in order, and only a ride in progress', async () => {
+      const riding = sourceAt('recording', 40);
+      expect(await riding.port.discardRideRecording?.()).toBe(true);
+      expect(riding.calls).toEqual(['armStop', 'armDiscard', 'confirmDiscard']);
+      const stopped = sourceAt('stopped', 40);
+      // Nothing recording: nothing to delete, so nothing is left behind.
+      expect(await stopped.port.discardRideRecording?.()).toBe(true);
+      expect(stopped.calls).toEqual([]);
+      expect(await gameTrainerPortOver(undefined).discardRideRecording?.()).toBe(true);
+    });
+  });
+
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {
     const { controller } = controllerWith({ ...NO_CONTROL, hasControl: true }, 'finished');
     expect(gameTrainerPortOver(controller).readTrainer()).toMatchObject({

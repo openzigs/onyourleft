@@ -23,7 +23,8 @@
  * 1. The session ends while a ride is recording, paused or being saved — the
  *    report waits, in this tab's memory only, and is saved with that ride the
  *    moment it is saved. If that ride's save comes back `empty` or `failed`,
- *    the report is dropped there and then, and nothing was ever written.
+ *    or the rider discards the ride (#2349), the report is dropped there and
+ *    then, and nothing was ever written.
  * 2. The session ends after a ride was saved during it — the report is saved
  *    with that ride at once.
  * 3. No ride was under way at any point during the session — the report is
@@ -96,7 +97,7 @@ import type { SideSessionSummary } from '@onyourleft/analysis';
 /** The part of the ride controller's snapshot this reads. */
 export interface RideProgress {
   readonly phase: 'idle' | 'recording' | 'paused' | 'stopped';
-  readonly saveState: 'unavailable' | 'saving' | 'saved' | 'empty' | 'failed';
+  readonly saveState: 'unavailable' | 'saving' | 'saved' | 'empty' | 'failed' | 'discarded';
   readonly savedActivityId: ActivityId | undefined;
 }
 
@@ -149,6 +150,11 @@ function openSession(options: SideReportKeeperOptions): SideReportSession {
     const now = rides.getSnapshot();
     if (now.phase === 'recording' || now.phase === 'paused') {
       stage = 'riding';
+    } else if (stage === 'riding' && now.saveState === 'discarded') {
+      // #2349: the rider discarded the ride, so it is never saved and there
+      // is nothing of it to put a report with. Settled now, rather than at
+      // the next ride's `idle`.
+      stage = 'none';
     } else if (stage !== 'none' && now.saveState === 'saving') {
       stage = 'saving';
     } else if (stage === 'saving') {

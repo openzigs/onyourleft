@@ -68,7 +68,10 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #1318: a lap taken by hand, pressed at the bars on a ride with no course.
   { surface: 'ride-screen', name: 'Lap', match: 'exact' },
   { surface: 'ride-screen', name: 'Stop', match: 'exact' },
-  { surface: 'ride-screen', name: 'Yes, stop the ride', match: 'exact' },
+  // #2349: the end-of-ride question's three answers (`ride/EndRideQuestion.tsx`),
+  // which took the place of *Yes, stop the ride*. Pressed at the bars.
+  { surface: 'ride-screen', name: 'Save ride', match: 'exact' },
+  { surface: 'ride-screen', name: 'Discard ride', match: 'exact' },
   { surface: 'ride-screen', name: 'Keep riding', match: 'exact' },
   // #1433: the zoom between the top two readings, larger, and every one chosen.
   { surface: 'ride-screen', name: 'Zoom', match: 'exact' },
@@ -91,6 +94,10 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // The same HUD control while the ride is paused (#710's review).
   { surface: 'game-hud', name: 'Resume', match: 'exact' },
   { surface: 'game-hud', name: 'End ride', match: 'exact' },
+  // #2349: the same question in the HUD, opened by *End ride*.
+  { surface: 'game-hud', name: 'Save ride', match: 'exact' },
+  { surface: 'game-hud', name: 'Discard ride', match: 'exact' },
+  { surface: 'game-hud', name: 'Keep riding', match: 'exact' },
   // #1482: the touch lock on the HUD, pressed at the bars before the rain.
   { surface: 'game-hud', name: 'Lock', match: 'exact' },
   // #785: a private race waiting on its line — the rider who made it starts it.

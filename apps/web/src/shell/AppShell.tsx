@@ -122,6 +122,7 @@ import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
+import { rideBack, RideBackContext } from './ride-back';
 import {
   isRideRoute,
   mayAnimateBetween,
@@ -960,13 +961,22 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   // #1512: Android's back, inside the shell. Read at each press: a ride on —
   // recording, paused, or the game's stage with the screen — consumes it.
-  useAndroidBack(props.nativeShell === true, () => {
-    const phase = props.rideController?.getSnapshot().phase;
-    return {
-      routeId: route.id,
-      rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
-    };
-  });
+  // #2349: and hands it to the ride screen on show, whose end-of-ride
+  // question it opens or answers with *Keep riding* (`ride-back.ts`).
+  const [rideBackPresses] = useState(rideBack);
+  useAndroidBack(
+    props.nativeShell === true,
+    () => {
+      const phase = props.rideController?.getSnapshot().phase;
+      return {
+        routeId: route.id,
+        rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
+      };
+    },
+    () => {
+      rideBackPresses.press();
+    },
+  );
 
   // #2073: the header asks whether the rider's own player is playing only
   // where its controls may show, so never on a ride route or while a ride has
@@ -1069,14 +1079,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
     // #1072's review (N5): a view deciding about motion of its own reads
     // whether a ride has the screen here (`route-motion.ts` §`mayCarryOn`).
     <RideHasTheScreen value={immersive}>
-      <ViewBoundary key={route.id}>
-        <Suspense fallback={<ViewLoading />}>
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-            colour: kitColour,
-            onChange: setKitColour,
-          })}
-        </Suspense>
-      </ViewBoundary>
+      <RideBackContext value={rideBackPresses}>
+        <ViewBoundary key={route.id}>
+          <Suspense fallback={<ViewLoading />}>
+            {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+              colour: kitColour,
+              onChange: setKitColour,
+            })}
+          </Suspense>
+        </ViewBoundary>
+      </RideBackContext>
     </RideHasTheScreen>
   );
 

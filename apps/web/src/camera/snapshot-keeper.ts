@@ -22,7 +22,10 @@
  * 3. **Only a save consumes a setup snapshot.** A ride that comes back
  *    `empty` or `failed` hands its setup snapshots back to wait for the next
  *    ride; the snapshots taken DURING that ride are dropped with it, and
- *    nothing of either was written.
+ *    nothing of either was written. ⚠️ **A ride the rider DISCARDED is the
+ *    exception** (#2349): the setup snapshots it claimed joined that ride
+ *    (rule 2), and the rider asked for the ride to be deleted, so they are
+ *    dropped with the ones taken during it rather than handed on to the next.
  * 4. **If no ride is saved, a setup snapshot is discarded**, having only ever
  *    been in memory: when the tab closes or reloads (nothing here crosses
  *    one), and when the erase runs ({@link SideSnapshotPort.forget}). The
@@ -141,9 +144,9 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
     for (const listener of notKeptListeners) listener();
   };
 
-  const finish = (savedAs: ActivityId | undefined): void => {
+  const finish = (savedAs: ActivityId | undefined, discarded = false): void => {
     const joining = [...claimed, ...during];
-    if (savedAs === undefined) {
+    if (savedAs === undefined && !discarded) {
       // Rule 3: the setup snapshots wait for the next ride; the ride's own go.
       setup = [...claimed, ...setup];
     }
@@ -221,6 +224,11 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
           setup = [];
         }
       }
+      return;
+    }
+    if (stage === 'riding' && now.saveState === 'discarded') {
+      // #2349: the ride is deleted, so is everything held for it (rule 3).
+      finish(undefined, true);
       return;
     }
     if (stage === 'riding' && now.saveState === 'saving') {

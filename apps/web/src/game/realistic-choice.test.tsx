@@ -49,6 +49,7 @@ import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { STRUCTURE_KINDS } from './scatter';
 import { sceneFrame } from './scene';
 import { REALISTIC_WORLD_STORAGE_KEY } from './world-preference';
+import { endRideAnswer } from './end-ride-testing';
 
 // #1541: `sceneFrame` itself, watched — what `GameView` asks it for. It still
 // builds every frame: the spy passes each call through.
@@ -456,6 +457,14 @@ describe('which world a ride draws — #475', () => {
       await Promise.resolve();
     });
     await settle();
+    // #2349: End ride asks; a ride with nothing recorded ends on Discard twice.
+    for (const answer of ['Discard ride', 'Discard ride'] as const) {
+      await act(async () => {
+        endRideAnswer(document, answer).click();
+        await Promise.resolve();
+      });
+      await settle();
+    }
     const before = told.length;
     await settleLoad({ loaded: true });
     expect(told.length).toBe(before);
@@ -487,6 +496,14 @@ describe('which world a ride draws — #475', () => {
       await Promise.resolve();
     });
     await settle();
+    // #2349: End ride asks; a ride with nothing recorded ends on Discard twice.
+    for (const answer of ['Discard ride', 'Discard ride'] as const) {
+      await act(async () => {
+        endRideAnswer(document, answer).click();
+        await Promise.resolve();
+      });
+      await settle();
+    }
     await act(async () => {
       arrive(RENDERER);
       await Promise.resolve();
