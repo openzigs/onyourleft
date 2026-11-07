@@ -1116,6 +1116,7 @@ function ErasePanel({
         theme: port.theme,
         retiredHostedKey: port.retiredHostedKey,
         instance: port.instance,
+        heldSnapshots: port.heldSnapshots,
         instanceAnalysis: port.instanceAnalysis,
         trainerTargets: port.trainerTargets,
         athlete: port.athleteRow,

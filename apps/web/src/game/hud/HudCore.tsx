@@ -41,6 +41,7 @@ import {
   givesWayToTheRoom,
   hudReadings,
   isDeliveryReading,
+  isRideTotalReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -141,6 +142,12 @@ export interface HudCoreProps extends SharedProps {
    * rider's ride keeps it.
    */
   readonly withoutElapsed?: boolean;
+  /**
+   * Leaves out *Distance*, *Climbed* and *Avg power* (#2076). The demo's: it
+   * records nothing, so the three would be dashes for as long as it plays.
+   * A rider's ride keeps them.
+   */
+  readonly withoutTotals?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -163,7 +170,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
-      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY),
+      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
+      !(props.withoutTotals === true && isRideTotalReading(reading)),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
@@ -454,6 +462,15 @@ function fieldClass(reading: HudReading): string {
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
+    // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
+    ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
+    // #2213 with #2076: the 4:3 tablet sets *Avg power* in its narrowest
+    // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
+    ...(reading.key === 'averagePower' ? ['oyl-hud__field--average-power'] : []),
+    // And the distance and the climb by name, which it sets in the second
+    // row's wide tracks there (the same section).
+    ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
+    ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
   ].join(' ');
 }
 

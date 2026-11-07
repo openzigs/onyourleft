@@ -143,7 +143,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
   });
 
   it('says power read zero, never "0 W", for a ride whose power readings were all 0 — #1054', async () => {
-    // `finish.ts` §`averagePowerOf` saves 0 for a ride whose every power
+    // `totals.ts` §`rideAveragePower` saves 0 for a ride whose every power
     // reading was 0, and the controller hands that to the card as it was saved.
     await show(savedSnapshot({ ...SAVED, averagePower: watts(0) }));
     const shown = card()!;
@@ -156,7 +156,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
   });
 
   it('draws and says no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
-    // `finish.ts` §`distanceOf` saves 0 m for a ride with no speed channel.
+    // `totals.ts` §`rideDistance` saves 0 m for a ride with no speed channel.
     await show(savedSnapshot({ ...SAVED, distance: metres(0) }));
     const shown = card()!;
     expect(queryAll<HTMLElement>(shown, 'dt').map((node) => node.textContent)).toEqual([
