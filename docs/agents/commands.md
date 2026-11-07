@@ -156,6 +156,20 @@ pnpm run test
 # command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
 
+# The same report as CI takes it since #2285 (§4c §"Two coverage jobs"): two
+# halves on two runners, then one merge. The first half is
+# `apps/web/src/game/`, the second every other file; each writes a Vitest blob
+# (its results and its coverage) to `coverage-blobs/coverage-<n>.json`, and
+# `test:coverage:merge` reads every blob there and writes the one report to
+# `coverage/`, as `test:coverage` does, exiting non-zero if a half had a red
+# case. Divided by PATH, not `--project`: a project filter keeps only that
+# project's own files in the report. `check:test-split` fails a half of any
+# other shape, a half over no file, and a file in no half or in two. Locally
+# `test:coverage` is the whole of both.
+pnpm run test:coverage:shard-1
+pnpm run test:coverage:shard-2
+pnpm run test:coverage:merge
+
 # The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
 # `test:coverage` with no `--coverage`, the same files, 106–133 s less on the
 # slower runner. `check:test-split` fails the two if their excludes differ.
@@ -189,11 +203,12 @@ pnpm run test:uninstrumented
 # `test:coverage` that is not `test:required` with `--coverage` after `run`:
 # the nightly report is of the files the required job runs. ⚠️ An
 # `--exclude` glob is matched against each Vitest PROJECT's root, not the
-# repository's, which is why it compares selections rather than globs. Lists,
-# runs no test: under a second.
+# repository's, which is why it compares selections rather than globs. ⚠️
+# Since #2285 it also holds the coverage run's halves (its rule 6), so it asks
+# `vitest list` eight times: about 8 s, and still runs no test.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 80 cases on 2026-11-04 (60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 103 cases on 2026-11-06 (80 before #2285, 60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 

@@ -16,10 +16,10 @@
  *
  * - **its start**: *12 left*, day 7, the largest round there is;
  * - **nearly over**: *10 delivered, 2 missed*, reached by riding the round —
- *   two houses passed with no throw, then a throw toward the next house
- *   every quarter second of the ride's own clock (Playwright's, so the round
- *   takes seconds rather than minutes), which the assist's wider windows
- *   catch at every house after them.
+ *   two houses passed with no throw, then a press toward the next house
+ *   every 25 ms of the ride's own clock (Playwright's, so the round takes
+ *   seconds rather than minutes, and stopped between those steps, #2282),
+ *   which the assist's wider windows catch at every house after them.
  *
  * ## What is held
  *
@@ -100,24 +100,93 @@ async function houses(page: Page): Promise<{ readonly left: string; readonly det
 }
 
 /**
+ * Stop the page's clock about where it is, so that nothing on the page moves
+ * unless {@link rideToNearlyOver} runs it on — #2282.
+ *
+ * `pauseAt` jumps the clock as `fastForward` does and then leaves it stopped;
+ * the jump is {@link STOP_AFTER_MS}, too short to carry the rider past a
+ * house's window. If the page's clock ran past that mark between reading it
+ * and stopping it, `pauseAt` throws, but it stops the clock before it jumps
+ * (Playwright 1.63 `ClockController.pauseAt`: `_innerPause()` first, then
+ * `_innerFastForwardTo`), so the clock is stopped where it was, which is
+ * still on the round's first steps. #2276 does the same for #1307.
+ */
+async function stopTheClock(page: Page): Promise<void> {
+  const pageNow = await page.evaluate(() => Date.now());
+  try {
+    await page.clock.pauseAt(pageNow + STOP_AFTER_MS);
+  } catch (error) {
+    if (!String(error).includes('Cannot fast-forward to the past')) throw error;
+  }
+}
+
+/** The jump {@link stopTheClock} makes as it stops the clock. */
+const STOP_AFTER_MS = 100;
+
+/**
  * Ride the round on to *10 delivered, 2 missed* on Playwright's clock: no
- * throw until two houses are missed, then one toward the next house every
- * quarter second (`throw-input.ts` §`THROW_KEYS`, the up arrow).
+ * throw until two houses are missed, then a press toward the next house
+ * (`throw-input.ts` §`THROW_KEYS`, the up arrow) every
+ * {@link PRESS_EVERY_MS} of the ride, with a look at *Houses* every
+ * {@link LOOK_EVERY_MS}.
+ *
+ * ⚠️ **On a STOPPED clock, and a press every half tick — #2282.** Until
+ * #2282 the clock was installed and left running, with one press and one
+ * `runFor(250)` a look, and *8 delivered, 3 missed* was read on a busy CI
+ * runner. Two things let a house's window pass with no throw in it:
+ *
+ * - **The runner's clock.** Between two `runFor` steps the page's clock ran
+ *   on with the runner's, so every look and every press let the rider ride on
+ *   with no throw. {@link stopTheClock} stops it first, so the ride moves
+ *   only in the steps below, every frame fired. Measured here with a 1 s wait
+ *   added before every fourth look: 4 rounds in 4 missed a third house on the
+ *   running clock, and 4 in 4 reached the end on the stopped one.
+ * - **The cool-down, at the descent's speed.** A press inside `throw.ts`
+ *   §`THROW_COOLDOWN_SECONDS` (0.5 s) is refused, not kept, so a press each
+ *   250 ms threw every 500 ms or every 750 ms, as the press fell either side
+ *   of the cool-down's last tick. The assist's catch radius (4.5 m each way,
+ *   `ASSISTED_THROW_SCALE`) takes a throw from 9 m of road before a house,
+ *   and by the round's last houses the rider is at 50 to 57 km/h downhill
+ *   (the HUD's *Speed*, 36 rounds): 750 ms there is 10 to 12 m, so a house
+ *   could fall between two throws. Even on the stopped clock 4 rounds in 72
+ *   did. `GameView` hands a press to the round on the next frame that runs a
+ *   simulation tick (`throw.ts` §`DELIVERY_TICK_SECONDS`, 50 ms), and on
+ *   Playwright's 16 ms frames those come 48 or 64 ms apart; a press every
+ *   half tick, 25 ms, is waiting at every one of them, so the throw is taken
+ *   on the first tick the cool-down allows. The throws are then 500 ms
+ *   apart, 8 m at 57 km/h, and every house has one in reach.
+ *
+ * The round's houses are its own seed's (`targets.ts` §`drawRoundSeed`),
+ * which nothing here sets, so which look a round ends on varies from run to
+ * run; the runner's speed no longer changes it.
  */
 async function rideToNearlyOver(page: Page): Promise<void> {
+  await stopTheClock(page);
   const done = '10\u00a0delivered, 2\u00a0missed';
-  for (let step = 0; step < 4_000; step += 1) {
+  for (let look = 0; look < 4_000; look += 1) {
     const now = await houses(page);
     if (now.detail === done) return;
     const missed = Number(/(\d+)\u00a0missed/.exec(now.detail)?.[1] ?? '0');
     if (missed > 2) {
       throw new Error(`the round missed a third house: ${now.detail}`);
     }
-    if (missed === 2) await page.keyboard.press('ArrowUp');
-    await page.clock.runFor(250);
+    if (missed < 2) {
+      await page.clock.runFor(LOOK_EVERY_MS);
+      continue;
+    }
+    for (let ridden = 0; ridden < LOOK_EVERY_MS; ridden += PRESS_EVERY_MS) {
+      await page.keyboard.press('ArrowUp');
+      await page.clock.runFor(PRESS_EVERY_MS);
+    }
   }
   throw new Error(`the round never reached ${done}: ${(await houses(page)).detail}`);
 }
+
+/** How much of the ride {@link rideToNearlyOver} runs between two looks at *Houses*. */
+const LOOK_EVERY_MS = 250;
+
+/** How much of the ride it runs between two presses: half of `throw.ts` §`DELIVERY_TICK_SECONDS`. */
+const PRESS_EVERY_MS = 25;
 
 /** The panels a rider can see: a 1 px clipped box is not one. */
 function seenPanels(seen: StageMeasurement): readonly StageItem[] {
