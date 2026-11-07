@@ -825,19 +825,30 @@ reads** (between the `nightly-measurements` markers), one column per job.
 | [42312238591](https://github.com/openzigs/onyourleft/actions/runs/42312238591) | `pull_request` | 456 | 454 | 733 | 29 | 337 | 319 | 261 | 195 |
 | [42312234419](https://github.com/openzigs/onyourleft/actions/runs/42312234419) | `workflow_dispatch` | 558 | 795 | 742 | 36 | 244 | 319 | 265 | 171 |
 | [42312237550](https://github.com/openzigs/onyourleft/actions/runs/42312237550) | `workflow_dispatch` | 549 | 607 | 785 | 27 | 568 | 367 | 367 | 147 |
+| [42318412519](https://github.com/openzigs/onyourleft/actions/runs/42318412519) | `workflow_dispatch` | 406 | 766 | 495 | 34 | 585 | 319 | 273 | 251 |
+| [42318409493](https://github.com/openzigs/onyourleft/actions/runs/42318409493) | `workflow_dispatch` | 421 | 615 | 756 | 28 | 545 | 326 | 323 | 237 |
+| [42318592284](https://github.com/openzigs/onyourleft/actions/runs/42318592284) | `pull_request` | 696 | 669 | 684 | 38 | 488 | 266 | 262 | 200 |
 <!-- nightly-measurements:end -->
 
-All three are of commit 3ffa4ac5; the third was dispatched on `experiment/issue-2285-reading-b`, a
-second name for it, so that two dispatches could run at once. In each, every job was green but
-`coverage-2` and `coverage`, which were red on one case alone: this table's own, before it had
-these columns. The stops are 1 800 s for `heavy` and both halves, 900 s for `coverage` and 1 200 s
-for each browser shard, so the slowest readings are 31 %, 44 %, 44 %, 4 %, 47 %, 31 %, 31 % and
-16 % of them. The CPUs, in column order:
+The first three are of commit 3ffa4ac5, and in each every job was green but `coverage-2` and
+`coverage`, red on one case alone: this table's own, before it had these columns. **The last three
+have both halves and the merge green**: the first two, of 62adbeb8 (this table added), with every
+job of the run green; the third, of 23560e97 (62adbeb8 with `main` merged), with `browser-2` red on
+#1623's winter case in `realistic.browser.spec.ts` (its 150 s `waitForFunction` on an EPYC 7763), a
+job this change does not touch. Two of the dispatches ran on `experiment/issue-2285-reading-b`, a
+second name for the same commit, so that two could run at once. The stops are 1 800 s for `heavy`
+and both halves, 900 s for `coverage` and 1 200 s for each browser shard, so the slowest readings
+are 39 %, 44 %, 44 %, 4 %, 49 %, 31 %, 31 % and 21 % of them. The CPUs, in column order:
 
 - 42312238591: EPYC 9V45, 9V45, 9V74, Xeon 6973P-C, 9V74, EPYC 7763, 9V74, 9V74.
 - 42312234419: EPYC 9V74, **EPYC 7763** (the lap race 6.39 s, the 32x ride 2.97 s, the late read
   3.34 s), Xeon Platinum 8370C, EPYC 7763, 9V45, 7763, 9V74, Xeon 6973P-C.
 - 42312237550: EPYC 9V74, 9V74, **EPYC 7763**, 9V45, 7763, Xeon Platinum 8370C, 7763, 9V45.
+- 42318412519: EPYC 9V45, **Xeon Platinum 8370C** (6.33, 3.02 and 3.22 s: the 32x ride and the
+  late read were #1688's last red cases there, at 5.0 and 5.1 s), 9V45, 9V74, 7763, 7763,
+  Xeon Platinum 8573C, 7763.
+- 42318409493: EPYC 9V45, 9V74, 9V74, 9V74, 7763, 7763, 7763, 9V74.
+- 42318592284: EPYC 7763, Xeon Platinum 8573C, 9V74, 7763, 7763, Xeon Platinum 8573C, 9V74, 9V74.
 
 Before this commit, the one job took 1 015 to 1 798 s (§"Cheaper cases under coverage — #1688");
 the split's first reading, with three workers in both halves, took 818 and 780 s on the 7763.
