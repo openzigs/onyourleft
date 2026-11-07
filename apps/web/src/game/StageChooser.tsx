@@ -1761,41 +1761,49 @@ function PacerControls(props: {
         />
         Ride against a pacer
       </label>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={PACER_INTENSITY_ID}>Pacer intensity, watts per kilogram</label>
-        <Stepper
-          name="pacer intensity"
-          step={0.1}
-          min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-          max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-        >
-          <input
-            id={PACER_INTENSITY_ID}
-            className="oyl-input"
-            type="number"
-            // `inputMode` rather than only `type`, because this is read and typed
-            // on a phone clamped to a handlebar: a decimal keypad is the
-            // difference between 2.5 and 25 at the moment a rider is setting up.
-            inputMode="decimal"
+      {/*
+        #2338: the box shows only while the pacer is on, the rule #2330 sets
+        for the wind boxes. `pacerChoice` never reads it with the switch off,
+        and what was typed survives off and on again because the value is
+        `GameView` state, not the input's own.
+      */}
+      {props.withPacer ? (
+        <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+          <label htmlFor={PACER_INTENSITY_ID}>Pacer intensity, watts per kilogram</label>
+          <Stepper
+            name="pacer intensity"
+            step={0.1}
             min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
             max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-            step={0.1}
-            value={props.intensity}
-            // ⚠️ **The two attributes that make the refusal part of the control
-            // rather than text near it — #255.** A `role="alert"` is announced
-            // once, when it appears. A rider who tabs *back* to this box
-            // afterwards heard "Pacer intensity, watts per kilogram, 70" and
-            // nothing about why nothing worked; `aria-describedby` is what makes
-            // the reason travel with the field, every time it is reached, and
-            // `aria-invalid` is what says the value in it is the problem.
-            aria-invalid={props.problem === undefined ? undefined : true}
-            aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
-            onChange={(event) => {
-              props.onIntensity(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
+          >
+            <input
+              id={PACER_INTENSITY_ID}
+              className="oyl-input"
+              type="number"
+              // `inputMode` rather than only `type`, because this is read and typed
+              // on a phone clamped to a handlebar: a decimal keypad is the
+              // difference between 2.5 and 25 at the moment a rider is setting up.
+              inputMode="decimal"
+              min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+              max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+              step={0.1}
+              value={props.intensity}
+              // ⚠️ **The two attributes that make the refusal part of the control
+              // rather than text near it — #255.** A `role="alert"` is announced
+              // once, when it appears. A rider who tabs *back* to this box
+              // afterwards heard "Pacer intensity, watts per kilogram, 70" and
+              // nothing about why nothing worked; `aria-describedby` is what makes
+              // the reason travel with the field, every time it is reached, and
+              // `aria-invalid` is what says the value in it is the problem.
+              aria-invalid={props.problem === undefined ? undefined : true}
+              aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
+              onChange={(event) => {
+                props.onIntensity(event.target.value);
+              }}
+            />
+          </Stepper>
+        </div>
+      ) : null}
       {/*
         ⚠️ `min`/`max` above are a hint to the browser and nothing more — they
         are trivially bypassed by typing, and they do not exist at all for the
