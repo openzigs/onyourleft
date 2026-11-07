@@ -263,11 +263,16 @@ export function clockInTheClockRow(viewport: Viewport): boolean {
   return !narrowOnItsSide;
 }
 
-/** #2076 — the ride so far, as the harness names the three readings. */
+/**
+ * #2076 — the ride so far, as the harness names the three readings — and
+ * since #2077 the rider's effort after them, drawn and given way where they are.
+ */
 export const RIDE_TOTAL_READINGS = [
   'reading: Distance',
   'reading: Climbed',
   'reading: Avg power',
+  'reading: W/kg',
+  'reading: Zone',
 ] as const;
 
 /**

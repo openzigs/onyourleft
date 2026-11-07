@@ -104,6 +104,13 @@
   --oyl-color-hud-ink-muted: #9da3a8;
   --oyl-color-hud-border: #787c82;
   --oyl-color-hud-stale-ink: #f1af48;
+  --oyl-color-hud-zone1: #949aa1;
+  --oyl-color-hud-zone2: #2d74ca;
+  --oyl-color-hud-zone3: #5fc372;
+  --oyl-color-hud-zone4: #f9df5d;
+  --oyl-color-hud-zone5: #f59441;
+  --oyl-color-hud-zone6: #cb574d;
+  --oyl-color-hud-zone7: #cf91f3;
   --oyl-color-hud-grade-descent: #4f9fe0;
   --oyl-color-hud-grade-flat: #6b7177;
   --oyl-color-hud-grade-climb: #d8b630;
@@ -10907,7 +10914,9 @@ select.oyl-input {
 
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--total {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--total, .oyl-hud__field--effort) {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -11266,6 +11275,155 @@ select.oyl-input {
     white-space: nowrap;
     border: 0;
   }
+}
+
+/*
+ * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
+ *
+ * Two secondary readings after the ride so far, drawn where it is drawn and
+ * given way on a PHONE's overlay with it (the rule above names both
+ * classes), for the same reason: a phone's overlay has no row for them. A
+ * laptop's window shows them (the owner's ruling of 2026-11-06, #2034).
+ *
+ * ⚠️ **On a tablet they never give way**, in a room or out of one — the
+ * owner's ruling of 2026-11-06 (#2034): they are the rider's own, and in a
+ * group ride there are no standings that say them. In a room the pacer's and
+ * the ghost's gaps and the wind give way first (§"THE RIDE SO FAR AT ARM'S
+ * LENGTH"), and then the ride so far on the 4:3 tablet and in a room's lap
+ * race. This PR's first cut hid these two in every tablet room instead,
+ * which reversed `main`'s room order.
+ *
+ * The zone's NUMBER is the reading, in the HUD's ink, beside a SWATCH of its
+ * zone's colour — an SVG, as the gauges are, so the panel stays its one
+ * opaque surface (`hud-surface.a11y.test.ts`). Every `hudZone*` is a declared
+ * 3:1 against `hudSurface` (SC 1.4.11; 3.99 the least, zone 2). The NAME is
+ * under it in the label's colour. Under that, this
+ * ride's time in each zone as a thin bar, each segment its zone's colour over
+ * the panel, in an outline of the label's colour that is the bar's full scale.
+ * The bar is `aria-hidden`; the number and the name are never colour alone.
+ */
+/* ⚠️ **At 1280×800, and in a laptop's window, in a room, the tier spans two
+   rows of the HUD's grid.** The owner's second ruling of 2026-11-06 (#2034)
+   keeps the pacer's and the ghost's gaps and the wind there beside these
+   two, which makes the tier a third row: a notice under it met the sound and
+   side-camera rows above the route panel (`ride-room.browser.spec.ts`
+   §"#1409"), and in a 1366×657 window ran into the route panel. So a notice
+   starts under the primary panel, and a race's standings under the tier,
+   whichever is taller. */
+@media (min-width: 51rem) and (min-height: 50rem),
+  (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) {
+    grid-template-areas:
+      'primary secondary'
+      'notices secondary'
+      'notices beside'
+      'route actions';
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding .oyl-hud:has(.oyl-hud__field--room) :is(.oyl-hud__standings, .oyl-hud__laps) {
+    grid-area: beside;
+  }
+}
+
+/* ⚠️ **On a tablet, the followed rider's name is one line, cut with an
+   ellipsis** — recorded as #419 asks, the owner's ruling of 2026-11-06
+   (#2034): it is the label of the room's first reading, and long, it wrapped
+   over three lines and made the tier's row as tall, so a race's standings
+   under it came within 9 px of the actions panel at 1280×800 with *Report*'s
+   reasons open. As on a phone (§"A ROOM RIDE ON A PHONE"), the whole name is
+   still in the document, where a screen reader reads it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__field--room .oyl-hud__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* The swatch: a square of the zone's colour beside its number, the height of
+   the digits' x-height or so, so the number is still the reading. */
+.oyl-hud__zone-swatch {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-end: 0.2em;
+  vertical-align: baseline;
+}
+
+.oyl-hud__zone-swatch--1 {
+  fill: var(--oyl-color-hud-zone1);
+}
+
+.oyl-hud__zone-swatch--2 {
+  fill: var(--oyl-color-hud-zone2);
+}
+
+.oyl-hud__zone-swatch--3 {
+  fill: var(--oyl-color-hud-zone3);
+}
+
+.oyl-hud__zone-swatch--4 {
+  fill: var(--oyl-color-hud-zone4);
+}
+
+.oyl-hud__zone-swatch--5 {
+  fill: var(--oyl-color-hud-zone5);
+}
+
+.oyl-hud__zone-swatch--6 {
+  fill: var(--oyl-color-hud-zone6);
+}
+
+.oyl-hud__zone-swatch--7 {
+  fill: var(--oyl-color-hud-zone7);
+}
+
+.oyl-hud__zone-bar {
+  display: block;
+  width: 100%;
+  height: 0.375rem;
+  margin-top: var(--oyl-space-xs);
+  overflow: visible;
+}
+
+.oyl-hud__zone-bar-scale {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__zone-bar-part--1 {
+  fill: var(--oyl-color-hud-zone1);
+}
+
+.oyl-hud__zone-bar-part--2 {
+  fill: var(--oyl-color-hud-zone2);
+}
+
+.oyl-hud__zone-bar-part--3 {
+  fill: var(--oyl-color-hud-zone3);
+}
+
+.oyl-hud__zone-bar-part--4 {
+  fill: var(--oyl-color-hud-zone4);
+}
+
+.oyl-hud__zone-bar-part--5 {
+  fill: var(--oyl-color-hud-zone5);
+}
+
+.oyl-hud__zone-bar-part--6 {
+  fill: var(--oyl-color-hud-zone6);
+}
+
+.oyl-hud__zone-bar-part--7 {
+  fill: var(--oyl-color-hud-zone7);
 }
 
 /* ⚠️ **And in a laptop's or a desktop's window under 40 rem tall (1024×600),
