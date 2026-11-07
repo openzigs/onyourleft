@@ -53,6 +53,15 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
+/** The lines of one of demo-release.yml's jobs, from its key to the next job's. */
+function job(name: string): string {
+  const lines = WORKFLOW.split('\n');
+  const start = lines.indexOf(`  ${name}:`);
+  expect(start, `demo-release.yml has no job ${name}`).toBeGreaterThanOrEqual(0);
+  const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
+  return lines.slice(start, end === -1 ? lines.length : end).join('\n');
+}
+
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 /** The fixture route, baked by the real bake into a fresh `routes/` as `id`. Returns the directory. */
@@ -252,15 +261,6 @@ describe('demo:release’s tag, presets and arguments — #1932', () => {
 });
 
 describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
-  /** The lines of one job, from its key to the next job's. */
-  function job(name: string): string {
-    const lines = WORKFLOW.split('\n');
-    const start = lines.indexOf(`  ${name}:`);
-    expect(start, `demo-release.yml has no job ${name}`).toBeGreaterThanOrEqual(0);
-    const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
-    return lines.slice(start, end === -1 ? lines.length : end).join('\n');
-  }
-
   it('runs by hand only: no pull request, push or schedule can bake real map data', () => {
     const on = /^on:\n((?:[ \t]+[^\n]*\n)+)/m.exec(WORKFLOW)?.[1] ?? '';
     const triggers = [...on.matchAll(/^ {2}(\w+):/gm)].map((match) => match[1]);
@@ -270,7 +270,7 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
 
   it('runs on the standard runner only, which is free on a public repository', () => {
     const runners = [...WORKFLOW.matchAll(/^\s*runs-on:\s*(\S+)/gm)].map((match) => match[1]);
-    expect(runners).toStrictEqual(['ubuntu-latest', 'ubuntu-latest']);
+    expect(runners).toStrictEqual(['ubuntu-latest', 'ubuntu-latest', 'ubuntu-latest']);
   });
 
   it('pins every action to a full commit SHA rather than a tag', () => {
@@ -317,5 +317,33 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
     expect(publish).toMatch(/--notes-file notes\.md/);
     expect(publish).toMatch(/--latest=false/);
     expect(publish).toMatch(/--target "\$TARGET"/);
+  });
+});
+
+describe('demo-release.yml deploys the demo to GitHub Pages — #2264', () => {
+  it('uploads the whole demo output as the Pages artefact, after the build reads the routes back', () => {
+    const bake = job('bake');
+    const build = bake.indexOf('run build:demo');
+    const upload = bake.search(/uses: actions\/upload-pages-artifact@[0-9a-f]{40}/);
+    expect(build).toBeGreaterThan(0);
+    expect(upload).toBeGreaterThan(build);
+    expect(bake.slice(upload)).toMatch(/^\s+path: apps\/web\/demo\/dist\/$/m);
+  });
+
+  it('deploys only after the release is published, so the hosted routes are on a release too', () => {
+    const pages = job('pages');
+    expect(pages).toMatch(/^ {4}needs: \[bake, publish\]$/m);
+    expect(pages).toMatch(/uses: actions\/deploy-pages@[0-9a-f]{40}/);
+    expect(pages).toMatch(/^ {6}name: github-pages$/m);
+  });
+
+  it('holds pages: write and id-token: write in the deploy job alone, which runs no repository code', () => {
+    const pages = job('pages');
+    expect(pages).toMatch(/^ {4}permissions:\n {6}pages: write\n {6}id-token: write\n {4}\S/m);
+    expect(pages).not.toMatch(/actions\/checkout|pnpm|node |run:/);
+    const elsewhere = WORKFLOW.replace(pages, '')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'));
+    expect(elsewhere.join('\n')).not.toMatch(/pages: write|id-token:/);
   });
 });
