@@ -104,6 +104,10 @@
   --color-hud-grade-climb: var(--oyl-color-hud-grade-climb);
   --color-hud-grade-steep: var(--oyl-color-hud-grade-steep);
   --color-hud-grade-wall: var(--oyl-color-hud-grade-wall);
+  --color-hud-map-land: var(--oyl-color-hud-map-land);
+  --color-hud-map-water: var(--oyl-color-hud-map-water);
+  --color-hud-map-street: var(--oyl-color-hud-map-street);
+  --color-hud-map-route: var(--oyl-color-hud-map-route);
 
   /* Spacing — `p-md`, `gap-sm`, `mb-lg`. `0` is the one length that is not a
      token, because nobody chooses it: `mt-0` has to exist to undo a margin. */

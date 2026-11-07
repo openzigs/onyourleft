@@ -360,6 +360,24 @@ export const COLOUR_TOKENS = {
   hudGradeClimb: '#d8b630',
   hudGradeSteep: '#e8812c',
   hudGradeWall: '#e5484d',
+  /**
+   * The street map in the plan view's box (#2290, `game/hud/StreetMap.tsx`),
+   * drawn from the ride's corridor. Dark, as every HUD panel is.
+   *
+   * ⚠️ **The streets are 4.49:1 on the land, where they were the route
+   * planner's dark `road` at 1.61** — the owner's screenshot ruling of
+   * 2026-11-06: *streets and paths get higher contrast against the land.*
+   * They are 3.32 on the water too, so a bridge reads, and the water stays a
+   * blue apart from the land (1.35, where it was 1.20). The route is the ride
+   * map's own `track` colour, drawn over a casing of `hudSurface`, so its edge
+   * is 6.74:1 whatever it crosses: the streets are now too light for the route
+   * to be 3:1 against them by colour alone. Each pair is declared in
+   * {@link CONTRAST_REQUIREMENTS}.
+   */
+  hudMapLand: '#1c2321',
+  hudMapWater: '#1d3a50',
+  hudMapStreet: '#7f8a88',
+  hudMapRoute: '#f0785c',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -1503,6 +1521,28 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 3.9, dark: 3.9 },
     where: 'the rider’s marker where it crosses the whole route’s filled strip (SC 1.4.11, #2075)',
+  },
+  {
+    foreground: 'hudMapStreet',
+    background: 'hudMapLand',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 4.49, dark: 4.49 },
+    where: 'a street or a path on the land of the HUD’s street map (SC 1.4.11, #2290)',
+  },
+  {
+    foreground: 'hudMapStreet',
+    background: 'hudMapWater',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 3.32, dark: 3.32 },
+    where: 'a street or a path over the water of the HUD’s street map: a bridge (SC 1.4.11, #2290)',
+  },
+  {
+    foreground: 'hudMapRoute',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 6.74, dark: 6.74 },
+    where:
+      'the route on the HUD’s street map, on its casing of the panel’s surface, and the rider’s ring on it (SC 1.4.11, #2290)',
   },
   {
     foreground: 'accentText',
