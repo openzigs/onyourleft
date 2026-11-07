@@ -29,7 +29,15 @@ const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
  * same sentence, and a screen that distinguished "loading" from "not set" would
  * be offering a rider a state they cannot act on.
  */
-export function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
+export function useOwnThresholds(
+  analysis: AnalysisPort | undefined,
+  /**
+   * Read again whenever this changes — #2307: the Ride screen bumps it once
+   * the rider accepts a test's estimate, so the next workout started there is
+   * ridden at the threshold they just set, not the one read on arrival.
+   */
+  version = 0,
+): OwnThresholds {
   const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
   useEffect(() => {
     if (analysis === undefined) {
@@ -56,6 +64,6 @@ export function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresho
     return () => {
       live = false;
     };
-  }, [analysis]);
+  }, [analysis, version]);
   return threshold;
 }

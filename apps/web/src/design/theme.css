@@ -2134,6 +2134,19 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * THE THRESHOLD OFFER'S TWO ANSWERS — #2307 (`ride/ThresholdOffer.tsx`), the
+ * owner's ruling of 2026-11-07 (f). *Set my threshold to 269 W* and *Keep my
+ * threshold as it is* are the same width: one column, each full width, where
+ * two 16rem columns do not fit (a phone), and two equal columns where they do.
+ * Inline, they wrapped unevenly on a phone, one long and one short.
+ */
+.oyl-threshold-offer__answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--oyl-space-sm);
+}
+
+/*
  * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
  * screen's own sentences and one action, in that order, on a quiet surface so
  * it reads as one thing rather than three paragraphs and a button.

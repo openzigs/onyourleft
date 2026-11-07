@@ -67,6 +67,7 @@ import {
   type PlayerStatus,
   type ReplanRecord,
   type Seconds,
+  type ThresholdTest,
   type TimeInZones,
   type UnixSeconds,
   type Watts,
@@ -161,6 +162,7 @@ import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
 import { blockText } from '../workouts/library';
+import { estimateFromRide, thresholdTestOf } from '../workouts/threshold-test-result';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
 import { createReplanSession, type ReplanSession } from '../workout/replan-session';
@@ -1463,6 +1465,13 @@ export function createRideController(options: RideControllerOptions): RideContro
    * outcome when a new ride starts.
    */
   let workoutFinishedInRide = false;
+  /**
+   * The threshold test ridden during this recording, if one was — #2307: the
+   * test, and its workout, whose blocks among the ride's say where its effort
+   * was. Latched when it starts, for {@link workoutFinishedInRide}'s reason,
+   * and cleared with it. The latest test wins: a ride holds one result card.
+   */
+  let testInRide: { readonly test: ThresholdTest; readonly workout: WorkoutInProgress } | undefined;
   /**
    * Every re-plan decision made during this recording — #1244, ADR 0048 P9.
    * Collected when a workout's session ends ({@link endWorkoutSession}), for
@@ -2959,6 +2968,18 @@ export function createRideController(options: RideControllerOptions): RideContro
             // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
             averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
             gameOutcome: outcomeInGame,
+            // #2307: a test's estimate, from the blocks and power this save wrote.
+            ...(testInRide === undefined
+              ? {}
+              : {
+                  thresholdTest: estimateFromRide(testInRide.test, {
+                    blocks: finished.activity.rideFacts?.workoutBlocks,
+                    firstBlock: testInRide.workout.blocksAfter ?? 0,
+                    startedAt: finished.streams.startedAt,
+                    sampleInterval: finished.streams.sampleInterval,
+                    power: finished.streams.channels.power,
+                  }),
+                }),
           }
         : undefined;
     if (outcome.status === 'saved' || outcome.status === 'empty') {
@@ -4054,6 +4075,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       lastManualLap = undefined;
       // #947: the same place, for the same reason.
       workoutFinishedInRide = false;
+      // #2307: and the threshold test ridden on that ride.
+      testInRide = undefined;
       // #1244: and the re-plan decisions that went with that ride.
       replanRecords = [];
       // ⚠️ But not `replanLastAskedAt` (#1329): the three minutes outlive the ride.
@@ -4263,6 +4286,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         blockPower: undefined,
       };
       workout = started;
+      // #2307: a threshold test, to estimate from once the ride is saved.
+      const test = thresholdTestOf(record.id);
+      if (test !== undefined) {
+        testInRide = { test, workout: started };
+      }
       // #1244, P7: only when the rider switched re-plans on for THIS workout,
       // and only with their own two thresholds (H1): `heartRateHold` is absent
       // without them. Off, the port is not asked for anything.

@@ -643,6 +643,28 @@ const SAVED_RIDE = {
   gameOutcome: 'not-beaten' as const,
 };
 
+/**
+ * `rideview.html?ride=saved&test=ramp` — #2307: the saved ride was a ramp
+ * test, so the result card is followed by `ride/ThresholdOffer.tsx` with an
+ * estimate to answer. The owner's ruling of 2026-11-07 (f) is measured on it:
+ * its two answers, *Set* and *Keep*, the same width on a phone.
+ */
+const SAVED_TEST =
+  QUERY.get('test') === 'ramp'
+    ? {
+        thresholdTest: {
+          test: 'ramp' as const,
+          estimate: {
+            kind: 'estimate' as const,
+            thresholdPower: watts(269),
+            basis: watts(359),
+            windowSeconds: 60,
+            multiplier: 0.75,
+          },
+        },
+      }
+    : {};
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -707,7 +729,7 @@ function snapshot(): RideSnapshot {
       phase: 'stopped',
       saveState: 'saved',
       savedActivityId: SAVED_RIDE.activityId,
-      savedRide: SAVED_RIDE,
+      savedRide: { ...SAVED_RIDE, ...SAVED_TEST },
     };
   }
   if (RIDE_STATE === 'armed') {
