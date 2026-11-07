@@ -247,12 +247,7 @@ describe('Save a copy — #2305', () => {
     expect(pane().textContent).toContain(
       'Saved “Sweet spot, three by twelve (47 min, −5%)” to your workouts.',
     );
-    // Listed under the rider's own workouts, read back from the store.
-    expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain(
-      'Sweet spot, three by twelve (47 min, −5%)',
-    );
-
-    // "Open it" is that saved workout's own address, which shows its blocks.
+    // "Open it" is that saved workout's own address.
     const link = queryAll<HTMLAnchorElement>(pane(), 'a').find(
       (each) => each.textContent === 'Open it',
     );
@@ -260,7 +255,17 @@ describe('Save a copy — #2305', () => {
       (link?.getAttribute('href') ?? '').replace('#/workouts/selected/', ''),
     );
     expect(selected).toBe(saved?.id);
+
+    // Listed under the rider's own workouts, read back from the store by a
+    // screen opened afresh on their list…
     mounted?.unmount();
+    mounted = await mount(<WorkoutsView port={stub} />);
+    await settle();
+    expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain(
+      'Sweet spot, three by twelve (47 min, −5%)',
+    );
+    // …and opening it shows its blocks.
+    mounted.unmount();
     mounted = await mount(<WorkoutsView port={stub} selected={selected} />);
     await settle();
     expect(document.querySelector('.oyl-selected')?.textContent).toContain(

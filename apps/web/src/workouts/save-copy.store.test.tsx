@@ -106,9 +106,7 @@ async function saveCopyAsA(open: StoreHarness): Promise<void> {
     for (let turn = 0; turn < 20 && !saidSaved(); turn += 1) {
       await settle();
     }
-    expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain(
-      'Sweet spot, three by twelve (47 min, −5%)',
-    );
+    expect(saidSaved()).toBe(true);
     mounted.unmount();
     mounted = undefined;
   });
@@ -152,6 +150,12 @@ describe('Save a copy, read back fresh — #2305', () => {
     if (copy === undefined) throw new Error('no copy saved');
 
     await open.read(async (store) => {
+      // Under the rider's own workouts, on a screen opened on their list…
+      mounted = await mount(<WorkoutsView port={{ athleteId: ATHLETE_A, store }} />);
+      await settle();
+      expect(document.querySelector('[data-oyl-list="saved"]')?.textContent).toContain(copy.name);
+      mounted.unmount();
+      // …and chosen there, with its blocks.
       mounted = await mount(
         <WorkoutsView port={{ athleteId: ATHLETE_A, store }} selected={copy.id} />,
       );
