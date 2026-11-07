@@ -287,7 +287,7 @@ function targetsOf(block: TemplateBlock): number[] {
 }
 
 /**
- * The main set's work: a repeating set's repetition, without the recovery
+ * The main set's blocks: a repeating set's repetition, without the recovery
  * after it, or every block of a set ridden through.
  */
 function workBlocks(template: WorkoutTemplate): readonly TemplateBlock[] {
@@ -295,8 +295,19 @@ function workBlocks(template: WorkoutTemplate): readonly TemplateBlock[] {
   return set.scaling === 'repeat' ? set.rep : set.blocks;
 }
 
-function workTargets(template: WorkoutTemplate): number[] {
-  return workBlocks(template).flatMap(targetsOf);
+/**
+ * The main set's working targets.
+ *
+ * For a category whose band starts at Tempo or above, a target below Tempo's
+ * lower bound is **easy riding between the work** — the easy half of a
+ * 30/30, the spinning between sprints — and not work, so it is left out; a
+ * Tempo-or-harder target is work and must be in the band, so a threshold set
+ * with a block at 0.85 still fails. For recovery and endurance, every target
+ * is work. The line is the zone table's, not a new number.
+ */
+function workTargets(template: WorkoutTemplate, band: Band): number[] {
+  const all = workBlocks(template).flatMap(targetsOf);
+  return band.lower >= zone(3) ? all.filter((target) => target >= zone(3)) : all;
 }
 
 /** The zone holds a template's main set carries. */
@@ -462,8 +473,10 @@ describe('the catalogue: every category matches its main set', () => {
       if (band === undefined) {
         return;
       }
-      const targets = workTargets(template);
-      expect(targets.length, 'a main set with a target to ride').toBeGreaterThan(0);
+      const targets = workTargets(template, band);
+      // Work to do: a working target, or an effort with the trainer released.
+      const released = workBlocks(template).some((block) => block.kind === 'free-ride');
+      expect(targets.length > 0 || released, 'a main set with work in it').toBe(true);
       for (const target of targets) {
         expect(inBand(target, band), `${String(target)} in ${JSON.stringify(band)}`).toBe(true);
       }
@@ -477,7 +490,8 @@ describe('the catalogue: every category matches its main set', () => {
   it.each(
     BUILT_IN_WORKOUTS.filter((t) => t.category === 'over-under').map((t) => [t.id, t] as const),
   )('%s goes both over and under threshold', (_, template) => {
-    const targets = workTargets(template);
+    const band = BANDS['over-under'];
+    const targets = band === undefined ? [] : workTargets(template, band);
     expect(targets.some((target) => target > 1)).toBe(true);
     expect(targets.some((target) => target < 1)).toBe(true);
   });
