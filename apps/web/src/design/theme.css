@@ -2094,6 +2094,59 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * THE TAILOR PANE — #2305 (`views/TailorBuiltIn.tsx`). Its controls are 48 px
+ * targets too, the issue's floor, as the filters above: the length select,
+ * the steppers' two buttons and their boxes, *Ride it* (#2306) and *Save a
+ * copy*. The stepper rules are the stage chooser's (§"the loadout's
+ * preview") in this pane.
+ */
+.oyl-tailor select,
+.oyl-tailor__save .oyl-button {
+  min-height: 3rem;
+}
+
+.oyl-tailor .oyl-stepper__step,
+.oyl-tailor .oyl-stepper > input {
+  min-block-size: 3rem;
+}
+
+.oyl-tailor .oyl-stepper__step {
+  min-inline-size: 3rem;
+}
+
+/*
+ * The owner's ruling of 2026-11-07 on #2305. (c) A label and its control sit
+ * on one line with the design system's small gap between them, so a long
+ * label ("Recovery between repeats, seconds") never touches its − button; on
+ * a line too narrow for both, the control wraps under its label. (e) The
+ * preview's Shape is a sentence, so it takes the facts grid's whole row
+ * rather than one of its columns.
+ */
+.oyl-tailor__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-activity-card__facts > .oyl-tailor__shape {
+  grid-column: 1 / -1;
+}
+
+/*
+ * THE THRESHOLD OFFER'S TWO ANSWERS — #2307 (`ride/ThresholdOffer.tsx`), the
+ * owner's ruling of 2026-11-07 (f). *Set my threshold to 269 W* and *Keep my
+ * threshold as it is* are the same width: one column, each full width, where
+ * two 16rem columns do not fit (a phone), and two equal columns where they do.
+ * Inline, they wrapped unevenly on a phone, one long and one short.
+ */
+.oyl-threshold-offer__answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--oyl-space-sm);
+}
+
+/*
  * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
  * screen's own sentences and one action, in that order, on a quiet surface so
  * it reads as one thing rather than three paragraphs and a button.

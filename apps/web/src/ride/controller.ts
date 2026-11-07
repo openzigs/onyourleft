@@ -67,6 +67,7 @@ import {
   type PlayerStatus,
   type ReplanRecord,
   type Seconds,
+  type ThresholdTest,
   type TimeInZones,
   type UnixSeconds,
   type Watts,
@@ -156,11 +157,18 @@ import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import type { TrainerTargetMemory } from './trainer-target-memory';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
-import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
+import {
+  createWorkoutSession,
+  RELEASE_INCOMPLETE,
+  STEP_DOWN_UNCONFIRMED,
+  type WorkoutRelease,
+  type WorkoutSession,
+} from '../workout/session';
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
 import { blockText } from '../workouts/library';
+import { estimateFromRide, thresholdTestOf } from '../workouts/threshold-test-result';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
 import { createReplanSession, type ReplanSession } from '../workout/replan-session';
@@ -301,6 +309,16 @@ export interface TrainerSnapshot {
    * next confirmed release and by taking control again.
    */
   readonly releaseFault: string | undefined;
+  /**
+   * The floor the end of a workout eased the trainer off to, when the trainer
+   * confirmed that step-down AND the Stop after it — #2348, the owner's
+   * ruling of 2026-11-07. The panel then says the trainer was eased off to its
+   * lowest setting and released, instead of "may still be holding N W". ⚠️
+   * `undefined` after every other release (End ERG, a game ride, a workout
+   * that needed no step-down, an unconfirmed step-down or Stop), and cleared
+   * by the next target, gradient, workout or grant of control.
+   */
+  readonly easedOffTo: Watts | undefined;
   /** Why the last setpoint was refused, for a screen that says more than "failed". */
   readonly refusal: string | undefined;
   /**
@@ -1519,6 +1537,13 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   let workoutFinishedInRide = false;
   /**
+   * The threshold test ridden during this recording, if one was — #2307: the
+   * test, and its workout, whose blocks among the ride's say where its effort
+   * was. Latched when it starts, for {@link workoutFinishedInRide}'s reason,
+   * and cleared with it. The latest test wins: a ride holds one result card.
+   */
+  let testInRide: { readonly test: ThresholdTest; readonly workout: WorkoutInProgress } | undefined;
+  /**
    * Every re-plan decision made during this recording — #1244, ADR 0048 P9.
    * Collected when a workout's session ends ({@link endWorkoutSession}), for
    * {@link workoutFinishedInRide}'s reason, and cleared with it.
@@ -1561,6 +1586,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let releaseFault: string | undefined;
+  /** @see TrainerSnapshot.easedOffTo */
+  let easedOffTo: Watts | undefined;
   /** The last *Set* the rescue deferred, and how many it has deferred. @see TrainerSnapshot.ergHeld */
   let held: { readonly target: Watts; readonly press: number } | undefined;
   let heldPresses = 0;
@@ -2228,24 +2255,71 @@ export function createRideController(options: RideControllerOptions): RideContro
    * listener in `wire` — which shows "Control lost" and pauses a workout — is
    * never reached from a path that meant to let go. Nothing re-requests
    * control after this either: rule 2 at the top of the file.
+   *
+   * ⚠️ **`stepDown` is the end of a workout's, and it is written FIRST**
+   * (#2348). A Stop leaves the last ERG target applied on the trainer
+   * measured, and a ramp test's last target is the hardest of the ride. So a
+   * workout hands in its trainer's floor, and it is written as a `0x05`
+   * immediately before the Stop: both are put on the control client's one
+   * queue in this call, in that order, behind whatever target is already on
+   * it, so nothing can land between them. It goes through
+   * {@link gatedTargets} like every ERG target (an ease to the floor always
+   * passes the forget rule), so the device's memory of what the trainer
+   * holds is the floor afterwards. A release already on the wire is joined
+   * and NOT stepped down: a `0x05` after its Stop would take the machine
+   * back into ERG. A step-down the trainer did not confirm is
+   * {@link STEP_DOWN_UNCONFIRMED} on {@link TrainerSnapshot.releaseFault},
+   * ahead of anything the Stop said.
    */
-  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> => {
+  const beginRelease = (
+    client: TrainerControl,
+    stepDown?: { readonly to: Watts; readonly floor: Watts },
+  ): {
+    readonly stop: Promise<TrainerRelease>;
+    /** Whether the trainer confirmed the step-down; `undefined` when none was written. */
+    readonly steppedDown: Promise<boolean | undefined>;
+  } => {
     // A release ends a hand-set target too, and its rescue with it (#567): a
     // stall rescue writing a 0x05 after the Stop would be taking the machine
     // back into ERG after the rider was told it had been let go.
     endManualErg();
     if (releasing !== undefined) {
-      return releasing;
+      return { stop: releasing, steppedDown: Promise.resolve(undefined) };
     }
+    // ⚠️ Called before `letGo` below, in the same synchronous run: the order
+    // of the two calls is the order on the wire.
+    const steppedDown: Promise<boolean | undefined> =
+      stepDown === undefined
+        ? Promise.resolve(undefined)
+        : gatedTargets(client, stepDown.floor)
+            .setTargetPower(stepDown.to)
+            .then(
+              () => true,
+              () => false,
+            );
     const attempt = client.letGo().then(
-      (outcome) => {
-        releaseFault = outcome.kind === 'stopped' ? undefined : RELEASE_INCOMPLETE;
+      async (outcome) => {
+        // Settled already: it was ahead of the Stop on the one queue.
+        const eased = await steppedDown;
+        releaseFault =
+          eased === false
+            ? STEP_DOWN_UNCONFIRMED
+            : outcome.kind === 'stopped'
+              ? undefined
+              : RELEASE_INCOMPLETE;
+        // #2348, the owner's ruling of 2026-11-07: only when both the
+        // step-down and the Stop were confirmed may the panel say so.
+        easedOffTo =
+          eased === true && outcome.kind === 'stopped' && stepDown !== undefined
+            ? stepDown.to
+            : undefined;
         // A setpoint the rider asked for can no longer be answered.
         requested = undefined;
         return outcome;
       },
       (error: unknown) => {
         releaseFault = `${RELEASE_INCOMPLETE} (${describe(error)})`;
+        easedOffTo = undefined;
         throw error;
       },
     );
@@ -2256,8 +2330,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         changed();
       })
       .catch(() => undefined);
-    return attempt;
+    return { stop: attempt, steppedDown };
   };
+  /** {@link beginRelease} with no step-down: every release but a workout's. */
+  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> =>
+    beginRelease(client).stop;
 
   /** Whether any **connected** sensor supplies this channel. */
   const isPaired = (capability: MeasurementCapability): boolean =>
@@ -2542,6 +2619,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         lost: controlLost,
         refusal,
         releaseFault,
+        easedOffTo,
         ergRescue: manual?.erg.rescue(),
         // #655: only while that press is still what the rescue is holding.
         ergHeld:
@@ -3017,6 +3095,18 @@ export function createRideController(options: RideControllerOptions): RideContro
             // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
             averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
             gameOutcome: outcomeInGame,
+            // #2307: a test's estimate, from the blocks and power this save wrote.
+            ...(testInRide === undefined
+              ? {}
+              : {
+                  thresholdTest: estimateFromRide(testInRide.test, {
+                    blocks: finished.activity.rideFacts?.workoutBlocks,
+                    firstBlock: testInRide.workout.blocksAfter ?? 0,
+                    startedAt: finished.streams.startedAt,
+                    sampleInterval: finished.streams.sampleInterval,
+                    power: finished.streams.channels.power,
+                  }),
+                }),
           }
         : undefined;
     if (outcome.status === 'saved' || outcome.status === 'empty') {
@@ -4169,6 +4259,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       lastManualLap = undefined;
       // #947: the same place, for the same reason.
       workoutFinishedInRide = false;
+      // #2307: and the threshold test ridden on that ride.
+      testInRide = undefined;
       // #1244: and the re-plan decisions that went with that ride.
       replanRecords = [];
       // ⚠️ But not `replanLastAskedAt` (#1329): the three minutes outlive the ride.
@@ -4333,6 +4425,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       endWorkoutSession('replace');
+      // #2348: the last workout's "eased off and released" is about to stop being true.
+      easedOffTo = undefined;
       // #567: the workout owns the target from here. A hand-set target's rescue
       // left running would be a second writer on one control point.
       endManualErg();
@@ -4347,7 +4441,17 @@ export function createRideController(options: RideControllerOptions): RideContro
           // `stop` and `letGo` are not: a release is never held back.
           setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
           stop: () => client.stop(),
-          letGo: () => releaseTrainer(client),
+          // #2348: the step-down, when the session asks for one, is written
+          // by the same release, immediately before its Stop.
+          letGo: async (stepDownTo): Promise<WorkoutRelease> => {
+            const release = beginRelease(
+              client,
+              stepDownTo === undefined
+                ? undefined
+                : { to: stepDownTo, floor: connection.powerRange.minimum },
+            );
+            return { stop: await release.stop, steppedDown: await release.steppedDown };
+          },
           // #1305: a read. What the client believes the trainer holds, a
           // hand-set target from before this workout included, and what
           // this app last had acknowledged where the client has forgotten.
@@ -4378,6 +4482,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         blockPower: undefined,
       };
       workout = started;
+      // #2307: a threshold test, to estimate from once the ride is saved.
+      const test = thresholdTestOf(record.id);
+      if (test !== undefined) {
+        testInRide = { test, workout: started };
+      }
       // #1244, P7: only when the rider switched re-plans on for THIS workout,
       // and only with their own two thresholds (H1): `heartRateHold` is absent
       // without them. Off, the port is not asked for anything.
@@ -4467,6 +4576,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         // Control is the rider's again; a notice about the last release would
         // now be describing a machine this client is driving.
         releaseFault = undefined;
+        easedOffTo = undefined;
       } catch (error) {
         // #1435: a refusal a rider can act on, chosen by its code.
         refusal = controlRefusalWords(error);
@@ -4500,6 +4610,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       requested = target;
       refusal = undefined;
+      // #2348: a hand-set target replaces "eased off and released".
+      easedOffTo = undefined;
       changed();
       try {
         // #567: through the hand-set target's own ERG writer, so its stall
@@ -4570,6 +4682,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
           endManualErg();
+          // #2348: a gradient replaces "eased off and released".
+          easedOffTo = undefined;
           return client.setSimulationParameters(parameters);
         },
         letGo: () => releaseTrainer(client),

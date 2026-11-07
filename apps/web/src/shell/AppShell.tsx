@@ -671,6 +671,8 @@ function viewFor(
           controller={props.rideController}
           workouts={props.workouts}
           analysis={props.analysis}
+          // #2306: a tailored built-in to ride, from the address.
+          query={match.query}
           // #551: the side camera's line, its Stop, and its link going said.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
@@ -753,6 +755,8 @@ function viewFor(
           selected={match.parameter}
           // #2304: the built-in list's filter, from the address.
           query={match.query}
+          // #2305: the rider's thresholds, for a tailored built-in in watts.
+          analysis={props.analysis}
         />
       );
     case 'game':

@@ -216,7 +216,10 @@ describe('the address a filter lives at — #2304', () => {
     expect(matchHash('#/workouts')).toEqual({ route: matchHash('#/workouts').route });
   });
 
-  it('is read on Workouts and on no other route', () => {
+  it('is read on Workouts — and since #2306 on Ride — and on no other route', () => {
+    expect(matchHash('#/ride?workout=built-in%3Atempo-2x20').query).toBe(
+      'workout=built-in%3Atempo-2x20',
+    );
     expect(matchHash('#/routes?category=tempo').query).toBeUndefined();
     expect(matchHash('#/game?route=r1').query).toBeUndefined();
   });

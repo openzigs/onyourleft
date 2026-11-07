@@ -97,6 +97,13 @@ condition, measured and met, that the app can take control again. So `TrainerCon
 ride ending by button or by navigating away. What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
+⚠️ **Since [#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout writes the
+trainer's floor before its Stop.** A ramp test ended with the machine keeping its top target (373 W on
+the simulator) through the Stop, under a spent rider. So a workout's release hands `beginRelease` the
+machine's own minimum, written as a `0x05` immediately before the `0x08` on the client's one queue,
+unless the session knows the trainer is already at the floor with nothing on the wire. A step-down
+the trainer does not confirm is told as `workout/session.ts` §`STEP_DOWN_UNCONFIRMED` on *Not
+released*. *End ERG* and a game ride's release are unchanged.
 ⚠️ **Easing a rider DURING a workout is a different command**
 ([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
 Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
