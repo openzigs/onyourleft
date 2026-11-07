@@ -1737,43 +1737,54 @@ function WindControls(props: {
         />
         Ride in a wind
       </label>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={WIND_SPEED_ID}>{`Wind speed, ${props.speedUnit}`}</label>
-        <Stepper name="wind speed" step={1} min={0}>
-          <input
-            id={WIND_SPEED_ID}
-            className="oyl-input"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step={0.1}
-            value={props.speed}
-            {...markedFor('speed')}
-            onChange={(event) => {
-              props.onSpeed(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={WIND_BEARING_ID}>Wind direction, degrees it blows from</label>
-        <Stepper name="wind direction" step={15} min={0} max={MAXIMUM_BEARING_DEGREES}>
-          <input
-            id={WIND_BEARING_ID}
-            className="oyl-input"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={MAXIMUM_BEARING_DEGREES}
-            step={1}
-            value={props.fromBearing}
-            {...markedFor('fromBearing')}
-            onChange={(event) => {
-              props.onFromBearing(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
+      {/*
+        #2330: the two boxes are shown only while the switch is on. Off, the
+        speed box sat empty under it and read as a value the rider still owed;
+        `windChoice` reads neither box while no wind is asked for, so there is
+        nothing to show. What was typed survives a switch off and on again,
+        because the values live in `GameView`, not in these inputs.
+      */}
+      {props.withWind ? (
+        <>
+          <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+            <label htmlFor={WIND_SPEED_ID}>{`Wind speed, ${props.speedUnit}`}</label>
+            <Stepper name="wind speed" step={1} min={0}>
+              <input
+                id={WIND_SPEED_ID}
+                className="oyl-input"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.1}
+                value={props.speed}
+                {...markedFor('speed')}
+                onChange={(event) => {
+                  props.onSpeed(event.target.value);
+                }}
+              />
+            </Stepper>
+          </div>
+          <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+            <label htmlFor={WIND_BEARING_ID}>Wind direction, degrees it blows from</label>
+            <Stepper name="wind direction" step={15} min={0} max={MAXIMUM_BEARING_DEGREES}>
+              <input
+                id={WIND_BEARING_ID}
+                className="oyl-input"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={MAXIMUM_BEARING_DEGREES}
+                step={1}
+                value={props.fromBearing}
+                {...markedFor('fromBearing')}
+                onChange={(event) => {
+                  props.onFromBearing(event.target.value);
+                }}
+              />
+            </Stepper>
+          </div>
+        </>
+      ) : null}
       {/*
         Rendered only when there is a problem, which is what keeps every
         `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on
