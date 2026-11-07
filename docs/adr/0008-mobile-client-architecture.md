@@ -547,6 +547,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the realistic world at 46 s and 66 s on that forecast while frame time stayed at 59–60 fps, and
   ruled: *"ignore heat entirely. The quality ladder decides on frame time alone, and Android
   throttles the device itself if it gets too hot."* `apps/web/src/game/quality.ts` therefore feeds
-  nothing thermal into its decisions. The thermal port and the native reading are not removed by this
-  entry; they have no consumer in the ladder. #91's 60-minute run (above) is read on frame times
-  alone.
+  nothing thermal into its decisions. With no consumer left, the thermal port, its watcher, the
+  shell's `ThermalPlugin.java` and `apps/mobile/src/thermal/` are removed, so the thermal-headroom
+  reading is no longer among the native capabilities; the foreground-service wake lock remains.
+  #91's 60-minute run (above) is read on frame times alone.

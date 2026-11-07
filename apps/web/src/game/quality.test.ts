@@ -724,6 +724,36 @@ describe('the realistic ladder waits for its world — #2289', () => {
     expect(realisticWorldArrived(stylised)).toBe(stylised);
   });
 
+  it('keeps a realistic ride whose forecast reads 0.99 throughout while its frames run at 17 ms — the owner’s ruling', () => {
+    // The Pixel 8's ride of 2026-11-06, as the shell used to report it: frames at
+    // 60 fps and a forecast past 0.85. Heat is not an input; Android throttles
+    // the device itself.
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      withForecast(17, 0.99),
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const ridden = sustainWorld(settled, withForecast(17, 0.99), SUSTAINED_SAMPLES * 40);
+    expect(ridden.realistic).toBe(true);
+    expect(ridden.quality.level).toBe(0);
+  });
+
+  it('still steps a genuinely slow realistic world down, and out, on frame time', () => {
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      { frameMs: 17 },
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const slow: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 1 };
+    const once = sustainWorld(settled, slow, SUSTAINED_SAMPLES);
+    expect(once.realistic).toBe(true);
+    expect(once.quality.level).toBe(1);
+    expect(sustainWorld(once, slow, SUSTAINED_SAMPLES)).toEqual({
+      realistic: false,
+      quality: INITIAL_QUALITY,
+    });
+  });
+
   it('names its hot signal as the ladder reads it', () => {
     expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE + 0.1 })).toBe(true);
     expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE })).toBe(false);
