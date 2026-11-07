@@ -113,27 +113,45 @@ describe('the workout the choices make is tailorWorkout’s — #2305', () => {
   it('says the domain’s own refusal, as a sentence', () => {
     expect(tailorFromDraft(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, length: '30' })).toEqual({
       status: 'refused',
+      control: 'length',
       message:
         '"Sweet spot, three by twelve" can be no shorter than 40 minutes; you asked for 30 minutes.',
     });
     expect(tailorFromDraft(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, intensity: '20' })).toEqual({
       status: 'refused',
+      control: 'intensity',
       message:
         'The intensity of "Sweet spot, three by twelve" can be set from −25% to +10%; you asked for +20%.',
+    });
+  });
+
+  it('names the control that is refused when the rider has also made a valid choice after it', () => {
+    const draft = { ...EMPTY_TAILOR_DRAFT, length: '30', intensity: '-5' };
+    expect(tailorFromDraft(SWEET_SPOT, draft)).toMatchObject({
+      status: 'refused',
+      control: 'length',
+    });
+    const other = { ...EMPTY_TAILOR_DRAFT, length: '45', intensity: '20' };
+    expect(tailorFromDraft(SWEET_SPOT, other)).toMatchObject({
+      status: 'refused',
+      control: 'intensity',
     });
   });
 
   it('refuses a box that holds no number, naming what to type', () => {
     expect(tailorFromDraft(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, repeats: 'three' })).toEqual({
       status: 'refused',
+      control: 'repeats',
       message: 'Type the number of repeats as a whole number.',
     });
     expect(tailorFromDraft(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, intensity: 'more' })).toEqual({
       status: 'refused',
+      control: 'intensity',
       message: 'Type the intensity as a number of percent, such as −5 or 5.',
     });
     expect(tailorFromDraft(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, recovery: '2m' })).toEqual({
       status: 'refused',
+      control: 'recovery',
       message: 'Type the recovery as a number of seconds.',
     });
   });
