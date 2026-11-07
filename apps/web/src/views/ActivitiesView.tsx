@@ -679,7 +679,7 @@ export function ActivitiesView({
  * Average power is shown only where the ride has it. A ride with no power
  * meter is not drawn as "0 W" or "—": the reading is simply absent. So is
  * distance where the ride stored none — a ride recorded with no speed channel
- * stores 0 (`recording/finish.ts` §`distanceOf`), and "0.0 km" would be an
+ * stores 0 (`recording/totals.ts` §`rideDistance`), and "0.0 km" would be an
  * invented reading (#1041's review).
  */
 function RideCard({

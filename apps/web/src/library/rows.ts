@@ -58,8 +58,8 @@ export interface LibraryRow {
    * heading and these digits cannot be in different systems.
    *
    * `undefined` when the ride stored a distance of nought: a ride recorded
-   * with no speed channel stores `metres(0)` (`recording/finish.ts`
-   * §`distanceOf`), which is "no distance known", not a ride of 0.0 km — the
+   * with no speed channel stores `metres(0)` (`recording/totals.ts`
+   * §`rideDistance`), which is "no distance known", not a ride of 0.0 km — the
    * same reason {@link averagePower} is `undefined` rather than 0 W (#1041's
    * review).
    */

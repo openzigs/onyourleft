@@ -61,14 +61,10 @@
 
 import {
   localDay,
-  metres,
-  watts,
-  type Metres,
   type RecordedSeries,
   type ReplanRecord,
   type Seconds,
   type UnixSeconds,
-  type Watts,
 } from '@onyourleft/domain';
 import type {
   ActivityId,
@@ -87,6 +83,7 @@ import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
 import { lapsToSave } from './laps';
+import { rideAveragePower, rideDistance } from './totals';
 import { workoutBlocksToSave } from './workout-blocks';
 
 /**
@@ -187,7 +184,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
 
   const startedAt = series.startedAt;
   const power = series.channels.power;
-  const average = averagePowerOf(power);
+  const average = rideAveragePower(power);
 
   const activity: NewActivity = {
     id: input.id,
@@ -197,7 +194,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     startedAtTimeZone: input.timeZone,
     elapsedTime: input.elapsedTime,
     movingTime: input.movingTime,
-    distance: distanceOf(series),
+    distance: rideDistance(series),
     hasPosition: series.channels.latitude !== undefined,
     ...(average === undefined ? {} : { averagePower: average }),
     // Computed here because the samples are in hand, which is the importer's
@@ -259,53 +256,6 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       channels: series.channels,
     },
   };
-}
-
-/**
- * How far the rider went, integrated from the speed channel.
- *
- * ⚠️ **Integrated rather than read**, because there is no distance channel —
- * ADR 0011's eight are power, heart rate, cadence, speed, latitude, longitude,
- * altitude and temperature. An imported file usually states a distance or
- * carries per-point ones; a recorded ride has neither.
- *
- * **A sample with no speed adds no distance.** That is the same refusal
- * `ghost-source.ts` makes about a dropout: carrying the last known speed across
- * a hole invents ground the rider may never have covered. It means a ride whose
- * speed sensor dropped reports short — which is visible and conservative, where
- * inventing the distance is neither.
- */
-function distanceOf(series: RecordedSeries<StreamChannelValue>): Metres {
-  const speed = series.channels.speed;
-  if (speed === undefined) {
-    return metres(0);
-  }
-  let total = 0;
-  for (const sample of speed) {
-    if (sample !== undefined) {
-      total += sample * series.sampleInterval;
-    }
-  }
-  return metres(total);
-}
-
-/** The mean of the readings that exist. `undefined` for a ride with no power. */
-function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watts | undefined {
-  if (power === undefined) {
-    return undefined;
-  }
-  let total = 0;
-  let count = 0;
-  for (const sample of power) {
-    if (sample !== undefined) {
-      total += sample;
-      count += 1;
-    }
-  }
-  // ⚠️ Divided by the readings that EXIST, not by the ride's length. A dropout
-  // is missing data, not a stretch at zero watts, and averaging over the whole
-  // series would make a ride with a flaky meter look easier than it was.
-  return count === 0 ? undefined : watts(Math.round(total / count));
 }
 
 /** What this module needs from the store, and nothing more. */

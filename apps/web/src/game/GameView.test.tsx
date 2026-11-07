@@ -2025,3 +2025,39 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     );
   });
 });
+
+/**
+ * #2077 — the rider's W/kg and zone, wired: the weight the shell hands the
+ * game (the weight the physics rides) and the rider's own threshold, read
+ * through the game's port. `fields.test.ts` holds the arithmetic.
+ */
+describe('the rider’s W/kg and zone on the HUD — #2077', () => {
+  async function rideWith(port: GamePort, riderMass?: Kilograms): Promise<void> {
+    mounted = await mount(<GameView port={port} riderMass={riderMass} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(10);
+  }
+
+  it('draws the zone of the rider’s own threshold, and W/kg over their own weight', async () => {
+    await rideWith(
+      { ...pedallingPort(testRoute()), ownThresholdPower: () => Promise.resolve(watts(200)) },
+      kilograms(80),
+    );
+    // 220 W over a 200 W threshold is 1.10 of it: zone 5.
+    expect(hudField('Zone')).toMatch(/^5\s*VO₂/);
+    // 220 W over 80 kg.
+    expect(hudField('W/kg')).toBe('2.8');
+  });
+
+  it('draws no zone with no threshold set, and a dash for W/kg with no weight', async () => {
+    await rideWith(pedallingPort(testRoute()));
+    expect(
+      queryAll(mounted?.container ?? document, '.oyl-hud__field dt').map((dt) => dt.textContent),
+    ).not.toContain('Zone');
+    expect(hudField('W/kg')).toBe(NO_READING);
+  });
+});

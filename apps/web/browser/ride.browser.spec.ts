@@ -135,6 +135,10 @@ import {
   CLOCK_READING,
   clockInTheClockRow,
   gradientInPrimary,
+  RIDE_TOTAL_READINGS,
+  rideTotalsDrawn,
+  LAPTOP_VIEWPORTS,
+  roomGivesWay,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -181,15 +185,23 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Moving',
         'Elapsed',
         'Clock',
+        // #2076: the ride so far, in the document wherever it is drawn.
+        'Distance',
+        'Climbed',
+        'Avg power',
+        // #2077: the rider's effort, after the ride so far.
+        'W/kg',
+        'Zone',
         'Pacer',
         'Your best',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
       // Twelve readings, the strip, the plan view, the trainer line, two
-      // controls and, since #1482, the touch lock — and since #2075 the road
-      // ahead beside the strip.
-      expect(seen.items).toHaveLength(19);
+      // controls and, since #1482, the touch lock — since #2075 the road ahead
+      // beside the strip, and since #2076 and #2077 the ride so far and the
+      // rider's effort, where they are drawn.
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 24 : 19);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -840,6 +852,87 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
   });
 }
 
+/**
+ * #2076 — the ride so far, and since #2077 the rider's W/kg and zone after it:
+ * DRAWN on a tablet and where the HUD stacks, inside
+ * the secondary panel, uncovered and over no other reading; GIVEN WAY by clip
+ * on a phone's overlay, and still in the secondary list in #94's order, where
+ * a screen reader meets it (`theme.css` §"THE RIDE SO FAR"). Both ways (#1120).
+ */
+for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+  test(`#2076 the ride so far is drawn where there is a row for it — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    // The recorder's figures, through the port and `GameView` to the fields
+    // (`ride-harness.tsx` §`RIDE_TOTALS`) — read from the document, where they
+    // are whether drawn or given way.
+    const values = await page.evaluate(() =>
+      [...document.querySelectorAll('.oyl-hud__field--total .oyl-hud__value')].map((each) =>
+        (each.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
+    );
+    expect(values).toEqual(['199.9 km', '4850 m', '425 W']);
+    // #2077: the zone of the harness's 342 W over the rider's own 250 W
+    // threshold, its number and name, and this ride's time in all seven zones.
+    const zone = await page.evaluate(() => {
+      const field = document.querySelector('.oyl-hud__field--effort:has(.oyl-hud__zone-bar)');
+      return {
+        reads: (field?.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        swatch: field?.querySelector('.oyl-hud__zone-swatch--6') !== null,
+        parts: field?.querySelectorAll('.oyl-hud__zone-bar-part').length ?? 0,
+      };
+    });
+    expect(zone).toEqual({ reads: '6 Anaerobic', swatch: true, parts: 7 });
+    for (const [how, seen] of await bothWays(page)) {
+      expect(seen.secondary, how).toEqual(
+        expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
+      );
+      if (!rideTotalsDrawn(viewport)) {
+        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS]);
+        continue;
+      }
+      expect(seen.givenWay, how).toEqual([]);
+      const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
+      if (panel === undefined) throw new Error(`${how}: no secondary panel`);
+      // Stacked, the readings scroll: drawn, in their panel and over no other
+      // reading is what holds there; on a tablet they are on the stage too.
+      const stacked = STACKED_VIEWPORTS.includes(viewport);
+      for (const name of RIDE_TOTAL_READINGS) {
+        const reading = named(seen.items, name);
+        expect(
+          reading.box.width * reading.box.height,
+          `${how}: ${describeItem(reading)}`,
+        ).toBeGreaterThan(1);
+        if (!stacked) {
+          expect(
+            inside(reading.box, viewport) && reading.onTop,
+            `${how}: ${describeItem(reading)}`,
+          ).toBe(true);
+        }
+        expect(
+          reading.box.left >= panel.box.left - SUBPIXEL_TOLERANCE &&
+            reading.box.right <= panel.box.right + SUBPIXEL_TOLERANCE &&
+            reading.box.top >= panel.box.top - SUBPIXEL_TOLERANCE &&
+            reading.box.bottom <= panel.box.bottom + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(reading)} in ${describeItem(panel)}`,
+        ).toBe(true);
+        expect(
+          seen.items
+            .filter(
+              (each) =>
+                each !== reading &&
+                each.name.startsWith('reading: ') &&
+                overlap(each.box, reading.box),
+            )
+            .map(describeItem),
+          how,
+        ).toEqual([]);
+      }
+    }
+  });
+}
+
 for (const viewport of STACKED_VIEWPORTS) {
   test.describe(viewport.name, () => {
     test('the harness is on the stage, stacked', async ({ browser }) => {
@@ -847,8 +940,9 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      // Twelve readings since #2072's elapsed time and clock, and the rest as above.
-      expect(seen.items).toHaveLength(19);
+      // Twelve readings since #2072's elapsed time and clock, and the rest as
+      // above — and the ride so far (#2076), drawn where the HUD stacks.
+      expect(seen.items).toHaveLength(24);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -2046,4 +2140,118 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
       'at the body’s leading the panel stays clear, so the assertion above cannot fail here',
     ).toBeGreaterThan(fold + 0.5);
   });
+});
+
+/**
+ * The owner's ruling of 2026-11-06 (#2034): what a phone's overlay gives way
+ * — the ride so far among it — is tied to PHONES, so a laptop's or a
+ * desktop's window under 47 rem tall draws it, on a plain ride and in a
+ * room, and its layout holds the ride's own invariants there: every reading
+ * and control on the stage and uncovered, every panel whole, none over
+ * another or over the leaning rider. In a room the pacer, the ghost and the
+ * wind give way first under 45 rem tall, and stay in a 1280×720 window; and under 40 rem tall (1024×600), while
+ * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
+ * FAR AT ARM'S LENGTH").
+ */
+/** A room with *Report*'s reasons open, sounds on and a side camera filming. */
+const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
+
+/** Two notices drawn: *Keep the screen on* and the road notice. */
+const TWO_NOTICES = '?keepalive=failed&trainer=workout';
+
+/** #2076's three, which a laptop's window under 40 rem tall gives way to two notices. */
+const RIDE_SO_FAR: readonly string[] = [
+  'reading: Distance',
+  'reading: Climbed',
+  'reading: Avg power',
+];
+
+for (const viewport of LAPTOP_VIEWPORTS) {
+  for (const query of [
+    '',
+    '?room=following',
+    TWO_NOTICES,
+    // A room at its fullest with a side camera's row: `main` itself runs it
+    // off a 1024×600 stage, so it is held where `main` holds it.
+    ...(viewport.height >= 640 ? [SIDE_CAMERA_ROOM] : []),
+  ]) {
+    const state =
+      query === ''
+        ? ''
+        : query === TWO_NOTICES
+          ? ', with two notices drawn'
+          : query === SIDE_CAMERA_ROOM
+            ? ', in a room with Report open and a side camera'
+            : ', in a room';
+    test(`#2034 a laptop's window draws the ride so far${state} — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport, query);
+      for (const [how, seen] of await bothWays(page)) {
+        const rideSoFarGivesWay = query === TWO_NOTICES && viewport.height < 640;
+        for (const name of RIDE_TOTAL_READINGS) {
+          if (rideSoFarGivesWay && RIDE_SO_FAR.includes(name)) {
+            expect(seen.givenWay, how).toContain(name);
+            continue;
+          }
+          const reading = named(seen.items, name);
+          expect(
+            inside(reading.box, viewport) && reading.onTop,
+            `${how}: ${describeItem(reading)}`,
+          ).toBe(true);
+        }
+        const clipped = seen.items
+          .filter((each) => each.box.width * each.box.height <= 1)
+          .map((each) => each.name);
+        // In a room the pacer, the ghost and the wind give way only where
+        // they do not fit: under 40 rem tall, and under 45 rem with a side
+        // camera's row (1366×657).
+        const givesWay =
+          (query === '?room=following' && roomGivesWay(viewport)) ||
+          (query === SIDE_CAMERA_ROOM && viewport.height < 720);
+        expect(clipped, how).toEqual(
+          givesWay ? ['reading: Pacer', 'reading: Your best', 'reading: Wind'] : [],
+        );
+        const lost = seen.items
+          .filter((each) => !clipped.includes(each.name))
+          .filter((each) => !inside(each.box, viewport) || !each.onTop)
+          .map(describeItem);
+        expect(lost, how).toEqual([]);
+        const rider = riderBox(viewport);
+        const faults: string[] = [];
+        seen.panels.forEach((a, index) => {
+          if (!inside(a.box, viewport)) faults.push(`not whole: ${describeItem(a)}`);
+          if (overlap(a.box, rider)) faults.push(`over the rider: ${describeItem(a)}`);
+          for (const b of seen.panels.slice(index + 1)) {
+            if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+          }
+        });
+        expect(faults, how).toEqual([]);
+      }
+    });
+  }
+}
+
+/**
+ * PR #2220's review: the 1024×600 rule counts only DRAWN notices. Folding the
+ * road notice away leaves its wrapper in the cell, visually hidden; with only
+ * *Keep the screen on* drawn, the ride so far is drawn again.
+ */
+test('#2034 the folded road notice does not count — the ride so far comes back — a small laptop window — 1024×600', async ({
+  page,
+}) => {
+  const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
+  await openRide(page, viewport, TWO_NOTICES);
+  await expect.poll(async () => (await measure(page)).givenWay).toContain('reading: Distance');
+  await page.getByRole('button', { name: 'Trainer notice' }).click();
+  await expect.poll(async () => (await measure(page)).givenWay).not.toContain('reading: Distance');
+  for (const [how, seen] of await bothWays(page)) {
+    for (const name of RIDE_SO_FAR) {
+      const reading = named(seen.items, name);
+      expect(
+        inside(reading.box, viewport) && reading.onTop,
+        `${how}: ${describeItem(reading)}`,
+      ).toBe(true);
+    }
+  }
 });
