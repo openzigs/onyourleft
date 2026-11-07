@@ -109,6 +109,27 @@ in it leaves the device, the bake never reads it, and the share-alike reasoning 
 still holds for it. The bundle is a separate database, made at build time from the archive, and it
 is the only OpenStreetMap-derived database this project publishes.
 
+## The lap race's built-in circuits
+
+[ADR 0064](adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md), **Accepted** on
+2026-11-06 on the owner's [ruling of that day](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818) on #2297, after the ruling of the same day on
+[#2293](https://github.com/openzigs/onyourleft/issues/2293). Nothing below is built until #2293
+lands; until then the sentence above stays true.
+
+- **What is in it.** Three or four short loops for solo races against bots, one JSON file each:
+  the loop's line, drawn on the project's own archive's streets, and its heights, with no corridor,
+  no OSM identifier and no name but the circuit's own. Committed, and shipped inside the app.
+- **Its licence.** Each file is treated as a Derivative Database that is Publicly Conveyed, so it is
+  offered under ODbL 1.0 with the licence, source and §4.3 notice inside it and a
+  `LICENCE-ODbL.txt` beside it. §4.6 a is the files themselves, in the repository and in every build.
+- **Where attribution is shown.** Beside the circuits in the course picker, on the credits screen,
+  and on the ride screen for the whole of a ride on a circuit, in every world.
+- **The no-credit sentence above changes when it is built.** A stylised-world ride on a circuit
+  shows the credit, so the list of worlds that show none loses that parenthesis then, and not
+  before.
+- **The on-device store is unchanged.** A circuit's corridor, with the realistic world chosen, is
+  read and kept like any route's, and never leaves the device.
+
 ## What does not change
 
 The archive itself is distributed by Protomaps as *"an Open Database License Produced Work

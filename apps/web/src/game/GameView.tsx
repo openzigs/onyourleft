@@ -191,7 +191,12 @@ import {
   type CuePreference,
 } from './cue-preference';
 import { SoundControls } from './SoundControls';
-import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
+import {
+  RoutePicker,
+  type DeliveryCourse,
+  type RecordingOffer,
+  type RidableRoute,
+} from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
@@ -211,6 +216,7 @@ import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
 import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
 import { readDeliveryProgress } from './delivery/delivery-progress';
+import { countCourses } from './delivery/courses';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -996,6 +1002,16 @@ function GameScreen({
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
   const [withDelivery, setWithDelivery] = useState(false);
+  /**
+   * Each saved route's houses for a round, by route id, once the round is
+   * chosen — #2294, `delivery/courses.ts`. In memory only, and one number a
+   * route. `courseCountsRef` keeps the counts made by profile, for the next
+   * time the round is switched on.
+   */
+  const [courses, setCourses] = useState<ReadonlyMap<string, DeliveryCourse> | undefined>(
+    undefined,
+  );
+  const courseCountsRef = useRef(new WeakMap<RouteProfile, number>());
   /**
    * Whether the rider switched on a lap race in the chooser, and which race
    * — #1907. Per ride, like the round beside it; one mode a ride, so turning
@@ -1814,6 +1830,33 @@ function GameScreen({
       controller.abort();
     };
   }, [port, corridorRoute, choosing]);
+
+  // #2294: with a Delivery round chosen, every saved route's houses for a
+  // round, counted on this device through the same corridor port, one route
+  // at a time, while the rider chooses — and abandoned, as the read above
+  // is, when a ride starts or the round is switched off. Only with the
+  // realistic world chosen, where the round is offered (DL6).
+  const coursesWanted =
+    choosing && withDelivery && routes !== undefined && readRealisticWorldChoice(deviceStorage());
+  useEffect(() => {
+    setCourses(undefined);
+    const load = port?.loadWorldCorridor?.bind(port);
+    if (load === undefined || routes === undefined || !coursesWanted) return;
+    const controller = new AbortController();
+    setCourses(new Map());
+    void countCourses(
+      routes,
+      load,
+      controller.signal,
+      (routeId, count) => {
+        setCourses((before) => new Map(before).set(routeId, count));
+      },
+      courseCountsRef.current,
+    );
+    return () => {
+      controller.abort();
+    };
+  }, [port, routes, coursesWanted]);
 
   useEffect(() => teardown, [teardown]);
 
@@ -3313,6 +3356,8 @@ function GameScreen({
             chosen: withDelivery,
             onChoose: chooseDelivery,
             week: readDeliveryProgress(deviceStorage()),
+            // #2294: what each saved route holds for the round, as counted.
+            courses,
           }}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
