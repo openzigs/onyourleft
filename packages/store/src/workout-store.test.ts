@@ -325,7 +325,7 @@ describe('a cadence cue survives the disk, and a bad one is refused (#2302)', ()
     expect(read?.workout.blocks).toStrictEqual(cued);
   });
 
-  it('the harness compares a cue by what it holds: green on the real store, red on one that widens it', async () => {
+  it('the harness compares a cue by what it holds: red on a store that widens it', async () => {
     const record = workoutFor(ATHLETE_A, { blocks: cued });
     const fake = createStoreHarness({ factory: widenedCueWorkoutStoreFactory() });
     await seedAthletes(fake);
