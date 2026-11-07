@@ -274,6 +274,8 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type TimeInZones,
+  type Watts,
   type Wind,
   type WorkoutRescue,
 } from '@onyourleft/domain';
@@ -323,6 +325,14 @@ export interface GamePort {
    * drawn. A rider with no instance loses this and nothing else.
    */
   riderGhostOffered?(): boolean;
+  /**
+   * The rider's OWN threshold power, or `undefined` when they have set none —
+   * #2077: the zone indicator is drawn from it and from nothing substituted
+   * (`analysis/thresholds.ts` is the one place a default is, and it is not for
+   * the HUD: a zone of a threshold the rider never set is a guess). Read once
+   * as the game opens. Absent, there is no zone indicator.
+   */
+  ownThresholdPower?(): Promise<Watts | undefined>;
   /**
    * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
    * 0039. Fetched from the instance by the route's digest
@@ -706,6 +716,51 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
     [trainer],
   );
   const read = useCallback(() => trainer?.rideLapSeconds?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
+ * The rider's own threshold power, read once as the game opens — #2077.
+ * `undefined` while it is read and when none is set: the zone indicator's
+ * answer to both is not to be drawn. @see GamePort.ownThresholdPower
+ */
+function useOwnThresholdPower(port: GamePort | undefined): Watts | undefined {
+  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void port
+      ?.ownThresholdPower?.()
+      .then((found) => {
+        if (live) setThreshold(found);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves no threshold, and so no zone
+        // indicator: there is nothing else the HUD could say a rider could act on.
+      });
+    return () => {
+      live = false;
+    };
+  }, [port]);
+  return threshold;
+}
+
+/**
+ * The recorder's time in each power zone of the rider's threshold, kept
+ * current — #2077. Subscribed for {@link useRideMovingSeconds}'s reason; the
+ * port hands back the same object until the recording moves on.
+ */
+function useRidePowerZoneTime(
+  trainer: GameTrainerPort | undefined,
+  threshold: Watts | undefined,
+): TimeInZones | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(
+    () => (threshold === undefined ? undefined : trainer?.ridePowerZoneTime?.(threshold)),
+    [trainer, threshold],
+  );
   return useSyncExternalStore(watch, read);
 }
 
@@ -1232,6 +1287,10 @@ function GameScreen({
   const lapSeconds = useRideLapSeconds(props.trainer);
   /** @see useRideTotals */
   const rideTotals = useRideTotals(props.trainer);
+  /** @see useOwnThresholdPower */
+  const thresholdPower = useOwnThresholdPower(props.port);
+  /** @see useRidePowerZoneTime */
+  const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
@@ -3404,6 +3463,12 @@ function GameScreen({
         lapSeconds={lapSeconds}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
         rideTotals={rideTotals}
+        // #2077: the rider's W/kg from the weight the physics rides (`undefined`
+        // when none is set, never the default), and the zone indicator from
+        // their own threshold and the recorder's time in each zone.
+        riderMass={props.riderMass}
+        thresholdPower={thresholdPower}
+        powerZoneTime={powerZoneTime}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.

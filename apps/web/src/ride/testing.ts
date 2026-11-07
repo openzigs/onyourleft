@@ -237,6 +237,8 @@ export function stubRideController(
 
   const controller: RideController = {
     getSnapshot: () => snapshot,
+    // #2077: a stub records nothing, so it has no time in any zone.
+    powerZoneTime: () => undefined,
     subscribe(listener) {
       listeners.add(listener);
       return () => {

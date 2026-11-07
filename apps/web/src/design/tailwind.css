@@ -85,6 +85,13 @@
   --color-hud-ink-muted: var(--oyl-color-hud-ink-muted);
   --color-hud-border: var(--oyl-color-hud-border);
   --color-hud-stale-ink: var(--oyl-color-hud-stale-ink);
+  --color-hud-zone1: var(--oyl-color-hud-zone1);
+  --color-hud-zone2: var(--oyl-color-hud-zone2);
+  --color-hud-zone3: var(--oyl-color-hud-zone3);
+  --color-hud-zone4: var(--oyl-color-hud-zone4);
+  --color-hud-zone5: var(--oyl-color-hud-zone5);
+  --color-hud-zone6: var(--oyl-color-hud-zone6);
+  --color-hud-zone7: var(--oyl-color-hud-zone7);
   --color-hud-grade-descent: var(--oyl-color-hud-grade-descent);
   --color-hud-grade-flat: var(--oyl-color-hud-grade-flat);
   --color-hud-grade-climb: var(--oyl-color-hud-grade-climb);

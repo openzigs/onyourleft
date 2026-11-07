@@ -427,6 +427,9 @@ test.describe('a room ride’s HUD — #1356', () => {
             'Distance',
             'Climbed',
             'Avg power',
+            // #2077: the rider's effort.
+            'W/kg',
+            'Zone',
             'Pacer',
             'Your best',
             'Wilhelmina Vandersteen-Oduya Mbe',

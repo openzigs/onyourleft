@@ -965,7 +965,8 @@ for (const viewport of VIEWPORTS) {
       expect(none.panel).toBeDefined();
       // The ordinary ride's panel is the two rows every claim below is against
       // — on the tablet since #2130 its six secondary tracks hold the ordinary
-      // ride's six readings in a row, and #2076's ride so far is the second.
+      // ride's six readings in a row, and the ride so far and the rider's
+      // effort (#2076, #2077), which a phone's overlay gives way, the second.
       expect(rows(none)).toBe(2);
       for (const stage of ['start', 'end']) {
         const round = deliveryStage(measured, stage);
