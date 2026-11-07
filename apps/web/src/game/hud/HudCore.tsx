@@ -24,7 +24,7 @@
  * `HudPanel` renders it.
  */
 
-import { useId, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import type { UnitSystem } from '@onyourleft/store';
 
@@ -58,10 +58,14 @@ import {
   GRADE_BANDS,
   LOOK_AHEAD_METRES,
   LOOK_AHEAD_RISE_METRES,
+  LOOK_AHEAD_WORDS,
+  gradeBand,
   lookAhead,
   nextClimbLabel,
   nextClimbText,
+  routeBands,
   type GradeBand,
+  type GradeBandKey,
   type LookAhead,
 } from './look-ahead';
 import { ControllerIntents } from './ControllerIntents';
@@ -505,6 +509,9 @@ function fieldClass(reading: HudReading): string {
     // primary track draws in the secondary panel (`theme.css`
     // §"THE GRADIENT, PRIMARY").
     ...(reading.key === GRADIENT_KEY ? ['oyl-hud__field--gradient'] : []),
+    // #2291: the gradient's digits and glyph in its band's colour (`theme.css`
+    // §"THE GRADIENT IN ITS BAND'S COLOUR").
+    ...(reading.grade === undefined ? [] : [`oyl-hud__field--grade-${bandOf(reading)}`]),
     // #2072: the clock row's two (`theme.css` §"THE CLOCK ROW").
     ...(reading.key === ELAPSED_TIME_KEY ? ['oyl-hud__field--elapsed'] : []),
     ...(reading.key === CLOCK_KEY ? ['oyl-hud__field--clock'] : []),
@@ -543,7 +550,11 @@ function FieldList(props: {
       aria-label={PANEL_NAMES[props.tier]}
     >
       {mine.map((reading) => (
-        <div key={reading.key} className={fieldClass(reading)}>
+        <div
+          key={reading.key}
+          className={fieldClass(reading)}
+          data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
+        >
           <dt className="oyl-hud__label">{reading.label}</dt>
           <dd
             className={
@@ -558,7 +569,12 @@ function FieldList(props: {
               <span className="oyl-hud__unit">
                 {' '}
                 {reading.unit}
-                {reading.slope === undefined ? null : <SlopeGlyph slope={reading.slope} />}
+                {reading.slope === undefined ? null : (
+                  <SlopeGlyph
+                    slope={reading.slope}
+                    band={reading.grade === undefined ? undefined : bandOf(reading)}
+                  />
+                )}
               </span>
             )}
             {reading.detail === undefined ? null : (
@@ -633,9 +649,14 @@ function ZoneBar(props: { readonly shares: readonly number[] }): JSX.Element {
  * smaller than the digits, which is what lets `+12.5` fit a primary track on
  * a phone on its side. The text is the value's own, so a reader of the `dd`
  * reads `+4.5` exactly as `fields.ts` formatted it.
+ *
+ * #2291: the gradient's DIGITS are a span of their own too, which `theme.css`
+ * colours by the band, and the sign is not in it. The digits are never under
+ * 24 px, so a band's colour is a large-text pair (3:1, declared in
+ * `tokens.ts`); the sign is half their size, small text, and keeps the ink.
  */
 function Value(props: { readonly reading: HudReading }): JSX.Element {
-  const { value, slope, zone } = props.reading;
+  const { value, slope, grade, zone } = props.reading;
   // #2077: the zone's number beside a swatch of the zone's own colour. The
   // swatch is `aria-hidden`: the number IS the reading, and the name under it
   // says the same in words, so the colour is never the only carrier.
@@ -655,13 +676,21 @@ function Value(props: { readonly reading: HudReading }): JSX.Element {
     );
   }
   const sign = value.charAt(0);
-  if (slope === undefined || (sign !== '+' && sign !== '-')) return <>{value}</>;
+  const signed = slope !== undefined && (sign === '+' || sign === '-');
+  const digits = signed ? value.slice(1) : value;
+  const drawn = grade === undefined ? digits : <span className="oyl-hud__digits">{digits}</span>;
+  if (!signed) return <>{drawn}</>;
   return (
     <>
       <span className="oyl-hud__sign">{sign}</span>
-      {value.slice(1)}
+      {drawn}
     </>
   );
+}
+
+/** The band of the grade a reading shows — #2291. @see HudReading.grade */
+function bandOf(reading: HudReading): GradeBandKey {
+  return gradeBand(reading.grade ?? 0).key;
 }
 
 /**
@@ -669,9 +698,19 @@ function Value(props: { readonly reading: HudReading }): JSX.Element {
  * for a climb, falling for a descent, flat for level road, so the sign is
  * read as a shape as well as a character (`fields.ts`
  * §`HudReading.slope`). ⚠️ `aria-hidden`: the signed value says it in text.
+ *
+ * #2291: STEEPER for a steeper band ({@link SLOPE_RISE}), and in the band's
+ * colour, so the band the digits are coloured by is a shape as well — colour
+ * is never the only thing that says it.
  */
-function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Element {
-  const [from, to] = SLOPE_ENDS[props.slope];
+function SlopeGlyph(props: {
+  readonly slope: 'up' | 'down' | 'level';
+  readonly band: GradeBandKey | undefined;
+}): JSX.Element {
+  const rise = props.slope === 'level' ? 0 : SLOPE_RISE[props.band ?? 'wall'];
+  const half = rise / 2;
+  // Top-down in its 16 × 12 box: a rising stroke ends higher than it starts.
+  const [from, to] = props.slope === 'up' ? [6 + half, 6 - half] : [6 - half, 6 + half];
   return (
     <svg
       className="oyl-hud__slope"
@@ -685,11 +724,18 @@ function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Ele
   );
 }
 
-/** Where the slope glyph's stroke starts and ends, top-down, in its 16 × 12 box. */
-const SLOPE_ENDS: Readonly<Record<'up' | 'down' | 'level', readonly [number, number]>> = {
-  up: [11, 1],
-  down: [1, 11],
-  level: [6, 6],
+/**
+ * How far the slope glyph's stroke climbs or falls across its box, by band —
+ * #2291. A flat stretch that is not level is a slight tilt, and each band up
+ * is a steeper one; a descent (every grade at or below −3 %) falls as a steep
+ * climb rises. 10 is the box's whole usable height, #2071's one angle.
+ */
+const SLOPE_RISE: Readonly<Record<GradeBandKey, number>> = {
+  descent: 8,
+  flat: 3,
+  climb: 6,
+  steep: 8,
+  wall: 10,
 };
 
 /**
@@ -742,12 +788,22 @@ function Gauge(props: { readonly fraction: number }): JSX.Element {
  *
  * ## Filled, and the road ahead beside it — #2075
  *
- * The whole route is a FILLED shape since #2075, in `hudBorder`, with the
- * marker in `hudInk` over a wider stroke of the panel's surface, so it reads
- * against the fill and the empty sky alike (both pairs are declared 3:1 in
- * `tokens.ts`). Beside it, at the same height so the route panel is no taller,
- * {@link LookAheadStrip} draws the next kilometre at a fixed scale, and the
- * next climb is written under it.
+ * The whole route is a FILLED shape since #2075 (in `hudBorder` until
+ * #2291), with the marker in `hudInk` over a wider stroke of the panel's
+ * surface, so it reads against the fill and the empty sky alike. Beside it,
+ * {@link LookAheadStrip} draws the road ahead (2 km since #2291) at a fixed
+ * scale, and the next climb is written under it.
+ *
+ * ## Shaded by steepness — #2291
+ *
+ * The whole route's fill is its grade bands since #2291 ({@link routeBands}),
+ * where it was one grey: each band's run a column of its colour and pattern,
+ * as on the road ahead, CLIPPED to the route's filled shape so the shape is
+ * the route's and the shading says how steep each part of it is. The patterns
+ * are the road ahead's, sized for this strip's 100 × 24 box ({@link
+ * ROUTE_PATTERN}), so a band is not told by colour alone here either. The
+ * marker is drawn over the bands as before, its surface-coloured edge what
+ * separates it from each band's colour (each a declared 3:1 on the surface).
  */
 function ElevationStrip(props: {
   readonly reading: ProfileReading;
@@ -755,11 +811,43 @@ function ElevationStrip(props: {
   readonly distance: number;
   readonly units: UnitSystem;
 }): JSX.Element {
-  const elevations = props.profile.elevations;
-  const points = strip(elevations);
+  // React's ids carry punctuation a `url(#…)` reference need not survive.
+  const id = `oyl-route-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const { profile } = props;
+  // Once per route: the HUD renders many times a second, the route never changes.
+  const fill = useMemo(() => {
+    const points = strip(profile.elevations);
+    if (points === '') return null;
+    return (
+      <>
+        <defs>
+          <clipPath id={`${id}-shape`}>
+            <polygon className="oyl-hud__profile-shape" points={`0,24 ${points} 100,24`} />
+          </clipPath>
+          {GRADE_BANDS.map((band) => (
+            <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...ROUTE_PATTERN} />
+          ))}
+        </defs>
+        <g className="oyl-hud__profile-fill" clipPath={`url(#${id}-shape)`}>
+          {routeBands(profile).map((run) => (
+            <rect
+              key={`${run.band}-${String(run.from)}`}
+              className={`oyl-hud__profile-run oyl-hud__profile-run--${run.band}`}
+              x={run.from * 100}
+              y={0}
+              width={(run.to - run.from) * 100}
+              height={24}
+              fill={`url(#${id}-${run.band})`}
+              data-band={run.band}
+            />
+          ))}
+        </g>
+      </>
+    );
+  }, [id, profile]);
   const percent = props.reading.position * 100;
-  const ahead = lookAhead(props.profile, props.distance);
-  const climb = nextClimbText(ahead.nextClimb, props.units);
+  const ahead = lookAhead(profile, props.distance);
+  const climb = nextClimbText(ahead.climb, props.units);
   return (
     <div className="oyl-hud__profile">
       <div className="oyl-hud__strips">
@@ -770,9 +858,7 @@ function ElevationStrip(props: {
           role="img"
           aria-label={props.reading.label}
         >
-          {points === '' ? null : (
-            <polygon className="oyl-hud__profile-fill" points={`0,24 ${points} 100,24`} />
-          )}
+          {fill}
           <line className="oyl-hud__profile-here-edge" x1={percent} y1={0} x2={percent} y2={24} />
           <line
             className="oyl-hud__profile-here"
@@ -790,13 +876,14 @@ function ElevationStrip(props: {
             data-position={String(props.reading.position)}
           />
         </svg>
-        <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.nextClimb, props.units)} />
+        <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.climb, props.units)} />
       </div>
       {/*
         The non-visual equivalent, which the rest of this app provides for every
         chart (#77's, #50's). A profile is a picture of a number, and the number
         is available. The next climb is its own line beside it (#2075), so a
-        sentence other features read whole stays the sentence it was.
+        sentence other features read whole stays the sentence it was; since
+        #2291 it names the top of the climb the rider is on.
       */}
       <div className="oyl-hud__profile-captions">
         <p className="oyl-hud__profile-text">{props.reading.text}</p>
@@ -811,7 +898,7 @@ function ElevationStrip(props: {
 }
 
 /**
- * The next kilometre of road — #2075, `look-ahead.ts`.
+ * The road ahead — #2075, `look-ahead.ts`; 2 km of it since #2291.
  *
  * The viewBox is the window itself: {@link LOOK_AHEAD_METRES} across and
  * {@link LOOK_AHEAD_RISE_METRES} of height up, so a metre of climb is the same
@@ -825,6 +912,12 @@ function ElevationStrip(props: {
  *
  * `role="img"` with the next climb as its name, as the whole route's strip is
  * named by its sentence.
+ *
+ * #2291: the top of the climb the rider is on, or of the next one, is a
+ * dashed ink line across the strip where the climb ends, when the window
+ * reaches it — a SHAPE, unlike the rider's solid edge. On a climb the caption
+ * says how far it is; before one, the strip's name does, and the caption
+ * keeps #2075's phrase (`look-ahead.ts` §`nextClimbText` says why).
  */
 function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: string }): JSX.Element {
   // React's ids carry punctuation a `url(#…)` reference need not survive.
@@ -835,18 +928,21 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
   const road = ahead.points
     .map((point) => `${String(point.ahead)},${String(yOf(point.height))}`)
     .join(' ');
+  // The climb's top, where the window reaches it.
+  const top =
+    ahead.climb !== undefined && ahead.climb.topIn <= ahead.length ? ahead.climb.topIn : undefined;
   return (
     <svg
       className="oyl-hud__ahead-svg"
       viewBox={`0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`The next kilometre: ${props.label}`}
+      aria-label={`The ${LOOK_AHEAD_WORDS}: ${props.label}`}
       data-testid="oyl-hud-look-ahead"
     >
       <defs>
         {GRADE_BANDS.map((band) => (
-          <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} />
+          <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...AHEAD_PATTERN} />
         ))}
       </defs>
       {ahead.runs.map((run) => (
@@ -875,6 +971,26 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
       */}
       <polyline className="oyl-hud__ahead-road-edge" points={road} />
       <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
+      {top === undefined ? null : (
+        <>
+          <line
+            className="oyl-hud__ahead-top-edge"
+            x1={top}
+            y1={0}
+            x2={top}
+            y2={LOOK_AHEAD_RISE_METRES}
+          />
+          <line
+            className="oyl-hud__ahead-top"
+            x1={top}
+            y1={0}
+            x2={top}
+            y2={LOOK_AHEAD_RISE_METRES}
+            data-testid="oyl-hud-climb-top"
+            data-ahead={String(top)}
+          />
+        </>
+      )}
       <line
         className="oyl-hud__ahead-here"
         x1={0}
@@ -887,12 +1003,32 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
   );
 }
 
+/**
+ * One pattern cell, in its strip's own units — #2291, so the road ahead and
+ * the whole route draw the same patterns at about the same size on screen.
+ */
+interface PatternCell {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The road ahead's cell, in metres across and metres up: about 11 by 10 px on
+ * a 270 px strip 3.5 rem tall, as it was at 1 km (40 by 20 then).
+ */
+const AHEAD_PATTERN: PatternCell = {
+  width: LOOK_AHEAD_METRES / 25,
+  height: LOOK_AHEAD_RISE_METRES / 5,
+};
+
+/** The whole route's, in its 100 × 24 box: about 11 by 10 px on a 270 px strip 2.5 rem tall. */
+const ROUTE_PATTERN: PatternCell = { width: 4, height: 6 };
+
 /** One band's fill: its colour, and the marks that tell it apart without colour. */
-function BandPattern(props: { readonly id: string; readonly band: GradeBand }): JSX.Element {
-  // In the strip's own units — metres across, metres up — about 11 by 10 px
-  // on a 270 px strip three rem tall.
-  const width = 40;
-  const height = 20;
+function BandPattern(
+  props: { readonly id: string; readonly band: GradeBand } & PatternCell,
+): JSX.Element {
+  const { width, height } = props;
   const { pattern } = props.band;
   return (
     <pattern
@@ -905,7 +1041,13 @@ function BandPattern(props: { readonly id: string; readonly band: GradeBand }): 
     >
       <rect className="oyl-hud__band-fill" x={0} y={0} width={width} height={height} />
       {pattern === 'dots' ? (
-        <ellipse className="oyl-hud__band-dot" cx={width / 2} cy={height / 2} rx={6} ry={3} />
+        <ellipse
+          className="oyl-hud__band-dot"
+          cx={width / 2}
+          cy={height / 2}
+          rx={width * 0.15}
+          ry={height * 0.15}
+        />
       ) : null}
       {pattern === 'hatch' || pattern === 'dense-hatch' || pattern === 'cross-hatch' ? (
         <line className="oyl-hud__band-mark" x1={0} y1={height} x2={width} y2={0} />

@@ -460,3 +460,24 @@ describe('the HUD’s supporting text has a floor (#307 review)', () => {
     ).toBeGreaterThanOrEqual(MINIMUM_HUD_SUPPORTING_REM);
   });
 });
+
+/**
+ * #2291 — the gradient's digits and slope glyph in their band's colour. The
+ * other end of the wire `HudPanel.test.tsx` holds: each band class `HudCore`
+ * puts on the field names a rule here, and the rule colours with THAT band's
+ * token, the one `tokens.ts` declares a pair for. A rule missing, or two bands
+ * swapped, would leave the class on the element and colour nothing, or the
+ * wrong thing.
+ */
+describe('the gradient in its band’s colour — #2291', () => {
+  it.each(['descent', 'flat', 'climb', 'steep', 'wall'])(
+    'a %s grade’s digits and glyph are its own band’s token',
+    (band) => {
+      const selector = `.oyl-hud__field--grade-${band} :is(.oyl-hud__digits, .oyl-hud__slope)`;
+      const at = declarations.indexOf(`${selector} {`);
+      expect(at, `theme.css has no rule for ${selector}`).toBeGreaterThan(-1);
+      const body = declarations.slice(at, declarations.indexOf('}', at));
+      expect(body).toMatch(new RegExp(`color:\\s*var\\(--oyl-color-hud-grade-${band}\\)`));
+    },
+  );
+});

@@ -70,6 +70,7 @@ import { HudCore } from './HudCore';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
 import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
+import { StreetMap } from './StreetMap';
 import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
@@ -79,6 +80,7 @@ import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
+import type { WorldCorridor } from '../world-data/corridor';
 
 /**
  * What the HUD needs beyond its readings.
@@ -301,6 +303,16 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    */
   readonly attribution?: string | undefined;
   /**
+   * The corridor of map data this ride's world was given at the press —
+   * #2290. With it the plan view is a street map around the rider
+   * (`StreetMap.tsx`), drawn from this and never from a request; `undefined`
+   * on every ride with no corridor, which draws the route's outline as before.
+   * A workout's strip still takes the panel while one runs. `GameView` hands
+   * it exactly when it hands {@link attribution}, so the map is never drawn
+   * without its credit.
+   */
+  readonly corridor?: WorldCorridor | undefined;
+  /**
    * A Delivery round's throws — #1810, ADR 0059 D-5: where a press on the
    * HUD's throw control, or a key, hands the throw the rider asked for. With
    * it the HUD shows `ThrowControl` in its actions panel, inside the touch
@@ -358,6 +370,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     keepPlan,
     onReplansOff,
     standings,
+    corridor,
     ...shared
   } = props;
   return (
@@ -381,7 +394,17 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           this comment recorded why the plan view could not read its number.
         */
         workout === undefined ? (
-          <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+          corridor === undefined ? (
+            <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+          ) : (
+            // #2290: the map data this ride holds, around the rider, in the
+            // plan view's box. The same odometer, for the same reason.
+            <StreetMap
+              corridor={corridor}
+              profile={props.profile}
+              distance={props.state.ride.distance}
+            />
+          )
         ) : (
           // #1307: while a workout runs, its strip takes the route plan's
           // place and its size — `oyl-hud__plan-svg` sizes both — so this

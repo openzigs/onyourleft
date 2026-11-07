@@ -8,9 +8,8 @@
  * the application's source tree has to be registered by hand in `MainActivity`,
  * **before** `super.onCreate`. If it is missing, or registered after, there is
  * no build error and no crash: the web layer gets "plugin not implemented" the
- * first time it asks. For `ThermalPlugin` that reads as "no forecast", which is
- * indistinguishable from a device below API 30, so a ride would never show that
- * anything was wrong.
+ * first time it asks, so a rider would meet the missing plugin at the moment
+ * they press the button that needs it.
  *
  * CI does not build Android and the Java here is uncompiled, so this reads the
  * source. It proves the registration is written, not that it runs.
@@ -38,12 +37,7 @@ describe('MainActivity registers every in-tree plugin before the bridge is built
   it('finds the plugins it is checking', () => {
     // Non-vacuity: a moved directory would leave the loop below checking nothing.
     expect(pluginClasses()).toEqual(
-      expect.arrayContaining([
-        'RecordingServicePlugin',
-        'ThermalPlugin',
-        'SecureWindowPlugin',
-        'OtherPlayerPlugin',
-      ]),
+      expect.arrayContaining(['RecordingServicePlugin', 'SecureWindowPlugin', 'OtherPlayerPlugin']),
     );
     expect(bridgeBuilt).toBeGreaterThan(0);
   });

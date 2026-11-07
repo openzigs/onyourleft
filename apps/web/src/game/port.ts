@@ -30,8 +30,9 @@
  * one from another product while there is nothing else to compare against.
  *
  * ⚠️ It does not discharge #91's third criterion — the 60-minute run on the
- * device floor recording frame times and `getThermalHeadroom()`. That needs the
- * hardware, and it is recorded as outstanding in `README.md` beside this file.
+ * device floor recording frame times, which since #2289 are the ladder's only
+ * input. That needs the hardware, and it is recorded as outstanding in
+ * `README.md` beside this file.
  */
 
 import type { Billboard } from './billboards';

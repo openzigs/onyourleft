@@ -63,6 +63,7 @@ import {
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 import { readRealisticWorldChoice } from '../game/world-preference';
+import { writeRealisticReport } from '../game/realistic-report';
 import { DRAFT_READING_STORAGE_KEY, readDraftReadingChoice } from '../game/draft-preference';
 import { OSM_ATTRIBUTION, readBasemapConfig, type BasemapConfig } from '../map/basemap';
 import { MAP_TILES_STORAGE_KEY, readMapTilesChoice } from '../map/tiles-preference';
@@ -1085,6 +1086,68 @@ describe('the game world — #475', () => {
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
     mounted.unmount();
+  });
+
+  it('says why the last realistic ride left the realistic world, from what that ride kept — #2289', async () => {
+    const store = disk();
+    // Nothing kept: nothing said.
+    const before = await settings(store);
+    const nothing = before.container.querySelector('.oyl-world__report');
+    before.unmount();
+    expect(nothing).toBeNull();
+    writeRealisticReport(store, {
+      frameMsLimit: 45,
+      settling: { frames: 30, slow: 3, worstMs: 280 },
+      steps: [
+        {
+          rung: 1,
+          left: true,
+          rideSeconds: 92,
+          frames: 30,
+          overFrameMs: 30,
+          medianMs: 58,
+          worstMs: 71,
+        },
+      ],
+    });
+    const mounted = await settings(store);
+    const box = mounted.container.querySelector('.oyl-world .oyl-world__report');
+    const text = (node: Element | null | undefined): string =>
+      (node?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // One plain line, outside the disclosure…
+    const main = box?.querySelector(':scope > p');
+    // …and the figures behind a native, closed "Details" whose summary is plain text.
+    const details = box?.querySelector(':scope > details');
+    const summary = details?.querySelector(':scope > summary');
+    const summaryChildren = summary?.children.length;
+    const open = details?.hasAttribute('open');
+    const figures = text(details);
+    mounted.unmount();
+    expect(text(main)).toBe(
+      'Your last ride in the realistic world switched to the standard world after 1 min 32 s because its frames were too slow.',
+    );
+    expect(text(main)).not.toMatch(/\bms\b|\d+\s+frames?\b|median|longest/);
+    expect(text(summary)).toBe('Details');
+    expect(summaryChildren).toBe(0);
+    expect(open).toBe(false);
+    expect(figures).toContain(
+      'While the world loaded, its first 30 frames were not counted: 3 took longer than 45 ms, the longest 280 ms.',
+    );
+    expect(figures).toContain(
+      'After 1 min 32 s it switched to the standard world: 30 of the last 30 frames took longer than 45 ms (median 58 ms, longest 71 ms).',
+    );
+  });
+
+  it('says plainly when the last realistic ride stayed, with no empty disclosure', async () => {
+    const store = disk();
+    writeRealisticReport(store, { frameMsLimit: 45, steps: [] });
+    const mounted = await settings(store);
+    const box = mounted.container.querySelector('.oyl-world .oyl-world__report');
+    const copy = (box?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const details = box?.querySelector('details');
+    mounted.unmount();
+    expect(copy).toBe('Your last ride in the realistic world stayed in it.');
+    expect(details).toBeNull();
   });
 });
 

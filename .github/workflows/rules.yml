@@ -304,6 +304,9 @@ jobs:
       #   basemap build script tests -- #1557. The suite of
       #   apps/web/tools/basemap/build.sh; fake `curl`, `git`, `java` and
       #   `mvn`, no network and no tiles.
+      #   valhalla build and upload script tests -- #2320. The suites of
+      #   apps/web/tools/valhalla/build-graph.sh (a fake `docker`) and
+      #   upload.sh (a fake `aws` and `curl`): no image, no bucket, no network.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -352,6 +355,8 @@ jobs:
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'
           'basemap build script tests' 'bash apps/web/tools/basemap/build.test.sh'
+          'valhalla build script tests' 'bash apps/web/tools/valhalla/build-graph.test.sh'
+          'valhalla upload script tests' 'bash apps/web/tools/valhalla/upload.test.sh'
           'shard results checker tests' 'bash scripts/check-shard-results.test.sh'
 
       # The generated-artefact gate (#299). `cap sync` writes two files this

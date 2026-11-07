@@ -100,6 +100,21 @@
     "Choose file Or drop a workout file here",
     "Import workout"
   ],
+  "games empty": [
+    "Games",
+    "Ride a Delivery round or a lap race, on a course you choose.",
+    "Help with Games",
+    "Each game is ridden on one of your saved routes.",
+    "Both are also switches in the trainer game, for a ride you start from a route.",
+    "Delivery",
+    "Throw parcels to the doorsteps of the houses on a round as you ride through a town.",
+    "Day 1 of 7 · nothing delivered yet",
+    "Play Delivery",
+    "Lap race",
+    "Race laps of one of your loops against bots, picking up items round the lap.",
+    "No loops to race on yet",
+    "Play Lap race"
+  ],
   "activities empty": [
     "Activities",
     "Your rides, newest first.",
@@ -978,6 +993,22 @@
     "About",
     "What this is, what it does not do, and where your data lives."
   ],
+  "delivery-courses empty": [
+    "Delivery: choose a course",
+    "Choose a route for your Delivery round, then set up the ride.",
+    "Back to Games",
+    "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
+    "Choose the realistic world in Settings"
+  ],
+  "lap-race-courses empty": [
+    "Lap race: choose a course",
+    "Choose a loop to race laps of against bots, then set up the ride.",
+    "Back to Games",
+    "No saved routes yet",
+    "You have no saved routes yet.",
+    "Each game is ridden on one of your saved routes.",
+    "Import a GPX file on the Routes screen"
+  ],
   "side-camera empty": [
     "Side camera",
     "This phone as the side camera your tablet starts and stops.",
@@ -1068,6 +1099,7 @@
     "Ride — Record a ride from the sensors paired on this device.",
     "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
+    "Games — Ride a Delivery round or a lap race, on a course you choose.",
     "Activities — Your rides, newest first.",
     "Analysis — Time in zone, and your best power for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",
@@ -1292,6 +1324,21 @@
     "10 min at 60%, 20 min at 90%",
     "Export Sweet spot over-unders with a very long name for a small screen",
     "Delete Sweet spot over-unders with a very long name for a small screen"
+  ],
+  "games populated": [
+    "Games",
+    "Ride a Delivery round or a lap race, on a course you choose.",
+    "Help with Games",
+    "Each game is ridden on one of your saved routes.",
+    "Both are also switches in the trainer game, for a ride you start from a route.",
+    "Delivery",
+    "Throw parcels to the doorsteps of the houses on a round as you ride through a town.",
+    "Day 1 of 7 · nothing delivered yet",
+    "Play Delivery",
+    "Lap race",
+    "Race laps of one of your loops against bots, picking up items round the lap.",
+    "No loops to race on yet",
+    "Play Lap race"
   ],
   "activities populated": [
     "Activities",
@@ -2996,6 +3043,25 @@
     "About",
     "What this is, what it does not do, and where your data lives."
   ],
+  "delivery-courses populated": [
+    "Delivery: choose a course",
+    "Choose a route for your Delivery round, then set up the ride.",
+    "Back to Games",
+    "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
+    "Choose the realistic world in Settings"
+  ],
+  "lap-race-courses populated": [
+    "Lap race: choose a course",
+    "Choose a loop to race laps of against bots, then set up the ride.",
+    "Back to Games",
+    "None of your routes is a loop yet.",
+    "A lap race needs a route that ends where it starts.",
+    "Open Routes",
+    "Courses",
+    "Box Hill, Leith Hill and every lane between them the long way round",
+    "3.0 km · climb 30 m · steepest 1%",
+    "Not a loop."
+  ],
   "side-camera populated": [
     "Side camera",
     "This phone as the side camera your tablet starts and stops.",
@@ -3439,6 +3505,7 @@
     "Ride — Record a ride from the sensors paired on this device.",
     "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
+    "Games — Ride a Delivery round or a lap race, on a course you choose.",
     "Activities — Your rides, newest first.",
     "Analysis — Time in zone, and your best power for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",

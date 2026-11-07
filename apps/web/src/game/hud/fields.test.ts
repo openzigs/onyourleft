@@ -1537,6 +1537,7 @@ describe('the gradient, signed and primary — #2071', () => {
       unit: '%',
       stale: false,
       slope: 'up',
+      grade: 4.5,
     });
     expect(at(-2)).toMatchObject({ value: '-2.0', unit: '%', slope: 'down' });
     expect(at(12.46)?.value).toBe('+12.5');
@@ -1551,6 +1552,19 @@ describe('the gradient, signed and primary — #2071', () => {
     expect(at(-0.05)).toMatchObject({ value: '-0.1', slope: 'down' });
     expect(at(2.25)?.value).toBe('+2.3');
     expect(at(-2.25)?.value).toBe('-2.3');
+  });
+
+  /**
+   * #2291: the number `HudCore` bands the digits' colour by is the number the
+   * digits SHOW, so the colour never disagrees with what a rider reads: 2.96
+   * shows `+3.0`, a climb's first tenth, and is coloured as one.
+   */
+  it('carries the grade it shows, rounded as the digits are', () => {
+    expect(at(2.96)).toMatchObject({ value: '+3.0', grade: 3 });
+    expect(at(-2.96)).toMatchObject({ value: '-3.0', grade: -3 });
+    expect(at(12.46)?.grade).toBe(12.5);
+    // What shows as `0.0` is nought, not a negative zero.
+    expect(Object.is(at(-0.04)?.grade, 0)).toBe(true);
   });
 
   it('is the fourth primary reading, after heart rate and before speed', () => {
