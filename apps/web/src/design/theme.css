@@ -2114,6 +2114,25 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * The owner's ruling of 2026-11-07 on #2305. (c) A label and its control sit
+ * on one line with the design system's small gap between them, so a long
+ * label ("Recovery between repeats, seconds") never touches its − button; on
+ * a line too narrow for both, the control wraps under its label. (e) The
+ * preview's Shape is a sentence, so it takes the facts grid's whole row
+ * rather than one of its columns.
+ */
+.oyl-tailor__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-activity-card__facts > .oyl-tailor__shape {
+  grid-column: 1 / -1;
+}
+
+/*
  * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
  * screen's own sentences and one action, in that order, on a quiet surface so
  * it reads as one thing rather than three paragraphs and a button.

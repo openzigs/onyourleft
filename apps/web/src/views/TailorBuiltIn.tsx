@@ -12,12 +12,14 @@ import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 import { BlockChart } from '../workouts/BlockChart';
 import type { BuiltInCard } from '../workouts/built-in';
-import { durationText, hardestShare, percentOf } from '../workouts/library';
+import { hardestShare, percentOf } from '../workouts/library';
 import {
   copyName,
-  EMPTY_TAILOR_DRAFT,
+  initialTailorDraft,
   lengthOptionText,
+  lengthText,
   previewRows,
+  repeatsIn,
   TAILOR_LENGTHS,
   tailorFromDraft,
   tailorOffer,
@@ -80,8 +82,11 @@ function signed(percent: number): string {
 
 export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInProps): JSX.Element {
   const offer = useMemo(() => tailorOffer(card.template), [card.template]);
-  const [draft, setDraft] = useState<TailorDraft>(EMPTY_TAILOR_DRAFT);
-  const [valid, setValid] = useState<Valid>({ draft: EMPTY_TAILOR_DRAFT, workout: card.workout });
+  // The ruling of 2026-11-07 (d): the template's repeats and recovery are in
+  // their boxes as values from the start, not grey placeholders.
+  const initial = useMemo(() => initialTailorDraft(offer), [offer]);
+  const [draft, setDraft] = useState<TailorDraft>(initial);
+  const [valid, setValid] = useState<Valid>({ draft: initial, workout: card.workout });
   const [refusal, setRefusal] = useState<Refusal | undefined>(undefined);
   const [saved, setSaved] = useState<{ readonly name: string; readonly id: string } | undefined>(
     undefined,
@@ -112,7 +117,13 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
   }, [card.template, thresholds.heartRate]);
 
   function change(control: TailorControl, value: string): void {
-    const next = withChoice(draft, control, value);
+    const chosen = withChoice(draft, control, value);
+    // Back to the length as written with no repeat count typed: the box gets
+    // the template's own again, as a value.
+    const next =
+      control === 'length' && value === '' && chosen.repeats.trim() === ''
+        ? { ...chosen, repeats: initial.repeats }
+        : chosen;
     setDraft(next);
     setSaved(undefined);
     setSaveFailed(false);
@@ -149,6 +160,15 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
     [valid.workout, thresholds.power],
   );
   const hardest = hardestShare(valid.workout);
+  /*
+   * A chosen length chose the repeats (`withChoice` emptied the box), so the
+   * box shows the count the preview has: a value, never an empty box beside a
+   * workout that has one.
+   */
+  const repeatsShown =
+    draft.repeats === '' && draft.length !== ''
+      ? String(repeatsIn(card.template, valid.workout) ?? '')
+      : draft.repeats;
 
   const refused = (control: TailorControl): JSX.Element | null =>
     refusal?.control === control ? (
@@ -173,7 +193,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
       >
         {offer.length ? (
           <div data-oyl-tailor="length">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.length}>Length</label>
               <select
                 id={ids.length}
@@ -198,7 +218,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.intensity === undefined ? null : (
           <div data-oyl-tailor="intensity">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.intensity}>Intensity, % easier or harder</label>
               <Stepper
                 name="intensity"
@@ -227,7 +247,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.repeats === undefined ? null : (
           <div data-oyl-tailor="repeats">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.repeats}>Repeats</label>
               <Stepper
                 name="repeats"
@@ -241,8 +261,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
                   name="repeats"
                   type="text"
                   inputMode="numeric"
-                  value={draft.repeats}
-                  placeholder={String(offer.repeats.default)}
+                  value={repeatsShown}
                   onChange={(event) => {
                     change('repeats', event.target.value);
                   }}
@@ -258,7 +277,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.recovery === undefined ? null : (
           <div data-oyl-tailor="recovery">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.recovery}>Recovery between repeats, seconds</label>
               <Stepper
                 name="recovery seconds"
@@ -273,7 +292,6 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
                   type="text"
                   inputMode="numeric"
                   value={draft.recovery}
-                  placeholder={String(offer.recovery.default)}
                   onChange={(event) => {
                     change('recovery', event.target.value);
                   }}
@@ -293,7 +311,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         <dl className="oyl-activity-card__facts">
           <div>
             <dt>Length</dt>
-            <dd>{durationText(timeline.totalSeconds)}</dd>
+            <dd>{lengthText(card.template, timeline.totalSeconds, valid.draft.length)}</dd>
           </div>
           <div>
             <dt>Hardest</dt>
@@ -301,7 +319,8 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
               {hardest === undefined ? 'No target' : `${String(percentOf(hardest))}% of threshold`}
             </dd>
           </div>
-          <div>
+          {/* The ruling of 2026-11-07 (e): the sentence takes the whole row. */}
+          <div className="oyl-tailor__shape">
             <dt>Shape</dt>
             <dd>{workoutShapeText(valid.workout)}</dd>
           </div>
