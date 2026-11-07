@@ -1417,7 +1417,16 @@ export const LAP_RACE_CHOICE_TEXT = {
   tierHint: (): string =>
     `${BOT_TIERS.map(
       (tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`,
-    ).join(', ')} watts per kilogram.`,
+    ).join(', ')} watts per kilogram, on average over a race.`,
+  /**
+   * Why a bot's figure in the race is not its tier's (#2329): the race plan
+   * (#1960, ADR 0061) saves on the flat and downhill and spends on climbs and
+   * in the sprint, and the standings show the tick's figure.
+   * `lap-race/bot-figure.test.ts` holds each clause to what the HUD shows.
+   */
+  tierLive:
+    'The figure beside a bot in the race moves around that: a bot saves a little on the flat ' +
+    'and more downhill, then spends it on climbs and in the final sprint.',
   items: 'Race with items',
   assistedOn: 'Your assisted race setting is on.',
   assistedOff: 'An assisted race setting can make a race easier.',
@@ -1524,6 +1533,7 @@ function LapRaceControl(props: {
           <p id={id('tiers')} className="tw:m-0">
             {LAP_RACE_CHOICE_TEXT.tierHint()}
           </p>
+          <p className="tw:m-0">{LAP_RACE_CHOICE_TEXT.tierLive}</p>
           <label>
             <input
               type="checkbox"
