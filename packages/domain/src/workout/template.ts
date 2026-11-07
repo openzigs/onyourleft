@@ -33,12 +33,13 @@
  * cannot know: the bounds a template puts on a rider's *choices*.
  */
 
-import type { Seconds } from '../quantities';
+import type { BeatsPerMinute, Seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
 import {
   MAXIMUM_REPEATS,
   validateWorkout,
+  type HeartRateHoldBlock,
   type SteadyBlock,
   type ThresholdShare,
   type Workout,
@@ -74,6 +75,38 @@ export const MINIMUM_INTENSITY_PERCENT = -25;
  */
 export const MAXIMUM_INTENSITY_PERCENT = 10;
 
+/**
+ * A heart-rate hold as a template writes one (#2300; spike 0038 R-4 and its
+ * finding for #2298): the range is **shares of the rider's threshold heart
+ * rate**, because a built-in cannot know anybody's heart rate in beats per
+ * minute.
+ *
+ * {@link tailorWorkout} resolves it into an ordinary `HeartRateHoldBlock` from
+ * the threshold heart rate a rider passes in {@link TailorChoices}, rounding
+ * **inward** — the low end up, the high end down — so the range in beats per
+ * minute never reaches outside the shares written. A range that comes out
+ * narrower than `MINIMUM_HOLD_RANGE_BPM` is then refused by `validateWorkout`,
+ * never widened.
+ *
+ * With no threshold heart rate it becomes the steady block at
+ * {@link startShare}: exactly what a hold rides whenever it cannot run
+ * (ADR 0048 D-3 H1, `heart-rate-hold.ts` §eligibility).
+ *
+ * Like the hold it becomes, it is never scaled by intensity.
+ */
+export interface HeartRateZoneHoldBlock {
+  readonly kind: 'heart-rate-zone-hold';
+  readonly seconds: Seconds;
+  /** The range as shares of threshold heart rate, both ends inclusive. */
+  readonly rangeShare: { readonly low: number; readonly high: number };
+  readonly startShare: ThresholdShare;
+  readonly ceilingShare: ThresholdShare;
+  readonly label?: string | undefined;
+}
+
+/** A block a template's main set may hold: any workout block, or a zone hold. */
+export type TemplateBlock = WorkoutBlock | HeartRateZoneHoldBlock;
+
 /** An inclusive range a rider's choice must fall inside. */
 export interface ChoiceRange {
   readonly minimum: number;
@@ -96,7 +129,7 @@ export interface ChoiceRangeWithDefault extends ChoiceRange {
 export interface RepeatMainSet {
   readonly scaling: 'repeat';
   /** One repetition's work, in order. */
-  readonly rep: readonly WorkoutBlock[];
+  readonly rep: readonly TemplateBlock[];
   /** How many repetitions the rider may choose, and how many they get. */
   readonly repeats: ChoiceRangeWithDefault;
   /** The easy riding after each repetition, when the set has any. */
@@ -120,7 +153,7 @@ export interface Recovery {
  */
 export interface FixedMainSet {
   readonly scaling: 'fixed';
-  readonly blocks: readonly WorkoutBlock[];
+  readonly blocks: readonly TemplateBlock[];
 }
 
 /**
@@ -131,7 +164,7 @@ export interface FixedMainSet {
  */
 export interface StretchMainSet {
   readonly scaling: 'stretch';
-  readonly blocks: readonly WorkoutBlock[];
+  readonly blocks: readonly TemplateBlock[];
   /**
    * How far the blocks may be stretched, as a factor of their written length:
    * `{ minimum: 0.5, maximum: 2 }` lets a 40-minute set be 20 to 80 minutes.
@@ -214,6 +247,13 @@ export interface TailorChoices {
   readonly repeats?: number | undefined;
   /** The recovery between repetitions, for a template that lets it change. */
   readonly recoverySeconds?: number | undefined;
+  /**
+   * The rider's own threshold heart rate, in beats per minute, which a
+   * {@link HeartRateZoneHoldBlock} resolves its range from. Pass it only when
+   * it is the rider's own: an assumed default makes a hold that could not run
+   * anyway (H1). Absent, every zone hold rides as its steady fallback.
+   */
+  readonly thresholdHeartRate?: number | undefined;
 }
 
 /**
@@ -225,6 +265,9 @@ export interface TailorChoices {
  *   `1 + intensityPercent / 100`. It does not touch a free ride (no target),
  *   a heart-rate hold (its 0.85 ceiling is ADR 0048 D-3; `replan.ts` keeps
  *   the same rule) or the warm-up and cool-down.
+ * - **A zone hold** ({@link HeartRateZoneHoldBlock}) becomes a hold in beats
+ *   per minute from the rider's threshold heart rate, or its steady fallback
+ *   when none is given.
  * - **A length** is met by the main set's own strategy (see {@link MainSet}):
  *   the repeat count for `repeat`, one stretch factor for `stretch`, and a
  *   refusal for `fixed`. When the main set at its shortest still runs long,
@@ -245,20 +288,76 @@ export interface TailorChoices {
  */
 export function tailorWorkout(template: WorkoutTemplate, choices: TailorChoices): Workout {
   const percent = intensityChoice(template, choices.intensityPercent);
+  const heartRate = heartRateChoice(choices.thresholdHeartRate);
   const shaped = shapedBlocks(template, choices);
   const main = shaped.main.map((block) => offsetBlock(block, percent));
+  // Resolved after the offset, so a zone hold's steady fallback is never
+  // scaled either: it is the hold's own start share, as written.
   return validateWorkout({
     name: template.name,
     description: template.summary,
-    blocks: [...shaped.warmUp, ...main, ...shaped.coolDown],
+    blocks: [...shaped.warmUp, ...main, ...shaped.coolDown].map((block) =>
+      resolveBlock(block, heartRate),
+    ),
   });
 }
 
-/** A workout's three parts, before the intensity offset. */
+/**
+ * A share times a heart rate, to a millionth: `0.82 × 150` is
+ * `122.99999999999999` in floating point, which rounding down would make 122.
+ */
+function product(share: number, heartRate: number): number {
+  return Math.round(share * heartRate * 1e6) / 1e6;
+}
+
+/** A workout's three parts, before the intensity offset and zone holds are resolved. */
 interface Shaped {
-  readonly warmUp: readonly WorkoutBlock[];
-  readonly main: readonly WorkoutBlock[];
-  readonly coolDown: readonly WorkoutBlock[];
+  readonly warmUp: readonly TemplateBlock[];
+  readonly main: readonly TemplateBlock[];
+  readonly coolDown: readonly TemplateBlock[];
+}
+
+/** The threshold heart rate a zone hold resolves from, after checking it is one. */
+function heartRateChoice(value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new WorkoutError(
+      'invalid-choice',
+      `a threshold heart rate must be a number of beats per minute above zero; you gave ${String(value)}.`,
+    );
+  }
+  return value;
+}
+
+/**
+ * A zone hold as the block a workout rides: a hold in beats per minute, rounded
+ * inward, or with no threshold heart rate its steady fallback. Every other
+ * block is returned as it is.
+ */
+function resolveBlock(block: TemplateBlock, thresholdHeartRate: number | undefined): WorkoutBlock {
+  if (block.kind !== 'heart-rate-zone-hold') {
+    return block;
+  }
+  const label = block.label === undefined ? {} : { label: block.label };
+  if (thresholdHeartRate === undefined) {
+    return { kind: 'steady', seconds: block.seconds, target: block.startShare, ...label };
+  }
+  const hold: HeartRateHoldBlock = {
+    kind: 'heart-rate-hold',
+    seconds: block.seconds,
+    range: {
+      // Inward: up at the bottom, down at the top. `validateWorkout` refuses
+      // what is then too narrow or out of bounds, by block number.
+      low: Math.ceil(product(block.rangeShare.low, thresholdHeartRate)) as BeatsPerMinute,
+      high: Math.floor(product(block.rangeShare.high, thresholdHeartRate)) as BeatsPerMinute,
+    },
+    startShare: block.startShare,
+    ceilingShare: block.ceilingShare,
+    ...label,
+  };
+  return hold;
 }
 
 /** The offset to apply, after checking it against the template's bounds. */
@@ -286,7 +385,7 @@ function intensityChoice(template: WorkoutTemplate, value: number | undefined): 
 function shapedBlocks(template: WorkoutTemplate, choices: TailorChoices): Shaped {
   const set = template.mainSet;
   const target = lengthChoice(template, choices.targetMinutes);
-  const asWritten = (main: readonly WorkoutBlock[]): Shaped => ({
+  const asWritten = (main: readonly TemplateBlock[]): Shaped => ({
     warmUp: template.warmUp,
     main,
     coolDown: template.coolDown,
@@ -414,7 +513,7 @@ function stretchedToLength(template: WorkoutTemplate, set: StretchMainSet, targe
  * The shortening is shared between the two in proportion to how much each
  * may lose, so neither is cut to its floor while the other keeps its length.
  */
-function framed(template: WorkoutTemplate, main: readonly WorkoutBlock[], target: number): Shaped {
+function framed(template: WorkoutTemplate, main: readonly TemplateBlock[], target: number): Shaped {
   const warmUp = blocksSeconds(template.warmUp);
   const coolDown = blocksSeconds(template.coolDown);
   const full = warmUp + blocksSeconds(main) + coolDown;
@@ -486,7 +585,7 @@ function shapedSeconds(shaped: Shaped): number {
 }
 
 /** How long some blocks last, the way `expandWorkout` adds them up. */
-function blocksSeconds(blocks: readonly WorkoutBlock[]): number {
+function blocksSeconds(blocks: readonly TemplateBlock[]): number {
   let total = 0;
   for (const block of blocks) {
     total +=
@@ -501,7 +600,7 @@ function blocksSeconds(blocks: readonly WorkoutBlock[]): number {
  * Every block's length times one factor, to the whole second. Targets, kinds
  * and the number of blocks are untouched.
  */
-function stretchBlocks(blocks: readonly WorkoutBlock[], factor: number): readonly WorkoutBlock[] {
+function stretchBlocks(blocks: readonly TemplateBlock[], factor: number): readonly TemplateBlock[] {
   // A length that rounds to zero is left for `validateWorkout` to refuse, by
   // block number, rather than raised to something nobody chose.
   const length = (value: Seconds): Seconds => Math.round(value * factor) as Seconds;
@@ -558,10 +657,10 @@ function recoveryBlock(set: RepeatMainSet, value: number | undefined): SteadyBlo
  * "5 × 3 min at 120 %" rather than ten rows. Anything else is written out.
  */
 function repeatBlocks(
-  rep: readonly WorkoutBlock[],
+  rep: readonly TemplateBlock[],
   recovery: SteadyBlock | undefined,
   repeats: number,
-): readonly WorkoutBlock[] {
+): readonly TemplateBlock[] {
   const [only] = rep;
   if (rep.length === 1 && only?.kind === 'steady' && recovery !== undefined) {
     return [
@@ -576,7 +675,7 @@ function repeatBlocks(
       },
     ];
   }
-  const blocks: WorkoutBlock[] = [];
+  const blocks: TemplateBlock[] = [];
   for (let repeat = 0; repeat < repeats; repeat += 1) {
     blocks.push(...rep);
     if (recovery !== undefined) {
@@ -589,11 +688,11 @@ function repeatBlocks(
 /**
  * One main-set block with its power targets offset.
  *
- * ⚠️ A hold and a free ride come back untouched, and that is the safety half
+ * ⚠️ A hold, a zone hold and a free ride come back untouched, and that is the safety half
  * of the rule rather than a detail: a hold's ceiling is ADR 0048 D-3's 0.85,
  * and a free ride has no target to scale.
  */
-function offsetBlock(block: WorkoutBlock, percent: number): WorkoutBlock {
+function offsetBlock(block: TemplateBlock, percent: number): TemplateBlock {
   // No offset means no arithmetic at all: `(share × 100) / 100` is not
   // `share` for every share in floating point, and a rider who chose nothing
   // rides exactly the template's own numbers (#2298 rule 6).
@@ -611,6 +710,7 @@ function offsetBlock(block: WorkoutBlock, percent: number): WorkoutBlock {
       return { ...block, hardTarget: scale(block.hardTarget), easyTarget: scale(block.easyTarget) };
     case 'free-ride':
     case 'heart-rate-hold':
+    case 'heart-rate-zone-hold':
       return block;
     default: {
       const unhandled: never = block;

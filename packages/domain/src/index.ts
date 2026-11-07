@@ -465,6 +465,7 @@ export {
   POWER_ZONE_LOWER_FRACTIONS,
   POWER_ZONE_NAMES,
   powerZones,
+  SWEET_SPOT_FRACTIONS,
   timeInZones,
   zoneOf,
 } from './analysis/zones';
