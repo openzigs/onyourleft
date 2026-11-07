@@ -123,8 +123,52 @@ export interface FixedMainSet {
   readonly blocks: readonly WorkoutBlock[];
 }
 
-/** The part of a template that its parameters act on. */
-export type MainSet = RepeatMainSet | FixedMainSet;
+/**
+ * A main set of steady efforts that a chosen length stretches or shortens
+ * (#2299): endurance, tempo, recovery. Every block's length changes by one
+ * factor, so the number of blocks, every target and the ratio between the
+ * blocks stay as written.
+ */
+export interface StretchMainSet {
+  readonly scaling: 'stretch';
+  readonly blocks: readonly WorkoutBlock[];
+  /**
+   * How far the blocks may be stretched, as a factor of their written length:
+   * `{ minimum: 0.5, maximum: 2 }` lets a 40-minute set be 20 to 80 minutes.
+   * The maximum is what keeps a block from becoming one nobody can ride —
+   * an endurance block may double, a block at 0.95 of threshold may not.
+   */
+  readonly stretch: ChoiceRange;
+}
+
+/**
+ * The part of a template that its parameters act on, and the one strategy a
+ * chosen length uses on it (#2299): `repeat` changes the repeat count only,
+ * `stretch` the length of every block, and `fixed` refuses a length at all.
+ */
+export type MainSet = RepeatMainSet | StretchMainSet | FixedMainSet;
+
+/**
+ * The shortest a warm-up becomes when a chosen length needs it shorter: 5
+ * minutes, unless the template says otherwise (#2299). It is never removed.
+ */
+export const MINIMUM_WARM_UP_SECONDS = 300;
+
+/** The same for a cool-down: 3 minutes, and never removed (#2299). */
+export const MINIMUM_COOL_DOWN_SECONDS = 180;
+
+/**
+ * How near a tailored workout must come to the length chosen: within 5 % or
+ * 3 minutes, whichever is larger (#2299). Outside it, the length is refused.
+ */
+export const LENGTH_TOLERANCE_SHARE = 0.05;
+export const LENGTH_TOLERANCE_SECONDS = 180;
+
+/**
+ * The lengths a library is browsed by, in minutes: the ones every surveyed
+ * library is organised around (#2295).
+ */
+export const TEMPLATE_LENGTHS_MINUTES: readonly number[] = [30, 45, 60, 75, 90];
 
 /** The knobs a template offers on every main set. */
 export interface TemplateParameters {
@@ -150,10 +194,20 @@ export interface WorkoutTemplate {
   readonly mainSet: MainSet;
   readonly coolDown: readonly WorkoutBlock[];
   readonly parameters: TemplateParameters;
+  /** The shortest the warm-up may become; {@link MINIMUM_WARM_UP_SECONDS} if absent. */
+  readonly warmUpFloorSeconds?: number | undefined;
+  /** The shortest the cool-down may become; {@link MINIMUM_COOL_DOWN_SECONDS} if absent. */
+  readonly coolDownFloorSeconds?: number | undefined;
 }
 
 /** What a rider chose. Every field absent means the template as written. */
 export interface TailorChoices {
+  /**
+   * About how long the whole workout should be, in minutes (#2299). A
+   * template whose main set repeats meets it with the repeat count, so this
+   * and {@link repeats} cannot both be chosen.
+   */
+  readonly targetMinutes?: number | undefined;
   /** An offset to every main-set power target, in percent: −10 or +5. */
   readonly intensityPercent?: number | undefined;
   /** How many repetitions, for a template whose main set repeats. */
@@ -171,6 +225,14 @@ export interface TailorChoices {
  *   `1 + intensityPercent / 100`. It does not touch a free ride (no target),
  *   a heart-rate hold (its 0.85 ceiling is ADR 0048 D-3; `replan.ts` keeps
  *   the same rule) or the warm-up and cool-down.
+ * - **A length** is met by the main set's own strategy (see {@link MainSet}):
+ *   the repeat count for `repeat`, one stretch factor for `stretch`, and a
+ *   refusal for `fixed`. When the main set at its shortest still runs long,
+ *   the warm-up and cool-down shorten towards their floors, and otherwise
+ *   keep their length. A length the template cannot come within tolerance of
+ *   is refused with the nearest lengths it can make. Length changes durations
+ *   and counts only, and intensity changes targets only, so the two compose
+ *   in either order.
  * - **Repeats** and **recovery** apply only where the main set declares them.
  *   A choice a template does not offer is refused rather than ignored: a
  *   rider who asked for three repeats and silently got the template's count
@@ -183,12 +245,20 @@ export interface TailorChoices {
  */
 export function tailorWorkout(template: WorkoutTemplate, choices: TailorChoices): Workout {
   const percent = intensityChoice(template, choices.intensityPercent);
-  const main = mainSetBlocks(template.mainSet, choices).map((block) => offsetBlock(block, percent));
+  const shaped = shapedBlocks(template, choices);
+  const main = shaped.main.map((block) => offsetBlock(block, percent));
   return validateWorkout({
     name: template.name,
     description: template.summary,
-    blocks: [...template.warmUp, ...main, ...template.coolDown],
+    blocks: [...shaped.warmUp, ...main, ...shaped.coolDown],
   });
+}
+
+/** A workout's three parts, before the intensity offset. */
+interface Shaped {
+  readonly warmUp: readonly WorkoutBlock[];
+  readonly main: readonly WorkoutBlock[];
+  readonly coolDown: readonly WorkoutBlock[];
 }
 
 /** The offset to apply, after checking it against the template's bounds. */
@@ -212,26 +282,234 @@ function intensityChoice(template: WorkoutTemplate, value: number | undefined): 
   return value;
 }
 
-/** The main set as blocks, with the rider's repeat and recovery choices. */
-function mainSetBlocks(set: MainSet, choices: TailorChoices): readonly WorkoutBlock[] {
-  if (set.scaling === 'fixed') {
-    if (choices.repeats !== undefined) {
-      throw new WorkoutError(
-        'invalid-choice',
-        'this workout has no repeat count to choose; it is ridden as written.',
-      );
+/** The three parts, with the rider's length, repeat and recovery choices. */
+function shapedBlocks(template: WorkoutTemplate, choices: TailorChoices): Shaped {
+  const set = template.mainSet;
+  const target = lengthChoice(template, choices.targetMinutes);
+  const asWritten = (main: readonly WorkoutBlock[]): Shaped => ({
+    warmUp: template.warmUp,
+    main,
+    coolDown: template.coolDown,
+  });
+  switch (set.scaling) {
+    case 'fixed':
+      refuseRepeatChoices(choices);
+      return asWritten(set.blocks);
+    case 'stretch':
+      refuseRepeatChoices(choices);
+      return target === undefined
+        ? asWritten(set.blocks)
+        : stretchedToLength(template, set, target);
+    case 'repeat': {
+      const recovery = recoveryBlock(set, choices.recoverySeconds);
+      if (target === undefined) {
+        return asWritten(repeatBlocks(set.rep, recovery, repeatChoice(set, choices.repeats)));
+      }
+      if (choices.repeats !== undefined) {
+        throw new WorkoutError(
+          'invalid-choice',
+          'choose a length or a number of repeats for this workout, not both: the length is ' +
+            'made by choosing the number of repeats.',
+        );
+      }
+      return repeatedToLength(template, set, recovery, target);
     }
-    if (choices.recoverySeconds !== undefined) {
-      throw new WorkoutError(
-        'invalid-choice',
-        'this workout has no recovery between repeats to change; it is ridden as written.',
-      );
+    default: {
+      const unhandled: never = set;
+      throw new Error(`unreachable: ${JSON.stringify(unhandled)}`);
     }
-    return set.blocks;
   }
-  const repeats = repeatChoice(set, choices.repeats);
-  const recovery = recoveryBlock(set, choices.recoverySeconds);
-  return repeatBlocks(set.rep, recovery, repeats);
+}
+
+/** A main set with no repeat count refuses a choice of one, rather than ignoring it. */
+function refuseRepeatChoices(choices: TailorChoices): void {
+  if (choices.repeats !== undefined) {
+    throw new WorkoutError('invalid-choice', 'this workout has no repeat count to choose.');
+  }
+  if (choices.recoverySeconds !== undefined) {
+    throw new WorkoutError(
+      'invalid-choice',
+      'this workout has no recovery between repeats to change.',
+    );
+  }
+}
+
+/** The chosen length in seconds, or `undefined` for the template's own. */
+function lengthChoice(template: WorkoutTemplate, minutes: number | undefined): number | undefined {
+  if (minutes === undefined) {
+    return undefined;
+  }
+  if (template.mainSet.scaling === 'fixed') {
+    throw new WorkoutError(
+      'invalid-choice',
+      `"${template.name}" is ridden as written, so its length cannot be chosen.`,
+    );
+  }
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    throw new WorkoutError(
+      'invalid-choice',
+      `a workout's length must be a number of minutes above zero; you asked for ${String(minutes)}.`,
+    );
+  }
+  return minutes * 60;
+}
+
+/** The repeat count whose workout comes nearest the length, and that workout. */
+function repeatedToLength(
+  template: WorkoutTemplate,
+  set: RepeatMainSet,
+  recovery: SteadyBlock | undefined,
+  target: number,
+): Shaped {
+  const minimum = Math.max(set.repeats.minimum, 1);
+  const maximum = Math.min(set.repeats.maximum, MAXIMUM_REPEATS);
+  const written: Shaped[] = [];
+  const shortened: Shaped[] = [];
+  for (let repeats = minimum; repeats <= maximum; repeats += 1) {
+    const main = repeatBlocks(set.rep, recovery, repeats);
+    written.push({ warmUp: template.warmUp, main, coolDown: template.coolDown });
+    shortened.push(framed(template, main, target));
+  }
+  // The frame as written first: it shortens only when no repeat count can
+  // meet the length without it, so a length that more repeats and a shorter
+  // warm-up would hit exactly still keeps the warm-up.
+  for (const candidates of [written, shortened]) {
+    const best = nearest(candidates, target);
+    if (best !== undefined && distance(best, target) <= tolerance(target)) {
+      return best;
+    }
+  }
+  const lengths = shortened.map(shapedSeconds);
+  const below = lengths.filter((length) => length < target);
+  const above = lengths.filter((length) => length > target);
+  throw lengthRefusal(
+    template,
+    target,
+    below.length === 0 ? undefined : Math.max(...below),
+    above.length === 0 ? undefined : Math.min(...above),
+    'or',
+  );
+}
+
+/** The main set stretched by the one factor that comes nearest the length. */
+function stretchedToLength(template: WorkoutTemplate, set: StretchMainSet, target: number): Shaped {
+  const written = blocksSeconds(set.blocks);
+  const framing = blocksSeconds(template.warmUp) + blocksSeconds(template.coolDown);
+  const wanted = (target - framing) / written;
+  const factor = Math.min(Math.max(wanted, set.stretch.minimum), set.stretch.maximum);
+  const shaped = framed(template, stretchBlocks(set.blocks, factor), target);
+  if (distance(shaped, target) <= tolerance(target)) {
+    return shaped;
+  }
+  const shortest = framed(template, stretchBlocks(set.blocks, set.stretch.minimum), 0);
+  const longest = framed(template, stretchBlocks(set.blocks, set.stretch.maximum), Infinity);
+  throw lengthRefusal(template, target, shapedSeconds(shortest), shapedSeconds(longest), 'to');
+}
+
+/**
+ * The main set with the warm-up and cool-down it is ridden with: their own,
+ * unless that runs outside tolerance long, when they shorten towards the
+ * length — never below their floors, and never removed.
+ *
+ * The shortening is shared between the two in proportion to how much each
+ * may lose, so neither is cut to its floor while the other keeps its length.
+ */
+function framed(template: WorkoutTemplate, main: readonly WorkoutBlock[], target: number): Shaped {
+  const warmUp = blocksSeconds(template.warmUp);
+  const coolDown = blocksSeconds(template.coolDown);
+  const full = warmUp + blocksSeconds(main) + coolDown;
+  const over = full - target;
+  if (over <= tolerance(target)) {
+    return { warmUp: template.warmUp, main, coolDown: template.coolDown };
+  }
+  const warmUpSlack = Math.max(
+    0,
+    warmUp - (template.warmUpFloorSeconds ?? MINIMUM_WARM_UP_SECONDS),
+  );
+  const coolDownSlack = Math.max(
+    0,
+    coolDown - (template.coolDownFloorSeconds ?? MINIMUM_COOL_DOWN_SECONDS),
+  );
+  const slack = warmUpSlack + coolDownSlack;
+  const cut = slack === 0 ? 0 : Math.min(over, slack) / slack;
+  return {
+    warmUp: stretchBlocks(template.warmUp, (warmUp - warmUpSlack * cut) / warmUp),
+    main,
+    coolDown: stretchBlocks(template.coolDown, (coolDown - coolDownSlack * cut) / coolDown),
+  };
+}
+
+function lengthRefusal(
+  template: WorkoutTemplate,
+  target: number,
+  shorter: number | undefined,
+  longer: number | undefined,
+  joiner: 'or' | 'to',
+): WorkoutError {
+  const asked = `you asked for ${minutesText(target)}.`;
+  const can =
+    shorter !== undefined && longer !== undefined
+      ? `can be ${minutesText(shorter, false)} ${joiner} ${minutesText(longer)} long`
+      : longer !== undefined
+        ? `can be no shorter than ${minutesText(longer)}`
+        : `can be no longer than ${minutesText(shorter ?? 0)}`;
+  return new WorkoutError('invalid-choice', `"${template.name}" ${can}; ${asked}`);
+}
+
+/** `2700` → `"45 minutes"`; with `unit` false, `"45"`. */
+function minutesText(totalSeconds: number, unit = true): string {
+  const minutes = String(Math.round(totalSeconds / 60));
+  return unit ? `${minutes} minutes` : minutes;
+}
+
+/** The candidate nearest the length; the first, so the fewest repeats, on a tie. */
+function nearest(candidates: readonly Shaped[], target: number): Shaped | undefined {
+  let best: Shaped | undefined;
+  for (const candidate of candidates) {
+    if (best === undefined || distance(candidate, target) < distance(best, target)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function tolerance(target: number): number {
+  return Math.max(target * LENGTH_TOLERANCE_SHARE, LENGTH_TOLERANCE_SECONDS);
+}
+
+function distance(shaped: Shaped, target: number): number {
+  return Math.abs(shapedSeconds(shaped) - target);
+}
+
+function shapedSeconds(shaped: Shaped): number {
+  return blocksSeconds(shaped.warmUp) + blocksSeconds(shaped.main) + blocksSeconds(shaped.coolDown);
+}
+
+/** How long some blocks last, the way `expandWorkout` adds them up. */
+function blocksSeconds(blocks: readonly WorkoutBlock[]): number {
+  let total = 0;
+  for (const block of blocks) {
+    total +=
+      block.kind === 'intervals'
+        ? block.repeats * (block.hardSeconds + block.easySeconds)
+        : block.seconds;
+  }
+  return total;
+}
+
+/**
+ * Every block's length times one factor, to the whole second. Targets, kinds
+ * and the number of blocks are untouched.
+ */
+function stretchBlocks(blocks: readonly WorkoutBlock[], factor: number): readonly WorkoutBlock[] {
+  // A length that rounds to zero is left for `validateWorkout` to refuse, by
+  // block number, rather than raised to something nobody chose.
+  const length = (value: Seconds): Seconds => Math.round(value * factor) as Seconds;
+  return blocks.map((block) =>
+    block.kind === 'intervals'
+      ? { ...block, hardSeconds: length(block.hardSeconds), easySeconds: length(block.easySeconds) }
+      : { ...block, seconds: length(block.seconds) },
+  );
 }
 
 function repeatChoice(set: RepeatMainSet, value: number | undefined): number {

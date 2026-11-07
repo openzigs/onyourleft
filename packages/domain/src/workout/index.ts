@@ -76,12 +76,22 @@ export type {
   MainSet,
   Recovery,
   RepeatMainSet,
+  StretchMainSet,
   TailorChoices,
   TemplateParameters,
   WorkoutCategory,
   WorkoutTemplate,
 } from './template';
-export { MAXIMUM_INTENSITY_PERCENT, MINIMUM_INTENSITY_PERCENT, tailorWorkout } from './template';
+export {
+  LENGTH_TOLERANCE_SECONDS,
+  LENGTH_TOLERANCE_SHARE,
+  MAXIMUM_INTENSITY_PERCENT,
+  MINIMUM_COOL_DOWN_SECONDS,
+  MINIMUM_INTENSITY_PERCENT,
+  MINIMUM_WARM_UP_SECONDS,
+  tailorWorkout,
+  TEMPLATE_LENGTHS_MINUTES,
+} from './template';
 
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
