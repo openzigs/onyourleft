@@ -37,9 +37,14 @@ import { OVER_UNDER_WORKOUTS } from './over-under';
 import { RECOVERY_WORKOUTS } from './recovery';
 import { SWEET_SPOT_WORKOUTS } from './sweet-spot';
 import { TEMPO_WORKOUTS } from './tempo';
+import { THRESHOLD_TESTS } from './test';
 import { THRESHOLD_WORKOUTS } from './threshold';
 
-/** Every built-in workout, easiest category first. */
+/**
+ * Every built-in workout, easiest category first, and the two threshold tests
+ * (#2303, `test.ts`) after them: a test is not a training category, and its
+ * estimate is what every other template here is a share of.
+ */
 export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...RECOVERY_WORKOUTS,
   ...ENDURANCE_WORKOUTS,
@@ -47,4 +52,5 @@ export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...SWEET_SPOT_WORKOUTS,
   ...THRESHOLD_WORKOUTS,
   ...OVER_UNDER_WORKOUTS,
+  ...THRESHOLD_TESTS.map((test) => test.template),
 ];

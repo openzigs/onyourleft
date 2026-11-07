@@ -1,0 +1,36 @@
+{
+  "description": [
+    "Synthetic, written by hand for #2303: never a real ride.",
+    "ramp-test-recording.json with a one-second power dropout 30 s into the 300 W step, the effort's best minute.",
+    "power is run-length, [watts, seconds], with null for a dropout."
+  ],
+  "thresholdPower": 250,
+  "effortStartsAt": 480,
+  "effortEndsAt": 1160,
+  "power": [
+    [115, 120],
+    [125, 120],
+    [135, 120],
+    [145, 120],
+    [150, 60],
+    [165, 60],
+    [180, 60],
+    [195, 60],
+    [210, 60],
+    [225, 60],
+    [240, 60],
+    [255, 60],
+    [270, 60],
+    [285, 60],
+    [300, 30],
+    [null, 1],
+    [300, 29],
+    [290, 4],
+    [260, 4],
+    [200, 4],
+    [120, 4],
+    [40, 4],
+    [0, 5],
+    [95, 595]
+  ]
+}
