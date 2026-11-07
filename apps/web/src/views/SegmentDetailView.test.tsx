@@ -41,6 +41,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { stubEffortPort, type StubEffortRide } from '../efforts/testing';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { SegmentDetailView } from './SegmentDetailView';
 
@@ -298,5 +299,67 @@ describe('what the screen does when it cannot read — #67’s seventh criterion
     await settle();
 
     expect(mounted.container.textContent ?? '').toContain('Open a segment');
+  });
+});
+
+describe('what is not counted (#69)', () => {
+  it('shows an excluded effort with the reason, in the rider’s units, and never as a personal best', async () => {
+    // 500 m in 10 s is 50 m/s: no rider averages that.
+    const port = stubEffortPort({
+      athleteId: OWNER,
+      segments: [theSegment()],
+      efforts: [
+        effort('impossible', 'ride-2', 1_760_100_100, 10, 'excluded'),
+        effort('real', 'ride-1', 1_760_000_100, 90),
+      ],
+      rides: [
+        { activity: ride('ride-1', 1_760_000_000) },
+        { activity: ride('ride-2', 1_760_100_000) },
+      ],
+    });
+
+    mounted = await mount(<SegmentDetailView port={port} segment="segment-1" />);
+    await settle();
+
+    const [counted, notCounted] = queryAll<HTMLTableElement>(mounted.container, 'table');
+    expect(counted?.textContent).toContain('Personal best');
+    expect(counted?.textContent).not.toContain('Ride ride-2');
+    expect(notCounted?.textContent).toContain('Ride ride-2');
+    expect(notCounted?.textContent).toContain(
+      'Not counted: 180 km/h averaged over the segment is faster than the 100 km/h a ride can go',
+    );
+  });
+
+  it('awards no personal best on a segment the instance says is hazardous', async () => {
+    const port = stubEffortPort({
+      athleteId: OWNER,
+      segments: [theSegment()],
+      efforts: [effort('real', 'ride-1', 1_760_000_100, 90)],
+      rides: [{ activity: ride('ride-1', 1_760_000_000) }],
+    });
+    const boards: LeaderboardPort = {
+      offered: () => true,
+      instanceName: () => 'rides.example.org',
+      publishRefusal: () => Promise.resolve(undefined),
+      standing: () =>
+        Promise.resolve({ kind: 'published', segmentId: 'a'.repeat(32), yours: false }),
+      publish: () => Promise.resolve('published'),
+      withdrawSegment: () => Promise.resolve(false),
+      board: (_id, scope, period) => Promise.resolve({ scope, period, hazardous: true, rows: [] }),
+      flagEffort: () => Promise.resolve('refused'),
+      flagHazard: () => Promise.resolve('refused'),
+      share: () => Promise.resolve({ rides: 0, notSynced: 0, failed: 0 }),
+      withdraw: () => Promise.resolve({ rides: 0, notSynced: 0, failed: 0 }),
+      listSegments: () => Promise.resolve([]),
+      addSegment: () => Promise.resolve('unavailable'),
+    };
+
+    mounted = await mount(<SegmentDetailView port={port} segment="segment-1" boards={boards} />);
+    await settle();
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('no personal best is awarded on it');
+    expect(text).not.toContain('Personal best');
   });
 });

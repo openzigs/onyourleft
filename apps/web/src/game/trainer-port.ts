@@ -78,11 +78,12 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
-import type { WorkoutRescue } from '@onyourleft/domain';
+import type { TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
 import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
+import type { RideTotals } from '../recording/totals';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
@@ -435,6 +436,24 @@ export interface GameTrainerPort {
    */
   rideElapsedSeconds?(): number | undefined;
   /**
+   * The ride so far — distance, climb and average power — of the ride being
+   * recorded, or `undefined` when no ride is in progress — #2076. The
+   * recorder's own, `RideSnapshot.totals`: `recording/totals.ts` §`rideTotals`
+   * over the series and laps the saved ride is written from, so the HUD's
+   * *Distance*, *Climbed* and *Avg power* are the saved ride's. Read through
+   * {@link watchRide}, as the moving time is. Optional, as
+   * {@link rideElapsedSeconds} is; `gameTrainerPortOver` always supplies it.
+   */
+  rideTotals?(): RideTotals | undefined;
+  /**
+   * How long the ride being recorded has spent in each power zone of
+   * `threshold`, or `undefined` when no ride is in progress — #2077's
+   * time-in-zone bar. The recorder's own, `RideController.powerZoneTime`:
+   * `timeInZones` over the power channel the saved ride stores, which is what
+   * the Analysis screen's zone chart reads it by. Read through {@link watchRide}.
+   */
+  ridePowerZoneTime?(threshold: Watts): TimeInZones | undefined;
+  /**
    * Be told whenever the ride controller's state changes — #1111's review.
    * Returns the call that stops telling.
    *
@@ -538,11 +557,15 @@ interface GameTrainerSource {
     readonly elapsedSeconds?: number;
     /** #1312. @see GameTrainerPort.rideLapSeconds */
     readonly courseLapSeconds?: number | undefined;
+    /** #2076. @see GameTrainerPort.rideTotals */
+    readonly totals?: RideTotals | undefined;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
   /** #1111. @see GameTrainerPort.watchRide */
   subscribe(listener: () => void): () => void;
+  /** #2077. @see GameTrainerPort.ridePowerZoneTime. Optional for a source with no recording. */
+  powerZoneTime?(threshold: Watts): TimeInZones | undefined;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
   /**
@@ -687,6 +710,23 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       const snapshot = controller?.getSnapshot();
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? snapshot.elapsedSeconds
+        : undefined;
+    },
+    ridePowerZoneTime: (threshold) => {
+      // #2077: the phase from the snapshot, the time from the controller's
+      // memo, so both are of one moment and the object is held between reads.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? controller?.powerZoneTime?.(threshold)
+        : undefined;
+    },
+    rideTotals: () => {
+      // #2076: the phase and the totals from one snapshot. The same object
+      // until the recording moves on (`controller.ts` §`totalsOf`), which is
+      // what lets `useSyncExternalStore` hold it.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.totals
         : undefined;
     },
   };

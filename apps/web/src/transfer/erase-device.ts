@@ -134,6 +134,13 @@ export const ERASE_REMOVES: readonly string[] = [
   // added by somebody who remembered, and #35's own criteria already require
   // the enumeration to be derived for exactly that reason.
   'every photograph this device kept from a ride, and everything derived from one',
+  // #1063, ADR 0044 D-5, by name: a side-camera snapshot is a picture the
+  // rider pressed for, kept with its ride, with the outline it was shown with.
+  // The line above covers it in principle; a rider reading this list looks for
+  // the word they pressed. `deleteAthlete`'s cascade removes the rows, and
+  // {@link eraseDevice} throws away any still held in memory for a ride not
+  // yet saved.
+  'every side-camera snapshot — a picture you saved with “Save snapshot” — and the outline kept with it, including any still waiting for a ride to be saved',
   // ⚠️ **#528, by name, although the line above already covers it in
   // principle.** The side camera's framing reference is where the rider's
   // knees, hips and shoulders were in the picture last time — numbers, not a
@@ -369,6 +376,18 @@ export async function eraseDevice(
     readonly retiredHostedKey?: EraseSideStores | undefined;
     /** This device's sign-in to an instance (#777) — `instance/instance-port.ts` §`instanceEraser`. */
     readonly instance?: EraseSideStores | undefined;
+    /**
+     * The side-camera snapshots held in this tab's memory for a ride not yet
+     * saved (#1063) — `camera/snapshot-keeper.ts`. Forgotten FIRST, so a ride
+     * whose save lands while the erase runs cannot write one after it.
+     *
+     * ⚠️ `forget()` does NOT stop a write already in flight: that write holds
+     * its own list of snapshots. What makes it safe is `putCameraFrame`'s
+     * check, inside its transaction, that the snapshot's ride is held by its
+     * athlete — once `deleteAthlete` has run the ride is gone and the put is
+     * refused (#1063's review). Do not "simplify" that check away.
+     */
+    readonly heldSnapshots?: EraseSideStores | undefined;
     /** The note of jobs asked of the instance and not yet seen to end (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`. */
     readonly instanceAnalysis?: EraseSideStores | undefined;
     /** The last target each trainer acknowledged, keyed by its device id (#1305) — `ride/trainer-target-memory.ts`. */
@@ -376,6 +395,7 @@ export async function eraseDevice(
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
+  options.heldSnapshots?.forget();
   const counts = await store.deleteAthlete(athleteId);
   options.drafts?.forget();
   options.theme?.forget();

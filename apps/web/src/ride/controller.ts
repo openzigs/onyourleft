@@ -60,11 +60,14 @@ import {
   holdEligible,
   type HeartRateHoldContext,
   type WorkoutTimeline,
+  powerZones,
   seconds,
+  timeInZones,
   unixSeconds,
   type PlayerStatus,
   type ReplanRecord,
   type Seconds,
+  type TimeInZones,
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
@@ -110,6 +113,7 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
+import { rideTotals, type RideTotals } from '../recording/totals';
 import {
   recoverableRides,
   unreadableRecordings,
@@ -554,6 +558,14 @@ export interface RideSnapshot {
     readonly last: { readonly number: number; readonly lap: LapFigures } | undefined;
   };
   readonly sampleCount: number;
+  /**
+   * The ride so far — how far, how much climbing and what average power —
+   * #2076. `recording/totals.ts` §`rideTotals` over the recorder's own series
+   * and laps, the function and the source the saved ride's totals are written
+   * from, so the HUD's figures and the saved ride's are one answer.
+   * `undefined` with no recorder.
+   */
+  readonly totals: RideTotals | undefined;
   readonly metrics: readonly RideMetric[];
   readonly sensors: readonly PairedSensor[];
   readonly trainer: TrainerSnapshot;
@@ -1050,6 +1062,15 @@ export interface RideController {
   /** Stable between changes, so `useSyncExternalStore` does not loop. */
   getSnapshot(): RideSnapshot;
   subscribe(listener: () => void): Unsubscribe;
+  /**
+   * How long the ride being recorded has spent in each power zone of
+   * `threshold` — #2077's time-in-zone bar. `@onyourleft/domain`
+   * §`timeInZones` over the recorder's own power channel, the function and
+   * the samples the Analysis screen's zone chart reads a saved ride by.
+   * `undefined` with no recorder. The same object until the recording moves
+   * on or the threshold changes, as `useSyncExternalStore` requires.
+   */
+  powerZoneTime(threshold: Watts): TimeInZones | undefined;
 
   /**
    * Pair one device. **Must be called from a user gesture** — one per device.
@@ -2325,6 +2346,75 @@ export function createRideController(options: RideControllerOptions): RideContro
     return true;
   };
 
+  /**
+   * #2076: the ride's totals, worked out again only when the recording has
+   * moved on — a new sample, or a lap kept or advanced. A snapshot is built
+   * for every reading and every tick, and the series is the whole ride.
+   */
+  let totalsMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly laps: readonly RecordedCourseLap[];
+        readonly open: RecordedCourseLap | undefined;
+        readonly totals: RideTotals;
+      }
+    | undefined;
+  const totalsOf = (current: Recorder | undefined): RideTotals | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    const laps = current.courseLaps;
+    const open = current.openCourseLap;
+    if (
+      totalsMemo?.recorder !== current ||
+      totalsMemo.samples !== samples ||
+      totalsMemo.laps !== laps ||
+      totalsMemo.open !== open
+    ) {
+      const ridden = open === undefined ? laps : [...laps, open];
+      totalsMemo = {
+        recorder: current,
+        samples,
+        laps,
+        open,
+        totals: rideTotals(current.session.series(), ridden),
+      };
+    }
+    return totalsMemo.totals;
+  };
+
+  /** #2077: `powerZoneTime`, worked out again only when the recording or the threshold moves on. */
+  let zoneTimeMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly threshold: Watts;
+        readonly time: TimeInZones;
+      }
+    | undefined;
+  const zoneTimeOf = (current: Recorder | undefined, threshold: Watts): TimeInZones | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    if (
+      zoneTimeMemo?.recorder !== current ||
+      zoneTimeMemo.samples !== samples ||
+      zoneTimeMemo.threshold !== threshold
+    ) {
+      const series = current.session.series();
+      zoneTimeMemo = {
+        recorder: current,
+        samples,
+        threshold,
+        time: timeInZones(
+          powerZones(threshold),
+          series.channels.power ?? [],
+          series.sampleInterval,
+        ),
+      };
+    }
+    return zoneTimeMemo.time;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -2345,6 +2435,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         last: lastManualLap,
       },
       sampleCount: session?.sampleCount ?? 0,
+      totals: totalsOf(recorder),
       metrics: RIDE_METRIC_IDS.map((id) => ({
         id,
         state: metricStateFor(
@@ -3446,6 +3537,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     getSnapshot(): RideSnapshot {
       snapshot ??= buildSnapshot();
       return snapshot;
+    },
+
+    powerZoneTime(threshold: Watts): TimeInZones | undefined {
+      return zoneTimeOf(recorder, threshold);
     },
 
     subscribe(listener): Unsubscribe {

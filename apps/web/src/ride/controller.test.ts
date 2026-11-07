@@ -28,6 +28,7 @@ import {
   gradePercent,
   metres,
   metresPerSecond,
+  powerZones,
   routeProfile,
   revolutionsPerMinute,
   beatsPerMinute,
@@ -37,6 +38,7 @@ import {
   HOLD_SILENCE_FALLBACK_SECONDS,
   seconds,
   thresholdShare,
+  timeInZones,
   unixSeconds,
   watts,
   type RouteProfile,
@@ -10114,13 +10116,36 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     expect(workoutGraphText(paused)).not.toContain('asks');
     expect(heldInstead(paused)).toBeUndefined();
     expect(workoutGraphKey(paused)).toBe('');
-    // #1313: the strip draws no line through the pause, though the trace
-    // still carries a range and a target, and its name says no more.
+    // #1313, the owner's ruling of 2026-11-05: through the pause the strip
+    // hides the stale dashed range, though the trace still carries one, and
+    // keeps the heart rate already ridden; its name says no range.
     const strip = workoutStripPaths(paused);
-    expect(strip.lane).toEqual({ kind: 'heart-rate', range: '', heartRate: '' });
-    expect(workoutStripPaths({ ...paused, status: 'running' }).lane).not.toEqual(strip.lane);
-    expect(workoutStripName(paused)).not.toMatch(/Your power|Heart rate|chosen range/);
+    if (strip.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(strip.lane.range).toBe('');
+    expect(strip.lane.heartRate).not.toBe('');
+    // The same line it would draw running: the pause takes away the range only.
+    const asRunning = workoutStripPaths({ ...paused, status: 'running' }).lane;
+    expect(asRunning.kind === 'heart-rate' ? asRunning.heartRate : undefined).toBe(
+      strip.lane.heartRate,
+    );
+    expect(asRunning.kind === 'heart-rate' ? asRunning.range : '').not.toBe('');
+    expect(workoutStripName(paused)).toMatch(/Heart rate: \d+ bpm\./);
+    expect(workoutStripName(paused)).not.toContain('chosen range');
     expect(strip.progress.done).not.toBe('');
+
+    // And everything is back on resume, through the same controller.
+    await rig.controller.resume();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    const resumed = rig.controller.getSnapshot().workout;
+    if (resumed === undefined) throw new Error('no workout');
+    expect(resumed.status).toBe('running');
+    const back = workoutStripPaths(resumed);
+    if (back.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(back.lane.range).not.toBe('');
+    expect(back.lane.heartRate).not.toBe('');
+    expect(workoutStripName(resumed)).toContain('with a chosen range of 130–140 bpm');
     rig.controller.dispose();
   });
 
@@ -13131,6 +13156,119 @@ describe('#1435 — a trainer that sends power and will not hand over control', 
 
     expect(rig.written).toEqual([]);
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+describe('#2076 — the HUD’s ride so far is the saved ride’s', () => {
+  const lapsOf = async (id: string) =>
+    harness.read(async (store) => store.listLaps(ATHLETE_A, activityId(id)));
+
+  it('reads distance, climb and average power from the recorder, and they are what the ride is saved with', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(hud.rideTotals?.()).toBeUndefined();
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    rig.bench.rider.set({ power: watts(180) });
+    await ride(rig, 6);
+    // The lap in progress counts, as the saved ride's part lap will.
+    hud.courseLine?.({ kind: 'progress', distance: metres(300), ascent: metres(9) });
+    const midway = hud.rideTotals?.();
+    expect(midway).toBe(rig.controller.getSnapshot().totals);
+    expect(midway?.distance).toBeGreaterThan(0);
+    expect(midway?.climbed).toBe(9);
+    expect(midway?.averagePower).toBe(180);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks.
+    expect(hud.rideTotals?.()).toBe(midway);
+    // …and a new one as it does: three more seconds ridden, further gone.
+    await ride(rig, 3);
+    expect(hud.rideTotals?.()?.distance).toBeGreaterThan(
+      midway?.distance ?? Number.POSITIVE_INFINITY,
+    );
+
+    hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(1_000),
+      ascent: metres(14),
+      partial: false,
+      again: true,
+    });
+    rig.bench.rider.set({ power: watts(260) });
+    await ride(rig, 5);
+    // Where the game says the rider stopped: a part lap that climbed 4 m.
+    hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(400),
+      ascent: metres(4),
+      partial: true,
+      again: false,
+    });
+    const riding = hud.rideTotals?.();
+    expect(riding?.climbed).toBe(18);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    // Stopped, the HUD has no ride in progress to show.
+    expect(hud.rideTotals?.()).toBeUndefined();
+
+    // Read back from the store, as the library and the ride's page read it.
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    const laps = await lapsOf('ride-1');
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    if (saved === undefined || atTheEnd === undefined) throw new Error('the ride was not saved');
+    expect(atTheEnd.distance).toBe(saved.distance);
+    expect(atTheEnd.averagePower).toBe(saved.averagePower);
+    expect(atTheEnd.climbed).toBe(laps.reduce((sum, lap) => sum + (lap.ascent ?? 0), 0));
+    // And what the HUD showed while riding was the same figures, short only
+    // of the samples sealed as the ride stopped.
+    expect(riding?.climbed).toBe(atTheEnd.climbed);
+    expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeGreaterThanOrEqual(0);
+    expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeLessThan(30);
+    rig.controller.dispose();
+  });
+});
+
+describe('#2077 — the HUD’s time in each power zone is the saved ride’s', () => {
+  it('works it out over the recorder’s power, as the saved power channel reads, and holds one object between reads', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(150) });
+    await ride(rig, 4);
+    rig.bench.rider.set({ power: watts(340) });
+    await ride(rig, 3);
+    const riding = hud.ridePowerZoneTime?.(watts(250));
+    expect(riding?.covered).toBeGreaterThan(0);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks…
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBe(riding);
+    // …and another threshold is another answer.
+    expect(hud.ridePowerZoneTime?.(watts(400))).not.toBe(riding);
+    const atTheEnd = rig.controller.powerZoneTime(watts(250));
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+
+    // What the Analysis screen reads a saved ride's zones from: its power channel.
+    const streams = await harness.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+    );
+    if (streams === undefined) throw new Error('the ride was not saved');
+    const saved = timeInZones(
+      powerZones(watts(250)),
+      streams.channels.power ?? [],
+      streams.sampleInterval,
+    );
+    expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
+    // While riding it was the same figures, short only of what sealed at the stop.
+    expect(saved.covered - (riding?.covered ?? Number.NaN)).toBeGreaterThanOrEqual(0);
+    expect(atTheEnd?.perZone[1]).toBeGreaterThan(0);
     rig.controller.dispose();
   });
 });

@@ -316,6 +316,22 @@ export const COLOUR_TOKENS = {
    */
   hudStaleInk: '#f1af48',
   /*
+   * The power zones on the HUD — #2077's zone indicator: #2039's seven (ADR
+   * 0063 D-4: grey, blue, green, yellow, orange, red, purple above red), at
+   * the dark palette's values, because the HUD is dark in both (its tokens are
+   * theme-independent, {@link HudColourToken}). A swatch beside the zone's
+   * number and the bar's segments, each on `hudSurface` and each a declared
+   * 3:1 in {@link CONTRAST_REQUIREMENTS}.
+   * **Never colour alone**: the zone's number and name are always written.
+   */
+  hudZone1: '#949aa1',
+  hudZone2: '#2d74ca',
+  hudZone3: '#5fc372',
+  hudZone4: '#f9df5d',
+  hudZone5: '#f59441',
+  hudZone6: '#cb574d',
+  hudZone7: '#cf91f3',
+  /**
    * The look-ahead strip's grade bands (#2075, `game/hud/look-ahead.ts`
    * §`GRADE_BANDS`), on the HUD's surface. Our own five, and the order a
    * rider already reads — cool for down, grey for flat, warmer and redder as
@@ -1383,6 +1399,25 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: { light: 9.8, dark: 9.8 },
     where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
+  // #2077: each power zone's colour on the HUD — the zone indicator's swatch
+  // and the time-in-zone bar's segment, both on the panel.
+  ...(
+    [
+      ['hudZone1', 6.61],
+      ['hudZone2', 3.99],
+      ['hudZone3', 8.52],
+      ['hudZone4', 14.06],
+      ['hudZone5', 8.21],
+      ['hudZone6', 4.48],
+      ['hudZone7', 8.04],
+    ] as const
+  ).map(([token, ratio], index) => ({
+    foreground: token,
+    background: 'hudSurface' as const,
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: ratio, dark: ratio },
+    where: `power zone ${String(index + 1)} on the HUD: the zone indicator's swatch and its segment of the time-in-zone bar (SC 1.4.11, #2077)`,
+  })),
   {
     foreground: 'hudGradeDescent',
     background: 'hudSurface',

@@ -870,6 +870,31 @@ export const RETRACE_HEADING_COSINE = Math.cos(Math.PI / 6);
 const RETRACE_SLACK_METRES = 0.05;
 
 /**
+ * The side of the cells {@link retracedRows} files a corridor's stretches
+ * under, in metres: **8**, a stretch or two of road and its `reach` — #1688.
+ * Any side gives the same answer; this one only decides how many stretches a
+ * point is tested against.
+ */
+const RETRACE_CELL_METRES = 8;
+
+/** No stretch near a point, for {@link retracedRows}. */
+const NO_STRETCHES: readonly number[] = [];
+
+/** The cell a coordinate falls in, for {@link retracedRows}. */
+function retraceCell(metres: number): number {
+  return Math.floor(metres / RETRACE_CELL_METRES);
+}
+
+/**
+ * One number for a cell, for {@link retracedRows}. Two cells share one only
+ * past 4 000 km from the projection's origin, and a stretch filed under the
+ * other is then turned away by its box.
+ */
+function retraceKey(cellX: number, cellZ: number): number {
+  return cellX * 1_000_003 + cellZ;
+}
+
+/**
  * Which of a corridor's points lie on a stretch of road the corridor ALSO
  * draws nearer where the camera looks, one byte a point, 1 where one does — #1996.
  *
@@ -900,11 +925,18 @@ const RETRACE_SLACK_METRES = 0.05;
  * it was built for, so what is placed on the road — the riders, the camera,
  * the scenery's window — is where it was.
  *
- * ⚠️ O(points²), about 18 000 point-and-stretch pairs at the usual 135 points,
- * and nothing at all unless the corridor turns through more than 120°, which
- * a road must to come back along itself.
+ * ⚠️ Nothing at all unless the corridor turns through more than 120°, which
+ * a road must to come back along itself. Past that, a point is tested only
+ * against the stretches filed under its own {@link RETRACE_CELL_METRES} cell
+ * (#1688), not all of them: every point against every stretch, about 18 000
+ * pairs at the usual 135 points, was most of the nightly coverage run's time
+ * in every hairpin test.
+ *
+ * Exported for `terrain.test.ts` §"the stretches a corridor point is tested
+ * against", which holds that a point at infinity ends it; the product's one
+ * caller is {@link roadCorridor}, in this module.
  */
-function retracedRows(
+export function retracedRows(
   centre: readonly CorridorPoint[],
   normals: Float64Array,
   reference: number,
@@ -946,8 +978,43 @@ function retracedRows(
     if (dot < 0) turns.push(row);
   }
   const reach = RETRACE_OVERLAP_METRES;
+  // Each stretch's box in plan, widened by `reach`, filed under every
+  // {@link RETRACE_CELL_METRES} cell it overlaps, in stretch order (#1688). A
+  // point is within `reach` only of a stretch whose box holds it, and every
+  // such stretch is filed under the point's own cell, so the loop below meets
+  // the same stretches in the same order as one over all of them did. A box
+  // that is not finite is filed nowhere: no point is within `reach` of its
+  // stretch (`across` is not a number), and its cells would never end.
+  const left = new Float64Array(rows);
+  const right = new Float64Array(rows);
+  const back = new Float64Array(rows);
+  const front = new Float64Array(rows);
+  const cells = new Map<number, number[]>();
+  for (let segment = 0; segment + 1 < rows; segment += 1) {
+    const from = centre[segment] as CorridorPoint;
+    const to = centre[segment + 1] as CorridorPoint;
+    const minX = Math.min(from.x, to.x) - reach;
+    const maxX = Math.max(from.x, to.x) + reach;
+    const minZ = Math.min(from.z, to.z) - reach;
+    const maxZ = Math.max(from.z, to.z) + reach;
+    left[segment] = minX;
+    right[segment] = maxX;
+    back[segment] = minZ;
+    front[segment] = maxZ;
+    if (!Number.isFinite(minX + maxX + minZ + maxZ)) continue;
+    for (let cellX = retraceCell(minX); cellX <= retraceCell(maxX); cellX += 1) {
+      for (let cellZ = retraceCell(minZ); cellZ <= retraceCell(maxZ); cellZ += 1) {
+        const key = retraceKey(cellX, cellZ);
+        const filed = cells.get(key);
+        if (filed === undefined) cells.set(key, [segment]);
+        else filed.push(segment);
+      }
+    }
+  }
   for (let row = 0; row < rows; row += 1) {
     const point = centre[row] as CorridorPoint;
+    const pointX = point.x;
+    const pointZ = point.z;
     const own = Math.abs(point.along - reference);
     // This point's heading, from the stretch it starts (or ends, at the last).
     const ahead = centre[Math.min(rows - 1, row + 1)] as CorridorPoint;
@@ -958,17 +1025,18 @@ function retracedRows(
     let nearest = Number.POSITIVE_INFINITY;
     let nearestAlong = 0;
     let nearestSegment = 0;
-    for (let segment = 0; segment + 1 < rows; segment += 1) {
-      const from = centre[segment] as CorridorPoint;
-      const to = centre[segment + 1] as CorridorPoint;
+    const near = cells.get(retraceKey(retraceCell(pointX), retraceCell(pointZ))) ?? NO_STRETCHES;
+    for (const segment of near) {
       if (
-        point.x < Math.min(from.x, to.x) - reach ||
-        point.x > Math.max(from.x, to.x) + reach ||
-        point.z < Math.min(from.z, to.z) - reach ||
-        point.z > Math.max(from.z, to.z) + reach
+        pointX < (left[segment] as number) ||
+        pointX > (right[segment] as number) ||
+        pointZ < (back[segment] as number) ||
+        pointZ > (front[segment] as number)
       ) {
         continue;
       }
+      const from = centre[segment] as CorridorPoint;
+      const to = centre[segment + 1] as CorridorPoint;
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const span = dx * dx + dz * dz;

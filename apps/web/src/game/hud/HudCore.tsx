@@ -41,6 +41,8 @@ import {
   givesWayToTheRoom,
   hudReadings,
   isDeliveryReading,
+  isEffortReading,
+  isRideTotalReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -145,6 +147,12 @@ export interface HudCoreProps extends SharedProps {
    * rider's ride keeps it.
    */
   readonly withoutElapsed?: boolean;
+  /**
+   * Leaves out *Distance*, *Climbed* and *Avg power* (#2076). The demo's: it
+   * records nothing, so the three would be dashes for as long as it plays.
+   * A rider's ride keeps them.
+   */
+  readonly withoutTotals?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -167,7 +175,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
-      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY),
+      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
+      !(props.withoutTotals === true && isRideTotalReading(reading)),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
@@ -461,6 +470,17 @@ function fieldClass(reading: HudReading): string {
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
+    // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
+    ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
+    // #2077: and the rider's own effort, drawn where the ride so far is.
+    ...(isEffortReading(reading) ? ['oyl-hud__field--effort'] : []),
+    // #2213 with #2076: the 4:3 tablet sets *Avg power* in its narrowest
+    // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
+    ...(reading.key === 'averagePower' ? ['oyl-hud__field--average-power'] : []),
+    // And the distance and the climb by name, which it sets in the second
+    // row's wide tracks there (the same section).
+    ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
+    ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
   ].join(' ');
 }
 
@@ -514,6 +534,7 @@ function FieldList(props: {
               <span className="oyl-hud__detail"> {reading.detail}</span>
             )}
             {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
+            {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
             {reading.stale ? (
               // ⚠️ Words, not only a tint. #94's second criterion is that a
               // dropped sensor be distinguishable from a zero — and a rider
@@ -531,6 +552,44 @@ function FieldList(props: {
 }
 
 /**
+ * This ride's time in each power zone — #2077: one thin bar, each zone's share
+ * a segment in its colour, in zone order. `aria-hidden`, and never the only
+ * carrier: the zone indicator's number and name say where the rider is now,
+ * and the Analysis screen's zone chart says the whole ride in words. Its
+ * outline alone with nothing recorded.
+ */
+function ZoneBar(props: { readonly shares: readonly number[] }): JSX.Element {
+  let from = 0;
+  return (
+    <svg
+      className="oyl-hud__zone-bar"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-zone-shares={props.shares.map((share) => share.toFixed(3)).join(',')}
+    >
+      {props.shares.map((share, index) => {
+        const width = share * 100;
+        const x = from;
+        from += width;
+        return width > 0 ? (
+          <rect
+            key={index}
+            className={`oyl-hud__zone-bar-part oyl-hud__zone-bar-part--${String(index + 1)}`}
+            x={x}
+            y={0}
+            width={width}
+            height={10}
+          />
+        ) : null;
+      })}
+      <rect className="oyl-hud__zone-bar-scale" x="0" y="0" width="100" height="10" />
+    </svg>
+  );
+}
+
+/**
  * A reading's value — and, for a signed one (#2071, the gradient's), its sign
  * in a span of its own: `theme.css` §"THE GRADIENT, PRIMARY" sets the sign
  * smaller than the digits, which is what lets `+12.5` fit a primary track on
@@ -543,7 +602,25 @@ function FieldList(props: {
  * `tokens.ts`); the sign is half their size, small text, and keeps the ink.
  */
 function Value(props: { readonly reading: HudReading }): JSX.Element {
-  const { value, slope, grade } = props.reading;
+  const { value, slope, grade, zone } = props.reading;
+  // #2077: the zone's number beside a swatch of the zone's own colour. The
+  // swatch is `aria-hidden`: the number IS the reading, and the name under it
+  // says the same in words, so the colour is never the only carrier.
+  if (zone?.current !== undefined) {
+    return (
+      <>
+        <svg
+          className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect x="0" y="0" width="10" height="10" rx="2" />
+        </svg>
+        {value}
+      </>
+    );
+  }
   const sign = value.charAt(0);
   const signed = slope !== undefined && (sign === '+' || sign === '-');
   const digits = signed ? value.slice(1) : value;

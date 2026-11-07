@@ -278,7 +278,7 @@ describe('the home screen — #428', () => {
   });
 
   it('draws no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
-    // `recording/finish.ts` §`distanceOf` stores 0 m for a ride recorded with
+    // `recording/totals.ts` §`rideDistance` stores 0 m for a ride recorded with
     // no speed channel: no distance known, as the Activities card reads it.
     await openHome([ride('still', 2, { distance: metres(0) })]);
     const terms = [...lastRide().querySelectorAll('dt')].map((t) => t.textContent);

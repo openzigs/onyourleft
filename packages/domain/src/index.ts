@@ -778,6 +778,17 @@ export {
   sampleHeading,
   startBearing,
 } from './segment/segment';
+// Leaderboard integrity (#69): the one automatic rule — an implied speed
+// impossible for the sport — applied alike on the device and the instance.
+export type { EffortFlagReason, HazardReason, ImplausibleEffort } from './segment/integrity';
+export {
+  EFFORT_FLAG_REASONS,
+  HAZARD_REASONS,
+  IMPLAUSIBLE_SPEED_METRES_PER_SECOND,
+  impliedSpeed,
+  implausibleEffort,
+  MEASURED_DETECTION,
+} from './segment/integrity';
 // A segment as it is published to an instance (#68): one definition the device
 // sends, the instance ranks against and another rider's device adds, named by
 // a digest of itself.

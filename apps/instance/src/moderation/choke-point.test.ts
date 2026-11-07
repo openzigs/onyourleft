@@ -154,6 +154,14 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a segment by its digest, never an athlete; one whose publisher the caller may not see is `not_found`, by the same rule (#68, segments/leaderboard.test.ts)',
   },
+  flagSegmentEffort: {
+    heldElsewhere:
+      'names an effort by its opaque id, never an athlete; an effort by a rider the caller may not see is `not_found`, as one that is not there, by the choke point’s rule in the flag’s own transaction (#69, segments/integrity.test.ts)',
+  },
+  flagSegmentHazard: {
+    heldElsewhere:
+      'names a segment, never an athlete; one whose publisher the caller may not see is `not_found`, and only a rider with an effort of their own on it may flag it (#69, segments/integrity.test.ts)',
+  },
   getSegmentLeaderboard: {
     heldElsewhere:
       'names a segment, never an athlete; every row’s rider is held to the choke point’s rule in the one read, held to `canSee` pair by pair, and one the caller may not see is left out (#68, segments/leaderboard.test.ts)',
@@ -183,6 +191,8 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
   segmentId:
     'a published segment, by a digest of its definition (#68); its publisher and every rider on its board are held to the choke point’s rule inside the read',
+  effortId:
+    'an effort on a board, by an opaque random id that is never an athlete’s (#69); its rider is held to the choke point’s rule in the flag’s transaction',
 };
 
 /**
@@ -219,7 +229,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   address: 'the CALLER’s own recovery address',
   confirmed: 'the CALLER’s own 18+ self-declaration (ruling Q5)',
   token: 'a token mailed to the CALLER’s own recovery address',
-  reason: 'free text a reporter or a moderator writes; never an id the route acts on',
+  reason:
+    'free text a reporter or a moderator writes, or a flag’s reason from a closed list (#69); never an id the route acts on',
   reportId: 'a report, read and decided only on the moderators’ routes',
   statement:
     'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',

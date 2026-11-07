@@ -576,7 +576,7 @@ function splitsOf(
   const firstSlots = stretches.map((stretch) => slotInstant(stretch.startedAt));
 
   const buckets: TrackPoint[][] = stretches.map(() => []);
-  /** The speed channel summed over each split: `recording/finish.ts` §`distanceOf`'s sum. */
+  /** The speed channel summed over each split: `recording/totals.ts` §`rideDistance`'s sum. */
   const recorded = stretches.map(() => 0);
   let index = 0;
   for (const point of points) {
