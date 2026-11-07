@@ -37,6 +37,7 @@ import {
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
 import {
+  circuitRouteId,
   openActivityStore,
   privacyZoneId,
   SCHEMA_VERSION,
@@ -200,6 +201,33 @@ describe('read once, then from the store', () => {
     expect(kept?.halfWidthMetres).toBe(CORRIDOR_HALF_WIDTH_METRES);
     expect(kept?.tiles.length).toBeGreaterThan(0);
     expect(kept?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+  });
+});
+
+describe('a built-in circuit’s corridor — #2293, ADR 0064 D-2.2', () => {
+  it('is read once, kept under the circuit’s key with no route saved, and then asks nothing', async () => {
+    // A circuit is never a RouteRecord: nothing is saved for it here.
+    const circuit = { id: circuitRouteId('fixture'), profile: circuitRoute(400) };
+    const source = countingSource(await buildArchive({ tiles: corridorTiles(circuit.profile) }));
+    const ask = (port: WorldCorridorPort): Promise<CorridorState> =>
+      port.load(circuit, new AbortController().signal, () => undefined);
+
+    const first = await ask(portOver(freshStore(), source, on()));
+    expect(first.kind).toBe('ready');
+    const calls = source.calls.length;
+    expect(calls).toBeGreaterThan(0);
+
+    const kept = await harness.read((store) =>
+      store.getWorldCorridor(ATHLETE_A, circuitRouteId('fixture')),
+    );
+    expect(kept?.owner).toBe(ATHLETE_A);
+    expect(kept?.routeId).toBe('circuit:fixture');
+    expect(kept?.licence).toBe('ODbL-1.0');
+
+    for (const store of stores) store.close();
+    const second = await ask(portOver(freshStore(), source, on()));
+    expect(source.calls.length - calls).toBe(0);
+    expect(featuresOf(second)).toStrictEqual(featuresOf(first));
   });
 });
 

@@ -169,10 +169,44 @@ export function segmentEffortId(value: string): SegmentEffortId {
   return value as SegmentEffortId;
 }
 
-/** @throws {StoreValidationError} if empty or blank. */
+/**
+ * The id namespace reserved for the app's built-in lap-race circuits — #2293,
+ * ADR 0064 D-2.2. A circuit is not a route the rider saved, so it has no
+ * `RouteRecord`, but the world corridor store is keyed by owner and route id,
+ * and a circuit's corridor is kept there under `circuit:` and the circuit's
+ * own id. **No route id may carry it**: {@link routeId} refuses one, so a
+ * circuit's corridor and a route's can never share a key.
+ */
+export const CIRCUIT_ROUTE_PREFIX = 'circuit:';
+
+/**
+ * @throws {StoreValidationError} if empty or blank, or if it starts with
+ * {@link CIRCUIT_ROUTE_PREFIX}, which only {@link circuitRouteId} makes.
+ */
 export function routeId(value: string): RouteId {
   assertUsableId(value, 'route id');
+  if (isCircuitRouteId(value)) {
+    throw new StoreValidationError(
+      `route id must not start with "${CIRCUIT_ROUTE_PREFIX}", which is reserved for the built-in circuits`,
+    );
+  }
   return value as RouteId;
+}
+
+/**
+ * The key a built-in circuit is known by where a route id is asked for — #2293:
+ * {@link CIRCUIT_ROUTE_PREFIX} and the circuit's id.
+ *
+ * @throws {StoreValidationError} if the circuit's id is empty or blank.
+ */
+export function circuitRouteId(circuit: string): RouteId {
+  assertUsableId(circuit, 'circuit id');
+  return `${CIRCUIT_ROUTE_PREFIX}${circuit}` as RouteId;
+}
+
+/** Whether an id is a built-in circuit's ({@link circuitRouteId}), never a saved route's. */
+export function isCircuitRouteId(value: string): boolean {
+  return value.startsWith(CIRCUIT_ROUTE_PREFIX);
 }
 
 /** @throws {StoreValidationError} if empty or blank. */

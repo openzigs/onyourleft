@@ -117,6 +117,12 @@ export interface CreditsViewProps {
    */
   readonly licenceText?: (licence: string) => Promise<string>;
   /**
+   * Reads the built-in circuits' ODbL notice (#2293, ADR 0064 D-3.2), the
+   * copy in `public/licences/`. Defaults to {@link loadCircuitsNotice}; a prop
+   * so a test can hand in one that fails to load.
+   */
+  readonly circuitsNotice?: () => Promise<string>;
+  /**
    * Works the build copies in rather than commits — #618. Defaults to
    * `credits.ts` §`COPIED_WORKS`; a prop so a fixture manifest can be rendered
    * with nothing beside it.
@@ -336,11 +342,22 @@ function ShippedLicences({
   );
 }
 
+/**
+ * The built-in circuits' notice, read into the page — #2293. A dynamic
+ * `import()` of the committed copy, for the reason `licence-documents.ts`
+ * gives: a link to the `.txt` would open over the app inside the Android
+ * shell and leave the rider there.
+ */
+export async function loadCircuitsNotice(): Promise<string> {
+  return (await import('../../public/licences/circuits-ODbL.txt?raw')).default;
+}
+
 export function CreditsView({
   manifest,
   notices,
   noticesDocument = loadNoticesDocument,
   licenceText = loadShippedLicence,
+  circuitsNotice = loadCircuitsNotice,
   copied = COPIED_WORKS,
 }: CreditsViewProps): JSX.Element {
   const credits = useMemo(
@@ -450,11 +467,16 @@ export function CreditsView({
         </div>
 
         {/*
-        #1552, ADR 0054 D-3.6: the map data. Not a file this app ships, so not
-        in `ASSETS.toml` and not generated from it: the maps are drawn
-        from OpenStreetMap,
+        #1552, ADR 0054 D-3.6: the map data. The maps are drawn from
+        OpenStreetMap read at the time, which is not a file this app ships,
         and ODbL §4.3 asks for this notice wherever the result is shown. The
         ride screen and the map show `OSM_ATTRIBUTION` beside the work itself.
+        ⚠️ Since #2293 (ADR 0064 D-3.2, D-5.2) the app DOES ship map data: the
+        built-in lap-race circuits' files, each a database derived from
+        OpenStreetMap and offered under ODbL 1.0. They are named in
+        `ASSETS.toml`, but under a licence with no `creator` key, so the art
+        list above leaves them out and they are credited here, with their
+        notice read in place.
       */}
         <div data-terms="map-data">
           <h2>Map data</h2>
@@ -467,6 +489,23 @@ export function CreditsView({
             .
           </p>
           <p>{ODBL_NOTICE}</p>
+          <p data-credit="circuits">
+            This app also ships the files of its built-in lap-race circuits. Each one follows
+            streets drawn from OpenStreetMap, so each file is made available under the{' '}
+            <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+              Open Database License 1.0
+            </a>{' '}
+            too. Their heights come from the USGS 3D Elevation Program, which is in the public
+            domain.
+          </p>
+          <ReadInPlace
+            load={circuitsNotice}
+            summary="Read the circuits’ licence notice"
+            reading="Reading the notice this app carries."
+            failedLabel="Could not open the notice"
+            failed="The circuits’ licence notice could not be read just now. It is also in this project’s public repository, beside the circuit files."
+            marker={{ 'data-circuits-notice': '' }}
+          />
           {/*
           #1975: the map archive also carries a land-cover layer derived from
           ESA WorldCover, which nothing here draws. CC BY 4.0 asks for the

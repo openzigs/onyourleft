@@ -19,6 +19,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
+import { circuitRouteId } from '@onyourleft/store';
 
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { hrefForGamePlay, hrefForGameRoute } from '../shell/routes';
@@ -97,12 +98,12 @@ afterEach(() => {
 });
 
 /** The game's setup, opened at `hash` as the shell would open it. */
-async function setupAt(hash: string): Promise<void> {
+async function setupAt(hash: string, port: GamePort = PORT): Promise<void> {
   globalThis.location.hash = hash;
   mounted = await mount(
     <main>
       <h1>Trainer game</h1>
-      <GameView port={PORT} renderer={() => Promise.resolve(RENDERER)} now={() => nowMs} />
+      <GameView port={port} renderer={() => Promise.resolve(RENDERER)} now={() => nowMs} />
     </main>,
   );
   await settle();
@@ -172,6 +173,25 @@ describe('#2292 — a lap race course chosen on the Games tab', () => {
     await ride();
     expect(drawn.length).toBeGreaterThan(0);
     expect(drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
+  });
+});
+
+describe('#2293 — a built-in circuit chosen on the Games tab', () => {
+  /** A synthetic circuit, keyed as a shipped one is (ADR 0064 D-6.4). */
+  const RING: RidableRoute = {
+    id: circuitRouteId('fixture-ring'),
+    name: 'Fixture ring',
+    profile: circuitRoute(70),
+    attempts: 0,
+  };
+  const WITH_CIRCUITS: GamePort = { ...PORT, listCircuits: () => Promise.resolve([RING]) };
+
+  it('opens the setup on that circuit, not the rider’s first route, and the race runs', async () => {
+    await setupAt(hrefForGamePlay('lap-race', RING.id), WITH_CIRCUITS);
+    expect(chosenCard()).toContain(RING.name);
+    await ride();
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.at(-1)?.lapRace).toBeDefined();
   });
 });
 
