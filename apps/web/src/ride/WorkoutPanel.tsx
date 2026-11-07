@@ -99,7 +99,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 
-import type { Watts } from '@onyourleft/domain';
+import { workoutCadenceText, type Watts } from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
 
 import type { SideControlState } from '../camera/side-pairing-port';
@@ -164,6 +164,14 @@ function raisedText(workout: RideWorkoutSnapshot): string {
   return workout.raisedFromWatts === undefined
     ? ''
     : ` This block asks for ${String(workout.raisedFromWatts)} W, which is less than the lowest target this trainer accepts.`;
+}
+
+/**
+ * The cadence cue line (#2302): `"Cadence cue: 60–65 rpm"`. A cue, said as
+ * one: the rider is asked, the trainer is not told.
+ */
+function cadenceCueLine(cue: NonNullable<RideWorkoutSnapshot['cadence']>): string {
+  return `Cadence cue: ${workoutCadenceText(cue)}`;
 }
 
 export interface WorkoutPanelProps {
@@ -520,6 +528,16 @@ export function WorkoutPanel({
           {durationText(workout.totalSeconds)}
         </p>
         {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
+        {/*
+          #2302: the stretch's advisory cadence cue, under the block it is part
+          of — an interval's hard or easy half each say their own. A line only
+          for a block that names one, so a workout with no cue lays out exactly
+          as before. Never a target: the trainer is told power and nothing
+          else, which is why the line says "cue".
+        */}
+        {workout.cadence === undefined ? null : (
+          <p data-oyl-cadence-cue="">{cadenceCueLine(workout.cadence)}</p>
+        )}
         {/*
           ⚠️ #605's review: `holdingWatts` is the writer's last ACKNOWLEDGED
           write, and it outlives a lost link — the workout does too

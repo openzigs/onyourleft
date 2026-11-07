@@ -31,6 +31,11 @@ export type WorkoutErrorCode =
    * minute in the plausible band, or is narrower than 6 bpm (#1239, H2).
    */
   | 'invalid-heart-rate-range'
+  /**
+   * A cadence cue that is not two whole numbers of rpm between 30 and 150,
+   * low first (#2302).
+   */
+  | 'invalid-cadence'
   /** A block kind the model does not have. */
   | 'unknown-block'
   /**

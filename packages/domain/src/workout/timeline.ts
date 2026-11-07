@@ -35,6 +35,7 @@ import { seconds, type Seconds } from '../quantities';
 
 import {
   validateWorkout,
+  type CadenceCue,
   type HeartRateHoldBlock,
   type ThresholdShare,
   type Workout,
@@ -65,7 +66,16 @@ export interface WorkoutSegment {
    * about the hold rides it as the steady block it falls back to.
    */
   readonly hold?: HeartRateHoldBlock | undefined;
+  /**
+   * The advisory cadence cue for this stretch, when its block names one
+   * (#2302): an interval's hard or easy cue for each of its halves. For a
+   * screen only — nothing that writes to a trainer reads it.
+   */
+  readonly cadence?: CadenceCue | undefined;
 }
+
+/** What a segment carries beyond its targets, only when its block has it. */
+type SegmentExtras = Pick<WorkoutSegment, 'hold' | 'cadence'>;
 
 /** A workout with its segments and its total length. */
 export interface WorkoutTimeline {
@@ -94,7 +104,7 @@ export function expandWorkout(workout: Workout): WorkoutTimeline {
     to: ThresholdShare | undefined,
     block: number,
     label: string | undefined,
-    hold?: HeartRateHoldBlock,
+    extras: SegmentExtras = {},
   ): void => {
     segments.push({
       startsAt: seconds(offset),
@@ -103,7 +113,8 @@ export function expandWorkout(workout: Workout): WorkoutTimeline {
       to,
       block,
       ...(label === undefined ? {} : { label }),
-      ...(hold === undefined ? {} : { hold }),
+      ...(extras.hold === undefined ? {} : { hold: extras.hold }),
+      ...(extras.cadence === undefined ? {} : { cadence: extras.cadence }),
     });
     offset += length;
   };
@@ -124,21 +135,25 @@ function expandBlock(
     to: ThresholdShare | undefined,
     block: number,
     label: string | undefined,
-    hold?: HeartRateHoldBlock,
+    extras?: SegmentExtras,
   ) => void,
 ): void {
   switch (block.kind) {
     case 'steady':
-      push(block.seconds, block.target, block.target, index, block.label);
+      push(block.seconds, block.target, block.target, index, block.label, {
+        cadence: block.cadence,
+      });
       return;
     case 'ramp':
-      push(block.seconds, block.from, block.to, index, block.label);
+      push(block.seconds, block.from, block.to, index, block.label, { cadence: block.cadence });
       return;
     case 'free-ride':
       push(block.seconds, undefined, undefined, index, block.label);
       return;
     case 'heart-rate-hold':
-      push(block.seconds, block.startShare, block.startShare, index, block.label, block);
+      push(block.seconds, block.startShare, block.startShare, index, block.label, {
+        hold: block,
+      });
       return;
     case 'intervals':
       // Hard then easy, every time, including the last repeat. A rider who
@@ -147,8 +162,12 @@ function expandBlock(
       // Dropping the final easy interval here would make `6 ×` mean five and a
       // half, and the arithmetic on the screen would stop matching the clock.
       for (let repeat = 0; repeat < block.repeats; repeat += 1) {
-        push(block.hardSeconds, block.hardTarget, block.hardTarget, index, block.label);
-        push(block.easySeconds, block.easyTarget, block.easyTarget, index, block.label);
+        push(block.hardSeconds, block.hardTarget, block.hardTarget, index, block.label, {
+          cadence: block.hardCadence,
+        });
+        push(block.easySeconds, block.easyTarget, block.easyTarget, index, block.label, {
+          cadence: block.easyCadence,
+        });
       }
       return;
     default: {

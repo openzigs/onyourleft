@@ -70,9 +70,11 @@ import { flushSync } from 'react-dom';
 
 import {
   beatsPerMinute,
+  CADENCE_WORKOUTS,
   expandWorkout,
   metres,
   seconds,
+  tailorWorkout,
   thresholdShare,
   unixSeconds,
   watts,
@@ -643,6 +645,38 @@ const SAVED_RIDE = {
   gameOutcome: 'not-beaten' as const,
 };
 
+/**
+ * `rideview.html?workout=cadence` — #2302: a low-cadence strength drill from
+ * the built-in library, forty seconds into its first effort, so the running
+ * workout's section carries the stretch's advisory cue — "Cadence cue: 60–65
+ * rpm" — under "Now:". Through the stub's snapshot, for {@link WORKOUT_STATE}'s
+ * reason: `workout/cadence-cue.store.test.tsx` drives the real controller from
+ * the real store; this page measures where the line lands, in each palette.
+ */
+function cadenceWorkout(): NonNullable<RideSnapshot['workout']> {
+  const template = CADENCE_WORKOUTS.find((each) => each.id === 'cadence-low-strength-5min');
+  if (template === undefined) throw new Error('no low-cadence drill in the library');
+  const timeline = expandWorkout(tailorWorkout(template, { repeats: 2 }));
+  const elapsed = 700;
+  const segment = timeline.segments.find(
+    (each) => each.startsAt <= elapsed && elapsed < each.endsAt,
+  );
+  return {
+    name: template.name,
+    status: 'running',
+    elapsedSeconds: elapsed,
+    totalSeconds: timeline.totalSeconds,
+    holdingWatts: 213,
+    nowRiding: '5 min at 85%',
+    cadence: segment?.cadence,
+    fault: undefined,
+    rescue: undefined,
+    timeline,
+    thresholdWatts: 250,
+    trace: graphTrace(213),
+  };
+}
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -797,6 +831,9 @@ function snapshot(): RideSnapshot {
       }),
       workout,
     };
+  }
+  if (WORKOUT_STATE === 'cadence') {
+    return { ...riding, workout: cadenceWorkout() };
   }
   if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
     return riding;
@@ -1800,6 +1837,8 @@ async function run(): Promise<void> {
         (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Heart-rate hold:',
       ),
     );
+  } else if (WORKOUT_STATE === 'cadence') {
+    await until('the cadence cue', () => document.querySelector('[data-oyl-cadence-cue]'));
   } else if (REPLAN_STATE === 'waiting') {
     await until('Keep the plan', () =>
       [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(

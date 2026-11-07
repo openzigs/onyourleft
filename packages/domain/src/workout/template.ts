@@ -573,6 +573,10 @@ function repeatBlocks(
         easySeconds: recovery.seconds,
         easyTarget: recovery.target,
         ...(only.label === undefined ? {} : { label: only.label }),
+        // #2302: each half keeps its own cue, or a drill's cues would be lost
+        // at the one step that turns two blocks into one.
+        ...(only.cadence === undefined ? {} : { hardCadence: only.cadence }),
+        ...(recovery.cadence === undefined ? {} : { easyCadence: recovery.cadence }),
       },
     ];
   }

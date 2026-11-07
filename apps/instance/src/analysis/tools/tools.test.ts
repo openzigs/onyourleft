@@ -7,7 +7,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { encodeWorkoutFile, seconds, thresholdShare } from '@onyourleft/domain';
+import {
+  CADENCE_WORKOUTS,
+  encodeWorkoutFile,
+  seconds,
+  tailorWorkout,
+  thresholdShare,
+} from '@onyourleft/domain';
 
 import { RIDE_INPUT } from '../agent-testing.ts';
 import { openSqlStore } from '../../store/open-sql-store.ts';
@@ -267,6 +273,23 @@ describe('workouts (#1100)', () => {
     const result = await WORKOUTS.run(context(reads), {});
     expect(result).toBe('Workout: Kept — 30 min: 10 min at 60%, 4 × 3 min at 110%, 2 min at 50%');
     expect(result).not.toContain('Not for the model');
+  });
+
+  it('returns a workout carrying cadence cues — a version-3 file — without error (#2302)', async () => {
+    // A built-in cadence drill, tailored and saved on the device, is a
+    // version-3 file (ADR 0017's 2026-11-07 amendment). The instance reads it
+    // with the same decoder the device writes with.
+    const template = CADENCE_WORKOUTS.find((each) => each.id === 'cadence-low-strength-5min');
+    if (template === undefined) throw new Error('no strength drill in the library');
+    const body = encodeWorkoutFile(tailorWorkout(template, { repeats: 2 }));
+    expect(body).toContain('"onYourLeftWorkout": 3,');
+    expect(body).toContain('"cadence"');
+    const { reads } = listReads({ workout: [body] });
+    expect(await WORKOUTS.run(context(reads), {})).toBe(
+      'Workout: Low-cadence strength, five-minute efforts — 33 min: 10 min ramping 45% to 70%, ' +
+        '1 min ramping 60% to 85%, 5 min at 85%, 3 min at 55%, 1 min ramping 60% to 85%, ' +
+        '5 min at 85%, 3 min at 55%, 5 min ramping 60% to 45%',
+    );
   });
 
   it('says so when none is synced, and takes no argument at all', async () => {

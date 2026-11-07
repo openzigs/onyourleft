@@ -3387,3 +3387,77 @@ test('#1433 — the control — unzoomed, a reading’s digit is under the glanc
     expect(each.digitHeight).toBeLessThan(ZOOMED_DIGIT_FLOOR_PIXELS);
   }
 });
+
+/**
+ * #2302: a cadence drill's advisory cue, one line under "Now:" in the running
+ * workout's section — at a phone, a tablet upright in the shell and the
+ * 1024×600 tablet, in both palettes. The line is on the screen without a
+ * horizontal scroll, after the block it belongs to and before the trainer's
+ * line, and its ink meets {@link AA_TEXT} on what it is painted over. Each
+ * case attaches a screenshot for the owner's approval (the issue's own
+ * criterion), which the gate itself cannot give.
+ */
+const CADENCE_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a phone — 390×844', width: 390, height: 844 },
+  TABLET_UPRIGHT_IN_THE_SHELL,
+  { name: 'a 1024×600 tablet', width: 1024, height: 600 },
+];
+
+for (const viewport of CADENCE_VIEWPORTS) {
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`#2302 — a cadence cue under Now:, on the screen and legible — ${viewport.name} — ${scheme}`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await open(page, viewport, '?workout=cadence');
+      const line = page.locator('[data-oyl-cadence-cue]');
+      await expect(line).toHaveText('Cadence cue: 60–65 rpm');
+      await line.scrollIntoViewIfNeeded();
+
+      const seen = await page.evaluate(() => {
+        const cue = document.querySelector('[data-oyl-cadence-cue]');
+        const paragraphs = [...(cue?.parentElement?.querySelectorAll(':scope > p') ?? [])];
+        const at = (start: string): number =>
+          paragraphs.findIndex((each) => each.textContent?.startsWith(start) === true);
+        let behind: Element | null = cue;
+        let background = 'rgba(0, 0, 0, 0)';
+        while (behind !== null) {
+          background = getComputedStyle(behind).backgroundColor;
+          if (!background.startsWith('rgba') || !background.endsWith(', 0)')) break;
+          behind = behind.parentElement;
+        }
+        const box = cue?.getBoundingClientRect();
+        return {
+          left: box?.left ?? -1,
+          right: box?.right ?? Infinity,
+          height: box?.height ?? 0,
+          now: at('Now: '),
+          cue: at('Cadence cue: '),
+          holding: at('Holding '),
+          colour: cue === null ? '' : getComputedStyle(cue).color,
+          background,
+          scrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+
+      // Under the block it belongs to, before what the trainer holds.
+      expect(seen.now).toBeGreaterThanOrEqual(0);
+      expect(seen.cue).toBe(seen.now + 1);
+      expect(seen.holding).toBe(seen.cue + 1);
+      expect(seen.left).toBeGreaterThanOrEqual(0);
+      expect(seen.right).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
+      expect(seen.height).toBeGreaterThan(0);
+      expect(seen.scrollWidth).toBeLessThanOrEqual(viewport.width);
+      const ratio = contrastRatio(hexOf(seen.colour), hexOf(seen.background));
+      const note = `${seen.colour} on ${seen.background}: ${ratio.toFixed(2)}:1 — ${viewport.name}, ${scheme}`;
+      testInfo.annotations.push({ type: '#2302 contrast', description: note });
+      console.log(`#2302 — the cadence cue — ${note}`);
+      expect(ratio, note).toBeGreaterThanOrEqual(AA_TEXT);
+
+      await testInfo.attach(
+        `cadence-cue-${String(viewport.width)}x${String(viewport.height)}-${scheme}`,
+        { body: await page.screenshot(), contentType: 'image/png' },
+      );
+    });
+  }
+}
