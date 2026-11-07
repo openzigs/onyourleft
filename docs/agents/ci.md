@@ -755,7 +755,7 @@ the standard runner, and never a longer timeout, stop or cap. Each half keeps th
 30-minute stop; the merge's is 15 minutes. `report` needs all three.
 
 **How the run is divided.** By path: the first half is every file under `apps/web/src/game/` (225
-of the run's 1 038), the second every other file. From the logs of the one job's runs
+of the run's 1 048 on 2026-11-07), the second every other file. From the logs of the one job's runs
 [42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) and
 [42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792), each file's case
 time as the reporter prints it: `apps/web/src/game/` held **1 780 and 1 813 s** of 3 329 and
