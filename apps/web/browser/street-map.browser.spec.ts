@@ -13,6 +13,14 @@
  *    them to the control page rather than to numbers is what makes this hold
  *    through every phone give-way rule `theme.css` applies to the plan view:
  *    whatever the rule, the map is under it too.
+ *    ⚠️ **Except on a tall upright phone** (412×915), where by the owner's
+ *    ruling of 2026-11-06 the map is given more room (`theme.css` §"THE STREET
+ *    MAP ON A TALL UPRIGHT PHONE"). There it must be a BIGGER square than the
+ *    outline's box, the route panel may only grow downwards, and the controls
+ *    are still where they were. At every viewport the plan view keeps 16 px
+ *    to the screen's edges, the route panel and the map credit are clear of
+ *    the leaning rider (`ride-stage.ts` §`riderBox`), and nothing measured is
+ *    off the screen.
  * 2. **It follows the rider**, and the mark is drawn in the middle of the box
  *    at the plan view's size.
  * 3. **Its cost**, as counts a slow runner cannot change: over a minute at
@@ -30,6 +38,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
+import { inside, overlap, riderBox } from './ride-stage';
 
 /** What `street-map-harness.tsx` publishes. Mirrored, as `hud.browser.spec.ts` mirrors its own. */
 interface StreetMapRide {
@@ -63,14 +72,19 @@ interface Box {
   readonly height: number;
 }
 
+/** `grows`: the map is given more room than the outline's box there (see the header). */
 const VIEWPORTS = [
-  { name: 'portrait', width: 390, height: 844 },
-  { name: 'landscape', width: 844, height: 390 },
-  { name: 'a phone on its side, short', width: 736, height: 360 },
-  { name: 'a narrow phone upright', width: 360, height: 800 },
-  { name: 'the middle band', width: 802, height: 600 },
-  { name: 'a landscape tablet', width: 1280, height: 800 },
+  { name: 'portrait', width: 390, height: 844, grows: false },
+  { name: 'landscape', width: 844, height: 390, grows: false },
+  { name: 'a phone on its side, short', width: 736, height: 360, grows: false },
+  { name: 'a narrow phone upright', width: 360, height: 800, grows: false },
+  { name: 'a tall phone upright', width: 412, height: 915, grows: true },
+  { name: 'the middle band', width: 802, height: 600, grows: false },
+  { name: 'a landscape tablet', width: 1280, height: 800, grows: false },
 ] as const;
+
+/** The least clear space between the plan view and each edge of the screen. */
+const SCREEN_MARGIN_PIXELS = 16;
 
 /** 40 km/h, one frame of sixty. */
 const METRES_PER_FRAME = 40 / 3.6 / 60;
@@ -107,6 +121,7 @@ async function boxes(page: Page): Promise<Record<string, Box | undefined>> {
     return {
       route: box(document.querySelector('.oyl-hud__route')),
       plan: box(document.querySelector('.oyl-hud__plan-svg')),
+      credit: box(document.querySelector('.oyl-hud__attribution')),
       pause: box(button('Pause')),
       end: box(button('End ride')),
     };
@@ -128,27 +143,79 @@ for (const viewport of VIEWPORTS) {
     await expect(map).toHaveCount(1);
     const after = await boxes(page);
 
-    for (const name of ['route', 'plan', 'pause', 'end'] as const) {
+    const same = (name: string, side: keyof Box): void => {
       const was = before[name];
       const is = after[name];
       expect(was, `${name} on the control page`).toBeDefined();
       expect(is, `${name} with the street map`).toBeDefined();
-      for (const side of ['left', 'top', 'width', 'height'] as const) {
-        expect(
-          Math.abs((is?.[side] ?? 0) - (was?.[side] ?? 0)),
-          `${name}.${side}: ${String(was?.[side])} without the map, ${String(is?.[side])} with it`,
-        ).toBeLessThanOrEqual(0.5);
-      }
+      expect(
+        Math.abs((is?.[side] ?? 0) - (was?.[side] ?? 0)),
+        `${name}.${side}: ${String(was?.[side])} without the map, ${String(is?.[side])} with it`,
+      ).toBeLessThanOrEqual(0.5);
+    };
+    const sides = ['left', 'top', 'width', 'height'] as const;
+    // No ride-time control moves, anywhere.
+    for (const name of ['pause', 'end'] as const) for (const side of sides) same(name, side);
+    if (viewport.grows) {
+      // More room for the map, as a bigger square, and the panel grows downwards only.
+      const was = before.plan;
+      const is = after.plan;
+      expect(is?.width ?? 0, 'the map is wider than the outline').toBeGreaterThan(
+        (was?.width ?? 0) + 24,
+      );
+      expect(is?.height ?? 0, 'the map is taller than the outline').toBeGreaterThan(
+        (was?.height ?? 0) + 24,
+      );
+      expect(Math.abs((is?.width ?? 0) - (is?.height ?? 0)), 'a square').toBeLessThanOrEqual(0.5);
+      for (const side of ['left', 'top', 'width'] as const) same('route', side);
+    } else {
+      for (const name of ['route', 'plan'] as const) for (const side of sides) same(name, side);
+    }
+
+    // Nothing measured is off the screen, the plan view keeps its margins,
+    // and neither the route panel nor the credit is over the leaning rider.
+    const stage = { name: viewport.name, width: viewport.width, height: viewport.height };
+    const rider = riderBox({ ...stage, unstagedFails: false });
+    const edges = (found: Box | undefined) => ({
+      left: found?.left ?? 0,
+      top: found?.top ?? 0,
+      width: found?.width ?? 0,
+      height: found?.height ?? 0,
+      right: (found?.left ?? 0) + (found?.width ?? 0),
+      bottom: (found?.top ?? 0) + (found?.height ?? 0),
+    });
+    for (const name of ['route', 'plan', 'credit', 'pause', 'end'] as const) {
+      expect(after[name], `${name} with the street map`).toBeDefined();
+      expect(
+        inside(edges(after[name]), { ...stage, unstagedFails: false }),
+        `${name} on screen`,
+      ).toBe(true);
+    }
+    for (const name of ['route', 'credit'] as const) {
+      expect(
+        overlap(edges(after[name]), rider),
+        `${name} [${JSON.stringify(after[name])}] over the leaning rider [${JSON.stringify(rider)}]`,
+      ).toBe(false);
+    }
+    const plan = edges(after.plan);
+    for (const [side, room] of [
+      ['left', plan.left],
+      ['top', plan.top],
+      ['right', viewport.width - plan.right],
+      ['bottom', viewport.height - plan.bottom],
+    ] as const) {
+      expect(room, `the plan view's ${side} margin`).toBeGreaterThanOrEqual(
+        SCREEN_MARGIN_PIXELS - 0.5,
+      );
     }
 
     // The rider's mark, drawn in the middle of the box at the plan view's size.
     const mark = await page.locator('.oyl-hud__street-map circle').boundingBox();
-    const plan = after.plan;
     expect(mark).not.toBeNull();
     expect(mark?.width ?? 0).toBeGreaterThanOrEqual(11);
     const middle = {
-      x: (plan?.left ?? 0) + (plan?.width ?? 0) / 2,
-      y: (plan?.top ?? 0) + (plan?.height ?? 0) / 2,
+      x: plan.left + plan.width / 2,
+      y: plan.top + plan.height / 2,
     };
     expect(Math.abs((mark?.x ?? 0) + (mark?.width ?? 0) / 2 - middle.x)).toBeLessThanOrEqual(1);
     expect(Math.abs((mark?.y ?? 0) + (mark?.height ?? 0) / 2 - middle.y)).toBeLessThanOrEqual(1);
@@ -156,13 +223,18 @@ for (const viewport of VIEWPORTS) {
     const streets = await page
       .locator('.oyl-hud__street-map [data-oyl-street-map="streets"]')
       .boundingBox();
-    expect(streets?.width ?? 0).toBeGreaterThanOrEqual((plan?.width ?? 0) - 1);
-    expect(streets?.height ?? 0).toBeGreaterThanOrEqual((plan?.height ?? 0) - 1);
+    expect(streets?.width ?? 0).toBeGreaterThanOrEqual(plan.width - 1);
+    expect(streets?.height ?? 0).toBeGreaterThanOrEqual(plan.height - 1);
 
     console.log(
       `#2290 the street map at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
-        `${(plan?.width ?? 0).toFixed(1)} × ${(plan?.height ?? 0).toFixed(1)} px, the mark ` +
-        `${(mark?.width ?? 0).toFixed(1)} px across`,
+        `${plan.width.toFixed(1)} × ${plan.height.toFixed(1)} px (the outline's ` +
+        `${(before.plan?.width ?? 0).toFixed(1)} × ${(before.plan?.height ?? 0).toFixed(1)}), the mark ` +
+        `${(mark?.width ?? 0).toFixed(1)} px across` +
+        (viewport.height > viewport.width
+          ? `; the credit ends ${(rider.top - edges(after.credit).bottom).toFixed(0)} px above ` +
+            `the leaning rider's top`
+          : ''),
     );
     const panel = page.locator('.oyl-hud__route');
     await testInfo.attach(`route panel, ${viewport.name}`, {

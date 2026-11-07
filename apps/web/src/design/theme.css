@@ -116,6 +116,10 @@
   --oyl-color-hud-grade-climb: #d8b630;
   --oyl-color-hud-grade-steep: #e8812c;
   --oyl-color-hud-grade-wall: #e5484d;
+  --oyl-color-hud-map-land: #1c2321;
+  --oyl-color-hud-map-water: #1d3a50;
+  --oyl-color-hud-map-street: #7f8a88;
+  --oyl-color-hud-map-route: #f0785c;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -7852,10 +7856,13 @@ select.oyl-input {
 }
 
 /* #2290: the street map a ride with a corridor draws in the plan view's box
-   (`StreetMap.tsx`). Its colours are attributes, the ride map's own dark
-   cartography (`basemap.ts` §MAP_COLOURS); this only keeps every line the
-   width `StreetMap.tsx` states in screen pixels, whatever the box's scale.
-   The rider's mark is `.oyl-hud__plan-here` above.
+   (`StreetMap.tsx`). Each layer is painted by its class, in the `hudMap*`
+   tokens (`tokens.ts` says why each is the value it is, and declares every
+   pair); `StreetMap.tsx` §STREET_MAP_PAINTS is the table these rules are held
+   to. ⚠️ No `stroke-width` here: the widths are attributes, and
+   `non-scaling-stroke` keeps each the width `StreetMap.tsx` states in screen
+   pixels, whatever the box's scale. The rider's mark is `.oyl-hud__plan-here`
+   above.
 
    ⚠️ Its own layer (`will-change`), so that the readings that change on every
    frame around it never make the engine raster the map again: it is
@@ -7870,6 +7877,29 @@ select.oyl-input {
 
 .oyl-hud__street-map {
   will-change: transform;
+}
+
+.oyl-hud__street-map-land {
+  fill: var(--oyl-color-hud-map-land);
+}
+
+.oyl-hud__street-map-water {
+  fill: var(--oyl-color-hud-map-water);
+}
+
+.oyl-hud__street-map-street {
+  fill: none;
+  stroke: var(--oyl-color-hud-map-street);
+}
+
+.oyl-hud__street-map-route-edge {
+  fill: none;
+  stroke: var(--oyl-color-hud-surface);
+}
+
+.oyl-hud__street-map-route {
+  fill: none;
+  stroke: var(--oyl-color-hud-map-route);
 }
 
 .oyl-hud__profile-text {
@@ -9578,6 +9608,44 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__profile-svg,
   .oyl-game--riding .oyl-hud__ahead-svg {
     height: 2.75rem;
+  }
+}
+
+/*
+ * THE STREET MAP ON A TALL UPRIGHT PHONE — #2290, the owner's screenshot
+ * ruling of 2026-11-06: *on phones, the map gets more room where that is
+ * possible without covering the rider or moving a ride-time control.*
+ *
+ * Upright the plan view is a 4.5 rem column beside the strips, 72 × 80 px,
+ * and on a phone 25.5 rem wide and 53 rem tall (412×915) the top stack ends
+ * far above the rider: the route panel at y = 325 and the map credit under it
+ * at y = 353, where the leaning rider's helmet is at y = 474 (`camera.ts`
+ * §`riderFrameBox`, 51.75 % of the height upright). So here the map is a
+ * square that grows with the height, `51.75vh − 21.5rem`: the room between
+ * the stack and the rider, less what the stack costs, which leaves the credit
+ * the same ~73 px above the helmet at every height of the band, on this
+ * machine's fonts. 5 rem at the least (no smaller than the box beside the
+ * strips) and 8 rem at the most (a landscape tablet's, #2070): 128 px at
+ * 412×915, 116 at 412×892, 93 at 412×848.
+ *
+ * Only the street map: the outline keeps the box #2075's review gave it, and
+ * so does every narrower or shorter phone, whose stack is taller and whose
+ * credit is 15 to 50 px from the rider already (360×752 to 390×844). Nothing
+ * that is pressed moves: the actions panel is at the bottom of the stage.
+ * The route panel only grows downwards, into the sky above the rider, and the
+ * plan view keeps the panel's padding, 17 px from the screen's edge.
+ * `street-map.browser.spec.ts` measures each of those, and that the map is
+ * bigger here than the outline's box.
+ */
+@media (min-width: 25.5rem) and (width < 46rem) and (min-height: 53rem) {
+  .oyl-game--riding .oyl-hud__route:has(.oyl-hud__street-map) {
+    --oyl-hud-street-map-size: clamp(5rem, 51.75vh - 21.5rem, 8rem);
+
+    grid-template-columns: minmax(0, 1fr) var(--oyl-hud-street-map-size);
+  }
+
+  .oyl-game--riding .oyl-hud__route .oyl-hud__street-map.oyl-hud__plan-svg {
+    height: var(--oyl-hud-street-map-size);
   }
 }
 

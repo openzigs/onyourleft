@@ -15,16 +15,26 @@
  * 8 rem) — so the panel is the size and in the place it was, covers no more of
  * the rider, and moves no ride-time control.
  *
- * ## The colours are the map's own, the dark ones
+ * ⚠️ **Except on a tall upright phone**, by the owner's ruling of 2026-11-06:
+ * there the map is a larger square than the outline's box, as far as the room
+ * above the rider allows (`theme.css` §"THE STREET MAP ON A TALL UPRIGHT
+ * PHONE"). The route panel grows downwards into the sky, and still moves no
+ * control.
  *
- * The land, the water, the streets and the route are `map/basemap.ts`
- * §`MAP_COLOURS`' dark table — the ride map's and the route planner's own
- * cartography, dark because the HUD's panels are dark in every palette
- * (`tokens.ts` §`hudSurface`). The route is that table's `track`, whose
- * contrast against each fill is already recorded there (SC 1.4.11). The
- * rider's mark is the plan view's: a `hudInk` disc in a `hudSurface` ring,
- * painted by the same class. `StreetMap.a11y.test.tsx` measures each pair a
- * rider has to tell apart.
+ * ## The colours are the HUD's own `hudMap*` tokens
+ *
+ * Dark, because the HUD's panels are dark in every palette (`tokens.ts`
+ * §`hudSurface`), and each layer is painted by its CLASS in `theme.css`, as
+ * the plan view's are. Until the owner's screenshot ruling of 2026-11-06 they
+ * were `map/basemap.ts` §`MAP_COLOURS`' dark table, whose road is 1.61:1 on
+ * its land: in a box 72 px across the streets were hard to see. The streets
+ * and paths are now 4.49:1 on the land and 3.32 on the water, and a little
+ * wider. The route is the ride map's `track` colour still, over a casing of
+ * the panel's surface (as the elevation strip's marker is), because no colour
+ * light enough to be 3:1 against those streets is still that orange. The
+ * rider's mark is the plan view's: a `hudInk` disc in a `hudSurface` ring.
+ * {@link STREET_MAP_PAINTS} is the table; `StreetMap.a11y.test.tsx` holds it
+ * to `theme.css` and every pair in it to a declared 3:1 (SC 1.4.11).
  */
 
 import { useMemo, type JSX } from 'react';
@@ -32,7 +42,7 @@ import { useMemo, type JSX } from 'react';
 import { metres } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { MAP_COLOURS } from '../../map/basemap';
+import type { ColourToken } from '../../design/tokens';
 import { useUnits } from '../../units/context';
 import { formatDistance, spokenDistanceUnit } from '../../units/format';
 import type { WorldCorridor } from '../world-data/corridor';
@@ -48,22 +58,53 @@ import {
   streetMapViewBox,
 } from './street-map';
 
-/** The map is dark on every palette: see the module note. */
-const COLOURS = MAP_COLOURS.dark;
+/** One layer of the map: the class `theme.css` paints it by, and its line's width. */
+export interface StreetMapPaint {
+  readonly className: string;
+  readonly fill: ColourToken | 'none';
+  readonly stroke: ColourToken | 'none';
+  /** In screen pixels (`theme.css` §`.oyl-hud__street-map-line`); `0` for a fill. */
+  readonly width: number;
+}
 
 /**
- * How each layer is painted, in the order it is drawn — #2290. The widths
- * are screen pixels (`theme.css` §`.oyl-hud__street-map-line` keeps them so).
- * The component paints from this, and `StreetMap.a11y.test.tsx` holds the
- * rendered SVG to it and measures each pair in it.
+ * How each layer is painted, in the order it is drawn — #2290. The component
+ * paints from this; `StreetMap.a11y.test.tsx` holds the rendered SVG and
+ * `theme.css` to it, and measures each pair in it.
+ *
+ * The streets are 2.5 px and the paths 1.5 (2 and 1 before the owner's
+ * ruling of 2026-11-06). The route is {@link PLAN_AHEAD_STROKE_PIXELS} over a
+ * casing two pixels wider each side, which is what it is told apart from a
+ * street by: the casing is 6.74:1 against the route's colour.
  */
 export const STREET_MAP_PAINTS = {
-  land: { fill: COLOURS.earth },
-  water: { fill: COLOURS.water },
-  streets: { stroke: COLOURS.road, width: 2 },
-  paths: { stroke: COLOURS.road, width: 1 },
-  route: { stroke: COLOURS.track, width: PLAN_AHEAD_STROKE_PIXELS },
-} as const;
+  land: { className: 'oyl-hud__street-map-land', fill: 'hudMapLand', stroke: 'none', width: 0 },
+  water: { className: 'oyl-hud__street-map-water', fill: 'hudMapWater', stroke: 'none', width: 0 },
+  streets: {
+    className: 'oyl-hud__street-map-street',
+    fill: 'none',
+    stroke: 'hudMapStreet',
+    width: 2.5,
+  },
+  paths: {
+    className: 'oyl-hud__street-map-street',
+    fill: 'none',
+    stroke: 'hudMapStreet',
+    width: 1.5,
+  },
+  routeEdge: {
+    className: 'oyl-hud__street-map-route-edge',
+    fill: 'none',
+    stroke: 'hudSurface',
+    width: PLAN_AHEAD_STROKE_PIXELS + 4,
+  },
+  route: {
+    className: 'oyl-hud__street-map-route',
+    fill: 'none',
+    stroke: 'hudMapRoute',
+    width: PLAN_AHEAD_STROKE_PIXELS,
+  },
+} as const satisfies Record<string, StreetMapPaint>;
 
 export interface StreetMapProps {
   /** The corridor this ride's world was given at the press (`GameView` §`worldCorridorRef`). */
@@ -84,6 +125,22 @@ function describe(props: StreetMapProps, units: UnitSystem): string {
   return (
     `Street map around you, north up, about ${across} from top to bottom, with the route on ` +
     `it. ${planWhere(props.profile, props.distance)}`
+  );
+}
+
+/** A line layer: its class, the line class that keeps its width, and its width. */
+function Line(props: {
+  readonly layer: 'streets' | 'paths' | 'routeEdge' | 'route';
+  readonly d: string;
+}): JSX.Element {
+  const paint = STREET_MAP_PAINTS[props.layer];
+  return (
+    <path
+      className={`oyl-hud__street-map-line ${paint.className}`}
+      strokeWidth={paint.width}
+      data-oyl-street-map={props.layer === 'routeEdge' ? 'route-edge' : props.layer}
+      d={props.d}
+    />
   );
 }
 
@@ -112,32 +169,20 @@ export function StreetMap(props: StreetMapProps): JSX.Element {
         aria-label={describe(props, units)}
       >
         <g aria-hidden="true">
-          <path fill={STREET_MAP_PAINTS.land.fill} data-oyl-street-map="land" d={layers.land} />
-          <path fill={STREET_MAP_PAINTS.water.fill} data-oyl-street-map="water" d={layers.water} />
           <path
-            className="oyl-hud__street-map-line"
-            fill="none"
-            stroke={STREET_MAP_PAINTS.streets.stroke}
-            strokeWidth={STREET_MAP_PAINTS.streets.width}
-            data-oyl-street-map="streets"
-            d={layers.streets}
+            className={STREET_MAP_PAINTS.land.className}
+            data-oyl-street-map="land"
+            d={layers.land}
           />
           <path
-            className="oyl-hud__street-map-line"
-            fill="none"
-            stroke={STREET_MAP_PAINTS.paths.stroke}
-            strokeWidth={STREET_MAP_PAINTS.paths.width}
-            data-oyl-street-map="paths"
-            d={layers.paths}
+            className={STREET_MAP_PAINTS.water.className}
+            data-oyl-street-map="water"
+            d={layers.water}
           />
-          <path
-            className="oyl-hud__street-map-line"
-            fill="none"
-            stroke={STREET_MAP_PAINTS.route.stroke}
-            strokeWidth={STREET_MAP_PAINTS.route.width}
-            data-oyl-street-map="route"
-            d={layers.route}
-          />
+          <Line layer="streets" d={layers.streets} />
+          <Line layer="paths" d={layers.paths} />
+          <Line layer="routeEdge" d={layers.route} />
+          <Line layer="route" d={layers.route} />
           <circle
             className="oyl-hud__plan-here"
             cx={centre.east}
