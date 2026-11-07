@@ -798,7 +798,7 @@ function gamePort(populated: boolean): GamePort {
               },
               {
                 id: 'route-2',
-                name: 'Richmond Park and back',
+                name: 'Out to the old mill and back',
                 profile: routeProfile(routePoints()),
                 attempts: 0,
               },
