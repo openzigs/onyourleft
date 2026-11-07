@@ -44,7 +44,7 @@ import {
   type RealisticWorldOutcome,
 } from './realistic-assets';
 import { PEOPLE_NEAR_MAX } from './people';
-import { readRealisticReport, realisticReportLines } from './realistic-report';
+import { readRealisticReport, realisticReportText } from './realistic-report';
 import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { STRUCTURE_KINDS } from './scatter';
 import { sceneFrame } from './scene';
@@ -414,8 +414,8 @@ describe('which world a ride draws — #475', () => {
       worstMs: 300,
     });
     expect(report?.steps).toEqual([]);
-    expect(realisticReportLines(report ?? { frameMsLimit: 0, steps: [] })).toContain(
-      'It did not leave the realistic world.',
+    expect(realisticReportText(report ?? { frameMsLimit: 0, steps: [] }).summary).toBe(
+      'Your last ride in the realistic world stayed in it.',
     );
   });
 

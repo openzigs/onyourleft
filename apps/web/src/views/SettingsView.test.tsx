@@ -1111,16 +1111,43 @@ describe('the game world — #475', () => {
       ],
     });
     const mounted = await settings(store);
-    const copy = (
-      mounted.container.querySelector('.oyl-world .oyl-world__report')?.textContent ?? ''
-    ).replace(/\s+/g, ' ');
+    const box = mounted.container.querySelector('.oyl-world .oyl-world__report');
+    const text = (node: Element | null | undefined): string =>
+      (node?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // One plain line, outside the disclosure…
+    const main = box?.querySelector(':scope > p');
+    // …and the figures behind a native, closed "Details" whose summary is plain text.
+    const details = box?.querySelector(':scope > details');
+    const summary = details?.querySelector(':scope > summary');
+    const summaryChildren = summary?.children.length;
+    const open = details?.hasAttribute('open');
+    const figures = text(details);
     mounted.unmount();
-    expect(copy).toContain('The last ride on this device in the realistic world:');
-    expect(copy).toContain('3 took longer than 45 ms, the longest 280 ms.');
-    expect(copy).toContain(
-      'It left the realistic world 92 s into the ride, from realistic rung 2, on frame time',
+    expect(text(main)).toBe(
+      'Your last ride in the realistic world switched to the standard world after 1 min 32 s because its frames were too slow.',
     );
-    expect(copy).not.toContain('It did not leave the realistic world.');
+    expect(text(main)).not.toMatch(/\bms\b|\d+\s+frames?\b|median|longest/);
+    expect(text(summary)).toBe('Details');
+    expect(summaryChildren).toBe(0);
+    expect(open).toBe(false);
+    expect(figures).toContain(
+      'While the world loaded, its first 30 frames were not counted: 3 took longer than 45 ms, the longest 280 ms.',
+    );
+    expect(figures).toContain(
+      'After 1 min 32 s it switched to the standard world: 30 of the last 30 frames took longer than 45 ms (median 58 ms, longest 71 ms).',
+    );
+  });
+
+  it('says plainly when the last realistic ride stayed, with no empty disclosure', async () => {
+    const store = disk();
+    writeRealisticReport(store, { frameMsLimit: 45, steps: [] });
+    const mounted = await settings(store);
+    const box = mounted.container.querySelector('.oyl-world .oyl-world__report');
+    const copy = (box?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const details = box?.querySelector('details');
+    mounted.unmount();
+    expect(copy).toBe('Your last ride in the realistic world stayed in it.');
+    expect(details).toBeNull();
   });
 });
 

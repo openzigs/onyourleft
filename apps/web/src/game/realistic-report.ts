@@ -8,7 +8,7 @@
  * keeps none. (The owner's measurement found it was the thermal forecast, which
  * the ladder no longer reads — it decides on frame time alone.) This is the
  * record a ride keeps instead, on the device, and the sentences Settings ›
- * Game world shows from it.
+ * Game world shows from it: one plain line, and the figures behind "Details".
  *
  * ## What it holds, and what it never does
  *
@@ -115,30 +115,53 @@ export function readRealisticReport(
 }
 
 /**
- * The record as sentences, one per line — what Settings › Game world shows.
- * Numbers rounded as a person reads them: whole milliseconds and seconds.
+ * What Settings › Game world says from the record — #2289, in the owner's
+ * simpler wording of 2026-11-07. `summary` is the one plain line a rider
+ * reads, with no millisecond and no frame count in it. `details` holds the
+ * figures, one sentence each, for the "Details" disclosure beneath it: the
+ * settling window's count and longest frame, then each step's frames.
+ * Numbers are rounded as a person reads them: whole milliseconds and seconds.
  */
-export function realisticReportLines(report: RealisticWorldReport): readonly string[] {
+export interface RealisticReportText {
+  readonly summary: string;
+  readonly details: readonly string[];
+}
+
+const LAST_RIDE = 'Your last ride in the realistic world';
+
+export function realisticReportText(report: RealisticWorldReport): RealisticReportText {
   const limit = `${ms(report.frameMsLimit)} ms`;
-  const lines: string[] = [];
+  const details: string[] = [];
   const settling = report.settling;
   if (settling !== undefined) {
-    lines.push(
-      `Its first ${String(settling.frames)} realistic frames were not counted while the world was handed over: ${String(settling.slow)} took longer than ${limit}, the longest ${ms(settling.worstMs)} ms.`,
+    details.push(
+      `While the world loaded, its first ${String(settling.frames)} frames were not counted: ${String(settling.slow)} took longer than ${limit}, the longest ${ms(settling.worstMs)} ms.`,
     );
   }
   for (const step of report.steps) {
-    const what = step.left
-      ? 'It left the realistic world'
-      : 'It stepped down within the realistic world';
-    lines.push(
-      `${what} ${ms(step.rideSeconds)} s into the ride, from realistic rung ${String(step.rung + 1)}, on frame time: of the last ${String(step.frames)} frames ${String(step.overFrameMs)} took longer than ${limit} (median ${ms(step.medianMs)} ms, longest ${ms(step.worstMs)} ms).`,
+    details.push(
+      `After ${duration(step.rideSeconds)} it ${stepAction(step)}: ${String(step.overFrameMs)} of the last ${String(step.frames)} frames took longer than ${limit} (median ${ms(step.medianMs)} ms, longest ${ms(step.worstMs)} ms).`,
     );
   }
-  if (!report.steps.some((step) => step.left)) {
-    lines.push('It did not leave the realistic world.');
-  }
-  return lines;
+  const decisive = report.steps.find((step) => step.left) ?? report.steps[0];
+  const summary =
+    decisive === undefined
+      ? `${LAST_RIDE} stayed in it.`
+      : `${LAST_RIDE} ${stepAction(decisive)} after ${duration(decisive.rideSeconds)} because its frames were too slow.`;
+  return { summary, details };
+}
+
+function stepAction(step: RealisticStepReading): string {
+  return step.left ? 'switched to the standard world' : 'stepped down to fewer details';
+}
+
+/** "1 min 32 s"; under a minute, "42 s"; on the minute, "2 min". */
+function duration(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (minutes === 0) return `${String(rest)} s`;
+  return rest === 0 ? `${String(minutes)} min` : `${String(minutes)} min ${String(rest)} s`;
 }
 
 function ms(value: number): string {

@@ -15,8 +15,10 @@ import type { PreferenceStorage } from './hud/announce-preference';
 import {
   REALISTIC_REPORT_STORAGE_KEY,
   readRealisticReport,
-  realisticReportLines,
+  realisticReportText,
   writeRealisticReport,
+  type RealisticSettlingReading,
+  type RealisticStepReading,
   type RealisticWorldReport,
 } from './realistic-report';
 
@@ -101,17 +103,65 @@ describe('the last realistic ride’s record — #2289', () => {
     expect(writeRealisticReport(undefined, LEFT)).toBe(false);
   });
 
-  it('says the reason, the readings and the rung, rounded as a person reads them', () => {
-    expect(realisticReportLines(LEFT)).toEqual([
-      'Its first 30 realistic frames were not counted while the world was handed over: 4 took longer than 45 ms, the longest 312 ms.',
-      'It stepped down within the realistic world 42 s into the ride, from realistic rung 1, on frame time: of the last 30 frames 30 took longer than 45 ms (median 61 ms, longest 89 ms).',
-      'It left the realistic world 47 s into the ride, from realistic rung 2, on frame time: of the last 30 frames 12 took longer than 45 ms (median 41 ms, longest 52 ms).',
-    ]);
+  it('says in one plain line that it switched, with the figures behind it — 2026-11-07', () => {
+    expect(realisticReportText(LEFT)).toEqual({
+      summary:
+        'Your last ride in the realistic world switched to the standard world after 47 s because its frames were too slow.',
+      details: [
+        'While the world loaded, its first 30 frames were not counted: 4 took longer than 45 ms, the longest 312 ms.',
+        'After 42 s it stepped down to fewer details: 30 of the last 30 frames took longer than 45 ms (median 61 ms, longest 89 ms).',
+        'After 47 s it switched to the standard world: 12 of the last 30 frames took longer than 45 ms (median 41 ms, longest 52 ms).',
+      ],
+    });
+  });
+
+  it('says when it stepped down and stayed, in minutes and seconds', () => {
+    const stepped: RealisticWorldReport = {
+      frameMsLimit: 45,
+      steps: [{ ...(LEFT.steps[0] as RealisticStepReading), rideSeconds: 91.6 }],
+    };
+    expect(realisticReportText(stepped)).toEqual({
+      summary:
+        'Your last ride in the realistic world stepped down to fewer details after 1 min 32 s because its frames were too slow.',
+      details: [
+        'After 1 min 32 s it stepped down to fewer details: 30 of the last 30 frames took longer than 45 ms (median 61 ms, longest 89 ms).',
+      ],
+    });
+    const onTheMinute = { ...stepped, steps: [{ ...stepped.steps[0], rideSeconds: 120 }] };
+    expect(realisticReportText(onTheMinute as RealisticWorldReport).summary).toContain(
+      'after 2 min because',
+    );
   });
 
   it('says when the ride stayed, and never names a thermal forecast — #2289', () => {
     const stayed: RealisticWorldReport = { frameMsLimit: 45, steps: [] };
-    expect(realisticReportLines(stayed)).toEqual(['It did not leave the realistic world.']);
-    expect(realisticReportLines(LEFT).join(' ')).not.toMatch(/thermal|forecast/i);
+    expect(realisticReportText(stayed)).toEqual({
+      summary: 'Your last ride in the realistic world stayed in it.',
+      details: [],
+    });
+    const { summary, details } = realisticReportText(LEFT);
+    expect([summary, ...details].join(' ')).not.toMatch(/thermal|forecast/i);
+  });
+
+  it('keeps every figure out of the main line and in the details, for each kind of record', () => {
+    const settling = LEFT.settling as RealisticSettlingReading;
+    const kinds: readonly RealisticWorldReport[] = [
+      { frameMsLimit: 45, settling, steps: [] },
+      { frameMsLimit: 45, settling, steps: [LEFT.steps[0] as RealisticStepReading] },
+      LEFT,
+    ];
+    for (const kind of kinds) {
+      const { summary, details } = realisticReportText(kind);
+      // "its frames were too slow" is the owner's wording: no frame COUNT, no millisecond.
+      expect(summary).not.toMatch(/\bms\b|\d+\s+frames?\b|\d+ of\b|rung|median|longest/i);
+      const all = details.join(' ');
+      expect(all).toContain(`first ${String(settling.frames)} frames`);
+      expect(all).toContain('the longest 312 ms');
+      for (const step of kind.steps) {
+        expect(all).toContain(
+          `${String(step.overFrameMs)} of the last ${String(step.frames)} frames took longer than 45 ms (median ${String(Math.round(step.medianMs))} ms, longest ${String(Math.round(step.worstMs))} ms)`,
+        );
+      }
+    }
   });
 });
