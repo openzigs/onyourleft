@@ -508,7 +508,10 @@ summary and upload the HTML as the `coverage-report` artefact. Nothing left the 
 the table (§"Coverage out of the required job — #1280"). ⚠️ **Since
 [#1701](https://github.com/openzigs/onyourleft/issues/1701) the three are the `coverage` job, on a
 runner of its own** (§"Coverage in a job of its own — #1701" below); a reviewer who remembers them
-as the last steps of `heavy` is reading the old file. They carry `if: ${{ !cancelled() }}`, from
+as the last steps of `heavy` is reading the old file. ⚠️ **Since
+[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is two jobs, `coverage-1` and
+`coverage-2`, and `coverage` merges their results into the one report** (§"Two coverage jobs —
+#2285" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
 when they followed the browser checks, so a red coverage run still publishes what it measured. A test
 that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
 same test passed in the required job, so it is one that passes only without instrumentation.
@@ -642,19 +645,19 @@ no browser either, and its stop is 30 minutes. `heavy` keeps its own 30 minutes,
 840 s `GATE_BUDGET_MS` still stops shard 1 before the job's stop would. `report` needs every job,
 and `nightly-split.test.ts` refuses a coverage run that shares a job with any other suite.
 `nightly-split.test.ts` also holds **every nightly job's slowest measured run at or under 60 % of
-its own stop**. It reads the figures from the table below, one column per job id. `report` is left
+its own stop**. It reads the figures from the table between the two `nightly-measurements`
+markers, one column per job id — ⚠️ since #2285 the table in §"Two coverage jobs — #2285" below;
+the one here is #1701's, kept as it was measured. `report` is left
 out because it runs only after a red run. A new job needs a column, and the table needs at least
 three rows. Each figure is the job's own seconds, from its start to its end, as the Actions API
 gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not counting the time it
 queued.
 
-<!-- nightly-measurements:start -->
 | Run | Event | heavy | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
 |---|---|--:|--:|--:|--:|--:|--:|
 | [40974080277](https://github.com/openzigs/onyourleft/actions/runs/40974080277) attempt 1 | `pull_request` | 565 | 896 | 551 | 431 | 277 | 344 |
 | [40974044131](https://github.com/openzigs/onyourleft/actions/runs/40974044131) | `workflow_dispatch` | 571 | 808 | 491 | 289 | 332 | 496 |
 | 40974080277 attempt 2 | `pull_request` | 588 | 906 | 344 | 292 | 278 | 307 |
-<!-- nightly-measurements:end -->
 
 The stops are 1 800 s for `heavy` and `coverage` and 1 200 s for each browser shard, so the slowest
 readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverage` itself took 873,
@@ -669,7 +672,7 @@ readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverag
 
 The coverage job is the one closest to its bound: 60 % of 1 800 s is 1 080 s, 174 s more than its
 slowest reading. When a new row turns this red, split `test:coverage` between two jobs, as #1675
-split the browser checks. Do not lengthen the stop or change the 60 %.
+split the browser checks. Do not lengthen the stop or change the 60 %. ⚠️ #2285 did that split.
 
 
 #### Cheaper cases under coverage — #1688
@@ -724,7 +727,8 @@ Readings after, on the branch (`gh workflow run nightly.yml --ref`):
 is past that table's 60 % bound (1 080 s), which `nightly-split.test.ts` would turn red, and the
 answer that section gives, two coverage jobs, is not #1688's to make. The table still holds the
 2026-10-29 figures, so that case is green on a bound the job no longer keeps: the slowest reading
-since is 1 798 s, and the slowest after #1688 is 1 448 s.
+since is 1 798 s, and the slowest after #1688 is 1 448 s. ⚠️ Since #2285 the table
+`nightly-split.test.ts` reads is §"Two coverage jobs — #2285"'s, of the split's own runs.
 
 **What is left.** The job's time is now the suite's whole work over the runner's two cores, not
 one file: on the 7763 the Vitest run summed 3 374 s of case time against 4 320 s before, and
@@ -738,6 +742,122 @@ every item on it — with no one loop the larger part: `corridor-wiring.test.tsx
 hairpin walks (their own 30 s). What would move them is a cheaper `sceneFrame` as a whole, or a
 change to this job's shape — the two coverage jobs this section's table already calls for, or
 fewer Vitest workers on the two-core runner — and those are the owner's to choose.
+
+#### Two coverage jobs — #2285
+
+⚠️ **The nightly coverage report is three jobs since
+[#2285](https://github.com/openzigs/onyourleft/issues/2285)**, and a reviewer who remembers one
+`coverage` job running `test:coverage` is reading the old file. `coverage-1` (`Nightly tests under
+coverage (1 of 2)`) runs `test:coverage:shard-1`, `coverage-2` runs `test:coverage:shard-2`, and
+`coverage` (`Nightly coverage report`) downloads what each wrote, runs `test:coverage:merge` and
+publishes the summary and the HTML as the one job did. The owner's ruling (2026-11-06): two jobs on
+the standard runner, and never a longer timeout, stop or cap. Each half keeps the one job's
+30-minute stop; the merge's is 15 minutes. `report` needs all three.
+
+**How the run is divided.** By path: the first half is every file under `apps/web/src/game/` (225
+of the run's 1 048 on 2026-11-07), the second every other file. From the logs of the one job's runs
+[42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) and
+[42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792), each file's case
+time as the reporter prints it: `apps/web/src/game/` held **1 780 and 1 813 s** of 3 329 and
+3 374 s, and every other file 1 549 and 1 561 s. Its three heaviest files are game files
+(`near-tree-fade.test.ts` 433–455 s, `landform.test.ts` 282–288 s, `near-field-street.test.ts`
+226–248 s), and each runs in one worker whichever half it is in.
+
+⚠️ **Not by Vitest project, as the required run's two parts are (§"Two Vitest shards — #2154").**
+With a `--project` filter, Vitest's v8 provider keeps only the selected projects' roots in the
+report (`coverage.DM_a_rWm.js`: "If --project filter is set pick only roots of resolved
+projects"), so what one package's tests run in another vanishes. Measured: `--project store` and
+`--project domain` as two halves, merged, came to 5 900 covered lines where the two in one run
+came to 6 009 — `hpke-testing.ts` alone fell from 128 lines to 22, because the store's tests run it.
+Selected by PATH (`packages/store/` and `packages/domain/`) the merged halves equal the one run file
+for file: 1 086 files, 6 099 covered lines each. Over the whole suite, locally: the merged halves
+and `pnpm run test:coverage` each reported 1 102 files with identical totals for every file, and
+63 091 against 63 082 covered lines, the difference being which timing cases each run had red on
+a machine at a load average of 50. `check:test-split` (its rule 6) refuses `--project` in a half,
+and fails a half over no file and a file of the run in no half or in two.
+
+**The merge.** Each half's script ends with Vitest's blob reporter, `--outputFile.blob=` its own
+file, `coverage-blobs/coverage-<n>.json`: the half's results and its coverage. The half uploads it
+as `coverage-blob-<n>` (`if: ${{ !cancelled() }}`, `if-no-files-found: error`, kept a day), and the
+merge downloads each by name into `coverage-blobs/`, so a half that uploaded nothing fails its
+download and the report is not merged from the other half alone. The blobs were 4.9 and 6.3 MB as
+artefacts and the merge 30 to 37 s. Vitest writes a blob whatever the run's result, and the merge
+replays every case, so its step is red when a half was and the two reporting steps after it still
+run.
+
+⚠️ **The one job published no report on a night with a red case.** Vitest's
+`coverage.reportOnFailure` is false by default, so a `test:coverage` with a failure writes no
+`coverage/`, and `Publish the coverage summary` printed `cannot read coverage/coverage-summary.json`
+(job 128148778382 of run 42292364270). Every night since 2026-11-04 was red, so none had a table.
+The merge writes the report from the blobs whatever their results: run
+[42305447868](https://github.com/openzigs/onyourleft/actions/runs/42305447868), with three red
+cases across its halves, published the table (`All files` 91.7 % of statements).
+
+**Two workers in the game half — measured, and this change's, not the ruling's.** The split alone
+did not make the whole-ride cases pass. On the first reading, run 42305447868, both halves landed on
+an EPYC 7763, and `coverage-1` failed on `lap-race-wiring.test.tsx`'s recorded ride at 10.02 s of
+its own 10 s and the 32x ride at 5.02 s of 5 s — the one job's figures on that CPU (10.03 s on run
+42279690792): a case's time is its share of the runner, not the job's length. The runner is two
+cores of two threads (§"Two Vitest shards — #2154") and Vitest starts three workers, so two share a
+core. With `VITEST_MAX_WORKERS: '2'` on that step:
+
+| CPU | Workers | Run | lap race | 32x ride | corridor late read | `coverage-1` |
+|---|--:|---|--:|--:|--:|--:|
+| EPYC 7763 | 3 | [42305447868](https://github.com/openzigs/onyourleft/actions/runs/42305447868) | 10.02 s ✗ | 5.02 s ✗ | — | 818 s |
+| EPYC 7763 | 2 | [42310244934](https://github.com/openzigs/onyourleft/actions/runs/42310244934) | 6.66 s | 3.23 s | 3.83 s | 809 s |
+| EPYC 9V74 | 3 | [42305870958](https://github.com/openzigs/onyourleft/actions/runs/42305870958) | 7.61 s | 3.10 s | — | 632 s |
+| EPYC 9V74 | 2 | [42308095771](https://github.com/openzigs/onyourleft/actions/runs/42308095771) | 5.06 s | 2.19 s | 2.49 s | 602 s |
+
+Two thirds of the time a case, and the half no longer. The two-worker runs are of branches
+`experiment/issue-2285-two-workers-*`, which ran only the three coverage jobs of this change's
+workflow with the worker count set. `coverage-2` keeps Vitest's three: none of its cases has passed a
+timeout under coverage, and with two it took 925 and 939 s on the 7763 (runs 42310240508 and
+42310198640) against 780 s with three. ⚠️ No timeout moved: a worker count is a share of the CPU,
+not a stop, and putting the third worker back is one line of `nightly.yml`.
+
+**Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
+§"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
+reads** (between the `nightly-measurements` markers), one column per job.
+
+<!-- nightly-measurements:start -->
+| Run | Event | heavy | coverage-1 | coverage-2 | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| [42312238591](https://github.com/openzigs/onyourleft/actions/runs/42312238591) | `pull_request` | 456 | 454 | 733 | 29 | 337 | 319 | 261 | 195 |
+| [42312234419](https://github.com/openzigs/onyourleft/actions/runs/42312234419) | `workflow_dispatch` | 558 | 795 | 742 | 36 | 244 | 319 | 265 | 171 |
+| [42312237550](https://github.com/openzigs/onyourleft/actions/runs/42312237550) | `workflow_dispatch` | 549 | 607 | 785 | 27 | 568 | 367 | 367 | 147 |
+| [42318412519](https://github.com/openzigs/onyourleft/actions/runs/42318412519) | `workflow_dispatch` | 406 | 766 | 495 | 34 | 585 | 319 | 273 | 251 |
+| [42318409493](https://github.com/openzigs/onyourleft/actions/runs/42318409493) | `workflow_dispatch` | 421 | 615 | 756 | 28 | 545 | 326 | 323 | 237 |
+| [42318592284](https://github.com/openzigs/onyourleft/actions/runs/42318592284) | `pull_request` | 696 | 669 | 684 | 38 | 488 | 266 | 262 | 200 |
+<!-- nightly-measurements:end -->
+
+The first three are of commit 3ffa4ac5, and in each every job was green but `coverage-2` and
+`coverage`, red on one case alone: this table's own, before it had these columns. **The last three
+have both halves and the merge green**: the first two, of 62adbeb8 (this table added), with every
+job of the run green; the third, of 23560e97 (62adbeb8 with `main` merged), with `browser-2` red on
+#1623's winter case in `realistic.browser.spec.ts` (its 150 s `waitForFunction` on an EPYC 7763), a
+job this change does not touch. Two of the dispatches ran on `experiment/issue-2285-reading-b`, a
+second name for the same commit, so that two could run at once. The stops are 1 800 s for `heavy`
+and both halves, 900 s for `coverage` and 1 200 s for each browser shard, so the slowest readings
+are 39 %, 44 %, 44 %, 4 %, 49 %, 31 %, 31 % and 21 % of them. The CPUs, in column order:
+
+- 42312238591: EPYC 9V45, 9V45, 9V74, Xeon 6973P-C, 9V74, EPYC 7763, 9V74, 9V74.
+- 42312234419: EPYC 9V74, **EPYC 7763** (the lap race 6.39 s, the 32x ride 2.97 s, the late read
+  3.34 s), Xeon Platinum 8370C, EPYC 7763, 9V45, 7763, 9V74, Xeon 6973P-C.
+- 42312237550: EPYC 9V74, 9V74, **EPYC 7763**, 9V45, 7763, Xeon Platinum 8370C, 7763, 9V45.
+- 42318412519: EPYC 9V45, **Xeon Platinum 8370C** (6.33, 3.02 and 3.22 s: the 32x ride and the
+  late read were #1688's last red cases there, at 5.0 and 5.1 s), 9V45, 9V74, 7763, 7763,
+  Xeon Platinum 8573C, 7763.
+- 42318409493: EPYC 9V45, 9V74, 9V74, 9V74, 7763, 7763, 7763, 9V74.
+- 42318592284: EPYC 7763, Xeon Platinum 8573C, 9V74, 7763, 7763, Xeon Platinum 8573C, 9V74, 9V74.
+
+Before this commit, the one job took 1 015 to 1 798 s (§"Cheaper cases under coverage — #1688");
+the split's first reading, with three workers in both halves, took 818 and 780 s on the 7763.
+
+⚠️ **When a row brings a half within reach of 60 % of its stop**, move a directory between the
+halves — a filter in the first half's script and its `--exclude` in the second's, which
+`check:test-split` holds as one partition — or add a third half: a `test:coverage:shard-3` script
+ending in its own blob, a `coverage-3` job copied from `coverage-2`, its download in `coverage` and
+its id in that job's `needs` and in `report`'s, and a column here. Not a longer stop.
 
 #### 23m39s of 25 — #1051
 
