@@ -39,6 +39,7 @@ import {
   seedAthletes,
   seedWorkout,
   truncatedWorkoutStoreFactory,
+  widenedCueWorkoutStoreFactory,
   workoutFor,
   type StoreHarness,
 } from './testing';
@@ -322,6 +323,16 @@ describe('a cadence cue survives the disk, and a bad one is refused (#2302)', ()
     await assertWorkoutRoundTrip(harness, record);
     const read = await harness.read(async (store) => store.getWorkout(ATHLETE_A, record.id));
     expect(read?.workout.blocks).toStrictEqual(cued);
+  });
+
+  it('the harness compares a cue by what it holds: green on the real store, red on one that widens it', async () => {
+    const record = workoutFor(ATHLETE_A, { blocks: cued });
+    const fake = createStoreHarness({ factory: widenedCueWorkoutStoreFactory() });
+    await seedAthletes(fake);
+    await expect(assertWorkoutRoundTrip(fake, record)).rejects.toThrow(
+      /workout\.blocks\[1\]\.cadence\.high: wrote 65 and read back 70/,
+    );
+    await fake.destroy();
   });
 
   it('refuses a row whose cue is out of bounds, rather than reading it', () => {
