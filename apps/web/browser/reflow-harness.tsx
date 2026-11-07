@@ -1621,9 +1621,10 @@ const FIRST_CUT_COLUMNS = `
 /**
  * Deletes every shipped rule that names `.oyl-sections` — the grid's
  * top-level rules (two in `theme.css`, three once the build splits the
- * title's selector list from its `:has()`) and its three container queries —
- * and fails unless it found all three queries and a top-level rule: a control
- * that deleted nothing would measure the shipped page and call it the defect.
+ * title's selector list from its `:has()`) and its four container queries,
+ * the fourth the Games course list's tracks (#2335) — and fails unless it
+ * found all four queries and a top-level rule: a control that deleted nothing
+ * would measure the shipped page and call it the defect.
  */
 function deleteSectionsGrid(): void {
   let containers = 0;
@@ -1641,9 +1642,9 @@ function deleteSectionsGrid(): void {
       }
     }
   }
-  if (containers !== 3 || styles < 2) {
+  if (containers !== 4 || styles < 2) {
     throw new Error(
-      `reflow harness: expected three .oyl-sections container queries and two or more rules, ` +
+      `reflow harness: expected four .oyl-sections container queries and two or more rules, ` +
         `deleted ${String(containers)} and ${String(styles)}`,
     );
   }

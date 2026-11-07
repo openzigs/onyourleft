@@ -1177,15 +1177,37 @@ html {
  * tracks a short list leaves empty folded away, so one course spans the row
  * rather than standing in a third of it (`sections.browser.spec.ts` §"#2067").
  * `ul` and both classes, to be more specific than `.oyl-sections`' own tracks.
+ *
+ * ⚠️ **Columns from the pane's 40rem, as every screen of sections** (#2335).
+ * Unconditional, the template gave two columns to a pane of 37 to 40rem, under
+ * #1014's floor, and to `main` back on the reading measure, so the prose
+ * control in `sections.browser.spec.ts` could not tell #1014's layout from
+ * none on this page.
  */
 ul.oyl-sections.oyl-game-courses__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
   gap: var(--oyl-space-md);
   align-items: start;
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+@container oyl-pane (min-width: 40rem) {
+  ul.oyl-sections.oyl-game-courses__list {
+    grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+  }
+}
+
+/*
+ * A course picker's own lines keep the reading measure — #2335. They sit in
+ * the picker's wrapper and not straight under `main`, so
+ * `.oyl-main--sections`' measure did not reach them: at 1280 px the lap
+ * race's "None of your routes is a loop yet" and Delivery's notice that it
+ * needs the realistic world ran 1160 px wide (`sections.browser.spec.ts`).
+ */
+.oyl-game-courses > :is(p, .oyl-status) {
+  max-width: var(--oyl-measure);
 }
 
 /*
