@@ -58,6 +58,7 @@
 import {
   expandWorkout,
   holdEligible,
+  type CadenceCue,
   type HeartRateHoldContext,
   type WorkoutTimeline,
   powerZones,
@@ -372,6 +373,12 @@ export interface RideWorkoutSnapshot {
   readonly raisedFromWatts?: number | undefined;
   /** The block being ridden, in the words `library.ts` writes. */
   readonly nowRiding: string | undefined;
+  /**
+   * The advisory cadence cue for the stretch being ridden — an interval's
+   * hard or easy half — or `undefined` when it names none (#2302). Shown,
+   * and never written: the trainer is told power only.
+   */
+  readonly cadence?: CadenceCue | undefined;
   /** Why the last workout write could not be made, if any. */
   readonly fault: string | undefined;
   /**
@@ -3237,6 +3244,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         segment === undefined
           ? undefined
           : blockText(shown.workout.blocks[segment.block] ?? EMPTY_BLOCK),
+      cadence: segment?.cadence,
       fault: state.lastFault,
       // #1305's second pass: the session's, which words a relief that lowers
       // nothing as such.

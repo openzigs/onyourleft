@@ -45,6 +45,12 @@ one-for-one. Four things about it are decisions rather than details:
   (`format.ts` §`workoutFileVersionFor`): no hold, version 1, which an older build still opens. The
   decoder reads both, and refuses a version-1 file that carries a hold — the file contradicts
   itself. A reviewer who remembers "the only version it reads is 1" is reading the old file.
+- ⚠️ **There is a version 3 since #2302**, for the advisory **cadence cue** (ADR 0017's 2026-11-07
+  amendment): `cadence` on a steady or ramp block, `hardCadence` and `easyCadence` on an intervals
+  block. Still the lowest version that carries the workout — no cue writes 1 or 2 as before — and a
+  version-1 or version-2 file carrying a cue is refused. **A cue never reaches the trainer**: the
+  player writes power only and reads no cue, and nothing about a cue informs the ERG stall rescue
+  (`erg-safety.ts`'s numbers are a trainer-safety rule; the owner's ruling 5 on #2295).
 - ⚠️ **An unrecognised key is refused, not ignored** (D-4) — the opposite of the usual convention.
   A future field that changed what a workout *does* would otherwise be dropped silently and the
   rider would ride something else against a machine applying resistance to them. Forward

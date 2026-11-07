@@ -45,7 +45,7 @@
  */
 
 import type { Quantity } from '../quantity';
-import type { BeatsPerMinute, Seconds } from '../quantities';
+import type { BeatsPerMinute, RevolutionsPerMinute, Seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
 
@@ -168,6 +168,33 @@ function shareRefusal(value: number, where = 'a power target'): string {
 }
 
 /**
+ * A cadence the rider is asked to pedal at, in revolutions per minute: an
+ * **advisory cue** (#2302), shown on the ride screen and nothing else.
+ *
+ * ⚠️ **It never reaches the trainer.** An FTMS trainer cannot hold a cadence,
+ * and in ERG it holds power whatever the cadence is; the player writes power
+ * targets only, and reads no cue. Nor does a cue inform the stall rescue
+ * (`erg-safety.ts`): a cue of 60 rpm does not tell the trend rule that a fall
+ * to 60 is meant — whether it ever may is the owner's question 5 on #2295,
+ * and the measured result is on #137.
+ *
+ * Inclusive at both ends; `low` may equal `high`, a single cadence.
+ */
+export interface CadenceCue {
+  readonly low: RevolutionsPerMinute;
+  readonly high: RevolutionsPerMinute;
+}
+
+/**
+ * The lowest and highest cadence a cue may name, in rpm (#2302). A bound on
+ * typing rather than on riding: below 30 nobody is pedalling a trainer, and
+ * above 150 is a spin no drill asks for — so `600`, a duration typed into the
+ * wrong field, is refused where it is typed.
+ */
+export const MINIMUM_CADENCE_CUE_RPM = 30;
+export const MAXIMUM_CADENCE_CUE_RPM = 150;
+
+/**
  * A stretch of riding at one unchanging target.
  *
  * The simplest thing a workout is made of, and the one every other block
@@ -179,6 +206,8 @@ export interface SteadyBlock {
   readonly target: ThresholdShare;
   /** Shown to the rider while it runs. Absent when the workout named nothing. */
   readonly label?: string | undefined;
+  /** An advisory cadence cue (#2302); never written to a trainer. */
+  readonly cadence?: CadenceCue | undefined;
 }
 
 /**
@@ -195,6 +224,8 @@ export interface RampBlock {
   readonly from: ThresholdShare;
   readonly to: ThresholdShare;
   readonly label?: string | undefined;
+  /** An advisory cadence cue for the whole ramp (#2302); never written to a trainer. */
+  readonly cadence?: CadenceCue | undefined;
 }
 
 /**
@@ -212,6 +243,10 @@ export interface IntervalsBlock {
   readonly easySeconds: Seconds;
   readonly easyTarget: ThresholdShare;
   readonly label?: string | undefined;
+  /** The hard interval's advisory cadence cue (#2302); never written to a trainer. */
+  readonly hardCadence?: CadenceCue | undefined;
+  /** The easy interval's, on the same terms. */
+  readonly easyCadence?: CadenceCue | undefined;
 }
 
 /**
@@ -346,6 +381,7 @@ function validateBlock(block: WorkoutBlock, index: number): void {
     case 'steady':
       assertDuration(block.seconds, where);
       assertShare(block.target, `${where}'s target`);
+      assertCadence(block.cadence, `${where}'s cadence cue`);
       return;
     case 'free-ride':
       assertDuration(block.seconds, where);
@@ -354,12 +390,15 @@ function validateBlock(block: WorkoutBlock, index: number): void {
       assertDuration(block.seconds, where);
       assertShare(block.from, `${where} starts at a target that`);
       assertShare(block.to, `${where} ends at a target that`);
+      assertCadence(block.cadence, `${where}'s cadence cue`);
       return;
     case 'intervals':
       assertDuration(block.hardSeconds, `${where}'s hard interval`);
       assertDuration(block.easySeconds, `${where}'s easy interval`);
       assertShare(block.hardTarget, `${where}'s hard target`);
       assertShare(block.easyTarget, `${where}'s easy target`);
+      assertCadence(block.hardCadence, `${where}'s hard cadence cue`);
+      assertCadence(block.easyCadence, `${where}'s easy cadence cue`);
       if (
         !Number.isInteger(block.repeats) ||
         block.repeats < 1 ||
@@ -469,6 +508,42 @@ function validateHold(block: HeartRateHoldBlock, where: string): void {
 function assertShare(value: ThresholdShare, where: string): void {
   if (!Number.isFinite(value) || value < MINIMUM_SHARE || value > MAXIMUM_SHARE) {
     throw new WorkoutError('target-out-of-range', shareRefusal(value, where));
+  }
+}
+
+/**
+ * A cue, when there is one, is two whole numbers of rpm inside
+ * {@link MINIMUM_CADENCE_CUE_RPM}..{@link MAXIMUM_CADENCE_CUE_RPM}, low first
+ * (#2302). Checked here and not only in the decoder, for `assertShare`'s
+ * reason: a hand-edited store row reaches this function too.
+ */
+function assertCadence(cue: CadenceCue | undefined, where: string): void {
+  if (cue === undefined) {
+    return;
+  }
+  // `typeof` first: a cue decoded from a hand-edited row is past the types.
+  const low = (cue as Partial<CadenceCue> | null)?.low;
+  const high = (cue as Partial<CadenceCue> | null)?.high;
+  if (
+    typeof low !== 'number' ||
+    typeof high !== 'number' ||
+    !Number.isInteger(low) ||
+    !Number.isInteger(high) ||
+    low < MINIMUM_CADENCE_CUE_RPM ||
+    high > MAXIMUM_CADENCE_CUE_RPM
+  ) {
+    throw new WorkoutError(
+      'invalid-cadence',
+      `${where} must be two whole numbers of revolutions per minute between ` +
+        `${String(MINIMUM_CADENCE_CUE_RPM)} and ${String(MAXIMUM_CADENCE_CUE_RPM)}; received ` +
+        `${JSON.stringify(cue)}`,
+    );
+  }
+  if (low > high) {
+    throw new WorkoutError(
+      'invalid-cadence',
+      `${where} runs from ${String(low)} to ${String(high)} rpm; its low must not be above its high`,
+    );
   }
 }
 

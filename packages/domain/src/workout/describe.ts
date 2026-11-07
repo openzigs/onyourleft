@@ -11,7 +11,7 @@
  * figure in watts would be one threshold's answer for it.
  */
 
-import type { Workout, WorkoutBlock } from './workout';
+import type { CadenceCue, Workout, WorkoutBlock } from './workout';
 
 /** `3720` → `"1 h 2 min"`; `600` → `"10 min"`; `45` → `"45 s"`. */
 export function workoutDurationText(totalSeconds: number): string {
@@ -31,6 +31,16 @@ export function workoutDurationText(totalSeconds: number): string {
 /** A share as a whole-number percentage. `0.885` → `89`. */
 export function workoutPercent(share: number): number {
   return Math.round(share * 100);
+}
+
+/**
+ * A cadence cue in words (#2302): `"85–95 rpm"`, or `"90 rpm"` when its two
+ * ends are one cadence. A cue only — the words never say the trainer holds it.
+ */
+export function workoutCadenceText(cue: CadenceCue): string {
+  return cue.low === cue.high
+    ? `${String(cue.low)} rpm`
+    : `${String(cue.low)}–${String(cue.high)} rpm`;
 }
 
 /** One block, in the words a rider would use for it. */

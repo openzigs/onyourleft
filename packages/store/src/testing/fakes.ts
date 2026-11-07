@@ -43,6 +43,7 @@
  * | `openedLoopStoreFactory` | *wrong layer* — one boolean lost in a mapping on the way in | the route comes back with every metre and every gradient correct, and **no longer wraps** |
  * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
  * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
+ * | `widenedCueWorkoutStoreFactory` | *wrong layer* — a layer above tidied a block's nested record on its way in (#2302) | every block comes back, and a cadence cue's top end is not what was written |
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  * | `consentIgnoredStoreFactory` | *cross-athlete exposure* — the cross-rider **read** that forgot the rider's consent (#793) | every ride and every consent is written and read back correctly, and the raceable list holds a ride its rider never agreed to be raced on |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
@@ -782,6 +783,47 @@ export function truncatedWorkoutStoreFactory(): StoreFactory {
                 record.workout.blocks.length > 1
                   ? record.workout.blocks.slice(0, -1)
                   : record.workout.blocks,
+            },
+          }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A layer above the store that rounds a steady block's cadence cue out to the
+ * next ten rpm on its way in (#2302): every block comes back, valid, with a
+ * cue — the wrong one. What it proves is that `assertWorkoutRoundTrip`
+ * compares a block's NESTED record by what it holds, field by field; a
+ * comparison by identity fails every nested record, and one that skipped them
+ * passes this store.
+ */
+export function widenedCueWorkoutStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putWorkout: async (record: WorkoutRecord): Promise<WorkoutId> =>
+          real.putWorkout({
+            ...record,
+            workout: {
+              ...record.workout,
+              blocks: record.workout.blocks.map((block) =>
+                block.kind === 'steady' && block.cadence !== undefined
+                  ? {
+                      ...block,
+                      cadence: {
+                        low: block.cadence.low,
+                        high: (Math.ceil((block.cadence.high + 1) / 10) *
+                          10) as typeof block.cadence.high,
+                      },
+                    }
+                  : block,
+              ),
             },
           }),
       };

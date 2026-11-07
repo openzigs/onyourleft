@@ -89,10 +89,10 @@ describe('a workout survives the round trip through a file', () => {
   });
 
   it('writes the version key, as the lowest version that carries the workout', () => {
-    // #1239: a workout with no heart-rate hold is still a version-1 file, so a
-    // build that reads only version 1 still opens it.
+    // #1239, #2302: a workout with no heart-rate hold and no cadence cue is
+    // still a version-1 file, so a build that reads only version 1 opens it.
     expect(documentOf()['onYourLeftWorkout']).toBe(WORKOUT_FILE_FIRST_VERSION);
-    expect(WORKOUT_FILE_VERSION).toBe(2);
+    expect(WORKOUT_FILE_VERSION).toBe(3);
   });
 
   it('writes something a person can read and edit', () => {
@@ -165,7 +165,7 @@ describe('what the decoder refuses, and what it calls each refusal', () => {
 
   it('tells a rider with a newer file that they need a newer program', () => {
     const error = refusal(() =>
-      decodeWorkoutFile(reserialised({ ...documentOf(), onYourLeftWorkout: 3 })),
+      decodeWorkoutFile(reserialised({ ...documentOf(), onYourLeftWorkout: 4 })),
     );
     expect(error.code).toBe('unsupported-version');
     expect(error.message).toContain('newer version');
@@ -178,9 +178,9 @@ describe('what the decoder refuses, and what it calls each refusal', () => {
   });
 
   it('reads the version before it complains about anything else', () => {
-    // A v3 file will carry v3 fields. Reporting the unknown field first would
+    // A v4 file will carry v4 fields. Reporting the unknown field first would
     // tell a rider their file is malformed when it is merely newer.
-    const future = { ...documentOf(), onYourLeftWorkout: 3, cooldownStrategy: 'gentle' };
+    const future = { ...documentOf(), onYourLeftWorkout: 4, cooldownStrategy: 'gentle' };
     expect(refusedWith(reserialised(future))).toBe('unsupported-version');
   });
 });
