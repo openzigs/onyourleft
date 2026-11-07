@@ -707,12 +707,21 @@ test.describe('#2304 — the built-in workouts’ filters', () => {
   const FILTER_TARGET = 48;
   const FILTERS = '.oyl-filters select, .oyl-filters label:has(> input[type="checkbox"])';
 
+  /** Workouts with the built-ins as its list: `#/workouts?list=built-in`. */
+  async function builtIns(page: Page): Promise<void> {
+    const seen = await page.evaluate(
+      async (target) => window.__oylReflow?.visit(target),
+      '#/workouts?list=built-in',
+    );
+    expect(seen?.routeId, 'workouts did not render').toBe('workouts');
+  }
+
   for (const viewport of [PHONE, TABLET]) {
     test(`are 48 px targets at ${String(viewport.width)}×${String(viewport.height)}`, async ({
       page,
     }) => {
       await open(page, viewport);
-      await visit(page, 'workouts');
+      await builtIns(page);
       const filters = await threeWays(page, FILTERS, { height: 'min-height' });
       expect(filters.count, 'not the three filters').toBe(3);
       for (const box of filters.shipped) expect(box.height).toBeGreaterThanOrEqual(FILTER_TARGET);
@@ -725,7 +734,7 @@ test.describe('#2304 — the built-in workouts’ filters', () => {
     page,
   }) => {
     await open(page, PHONE);
-    await visit(page, 'workouts');
+    await builtIns(page);
     const cards = page.locator('main [data-oyl-built-in]');
     const every = await cards.count();
     expect(every, 'no built-in on Workouts').toBeGreaterThan(10);

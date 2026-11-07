@@ -487,14 +487,18 @@ test.describe('a cold start with the network off', () => {
     try {
       await second.page.goto(`${PRODUCT_ORIGIN}/#/workouts`);
       await expect(second.page.locator('h1')).toHaveText('Workouts');
+      // Nothing of the rider's own: their list is the empty state.
+      await expect(second.page.locator('main [data-oyl-list="saved"]')).toContainText(
+        'No workouts saved on this device yet',
+      );
+      await second.page
+        .getByRole('navigation', { name: 'Which workouts' })
+        .getByRole('link', { name: 'Built-in workouts' })
+        .click();
       const cards = second.page.locator('main [data-oyl-built-in]');
       await expect(cards).toHaveCount(BUILT_IN_WORKOUTS.length);
       expect(await cards.locator('a').allTextContents()).toEqual(
         BUILT_IN_WORKOUTS.map((template) => template.name),
-      );
-      // Nothing of the rider's own: the list is the empty state.
-      await expect(second.page.locator('main [data-oyl-list="saved"]')).toContainText(
-        'No workouts saved on this device yet',
       );
       // The control: the network really is off in this session.
       const control = await second.page.evaluate(async (path: string) => {

@@ -163,7 +163,7 @@ for (const theme of THEMES) {
     test('a built-in workout’s card on Workouts', async ({ page }) => {
       await page.goto('/reflow.html?data=populated');
       await page.waitForFunction(() => window.__oylReflow?.ready === true);
-      await page.evaluate(async () => window.__oylReflow?.visit('#/workouts'));
+      await page.evaluate(async () => window.__oylReflow?.visit('#/workouts?list=built-in'));
       expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
       const seen = await zonesIn(
         page,

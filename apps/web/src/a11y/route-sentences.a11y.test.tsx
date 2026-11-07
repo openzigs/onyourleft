@@ -187,12 +187,11 @@
  * on and finds both. Nothing is added or reworded.
  *
  * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
- * request's screenshots**, for added lines and nothing else: Workouts lists
- * the built-in workouts under its own list, on both walks — their heading,
- * line, filters and cards. One line MOVES rather than goes: on the populated
- * walk "Length" was the chosen workout's fact, and is now said first by the
- * length filter's label, so the recorder lists it there. No sentence is
- * dropped or reworded.
+ * request's screenshots**, for two added lines and nothing else: Workouts'
+ * list pane offers its two lists, *Your workouts* and *Built-in workouts*,
+ * on both walks. The walks open on the rider's own, so the built-ins'
+ * sentences are not on them; `BuiltInWorkouts.test.tsx` reads those. No
+ * sentence is dropped or reworded.
  *
  * ## What it does not check
  *

@@ -41,7 +41,14 @@ import {
 } from '../workouts/build';
 import { blockChartPaths, type BlockChartPaths } from '../workouts/block-chart';
 import { BlockChart } from '../workouts/BlockChart';
-import { builtInFilterFromQuery, isBuiltInId } from '../workouts/built-in';
+import {
+  builtInFilterFromQuery,
+  hrefForSavedWorkouts,
+  hrefForWorkouts,
+  isBuiltInId,
+  workoutsListOf,
+  type WorkoutsList,
+} from '../workouts/built-in';
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
@@ -229,6 +236,8 @@ export function WorkoutsView({
   // #2304: a built-in is chosen by the same address and never read from the store.
   const builtIn = isBuiltInId(selected);
   const thresholds = useOwnThresholds(analysis);
+  // #2304: the rider's own workouts or the built-ins, from the address.
+  const shownList = workoutsListOf(query, selected);
   // Not on every keystroke the builder causes: only when the list is read again.
   const cardZones = useMemo(() => zonesOnCards(entries ?? []), [entries]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -604,16 +613,16 @@ export function WorkoutsView({
 
   const list = (
     <>
-      {entries?.length === 0 ? null : (
+      {entries?.length === 0 && shownList === 'saved' ? null : (
         <p>
           <CreateLink route={routeById('workouts')} selection={selected}>
             Build a workout
           </CreateLink>
         </p>
       )}
-      {listed}
-      {/* #2304: the built-ins under their own heading, after the rider's own. */}
-      <BuiltInWorkouts filter={filter} selected={selected} />
+      {/* #2304: after the way to the builder, so that keeps its place. */}
+      <ListSwitch shown={shownList} />
+      {shownList === 'saved' ? listed : <BuiltInWorkouts filter={filter} selected={selected} />}
     </>
   );
 
@@ -713,7 +722,7 @@ export function WorkoutsView({
     <ListDetail
       route={routeById('workouts')}
       selection={selected}
-      listLabel="Saved workouts"
+      listLabel={shownList === 'saved' ? 'Saved workouts' : 'Built-in workouts'}
       detailLabel="Workout"
       backLabel="All workouts"
       detailWithoutSelection
@@ -1061,6 +1070,41 @@ export function WorkoutsView({
         )
       }
     />
+  );
+}
+
+/**
+ * The two lists the list pane can show — #2304: the rider's own, or the
+ * built-ins. Links, as the section tabs are (`AppShell.tsx` §`SectionNav`),
+ * because each list is an address: Back, a reload and a shared link keep it.
+ * Drawn as those tabs, and the current one is told the same ways — filled,
+ * bold and underlined — with `aria-current="true"`, since it is a choice of
+ * list on one page rather than a page of its own.
+ */
+function ListSwitch({ shown }: { readonly shown: WorkoutsList }): JSX.Element {
+  return (
+    <nav aria-label="Which workouts" className="oyl-list-switch">
+      <ul className="oyl-subnav-list">
+        <li>
+          <a
+            className="oyl-subnav-link"
+            href={hrefForSavedWorkouts()}
+            aria-current={shown === 'saved' ? 'true' : undefined}
+          >
+            Your workouts
+          </a>
+        </li>
+        <li>
+          <a
+            className="oyl-subnav-link"
+            href={hrefForWorkouts({})}
+            aria-current={shown === 'built-in' ? 'true' : undefined}
+          >
+            Built-in workouts
+          </a>
+        </li>
+      </ul>
+    </nav>
   );
 }
 
