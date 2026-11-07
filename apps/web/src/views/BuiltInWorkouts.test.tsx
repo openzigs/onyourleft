@@ -11,13 +11,25 @@
  * in the DOM — never the filter's state.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { BUILT_IN_WORKOUTS, seconds, thresholdShare, unixSeconds } from '@onyourleft/domain';
 import { athleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
 import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { useRoute } from '../shell/useRoute';
-import { chooseOption, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { answerTwoPanes } from '../testing/panes';
+import {
+  activateWithKeyboard,
+  chooseOption,
+  mount,
+  queryAll,
+  settle,
+  type Mounted,
+} from '../testing/mount';
 import { hrefForWorkouts } from '../workouts/built-in';
 import type { WorkoutStore } from '../workouts/store-port';
 import { workoutStub, type WorkoutStub } from '../workouts/testing';
@@ -38,6 +50,13 @@ const SAVED: WorkoutRecord = {
 };
 
 let mounted: Mounted | undefined;
+let restore: (() => void) | undefined;
+
+// `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
+const THEME = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../design/theme.css'),
+  'utf8',
+);
 
 beforeEach(() => {
   globalThis.location.hash = '#/workouts?list=built-in';
@@ -46,6 +65,8 @@ beforeEach(() => {
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  restore?.();
+  restore = undefined;
   globalThis.location.hash = '';
 });
 
@@ -103,9 +124,14 @@ function select(label: string): HTMLSelectElement {
   return control;
 }
 
+/**
+ * Follow a link as a rider does, and let the router hear of it:
+ * `activateWithKeyboard` waits for the URL to move and supplies the
+ * `hashchange` jsdom owes (`testing/mount.tsx`). A bare `click()` and one
+ * turn of the loop raced the URL's own queued update on a loaded machine.
+ */
 async function follow(link: HTMLAnchorElement): Promise<void> {
-  link.click();
-  await settle();
+  await activateWithKeyboard(link);
 }
 
 function linkSaying(root: ParentNode, text: string): HTMLAnchorElement {
@@ -236,6 +262,8 @@ describe('choosing a built-in — #2304', () => {
   });
 
   it('keeps the chosen built-in when the filter changes', async () => {
+    // Two panes: at one, the list is hidden while a built-in is chosen.
+    restore = answerTwoPanes(true, THEME);
     globalThis.location.hash = hrefForWorkouts({}, 'built-in:tempo-2x20');
     await open();
     await chooseOption(select('Length'), '75');
@@ -265,6 +293,8 @@ describe('choosing a built-in — #2304', () => {
 
 describe('browsing writes nothing — #2304', () => {
   it('leaves the rider’s saved workouts exactly as they were', async () => {
+    // Two panes, so the list stays beside a chosen built-in, as on a tablet.
+    restore = answerTwoPanes(true, THEME);
     const stub = workoutStub(OWNER, [SAVED]);
     const before = await stub.store.listWorkouts(OWNER);
     const calls: string[] = [];
