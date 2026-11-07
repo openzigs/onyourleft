@@ -37,6 +37,8 @@ export interface SessionOptions {
   readonly memoryBudgetBytes: number;
   readonly workerUrl: string;
   readonly wasmUrl: string;
+  /** The SDK's per-fetch deadline, so a big tile on a slow link is measured, not a transport error. */
+  readonly timeoutMs: number;
 }
 
 /** The fields of a route result the page reads. `valhalla-browser`'s `RouteResult` has them all. */
@@ -95,7 +97,12 @@ export interface RouterLike {
   ): Promise<RouteResultLike>;
   diagnostics(): Promise<DiagnosticsLike>;
   dispose(): Promise<void>;
+  /** Rejects every outstanding call with `CANCELLED`. */
+  cancel(): void;
 }
+
+/** The SDK's longest per-fetch deadline (`timeoutMs`, 1 to 60,000); its default is 10,000. */
+export const SESSION_FETCH_TIMEOUT_MS = 60_000;
 
 /** What the measurement needs from its surroundings. */
 export interface MeasureDeps {
@@ -197,15 +204,22 @@ async function withDeadline<T>(
   step: Step,
   timeoutMs: number,
   run: (signal: AbortSignal) => Promise<T>,
+  onTimeout: () => void = () => undefined,
 ): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Raced, so a call that ignores the signal and the cancel still ends at the deadline.
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      onTimeout();
+      reject(new Error('deadline'));
+    }, timeoutMs);
+  });
   try {
-    return await run(controller.signal);
+    return await Promise.race([run(controller.signal), deadline]);
   } catch (error: unknown) {
     throw new StepFailed(step, errorCode(error, timedOut));
   } finally {
@@ -226,6 +240,7 @@ async function measureOne(
     memoryBudgetBytes: config.budgetBytes,
     workerUrl: deps.workerUrl,
     wasmUrl: deps.wasmUrl,
+    timeoutMs: SESSION_FETCH_TIMEOUT_MS,
   });
   const base = { pair: index + 1, run, targetKm: pair.targetKm };
   let record: PairRecord = base;
@@ -260,7 +275,12 @@ async function measureOne(
   };
   try {
     const initStarted = deps.now();
-    startup = await withDeadline('init', config.timeoutMs, () => router.initialize());
+    startup = await withDeadline(
+      'init',
+      config.timeoutMs,
+      () => router.initialize(),
+      () => router.cancel(),
+    );
     record = {
       ...record,
       init: {
@@ -283,6 +303,7 @@ async function measureOne(
     const [warm] = await step('warm', pair.destination);
     record = { ...record, warm };
     const shape = result.native.trip.legs.flatMap((leg) => decodePolyline6(leg.shape));
+    // The destination lies on the cold route, so this is close to a warm route: a lower bound on a real drag.
     const [drag] = await step('drag', pointBackAlong(shape, config.dragMetres));
     record = { ...record, drag };
     const native = (await router.diagnostics()).native;

@@ -38,6 +38,8 @@
 set -euo pipefail
 
 CACHE_CONTROL='public, max-age=31536000, immutable'
+# What a browser offers, so a CDN that compresses for browsers shows here (the SDK refuses encoded graph responses).
+ENCODINGS='Accept-Encoding: gzip, deflate, br'
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEB="$(cd "${HERE}/../.." && pwd)"
@@ -97,7 +99,7 @@ put() {
   local key="$1" type="$2"
   s3 put-object --key "${prefix}/${release}/${key}" --body "${dir}/${key}" \
     --content-type "${type}" --cache-control "${CACHE_CONTROL}" >/dev/null ||
-    die "the upload of ${key} failed"
+    die "the upload of ${key} failed; --upload now refuses this prefix, so delete everything under ${prefix}/${release}/ in the bucket by hand, then run --upload again"
   printf 'upload: put %s\n' "${key}"
 }
 
@@ -113,7 +115,7 @@ problem() {
 
 check_object() {
   local key="$1" etag="$2" bytes="$3" url="${public}/${release}/$1" headers expose allow encoding
-  headers="$(curl -sS -I -H "Origin: ${origin}" "${url}")" || {
+  headers="$(curl -sS -I -H "Origin: ${origin}" -H "${ENCODINGS}" "${url}")" || {
     problem "${key}" 'the public URL did not answer'
     return
   }
@@ -140,7 +142,7 @@ check_object() {
 
 check_range() {
   local bytes="$1" url="${public}/${release}/graph.tar" headers
-  headers="$(curl -sS -o /dev/null -D - -H "Origin: ${origin}" -H 'Range: bytes=0-511' "${url}")" || {
+  headers="$(curl -sS -o /dev/null -D - -H "Origin: ${origin}" -H "${ENCODINGS}" -H 'Range: bytes=0-511' "${url}")" || {
     problem graph.tar 'the range request did not answer'
     return
   }

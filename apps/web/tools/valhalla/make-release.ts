@@ -235,7 +235,6 @@ export function readGraphArchive(path: string): GraphArchive {
     for (const member of members.slice(1)) {
       if (!TILE_PATH.test(member.name))
         throw new Error(`graph.tar holds a file that is not a tile: ${member.name}`);
-      if (byOffset.has(member.offset)) throw new Error('graph.tar holds two members at one offset');
       byOffset.set(member.offset, member);
     }
     const tiles: GraphTile[] = [];

@@ -12,14 +12,14 @@ tablet's numbers hold.
 argument, and nothing the build publishes says which state it is, except the
 box the tiles cover. No fixture here holds a real coordinate.
 
-| Path | What |
-| --- | --- |
-| `build-graph.sh` | The build: `valhalla_build_config`, `_admins`, `_tiles` and `_extract` in `ghcr.io/valhalla/valhalla:3.8.3`, pinned by digest, with `loki.use_connectivity` off. Then `make-release.ts`. Its suite is `build-graph.test.sh` (a fake `docker`). |
-| `make-release.ts` | Checks `graph.tar` the way the SDK will (index first, one entry per tile, each tile's own GraphId) and writes the release directory below, and a local build record nobody uploads. |
-| `upload.sh` | Uploads one release to R2 and checks the public URL before the manifest goes up. **A dry run unless told otherwise.** Its suite is `upload.test.sh` (a fake `aws` and `curl`). |
-| `release-objects.ts` | What `upload.sh` uploads and checks, manifest last. |
-| `measure/` | The dev-only page, built by `vite.valhalla.config.ts`, never by the product's `vite.config.ts`. `stays-out.test.ts` holds that line. |
-| `graph-tar-testing.ts` | A `graph.tar` of Valhalla's shape with three filler tiles, for the tests. |
+| Path                   | What                                                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build-graph.sh`       | The build: `valhalla_build_config`, `_admins`, `_tiles` and `_extract` in `ghcr.io/valhalla/valhalla:3.8.3`, pinned by digest, with `loki.use_connectivity` off. Then `make-release.ts`. Its suite is `build-graph.test.sh` (a fake `docker`). |
+| `make-release.ts`      | Checks `graph.tar` the way the SDK will (index first, one entry per tile, each tile's own GraphId) and writes the release directory below, and a local build record nobody uploads.                                                            |
+| `upload.sh`            | Uploads one release to R2 and checks the public URL before the manifest goes up. **A dry run unless told otherwise.** Its suite is `upload.test.sh` (a fake `aws` and `curl`).                                                                 |
+| `release-objects.ts`   | What `upload.sh` uploads and checks, manifest last.                                                                                                                                                                                            |
+| `measure/`             | The dev-only page, built by `vite.valhalla.config.ts`, never by the product's `vite.config.ts`. `stays-out.test.ts` holds that line.                                                                                                           |
+| `graph-tar-testing.ts` | A `graph.tar` of Valhalla's shape with three filler tiles, for the tests.                                                                                                                                                                      |
 
 ## 1. Build the graph
 
@@ -67,7 +67,7 @@ The AWS CLI finds the existing R2 credentials itself (`AWS_PROFILE` or its own
 environment variables); the script never reads or prints one. Each object is
 one PUT under `routing/<release>/` with `Cache-Control: public,
 max-age=31536000, immutable`, and no `Content-Encoding`: the SDK refuses an
-encoded graph. Then every graph object is fetched from
+encoded graph. Then every graph object is fetched (asking for gzip, deflate and br, as a browser does) from
 `https://tiles.openzigs.com/routing/<release>/` with the page's `Origin`, and
 `manifest.json` goes up last, only if each one answered with:
 
@@ -78,16 +78,33 @@ encoded graph. Then every graph object is fetched from
   naming `ETag`, `Content-Length`, `Content-Range` and `Last-Modified`;
 - and, for `graph.tar`, `206` with the exact `Content-Range` for one byte range.
 
+If a put fails part-way, `--upload` refuses the prefix from then on (a release
+is immutable) and `--finish` uploads only the manifest, so delete everything
+under `routing/<release>/` in the bucket by hand and run `--upload` again.
+
 ⚠️ **CORS is the bucket's, not this script's**, and the same bucket serves the
 basemap. If the check says CORS is wrong, the rule upstream's guide gives is
 below; changing it is the owner's call. Then `upload.sh <release> --finish`
 checks again and uploads only the manifest.
 
 ```json
-[{ "AllowedOrigins": ["*"], "AllowedMethods": ["GET", "HEAD"],
-   "AllowedHeaders": ["Range", "If-None-Match", "If-Modified-Since"],
-   "ExposeHeaders": ["Content-Range", "Content-Length", "Content-Encoding", "ETag", "Last-Modified", "Accept-Ranges", "Cache-Control"],
-   "MaxAgeSeconds": 3600 }]
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["Range", "If-None-Match", "If-Modified-Since"],
+    "ExposeHeaders": [
+      "Content-Range",
+      "Content-Length",
+      "Content-Encoding",
+      "ETag",
+      "Last-Modified",
+      "Accept-Ranges",
+      "Cache-Control"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]
 ```
 
 Optional: a `Timing-Allow-Origin: *` response header (a Cloudflare transform
@@ -120,9 +137,14 @@ decoded-tile cache), with `individual-tiles` and a 128 MiB decoded-tile
 budget, and records: initialisation, cold, warm and dragged-waypoint route
 times; bytes and tiles fetched; WebAssembly memory high water and the decoded
 cache. The drag moves the destination `dragM` back along the route it drew,
-so it is on a road. A route that runs past `timeoutS` is abandoned as
+so it is on a road. That point lies on the cold route, so the drag fetches
+no new tile and is close to a warm route by construction: read it as a lower
+bound on a real drag. The session's per-fetch deadline is the SDK's longest
+(60 s), so a large tile on a slow link is measured as a slow cold route, not
+a transport error. A route or an initialisation that runs past `timeoutS` is
+cancelled. A route that runs past `timeoutS` is abandoned as
 `TIMEOUT` (spike 0035's 32 MiB budget never finished). The record holds no
-coordinate and no error message, only codes, so *Copy the record* can be
+coordinate and no error message, only codes, so _Copy the record_ can be
 pasted into #2009 as it is.
 
 **Not measured by this page:** the Capacitor WebView (the page is not in the

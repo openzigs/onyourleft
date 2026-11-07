@@ -100,12 +100,13 @@ brk="${OYL_FAKE_BREAK:-}"
 if [ -n "${range}" ] && [ "${brk}" != range ]; then
   printf 'HTTP/2 206\r\ncontent-range: bytes %s/%s\r\ncontent-length: %s\r\n' "${range}" "${size}" "$((${range#*-} - ${range%-*} + 1))"
 else
-  printf 'HTTP/2 200\r\ncontent-length: %s\r\n' "${size}"
+  printf 'HTTP/2 %s\r\ncontent-length: %s\r\n' "$([ "${brk}" = status ] && echo 203 || echo 200)" \
+    "$([ "${brk}" = length ] && echo $((size + 1)) || echo "${size}")"
 fi
 printf 'etag: "%s"\r\nlast-modified: Fri, 06 Nov 2026 00:00:00 GMT\r\n' "${md5}"
 printf 'cache-control: %s\r\n' "$([ "${brk}" = cache ] && echo 'max-age=3600' || cat "${file}.cache")"
 [ "${brk}" = encoding ] && printf 'content-encoding: gzip\r\n'
-printf 'access-control-allow-origin: *\r\n'
+printf 'access-control-allow-origin: %s\r\n' "$([ "${brk}" = origin ] && echo https://elsewhere.example || echo '*')"
 if [ "${brk}" = cors ]; then
   printf 'access-control-expose-headers: Content-Length, Content-Range\r\n'
 else
@@ -169,6 +170,7 @@ check '--upload: with the immutable Cache-Control' \
   test "$(cat "${tmp}/bucket/routing/${release}/manifest.json.cache")" = 'public, max-age=31536000, immutable'
 check '--upload: as JSON and as bytes' has "${calls}" "--key routing/${release}/graph.tar --body ${rel}/graph.tar --content-type application/octet-stream"
 check '--upload: the check sends the page'"'"'s Origin' has "${calls}" 'Origin: http://localhost:5180'
+check '--upload: the check asks for the encodings a browser does' has "${calls}" 'Accept-Encoding: gzip, deflate, br'
 check '--upload: the check asks graph.tar for a range' has "${calls}" 'Range: bytes=0-511'
 check '--upload: the key is on no command line' lacks "${calls}" 'oyl-test-secret-value'
 check '--upload: and in no output' lacks "${out}" 'oyl-test-secret-value'
@@ -184,7 +186,7 @@ check 'an existing release: it says why' has "${out}" 'a release is immutable'
 check 'an existing release: nothing is put' test "$(puts)" -eq 0
 
 # --- What the public URL gets wrong stops the manifest ----------------------------
-for broken in etag cors encoding range cache; do
+for broken in etag cors encoding range cache status length origin; do
   new_fixture
   release="$(basename "${rel}")"
   out="$(OYL_FAKE_DIR="${tmp}" OYL_FAKE_BREAK="${broken}" PATH="${tmp}/bin:${PATH}" OYL_R2_BUCKET=b \
@@ -199,6 +201,9 @@ for broken in etag cors encoding range cache; do
     encoding) check 'a wrong encoding: it names it' has "${out}" 'served with Content-Encoding gzip' ;;
     range) check 'a wrong range: it says a range is not answered' has "${out}" 'a byte range is not answered with 206' ;;
     cache) check 'a wrong cache: it says so' has "${out}" 'its Cache-Control is not immutable' ;;
+    status) check 'a wrong status: it says HEAD answered 203' has "${out}" 'HEAD answered 203, not 200' ;;
+    length) check 'a wrong length: it says so' has "${out}" "its Content-Length is not its size" ;;
+    origin) check 'a wrong origin: it names the origin' has "${out}" 'CORS does not allow http://localhost:5180' ;;
   esac
 done
 
@@ -241,6 +246,7 @@ out="$(OYL_FAKE_DIR="${tmp}" OYL_FAKE_PUT_FAIL=config.json PATH="${tmp}/bin:${PA
 code=$?
 check 'a failed put: it stops' test "${code}" -eq 1
 check 'a failed put: it names the object' has "${out}" 'the upload of config.json failed'
+check 'a failed put: it says the prefix must be deleted by hand' has "${out}" 'delete everything under routing/'
 check 'a failed put: the manifest is not uploaded' test "$(grep -c 'manifest.json' "${tmp}/calls")" -eq 0
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"

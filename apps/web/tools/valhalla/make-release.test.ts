@@ -15,9 +15,12 @@ import {
   extractDateFromName,
   makeRelease,
   parseArguments,
+  planRelease,
   readGraphArchive,
   runtimeConfig,
   tileIdFromPath,
+  writeRelease,
+  type GraphArchive,
   type MakeReleaseOptions,
 } from './make-release';
 
@@ -141,6 +144,61 @@ describe('readGraphArchive', () => {
     tar[3] = 0x41;
     const { work } = workDirectory(tar);
     expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow('checksum is wrong');
+  });
+
+  it('refuses a tile whose path is not the one its index entry’s id gives', () => {
+    // The entry names a tile that is not at the path the SDK would fetch for it.
+    const tar = syntheticGraphTar(SYNTHETIC_TILE_PATHS, {
+      index: (entries) =>
+        entries.map((entry, at) =>
+          at === 1 ? { ...entry, id: tileIdFromPath('2/000/519/122.gph') } : entry,
+        ),
+    });
+    const { work } = workDirectory(tar);
+    expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow(
+      'a tile at the wrong path: 2/000/519/120.gph',
+    );
+  });
+
+  it('refuses a member that is not a tile path', () => {
+    const { work } = workDirectory(syntheticGraphTar(['0/002/025.gph', '3/000/519/120.gph']));
+    expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow(
+      'holds a file that is not a tile: 3/000/519/120.gph',
+    );
+  });
+
+  it('refuses an index that names one tile twice', () => {
+    const tar = syntheticGraphTar(SYNTHETIC_TILE_PATHS, {
+      index: (entries) =>
+        entries.map((entry, at) => (at === 1 ? { ...entry, id: entries[0]?.id ?? 0 } : entry)),
+    });
+    const { work } = workDirectory(tar);
+    expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow('does not match its tiles');
+  });
+
+  it('refuses an index entry for a level above 2', () => {
+    const tar = syntheticGraphTar(SYNTHETIC_TILE_PATHS, {
+      index: (entries) =>
+        entries.map((entry, at) => (at === 0 ? { ...entry, id: entry.id + 3 } : entry)),
+    });
+    const { work } = workDirectory(tar);
+    expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow('does not match its tiles');
+  });
+
+  it('refuses a member that is not a regular file', () => {
+    const tar = syntheticGraphTar(SYNTHETIC_TILE_PATHS);
+    // Make the first tile's own header (after index.bin and its PAX header) a symbolic link.
+    const link = tar.indexOf(Buffer.from('2/000/519/120.gph\0'), 512);
+    tar.write('2', link + 156, 'ascii');
+    let sum = 0;
+    for (let at = link; at < link + 512; at += 1) {
+      sum += at >= link + 148 && at < link + 156 ? 0x20 : (tar[at] ?? 0);
+    }
+    tar.write(`${sum.toString(8).padStart(6, '0')}\0 `, link + 148, 'ascii');
+    const { work } = workDirectory(tar);
+    expect(() => readGraphArchive(join(work, 'graph.tar'))).toThrow(
+      "holds a member of type '2'; only regular files are expected",
+    );
   });
 });
 
@@ -332,5 +390,54 @@ describe('parseArguments', () => {
     expect(() => parseArguments([...required, '--work', 'again'])).toThrow('--work given twice');
     expect(() => parseArguments([...required, '--prefix'])).toThrow('--prefix needs a value');
     expect(() => parseArguments([...required, '--state', 'x'])).toThrow('unknown argument --state');
+  });
+});
+
+describe('refusals while a release is made', () => {
+  it('refuses a manifest over the SDK’s 4 MiB limit', () => {
+    const { work } = workDirectory();
+    const real = readGraphArchive(join(work, 'graph.tar'));
+    const tiles = Array.from({ length: 30_000 }, (_, at) => ({
+      id: at * 8 + 2,
+      path: `2/${String(at)
+        .padStart(9, '0')
+        .replace(/(\d{3})(?=\d)/g, '$1/')}.gph`,
+      offset: 1024 + at * 512,
+      size: 300,
+      sha256: 'a'.repeat(64),
+      md5: 'b'.repeat(32),
+    }));
+    const huge: GraphArchive = { ...real, tiles };
+    expect(() =>
+      planRelease({
+        archive: huge,
+        nativeConfig: NATIVE_CONFIG,
+        valhallaRevision: RUNTIME.versions.valhalla,
+        valhallaVersion: '3.8.3',
+        prefix: 'oyl-bicycle',
+        extractDate: undefined,
+      }),
+    ).toThrow('manifest.json is over the SDK’s 4 MiB limit');
+  });
+
+  it('refuses to write when graph.tar changed after it was read, and leaves no release', () => {
+    const { work, out } = workDirectory();
+    const path = join(work, 'graph.tar');
+    const archive = readGraphArchive(path);
+    const release = planRelease({
+      archive,
+      nativeConfig: NATIVE_CONFIG,
+      valhallaRevision: RUNTIME.versions.valhalla,
+      valhallaVersion: '3.8.3',
+      prefix: 'oyl-bicycle',
+      extractDate: undefined,
+    });
+    const bytes = readFileSync(path);
+    bytes[bytes.length - 600] = (bytes[bytes.length - 600] ?? 0) ^ 0xff;
+    writeFileSync(path, bytes);
+    expect(() => writeRelease(release, archive, { archivePath: path, out, record: {} })).toThrow(
+      'graph.tar changed while the release was being made',
+    );
+    expect(readdirSync(out)).toEqual([]);
   });
 });

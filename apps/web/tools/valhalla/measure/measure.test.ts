@@ -78,6 +78,8 @@ interface Script {
     hang?: true;
   }>;
   readonly initFails?: Error;
+  /** `initialize()` never answers, unless `cancel()` is called. */
+  readonly initHangs?: true;
 }
 
 /** A router whose every answer the test wrote, which advances the test's clock as it "works". */
@@ -95,7 +97,21 @@ class FakeRouter implements RouterLike {
     private readonly clock: { t: number },
   ) {}
 
+  cancelled = 0;
+  private cancelInit: (() => void) | undefined;
+
+  cancel(): void {
+    this.cancelled += 1;
+    this.cancelInit?.();
+  }
+
   async initialize(): Promise<StartupLike> {
+    if (this.script.initHangs === true) {
+      return new Promise((_, reject) => {
+        this.cancelInit = () =>
+          reject(Object.assign(new Error('cancelled'), { code: 'CANCELLED' }));
+      });
+    }
     this.clock.t += 200;
     if (this.script.initFails !== undefined) throw this.script.initFails;
     return Promise.resolve(STARTUP);
@@ -232,6 +248,7 @@ describe('runMeasurement', () => {
       memoryBudgetBytes: 128 * 1024 * 1024,
       workerUrl: '/assets/worker-1.js',
       wasmUrl: '/assets/valhalla-browser-1.wasm',
+      timeoutMs: 60_000,
     });
   });
 
@@ -299,6 +316,20 @@ describe('runMeasurement', () => {
     const record = (await runMeasurement({ ...CONFIG, timeoutMs: 20 }, deps)).records[0];
     expect(record?.error).toEqual({ step: 'cold', code: 'TIMEOUT' });
     expect(routers[0]?.disposed).toBe(1);
+  });
+
+  it('gives up on a session that never starts, as TIMEOUT, and cancels it', async () => {
+    const { deps, routers } = harness([{ routes: [], initHangs: true }]);
+    const record = (await runMeasurement({ ...CONFIG, timeoutMs: 20 }, deps)).records[0];
+    expect(record?.error).toEqual({ step: 'init', code: 'TIMEOUT' });
+    expect(routers[0]?.cancelled).toBe(1);
+    expect(routers[0]?.disposed).toBe(1);
+  });
+
+  it('gives the session the SDK’s longest per-fetch deadline', async () => {
+    const { deps, routers } = harness([{ routes: [{ ms: 1 }] }]);
+    await runMeasurement(CONFIG, deps);
+    expect(routers[0]?.options.timeoutMs).toBe(60_000);
   });
 
   it('records a session that would not start against the init step', async () => {
