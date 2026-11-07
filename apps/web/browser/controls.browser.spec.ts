@@ -783,8 +783,8 @@ test.describe('#2305 — the tailor pane’s controls', () => {
           '.oyl-tailor__save .oyl-button',
         { height: 'min-height' },
       );
-      // The length select, three steppers of two buttons and a box, and Save a copy.
-      expect(controls.count).toBe(11);
+      // The length select, three steppers of two buttons and a box, Ride it and Save a copy.
+      expect(controls.count).toBe(12);
       for (const box of controls.shipped) expect(box.height).toBeGreaterThanOrEqual(TAILOR_TARGET);
       expect(new Set(controls.declared)).toEqual(new Set([`${String(TAILOR_TARGET)}px`]));
       for (const height of controls.stripped) expect(height).toBeLessThan(TAILOR_TARGET);
