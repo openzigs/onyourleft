@@ -6022,6 +6022,17 @@ select.oyl-input {
 }
 
 /*
+ * #2294: a route that cannot hold the Delivery round chosen is GREYED — its
+ * drawing faded and drained of colour. Only the drawing: it is `aria-hidden`
+ * and says nothing the words do not, while the name and both bands keep their
+ * declared text pairs, and the band under the facts says why in words.
+ */
+.oyl-chooser__card--no-round > .oyl-chooser__shape {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+/*
  * The doubled edge is drawn by a layer OVER the tile since #1011: the drawing
  * and the band reach the tile's edges, and an inset `box-shadow` on the tile
  * itself is painted under its children, so the band covered it.
