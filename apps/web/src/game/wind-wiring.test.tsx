@@ -452,3 +452,60 @@ describe('a rider riding in the wind they set can see it on the HUD (#335)', () 
     expect(hudField('Wind')).toEqual({ text: '36 mph headwind', detail: 'headwind' });
   });
 });
+
+describe('the wind boxes are on the screen only while a wind is asked for (#2330)', () => {
+  /**
+   * With the switch off, an empty "Wind speed" box under it read as a number
+   * the rider still owed. Driven through `GameView` rather than by rendering
+   * the control alone, because the claim that a value survives the switch
+   * going off and on is about where `GameView` keeps it.
+   */
+  async function picker(): Promise<void> {
+    mounted = await mount(<GameView port={pedallingPort(northRoute())} now={() => nowMs} />);
+    await settle();
+  }
+
+  it('shows neither box while the switch is off, and both once it is on', async () => {
+    await picker();
+    // The switch itself is there, so "no box" is not "no wind control".
+    expect(boxLabelled('Ride in a wind')).toBeDefined();
+    expect(boxLabelled('Wind speed')).toBeUndefined();
+    expect(boxLabelled('Wind direction')).toBeUndefined();
+
+    await clickThrough(boxLabelled('Ride in a wind'));
+    expect(boxLabelled('Wind speed')).toBeDefined();
+    expect(boxLabelled('Wind direction')).toBeDefined();
+
+    await clickThrough(boxLabelled('Ride in a wind'));
+    expect(boxLabelled('Wind speed')).toBeUndefined();
+    expect(boxLabelled('Wind direction')).toBeUndefined();
+  });
+
+  it('keeps what was typed through the switch going off and on again', async () => {
+    await picker();
+    await clickThrough(boxLabelled('Ride in a wind'));
+    await type(boxLabelled('Wind speed'), '12');
+    await type(boxLabelled('Wind direction'), '90');
+
+    await clickThrough(boxLabelled('Ride in a wind'));
+    await clickThrough(boxLabelled('Ride in a wind'));
+
+    expect(boxLabelled('Wind speed')?.value).toBe('12');
+    expect(boxLabelled('Wind direction')?.value).toBe('90');
+  });
+
+  it('does not block the ride over a hidden box the rider cannot see', async () => {
+    // A refusal pointing at a box that is not on the screen would leave the
+    // rider blocked with nothing to correct.
+    await picker();
+    await clickThrough(boxLabelled('Ride in a wind'));
+    await type(boxLabelled('Wind speed'), '9000');
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+
+    await clickThrough(boxLabelled('Ride in a wind'));
+
+    expect(boxLabelled('Wind speed')).toBeUndefined();
+    expect(rideButton()?.getAttribute('aria-disabled')).not.toBe('true');
+    expect(mounted?.container.querySelector('.oyl-game__problem')).toBeNull();
+  });
+});

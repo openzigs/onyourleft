@@ -37,6 +37,7 @@ import {
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
 import {
+  circuitRouteId,
   openActivityStore,
   privacyZoneId,
   SCHEMA_VERSION,
@@ -200,6 +201,33 @@ describe('read once, then from the store', () => {
     expect(kept?.halfWidthMetres).toBe(CORRIDOR_HALF_WIDTH_METRES);
     expect(kept?.tiles.length).toBeGreaterThan(0);
     expect(kept?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+  });
+});
+
+describe('a built-in circuit’s corridor — #2293, ADR 0064 D-2.2', () => {
+  it('is read once, kept under the circuit’s key with no route saved, and then asks nothing', async () => {
+    // A circuit is never a RouteRecord: nothing is saved for it here.
+    const circuit = { id: circuitRouteId('fixture'), profile: circuitRoute(400) };
+    const source = countingSource(await buildArchive({ tiles: corridorTiles(circuit.profile) }));
+    const ask = (port: WorldCorridorPort): Promise<CorridorState> =>
+      port.load(circuit, new AbortController().signal, () => undefined);
+
+    const first = await ask(portOver(freshStore(), source, on()));
+    expect(first.kind).toBe('ready');
+    const calls = source.calls.length;
+    expect(calls).toBeGreaterThan(0);
+
+    const kept = await harness.read((store) =>
+      store.getWorldCorridor(ATHLETE_A, circuitRouteId('fixture')),
+    );
+    expect(kept?.owner).toBe(ATHLETE_A);
+    expect(kept?.routeId).toBe('circuit:fixture');
+    expect(kept?.licence).toBe('ODbL-1.0');
+
+    for (const store of stores) store.close();
+    const second = await ask(portOver(freshStore(), source, on()));
+    expect(source.calls.length - calls).toBe(0);
+    expect(featuresOf(second)).toStrictEqual(featuresOf(first));
   });
 });
 
@@ -407,10 +435,15 @@ describe('#1789 building fields: through the real store and back, and a row with
     expect(fieldsHandedToThePlan(state).length).toBeGreaterThan(0);
   });
 
-  it('changes no Dexie schema: the store is at version 20, and worldCorridors and its keys are as #1545 declared them', () => {
-    expect(SCHEMA_VERSION).toBe(20);
-    expect(SCHEMA_VERSIONS).toHaveLength(20);
-    expect(SCHEMA_VERSIONS.at(-1)?.[TABLE.worldCorridors]).toBe('[owner+routeId], owner');
+  it('changes no Dexie schema: the store is at version 21, and worldCorridors and its keys are as #1545 declared them', () => {
+    // 21 since #1063, which re-declares cameraFrames alone; worldCorridors is
+    // still as version 20 (#1545) declared it.
+    expect(SCHEMA_VERSION).toBe(21);
+    expect(SCHEMA_VERSIONS).toHaveLength(21);
+    expect(
+      SCHEMA_VERSIONS.findLast((stores) => TABLE.worldCorridors in stores)?.[TABLE.worldCorridors],
+    ).toBe('[owner+routeId], owner');
+    expect(SCHEMA_VERSIONS.at(-1)?.[TABLE.worldCorridors]).toBeUndefined();
   });
 });
 

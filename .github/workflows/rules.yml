@@ -221,7 +221,12 @@ jobs:
       #   there is nothing to install. The version is printed because the
       #   runner's is older than a typical developer's and the two can disagree.
       #
-      #   format:check, lint, typecheck -- docs/agents/commands.md §4a.
+      #   format:check, lint, typecheck -- docs/agents/commands.md §4a. Since
+      #   #2272 `lint` is scripts/lint.sh: one ESLint process per workspace
+      #   project, one after another, because one process for the whole tree
+      #   ran out of its 4 GB heap here. Each prints its peak heap beside its
+      #   limit. Its suite beside it: a file that falls between the processes,
+      #   or a failing process that is swallowed, is a gate removed.
       #
       #   check-a11y-suite.test.sh -- the accessibility checker (below) decides
       #   what counts as an accessibility test from paths and from
@@ -299,6 +304,9 @@ jobs:
       #   basemap build script tests -- #1557. The suite of
       #   apps/web/tools/basemap/build.sh; fake `curl`, `git`, `java` and
       #   `mvn`, no network and no tiles.
+      #   valhalla build and upload script tests -- #2320. The suites of
+      #   apps/web/tools/valhalla/build-graph.sh (a fake `docker`) and
+      #   upload.sh (a fake `aws` and `curl`): no image, no bucket, no network.
       #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
@@ -329,6 +337,7 @@ jobs:
           'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
           'format:check' 'pnpm run format:check'
           'lint' 'pnpm run lint'
+          'lint runner tests' 'bash scripts/lint.test.sh'
           'typecheck' 'pnpm run typecheck'
           'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
           'test split' 'pnpm run check:test-split'
@@ -346,6 +355,8 @@ jobs:
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'
           'basemap build script tests' 'bash apps/web/tools/basemap/build.test.sh'
+          'valhalla build script tests' 'bash apps/web/tools/valhalla/build-graph.test.sh'
+          'valhalla upload script tests' 'bash apps/web/tools/valhalla/upload.test.sh'
           'shard results checker tests' 'bash scripts/check-shard-results.test.sh'
 
       # The generated-artefact gate (#299). `cap sync` writes two files this

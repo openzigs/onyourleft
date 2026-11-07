@@ -112,13 +112,14 @@ import type {
   SegmentEffortRecord,
 } from './records';
 import type { AthleteId } from './ids';
-import { privacyZoneId } from './ids';
+import { circuitRouteId, privacyZoneId, segmentEffortId } from './ids';
 import {
   ATHLETE_A,
   ATHLETE_B,
   ATHLETE_C,
   ATHLETES,
   cameraFrameFor,
+  snapshotFor,
   chunksOf,
   framingReferenceFor,
   sideCameraReportFor,
@@ -180,6 +181,8 @@ interface World {
   readonly zone: PrivacyZoneRecord;
   readonly checkpoint: MatchCheckpointRecord;
   readonly frame: CameraFrameRecord;
+  /** #1063. A side-camera snapshot of this athlete's own ride. */
+  readonly snapshot: CameraFrameRecord;
   readonly reference: FramingReferenceRecord;
   readonly report: SideCameraReportRecord;
   readonly writeUp: RideWriteUpRecord;
@@ -191,6 +194,12 @@ interface World {
   readonly workoutGoals: WorkoutGoalsRecord;
   /** #1545: the map features around {@link World.route}. */
   readonly corridor: WorldCorridorRecord;
+  /**
+   * #2293, ADR 0064 D-2.2: the map features around a built-in circuit, kept
+   * under the SAME `circuit:` key by every athlete — a circuit is the app's,
+   * so its key is shared, and only the owner half of it tells them apart.
+   */
+  readonly circuitCorridor: WorldCorridorRecord;
   /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
   readonly binned: ReturnType<typeof rideFor>;
 }
@@ -254,6 +263,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // athlete would otherwise pass, which is the shape the different privacy-zone
   // centre above guards against one field along.
   const frame = cameraFrameFor(owner);
+  // #1063. Distinct bytes and outline per athlete, on this athlete's own ride.
+  const snapshot = snapshotFor(owner, ride.id);
   // #528. Different numbers per athlete, so a probe that handed back the
   // wrong athlete's reference cannot pass on shape alone.
   const reference = framingReferenceFor(owner);
@@ -279,6 +290,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const binned = rideFor(owner, { name: `Deleted by ${owner}` });
   // #1545. Different features per athlete, around this athlete's own route.
   const corridor = await worldCorridorFor(owner, route.id);
+  // #2293. The same circuit key for every athlete, different features each.
+  const circuitCorridor = await worldCorridorFor(owner, SCOPING_CIRCUIT, { seed: 5 });
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -288,7 +301,11 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putStreamSet(streams);
     await store.putLap(lap);
     await store.putPrivacyZone(zone);
-    await store.putActivityEfforts(owner, ride.id, [effort]);
+    // #69: and one the rule excluded, for `listExcludedEfforts` to be tempted by.
+    await store.putActivityEfforts(owner, ride.id, [
+      effort,
+      { ...effort, id: segmentEffortId(`${effort.id}-excluded`), visibility: 'excluded' },
+    ]);
     await store.putRecordingSession(recording);
     for (const chunk of chunks) {
       await store.appendRecordingChunk(chunk);
@@ -297,6 +314,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putActivityRecord(signed);
     await store.putMatchCheckpoint(checkpoint);
     await store.putCameraFrame(frame);
+    await store.putCameraFrame(snapshot);
     await store.putFramingReference(reference);
     await store.putSideCameraReport(report);
     await store.putRideWriteUp(writeUp);
@@ -315,6 +333,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putRiderText(riderTextFor(owner, 'note', binned.id));
     await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
     await store.putWorldCorridor(corridor);
+    await store.putWorldCorridor(circuitCorridor);
   });
 
   return {
@@ -329,6 +348,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     zone,
     checkpoint,
     frame,
+    snapshot,
     reference,
     report,
     writeUp,
@@ -339,9 +359,13 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     trustedKey,
     workoutGoals,
     corridor,
+    circuitCorridor,
     binned,
   };
 }
+
+/** #2293: the built-in circuit every athlete keeps a corridor for. */
+const SCOPING_CIRCUIT = circuitRouteId('scoping-fixture');
 
 /**
  * One member of the scoped surface, and what a missing `owner` filter on it
@@ -576,6 +600,17 @@ const PROBES: readonly ScopingProbe[] = [
     async run(store, mine, theirs) {
       await expect(store.listEfforts(mine.owner, theirs.segment.id)).resolves.toStrictEqual([]);
       everyRowBelongsTo(await store.listEfforts(mine.owner, mine.segment.id), mine.owner);
+    },
+  },
+  {
+    member: 'listExcludedEfforts',
+    leaks:
+      "another athlete's excluded efforts on a segment — the times the rule said they could not have ridden (#69)",
+    async run(store, mine, theirs) {
+      await expect(store.listExcludedEfforts(mine.owner, theirs.segment.id)).resolves.toStrictEqual(
+        [],
+      );
+      everyRowBelongsTo(await store.listExcludedEfforts(mine.owner, mine.segment.id), mine.owner);
     },
   },
   {
@@ -815,8 +850,11 @@ const PROBES: readonly ScopingProbe[] = [
       // number of rows with somebody else's picture in them would pass the two
       // assertions above, because the id and the owner are metadata and the
       // payload is what matters here.
-      const first = rows[0];
-      expect(first?.bytes).toStrictEqual(mine.frame.bytes);
+      const kept = rows.find((row) => row.id === mine.frame.id);
+      expect(kept?.bytes).toStrictEqual(mine.frame.bytes);
+      expect(rows.map((row) => row.id).sort()).toStrictEqual(
+        [mine.frame.id, mine.snapshot.id].sort(),
+      );
     },
   },
   {
@@ -825,8 +863,38 @@ const PROBES: readonly ScopingProbe[] = [
       'how many pictures everybody on this device has kept, which says that somebody else has been taking them',
     async run(store, mine, theirs) {
       expect(theirs.owner).not.toBe(mine.owner);
-      // One each, so a count that ignored the owner would be three.
-      await expect(store.countCameraFrames(mine.owner)).resolves.toBe(1);
+      // Two each — a kept frame and a snapshot (#1063) — so a count that
+      // ignored the owner would be six.
+      await expect(store.countCameraFrames(mine.owner)).resolves.toBe(2);
+    },
+  },
+  {
+    member: 'countExportableCameraFrames',
+    leaks:
+      'how many pictures everybody on this device has kept, which says that somebody else has been taking them',
+    async run(store, mine, theirs) {
+      // Two each — a kept frame and a snapshot (#1063) — so a count that
+      // ignored the owner would be six.
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(2);
+      // Their ride in Recently deleted says nothing about my pictures, and
+      // mine leaves my snapshot out of my count only.
+      await store.moveActivityToRecentlyDeleted(
+        theirs.owner,
+        theirs.ride.id,
+        theirs.ride.startedAt,
+      );
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(2);
+      await store.moveActivityToRecentlyDeleted(mine.owner, mine.ride.id, mine.ride.startedAt);
+      await expect(store.countExportableCameraFrames(mine.owner)).resolves.toBe(1);
+      await expect(store.countExportableCameraFrames(theirs.owner)).resolves.toBe(1);
+      // ⚠️ Put both back: every probe shares one seeded device, and this one
+      // runs again against the third athlete.
+      await expect(
+        store.restoreRecentlyDeleted(theirs.owner, theirs.ride.id, theirs.ride.startedAt),
+      ).resolves.toBe('restored');
+      await expect(
+        store.restoreRecentlyDeleted(mine.owner, mine.ride.id, mine.ride.startedAt),
+      ).resolves.toBe('restored');
     },
   },
   {
@@ -840,6 +908,53 @@ const PROBES: readonly ScopingProbe[] = [
       // `testing/fakes.ts` is the store built to fail exactly here.
       const theirsAfter = await store.listCameraFrames(theirs.owner);
       expect(theirsAfter.map((row) => row.id)).toContain(theirs.frame.id);
+    },
+  },
+  {
+    member: 'listRideSnapshots',
+    leaks:
+      'a picture another rider saved of themselves, on their own ride’s page — a photograph of the inside of somebody else’s house',
+    async run(store, mine, theirs) {
+      const rows = await store.listRideSnapshots(mine.owner, mine.ride.id);
+      everyRowBelongsTo(rows, mine.owner);
+      expect(rows.map((row) => row.id)).toStrictEqual([mine.snapshot.id]);
+      expect(rows[0]?.bytes).toStrictEqual(mine.snapshot.bytes);
+      // Asked for THEIR ride while naming myself: nothing. An index on the
+      // ride alone would hand theirs over here.
+      await expect(store.listRideSnapshots(mine.owner, theirs.ride.id)).resolves.toStrictEqual([]);
+    },
+  },
+  {
+    member: 'countRideSnapshots',
+    leaks: 'that somebody else saved pictures of themselves on a ride',
+    async run(store, mine, theirs) {
+      await expect(store.countRideSnapshots(mine.owner, mine.ride.id)).resolves.toBe(1);
+      await expect(store.countRideSnapshots(mine.owner, theirs.ride.id)).resolves.toBe(0);
+    },
+  },
+  {
+    member: 'countSnapshots',
+    leaks: 'that somebody else on this device saved pictures of themselves',
+    async run(store, mine, theirs) {
+      expect(theirs.owner).not.toBe(mine.owner);
+      // One snapshot each, beside one kept frame each: an owner-blind count
+      // would be three, and one that counted kept frames two.
+      await expect(store.countSnapshots(mine.owner)).resolves.toBe(1);
+    },
+  },
+  {
+    member: 'deleteRideSnapshot',
+    leaks: 'another rider’s snapshot, destroyed by somebody who only knew its id',
+    async run(store, mine, theirs) {
+      await expect(
+        store.deleteRideSnapshot(mine.owner, theirs.ride.id, theirs.snapshot.id),
+      ).resolves.toBe(false);
+      await expect(
+        store.deleteRideSnapshot(mine.owner, mine.ride.id, theirs.snapshot.id),
+      ).resolves.toBe(false);
+      // Read back as the owner: theirs is still there.
+      const after = await store.listRideSnapshots(theirs.owner, theirs.ride.id);
+      expect(after.map((row) => row.id)).toStrictEqual([theirs.snapshot.id]);
     },
   },
   {
@@ -976,6 +1091,16 @@ const PROBES: readonly ScopingProbe[] = [
       // row and handed back another's blob would pass on the key fields.
       expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
         worldCorridorFeaturesFor(mine.owner),
+      );
+      // #2293, ADR 0064 D-2.2: a built-in circuit's corridor is kept under a
+      // key every athlete shares, so the owner filter is all that keeps
+      // another athlete's — read round THEIR privacy zones — from being mine.
+      const circuit = await store.getWorldCorridor(mine.owner, SCOPING_CIRCUIT);
+      expect(circuit?.owner).toBe(mine.owner);
+      expect(circuit?.routeDigest).toBe(mine.circuitCorridor.routeDigest);
+      expect(circuit?.routeDigest).not.toBe(theirs.circuitCorridor.routeDigest);
+      expect(circuit && (await unpackWorldCorridorFeatures(circuit.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(mine.circuitCorridor.features),
       );
     },
   },

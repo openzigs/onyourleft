@@ -72,6 +72,7 @@ import {
   type Insets,
 } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
+import { PAUSE_MUSIC_NAME } from '../src/shell/OtherPlayerControls';
 import { isRideRoute } from '../src/shell/route-motion';
 import { ALL_ROUTES, hrefFor } from '../src/shell/routes';
 
@@ -1665,8 +1666,8 @@ const NAVIGATION_VIEWPORTS = [
   { name: '1280×800 — a landscape tablet', width: 1280, height: 800, expect: 'rail' },
 ] as const;
 
-/** How many primary destinations #427 allows at most. */
-const MOST_DESTINATIONS = 5;
+/** How many primary destinations #427 allows at most: six since #2292, the owner's ruling that added Games. */
+const MOST_DESTINATIONS = 6;
 
 interface NavLinkBox {
   readonly label: string;
@@ -1758,7 +1759,7 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       }
     });
 
-    test('holds at most five destinations, each a 44×44 target as Chromium lays it out', async ({
+    test('holds at most six destinations, each a 44×44 target as Chromium lays it out', async ({
       browser,
     }) => {
       const page = await sharedShell(browser, viewport);
@@ -4284,3 +4285,71 @@ test.describe('#2058 — the menus’ music, in a real engine', () => {
     expect((await readMusic(page)).elements, 'one element for the visit').toBe(1);
   });
 });
+
+/**
+ * #2253 through the harness's composition, which is `main.tsx`'s: the one
+ * `OtherPlayer` the header shows (`?own-player=heard`) is also the menus'
+ * music's `riderPlayer`. Heard playing, a press makes no loop at all — the
+ * same press that starts it in the case above.
+ */
+test.describe('#2253 — the menus’ music yields to the rider’s own player, in a real engine', () => {
+  test('with the rider’s player heard playing, a press starts nothing', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(AUDIO_GRAPH_PROBE);
+    await page.goto('/shell.html?music=fixture&own-player=heard');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    // The header heard it playing: its play/pause offers to pause.
+    await expect(page.getByRole('button', { name: PAUSE_MUSIC_NAME })).toBeVisible();
+
+    await pressSomethingElse(page);
+    // The press's handler has run once focus has left the skip link.
+    await expect(page.locator('.oyl-skip-link')).not.toBeFocused();
+    expect(await readMusic(page), 'the loop started over the rider’s own player').toEqual({
+      elements: 0,
+      playing: false,
+      time: 0,
+      bus: null,
+    });
+  });
+});
+
+/**
+ * The way back from a game's course picker — the owner's ruling of
+ * 2026-11-06 on #2292: a visible Back link to Games on both pickers, at every
+ * size including a phone's, and a 44×44 target (SC 2.5.5, as
+ * {@link TOUCH_TARGET_PIXELS} above). The shell harness hands the pickers no
+ * routes, so each is its empty state, and the link must be there all the same.
+ * ⚠️ Measured as Chromium lays it out: a text link's box is its line, about
+ * 25 px, so without `theme.css` §`.oyl-game-courses__back`'s floor this is red.
+ */
+for (const viewport of VIEWPORTS) {
+  test.describe(`${viewport.name} — Back to Games on the course pickers`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('each picker has a visible Back link to Games, a 44×44 target, that goes there', async ({
+      page,
+    }) => {
+      await page.goto('/shell.html');
+      await page.waitForSelector('html[data-oyl-shell-ready]');
+      for (const hash of ['#/games/delivery', '#/games/lap-race']) {
+        await page.evaluate((to) => {
+          window.location.hash = to;
+        }, hash);
+        const back = page.getByRole('link', { name: 'Back to Games', exact: true });
+        await expect(back, `${hash}: no Back to Games link`).toBeVisible();
+        const box = await back.boundingBox();
+        expect(box, `${hash}: the link has no box`).not.toBeNull();
+        expect(
+          box?.height ?? 0,
+          `${hash}: Back to Games is ${String(box?.height)} px tall, under the 44 px target`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(
+          box?.width ?? 0,
+          `${hash}: Back to Games is ${String(box?.width)} px wide`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        await back.click();
+        await expect(page.locator('h1')).toHaveText('Games');
+      }
+    });
+  });
+}

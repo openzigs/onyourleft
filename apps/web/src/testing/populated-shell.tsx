@@ -188,7 +188,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   home: { kind: 'fixture', marker: '.oyl-main .oyl-home__facts' },
   ride: { kind: 'fixture', marker: '.oyl-main .oyl-metric--live' },
   game: { kind: 'fixture', marker: '.oyl-chooser__card input[type="radio"]' },
-  workouts: { kind: 'fixture', marker: '.oyl-main a[data-oyl-select]' },
+  // The rider's own list: the built-ins after it (#2304) are there with no fixture.
+  workouts: { kind: 'fixture', marker: '.oyl-main [data-oyl-list="saved"] a[data-oyl-select]' },
   activities: { kind: 'fixture', marker: '.oyl-main a[href^="#/activities/"]' },
   analysis: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   segments: { kind: 'fixture', marker: '.oyl-main a[href^="#/segments/"]' },
@@ -236,6 +237,20 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
   more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
+  // #2292: the fixture's routes are not loops and its week is a fresh one,
+  // so both cards say the same in both walks.
+  games: {
+    kind: 'constant',
+    marker: '.oyl-main .oyl-games__card a[href="#/games/lap-race"]',
+    reason: 'two cards, each the same in both walks: no loop, and a fresh Delivery week',
+  },
+  // #2292: this harness chooses no realistic world, so the page says Delivery
+  // needs it in both walks; the lap race's page draws the same list.
+  'delivery-courses': {
+    kind: 'none',
+    reason: 'the standard world is chosen here, so it says a round needs the realistic one',
+  },
+  'lap-race-courses': { kind: 'fixture', marker: '.oyl-main .oyl-game-courses__course' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -298,6 +313,12 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
   'route-editor': { kind: 'none', reason: 'one saved route, opened by its id' },
   more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
+  games: { kind: 'none', reason: 'a card for each game, never empty (#2292)' },
+  'delivery-courses': {
+    kind: 'none',
+    reason: 'the standard world is chosen here, so it says a round needs the realistic one',
+  },
+  'lap-race-courses': { kind: 'empty-state', sentence: 'You have no saved routes yet.' },
   'not-found': { kind: 'none', reason: 'a heading and the route list' },
 };
 
@@ -757,8 +778,12 @@ function unpairedSideCamera(): SidePairingPort {
 
 /**
  * The trainer game's routes. Populated: one route with a long name, which the
- * picker lists with its ghost checkbox. No ride is started — this page has no
- * renderer — so the sensors are never read.
+ * picker lists with its ghost checkbox, and since #2335 a second, so a Games
+ * course picker (#2292) is a screen of two sections that
+ * `sections.browser.spec.ts` can find in columns and rows: with one it had
+ * a single card and no column to count. Neither is a loop, so the lap race's
+ * page still says it has none to race on. No ride is started — this page has
+ * no renderer — so the sensors are never read.
  */
 function gamePort(populated: boolean): GamePort {
   return {
@@ -769,6 +794,12 @@ function gamePort(populated: boolean): GamePort {
               {
                 id: 'route-1',
                 name: 'Box Hill, Leith Hill and every lane between them the long way round',
+                profile: routeProfile(routePoints()),
+                attempts: 0,
+              },
+              {
+                id: 'route-2',
+                name: 'Out to the old mill and back',
                 profile: routeProfile(routePoints()),
                 attempts: 0,
               },

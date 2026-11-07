@@ -21,6 +21,11 @@
  * see — inside a worker, or through a primitive the list forgot. A thrower fails
  * the render at the moment of the call, and the ride below then fails loudly.
  *
+ * ⚠️ **Since #2290 a ride with a corridor draws a street map here**, from the
+ * corridor kept on the device before the ride; the second block below rides
+ * one with every primitive still refused, so the map is held to the same
+ * "no request" as the outline.
+ *
  * ⚠️ **It rides**, rather than mounting and asserting. The picker makes no
  * request either, and a test that stopped there would pass against a screen that
  * fetched a tile on the first frame of every ride.
@@ -30,6 +35,8 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { northCorridor, northRoute } from './hud/street-map-testing';
+import { OSM_ATTRIBUTION } from '../map/basemap';
 import type { GameRenderer } from './port';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
@@ -59,8 +66,9 @@ function importedRoute(): RidableRoute {
   return { id: 'imported', name: 'Sunday loop', profile: routeProfile(points), attempts: 0 };
 }
 
-function port(route: RidableRoute): GamePort {
+function port(route: RidableRoute, corridor?: GamePort['loadWorldCorridor']): GamePort {
   return {
+    ...(corridor === undefined ? {} : { loadWorldCorridor: corridor }),
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
@@ -141,6 +149,31 @@ async function pump(count: number): Promise<void> {
   }
 }
 
+/** Mount the game over `gamePort`, press *Ride*, and ride 40 frames of 250 ms. */
+async function ride(gamePort: GamePort): Promise<Mounted> {
+  const shown = await mount(
+    <GameView
+      port={gamePort}
+      renderer={() => Promise.resolve(headlessRenderer())}
+      now={() => nowMs}
+    />,
+  );
+  mounted = shown;
+  await settle();
+  const button = queryAll<HTMLButtonElement>(shown.container, 'button').find((each) =>
+    (each.textContent ?? '').startsWith('Ride '),
+  );
+  expect(button).toBeDefined();
+  await act(async () => {
+    button?.click();
+    await Promise.resolve();
+  });
+  await settle();
+  await pump(40);
+  await settle();
+  return shown;
+}
+
 describe('the plan view draws from the profile alone', () => {
   it('rides a real imported route and issues no request of any kind', async () => {
     const route = importedRoute();
@@ -181,5 +214,50 @@ describe('the plan view draws from the profile alone', () => {
     // And the errors the render boundary caught, which is where a thrown
     // refusal would have landed rather than failing the assertions above.
     expect(mounted.caughtErrors).toEqual([]);
+  });
+});
+
+describe('the street map draws from the corridor the ride already holds — #2290', () => {
+  it('rides a route with a corridor, follows the rider on its streets, and issues no request', async () => {
+    const route: RidableRoute = {
+      id: 'north',
+      name: 'North street',
+      profile: northRoute(),
+      attempts: 0,
+    };
+    // The corridor answers as the store would offline: kept, no read.
+    const shown = await ride(
+      port(route, () => Promise.resolve({ kind: 'ready', corridor: northCorridor(route.id) })),
+    );
+
+    const map = shown.container.querySelector('.oyl-hud__street-map');
+    expect(map, 'the street map is drawn on a ride with a corridor').not.toBeNull();
+    expect(map?.getAttribute('aria-label')).toContain('Street map around you, north up');
+    // Its streets, from the corridor, and the route over them.
+    const streets = map?.querySelector('[data-oyl-street-map="streets"]')?.getAttribute('d') ?? '';
+    expect(streets).toMatch(/^M/);
+    expect(map?.querySelector('[data-oyl-street-map="route"]')?.getAttribute('d')).toMatch(/^M/);
+    // The outline it replaces is not drawn beside it.
+    expect(shown.container.querySelector('.oyl-hud__plan-line')).toBeNull();
+    // It follows: the view is centred on the rider, who has ridden north.
+    const [, top] = (map?.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    expect(top ?? 0).toBeLessThan(-500);
+    // With the map data's credit beside it, for the whole ride.
+    expect(shown.container.textContent).toContain(OSM_ATTRIBUTION);
+
+    expect(shown.container.querySelectorAll('img, image, iframe, use')).toHaveLength(0);
+    expect(shown.container.innerHTML).not.toContain('http');
+    expect(shown.caughtErrors).toEqual([]);
+  });
+
+  it('draws the route’s outline, as before, on a ride whose corridor is not ready', async () => {
+    const route: RidableRoute = { id: 'north', name: 'North', profile: northRoute(), attempts: 0 };
+    const shown = await ride(
+      port(route, () => Promise.resolve({ kind: 'unavailable', why: 'offline' })),
+    );
+    expect(shown.container.querySelector('.oyl-hud__street-map')).toBeNull();
+    expect(shown.container.querySelectorAll('.oyl-hud__plan-line').length).toBeGreaterThan(0);
+    expect(shown.container.textContent).not.toContain(OSM_ATTRIBUTION);
+    expect(shown.caughtErrors).toEqual([]);
   });
 });

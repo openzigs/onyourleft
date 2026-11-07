@@ -89,6 +89,7 @@ import {
   watts,
   type RoutePoint,
   type RouteProfile,
+  type TimeInZones,
   type WorkoutRescue,
 } from '@onyourleft/domain';
 
@@ -99,7 +100,14 @@ import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
+import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
+import {
+  HUD_LAYOUT_STORAGE_KEY,
+  HUD_PANELS,
+  HUD_TEXT_SIZES,
+  writeHudLayout,
+} from '../src/game/hud/hud-layout-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
@@ -163,6 +171,15 @@ export interface StageMeasurement {
   readonly panels: readonly StageItem[];
   /** Every reading, the strip, the plan view, the trainer line and both controls. */
   readonly items: readonly StageItem[];
+  /**
+   * #2076: the ride-so-far readings a phone's overlay hides by clip
+   * (`theme.css` §"THE RIDE SO FAR") — set apart from {@link items} rather
+   * than listed as readings off the stage, so every case that holds the
+   * readings on the stage holds the ones that ARE drawn. Where they are drawn
+   * they are {@link items} like any reading; `ride.browser.spec.ts` §"#2076"
+   * holds which viewports give them way.
+   */
+  readonly givenWay: readonly string[];
   /** The labels of the readings, in document order, per tier. */
   readonly primary: readonly string[];
   readonly secondary: readonly string[];
@@ -498,9 +515,20 @@ const CORRIDOR =
  * itself, on Playwright's clock.
  */
 const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+
+/** #2079: `?text=large` or `?text=extra-large`, the HUD's text size. */
+const HUD_TEXT_ASKED = new URLSearchParams(window.location.search).get('text');
+const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
+
+/** #2079: `?hide=readings,route`, the HUD's panels turned off. */
+const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
+  (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
+);
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
 const GAME: GamePort = {
+  // #2077: a threshold of the rider's own, so the zone indicator is drawn.
+  ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
     Promise.resolve([
@@ -620,6 +648,23 @@ const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') ==
  * under ten hours is wider than this one.
  */
 const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
+/**
+ * #2076: the ride so far, at the widest figures a ride under ten hours
+ * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
+ * the same object every read, as `useSyncExternalStore` requires.
+ */
+const RIDE_TOTALS: RideTotals = {
+  distance: metres(199_900),
+  climbed: metres(4850),
+  averagePower: watts(425),
+};
+
+/** #2077: some time in each of the seven power zones, the same object every read. */
+const ZONE_TIME: TimeInZones = {
+  perZone: [600, 1200, 900, 600, 300, 120, 30].map((spent) => seconds(spent)),
+  covered: seconds(3750),
+};
 
 /**
  * `ride.html?gradient=refused` — a trainer that refuses every gradient, so the
@@ -913,6 +958,11 @@ const TRAINER: GameTrainerPort = {
   // #2072: the elapsed time at the same widest figure, so the clock row is
   // laid out and measured with its widest time in it.
   rideElapsedSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
+  // #2076: the ride so far at its widest plausible figures, so where the
+  // three are drawn they are laid out and measured at their widest.
+  rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS),
+  // #2077: time in every one of the seven zones, so the bar is drawn whole.
+  ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
   recordGameRide: () => Promise.resolve(false),
   watchRide: () => () => undefined,
   readTrainer: () =>
@@ -1008,12 +1058,22 @@ function measure(): StageMeasurement {
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
   const items: StageItem[] = [];
+  const givenWay: string[] = [];
   for (const field of document.querySelectorAll('.oyl-hud__field')) {
-    items.push(item(`reading: ${textOf(field.querySelector('dt'))}`, field));
+    const name = `reading: ${textOf(field.querySelector('dt'))}`;
+    const box = field.getBoundingClientRect();
+    const givesWay = ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
+      field.classList.contains(name),
+    );
+    if (givesWay && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
+    }
+    items.push(item(name, field));
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
-    // #2075: the next kilometre, beside it.
+    // #2075: the road ahead, beside it (2 km of it since #2291).
     ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
@@ -1023,15 +1083,30 @@ function measure(): StageMeasurement {
     ['the plan change', '.oyl-hud__plan-change'],
     // #1552: the OpenStreetMap credit, on a ride with map data in its world.
     ['the map credit', '.oyl-hud__attribution'],
+    // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
+    ['the recent graph', '.oyl-hud__recent'],
   ] as const) {
     const element = document.querySelector(selector);
-    if (element !== null) {
-      items.push(item(name, element));
+    if (element === null) continue;
+    const box = element.getBoundingClientRect();
+    if (selector === '.oyl-hud__recent' && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
     }
+    items.push(item(name, element));
   }
   // #1482: and the touch lock, which is the design system's toggle rather
   // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
   for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
+    // #2080: the swap between a race's standings and a loop's lap splits is
+    // drawn only where its panel is — on a tablet — and not displayed at all
+    // on a phone, where the panel is clipped to nothing (`theme.css` §"A
+    // LOOP'S LAP SPLITS"). There it has given way, and is said so.
+    const box = control.getBoundingClientRect();
+    if (control.classList.contains('oyl-hud__swap') && box.width * box.height === 0) {
+      givenWay.push(`control: ${textOf(control)}`);
+      continue;
+    }
     items.push(item(`control: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
@@ -1077,6 +1152,7 @@ function measure(): StageMeasurement {
       ].filter((each) => window.getComputedStyle(each).position === 'absolute'),
     ].map((each) => item(each.className, each)),
     items,
+    givenWay,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
     primaryValuePixels: fontPixels('.oyl-hud__fields--primary .oyl-hud__value'),
@@ -1283,6 +1359,12 @@ async function run(): Promise<void> {
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
+  }
+  // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
+  // written where Settings writes them, read as the ride starts.
+  localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0) {
+    writeHudLayout(localStorage, { textSize: HUD_TEXT ?? 'normal', hidden: HUD_HIDDEN });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);

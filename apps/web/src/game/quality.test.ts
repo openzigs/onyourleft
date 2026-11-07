@@ -19,24 +19,28 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ARRIVING_REALISTIC_QUALITY,
   DISPLAY_RATE,
   FRAME_MS_REDUCE_ABOVE,
-  HEADROOM_REDUCE_ABOVE,
-  HEADROOM_RESTORE_BELOW,
   INITIAL_QUALITY,
   INITIAL_REALISTIC_QUALITY,
   QUALITY_LADDER,
   REALISTIC_LADDER,
+  REALISTIC_ARRIVAL_LIMIT_MS,
+  REALISTIC_SETTLING_SAMPLES,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SHADOW_MAP_OFF,
   SUSTAINED_SAMPLES,
   TARGET_FRAMES_PER_SECOND,
+  frameTimeHot,
   keepsShadowMap,
   nextQuality,
   nextWorldQuality,
   qualitySettings,
   readShadowMapChoice,
+  realisticArrivalLapsed,
+  realisticWorldArrived,
   rungFor,
   worldRung,
   type QualityLevel,
@@ -60,12 +64,21 @@ function sustain(state: QualityState, sample: QualitySample, count: number): Qua
   return current;
 }
 
-const HOT: QualitySample = { thermalHeadroom: 0.95, frameMs: 33 };
-const COOL: QualitySample = { thermalHeadroom: 0.2, frameMs: 20 };
-const STEADY: QualitySample = { thermalHeadroom: 0.7, frameMs: 33 };
+const HOT: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 5 };
+const COOL: QualitySample = { frameMs: 20 };
+// Between the restore and reduce thresholds: argues for nothing.
+const STEADY: QualitySample = { frameMs: 33 };
+
+/**
+ * A sample as the ladder used to be fed it, with Android's thermal forecast —
+ * #2289's owner ruling: the ladder decides on frame time alone, so the forecast
+ * must change nothing. Cast because `QualitySample` no longer has the field.
+ */
+const withForecast = (frameMs: number, thermalHeadroom: number): QualitySample =>
+  ({ frameMs, thermalHeadroom }) as QualitySample;
 
 describe('the reduction path', () => {
-  it('drops a level once the forecast has been high for long enough', () => {
+  it('drops a level once frame time has been over the limit for long enough', () => {
     const reduced = sustain(INITIAL_QUALITY, HOT, SUSTAINED_SAMPLES);
 
     expect(reduced.level).toBe(1);
@@ -86,7 +99,7 @@ describe('the reduction path', () => {
     expect(third.frameCap).toBeLessThan(TARGET_FRAMES_PER_SECOND);
   });
 
-  it('walks all the way down under sustained heat, and stops at the bottom', () => {
+  it('walks all the way down under sustained slow frames, and stops at the bottom', () => {
     let state = INITIAL_QUALITY;
     for (let rung = 0; rung < QUALITY_LADDER.length + 3; rung += 1) {
       state = sustain(state, HOT, SUSTAINED_SAMPLES);
@@ -103,21 +116,21 @@ describe('the reduction path', () => {
     expect(once.level).toBe(1);
   });
 
-  it('reduces on frame time alone when the platform reports no forecast', () => {
-    // The web platform, and every Android below API 30.
-    const slow: QualitySample = { thermalHeadroom: undefined, frameMs: FRAME_MS_REDUCE_ABOVE + 10 };
+  it('reduces on frame time alone', () => {
+    const slow: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 10 };
     const reduced = sustain(INITIAL_QUALITY, slow, SUSTAINED_SAMPLES);
 
     expect(reduced.level).toBe(1);
   });
 
-  it('treats a NaN forecast as no forecast rather than as an emergency', () => {
-    // A vendor that never implemented the API. Throttling every such device
-    // would be the opposite of the intended behaviour.
-    const broken: QualitySample = { thermalHeadroom: Number.NaN, frameMs: 20 };
-    const unchanged = sustain(INITIAL_QUALITY, broken, SUSTAINED_SAMPLES * 2);
+  it('ignores a hot thermal forecast: comfortable frames keep the rung — #2289', () => {
+    // The owner's 2026-11-06 ruling. The Pixel 8's forecast passed 0.85 while its
+    // frames ran at 59-60 fps, and the forecast took the ride off its world.
+    for (const forecast of [0.86, 0.95, 1, Number.NaN]) {
+      const unchanged = sustain(INITIAL_QUALITY, withForecast(20, forecast), SUSTAINED_SAMPLES * 3);
 
-    expect(unchanged.level).toBe(0);
+      expect(unchanged.level).toBe(0);
+    }
   });
 });
 
@@ -156,30 +169,24 @@ describe('recovery, and the hysteresis that stops it oscillating', () => {
     expect(restored.level).toBe(0);
   });
 
-  it('does not restore merely because the phone stopped getting hotter', () => {
-    // Google's guidance: the workload must drop BELOW the sustainable level to
-    // recover, not back to it. A forecast between the two thresholds is exactly
-    // that case, and restoring here is what would oscillate.
-    const between = (HEADROOM_REDUCE_ABOVE + HEADROOM_RESTORE_BELOW) / 2;
+  it('does not restore merely because frames stopped getting worse', () => {
+    // The workload must drop BELOW the sustainable level to recover, not back to
+    // it. A frame time between the two thresholds is exactly that case, and
+    // restoring here is what would oscillate.
     const reduced = sustain(INITIAL_QUALITY, HOT, SUSTAINED_SAMPLES);
-    const held = sustain(reduced, { thermalHeadroom: between, frameMs: 20 }, SUSTAINED_SAMPLES * 2);
+    const held = sustain(reduced, STEADY, SUSTAINED_SAMPLES * 2);
 
     expect(held.level).toBe(1);
   });
 
-  it('keeps reducing on comfortable frames while the forecast is still high', () => {
-    // The dangerous case, and the one a frame-time-only policy gets backwards:
-    // the reduction worked, so frames are fine — and the phone is only fine
-    // *because* of the reduction, while the forecast says it is still heating.
-    // Restoring here is what would oscillate; holding would ignore a forecast
-    // that is still above the reduce threshold. The right answer is to keep
-    // going down.
+  it('restores on comfortable frames whatever the thermal forecast says — #2289', () => {
+    // Before the owner's ruling a high forecast kept the ladder going down on
+    // comfortable frames. Frame time alone decides now, both ways.
     const reduced = sustain(INITIAL_QUALITY, HOT, SUSTAINED_SAMPLES);
-    const further = sustain(reduced, { thermalHeadroom: 0.9, frameMs: 20 }, SUSTAINED_SAMPLES);
+    const restored = sustain(reduced, withForecast(20, 0.9), SUSTAINED_SAMPLES);
 
     expect(reduced.level).toBe(1);
-    expect(further.level).toBe(2);
-    expect(further.level).not.toBe(0);
+    expect(restored.level).toBe(0);
   });
 
   it('never climbs above the top rung, which draws at the display’s rate — #476', () => {
@@ -319,14 +326,13 @@ describe('the scenery budget is a rung on the ladder — #245', () => {
     // flickering resolution, because items appear and vanish rather than the
     // whole world softening — so the hysteresis has to hold with the new
     // dimension on it, not merely with the two it was written for.
-    const above = HEADROOM_REDUCE_ABOVE + 0.05;
-    const below = HEADROOM_RESTORE_BELOW - 0.05;
+    const above = FRAME_MS_REDUCE_ABOVE + 5;
+    const below = 20;
     let state = INITIAL_QUALITY;
     const seen: number[] = [qualitySettings(state.level).scatterItems];
 
     for (let sample = 0; sample < SUSTAINED_SAMPLES * 8; sample += 1) {
-      const headroom = sample % 2 === 0 ? above : below;
-      state = nextQuality(state, { thermalHeadroom: headroom, frameMs: 20 });
+      state = nextQuality(state, { frameMs: sample % 2 === 0 ? above : below });
       seen.push(qualitySettings(state.level).scatterItems);
     }
 
@@ -341,7 +347,7 @@ describe('the scenery budget is a rung on the ladder — #245', () => {
     // rather than alternated, has to move it.
     const held = sustain(
       INITIAL_QUALITY,
-      { thermalHeadroom: 0.95, frameMs: 20 },
+      { frameMs: FRAME_MS_REDUCE_ABOVE + 5 },
       SUSTAINED_SAMPLES,
     );
 
@@ -350,12 +356,11 @@ describe('the scenery budget is a rung on the ladder — #245', () => {
     );
   });
 
-  it('leaves the budget at full when the forecast is NaN and the frames are fine', () => {
-    // #245's fourth criterion, and the behaviour is deliberate: reading NaN as
-    // hot would thin the scenery on every device whose vendor never implemented
-    // `getThermalHeadroom`, which is most of them.
-    const broken: QualitySample = { thermalHeadroom: Number.NaN, frameMs: 20 };
-    const unchanged = sustain(INITIAL_QUALITY, broken, SUSTAINED_SAMPLES * 3);
+  it('leaves the budget at full when the forecast is hot or NaN and the frames are fine', () => {
+    // #245's fourth criterion, narrowed by #2289: the forecast is not read at
+    // all, so neither a NaN nor a hot one thins the scenery.
+    let unchanged = sustain(INITIAL_QUALITY, withForecast(20, Number.NaN), SUSTAINED_SAMPLES * 3);
+    unchanged = sustain(unchanged, withForecast(20, 0.99), SUSTAINED_SAMPLES * 3);
 
     expect(qualitySettings(unchanged.level).scatterItems).toBe(SCATTER_MAX_ITEMS);
   });
@@ -495,7 +500,7 @@ describe('the riders’ shadows on the ladder — #426', () => {
     // From level 0, a device running cool for as long as you like stays at 0,
     // and 0 has no shadow map: a ride that has lost the map does not get it
     // back from the ladder, which is what makes the drop one-way (#547).
-    const cool = sustain(INITIAL_QUALITY, { frameMs: 5, thermalHeadroom: 0.1 }, 1_000);
+    const cool = sustain(INITIAL_QUALITY, { frameMs: 5 }, 1_000);
     expect(cool.level).toBe(0);
     expect(rungFor(cool.level, false).riderShadows).toBe('contact');
   });
@@ -669,6 +674,121 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
   it('is never reached from a stylised start, however cool the device', () => {
     const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
     expect(sustainWorld(stylised, COOL, SUSTAINED_SAMPLES * 10).realistic).toBe(false);
+  });
+});
+
+describe('the realistic ladder waits for its world — #2289', () => {
+  function sustainWorld(
+    state: WorldQualityState,
+    sample: QualitySample,
+    count: number,
+  ): WorldQualityState {
+    let current = state;
+    for (let index = 0; index < count; index += 1) {
+      current = nextWorldQuality(current, sample);
+    }
+    return current;
+  }
+
+  it('is not fed at all while the realistic world is arriving, however long and however hot', () => {
+    const waited = sustainWorld(ARRIVING_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 20);
+    expect(waited).toEqual(ARRIVING_REALISTIC_QUALITY);
+    expect(worldRung(waited)).toBe(REALISTIC_LADDER[0]);
+  });
+
+  it('ignores the settling window once the world is here, then is fed as before', () => {
+    const arrived = realisticWorldArrived(ARRIVING_REALISTIC_QUALITY);
+    expect(arrived.settling).toBe(REALISTIC_SETTLING_SAMPLES);
+    const settled = sustainWorld(arrived, HOT, REALISTIC_SETTLING_SAMPLES);
+    // Nothing moved, not even the pressure: the window is not a head start.
+    expect(settled).toEqual({ ...INITIAL_REALISTIC_QUALITY, settling: 0 });
+    // A whole run after it, less one sample: still the top.
+    const almost = sustainWorld(settled, HOT, SUSTAINED_SAMPLES - 1);
+    expect(almost.quality.level).toBe(0);
+    expect(nextWorldQuality(almost, HOT).quality.level).toBe(1);
+  });
+
+  it('leaves for the stylised top exactly as before once settled — the thresholds are not raised', () => {
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      HOT,
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const left = sustainWorld(settled, HOT, SUSTAINED_SAMPLES * 2);
+    expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
+    expect(REALISTIC_SETTLING_SAMPLES).toBe(SUSTAINED_SAMPLES);
+    expect(FRAME_MS_REDUCE_ABOVE).toBe(45);
+    expect(SUSTAINED_SAMPLES).toBe(30);
+  });
+
+  it('stops holding the ladder off once the arrival window has lapsed, and not a millisecond before — #2289’s review', () => {
+    // A generous, stated bound, not a frame threshold.
+    expect(REALISTIC_ARRIVAL_LIMIT_MS).toBe(120_000);
+    const before = realisticArrivalLapsed(
+      ARRIVING_REALISTIC_QUALITY,
+      REALISTIC_ARRIVAL_LIMIT_MS - 1,
+    );
+    expect(before).toBe(ARRIVING_REALISTIC_QUALITY);
+    const lapsed = realisticArrivalLapsed(ARRIVING_REALISTIC_QUALITY, REALISTIC_ARRIVAL_LIMIT_MS);
+    // No settling window: no world was swapped in, so the next sample counts.
+    expect(lapsed).toEqual({ ...INITIAL_REALISTIC_QUALITY, settling: 0 });
+    const almost = sustainWorld(lapsed, HOT, SUSTAINED_SAMPLES - 1);
+    expect(almost.quality.level).toBe(0);
+    expect(nextWorldQuality(almost, HOT).quality.level).toBe(1);
+  });
+
+  it('leaves an arrived, settling, settled or stylised state alone when the window lapses', () => {
+    const late = REALISTIC_ARRIVAL_LIMIT_MS * 10;
+    const settling = realisticWorldArrived(ARRIVING_REALISTIC_QUALITY);
+    expect(realisticArrivalLapsed(settling, late)).toBe(settling);
+    const settled: WorldQualityState = { ...INITIAL_REALISTIC_QUALITY, settling: 0 };
+    expect(realisticArrivalLapsed(settled, late)).toBe(settled);
+    const stylised: WorldQualityState = {
+      realistic: false,
+      quality: INITIAL_QUALITY,
+      settling: Number.POSITIVE_INFINITY,
+    };
+    expect(realisticArrivalLapsed(stylised, late)).toBe(stylised);
+  });
+
+  it('leaves a stylised state alone when the world arrives after the ride left realism', () => {
+    const stylised: WorldQualityState = { realistic: false, quality: { level: 2, pressure: 4 } };
+    expect(realisticWorldArrived(stylised)).toBe(stylised);
+  });
+
+  it('keeps a realistic ride whose forecast reads 0.99 throughout while its frames run at 17 ms — the owner’s ruling', () => {
+    // The Pixel 8's ride of 2026-11-06, as the shell used to report it: frames at
+    // 60 fps and a forecast past 0.85. Heat is not an input; Android throttles
+    // the device itself.
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      withForecast(17, 0.99),
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const ridden = sustainWorld(settled, withForecast(17, 0.99), SUSTAINED_SAMPLES * 40);
+    expect(ridden.realistic).toBe(true);
+    expect(ridden.quality.level).toBe(0);
+  });
+
+  it('still steps a genuinely slow realistic world down, and out, on frame time', () => {
+    const settled = sustainWorld(
+      realisticWorldArrived(ARRIVING_REALISTIC_QUALITY),
+      { frameMs: 17 },
+      REALISTIC_SETTLING_SAMPLES,
+    );
+    const slow: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 1 };
+    const once = sustainWorld(settled, slow, SUSTAINED_SAMPLES);
+    expect(once.realistic).toBe(true);
+    expect(once.quality.level).toBe(1);
+    expect(sustainWorld(once, slow, SUSTAINED_SAMPLES)).toEqual({
+      realistic: false,
+      quality: INITIAL_QUALITY,
+    });
+  });
+
+  it('names its hot signal as the ladder reads it', () => {
+    expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE + 0.1 })).toBe(true);
+    expect(frameTimeHot({ frameMs: FRAME_MS_REDUCE_ABOVE })).toBe(false);
   });
 });
 

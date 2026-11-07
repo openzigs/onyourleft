@@ -74,6 +74,8 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
@@ -94,7 +96,6 @@ import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
-import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
 import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
@@ -109,13 +110,17 @@ import {
   groupDestination,
   hrefFor,
   NAV_GROUPS,
+  navGroupOf,
   routesInGroup,
+  type NavGroupId,
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
 import type { MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
+import type { OtherPlayer } from './other-player';
+import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
 import {
   isRideRoute,
@@ -138,6 +143,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * not be reachable from the entry chunk.
  */
 const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const GAMES_GROUP = viewGroup(async () => import('./lazy/games'));
 const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
 const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
 const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
@@ -145,6 +151,7 @@ const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
 /** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
 export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
   RIDE_GROUP,
+  GAMES_GROUP,
   HISTORY_GROUP,
   ROUTES_GROUP,
   MORE_GROUP,
@@ -153,6 +160,8 @@ export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
 const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
 const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
 const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const GamesView = lazyView(GAMES_GROUP, (group) => group.GamesView);
+const GameCoursesView = lazyView(GAMES_GROUP, (group) => group.GameCoursesView);
 const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
 const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
 const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
@@ -292,6 +301,17 @@ export interface AppShellProps {
    */
   readonly sidePairing?: SidePairingPort | undefined;
   /**
+   * Where *Save snapshot* holds a side-camera picture until the ride it joins
+   * is saved — #1063, `camera/snapshot-keeper.ts`. One per tab, built by
+   * `main.tsx` beside the side-camera report's keeper.
+   */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
+  /**
+   * A ride's side-camera snapshots, read only once the rider opens their
+   * section on that ride's page — #1063, `detail/ride-snapshots-port.ts`.
+   */
+  readonly rideSnapshots?: RideSnapshotsPort | undefined;
+  /**
    * The rider's instance, as the Camera page asks about it to offer it the
    * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
    * and the page then has no such section.
@@ -317,11 +337,6 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
-  /**
-   * Android's thermal forecast, for the game's quality ladder (#247). Absent
-   * in a browser. @see game/thermal-port.ts
-   */
-  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -371,6 +386,12 @@ export interface AppShellProps {
    * context until a press asks for sound; a test hands in a recording double.
    */
   readonly soundOutput?: import('../game/audio-port').CueOutput | undefined;
+  /**
+   * The rider's own music player, another app — #2073. Made by `main.tsx`
+   * inside the Android shell only (`other-player.ts` §`otherPlayerOffered`);
+   * `undefined` in a browser, where the header offers no such control.
+   */
+  readonly otherPlayer?: OtherPlayer | undefined;
   /**
    * The trainer game's store reads and sensor sampling (#85).
    *
@@ -649,6 +670,8 @@ function viewFor(
           controller={props.rideController}
           workouts={props.workouts}
           analysis={props.analysis}
+          // #2306: a tailored built-in to ride, from the address.
+          query={match.query}
           // #551: the side camera's line, its Stop, and its link going said.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
@@ -668,6 +691,8 @@ function viewFor(
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
           analysis={props.analysis}
+          // #1063: the chosen ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'activity-detail':
@@ -680,6 +705,8 @@ function viewFor(
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
           analysis={props.analysis}
+          // #1063: the ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'analysis':
@@ -725,6 +752,10 @@ function viewFor(
           port={props.workouts}
           save={props.transfer?.save}
           selected={match.parameter}
+          // #2304: the built-in list's filter, from the address.
+          query={match.query}
+          // #2305: the rider's thresholds, for a tailored built-in in watts.
+          analysis={props.analysis}
         />
       );
     case 'game':
@@ -746,8 +777,6 @@ function viewFor(
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
-          // #247. The forecast half of the ladder; only the shell supplies one.
-          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
           // #1827. The steering controller paired on Devices; a Delivery
           // round's HUD reads it, through the game's controller port.
           {...(props.steering === undefined ? {} : { controller: props.steering })}
@@ -761,6 +790,13 @@ function viewFor(
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
+    case 'games':
+      // #2292: a card for each game, the lap race's reading the rider's loops.
+      return <GamesView port={props.game} />;
+    case 'delivery-courses':
+      return <GameCoursesView mode="delivery" port={props.game} />;
+    case 'lap-race-courses':
+      return <GameCoursesView mode="lap-race" port={props.game} />;
     case 'segment-detail':
       return (
         <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
@@ -770,6 +806,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1063: where Save snapshot holds a picture for its ride.
+          {...(props.sideSnapshots === undefined ? {} : { sideSnapshots: props.sideSnapshots })}
           // #1106: the rider's instance, for the side camera's pictures.
           {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
@@ -934,6 +972,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
     };
   });
 
+  // #2073: the header asks whether the rider's own player is playing only
+  // where its controls may show, so never on a ride route or while a ride has
+  // the screen, where the ride's own cues would read as the rider's music.
+  const otherPlayer = props.otherPlayer;
+  const otherPlayerMayShow = !immersive && !isRideRoute(route.id);
+  useEffect(() => {
+    if (otherPlayer === undefined || !otherPlayerMayShow) return undefined;
+    return otherPlayer.watch();
+  }, [otherPlayer, otherPlayerMayShow]);
+
   /*
    * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
    * review. Under a view transition React runs passive effects only once the
@@ -1089,7 +1137,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
         {/*
           #671: the header is the wordmark and, since #2056, the one-press
-          mute on a menu route — nothing else. The navigation is
+          mute on a menu route, and since #2073 the rider's own music player's
+          controls once other audio was seen, on a menu route inside the
+          Android shell — nothing else. The navigation is
           its own landmark beside it rather than inside it — a bar or a rail
           since #427, so it was never in the header's box on any screen but the
           shortest, where it made the header 191 px of 256.
@@ -1111,12 +1161,20 @@ export function AppShell(props: AppShellProps): JSX.Element {
               ride route, whose own sound controls stay as they are.
             */}
             {isRideRoute(route.id) ? null : <HeaderMute output={props.soundOutput} />}
+            {/*
+              #2073, owner ruling 2 of 2026-11-05: never on a ride route, whose
+              controls have their own rules (`design/ride-time-controls.ts`).
+              After the mute, which stays first in the tab order (#2056).
+            */}
+            {otherPlayer === undefined || !otherPlayerMayShow ? null : (
+              <OtherPlayerControls player={otherPlayer} />
+            )}
           </header>
         )}
 
-        {immersive ? null : <PrimaryNav route={route} />}
+        {immersive ? null : <PrimaryNav route={route} group={navGroupOf(match)} />}
 
-        {immersive ? null : <SectionNav route={route} />}
+        {immersive ? null : <SectionNav route={route} group={navGroupOf(match)} />}
 
         <main
           id={MAIN_ID}
@@ -1244,7 +1302,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * §"THE MARK" draws it only on a rail with the height to spare; whether a
  * phone's bar carries one is the owner's open question on #2030.
  */
-function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
+function PrimaryNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /** The group the rider is under: {@link navGroupOf}, not always the route's own. */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
       <img
@@ -1260,7 +1325,7 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
-          const here = route.group === group.id;
+          const here = under === group.id;
           // `page` where no section row will say which page this is: a group
           // of one, or the group's own menu page (#1429), which has none.
           const current = !here
@@ -1291,15 +1356,25 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
  * list tells it apart from the primary one (`audit.ts`'s
  * `landmarks-are-distinguishable`).
  */
-function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element | null {
-  if (route.group === undefined) {
+function SectionNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /**
+   * The group the rider is under ({@link navGroupOf}). #2292: a setup opened
+   * from Games is under Games, a group of one page, so it has no Ride row.
+   */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element | null {
+  if (under === undefined) {
     return null;
   }
-  const group = NAV_GROUPS.find((each) => each.id === route.group);
-  const pages = routesInGroup(route.group);
+  const group = NAV_GROUPS.find((each) => each.id === under);
+  const pages = routesInGroup(under);
   // #1429: the group's menu page lists the same pages itself, with a line
   // each, so a row of them above it would be the list twice.
-  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  const menu = route.id === groupDestination(under).id && !pages.includes(route);
   if (group === undefined || pages.length < 2 || menu) {
     return null;
   }

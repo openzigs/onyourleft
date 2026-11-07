@@ -37,6 +37,7 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     courseLapSeconds: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
+    totals: undefined,
     metrics: Object.entries(states).map(([id, state]) => ({
       id: id as 'power' | 'cadence' | 'heartRate' | 'speed',
       state: state as MetricState,

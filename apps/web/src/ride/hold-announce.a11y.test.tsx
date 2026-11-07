@@ -68,6 +68,7 @@ const trainer: TrainerSnapshot = {
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  easedOffTo: undefined,
   ergRescue: undefined,
   ergHeld: undefined,
 };

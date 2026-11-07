@@ -102,6 +102,7 @@ export function idleSnapshot(): RideSnapshot {
     courseLapSeconds: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
+    totals: undefined,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
     workout: undefined,
@@ -118,6 +119,7 @@ export function idleSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      easedOffTo: undefined,
       ergRescue: undefined,
       ergHeld: undefined,
     },
@@ -182,6 +184,7 @@ export function ridingSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      easedOffTo: undefined,
       ergRescue: undefined,
       ergHeld: undefined,
     },
@@ -236,6 +239,8 @@ export function stubRideController(
 
   const controller: RideController = {
     getSnapshot: () => snapshot,
+    // #2077: a stub records nothing, so it has no time in any zone.
+    powerZoneTime: () => undefined,
     subscribe(listener) {
       listeners.add(listener);
       return () => {

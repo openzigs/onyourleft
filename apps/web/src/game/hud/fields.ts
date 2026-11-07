@@ -39,15 +39,28 @@
 
 import {
   metresPerSecond,
+  powerZones,
+  zoneOf,
   type GapInput,
+  type Kilograms,
   type Metres,
   type PacerGap,
   type RouteProfile,
+  type TimeInZones,
+  type Watts,
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration, formatTimeOfDay } from '../../format';
-import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
+import type { RideTotals } from '../../recording/totals';
+import {
+  distanceUnit,
+  formatDistance,
+  formatSmallDistance,
+  formatSpeed,
+  smallDistanceUnit,
+  type Measurement,
+} from '../../units/format';
 import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
@@ -160,6 +173,25 @@ export interface HudReading {
    * `aria-hidden`. Absent on every other field.
    */
   readonly slope?: 'up' | 'down' | 'level' | undefined;
+  /**
+   * The grade the value SHOWS, as a number — #2291, the gradient's alone:
+   * `HudCore.tsx` colours the digits and the slope glyph by its band
+   * (`look-ahead.ts` §`gradeBand`), so the colour is the band of the number a
+   * rider reads, never of a grade the rounding hid. ⚠️ **Never the only
+   * carrier**: the number is the reading. Absent on every other field.
+   */
+  readonly grade?: number | undefined;
+  /**
+   * The power zone, drawn — #2077, the zone indicator's alone. `current` is
+   * the zone the rider is in now, 1 to 7, and draws {@link value}'s number on
+   * that zone's colour; `undefined` with no live power. `shares` is this
+   * ride's time in each zone as a fraction of the time power was read, drawn
+   * as a thin bar under the name. ⚠️ **Never the only carrier**: the value is
+   * the zone's number and {@link detail} its name, so the colour and the bar
+   * are `aria-hidden`. Absent on every other field.
+   */
+  readonly zone?:
+    { readonly current: number | undefined; readonly shares: readonly number[] } | undefined;
 }
 
 /**
@@ -428,6 +460,38 @@ export interface HudInput {
    */
   readonly elapsedSeconds?: number | undefined;
   /**
+   * The ride so far — how far, how much climbing, what average power — #2076.
+   * **The recorder's**, as the two times are: `RideSnapshot.totals`, read
+   * through `trainer-port.ts` §`GameTrainerPort.rideTotals`, which is
+   * `recording/totals.ts` §`rideTotals` over the series and laps the saved
+   * ride is written from. Never the simulation's odometer: *To go* is the
+   * course's, and *Distance* is what the saved ride will say.
+   *
+   * `undefined` where nothing is being recorded, and then each of the three
+   * fields shows {@link NO_READING}.
+   */
+  readonly rideTotals?: RideTotals | undefined;
+  /**
+   * What the rider weighs, as they set it — #2077's W/kg. **The weight the
+   * physics rides** (`GameView.tsx` §`riderMass`, through `athlete/mass.ts`
+   * §`riderMassFor`), and `undefined` when none is set: then *W/kg* is a dash,
+   * never a figure of the default weight the physics falls back to, and no
+   * prompt appears mid-ride.
+   */
+  readonly riderMass?: Kilograms | undefined;
+  /**
+   * The rider's own threshold power, or `undefined` when none is set — #2077.
+   * No threshold, no zone indicator: a zone of a threshold the rider never set
+   * is a guess (`GamePort.ownThresholdPower`).
+   */
+  readonly thresholdPower?: Watts | undefined;
+  /**
+   * The recorder's time in each power zone of {@link thresholdPower} — #2077's
+   * time-in-zone bar (`trainer-port.ts` §`GameTrainerPort.ridePowerZoneTime`).
+   * `undefined` with nothing recorded, and then the bar is empty.
+   */
+  readonly powerZoneTime?: TimeInZones | undefined;
+  /**
    * The device's own time, now — #2072: the time of day, shown `HH:MM` under
    * the label *Clock* ({@link clockReading}). Not a ride figure and not a
    * clock of the ride's: what a rider with the phone's own status bar hidden
@@ -554,6 +618,19 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // gap, room and wind field two places along, once.
     elapsedTimeReading(input.elapsedSeconds),
     ...clockReading(input.timeOfDay),
+    // #2076: the ride so far, after the clock and before every gap. Present
+    // on every ride (a dash with nothing recorded), so their indices are the
+    // same on every ride; they moved every gap, room and wind field three
+    // places along, once. After the three times rather than beside *To go*,
+    // so the moving time stays the third secondary reading, which is the
+    // track `theme.css` sizes from its content (§"THE MOVING TIME'S OWN WIDTH").
+    ...rideTotalReadings(input.rideTotals, units),
+    // #2077: the rider's own effort, after the ride so far and before every
+    // gap: W/kg on every ride, the zone only where a threshold is set (its
+    // presence is a choice made off the ride, never changed mid-ride, so a
+    // ride with one and a ride without agree about every other field's place).
+    wattsPerKilogramReading(state, input.riderMass),
+    ...zoneReading(state, input.thresholdPower, input.powerZoneTime),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
@@ -589,7 +666,141 @@ function gradientReading(grade: number): HudReading {
   const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
   const magnitude = Math.abs(shown).toFixed(1);
   const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
-  return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
+  return {
+    key: GRADIENT_KEY,
+    label: 'Gradient',
+    value,
+    unit: '%',
+    stale: false,
+    slope,
+    // `+ 0` so a rounded -0.04 is 0, not -0, for a reader comparing it.
+    grade: shown + 0,
+  };
+}
+
+/** The key of the W/kg field — #2077. @see wattsPerKilogramReading */
+export const WATTS_PER_KILOGRAM_KEY = 'wattsPerKilogram';
+
+/** The key of the zone indicator — #2077. @see zoneReading */
+export const ZONE_KEY = 'powerZone';
+
+/** Whether a reading is the rider's own effort, W/kg or the zone — #2077. */
+export function isEffortReading(reading: HudReading): boolean {
+  return reading.key === WATTS_PER_KILOGRAM_KEY || reading.key === ZONE_KEY;
+}
+
+/**
+ * The rider's W/kg — #2077: the live power over the weight the physics rides,
+ * to one decimal, as the room's riders' are shown (ruling Q17 governs only
+ * theirs). A dash with no weight set — never a figure of the default weight
+ * the physics falls back to (`athlete/mass.ts` §`riderMassFor`) — and a dash,
+ * stale, where the power reading is, so a dropped meter is never a W/kg.
+ */
+function wattsPerKilogramReading(state: GameState, mass: Kilograms | undefined): HudReading {
+  const power = state.input.power;
+  const live = state.input.live && power !== undefined && Number.isFinite(power);
+  const stale = state.input.paired !== false && !state.input.live;
+  if (mass === undefined || !(mass > 0) || !live) {
+    return { key: WATTS_PER_KILOGRAM_KEY, label: 'W/kg', value: NO_READING, unit: '', stale };
+  }
+  return {
+    key: WATTS_PER_KILOGRAM_KEY,
+    label: 'W/kg',
+    value: (power / mass).toFixed(1),
+    unit: '',
+    stale: false,
+  };
+}
+
+/**
+ * The zone indicator — #2077: the power zone of the rider's own threshold
+ * they are in now, its number as the value and its name under it, on the zone
+ * colours of #2039, with this ride's time in each zone as a thin bar. **None
+ * at all with no threshold set**, which a test holds. The zones are
+ * `@onyourleft/domain` §`powerZones`, the seven the Analysis screen draws.
+ */
+function zoneReading(
+  state: GameState,
+  threshold: Watts | undefined,
+  time: TimeInZones | undefined,
+): readonly HudReading[] {
+  if (threshold === undefined || !(threshold > 0)) {
+    return [];
+  }
+  const power = state.input.power;
+  const live = state.input.live && power !== undefined;
+  const zone = live ? zoneOf(powerZones(threshold), power) : undefined;
+  const covered = time === undefined ? 0 : (time.covered as number);
+  const shares =
+    time === undefined || !(covered > 0)
+      ? []
+      : time.perZone.map((spent) => (spent as number) / covered);
+  return [
+    {
+      key: ZONE_KEY,
+      label: 'Zone',
+      value: zone === undefined ? NO_READING : String(zone.index),
+      unit: '',
+      stale: state.input.paired !== false && !state.input.live,
+      ...(zone === undefined ? {} : { detail: zone.name }),
+      zone: { current: zone?.index, shares },
+    },
+  ];
+}
+
+/** The keys of the ride-so-far fields — #2076. @see rideTotalReadings */
+export const RIDE_TOTAL_KEYS: ReadonlySet<string> = new Set([
+  'distance',
+  'climbed',
+  'averagePower',
+]);
+
+/** Whether a reading is one of the ride-so-far fields — #2076. */
+export function isRideTotalReading(reading: HudReading): boolean {
+  return RIDE_TOTAL_KEYS.has(reading.key);
+}
+
+/**
+ * *Distance*, *Climbed* and *Avg power* — the ride so far, #2076.
+ *
+ * Formats of the recorder's figures ({@link HudInput.rideTotals}) and nothing
+ * else: the distance to one decimal in the rider's unit as a ride's distance
+ * is shown everywhere, the climb in the rider's small unit (metres or feet),
+ * the power in whole watts. Never stale — none is a sensor's — and each a dash
+ * with nothing to say: nothing recording, or a climb nobody measured (a ride
+ * with no altitude and no course under it), or a ride with no power reading.
+ * No load metric of any name (CLAUDE.md §6).
+ */
+function rideTotalReadings(
+  totals: RideTotals | undefined,
+  units: UnitSystem,
+): readonly HudReading[] {
+  const dash = (key: string, label: string, unit: string): HudReading => ({
+    key,
+    label,
+    value: NO_READING,
+    unit,
+    stale: false,
+  });
+  const distance =
+    totals === undefined
+      ? dash('distance', 'Distance', distanceUnit(units))
+      : measured('distance', 'Distance', formatDistance(totals.distance, units));
+  const climbed =
+    totals?.climbed === undefined
+      ? dash('climbed', 'Climbed', smallDistanceUnit(units))
+      : measured('climbed', 'Climbed', formatSmallDistance(totals.climbed, units));
+  const power =
+    totals?.averagePower === undefined
+      ? dash('averagePower', 'Avg power', 'W')
+      : {
+          key: 'averagePower',
+          label: 'Avg power',
+          value: String(Math.round(totals.averagePower)),
+          unit: 'W',
+          stale: false,
+        };
+  return [distance, climbed, power];
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */

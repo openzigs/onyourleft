@@ -207,6 +207,38 @@ export function describeItem(item: StageItem): string {
 }
 
 /**
+ * The layout's own invariants, as the ride's specs hold them, as failure lines
+ * — #2079, and #2080's lap splits: everything on the stage, uncovered and
+ * unscrolled; every panel whole, over no other and not over the leaning
+ * rider; and the primary tier visibly larger than the secondary.
+ */
+export function layoutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  if (seen.scrollY !== 0 || seen.stageScrollTop !== 0) faults.push('the stage scrolled');
+  for (const item of seen.items) {
+    if (!inside(item.box, viewport) || !item.onTop) faults.push(`lost: ${describeItem(item)}`);
+  }
+  for (const panel of seen.panels) {
+    if (!inside(panel.box, viewport)) faults.push(`not whole: ${describeItem(panel)}`);
+  }
+  seen.panels.forEach((a, index) => {
+    for (const b of seen.panels.slice(index + 1)) {
+      if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  const rider = riderBox(viewport);
+  for (const panel of seen.panels) {
+    if (overlap(panel.box, rider)) faults.push(`over the rider: ${describeItem(panel)}`);
+  }
+  if (seen.primaryValuePixels / seen.secondaryValuePixels < MINIMUM_TIER_RATIO) {
+    faults.push(
+      `primary ${String(seen.primaryValuePixels)} px over secondary ${String(seen.secondaryValuePixels)} px`,
+    );
+  }
+  return faults;
+}
+
+/**
  * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels, for a rider
  * leaning as far as one is ever drawn (#499).
  *
@@ -262,6 +294,63 @@ export function clockInTheClockRow(viewport: Viewport): boolean {
     viewport.height <= 480;
   return !narrowOnItsSide;
 }
+
+/**
+ * #2076 — the ride so far, as the harness names the three readings — and
+ * since #2077 the rider's effort after them, drawn and given way where they are.
+ */
+export const RIDE_TOTAL_READINGS = [
+  'reading: Distance',
+  'reading: Climbed',
+  'reading: Avg power',
+  'reading: W/kg',
+  'reading: Zone',
+] as const;
+
+/**
+ * #2076 — whether the ride so far is DRAWN at this viewport: everywhere but a
+ * PHONE's overlay — the short corners layout on its side (30 rem tall or
+ * less) and the column layout upright — where it gives way by clip
+ * (`theme.css` §"THE RIDE SO FAR"). The owner's ruling of 2026-11-06 (#2034)
+ * ties it to phones: a laptop's window under 47 rem tall draws it.
+ */
+export function rideTotalsDrawn(viewport: Viewport): boolean {
+  const corners = viewport.width >= 736 && viewport.height >= 360;
+  const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
+  const phoneOnItsSide = corners && viewport.height <= 480;
+  return !phoneOnItsSide && !column;
+}
+
+/**
+ * Whether, in a room, the pacer's and the ghost's gaps and the wind give way
+ * at this viewport — `theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH", the
+ * owner's second ruling of 2026-11-06: where space runs out — a phone, the
+ * 4:3 tablet, the upright tablet, a window under 40 rem tall, and every tablet
+ * at #2079's large text sizes. They stay where they fit: 1280×800 at the
+ * normal size, and a window 40 to 47 rem tall (1280×720, 1366×657) — but for
+ * a side camera's row there (`ride-room.browser.spec.ts` §"#1409").
+ */
+export function roomGivesWay(viewport: Viewport, largeText = false): boolean {
+  const corners = viewport.width >= 736 && viewport.height > 480;
+  const tablet = corners && viewport.height >= 752;
+  if (largeText && tablet) return true;
+  const roomyTablet = viewport.width >= 816 && viewport.height >= 800;
+  const roomyWindow = corners && viewport.height >= 640 && viewport.height < 752;
+  return !(roomyTablet || roomyWindow);
+}
+
+/**
+ * A laptop's or a desktop's window under 47 rem tall: the corners layout, not
+ * a phone's and not a tablet's. None of the nine overlay viewports is one,
+ * and the owner's ruling of 2026-11-06 (#2034) is that what a phone gives way
+ * is drawn here; `theme.css` names these three in its note on *Start the
+ * race*.
+ */
+export const LAPTOP_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a laptop window — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  { name: 'a laptop window — 1366×657', width: 1366, height: 657, unstagedFails: true },
+  { name: 'a small laptop window — 1024×600', width: 1024, height: 600, unstagedFails: true },
+];
 
 /**
  * #2071 — whether the gradient is drawn in the PRIMARY panel at this

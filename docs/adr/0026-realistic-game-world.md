@@ -560,3 +560,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   code (`apps/web/tools/realistic/sources.ts` §`ADMITTED_SOURCES`, §`BARRED_SOURCES`), with a test
   that reads ADR 0049 and holds the two to each other. No asset was added.
   ([#1275](https://github.com/openzigs/onyourleft/issues/1275))
+- **2026-11-06** — **D-3's step down is on frame time, not thermal pressure.** D-3 says the realistic
+  rungs reduce *"under thermal pressure"*, and until this date the ladder read Android's thermal
+  forecast beside frame time. On [#2289](https://github.com/openzigs/onyourleft/issues/2289) the
+  owner's Pixel 8 left the realistic world on that forecast at 46 s and 66 s while drawing it at
+  59–60 fps, and the owner ruled: *"ignore heat entirely. The quality ladder decides on frame time
+  alone, and Android throttles the device itself if it gets too hot."* `apps/web/src/game/quality.ts`
+  §`nextWorldQuality` now steps the realistic rungs down, and out to the stylised top, only on
+  sustained frame time over `FRAME_MS_REDUCE_ABOVE` (45 ms, unchanged); the whole-world rule and
+  every other part of D-3 stand. ADR 0008 carries the matching entry.

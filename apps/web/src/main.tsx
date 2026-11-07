@@ -50,6 +50,7 @@ import {
 } from './ride/trainer-target-memory';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
+import { ownThresholdPowerFrom } from './game/own-threshold';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
 import {
@@ -121,15 +122,17 @@ import type { SidePoseEstimator } from './camera/side-analysis-port';
 import { hostedKeyServiceReader } from './instance/hosted-service';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
+import { sideSnapshotKeeper } from './camera/snapshot-keeper';
+import type { SideSnapshotPort } from './camera/side-snapshot-port';
+import type { RideSnapshotsPort } from './detail/ride-snapshots-port';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
-import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
 import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
-import { THERMAL_FORECAST_SECONDS } from './game/thermal';
+import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -283,12 +286,6 @@ interface ClientPlatform {
   /** `undefined` in a browser, where `DevicesView` reads {@link capabilities}. */
   readonly shell: ShellSupportPort | undefined;
   /**
-   * Android's thermal forecast for the game's ladder (#247). `undefined` in a
-   * browser, where `GameView` falls back to `BROWSER_THERMAL`'s honest
-   * `undefined`.
-   */
-  readonly thermal: ThermalPort | undefined;
-  /**
    * Each connected device's signal strength, for the Devices screen (#1435).
    * `undefined` in a browser: Web Bluetooth gives none for a connected device.
    */
@@ -310,6 +307,12 @@ interface ClientPlatform {
    * `plugin`, a browser's on the same `navigator.bluetooth`.
    */
   readonly steering: SteeringController | undefined;
+  /**
+   * The rider's own music player, another app — #2073. Inside the Android
+   * shell only (`shell/other-player.ts` §`otherPlayerOffered`): a browser
+   * cannot reach another app's player, so it gets none and no control.
+   */
+  readonly otherPlayer: OtherPlayer | undefined;
   /**
    * Each connected sensor's battery, for Home's sensors module — #2047. A
    * browser's, from the Web Bluetooth transport; `undefined` in the shell,
@@ -434,14 +437,6 @@ async function buildPlatform(
         resolvedUuids: async (deviceId) => mobile.readCapacitorResolvedUuids(plugin, deviceId),
       }),
     });
-    // #247. Its own plugin, not the BLE one: the forecast has nothing to do
-    // with a link, and `ThermalPlugin.java` is registered beside the recording
-    // service in `MainActivity`.
-    const thermalPlugin = mobile.capacitorThermalPlugin();
-    const thermal: ThermalPort = {
-      readThermalHeadroom: async () =>
-        mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
-    };
     // #1435. The same `plugin`, for the reason `openTrainer` above gives: the
     // link whose signal is read is the one this object holds.
     const signal: SignalStrengthPort = {
@@ -463,15 +458,20 @@ async function buildPlatform(
     const steering = createSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
     );
+    // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
+    // others in `MainActivity`: media keys have nothing to do with a link.
+    const otherPlayer = otherPlayerOffered(platformCapacitor())
+      ? new OtherPlayer(mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()))
+      : undefined;
     return {
       rideController,
       shell,
-      thermal,
       signal,
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
       launch,
       steering,
+      otherPlayer,
       // #2047: the plugin reads no Battery Service, so the shell shows no level.
       battery: undefined,
     };
@@ -481,12 +481,12 @@ async function buildPlatform(
     return {
       rideController: undefined,
       shell: undefined,
-      thermal: undefined,
       signal: undefined,
       bluetoothAsk: undefined,
       systemSettings: undefined,
       launch: NO_LAUNCH,
       steering: undefined,
+      otherPlayer: undefined,
       battery: undefined,
     };
   }
@@ -511,11 +511,11 @@ async function buildPlatform(
     // absence is the decision, taken here, in the one file that may read a
     // global.
     shell: undefined,
-    thermal: undefined,
     signal: undefined,
     bluetoothAsk: undefined,
     systemSettings: undefined,
     launch: NO_LAUNCH,
+    otherPlayer: undefined,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -773,6 +773,11 @@ function buildGamePort(
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
+    // #2077: the rider's own threshold, for the HUD's zone indicator — the
+    // local athlete's row, and only theirs. ⚠️ An optional member, so the
+    // module is what holds it: `game/own-threshold.test.ts` reads it through a
+    // real store, and dropping this line is a red `check:wiring` (WIRE001).
+    ownThresholdPower: ownThresholdPowerFrom(store),
     loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
       if (ghosts === undefined) return { kind: 'unavailable' };
       const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));
@@ -794,6 +799,13 @@ function buildGamePort(
         return { kind: 'none' };
       }
     },
+    // #2293, ADR 0064: the built-in lap-race circuits, from the bundle — no
+    // store, no instance, no request. Imported when the game asks, so the
+    // files are chunks of their own. ⚠️ An optional member, so dropping this
+    // line is green in `check:wiring`; `game/circuits/circuits-wiring.test.tsx`
+    // is what goes red.
+    listCircuits: async (): Promise<readonly RidableRoute[]> =>
+      (await import('./game/circuits/circuits')).loadBuiltInCircuits(),
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];
@@ -804,6 +816,9 @@ function buildGamePort(
           name: route.name,
           profile: route.profile,
           attempts: attempts.length,
+          bestSeconds: fastestAttempt(
+            attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
+          )?.movingSeconds,
         });
       }
       return rows;
@@ -908,7 +923,10 @@ function deviceTrainerTargets(): TrainerTargetMemory {
   return trainerTargetMemory;
 }
 
-function buildTransferPort(corridors: WorldCorridorPort): TransferPort | undefined {
+function buildTransferPort(
+  corridors: WorldCorridorPort,
+  heldSnapshots: SideSnapshotPort | undefined,
+): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
   }
@@ -932,7 +950,38 @@ function buildTransferPort(corridors: WorldCorridorPort): TransferPort | undefin
       typeof localStorage === 'undefined' ? undefined : localStorage,
     ),
     trainerTargets: deviceTrainerTargets(),
+    // #1063: snapshots held in memory for a ride not yet saved go with an erase.
+    ...(heldSnapshots === undefined ? {} : { heldSnapshots }),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
+  };
+}
+
+/**
+ * A ride's side-camera snapshots, for its page — #1063, ADR 0044 D-5, D-6 and
+ * D-12. The same connection as every other port; the object URLs are the
+ * platform's own, made only once the rider opens the section; and the secure
+ * window is THE one {@link buildSecureWindow} makes, which the camera
+ * controller holds too, so a snapshot and a live view on screen together never
+ * clear the flag early. ⚠️ It is handed in directly rather than reached through
+ * the camera controller (#1063's review): a snapshot needs no camera, and a
+ * tab with no `mediaDevices` builds no controller, which used to leave a
+ * snapshot on an Android screen without `FLAG_SECURE`.
+ */
+function buildRideSnapshotsPort(secureWindow: SecureWindow): RideSnapshotsPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    objectUrls:
+      typeof URL.createObjectURL === 'function'
+        ? {
+            create: (bytes, mediaType) =>
+              URL.createObjectURL(new Blob([bytes as BlobPart], { type: mediaType })),
+            revoke: (url) => {
+              URL.revokeObjectURL(url);
+            },
+          }
+        : undefined,
+    holdSecureWindow: () => secureWindow.hold(),
   };
 }
 
@@ -1466,8 +1515,35 @@ function buildSidePictures():
  * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
  * one of them.
  */
+/**
+ * The one owner of Android's secure window flag in this tab — #1061, ADR 0044
+ * D-12 — built once and handed to the camera controller AND to a ride's
+ * snapshots (#1063's review), so the two share one count.
+ *
+ * Inside the shell, `FLAG_SECURE` through `SecureWindowPlugin.java`, registered
+ * in `MainActivity`; in a browser, over nothing, because a browser cannot stop
+ * a screenshot — and the consent says so. Behind the same `import()` as every
+ * other reach for `@onyourleft/mobile`, so a browser downloads no line of
+ * Capacitor.
+ */
+async function buildSecureWindow(): Promise<SecureWindow> {
+  if (!isNativeShell(platformCapacitor())) {
+    return new SecureWindow(NO_SECURE_WINDOW, documentForeground());
+  }
+  const mobile = await import('@onyourleft/mobile');
+  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
+  return new SecureWindow(
+    {
+      setSecureWindow: async (secure) =>
+        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
+    },
+    documentForeground(),
+  );
+}
+
 async function buildCameraController(
   analysis: () => ReturnType<typeof riderAnalysisPort>,
+  secureWindow: SecureWindow,
 ): Promise<CameraController | undefined> {
   // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
   // outside `apps/web/src/camera/`, and a local variable is a name — the scan
@@ -1499,9 +1575,8 @@ async function buildCameraController(
   // rather than once, so switching it off on the Camera screen stops the next
   // request. With nothing saved it answers `undefined` and nothing can be sent.
   if (!isNativeShell(platformCapacitor())) {
-    // #1061, ADR 0044 D-12: a browser cannot stop a screenshot, so the flag's
-    // owner is built over nothing — and the consent says so.
-    const secureWindow = new SecureWindow(NO_SECURE_WINDOW, documentForeground());
+    // #1061, ADR 0044 D-12: the flag's owner, built over nothing in a browser
+    // by `buildSecureWindow`.
     return new CameraController({ port, keep, analysis, secureWindow });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
@@ -1515,15 +1590,7 @@ async function buildCameraController(
   // so a browser downloads no line of Capacitor.
   const mobile = await import('@onyourleft/mobile');
   // #1061, ADR 0044 D-12: Android's FLAG_SECURE while a camera picture is on
-  // screen, through `SecureWindowPlugin.java`, registered in `MainActivity`.
-  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
-  const secureWindow = new SecureWindow(
-    {
-      setSecureWindow: async (secure) =>
-        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
-    },
-    documentForeground(),
-  );
+  // screen — `buildSecureWindow`'s, shared with a ride's snapshots.
   return new CameraController({
     port,
     keep,
@@ -1540,7 +1607,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
-  const camera = await buildCameraController(riderAnalysis);
+  // #1063's review: one secure window for the tab, shared by the camera and a
+  // ride's snapshots, so the snapshots hold it with no camera at all.
+  const secureWindow = await buildSecureWindow();
+  const camera = await buildCameraController(riderAnalysis, secureWindow);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -1571,6 +1641,23 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #1063. Each side-camera snapshot, held in this tab's memory and written
+  // with the ride it joins, after that ride's save (ADR 0044 D-3) — so, like
+  // the report, it needs the ride controller, and with none there is no ride
+  // to keep one with and Save snapshot is not offered. ⚠️ Optional on
+  // `AppShell`, so leaving it out is green in `check:wiring` (§Limits' third
+  // entry): `views/SideCameraControl.test.tsx` §"#1063" drives the control
+  // with a keeper over the real link, and this line is what supplies it.
+  const sideSnapshots =
+    rideController === undefined
+      ? undefined
+      : sideSnapshotKeeper({
+          rides: rideController,
+          store: localStore(),
+          athleteId: LOCAL_ATHLETE,
+          newFrameId: () => globalThis.crypto.randomUUID(),
+          now: browserClock,
+        });
   // #1106: built once, so every pairing asks the same sealed session.
   const sidePictures = buildSidePictures();
   const sidePairing = sideLinkAvailable()
@@ -1648,9 +1735,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
       };
     },
     hidden: () => document.hidden,
-    // #2253: the rider's own player, which the loop yields to. None yet: #2242
-    // supplies the Android shell's `OtherPlayer` (`platform.otherPlayer`).
-    riderPlayer: undefined,
+    // #2253: the rider's own player, which the loop yields to — #2073's
+    // `OtherPlayer`, in the Android shell only; none in a browser.
+    riderPlayer: platform.otherPlayer,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
@@ -1691,8 +1778,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
+          {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
+          rideSnapshots={buildRideSnapshotsPort(secureWindow)}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
-          {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
+          otherPlayer={platform.otherPlayer}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on
@@ -1722,7 +1811,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           rideController={rideController}
           menuSounds={menuSounds}
           menuMusic={menuMusic}
-          transfer={buildTransferPort(worldCorridorPort)}
+          transfer={buildTransferPort(worldCorridorPort, sideSnapshots)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
           {...(instanceAnalysis === undefined ? {} : { instanceAnalysis })}

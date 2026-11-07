@@ -40,7 +40,9 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 [#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
 suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841),
 and — since #1285 — `bash scripts/check-shard-results.test.sh` in a shard and
-`bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`.
+`bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`, and —
+since [#2272](https://github.com/openzigs/onyourleft/issues/2272) — `bash scripts/lint.test.sh`
+beside `lint` in the concurrent step (§"Lint, a project per process — #2272").
 ⚠️ **Since #1280 it takes no coverage and publishes none**: the coverage table and the HTML
 artefact are the NIGHTLY workflow's (§"The nightly job — #866"), where the two reporting steps
 still cannot fail the job: the run where coverage moved unexpectedly is exactly the one whose
@@ -214,6 +216,54 @@ same 25 % the first 9V74 sample on #833's own pull request showed, and in the tw
 touch; the image check itself took **12 s and 15 s** inside the concurrent step. So "EPYC 9V74" is
 not one speed (the tag is the CPU model, not the VM's share of it), and one job can land anywhere
 from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
+
+#### Lint, a project per process — #2272
+
+⚠️ **`pnpm run lint` is `scripts/lint.sh`, not `eslint .`, and a reviewer who remembers one ESLint
+process is reading the old file.** On 2026-11-06 the merge-queue run for #2236 (run 42263160979)
+failed in `Checks` with `JavaScript heap out of memory`: `lint` had reached its 4 GB heap after
+283 s. typescript-eslint's project service keeps every TypeScript program it opens, so one process
+over the whole tree held all of them at once — `apps/web`'s, `apps/instance`'s, each package's and
+the root's — and the sum had grown into the limit. `scripts/lint.sh` runs one ESLint process per
+directory under `apps/` and `packages/`, then one for the rest of the tree (`.` with exactly those
+directories ignored), **one after another**, so the peak is the largest single program's rather
+than the sum. Same `eslint.config.js`, same files, same rules: on the tree of #2272's branch the
+whole-tree run (given 8 GB to finish) and the split run linted the same 2 433 files, none twice,
+with the same messages. Its suite, `scripts/lint.test.sh`, is the guarantee that stays true: a
+problem in every place a file can be — inside an app, inside a package, at the root, in a
+directory that is no project — is reported once and fails the run, from the first process or the
+last.
+
+Every process prints `lint-memory: peak heap N MB of a M MB limit, peak RSS R MB`
+(`scripts/lint-memory.mjs`), so every `Checks` log carries the margin. The heap figure is sampled,
+so it counts garbage not yet collected: an upper bound, and a process whose live heap reaches the
+limit prints nothing and dies instead. The limit is Node's default, about 4 GB on the 16 GB
+runner; `--max-old-space-size` is **not** raised, because nothing measured needs it.
+
+Readings, `lint` inside `Checks, concurrently` (the peak of the whole run before; of its largest
+process, `apps/web`, after):
+
+| | Run | CPU | Peak heap (limit 4 192 MB) | Peak RSS | `lint` | Result |
+|---|---|---|--:|--:|--:|---|
+| **Before**, merge queue for #2236 | [42263160979](https://github.com/openzigs/onyourleft/actions/runs/42263160979) | EPYC 9V74 | 4 019 MB, 3 987 MB live after its last mark-compact | — | 320 s | out of memory at 283 s, exit 134 |
+| **Before**, #2272's first commit | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 1 | EPYC 9V74 | 3 990 MB | 4 456 MB | 268 s | passed |
+| **Before**, the same, rerun | [42274420331](https://github.com/openzigs/onyourleft/actions/runs/42274420331) attempt 2 | Xeon Platinum 8573C | 4 013 MB | 4 435 MB | 323 s | passed |
+| **After**, #2272's second commit | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 1 | Xeon Platinum 8573C | 3 254 MB (`apps/web`) | 3 689 MB | 302 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 2 | EPYC 7763 | 3 132 MB (`apps/web`) | 3 758 MB | 342 s | passed |
+| **After**, the same, rerun | [42281010162](https://github.com/openzigs/onyourleft/actions/runs/42281010162) attempt 3 | EPYC 9V74 | 3 283 MB (`apps/web`) | 3 705 MB | 260 s | passed |
+
+The next largest processes were `apps/instance` (1 092 to 1 354 MB) and `packages/store` (about
+525 MB); the rest of the tree took about 210 MB. The `Checks` job took as long as it did before
+(5 m 11 s and 6 m 12 s before; 5 m 48 s, 6 m 37 s and 5 m 08 s after), and `lint` is still the
+concurrent step's long pole: `apps/instance`, first, shares four CPUs with 28 other commands.
+
+Locally (an Apple M4 Pro, 4 144 MB limit, run alone), on the same tree: the whole-tree process
+died at the limit after 124 s; the split run passed in 107 to 154 s, `apps/web` peaking at
+3 309 MB sampled and **2 740 MB live** (the largest heap left after a mark-compact, from
+`--trace-gc`), `apps/instance` 1 353 MB, every package 200 to 530 MB, the rest 178 MB. Given 8 GB,
+the whole-tree process peaked at 5 357 MB. ⚠️ **`apps/web` is now the margin**: one program, so
+splitting its files across processes would not shrink it. When its line nears the limit, the next
+lever is a smaller program — `apps/web/tsconfig.json` split in two — not a bigger heap.
 
 #### The merge queue — #2198
 
@@ -458,7 +508,10 @@ summary and upload the HTML as the `coverage-report` artefact. Nothing left the 
 the table (§"Coverage out of the required job — #1280"). ⚠️ **Since
 [#1701](https://github.com/openzigs/onyourleft/issues/1701) the three are the `coverage` job, on a
 runner of its own** (§"Coverage in a job of its own — #1701" below); a reviewer who remembers them
-as the last steps of `heavy` is reading the old file. They carry `if: ${{ !cancelled() }}`, from
+as the last steps of `heavy` is reading the old file. ⚠️ **Since
+[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is two jobs, `coverage-1` and
+`coverage-2`, and `coverage` merges their results into the one report** (§"Two coverage jobs —
+#2285" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
 when they followed the browser checks, so a red coverage run still publishes what it measured. A test
 that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
 same test passed in the required job, so it is one that passes only without instrumentation.
@@ -592,19 +645,19 @@ no browser either, and its stop is 30 minutes. `heavy` keeps its own 30 minutes,
 840 s `GATE_BUDGET_MS` still stops shard 1 before the job's stop would. `report` needs every job,
 and `nightly-split.test.ts` refuses a coverage run that shares a job with any other suite.
 `nightly-split.test.ts` also holds **every nightly job's slowest measured run at or under 60 % of
-its own stop**. It reads the figures from the table below, one column per job id. `report` is left
+its own stop**. It reads the figures from the table between the two `nightly-measurements`
+markers, one column per job id — ⚠️ since #2285 the table in §"Two coverage jobs — #2285" below;
+the one here is #1701's, kept as it was measured. `report` is left
 out because it runs only after a red run. A new job needs a column, and the table needs at least
 three rows. Each figure is the job's own seconds, from its start to its end, as the Actions API
 gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not counting the time it
 queued.
 
-<!-- nightly-measurements:start -->
 | Run | Event | heavy | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
 |---|---|--:|--:|--:|--:|--:|--:|
 | [40974080277](https://github.com/openzigs/onyourleft/actions/runs/40974080277) attempt 1 | `pull_request` | 565 | 896 | 551 | 431 | 277 | 344 |
 | [40974044131](https://github.com/openzigs/onyourleft/actions/runs/40974044131) | `workflow_dispatch` | 571 | 808 | 491 | 289 | 332 | 496 |
 | 40974080277 attempt 2 | `pull_request` | 588 | 906 | 344 | 292 | 278 | 307 |
-<!-- nightly-measurements:end -->
 
 The stops are 1 800 s for `heavy` and `coverage` and 1 200 s for each browser shard, so the slowest
 readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverage` itself took 873,
@@ -619,8 +672,192 @@ readings are 33 %, 50 %, 46 %, 36 %, 28 % and 41 % of them. `Tests under coverag
 
 The coverage job is the one closest to its bound: 60 % of 1 800 s is 1 080 s, 174 s more than its
 slowest reading. When a new row turns this red, split `test:coverage` between two jobs, as #1675
-split the browser checks. Do not lengthen the stop or change the 60 %.
+split the browser checks. Do not lengthen the stop or change the 60 %. ⚠️ #2285 did that split.
 
+
+#### Cheaper cases under coverage — #1688
+
+⚠️ **From 2026-11-04 the `coverage` job was red on every nightly run**, and the table above did not
+show it: its three rows predate it. A case past Vitest's 5 s timeout under coverage turned it red,
+a different case most nights, and on the EPYC 7763 the job came within seconds of its 1 800 s stop.
+The owner's ruling for #1688 (2026-11-06): make those cases cheaper, and **never raise a timeout
+or the job's stop**. Four readings before, each the coverage job's own seconds from the Actions
+API, with the slowest Vitest file's own seconds:
+
+| Run | Event | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42014927562](https://github.com/openzigs/onyourleft/actions/runs/42014927562) | `schedule` | EPYC 7763 | 1 761 | 1 276 | `people` (side road) 5.8 s, the 32x ride 5.0 s, `worship-steeple` 7.3 s |
+| [42039098957](https://github.com/openzigs/onyourleft/actions/runs/42039098957) | `workflow_dispatch` | EPYC 7763 | 1 798 | 1 290 | `people` ×2, the 32x ride, `worship-steeple` 7.1 s, `landform-levelling` |
+| [42067419110](https://github.com/openzigs/onyourleft/actions/runs/42067419110) | `workflow_dispatch` | EPYC 9V74 | 1 469 | 989 | `worship-steeple` 5.8 s |
+| [42206133669](https://github.com/openzigs/onyourleft/actions/runs/42206133669) | `schedule` | EPYC 9V45 | 1 201 | 826 | two hairpin walks, 6.2 and 6.5 s, `mapped-paint` 5.7 s |
+
+Over 19 red runs from 2026-11-04 to 2026-11-06 the cases that failed most were
+`line-on-the-road.test.ts`'s hairpin walks (11 runs), `worship-steeple.test.ts` (9), the 32x ride
+in `simulated-rider-wiring.test.tsx` (7), `people.test.ts`'s side roads (6 and 5),
+`mapped-paint.test.ts` (5), `corridor-wiring.test.tsx` (4) and `chase-camera-bend.test.ts` (4).
+
+**Where the time was.** A CPU profile of one worker under `--coverage` (`NODE_OPTIONS=--cpu-prof`
+with `--pool=threads`) put each of those cases' time in one of four loops. V8's block coverage counts
+every branch a loop takes, and a loop that branches per cell or calls a closure per row ran 5 to 12
+times slower under it than without; none of them is slow in a ride.
+
+| Loop | What it cost, locally, under coverage | Now |
+|---|---|---|
+| `land-class.ts` §`chamfer`, a branch per cell | 2.0 of `mapped-paint`'s and `worship-steeple`'s 2.4 s | the edges written out beside a branch-free interior; 0.25 → 0.23 ms a chunk without coverage |
+| `terrain.ts` §`retracedRows`, every point against every stretch | 1.5 of each hairpin case's 2.4 s | stretches filed by 8 m cell |
+| `landform.ts` §`groundTop`, every item against every row, through a closure | 0.7 of each frame-drawing case's 1.7 s | rows skipped by run-of-eight boxes, no closure |
+| `landform.test.ts`'s walk over every triangle for each metre of a ray | 331 of the file's 495 s | triangles looked up by cell; `surfaceTop` allocates nothing per triangle |
+
+Each gives the answer it gave: `land-class.test.ts` §"the chamfer, cell by cell" holds `chamfer` to
+the passes with a test per cell, `landform.test.ts` §"this file's own lookup" holds the cells to the
+walk, and the rest is held by the tests that were already there (`out-and-back.test.ts` for the
+retrace, `arrangement-unchanged.test.ts` and #2099's for the boxes). Two cases are also split in
+two, doing no less: each hairpin walk meets at the step nearest the apex, and each of `people.test.ts`'s
+#1619 claims is a case beside its control. No timeout, no stop and no worker count moved.
+
+Readings after, on the branch (`gh workflow run nightly.yml --ref`):
+
+| Run | Commit | CPU | coverage | `landform.test.ts` | Red cases |
+|---|---|---|--:|--:|---|
+| [42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792) | f4e83683 (the loops) | EPYC 7763 | 1 448 | 282 | the radius-12 m hairpin walk 5.2 s, the crossroads 5.2 s, `corridor-wiring` 5.1 s, `lap-race-wiring`'s recorded ride at its own 10 s |
+| [42287054864](https://github.com/openzigs/onyourleft/actions/runs/42287054864) | 10c5c741 (and the splits) | Xeon 6973P-C | 1 015 | 176 | none: every job of the run green |
+| [42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) | 0bb1373f (10c5c741 and this section) | Xeon Platinum 8370C | 1 444 | 288 | the 32x ride 5.0 s, `corridor-wiring` 5.1 s |
+
+⚠️ **None of these readings is a row of the table above**, and neither are the four before it: each
+is past that table's 60 % bound (1 080 s), which `nightly-split.test.ts` would turn red, and the
+answer that section gives, two coverage jobs, is not #1688's to make. The table still holds the
+2026-10-29 figures, so that case is green on a bound the job no longer keeps: the slowest reading
+since is 1 798 s, and the slowest after #1688 is 1 448 s. ⚠️ Since #2285 the table
+`nightly-split.test.ts` reads is §"Two coverage jobs — #2285"'s, of the split's own runs.
+
+**What is left.** The job's time is now the suite's whole work over the runner's two cores, not
+one file: on the 7763 the Vitest run summed 3 374 s of case time against 4 320 s before, and
+`near-tree-fade.test.ts` (455 s) is its slowest file. A case's time on the 7763 under coverage is
+about four times its time alone on a development Mac under coverage, so a case that takes more than
+about a second there is near the 5 s timeout on that runner. The two still red on the third
+reading, and the cases nearest them, all draw whole frames — scenery, ground and the standing of
+every item on it — with no one loop the larger part: `corridor-wiring.test.tsx`'s late read and the
+32x ride (each two whole rides compared, so not split as the hairpin walks were),
+`lap-race-wiring`'s recorded ride (9.6 s of its own 10 s on the 8370C) and the bot-and-ghost
+hairpin walks (their own 30 s). What would move them is a cheaper `sceneFrame` as a whole, or a
+change to this job's shape — the two coverage jobs this section's table already calls for, or
+fewer Vitest workers on the two-core runner — and those are the owner's to choose.
+
+#### Two coverage jobs — #2285
+
+⚠️ **The nightly coverage report is three jobs since
+[#2285](https://github.com/openzigs/onyourleft/issues/2285)**, and a reviewer who remembers one
+`coverage` job running `test:coverage` is reading the old file. `coverage-1` (`Nightly tests under
+coverage (1 of 2)`) runs `test:coverage:shard-1`, `coverage-2` runs `test:coverage:shard-2`, and
+`coverage` (`Nightly coverage report`) downloads what each wrote, runs `test:coverage:merge` and
+publishes the summary and the HTML as the one job did. The owner's ruling (2026-11-06): two jobs on
+the standard runner, and never a longer timeout, stop or cap. Each half keeps the one job's
+30-minute stop; the merge's is 15 minutes. `report` needs all three.
+
+**How the run is divided.** By path: the first half is every file under `apps/web/src/game/` (225
+of the run's 1 048 on 2026-11-07), the second every other file. From the logs of the one job's runs
+[42292364270](https://github.com/openzigs/onyourleft/actions/runs/42292364270) and
+[42279690792](https://github.com/openzigs/onyourleft/actions/runs/42279690792), each file's case
+time as the reporter prints it: `apps/web/src/game/` held **1 780 and 1 813 s** of 3 329 and
+3 374 s, and every other file 1 549 and 1 561 s. Its three heaviest files are game files
+(`near-tree-fade.test.ts` 433–455 s, `landform.test.ts` 282–288 s, `near-field-street.test.ts`
+226–248 s), and each runs in one worker whichever half it is in.
+
+⚠️ **Not by Vitest project, as the required run's two parts are (§"Two Vitest shards — #2154").**
+With a `--project` filter, Vitest's v8 provider keeps only the selected projects' roots in the
+report (`coverage.DM_a_rWm.js`: "If --project filter is set pick only roots of resolved
+projects"), so what one package's tests run in another vanishes. Measured: `--project store` and
+`--project domain` as two halves, merged, came to 5 900 covered lines where the two in one run
+came to 6 009 — `hpke-testing.ts` alone fell from 128 lines to 22, because the store's tests run it.
+Selected by PATH (`packages/store/` and `packages/domain/`) the merged halves equal the one run file
+for file: 1 086 files, 6 099 covered lines each. Over the whole suite, locally: the merged halves
+and `pnpm run test:coverage` each reported 1 102 files with identical totals for every file, and
+63 091 against 63 082 covered lines, the difference being which timing cases each run had red on
+a machine at a load average of 50. `check:test-split` (its rule 6) refuses `--project` in a half,
+and fails a half over no file and a file of the run in no half or in two.
+
+**The merge.** Each half's script ends with Vitest's blob reporter, `--outputFile.blob=` its own
+file, `coverage-blobs/coverage-<n>.json`: the half's results and its coverage. The half uploads it
+as `coverage-blob-<n>` (`if: ${{ !cancelled() }}`, `if-no-files-found: error`, kept a day), and the
+merge downloads each by name into `coverage-blobs/`, so a half that uploaded nothing fails its
+download and the report is not merged from the other half alone. The blobs were 4.9 and 6.3 MB as
+artefacts and the merge 30 to 37 s. Vitest writes a blob whatever the run's result, and the merge
+replays every case, so its step is red when a half was and the two reporting steps after it still
+run.
+
+⚠️ **The one job published no report on a night with a red case.** Vitest's
+`coverage.reportOnFailure` is false by default, so a `test:coverage` with a failure writes no
+`coverage/`, and `Publish the coverage summary` printed `cannot read coverage/coverage-summary.json`
+(job 128148778382 of run 42292364270). Every night since 2026-11-04 was red, so none had a table.
+The merge writes the report from the blobs whatever their results: run
+[42305447868](https://github.com/openzigs/onyourleft/actions/runs/42305447868), with three red
+cases across its halves, published the table (`All files` 91.7 % of statements).
+
+**Two workers in the game half — measured, and this change's, not the ruling's.** The split alone
+did not make the whole-ride cases pass. On the first reading, run 42305447868, both halves landed on
+an EPYC 7763, and `coverage-1` failed on `lap-race-wiring.test.tsx`'s recorded ride at 10.02 s of
+its own 10 s and the 32x ride at 5.02 s of 5 s — the one job's figures on that CPU (10.03 s on run
+42279690792): a case's time is its share of the runner, not the job's length. The runner is two
+cores of two threads (§"Two Vitest shards — #2154") and Vitest starts three workers, so two share a
+core. With `VITEST_MAX_WORKERS: '2'` on that step:
+
+| CPU | Workers | Run | lap race | 32x ride | corridor late read | `coverage-1` |
+|---|--:|---|--:|--:|--:|--:|
+| EPYC 7763 | 3 | [42305447868](https://github.com/openzigs/onyourleft/actions/runs/42305447868) | 10.02 s ✗ | 5.02 s ✗ | — | 818 s |
+| EPYC 7763 | 2 | [42310244934](https://github.com/openzigs/onyourleft/actions/runs/42310244934) | 6.66 s | 3.23 s | 3.83 s | 809 s |
+| EPYC 9V74 | 3 | [42305870958](https://github.com/openzigs/onyourleft/actions/runs/42305870958) | 7.61 s | 3.10 s | — | 632 s |
+| EPYC 9V74 | 2 | [42308095771](https://github.com/openzigs/onyourleft/actions/runs/42308095771) | 5.06 s | 2.19 s | 2.49 s | 602 s |
+
+Two thirds of the time a case, and the half no longer. The two-worker runs are of branches
+`experiment/issue-2285-two-workers-*`, which ran only the three coverage jobs of this change's
+workflow with the worker count set. `coverage-2` keeps Vitest's three: none of its cases has passed a
+timeout under coverage, and with two it took 925 and 939 s on the 7763 (runs 42310240508 and
+42310198640) against 780 s with three. ⚠️ No timeout moved: a worker count is a share of the CPU,
+not a stop, and putting the third worker back is one line of `nightly.yml`.
+
+**Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
+§"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
+reads** (between the `nightly-measurements` markers), one column per job.
+
+<!-- nightly-measurements:start -->
+| Run | Event | heavy | coverage-1 | coverage-2 | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| [42312238591](https://github.com/openzigs/onyourleft/actions/runs/42312238591) | `pull_request` | 456 | 454 | 733 | 29 | 337 | 319 | 261 | 195 |
+| [42312234419](https://github.com/openzigs/onyourleft/actions/runs/42312234419) | `workflow_dispatch` | 558 | 795 | 742 | 36 | 244 | 319 | 265 | 171 |
+| [42312237550](https://github.com/openzigs/onyourleft/actions/runs/42312237550) | `workflow_dispatch` | 549 | 607 | 785 | 27 | 568 | 367 | 367 | 147 |
+| [42318412519](https://github.com/openzigs/onyourleft/actions/runs/42318412519) | `workflow_dispatch` | 406 | 766 | 495 | 34 | 585 | 319 | 273 | 251 |
+| [42318409493](https://github.com/openzigs/onyourleft/actions/runs/42318409493) | `workflow_dispatch` | 421 | 615 | 756 | 28 | 545 | 326 | 323 | 237 |
+| [42318592284](https://github.com/openzigs/onyourleft/actions/runs/42318592284) | `pull_request` | 696 | 669 | 684 | 38 | 488 | 266 | 262 | 200 |
+<!-- nightly-measurements:end -->
+
+The first three are of commit 3ffa4ac5, and in each every job was green but `coverage-2` and
+`coverage`, red on one case alone: this table's own, before it had these columns. **The last three
+have both halves and the merge green**: the first two, of 62adbeb8 (this table added), with every
+job of the run green; the third, of 23560e97 (62adbeb8 with `main` merged), with `browser-2` red on
+#1623's winter case in `realistic.browser.spec.ts` (its 150 s `waitForFunction` on an EPYC 7763), a
+job this change does not touch. Two of the dispatches ran on `experiment/issue-2285-reading-b`, a
+second name for the same commit, so that two could run at once. The stops are 1 800 s for `heavy`
+and both halves, 900 s for `coverage` and 1 200 s for each browser shard, so the slowest readings
+are 39 %, 44 %, 44 %, 4 %, 49 %, 31 %, 31 % and 21 % of them. The CPUs, in column order:
+
+- 42312238591: EPYC 9V45, 9V45, 9V74, Xeon 6973P-C, 9V74, EPYC 7763, 9V74, 9V74.
+- 42312234419: EPYC 9V74, **EPYC 7763** (the lap race 6.39 s, the 32x ride 2.97 s, the late read
+  3.34 s), Xeon Platinum 8370C, EPYC 7763, 9V45, 7763, 9V74, Xeon 6973P-C.
+- 42312237550: EPYC 9V74, 9V74, **EPYC 7763**, 9V45, 7763, Xeon Platinum 8370C, 7763, 9V45.
+- 42318412519: EPYC 9V45, **Xeon Platinum 8370C** (6.33, 3.02 and 3.22 s: the 32x ride and the
+  late read were #1688's last red cases there, at 5.0 and 5.1 s), 9V45, 9V74, 7763, 7763,
+  Xeon Platinum 8573C, 7763.
+- 42318409493: EPYC 9V45, 9V74, 9V74, 9V74, 7763, 7763, 7763, 9V74.
+- 42318592284: EPYC 7763, Xeon Platinum 8573C, 9V74, 7763, 7763, Xeon Platinum 8573C, 9V74, 9V74.
+
+Before this commit, the one job took 1 015 to 1 798 s (§"Cheaper cases under coverage — #1688");
+the split's first reading, with three workers in both halves, took 818 and 780 s on the 7763.
+
+⚠️ **When a row brings a half within reach of 60 % of its stop**, move a directory between the
+halves — a filter in the first half's script and its `--exclude` in the second's, which
+`check:test-split` holds as one partition — or add a third half: a `test:coverage:shard-3` script
+ending in its own blob, a `coverage-3` job copied from `coverage-2`, its download in `coverage` and
+its id in that job's `needs` and in `report`'s, and a column here. Not a longer stop.
 
 #### 23m39s of 25 — #1051
 
@@ -1983,6 +2220,21 @@ artefact. On a pull request it runs only when the video tooling or the demo code
 `apps/web/tools/demo/**` and the files they import from the gate) changes, and then runs only the
 checks. It installs `ffmpeg` with `apt-get` because the runner image has none. It is not a required
 check and uses no secret. [`docs/demo-video.md`](../demo-video.md) describes it.
+
+[`.github/workflows/demo-release.yml`](../../.github/workflows/demo-release.yml) — **`Demo route release`**
+([#1932](https://github.com/openzigs/onyourleft/issues/1932), ADR 0056 D-4.2) — on `workflow_dispatch`
+from `main` only, it bakes the demo's preset routes from the published archive, builds the demo, and
+publishes a GitHub release of each route's `.bin`, `routes.json` and `LICENCE-ODbL.txt`
+(`tools/demo/demo-release.ts`). ⚠️ **It has no pull-request trigger, on purpose**: it bakes
+OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `bake` job holds
+`contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
+`GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
+holds its trigger, runners, pins and permissions in the required suite.
+Since [#2264](https://github.com/openzigs/onyourleft/issues/2264) a third job, `pages`, deploys the
+demo output `bake` built to GitHub Pages after `publish`; it alone holds `pages: write` and
+`id-token: write`, checks out nothing, and fails until the owner enables Pages with _GitHub Actions_
+as its source. [`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs and the
+Pages URL.
 
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs

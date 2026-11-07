@@ -17,7 +17,8 @@
  * way to a race are all there to give way:
  *
  * - `none`: that ride with no race;
- * - `start`: a race of twelve on its first lap, nothing held;
+ * - `start`: a race of twelve on its first lap, nothing held — longer than
+ *   any solo field, so the standings are their tallest, eight lines (#2328);
  * - `warned`: the same race on its last lap, the rider 11th of 12 holding a
  *   crosswind gust, with a bot behind in the rider's lane holding another —
  *   the widest place and the warning under the item;
