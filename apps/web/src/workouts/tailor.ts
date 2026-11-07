@@ -373,6 +373,19 @@ export function lengthOptionText(minutes: number): string {
 export const TAILOR_LENGTHS: readonly number[] = LENGTH_CHOICES;
 
 /**
+ * The name a tailored built-in carries on the Ride screen — the owner's ruling
+ * of 2026-11-07 (a): the template's, with any intensity, and NOT its length,
+ * because the Ride screen says the length beside every workout's name
+ * ("Sweet spot, three by twelve (−5%) — 47 min, …"), and a name that carried
+ * it too said it twice.
+ */
+export function rideName(template: WorkoutTemplate, draft: TailorDraft): string {
+  const intensity = numberIn(draft.intensity) ?? 0;
+  if (intensity === 0 || Number.isNaN(intensity)) return template.name;
+  return `${template.name} (${intensity > 0 ? `+${String(intensity)}%` : `−${String(-intensity)}%`})`;
+}
+
+/**
  * The name a saved copy is given: the template's, with its length and any
  * intensity, so two copies of one template read apart in the list —
  * "Sweet spot, two by twenty (45 min, −5%)".

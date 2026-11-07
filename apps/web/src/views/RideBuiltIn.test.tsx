@@ -53,7 +53,13 @@ function template(id: string): WorkoutTemplate {
 }
 
 const SWEET_SPOT = template('sweet-spot-3x12');
-const NAME = 'Sweet spot, three by twelve (47 min, −5%)';
+// The owner's ruling of 2026-11-07 (a): no length in the name, which the screen says beside it.
+const NAME = 'Sweet spot, three by twelve (−5%)';
+
+/** How many times `text` says `part`. */
+function times(text: string | null | undefined, part: string): number {
+  return (text ?? '').split(part).length - 1;
+}
 
 /** On the tailor pane: 45 minutes at −5 %, then the address *Ride it* links to. */
 async function rideItAddress(): Promise<string> {
@@ -135,6 +141,11 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
 
     const panel = document.querySelector('.oyl-ride__group--trainer');
     expect(panel?.textContent).toContain(`${NAME} — 47 min,`);
+    // (a) The length is said once on the workout's line, not in its name as well.
+    const line = queryAll(panel ?? document, 'li').find((each) =>
+      (each.textContent ?? '').startsWith(NAME),
+    );
+    expect(times(line?.textContent, '47 min')).toBe(1);
     const ride = rideButton();
     expect(ride).toBeDefined();
     await activateWithKeyboard(ride as HTMLButtonElement);
@@ -156,6 +167,7 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
     const { stub } = await rideScreen(href);
     const offered = document.querySelector('[data-oyl-offered-workout]');
     expect(offered?.textContent).toContain(`${NAME} — 47 min,`);
+    expect(times(offered?.textContent, '47 min')).toBe(1);
     expect(document.body.textContent).toContain('Set your threshold power on the Analysis screen');
     expect(rideButton()).toBeUndefined();
     expect(stub.calls.startWorkout).toEqual([]);

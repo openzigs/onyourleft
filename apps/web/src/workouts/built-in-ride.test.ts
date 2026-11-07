@@ -50,6 +50,11 @@ describe('Ride it’s address — #2306', () => {
     expect(
       hrefForRidingBuiltIn(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, repeats: '5', recovery: '180' }),
     ).toBe('#/ride?workout=built-in%3Asweet-spot-3x12&repeats=5&recovery=180');
+    // The pane opens with the template's own repeats and recovery in their boxes
+    // (#2305, the ruling of 2026-11-07): those are not choices to carry either.
+    expect(
+      hrefForRidingBuiltIn(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, repeats: '3', recovery: '240' }),
+    ).toBe('#/ride?workout=built-in%3Asweet-spot-3x12');
   });
 
   it('is read back by the router as the Ride route, and its query as the same choices', () => {
@@ -80,7 +85,8 @@ describe('the workout offered on the Ride screen — #2306', () => {
     expect(outcome.record.workout.blocks).toStrictEqual(tailored.blocks);
     expect(outcome.record.id).toBe(`${BUILT_IN_RIDE_PREFIX}sweet-spot-3x12`);
     expect(outcome.record.id.startsWith('workout-')).toBe(false);
-    expect(outcome.record.name).toBe('Sweet spot, three by twelve (47 min, −5%)');
+    // The owner's ruling of 2026-11-07 (a): the Ride screen says the length beside the name.
+    expect(outcome.record.name).toBe('Sweet spot, three by twelve (−5%)');
     expect(outcome.record.workout.name).toBe(outcome.record.name);
     expect(outcome.record.createdBy).toBe(OWNER);
   });

@@ -32,17 +32,19 @@
  * an id with no stored row loses nothing.
  */
 
-import {
-  BUILT_IN_WORKOUTS,
-  expandWorkout,
-  unixSeconds,
-  type WorkoutTemplate,
-} from '@onyourleft/domain';
+import { BUILT_IN_WORKOUTS, unixSeconds, type WorkoutTemplate } from '@onyourleft/domain';
 import { workoutId, type AthleteId, type WorkoutRecord } from '@onyourleft/store';
 
 import { hrefFor, routeById } from '../shell/routes';
 import { BUILT_IN_ID_PREFIX } from './built-in';
-import { copyName, EMPTY_TAILOR_DRAFT, tailorFromDraft, type TailorDraft } from './tailor';
+import {
+  EMPTY_TAILOR_DRAFT,
+  initialTailorDraft,
+  rideName,
+  tailorFromDraft,
+  tailorOffer,
+  type TailorDraft,
+} from './tailor';
 
 /** The id a ridden built-in carries: `built-in:sweet-spot-3x12`. */
 export const BUILT_IN_RIDE_PREFIX = BUILT_IN_ID_PREFIX;
@@ -64,9 +66,14 @@ const KEYS = {
 export function hrefForRidingBuiltIn(template: WorkoutTemplate, draft: TailorDraft): string {
   const params = new URLSearchParams();
   params.set(KEYS.workout, `${BUILT_IN_RIDE_PREFIX}${template.id}`);
+  // The pane opens with the template's repeats and recovery in their boxes
+  // (#2305, the ruling of 2026-11-07): those are the template's own, too.
+  const own = initialTailorDraft(tailorOffer(template));
   for (const key of ['length', 'intensity', 'repeats', 'recovery'] as const) {
     const value = draft[key].trim();
-    if (value !== '' && value !== EMPTY_TAILOR_DRAFT[key]) params.set(KEYS[key], value);
+    if (value !== '' && value !== EMPTY_TAILOR_DRAFT[key] && value !== own[key]) {
+      params.set(KEYS[key], value);
+    }
   }
   return `${hrefFor(routeById('ride'))}?${params.toString()}`;
 }
@@ -122,7 +129,8 @@ export function offeredWorkout(
   if (outcome.status === 'refused') {
     return { status: 'refused', name: ride.template.name, message: outcome.message };
   }
-  const name = copyName(ride.template, expandWorkout(outcome.workout).totalSeconds, ride.draft);
+  // Without its length: the Ride screen says that beside the name (the ruling of 2026-11-07 (a)).
+  const name = rideName(ride.template, ride.draft);
   const at = unixSeconds(Math.floor(now));
   return {
     status: 'offered',
