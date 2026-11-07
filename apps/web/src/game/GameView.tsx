@@ -1923,8 +1923,7 @@ function GameScreen({
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
       ghostRiderRef.current = undefined;
-      // #2293: a circuit has no attempts and no other rider's either.
-      if (riderGhost && !onCircuit) {
+      if (riderGhost) {
         // #331: ONE other rider's ghost, in place of the rider's own. Asked
         // for at the press, and never kept: it lives in this ref for this ride.
         const asked: RiderGhostLoad = (await port?.loadRiderGhost?.(route.id)) ?? {
@@ -1944,8 +1943,7 @@ function GameScreen({
         ghostRef.current = asked.track;
         ghostRiderRef.current = asked.rider;
       } else {
-        ghostRef.current =
-          ghost && !onCircuit && port !== undefined ? await port.loadGhost(route.id) : undefined;
+        ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
       }
       // #509: the rider may have left while the ghost loaded. @see unmountedRef
       if (unmountedRef.current) {

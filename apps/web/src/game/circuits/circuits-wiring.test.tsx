@@ -38,7 +38,7 @@ import type { GameRenderer } from '../port';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import type { SceneInput } from '../scene';
 import { BUILT_IN_CIRCUITS_TEXT, LAP_RACE_CHOICE_TEXT } from '../StageChooser';
-import { REALISTIC_WORLD_STORAGE_KEY } from '../world-preference';
+import { REALISTIC_WORLD_STORAGE_KEY, writeRealisticWorldChoice } from '../world-preference';
 
 const inputs: SceneInput[] = [];
 
@@ -87,6 +87,9 @@ const OWN: RidableRoute = {
 
 /** The ghost's switch, as the loadout labels it for a route with attempts. */
 const OWN_GHOST = 'Race your own best attempt';
+
+/** The chooser's *Preview without a trainer*, which rides a route with no race. */
+const PREVIEW = 'Preview without a trainer';
 
 /** The synthetic fixture circuit (D-6.4): a loop of about 250 m. */
 const FIXTURE: RidableRoute = {
@@ -151,7 +154,7 @@ async function until(condition: () => boolean, tries = 200): Promise<void> {
 
 async function open(
   gamePort: GamePort,
-  extra: { readonly rooms?: RoomsPort; readonly roomId?: string } = {},
+  extra: { readonly rooms?: RoomsPort; readonly roomId?: string; readonly delivery?: boolean } = {},
 ): Promise<void> {
   mounted = await mount(
     <GameView
@@ -214,15 +217,28 @@ describe('the built-in circuits in the chooser — #2293', () => {
     expect(text()).toContain(LAP_RACE_CHOICE_TEXT.notALoop);
     expect(mounted?.container.querySelector('.oyl-game__pacer')).not.toBeNull();
     expect(text()).toContain(OWN_GHOST);
+    expect(mounted?.container.querySelector('.oyl-game__ghost')).not.toBeNull();
+    expect(text()).toContain(PREVIEW);
     await choose(FIXTURE);
     expect(text()).toContain(LAP_RACE_CHOICE_TEXT.onCircuit);
     expect(text()).not.toContain(LAP_RACE_CHOICE_TEXT.label);
     expect(text()).not.toContain(LAP_RACE_CHOICE_TEXT.notALoop);
     expect(mounted?.container.querySelector('.oyl-game__pacer')).toBeNull();
     expect(text()).not.toContain(OWN_GHOST);
+    expect(mounted?.container.querySelector('.oyl-game__ghost')).toBeNull();
+    expect(text()).not.toContain(PREVIEW);
     // The race's own choices are shown without a switch being turned on.
     expect(text()).toContain(LAP_RACE_CHOICE_TEXT.laps);
     expect(text()).toContain(`Ride ${FIXTURE.name}`);
+  });
+
+  it('chosen with the realistic world, offers no Delivery round: a circuit is raced and nothing else', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open(port([OWN], [FIXTURE]));
+    expect(mounted?.container.querySelector('.oyl-game__delivery')).not.toBeNull();
+    await choose(FIXTURE);
+    expect(mounted?.container.querySelector('.oyl-game__delivery')).toBeNull();
+    expect(text()).toContain(LAP_RACE_CHOICE_TEXT.onCircuit);
   });
 
   it('are offered to a rider with no routes of their own, who is told how to add one', async () => {
@@ -271,6 +287,17 @@ describe('a ride on a built-in circuit — #2293, ADR 0064 D-5.3 and D-8', () =>
     expect(stageText()).not.toBe('');
     expect(stageText()).not.toContain(OSM_ATTRIBUTION);
     expect(inputs.some((input) => input.raceBots !== undefined)).toBe(false);
+  });
+
+  it('is still the race when the shell asks every ride for a Delivery round', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    await open(port([OWN], [FIXTURE]), { delivery: true });
+    await choose(FIXTURE);
+    await pressRide();
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    await pump(10);
+    const drawn = inputs.filter((input) => input.raceBots !== undefined);
+    expect(drawn.at(-1)?.raceBots).toHaveLength(DEFAULT_LAP_RACE_CHOICE.bots);
   });
 
   it('is refused where it could not race — the shell’s room — rather than ridden as something else', async () => {
