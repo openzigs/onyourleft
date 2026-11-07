@@ -180,7 +180,9 @@ interface BandSpan {
  * as the climb and its band ends where `slopesOf` ends it, at the top marker.
  * The shortest goes first, and neighbours left in one band are joined. The
  * first and last runs are never merged: there the strip cuts the road, and a
- * short run at its edge is the start of what lies beyond. Pure.
+ * short run at its edge is the start of what lies beyond. A real pitch
+ * shorter than the minimum merges upward too, so it is drawn wider than it is,
+ * as far as the band beside it. Pure.
  */
 export function withoutSlivers(spans: readonly BandSpan[], minimum: number): BandSpan[] {
   const out = [...spans];

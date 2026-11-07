@@ -198,6 +198,30 @@ describe('a climb’s average, as the rider is told it — #2291', () => {
     }
   });
 
+  it('keeps the mean over all of a slope too short to have a body', () => {
+    // Exactly MINIMUM_SLOPE_METRES (10 samples), then 110 m and 140 m: each
+    // under three trims, so the mean is over every sample, never NaN, and
+    // never one or a few samples from the middle.
+    const peak = [3.5, 4, 5, 6, 7, 7, 6, 5, 4, 3.5];
+    for (const pitch of [
+      peak,
+      [...peak.slice(0, 5), 8, ...peak.slice(5)],
+      [...peak.slice(0, 5), 8, 8, 8, 8, ...peak.slice(5)],
+    ]) {
+      const slopes = slopesOf(graded([...stretch(100, 0), ...pitch, ...stretch(100, 0)]));
+      const mean = pitch.reduce((sum, grade) => sum + grade, 0) / pitch.length;
+      expect(slopes).toHaveLength(1);
+      expect(slopes[0]?.length).toBe(pitch.length * RESOLUTION);
+      expect(Number.isFinite(slopes[0]?.grade)).toBe(true);
+      expect(slopes[0]?.grade).toBeCloseTo(mean, 10);
+    }
+    // At three trims (150 m) the body is taken: the middle 50 m, here 8 %.
+    const long = [...peak.slice(0, 5), 8, 8, 8, 8, 8, ...peak.slice(5)];
+    expect(
+      slopesOf(graded([...stretch(100, 0), ...long, ...stretch(100, 0)]))[0]?.grade,
+    ).toBeCloseTo(8, 10);
+  });
+
   it('on a loop, takes the mean over both halves of a climb across the line', () => {
     // The tail at the end of the lap is 6 %, the head after the line 8 %.
     const profile = graded([...stretch(30, 8), ...stretch(150, 0), ...stretch(30, 6), 8], true);
