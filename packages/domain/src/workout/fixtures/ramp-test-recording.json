@@ -1,0 +1,35 @@
+{
+  "description": [
+    "Synthetic, written by hand for #2303: never a real ride.",
+    "A rider riding RAMP_TEST against a threshold of 250 W: 480 s of warm-up, then one-minute steps from 150 W rising by 15 W (0.6 of threshold, up 0.06 a step).",
+    "They hold eleven steps, the last at 300 W, fail 20 s into the 315 W step and stall, then spin easy in the cool-down.",
+    "power is run-length, [watts, seconds], with null for a dropout. The best minute of the effort is the 300 W step."
+  ],
+  "thresholdPower": 250,
+  "effortStartsAt": 480,
+  "effortEndsAt": 1160,
+  "power": [
+    [115, 120],
+    [125, 120],
+    [135, 120],
+    [145, 120],
+    [150, 60],
+    [165, 60],
+    [180, 60],
+    [195, 60],
+    [210, 60],
+    [225, 60],
+    [240, 60],
+    [255, 60],
+    [270, 60],
+    [285, 60],
+    [300, 60],
+    [290, 4],
+    [260, 4],
+    [200, 4],
+    [120, 4],
+    [40, 4],
+    [0, 5],
+    [95, 595]
+  ]
+}
