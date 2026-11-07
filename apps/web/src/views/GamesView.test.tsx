@@ -27,8 +27,13 @@ import { gamePlayFromHash, gameRouteFromHash, hrefFor, routeById } from '../shel
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
-import { GAME_COURSES_TEXT } from './GameCoursesView';
-import { deliveryWeekProgressText, GAMES_TEXT, lapRaceLoopsText } from './GamesView';
+import { GAME_COURSES_TEXT, GameCoursesView } from './GameCoursesView';
+import {
+  deliveryWeekProgressText,
+  GAMES_TEXT,
+  lapRaceCoursesText,
+  lapRaceLoopsText,
+} from './GamesView';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -148,6 +153,35 @@ describe('the Games tab — #2292', () => {
     const out = { ...OUT, bestSeconds: 60 };
     await open('/games', [slow, out, fast]);
     expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on · your best 12:34');
+  });
+
+  it('counts the built-in circuits the port lists beside several of the rider’s loops', async () => {
+    const second = { ...RING, id: circuitRouteId('fixture-oval'), name: 'Fixture oval' };
+    await open('/games', [LOOP_A, OUT, LOOP_B], [RING, second]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 built-in circuits, 2 of your loops');
+  });
+
+  it('counts one of the rider’s loops beside the circuits as “1 of your loops”', async () => {
+    await open('/games', [LOOP_A, OUT], [RING]);
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('1 built-in circuit, 1 of your loops');
+  });
+
+  it('counts the circuits alone when the rider has no loop', async () => {
+    await open('/games', [OUT], [RING]);
+    const standing = card(GAMES_TEXT.lapRace)?.querySelector('.oyl-games__standing');
+    expect(standing?.textContent).toBe('1 built-in circuit');
+  });
+
+  it('shows the loop count alone, as before, when the circuits cannot be read', async () => {
+    globalThis.location.hash = '#/games';
+    const port: GamePort = {
+      ...portOf([LOOP_A, LOOP_B]),
+      listCircuits: () => Promise.reject(new Error('a damaged bundle')),
+    };
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
+    await settle();
+    const standing = card(GAMES_TEXT.lapRace)?.querySelector('.oyl-games__standing');
+    expect(standing?.textContent).toBe('2 loops to race on');
   });
 
   it('says nothing of a best before the rider has ridden a loop — the control', async () => {
@@ -286,6 +320,33 @@ describe('the built-in circuits on the lap race’s picker — #2293 through #22
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port} />);
     await settle();
     expect(names()).toEqual([LOOP_A.name]);
+  });
+
+  it('drops them at once when the picker is handed Delivery in place of the lap race', async () => {
+    // The review of #2326. AppShell keys its view by route today
+    // (`ViewBoundary key={route.id}`), so each game gets a picker of its
+    // own; this renders one picker and changes its game, which is the case
+    // that key would no longer cover. The second read of the routes never
+    // answers, holding open the moment the circuits could linger.
+    writeRealisticWorldChoice(localStorage, true);
+    let reads = 0;
+    const port: GamePort = {
+      ...portOf([], [RING]),
+      listRoutes: () => {
+        reads += 1;
+        return reads === 1 ? Promise.resolve([]) : new Promise(() => undefined);
+      },
+    };
+    mounted = await mount(<GameCoursesView mode="lap-race" port={port} />);
+    await settle();
+    expect(names()).toEqual([RING.name]);
+    await mounted.rerender(<GameCoursesView mode="delivery" port={port} />);
+    await settle();
+    expect(reads).toBe(2);
+    expect(names()).toEqual([]);
+    expect(document.querySelector('[data-oyl-empty-state]')?.textContent).toContain(
+      GAME_COURSES_TEXT.noRoutes,
+    );
   });
 });
 
@@ -441,5 +502,16 @@ describe('the cards’ words', () => {
     );
     expect(lapRaceLoopsText(1)).toBe('1 loop to race on');
     expect(lapRaceLoopsText(0)).toBe('No loops to race on yet');
+  });
+
+  it('counts the lap race’s courses as the owner ruled on 2026-11-07', () => {
+    expect(lapRaceCoursesText(4, 0)).toBe('4 built-in circuits');
+    expect(lapRaceCoursesText(4, 1)).toBe('4 built-in circuits, 1 of your loops');
+    expect(lapRaceCoursesText(4, 3)).toBe('4 built-in circuits, 3 of your loops');
+    expect(lapRaceCoursesText(4, 3, 754)).toBe(
+      '4 built-in circuits, 3 of your loops · your best 12:34',
+    );
+    expect(lapRaceCoursesText(0, 2)).toBe('2 loops to race on');
+    expect(lapRaceCoursesText(0, 0)).toBe('No loops to race on yet');
   });
 });

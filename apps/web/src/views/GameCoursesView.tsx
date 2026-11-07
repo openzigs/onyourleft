@@ -79,6 +79,11 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
   // circuit that cannot be read costs the circuits and never the routes.
   const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   useEffect(() => {
+    // A picker handed another game keeps this state while the routes are
+    // read again, so the lap race's circuits go at once and are never counted
+    // under Delivery. AppShell's `ViewBoundary key={route.id}` remounts the
+    // view today; this does not lean on it.
+    setCircuits([]);
     if (port === undefined) {
       setRoutes([]);
       return;
