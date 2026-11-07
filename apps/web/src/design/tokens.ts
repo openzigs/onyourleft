@@ -354,6 +354,13 @@ export const COLOUR_TOKENS = {
    * own fill pattern, drawn in `hudSurface` over the colour, and the next
    * climb is written out in words beside the strip. Each colour is a declared
    * 3:1 against `hudSurface` (SC 1.4.11) in {@link CONTRAST_REQUIREMENTS}.
+   *
+   * #2291 uses the same five twice more: the whole route's strip is shaded by
+   * them, and the gradient's DIGITS are drawn in their band's colour. The
+   * digits are large text — never under 24 px, which `ride.browser.spec.ts`
+   * measures at every viewport — so the same 3:1 is the pair they need
+   * (SC 1.4.3's large-text threshold), and the sign beside them, which is
+   * small, keeps `hudInk`.
    */
   hudGradeDescent: '#4f9fe0',
   hudGradeFlat: '#6b7177',
@@ -1477,28 +1484,32 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 6.58, dark: 6.58 },
-    where: 'a descent on the HUD’s look-ahead strip, and its dotted pattern (SC 1.4.11, #2075)',
+    where:
+      'a descent on the HUD’s look-ahead strip and whole route’s strip, and its dotted pattern (SC 1.4.11, #2075, #2291); a descent’s gradient digits, 24 px or larger (SC 1.4.3 large text, #2291)',
   },
   {
     foreground: 'hudGradeFlat',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 3.8, dark: 3.8 },
-    where: 'flat road on the HUD’s look-ahead strip (SC 1.4.11, #2075)',
+    where:
+      'flat road on the HUD’s look-ahead strip and whole route’s strip (SC 1.4.11, #2075, #2291); a flat gradient’s digits, 24 px or larger (SC 1.4.3 large text, #2291)',
   },
   {
     foreground: 'hudGradeClimb',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 9.52, dark: 9.52 },
-    where: 'a climb on the HUD’s look-ahead strip, and its hatching (SC 1.4.11, #2075)',
+    where:
+      'a climb on the HUD’s look-ahead strip and whole route’s strip, and its hatching (SC 1.4.11, #2075, #2291); a climb’s gradient digits, 24 px or larger (SC 1.4.3 large text, #2291)',
   },
   {
     foreground: 'hudGradeSteep',
     background: 'hudSurface',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 6.8, dark: 6.8 },
-    where: 'a steep stretch on the HUD’s look-ahead strip, and its hatching (SC 1.4.11, #2075)',
+    where:
+      'a steep stretch on the HUD’s look-ahead strip and whole route’s strip, and its hatching (SC 1.4.11, #2075, #2291); a steep gradient’s digits, 24 px or larger (SC 1.4.3 large text, #2291)',
   },
   {
     foreground: 'hudGradeWall',
@@ -1506,21 +1517,7 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 4.79, dark: 4.79 },
     where:
-      'a very steep stretch on the HUD’s look-ahead strip, and its cross-hatching (SC 1.4.11, #2075)',
-  },
-  {
-    foreground: 'hudBorder',
-    background: 'hudSurface',
-    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 4.47, dark: 4.47 },
-    where: 'the whole route’s filled elevation strip on the HUD (SC 1.4.11, #2075)',
-  },
-  {
-    foreground: 'hudInk',
-    background: 'hudBorder',
-    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
-    measured: { light: 3.9, dark: 3.9 },
-    where: 'the rider’s marker where it crosses the whole route’s filled strip (SC 1.4.11, #2075)',
+      'a very steep stretch on the HUD’s look-ahead strip and whole route’s strip, and its cross-hatching (SC 1.4.11, #2075, #2291); a very steep gradient’s digits, 24 px or larger (SC 1.4.3 large text, #2291)',
   },
   {
     foreground: 'hudMapStreet',

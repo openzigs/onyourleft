@@ -13,7 +13,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     /**
-     * ⚠️ {@link RecordingServicePlugin}, {@link ThermalPlugin} (#247), {@link SecureWindowPlugin}
+     * ⚠️ {@link RecordingServicePlugin}, {@link SecureWindowPlugin}
      * (#1061) and {@link OtherPlayerPlugin} (#2073) are registered here, BEFORE
      * {@code super.onCreate}. Capacitor
      * auto-discovers plugins that ship as packages; one that lives in the application's own source
@@ -23,7 +23,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         registerPlugin(RecordingServicePlugin.class);
-        registerPlugin(ThermalPlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         registerPlugin(OtherPlayerPlugin.class);
         super.onCreate(savedInstanceState);
