@@ -114,6 +114,54 @@ describe('the estimate from a ride — #2307', () => {
     expect(result.estimate.kind === 'estimate' && result.estimate.thresholdPower).toBe(188);
   });
 
+  it('finds the effort when the test was begun before the recording and its first blocks have no row', () => {
+    // A 20-minute test recorded from its openers: no row for the 10-minute
+    // warm-up. Rows are openers, easy, the twenty minutes, the cool-down.
+    const [, openers, easy] = TWENTY_MINUTE_TEST.template.warmUp;
+    const [effort] = TWENTY_MINUTE_TEST.template.mainSet.blocks as readonly WorkoutBlock[];
+    const [cool] = TWENTY_MINUTE_TEST.template.coolDown;
+    const rows = [
+      ridden(openers as WorkoutBlock, 0, 360),
+      ridden(easy as WorkoutBlock, 360, 300),
+      ridden(effort as WorkoutBlock, 660, 1200),
+      ridden(cool as WorkoutBlock, 1860, 600),
+    ];
+    const series = power([660, 100], [1200, 200], [600, 100]).map((value) => watts(value));
+    const result = estimateFromRide(TWENTY_MINUTE_TEST, {
+      blocks: rows,
+      firstBlock: 0,
+      startedAt: unixSeconds(START),
+      sampleInterval: 1,
+      power: series,
+    });
+    // 0.95 of 200 W — not a refusal for a window the cool-down was mistaken for.
+    expect(result.estimate.kind === 'estimate' && result.estimate.thresholdPower).toBe(190);
+  });
+
+  it('starts a ramp recorded from its second step at that step, not one late', () => {
+    // Rows from the second step: the warm-up row and the first
+    // step have none.
+    const steps = RAMP_TEST.template.mainSet.blocks as readonly WorkoutBlock[];
+    const cool = RAMP_TEST.template.coolDown[0] as WorkoutBlock;
+    const rows: WorkoutBlockFact[] = [
+      ...steps.slice(1).map((block, index) => ridden(block, index * 60, 60)),
+      ridden(cool, (steps.length - 1) * 60, 60),
+    ];
+    // The best minute is the first row's, 300 W; one late, it would be missed.
+    const series = power([60, 300], [540, 200], [60, 100]).map((value) => watts(value));
+    const result = estimateFromRide(RAMP_TEST, {
+      blocks: rows,
+      firstBlock: 0,
+      startedAt: unixSeconds(START),
+      sampleInterval: 1,
+      power: series,
+    });
+    expect(result.estimate).toEqual(
+      estimateThreshold('ramp', { power: series, effortStartsAt: 0, effortEndsAt: 600 }),
+    );
+    expect(result.estimate.kind === 'estimate' && result.estimate.thresholdPower).toBe(225);
+  });
+
   it('refuses a ramp given up in its first steps, with the domain’s reason and no number', () => {
     const result = estimateFromRide(RAMP_TEST, {
       blocks: rampRide(2),

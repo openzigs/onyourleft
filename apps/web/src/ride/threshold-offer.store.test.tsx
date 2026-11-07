@@ -245,6 +245,32 @@ describe('after a ramp test, the estimate is offered — #2307', () => {
     expect(athlete?.thresholdHeartRate).toBe(170);
   });
 
+  it('Accept: the same Ride screen reads the new threshold at once, for the next workout', async () => {
+    // The rider has no threshold power yet, so the workout panel cannot start anything.
+    await harness.write((store) =>
+      store.setAthleteThresholds(ATHLETE_A, {
+        thresholdPower: undefined,
+        thresholdHeartRate: beatsPerMinute(170),
+      }),
+    );
+    const controller = await rideBuiltIn('ramp-test', 480 + 600);
+    const offer = controller.getSnapshot().savedRide?.thresholdTest;
+    if (offer?.estimate.kind !== 'estimate') throw new Error('no estimate was made');
+    const estimate = offer.estimate.thresholdPower;
+    mounted = await mount(
+      <RideView controller={controller} analysis={{ athleteId: ATHLETE_A, store: freshStore() }} />,
+    );
+    const said = (): string => document.body.textContent ?? '';
+    await untilSettled(() => said().includes('Set your threshold power on the Analysis screen'));
+
+    await activateWithKeyboard(buttonSaying(THRESHOLD_OFFER_TEXT.accept(estimate)));
+    await untilSettled(() => said().includes(THRESHOLD_OFFER_TEXT.accepted(estimate)));
+    // Without leaving the screen: the workout panel now has a threshold to ride at.
+    await untilSettled(() => !said().includes('Set your threshold power on the Analysis screen'));
+    expect(said()).toContain('No workouts saved on this device yet');
+    controller.dispose();
+  });
+
   it('Keep: the threshold is unchanged after a reload, read the same way', async () => {
     const controller = await rideBuiltIn('ramp-test', 480 + 600);
     await rideScreen(controller);

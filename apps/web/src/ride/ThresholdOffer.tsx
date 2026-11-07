@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useId, useState, type JSX } from 'react';
+import { useId, useRef, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 
@@ -71,7 +71,8 @@ export function ThresholdOffer({
 }: ThresholdOfferProps): JSX.Element {
   const headingId = useId();
   const [answer, setAnswer] = useState<Answer | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
+  // A ref, not state: two presses inside one render both see the same state.
+  const busy = useRef(false);
   /*
    * The threshold the rider had when they answered: the screen reads theirs
    * again once they accept, and "it is 247 W now" beside a suggestion of
@@ -82,8 +83,8 @@ export function ThresholdOffer({
   const estimate = offer.estimate.kind === 'estimate' ? offer.estimate.thresholdPower : undefined;
 
   async function accept(power: Watts): Promise<void> {
-    if (analysis === undefined || busy) return;
-    setBusy(true);
+    if (analysis === undefined || busy.current) return;
+    busy.current = true;
     setBefore(current);
     try {
       // Read first: the write replaces both thresholds, and heart rate stays.
@@ -97,7 +98,7 @@ export function ThresholdOffer({
     } catch {
       setAnswer('failed');
     } finally {
-      setBusy(false);
+      busy.current = false;
     }
   }
 

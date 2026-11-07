@@ -113,6 +113,20 @@ describe('the threshold-estimate offer — #2307', () => {
     expect(audit()).toBe('');
   });
 
+  it('writes once when Accept is pressed twice before the screen has re-rendered', async () => {
+    const analysis = await offer(ESTIMATE);
+    const accept = queryAll<HTMLButtonElement>(document, 'button').find(
+      (each) => each.textContent === 'Set my threshold to 247 W',
+    );
+    await act(async () => {
+      accept?.click();
+      accept?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(analysis.thresholdWrites).toHaveLength(1);
+  });
+
   it('says the answer to Keep once, live, and writes nothing', async () => {
     const analysis = await offer(ESTIMATE);
     await press(THRESHOLD_OFFER_TEXT.keep);

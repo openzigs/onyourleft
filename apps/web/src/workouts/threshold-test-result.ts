@@ -74,16 +74,26 @@ export interface RideOfTest {
  * is the domain's refusal, never an error — its sentence says why.
  */
 export function estimateFromRide(test: ThresholdTest, ride: RideOfTest): TestRideEstimate {
-  const effortFrom = ride.firstBlock + test.template.warmUp.length;
-  const effort = (ride.blocks ?? []).slice(
-    effortFrom,
-    effortFrom + test.template.mainSet.blocks.length,
+  // The test's own rows are the plan's blocks from the first one the recording
+  // saw to the last (`recording/workout-blocks.ts`: a workout begun before the
+  // recording has no rows for the blocks before the one it first sees, and
+  // every block after the last ridden is a `skipped` row). So they are the
+  // END of the plan, and the effort is found counting back from it, never
+  // forward from a first row that may not be the first block.
+  const rows = (ride.blocks ?? []).slice(ride.firstBlock);
+  const plan = test.template;
+  const unseen =
+    plan.warmUp.length + plan.mainSet.blocks.length + plan.coolDown.length - rows.length;
+  const effortFrom = plan.warmUp.length - unseen;
+  const effort = rows.slice(
+    Math.max(0, effortFrom),
+    Math.max(0, effortFrom + plan.mainSet.blocks.length),
   );
   const ridden = effort.flatMap((block) => (block.outcome === 'skipped' ? [] : [block]));
   const first = ridden[0];
   const last = ridden.at(-1);
-  // Seconds from sample 0 — the estimate's series is 1 Hz, and so is the
-  // recording's grid (#45); another spacing is read at its own.
+  // Sample indices, which are seconds because the recording's grid is 1 Hz
+  // (#45) and `estimateThreshold` counts its series in seconds.
   const at = (instant: number): number => (instant - ride.startedAt) / ride.sampleInterval;
   const recording = {
     power: (ride.power ?? []).map((value) => (value === undefined ? undefined : watts(value))),
