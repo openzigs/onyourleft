@@ -1285,7 +1285,7 @@ export function deliveryCourseLine(
     }
     case 'counted': {
       const needs = Math.min(week.houses, FEWEST_DELIVERY_HOUSES);
-      if (course.houses >= needs && course.houses > 0) {
+      if (course.houses >= needs) {
         const most = Math.min(course.houses, week.houses);
         return { text: `Delivery: up to ${housesText(most)} on the round`, holds: true };
       }

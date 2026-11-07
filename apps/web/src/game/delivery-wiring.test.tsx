@@ -1631,6 +1631,55 @@ describe('offered in the chooser, with the short round and the no-round fallback
     },
   );
 
+  describe('the course count is abandoned (#2294)', () => {
+    /** A read that never answers, keeping each call's signal. */
+    function hangingReads(): {
+      readonly signals: AbortSignal[];
+      readonly load: GamePort['loadWorldCorridor'];
+    } {
+      const signals: AbortSignal[] = [];
+      return {
+        signals,
+        load: (_route, signal) => {
+          signals.push(signal);
+          return new Promise<CorridorState>(() => undefined);
+        },
+      };
+    }
+
+    async function mountChoosing(load: GamePort['loadWorldCorridor']): Promise<void> {
+      writeRealisticWorldChoice(localStorage, true);
+      mounted = await mount(
+        <GameView
+          port={{ ...portWith(town.corridor), loadWorldCorridor: load }}
+          renderer={() => Promise.resolve(realisticNotLoaded())}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+    }
+
+    it('abandons the walk when the round is switched off', async () => {
+      const reads = hangingReads();
+      await mountChoosing(reads.load);
+      const before = reads.signals.length;
+      await clickThrough(deliverySwitch());
+      const walk = reads.signals.slice(before);
+      expect(walk.some((signal) => !signal.aborted)).toBe(true);
+      await clickThrough(deliverySwitch());
+      expect(walk.every((signal) => signal.aborted)).toBe(true);
+    });
+
+    it('abandons the walk when a ride starts', async () => {
+      const reads = hangingReads();
+      await mountChoosing(reads.load);
+      await clickThrough(deliverySwitch());
+      expect(reads.signals.some((signal) => !signal.aborted)).toBe(true);
+      await clickThrough(buttonStarting('Ride '));
+      expect(reads.signals.every((signal) => signal.aborted)).toBe(true);
+    });
+  });
+
   /** A corridor read that has told the chooser `state` and goes no further. */
   const stopsAt =
     (state: CorridorState): GamePort['loadWorldCorridor'] =>

@@ -31,6 +31,8 @@ import { northRoute } from '../route-fixtures-testing';
 import { corridorOrigin } from '../terrain';
 import type { CorridorState, WorldCorridor } from '../world-data/corridor';
 
+import type { DeliveryCourse } from '../StageChooser';
+
 import { countCourses, roundHousesOn, type CourseCount, type CourseRoute } from './courses';
 import { deliveryTown } from './delivery-town-testing';
 import { MOST_HOUSES } from './round';
@@ -261,5 +263,14 @@ describe('#2294 — counting each saved route in turn', () => {
     expect(load).toHaveBeenCalledTimes(3);
     expect(load.mock.calls.at(-1)?.[0].id).toBe('offline-route');
     expect(second).toEqual(first);
+  });
+});
+
+describe('the chooser’s restatement of a count', () => {
+  it('is the same type as CourseCount, so the two cannot drift apart', () => {
+    // Each assignment fails typecheck if the two types stop agreeing.
+    const toChooser = (count: CourseCount): DeliveryCourse => count;
+    const fromChooser = (course: DeliveryCourse): CourseCount => course;
+    expect(toChooser({ kind: 'failed' })).toEqual(fromChooser({ kind: 'failed' }));
   });
 });
