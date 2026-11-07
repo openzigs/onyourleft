@@ -1,18 +1,23 @@
 # ADR 0064: Built-in lap-race circuits — short loops drawn on our own basemap, committed and shipped in the app under ODbL 1.0, for solo bot races only
 
-- **Status**: **Proposed, 2026-11-06**. Not to be merged before the owner answers D-11 Q0; if
-  the owner accepts it before merge, the pull request flips this line, because an amendment cannot change a Status line
-  afterwards (ADR 0013). [#2293](https://github.com/openzigs/onyourleft/issues/2293)'s build waits
-  on it either way
+- **Status**: **Accepted, 2026-11-06**, on the owner's
+  [ruling of that day](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818)
+  on pull request #2297: Q0 accept before merge; Q1 (a), lines drawn on our basemap's streets; Q2 (a), line and heights only; Q3 (a), heights from USGS 3DEP; Q4 yes, ODbL
+  1.0. Q5 was not ruled on, so D-9.1's default holds. D-11 records each answer. Proposed 2026-11-06;
+  the pull request flipped this line before merge, because an amendment cannot change a Status line
+  afterwards (ADR 0013). [#2293](https://github.com/openzigs/onyourleft/issues/2293) builds the
+  circuits
 - **Date**: 2026-11-06
 - **Deciders**: **the owner**, on the ruling of 2026-11-06 that #2293 records (built-in circuits,
   for solo races against bots only, confirming [ADR 0060](0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)
   D-14 Q6). The owner ruled **that** circuits ship, **for solo bot races only**, **three or four
   loops of about 3 to 8 km on real roads drawn from our own basemap**, **original, with our own
   names**, **with their map data and the OpenStreetMap credit**, and **working with no instance**.
-  The owner did not rule on what of the map data ships, where the hills come from, or how the
-  licence is carried: D-11 puts those as questions with a recommendation. Drafted by the author;
-  every recommendation is the author's engineering reading and says so
+  That ruling left open what of the map data ships, where the hills come from, and how the licence
+  is carried: D-11 put those as questions with a recommendation, and the owner's
+  [ruling of 2026-11-06 on #2297](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818)
+  took the recommendation on Q0 to Q4 (D-11). Drafted by the author; each recommendation was the
+  author's engineering reading
 - **Issue**: [#2293](https://github.com/openzigs/onyourleft/issues/2293), of the epic
   [#1894](https://github.com/openzigs/onyourleft/issues/1894). Its lane scope (the comment of
   2026-11-06) asks first whether shipping circuit map data in the app needs an ADR change, and if it
@@ -139,7 +144,7 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
 | ADR 0012 **D-4**, *"§4.6 is not the plan"* | **Superseded for this one database**, as ADR 0056 did for the demo bundle: §4.6 a, the entire database (D-4) |
 | ADR 0054 **D-2** (the corridor read per route, on the device) and **D-3.5** (`worldCorridors` never leaves the device) | **Unchanged.** A circuit's corridor, when the realistic world is chosen, is read like any route's (D-2.2) |
 | ADR 0054 **D-3.6** (the ride's credit, keyed on the corridor) | **Extended, and superseded in part**: the credit is also owed for the whole of a ride on a built-in circuit, in every world, so the stylised world no longer always shows none (D-5.3) |
-| ADR 0056, every decision | **Unchanged.** Its bundle stays in the demo build only (D-2.4). A circuit file is a different database with no corridor in it (D-2.1), so D-2.4 is not reached; if the owner answers Q2 (b), D-2.4 is superseded for the app and this row changes |
+| ADR 0056, every decision | **Unchanged.** Its bundle stays in the demo build only (D-2.4). A circuit file is a different database with no corridor in it (D-2.1), so D-2.4 is not reached; the owner answered Q2 (a), so this row stands |
 | ADR 0060 D-11 and ADR 0028 D-7.1 | **Unchanged**: D-14 Q6 already allows a bundled circuit for solo bot races; D-8 here holds it there |
 
 ### D-2 — What is shipped: the circuit's line and heights, and no corridor
@@ -149,7 +154,7 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    its heights (D-7, as `ElevationDataset` names one) and the licence metadata of D-3.2. **No OSM
    identifier, no street or place name, no address, no owner, no route id and no device time.**
    A file of this shape is a few tens of kilobytes at most; the build issue states the real sizes.
-2. **No corridor is shipped** (option (a), recommended, D-11 Q2). With the realistic world chosen,
+2. **No corridor is shipped** (option (a), the owner's answer to D-11 Q2). With the realistic world chosen,
    the circuit's corridor is read from the configured archive while the rider chooses, by the same
    code as a rider's own route's (ADR 0054 D-2), and with no archive reachable the world is
    procedural (ADR 0054 D-4). The stylised world needs none. **The `worldCorridors` port is keyed by
@@ -258,17 +263,17 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    closed loop that follows them, with no OSM identifier or name. The method is the build issue's,
    stated in its pull request. **The loop's design is ours** (ADR 0060 D-1.2 and D-1.3): no course
    traced or recreated from any game.
-2. **The heights, recommended (D-11 Q3): USGS 3DEP**, sampled once along the line at authoring,
+2. **The heights, the owner's answer to D-11 Q3 (a): USGS 3DEP**, sampled once along the line at authoring,
    with its name and resolution recorded in the file as a planned route records its DEM. It is
    public domain (ADR 0032's table), so §4.4 d is met and nothing is owed beyond a courtesy credit;
    it is a bare-earth model, so a tree-lined road does not gain false grade. It covers the archive's
    coverage. ADR 0032 D-1's rejection of 3DEP is for the **world**, and ADR 0032 D-3 leaves a route's
    elevation outside it; adding it as a source for these files only is recorded here so that it is
    a decision and not a drift.
-3. **Not recommended: Copernicus GLO-30.** Its licence is bespoke, not OSI and not CC (ADR 0032),
+3. **Not chosen: Copernicus GLO-30.** Its licence is bespoke, not OSI and not CC (ADR 0032),
    and *"all rights reserved"* is in its notice; committing heights derived from it is not a step
    this project has taken for any file.
-4. **The alternative the owner may choose instead (Q1 (b), Q3 (b)): a GPX the owner rides** on each
+4. **The alternative the owner did not choose (Q1 (b), Q3 (b)): a GPX the owner rides** on each
    loop, under ADR 0056 D-7's rules (latitude, longitude and elevation only, no timestamp, trimmed or
    starting at a public place, `CC0-1.0`). Its line is then the owner's own trace and not derived
    from OpenStreetMap, D-3 and D-4 fall away for the line, and ADR 0032 D-1 item 2 is not reached at
@@ -296,7 +301,8 @@ term and does not call itself a legal opinion. D-3 does not rest on it.
    location is published. **Where they are drawn is also a disclosure**: loops authored by one
    identifiable maintainer on roads they know reveal that maintainer's home area, and committed
    history is permanent. So the circuits are **not drawn in the owner's home area, or the owner
-   accepts that they may be** (Q5), and under Q1 (b) the same applies to the owner's own GPX.
+   accepts that they may be** (Q5). The owner's ruling of 2026-11-06 did not answer Q5, so until
+   the owner says otherwise the first half holds: no circuit is drawn in the owner's home area.
 2. **No coordinate and no place name in public text** (the ruling): not in an issue, a pull request,
    a commit message, a review, this ADR, `docs/`, or a rider-facing word. The files' own points are
    the only coordinates, and a circuit's name is ours and is not a place name.
@@ -309,21 +315,30 @@ ADR 0012 D-6's rule and ADR 0056 D-11's, for the same reason: no lawyer was cons
 clauses this relies on are the ones ADR 0056 read first-hand on 2026-10-24; the Substantial
 guideline was read on 2026-11-06.
 
-### D-11 — What the owner is asked to rule on
+### D-11 — What the owner was asked, and the answers
+
+The owner answered on 2026-11-06, in a [comment on pull request #2297](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818): *"Q0: accept before
+merge. Q1 (a): lines drawn on our basemap's streets. Q2 (a): line and heights only. Q3 (a): heights
+from USGS 3DEP. Q4: yes, treat the circuits as ODbL 1.0."* Each answer is the recommendation. Q5 was
+not answered (D-9.1 says what holds).
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
-   merge**; the pull request flips the Status line.
+   merge**; the pull request flips the Status line. **Answered: accept before merge.**
 2. **Q1 — Where does each circuit's line come from: (a) drawn on our own basemap's streets (D-7.1),
    or (b) a GPX the owner rides (D-7.4)?** Recommended: **(a)**, because it is the ruling's *"drawn
    from our own basemap"* and needs no ride; it is what makes D-1, D-3, D-4 and D-6 necessary.
+   **Answered: (a)**, lines drawn on our basemap's streets.
 3. **Q2 — What of the map data ships: (a) the line and heights only, the corridor read per ride as
    for any route (D-2.2), or (b) a baked corridor per circuit in the app (D-2.3)?** Recommended:
-   **(a)**. (b) supersedes ADR 0056 D-2.4 for the app and is a larger change.
+   **(a)**. (b) supersedes ADR 0056 D-2.4 for the app and is a larger change. **Answered: (a)**,
+   the line and heights only.
 4. **Q3 — The heights: (a) USGS 3DEP (D-7.2), (b) the owner's GPX, or (c) flat?** Recommended:
    **(a)**. (c) costs every circuit its hills, which the trainer would otherwise put in the legs.
+   **Answered: (a)**, USGS 3DEP.
 5. **Q4 — Treat the circuits as ODbL 1.0 whatever the Substantial guideline says (D-3.3)?**
-   Recommended: **yes**.
+   Recommended: **yes**. **Answered: yes**, ODbL 1.0.
 6. **Q5 — Are the circuits kept out of the owner's home area (D-9.1)?** Recommended: **yes**.
+   **Not answered** on 2026-11-06; D-9.1's first half holds until the owner rules.
 
 ---
 
@@ -344,7 +359,7 @@ guideline was read on 2026-11-06.
   the app for as long as the files ship. D-4.2 is how a redistributor meets them without knowing.
 - **A credit on rides that showed none**: a stylised-world race on a built-in circuit now shows the
   OpenStreetMap line for the whole ride.
-- **A new height source for four files** (3DEP, if Q3 (a)), and an authoring script a developer
+- **A new height source for four files** (3DEP, Q3 (a)), and an authoring script a developer
   runs by hand.
 - **A circuit redrawn after an archive refresh is a new commit.** Nothing redraws itself.
 
@@ -352,7 +367,7 @@ guideline was read on 2026-11-06.
 
 | Issue | Constraint |
 |---|---|
-| [#2293](https://github.com/openzigs/onyourleft/issues/2293) | D-2 to D-9 as the owner answers D-11: the file shape and licence fields, the notice file, the repository rule of D-6.2, the digest, the fixture circuit for drawn tests, the picker's and the ride screen's credit, solo races only, nothing copied into the rider's records, no coordinate or place name in public text, screenshots that show the credit |
+| [#2293](https://github.com/openzigs/onyourleft/issues/2293) | D-2 to D-9 as the owner answered D-11: the file shape and licence fields, the notice file, the repository rule of D-6.2, the digest, the fixture circuit for drawn tests, the picker's and the ride screen's credit, solo races only, nothing copied into the rider's records, no coordinate or place name in public text, screenshots that show the credit |
 | [#2292](https://github.com/openzigs/onyourleft/issues/2292) | None beyond #2293's: the Games tab leads to the same picker |
 | [#2102](https://github.com/openzigs/onyourleft/issues/2102) | None: a room's course stays a loop the host saved (D-8.1) |
 | ADR 0032, ADR 0054 and ADR 0012 | Each gains one appended entry under ADR 0013 pointing here, in this pull request |
@@ -361,11 +376,13 @@ guideline was read on 2026-11-06.
 
 ## What would make this ADR wrong
 
-- **The owner answers Q1 (b).** Then the line is not OpenStreetMap's, D-3, D-4 and D-6.2 apply to
-  nothing, and ADR 0032 D-1 item 2 is not superseded; this ADR should be rewritten before it merges,
-  not merged and amended.
-- **The owner answers Q2 (b).** Then ADR 0056 D-2.4 is superseded for the app, and D-1's ADR 0056
-  row changes.
+- **The line is taken from a GPX the owner rides after all (Q1 (b)).** The owner answered (a) on
+  2026-11-06. Were that reversed, the line would not be OpenStreetMap's, D-3, D-4 and D-6.2 would
+  apply to nothing, and ADR 0032 D-1 item 2 would not be superseded: a superseding ADR, not an
+  amendment.
+- **A baked corridor is shipped in the app after all (Q2 (b)).** The owner answered (a) on
+  2026-11-06. Were that reversed, ADR 0056 D-2.4 would be superseded for the app, and D-1's ADR
+  0056 row would change.
 - **The lap race is offered in a room on a built-in circuit.** That is ADR 0060 D-11.3 and the
   patent reading spike 0030 §5.1 rests on, and it needs a superseding ADR first.
 - **USGS 3DEP's terms, or the OSMF's guidance on games, change.** The dates above are there for that
@@ -376,6 +393,7 @@ guideline was read on 2026-11-06.
 | What | Where | Read |
 |---|---|---|
 | The owner's ruling and the lane scope | [#2293](https://github.com/openzigs/onyourleft/issues/2293), its body and its comment of 2026-11-06 | 2026-11-06 |
+| The owner's answers to D-11 and the acceptance | [Comment on #2297](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818) | 2026-11-06 |
 | ODbL 1.0 §1.0, §4.2, §4.3, §4.4 and §4.6, verbatim | ADR 0056's Context, read first-hand from <https://opendatacommons.org/licenses/odbl/1-0/> | 2026-10-24 |
 | The OSMF *Substantial* guideline: its endorsement date, its thresholds, and *"repeated small extractions as one big extraction"* | <https://osmfoundation.org/wiki/Licence/Community_Guidelines/Substantial_-_Guideline> | 2026-11-06 |
 | Copernicus GLO-30 *"Bespoke, not OSI and not CC"*; SRTM, NASADEM and USGS 3DEP *"Public domain / CC0"* | ADR 0032 D-1's table, read first-hand there | as ADR 0032 records |

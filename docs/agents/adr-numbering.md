@@ -15,9 +15,9 @@ It has the same authority as the root file. Where the text below says "this file
   ⚠️ **0064 is [ADR 0064](../adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md)**,
   taken by [#2293](https://github.com/openzigs/onyourleft/issues/2293) on 2026-11-06 for the lap
   race's built-in circuits (short loops drawn on the project's own basemap, committed and shipped in
-  the app under ODbL 1.0, for solo bot races only), on the owner's ruling of that day. It is
-  **Proposed** until the owner accepts it, and it supersedes ADR 0032 D-1 item 2 and ADR 0012 D-4 in
-  part, as an ADR rather than the amendment the issue named, because ADR 0013 D-3 sends a reversed
+  the app under ODbL 1.0, for solo bot races only), on the owner's ruling of that day. It was
+  **Accepted** the same day, on the owner's [ruling](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818)
+  on #2297, and it supersedes ADR 0032 D-1 item 2 and ADR 0012 D-4 in part, as an ADR rather than the amendment the issue named, because ADR 0013 D-3 sends a reversed
   decision to a new ADR. It took the next free number after 0063; **0057 and 0058 stay claimed** by
   #1748 and #1752. **The next free number is 0065.** A reviewer who remembers this file offering 0064
   is reading the old file.

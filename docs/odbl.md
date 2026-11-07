@@ -109,12 +109,12 @@ in it leaves the device, the bake never reads it, and the share-alike reasoning 
 still holds for it. The bundle is a separate database, made at build time from the archive, and it
 is the only OpenStreetMap-derived database this project publishes.
 
-## The lap race's built-in circuits (proposed)
+## The lap race's built-in circuits
 
-[ADR 0064](adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md), **Proposed** on
-2026-11-06 on the owner's ruling of that day on
-[#2293](https://github.com/openzigs/onyourleft/issues/2293). Nothing below is built until the owner
-accepts it and #2293 lands; until then the sentence above stays true.
+[ADR 0064](adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md), **Accepted** on
+2026-11-06 on the owner's [ruling of that day](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818) on #2297, after the ruling of the same day on
+[#2293](https://github.com/openzigs/onyourleft/issues/2293). Nothing below is built until #2293
+lands; until then the sentence above stays true.
 
 - **What is in it.** Three or four short loops for solo races against bots, one JSON file each:
   the loop's line, drawn on the project's own archive's streets, and its heights, with no corridor,
