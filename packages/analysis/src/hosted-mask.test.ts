@@ -100,8 +100,8 @@ describe('a coordinate written with its labels (#854 review)', () => {
 
 describe('ordinary cycling text is not masked (#839)', () => {
   it.each([
-    'Quarry climb',
-    'Three laps of Quarry climb, then 2 Quarry climb repeats.',
+    'Mudbury Top',
+    'Three laps of Mudbury Top, then 2 Mudbury Top repeats.',
     '20 km',
     '4x8 min',
     'Zone 2',

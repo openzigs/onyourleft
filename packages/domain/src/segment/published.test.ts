@@ -112,7 +112,7 @@ describe('a published segment definition (#68)', () => {
     ],
     ['a blank name', { ...DEFINITION, name: '   ' }, 'name'],
     ['a name over 80', { ...DEFINITION, name: 'x'.repeat(81) }, 'name'],
-    ['a control character in the name', { ...DEFINITION, name: 'Box\nHill' }, 'name'],
+    ['a control character in the name', { ...DEFINITION, name: 'Quarry\nclimb' }, 'name'],
     ['a sport there is no board for', { ...DEFINITION, sport: 'swim' }, 'sport'],
     [
       'a radius past the widest gate',
