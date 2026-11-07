@@ -63,7 +63,7 @@ function ridableRoute(id: string, name: string, attempts: number): RidableRoute 
 
 const PORT: GamePort = {
   listRoutes: () =>
-    Promise.resolve([ridableRoute('a', 'Box Hill', 0), ridableRoute('b', 'Ditchling', 4)]),
+    Promise.resolve([ridableRoute('a', 'Quarry climb', 0), ridableRoute('b', 'Reservoir road', 4)]),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
     rider: { power: watts(0), live: false, paired: false },
@@ -386,17 +386,17 @@ describe('opened from Home’s next up — #1010', () => {
   it('opens on the route the link names', async () => {
     globalThis.location.hash = '#/game?route=b';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Ditchling');
+    expect(rideLabel()).toBe('Ride Reservoir road');
   });
 
   it('opens on the first route with no route named, or one it does not hold', async () => {
     globalThis.location.hash = '#/game';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Box Hill');
+    expect(rideLabel()).toBe('Ride Quarry climb');
     mounted.unmount();
     globalThis.location.hash = '#/game?route=gone';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Box Hill');
+    expect(rideLabel()).toBe('Ride Quarry climb');
   });
 });
 

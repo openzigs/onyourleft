@@ -35,7 +35,7 @@ const PATH: readonly (readonly [number, number])[] = Array.from(
 );
 
 const DEFINITION: PublishedSegmentDefinition = {
-  name: 'Box Hill',
+  name: 'Quarry climb',
   sport: 'ride',
   geometry: PATH,
   endpointRadiusMetres: 15,
@@ -47,7 +47,7 @@ describe('a published segment definition (#68)', () => {
     const own = createSegment({
       id: 'local-1',
       createdBy: 'local',
-      name: 'Box Hill',
+      name: 'Quarry climb',
       sport: 'ride',
       geometry: PATH.map(([latitude, longitude]) =>
         geographicPosition(latitude as DegreesLatitude, longitude as DegreesLongitude),
@@ -73,14 +73,14 @@ describe('a published segment definition (#68)', () => {
     expect(id).toMatch(PUBLISHED_SEGMENT_ID);
     // Member order is not part of it: the canonical form sorts them.
     const reordered = JSON.parse(
-      '{"sport":"ride","bearingToleranceDegrees":60,"name":"Box Hill","endpointRadiusMetres":15,"geometry":' +
+      '{"sport":"ride","bearingToleranceDegrees":60,"name":"Quarry climb","endpointRadiusMetres":15,"geometry":' +
         JSON.stringify(PATH) +
         '}',
     ) as PublishedSegmentDefinition;
     expect(await publishedSegmentId(reordered, fakeSha256)).toBe(id);
     expect(canonicalDefinition(reordered)).toBe(canonicalDefinition(DEFINITION));
     expect(
-      await publishedSegmentId({ ...DEFINITION, name: 'Box Hill climb' }, fakeSha256),
+      await publishedSegmentId({ ...DEFINITION, name: 'Quarry climb again' }, fakeSha256),
     ).not.toBe(id);
     // Nothing a caller's object carries beyond the five is digested.
     const extra = { ...DEFINITION, createdBy: 'somebody' } as PublishedSegmentDefinition;

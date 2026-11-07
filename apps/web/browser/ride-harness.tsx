@@ -422,8 +422,8 @@ const RELEASE_AND_PROMISE =
  */
 const LONGEST_ROUTE_NAME = (() => {
   const words =
-    'Box Hill, Leith Hill, Ranmore Common, Coldharbour, Holmbury St Mary, Peaslake, Shere, ' +
-    'Abinger and every lane between them, twice over, the long way round';
+    'The mill, the ridge, the reservoir, the old quarry, the ford, the farm, the beacon, the green, ' +
+    'the common and every lane between them, twice over, the long way round';
   const name = words.slice(0, MAXIMUM_ROUTE_NAME_LENGTH);
   if (name.length !== MAXIMUM_ROUTE_NAME_LENGTH || name !== name.trim()) {
     throw new Error('ride harness: the longest route name is not the store’s bound');
@@ -446,7 +446,7 @@ function chooserRoutes(): readonly {
     'The coast road',
     'Two bridges',
     'Old railway line',
-    'Box Hill, Leith Hill and every lane between them the long way round',
+    'The mill, the ridge and every lane between them the long way round',
     LONGEST_ROUTE_NAME,
   ];
   return names.map((name, index) => {

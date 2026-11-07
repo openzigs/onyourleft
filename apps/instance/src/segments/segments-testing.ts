@@ -17,7 +17,7 @@ import { authorised, riderWithRide } from '../sync/sync-testing.ts';
 export const RIDE_STARTED_AT = 1_790_000_000;
 
 /** A northbound path of six positions a little over 110 m apart: about 555 m. */
-export function definitionFixture(name = 'Box Hill'): PublishedSegmentDefinition {
+export function definitionFixture(name = 'Quarry climb'): PublishedSegmentDefinition {
   return {
     name,
     sport: 'ride',

@@ -106,7 +106,7 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'game-hud', name: 'Keep the plan', match: 'exact' },
   // #940: the trainer game's pre-ride chooser, `game/StageChooser.tsx`. Its
   // *Ride* starts the ride, so it is *Start* in the ruling's four. A PREFIX,
-  // because it is named after the route ("Ride Box Hill").
+  // because it is named after the route ("Ride Quarry climb").
   { surface: 'stage-chooser', name: 'Ride ', match: 'prefix' },
   // #1992, PR #2113's ruling: *Preview without a trainer* starts a ride too
   // (a simulated one), so it is *Start* as well. A PREFIX, named after the route.
