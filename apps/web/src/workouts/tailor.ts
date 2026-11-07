@@ -98,6 +98,61 @@ export const EMPTY_TAILOR_DRAFT: TailorDraft = {
 };
 
 /**
+ * The draft a pane opens with — the owner's ruling of 2026-11-07 (d): the
+ * template's own repeats and recovery IN the boxes, as values, rather than as
+ * grey placeholders that read as a control switched off. Each is the
+ * template's default, so the workout it makes is the template as written.
+ */
+export function initialTailorDraft(offer: TailorOffer): TailorDraft {
+  return {
+    ...EMPTY_TAILOR_DRAFT,
+    repeats: offer.repeats === undefined ? '' : String(offer.repeats.default),
+    recovery: offer.recovery === undefined ? '' : String(offer.recovery.default),
+  };
+}
+
+/**
+ * How many repeats a tailored workout of `template` holds, read off the
+ * workout itself: what a chosen length chose. `undefined` for a template
+ * whose main set does not repeat.
+ *
+ * `tailorWorkout` keeps one block for each block of the warm-up and the
+ * cool-down (a length shortens them, never removes them), and the main set is
+ * either one intervals block or the repetition written out each time.
+ */
+export function repeatsIn(template: WorkoutTemplate, workout: Workout): number | undefined {
+  const set = template.mainSet;
+  if (set.scaling !== 'repeat') return undefined;
+  const main = workout.blocks.slice(
+    template.warmUp.length,
+    workout.blocks.length - template.coolDown.length,
+  );
+  const [only] = main;
+  if (main.length === 1 && only?.kind === 'intervals') return only.repeats;
+  const perRepeat = set.rep.length + (set.recovery === undefined ? 0 : 1);
+  return Math.round(main.length / perRepeat);
+}
+
+/**
+ * The preview's length, and why it is not the length chosen when it is not —
+ * the owner's ruling of 2026-11-07: "47 min, the nearest with whole repeats".
+ * A length is met with whole repeats, or by stretching blocks no further than
+ * the template lets them go, so it can land beside the minutes asked for.
+ */
+export function lengthText(
+  template: WorkoutTemplate,
+  totalSeconds: number,
+  chosen: string,
+): string {
+  const said = workoutDurationText(totalSeconds);
+  const minutes = numberIn(chosen);
+  if (minutes === undefined || said === workoutDurationText(minutes * 60)) return said;
+  return template.mainSet.scaling === 'repeat'
+    ? `${said}, the nearest with whole repeats`
+    : `${said}, the nearest it stretches to`;
+}
+
+/**
  * One control changed, and what that does to the others: a length and a
  * repeat count cannot both be chosen (`tailorWorkout` refuses the pair,
  * because a length IS made by choosing the repeat count), so choosing either

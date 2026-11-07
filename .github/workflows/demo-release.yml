@@ -25,6 +25,20 @@
 # A bake that disagrees with a preset route's committed record fails the run
 # before anything is published (`bake-route.ts` §`settleRecord`): the release
 # holds the files the committed digests name, or nothing.
+#
+# Since #2264, each release also deploys the demo it built to GitHub Pages, at
+# https://openzigs.github.io/onyourleft/ (the owner's ruling on #2264,
+# 2026-11-07). `bake` uploads the whole demo output as the Pages artefact,
+# and a third job, `pages`, deploys it after `publish`, so the route data the
+# hosted demo serves is always on a release as well (D-4.2). `pages` alone
+# holds `pages: write` and `id-token: write`, the two permissions
+# `actions/deploy-pages` needs, and like `publish` it checks out nothing and
+# runs no repository code. Pages sends no custom header, so the demo's own
+# `<meta>` policy is the whole of its Content-Security-Policy there;
+# `docs/demo-embedding.md` §"Hosted on GitHub Pages" says what that gives up.
+# ⚠️ It fails until Pages is enabled with "GitHub Actions" as its source in the
+# repository's settings, which is the owner's step: by then the release is
+# already published, and re-running the failed job deploys it.
 
 name: Demo route release
 
@@ -115,6 +129,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # The whole demo output, unchanged (docs/demo-embedding.md §"The files"),
+      # baked routes and their notice included. Not under `$RUNNER_TEMP`:
+      # this is what `build:demo` wrote, read back by nothing in between.
+      #   gh api repos/actions/upload-pages-artifact/git/ref/tags/v5.0.0 --jq .object.sha
+      - name: Upload the demo for GitHub Pages
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: apps/web/demo/dist/
+
   publish:
     name: Publish the release
     needs: bake
@@ -145,3 +168,20 @@ jobs:
             --title "Demo route data $TAG" \
             --notes-file notes.md \
             --latest=false
+
+  pages:
+    name: Deploy the demo to GitHub Pages
+    needs: [bake, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      #   gh api repos/actions/deploy-pages/git/ref/tags/v5.0.1 --jq .object.sha
+      - name: Deploy the demo
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

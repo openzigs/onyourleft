@@ -291,6 +291,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Appearance',
     'Announcements',
     'Sounds',
+    // #2079: which panels the ride HUD shows, and that a larger size is drawn on a tablet.
+    'Ride HUD',
     // #1433: what the order is for — the zoom keeps the top two.
     'Ride screen readings',
     'Game world',

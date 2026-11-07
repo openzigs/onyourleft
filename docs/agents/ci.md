@@ -2230,7 +2230,11 @@ OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `
 `contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
 `GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
 holds its trigger, runners, pins and permissions in the required suite.
-[`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs.
+Since [#2264](https://github.com/openzigs/onyourleft/issues/2264) a third job, `pages`, deploys the
+demo output `bake` built to GitHub Pages after `publish`; it alone holds `pages: write` and
+`id-token: write`, checks out nothing, and fails until the owner enables Pages with _GitHub Actions_
+as its source. [`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs and the
+Pages URL.
 
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs

@@ -3,6 +3,7 @@
 import {
   BUILT_IN_WORKOUTS,
   beatsPerMinute,
+  expandWorkout,
   seconds,
   tailorWorkout,
   thresholdShare,
@@ -14,8 +15,11 @@ import { describe, expect, it } from 'vitest';
 import {
   copyName,
   EMPTY_TAILOR_DRAFT,
+  initialTailorDraft,
+  lengthText,
   previewRow,
   previewRows,
+  repeatsIn,
   TAILOR_LENGTHS,
   tailorFromDraft,
   tailorOffer,
@@ -264,5 +268,47 @@ describe('the name a copy is saved under — #2305', () => {
     expect(copyName(SWEET_SPOT, 3600, { ...EMPTY_TAILOR_DRAFT, intensity: '3' })).toBe(
       'Sweet spot, three by twelve (1 h, +3%)',
     );
+  });
+});
+
+describe('the owner’s ruling of 2026-11-07 — #2305', () => {
+  const lengthOf = (id: string, minutes: number): number =>
+    expandWorkout(tailorWorkout(template(id), { targetMinutes: minutes })).totalSeconds;
+
+  it('opens with the template’s repeats and recovery as values, and nothing else chosen', () => {
+    expect(initialTailorDraft(tailorOffer(SWEET_SPOT))).toEqual({
+      ...EMPTY_TAILOR_DRAFT,
+      repeats: '3',
+      recovery: '240',
+    });
+    // Nothing to put in a box a template does not offer.
+    expect(initialTailorDraft(tailorOffer(STEADY_HOUR))).toEqual(EMPTY_TAILOR_DRAFT);
+    // The defaults make the workout as written.
+    expect(tailorFromDraft(SWEET_SPOT, initialTailorDraft(tailorOffer(SWEET_SPOT)))).toEqual({
+      status: 'tailored',
+      workout: tailorWorkout(SWEET_SPOT, {}),
+    });
+  });
+
+  it('says why a length is not the one chosen, in one line', () => {
+    expect(lengthText(SWEET_SPOT, lengthOf('sweet-spot-3x12', 45), '45')).toBe(
+      '47 min, the nearest with whole repeats',
+    );
+    expect(lengthText(SWEET_SPOT, lengthOf('sweet-spot-3x12', 75), '75')).toBe('1 h 15 min');
+    const rising = template('tempo-rising-steps');
+    expect(lengthText(rising, lengthOf('tempo-rising-steps', 90), '90')).toBe(
+      '1 h 27 min, the nearest it stretches to',
+    );
+    // No length chosen: the length alone.
+    expect(lengthText(SWEET_SPOT, 63 * 60, '')).toBe('1 h 3 min');
+  });
+
+  it('reads the repeat count a length chose off the workout', () => {
+    expect(repeatsIn(SWEET_SPOT, tailorWorkout(SWEET_SPOT, { targetMinutes: 45 }))).toBe(2);
+    // A repetition of several blocks, written out each time.
+    const overUnder = template('over-under-3x3');
+    expect(repeatsIn(overUnder, tailorWorkout(overUnder, { targetMinutes: 60 }))).toBe(3);
+    expect(repeatsIn(overUnder, tailorWorkout(overUnder, { repeats: 5 }))).toBe(5);
+    expect(repeatsIn(STEADY_HOUR, tailorWorkout(STEADY_HOUR, {}))).toBeUndefined();
   });
 });

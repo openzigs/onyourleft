@@ -132,8 +132,8 @@ describe('the preview follows every choice — #2305', () => {
       workoutShapeText(tailorWorkout(SWEET_SPOT, { targetMinutes: 45 })),
     );
     expect(fortyFive.shape).not.toBe(sixty.shape);
-    expect(fortyFive.length).toBe('47 min');
-    expect(sixty.length).toBe('1 h 3 min');
+    expect(fortyFive.length).toBe('47 min, the nearest with whole repeats');
+    expect(sixty.length).toBe('1 h 3 min, the nearest with whole repeats');
     expect(fortyFive.graph).not.toEqual(sixty.graph);
     expect(fortyFive.graph.length).toBeGreaterThan(0);
   });
@@ -159,6 +159,37 @@ describe('the preview follows every choice — #2305', () => {
     await open('ramp-test');
     expect(pane().querySelectorAll('select, input')).toHaveLength(0);
     expect(pane().textContent).toContain('This workout is ridden as written');
+  });
+});
+
+describe('the owner’s ruling of 2026-11-07 — #2305', () => {
+  it('(d) opens with the template’s repeats and recovery in their boxes as values', async () => {
+    await open('sweet-spot-3x12');
+    const repeats = control<HTMLInputElement>('repeats', 'input');
+    const recovery = control<HTMLInputElement>('recovery', 'input');
+    expect(repeats.value).toBe('3');
+    expect(recovery.value).toBe('240');
+    // A value, not a grey hint: nothing is shown in placeholder text.
+    expect(repeats.placeholder).toBe('');
+    expect(recovery.placeholder).toBe('');
+    // The values are the template's own, so the preview is the workout as written.
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, {})));
+  });
+
+  it('(d) shows the repeats a chosen length chose, and the template’s again as written', async () => {
+    await open('sweet-spot-3x12');
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '45');
+    expect(fact('Shape')).toContain('2 × 12 min');
+    expect(control<HTMLInputElement>('repeats', 'input').value).toBe('2');
+
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '');
+    expect(control<HTMLInputElement>('repeats', 'input').value).toBe('3');
+    expect(fact('Shape')).toContain('3 × 12 min');
+  });
+
+  it('says the length once, with no reason, when no length is chosen', async () => {
+    await open('sweet-spot-3x12');
+    expect(fact('Length')).toBe('1 h 3 min');
   });
 });
 
