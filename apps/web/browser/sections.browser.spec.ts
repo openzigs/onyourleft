@@ -25,7 +25,8 @@
  *   whose garage was already two cards wide upright, and the screens #2190
  *   made a pair ({@link PAIRED_BY_2190}), one column upright by design.
  * - **The line under the title keeps the reading measure** wherever `main`
- *   dropped it.
+ *   dropped it, and in landscape so does every paragraph and notice outside
+ *   the sections (#2335: a Games course picker's ran 1160 px wide).
  * - **A phone is unchanged**: one column on every one of these routes.
  * - **The detail panes**: Routes with nothing chosen and with a route chosen,
  *   and Workouts with nothing chosen, in two columns both ways up.
@@ -37,6 +38,13 @@
  *   1500 px down one column and back up for the second, which is what CSS
  *   columns did (Files 2287 px tall at 1280×800). Each route's height is
  *   published under the grid and under the columns it replaced.
+ *
+ * - **The Games tab's three screens** (#2292, held since #2335): the Games
+ *   page's two cards in `--halves`' two tracks, and each course picker's
+ *   courses — two in the fixture — in columns from the pane's 40rem. The
+ *   Delivery picker is opened with the realistic world chosen
+ *   ({@link REALISTIC_WORLD_FOR}), because in the standard world it lists no
+ *   course at all: it says a round needs the realistic world.
  *
  * - **No section dwarfs its row** (#1026). On Settings and Files in landscape,
  *   in every row of two or more sections, the tallest is at most
@@ -70,8 +78,15 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { writeRealisticWorldChoice } from '../src/game/world-preference';
 import { RIDE_ROUTE_IDS } from '../src/shell/route-motion';
-import { ALL_ROUTES, hrefFor, type RouteDefinition, type RouteId } from '../src/shell/routes';
+import {
+  ALL_ROUTES,
+  DELIVERY_COURSES_ROUTE,
+  hrefFor,
+  type RouteDefinition,
+  type RouteId,
+} from '../src/shell/routes';
 
 import {
   applyInsets,
@@ -114,6 +129,13 @@ const SECTIONS = ALL_ROUTES.filter((route) => route.layout === 'sections');
  */
 const PAIRED_BY_2190: readonly string[] = ['route-builder', 'activity-detail'];
 
+/**
+ * The screens in `.oyl-sections--halves` (#2197): two tracks and never three.
+ * Analysis and Segments choose it by what they hold; the Games page (#2292)
+ * always, for its two cards.
+ */
+const HALVES: readonly string[] = ['analysis', 'games', 'segments'];
+
 /** Upright, these keep one column of sections — and why is in the file header. */
 const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices', ...PAIRED_BY_2190];
 
@@ -144,7 +166,7 @@ interface SectionsLayout {
   readonly h1: string | null;
   /** Distinct left edges of the children of `.oyl-sections` that span no columns. */
   readonly columns: number;
-  /** #2197: the tracks of `.oyl-sections`' grid, or 0 where it is no grid. */
+  /** #2197: the tracks of `.oyl-sections`' grid that take width, or 0 where it is no grid. */
   readonly tracks: number;
   /** How many children were counted — a page that rendered none has no columns either. */
   readonly counted: number;
@@ -156,6 +178,12 @@ interface SectionsLayout {
   /** The line under the title: its width, and the `max-width` it is held to. */
   readonly summaryWidth: number | null;
   readonly summaryMaxWidth: string | null;
+  /**
+   * #2335: the paragraphs and notices in `main` outside its sections that are
+   * wider than the line under the title is held to, in words. The measure is
+   * dropped for `main`, never for its prose.
+   */
+  readonly wideProse: readonly string[];
   /** Every child with a box, in DOM order. */
   readonly boxes: readonly SectionBox[];
   /** `.oyl-sections`' row gap in pixels; 0 where it is `normal` (columns). */
@@ -186,9 +214,52 @@ async function open(
   expect(await resolvedInsets(page)).toEqual(viewport.insets);
 }
 
-/** Opens `hash` and reads the sections inside `root` (a selector) back from the engine. */
-async function layoutAt(page: Page, hash: string, root: string): Promise<SectionsLayout> {
+/**
+ * The page that is opened with the realistic world chosen — #2335. In the
+ * standard world, which the harness chooses, the Delivery picker lists no
+ * course (DL6) and says so, so there would be no sections to measure. The
+ * choice is stored as the Settings switch stores it, and taken away again once
+ * the page has read it as it opened, so no other route sees it.
+ */
+const REALISTIC_WORLD_FOR = hrefFor(DELIVERY_COURSES_ROUTE);
+
+/** The entry {@link writeRealisticWorldChoice} stores for "chosen", as a key and a value. */
+const REALISTIC_WORLD_CHOSEN = ((): readonly [string, string] => {
+  let stored: readonly [string, string] | undefined;
+  writeRealisticWorldChoice(
+    {
+      getItem: () => null,
+      setItem: (key, value) => {
+        stored = [key, value];
+      },
+    },
+    true,
+  );
+  if (stored === undefined) throw new Error('the realistic world choice stored nothing');
+  return stored;
+})();
+
+/**
+ * Opens `hash` and reads the sections inside `root` (a selector) back from the
+ * engine — with the realistic world chosen as the page opens where `world` says.
+ */
+async function layoutAt(
+  page: Page,
+  hash: string,
+  root: string,
+  world = hash === REALISTIC_WORLD_FOR,
+): Promise<SectionsLayout> {
+  if (world) {
+    await page.evaluate(([key, value]) => {
+      localStorage.setItem(key, value);
+    }, REALISTIC_WORLD_CHOSEN);
+  }
   const seen = await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
+  if (world) {
+    await page.evaluate(([key]) => {
+      localStorage.removeItem(key);
+    }, REALISTIC_WORLD_CHOSEN);
+  }
   expect(seen?.settledWithinPatience, `${hash} did not settle`).toBe(true);
   expect(seen?.errors, `${hash} raised an error`).toEqual([]);
   return readLayout(page, root);
@@ -225,10 +296,14 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
     }
     const rowGap = grid === null ? 0 : Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
     // The engine resolves the template to one length a track ("371px 371px").
+    // A track `auto-fit` folded away is "0px" (#2335: the Games course list,
+    // "572px 572px 0px"): it takes no width, so it is no empty column.
     const tracks =
       grid === null || getComputedStyle(grid).display !== 'grid'
         ? 0
-        : getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
+        : getComputedStyle(grid)
+            .gridTemplateColumns.split(' ')
+            .filter((track) => track !== '' && Number.parseFloat(track) > 0).length;
     let garageRow: number | null = null;
     const cards = [...document.querySelectorAll('main .oyl-pairing > li')];
     if (cards.length > 0) {
@@ -240,6 +315,19 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       garageRow = Math.max(...rows.values());
     }
     const summary = document.querySelector('main > .oyl-view-head > h1 + p');
+    const measure =
+      summary === null
+        ? Number.POSITIVE_INFINITY
+        : Number.parseFloat(getComputedStyle(summary).maxWidth);
+    // A pixel for the engine's rounding of the measure's `ch`, as below.
+    const wideProse = [...(main?.querySelectorAll('p, .oyl-status') ?? [])]
+      .filter((each) => each.closest('.oyl-sections') === null)
+      .filter((each) => each.getBoundingClientRect().width > measure + 1)
+      .map(
+        (each) =>
+          `${String(Math.round(each.getBoundingClientRect().width))} px: ` +
+          `"${(each.textContent ?? '').trim().slice(0, 40)}"`,
+      );
     return {
       h1: document.querySelector('main > .oyl-view-head > h1')?.textContent ?? null,
       columns: lefts.size,
@@ -250,6 +338,7 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       viewportWidth: window.innerWidth,
       summaryWidth: summary?.getBoundingClientRect().width ?? null,
       summaryMaxWidth: summary === null ? null : getComputedStyle(summary).maxWidth,
+      wideProse,
       boxes,
       rowGap,
       sectionsHeight: grid?.getBoundingClientRect().height ?? 0,
@@ -405,15 +494,18 @@ async function fitsColumnOverflow(page: Page): Promise<string[]> {
  * and on a phone (`reflow`).
  */
 test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: NIGHTLY }, () => {
-  test('the walk finds the screens #1014 names, and those #2067 added', () => {
+  test('the walk finds the screens #1014 names, and those #2067 and #2292 added', () => {
     expect(SECTIONS.map((route) => route.id).sort()).toEqual([
       'about',
       'activity-detail',
       'analysis',
       'camera',
       'credits',
+      'delivery-courses',
       'devices',
+      'games',
       'instance',
+      'lap-race-courses',
       'more',
       'route-builder',
       'segments',
@@ -462,6 +554,9 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       // A pixel for the engine's rounding of the measure's `ch` to three places.
       expect(seen.summaryWidth ?? 0).toBeLessThanOrEqual(
         Number.parseFloat(seen.summaryMaxWidth ?? '0') + 1,
+      );
+      expect(seen.wideProse, `${route.id}: prose outside the sections left the measure`).toEqual(
+        [],
       );
     }
     console.log(`[#1014] ${TABLET_IN_THE_SHELL.name}\n${report.join('\n')}`);
@@ -521,21 +616,34 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       expectSomethingToCount(seen, route.id);
       if (emptyTrackFault(seen) !== undefined) failed.push(route.id);
     }
-    // The screens #2197 gave two tracks, and only they, have an empty one again.
-    expect(failed.sort()).toEqual(['analysis', 'segments']);
+    // The screens #2197 gave two tracks, and the Games page that took its
+    // `--halves` (#2292), and only they, have an empty one again.
+    expect(failed.sort()).toEqual(HALVES.toSorted());
   });
 
-  test('first run (no data) — Analysis and Segments hold no empty track (#2197)', async ({
+  test('first run (no data) — the screens in halves hold no empty track (#2197)', async ({
     page,
   }) => {
     await open(page, TABLET_IN_THE_SHELL, '', 'empty');
-    for (const route of SECTIONS.filter((r) => r.id === 'analysis' || r.id === 'segments')) {
+    for (const route of SECTIONS.filter((r) => HALVES.includes(r.id))) {
       const seen = await layoutAt(page, await hashOf(page, route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
       expectSomethingToCount(seen, route.id);
       expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
       expect(shortLastRowFault(seen), `${route.id}: a row is short`).toBeUndefined();
     }
+  });
+
+  test('the Delivery picker in the standard world: its notice keeps the measure (#2335)', async ({
+    page,
+  }) => {
+    // The state the walk above does not open: no realistic world, so no
+    // course, and the page says why with a way to Settings.
+    await open(page, TABLET_IN_THE_SHELL);
+    const seen = await layoutAt(page, REALISTIC_WORLD_FOR, 'main', false);
+    expect(seen.h1).toBe(DELIVERY_COURSES_ROUTE.title);
+    expect(seen.counted, 'the standard world listed a course').toBe(0);
+    expect(seen.wideProse, 'the notice left the measure').toEqual([]);
   });
 
   test('the control — switched back to prose, every route fails in landscape', async ({ page }) => {
