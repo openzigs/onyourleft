@@ -3788,6 +3788,12 @@ function GameScreen({
         // road itself is the circuit's line drawn from OpenStreetMap. A ride
         // on the stylised world on the rider's own route still shows none.
         attribution={rideHasCorridor || rideOnCircuit ? OSM_ATTRIBUTION : undefined}
+        // #2290: and the plan view draws that corridor as a street map around
+        // the rider — on exactly the rides that carry the corridor's credit
+        // (a stylised-world ride on a circuit carries the credit and draws no
+        // map), from the corridor fixed at the press, so it makes no request
+        // during the ride.
+        corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
