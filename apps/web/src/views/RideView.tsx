@@ -44,7 +44,7 @@
  * component rendering the two buttons in the right order.
  */
 
-import { useEffect, useId, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 
@@ -66,6 +66,8 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import { useOwnThresholds } from '../analysis/own-thresholds';
+import { LOCAL_ATHLETE } from '../local-athlete';
+import { builtInRideFromQuery, offeredWorkout } from '../workouts/built-in-ride';
 import type { RecoverableRide } from '../recording/recovery';
 import type { RecordingSessionId } from '@onyourleft/store';
 import {
@@ -134,6 +136,12 @@ export interface RideViewProps {
    * shell, which is what pins `AppShell`'s half.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The address's query — #2306: a tailored built-in to ride, put there by
+   * *Ride it* on the Workouts screen (`workouts/built-in-ride.ts`). Offered
+   * beside the saved workouts, never saved.
+   */
+  readonly query?: string | undefined;
 }
 
 export function RideView({
@@ -141,6 +149,7 @@ export function RideView({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: RideViewProps): JSX.Element {
   if (controller === undefined) {
     return (
@@ -160,6 +169,7 @@ export function RideView({
       workouts={workouts}
       analysis={analysis}
       sidePairing={sidePairing}
+      query={query}
     />
   );
 }
@@ -172,15 +182,37 @@ function LiveRide({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: {
   readonly controller: RideController;
   readonly workouts: WorkoutPort | undefined;
   readonly analysis: AnalysisPort | undefined;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly query: string | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
   const own = useOwnThresholds(analysis);
   const thresholdPower = own.power;
+  /*
+   * #2306: the tailored built-in the address asks for, made again here from
+   * the template and the rider's choices — with the rider's own threshold
+   * heart rate, as the tailor pane made it — as a record held in memory. It
+   * is offered beside the saved workouts and started through the same
+   * `onStart` below; nothing writes it to the workouts store.
+   */
+  const ride = useMemo(() => builtInRideFromQuery(query), [query]);
+  const offered = useMemo(
+    () =>
+      ride === undefined
+        ? undefined
+        : offeredWorkout(
+            ride,
+            workouts?.athleteId ?? analysis?.athleteId ?? LOCAL_ATHLETE,
+            own.heartRate,
+            Date.now() / 1000,
+          ),
+    [ride, workouts, analysis, own.heartRate],
+  );
   const sideCamera = useSideCamera(sidePairing);
   // #655: which of two voices answers a held *Set* — the ERG form's, or the
   // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
@@ -382,6 +414,8 @@ function LiveRide({
           power={livePower(snapshot)}
           port={workouts}
           thresholdPower={thresholdPower}
+          // #2306: a tailored built-in from the Workouts screen, or its refusal.
+          offered={offered}
           // #551: the ride's one region says the side camera's link going.
           sideCamera={sideCamera.state}
           // #647: …and, once, that the ride may stop if the screen goes off.

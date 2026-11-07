@@ -5,13 +5,14 @@ import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 import { expandWorkout, workoutShapeText, type Workout } from '@onyourleft/domain';
 
 import type { OwnThresholds } from '../analysis/own-thresholds';
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { Stepper } from '../design/Stepper';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 import { BlockChart } from '../workouts/BlockChart';
 import type { BuiltInCard } from '../workouts/built-in';
+import { hrefForRidingBuiltIn } from '../workouts/built-in-ride';
 import { hardestShare, percentOf } from '../workouts/library';
 import {
   copyName,
@@ -347,8 +348,16 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         <BlockChart segments={timeline.segments} />
       </section>
 
+      {/*
+        #2306: *Ride it* without saving, the owner's ruling 3 on #2295 — a
+        link to the Ride screen carrying the last valid choices, where the
+        workout is made again and offered beside the saved ones. *Save a
+        copy* beside it, secondary: riding is what a rider came for.
+      */}
       <p className="oyl-tailor__save">
+        <ButtonLink href={hrefForRidingBuiltIn(card.template, valid.draft)}>Ride it</ButtonLink>{' '}
         <Button
+          variant="secondary"
           type="button"
           onClick={() => {
             void save();

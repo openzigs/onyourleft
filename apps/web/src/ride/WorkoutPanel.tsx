@@ -137,6 +137,7 @@ import {
   REPLANS_ON_BADGE,
   RIDE_WITH_REPLANS,
 } from '../workout/replan-text';
+import type { OfferedWorkout } from '../workouts/built-in-ride';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -173,6 +174,15 @@ export interface WorkoutPanelProps {
   readonly port?: WorkoutPort | undefined;
   /** The rider's threshold, or `undefined` when they have not set one. */
   readonly thresholdPower?: Watts | undefined;
+  /**
+   * A tailored built-in sent from the Workouts screen's *Ride it* — #2306:
+   * a record held in memory and never saved, or the domain's refusal of the
+   * choices its address carried. Offered FIRST among the workouts, with the
+   * same *Ride* that goes to the same `onStart` as a saved one's, so it is
+   * started through the one start path and behind the same guards: no *Ride*
+   * without control or without the rider's own threshold.
+   */
+  readonly offered?: OfferedWorkout | undefined;
   /**
    * Start `record`, with what the rider chose for it in the chooser — #1244:
    * whether re-plans are on for this ride. `{}` wherever the switch was not
@@ -250,6 +260,7 @@ export function WorkoutPanel({
   workout,
   port,
   thresholdPower,
+  offered,
   onStart,
   onEnd,
   replansAvailable,
@@ -383,9 +394,45 @@ export function WorkoutPanel({
   return (
     <>
       {region}
-      {trainer.controllable ? panelBody() : null}
+      {trainer.controllable ? panelBody() : offeredAlone()}
     </>
   );
+
+  /**
+   * #2306: the built-in sent here, said in words where no *Ride* can be
+   * offered for it — its name and length, so the rider sees what they chose
+   * arrived — or why its choices were refused. Never a control.
+   */
+  function offeredLine(): JSX.Element | null {
+    if (offered === undefined) return null;
+    if (offered.status === 'refused') {
+      return (
+        <StatusMessage tone="warning">
+          {offered.name} cannot be ridden as it was asked for. {offered.message}
+        </StatusMessage>
+      );
+    }
+    const row = workoutRow(offered.record);
+    return (
+      <p data-oyl-offered-workout="">
+        From Workouts, not saved: {row.name} — {row.duration}, {row.shape}
+      </p>
+    );
+  }
+
+  /** With no trainer to control, the built-in sent here and what it needs. */
+  function offeredAlone(): JSX.Element | null {
+    if (offered === undefined) return null;
+    return (
+      <section>
+        <h3>Ride a workout</h3>
+        {offeredLine()}
+        {offered.status === 'offered' ? (
+          <p>Pair a trainer that can be controlled to ride it.</p>
+        ) : null}
+      </section>
+    );
+  }
 
   function panelBody(): JSX.Element {
     return workout === undefined ? chooser() : riding(workout);
@@ -554,16 +601,20 @@ export function WorkoutPanel({
   }
 
   function chooser(): JSX.Element {
+    // #2306: the built-in sent from Workouts first, then the saved ones. One
+    // list, so one *Ride* and one `onStart` for both.
+    const ridable = offered?.status === 'offered' ? [offered.record, ...saved] : saved;
     const offerReplans =
       replansAvailable === true &&
       trainer.hasControl &&
       thresholdPower !== undefined &&
-      saved.length > 0;
+      ridable.length > 0;
     // #1329: one answer for what the badge, every Ride button and the press
     // itself say, so a button can never read "with re-plans" and start
     // without them. Inside the list it is the same as the old
     // `replansAvailable === true && replans`: the list needs control, a
-    // threshold and a saved workout too.
+    // threshold and a workout to ride: a saved one, or (#2306) the built-in
+    // sent here. The swap library is still the saved workouts only.
     const withReplans = offerReplans && replans;
     return (
       <section>
@@ -625,45 +676,57 @@ export function WorkoutPanel({
         {!trainer.hasControl ? (
           // #1013: trainer-control text, kept on the screen (the mark, not a
           // wrapper, so the measured layout does not move).
-          <p data-oyl-kept-visible="">
-            Ask the trainer for control first. A workout sets targets on the trainer, and it will
-            refuse every one until control is granted.
-          </p>
+          <>
+            <p data-oyl-kept-visible="">
+              Ask the trainer for control first. A workout sets targets on the trainer, and it will
+              refuse every one until control is granted.
+            </p>
+            {offeredLine()}
+          </>
         ) : thresholdPower === undefined ? (
           // ⚠️ Refused rather than defaulted. A workout's targets are shares of
           // threshold, so a substituted threshold would put a made-up number on a
           // trainer — and `analysis/thresholds.ts` is the one place in this
           // program that supplies a default, deliberately.
-          <p data-oyl-kept-visible="">
-            Set your threshold power on the Analysis screen first. A workout&rsquo;s targets are a
-            share of it, so there is no number to send without one.
-          </p>
-        ) : saved.length === 0 ? (
-          <p>No workouts saved on this device yet. Build one on the Workouts screen.</p>
+          <>
+            <p data-oyl-kept-visible="">
+              Set your threshold power on the Analysis screen first. A workout&rsquo;s targets are a
+              share of it, so there is no number to send without one.
+            </p>
+            {offeredLine()}
+          </>
+        ) : ridable.length === 0 ? (
+          <>
+            {offeredLine()}
+            <p>No workouts saved on this device yet. Build one on the Workouts screen.</p>
+          </>
         ) : (
-          <ul>
-            {saved.map((record) => {
-              const row = workoutRow(record);
-              return (
-                <li key={record.id}>
-                  {row.name} — {row.duration}, {row.shape}{' '}
-                  <Button
-                    variant="secondary"
-                    size="ride"
-                    type="button"
-                    onClick={() => {
-                      // ⚠️ #400: inside the press and before anything else — the
-                      // one place the audio context may be resumed. The choice is
-                      // re-read so one made on Settings since this panel mounted
-                      // is the one this workout sounds with.
-                      const choice = readCuePreference(storage);
-                      setSound(choice);
-                      cues.set(choice);
-                      cues.begin();
-                      onStart(record, withReplans ? { replans: true } : {});
-                    }}
-                  >
-                    {/*
+          <>
+            {/* The list stands in for a refused address, so its words come first. */}
+            {offered?.status === 'refused' ? offeredLine() : null}
+            <ul>
+              {ridable.map((record) => {
+                const row = workoutRow(record);
+                return (
+                  <li key={record.id}>
+                    {row.name} — {row.duration}, {row.shape}{' '}
+                    <Button
+                      variant="secondary"
+                      size="ride"
+                      type="button"
+                      onClick={() => {
+                        // ⚠️ #400: inside the press and before anything else — the
+                        // one place the audio context may be resumed. The choice is
+                        // re-read so one made on Settings since this panel mounted
+                        // is the one this workout sounds with.
+                        const choice = readCuePreference(storage);
+                        setSound(choice);
+                        cues.set(choice);
+                        cues.begin();
+                        onStart(record, withReplans ? { replans: true } : {});
+                      }}
+                    >
+                      {/*
                       #1329, the owner's ruling of 2026-11-05: while the switch
                       is on, every Ride reads "Ride, with re-plans". The badge
                       is on the heading's row and scrolls away; this is on the
@@ -678,19 +741,20 @@ export function WorkoutPanel({
                       in the trainer column and puts the first Ride under the
                       fold floor in the Android shell.
                     */}
-                    {withReplans ? (
-                      <>
-                        {RIDE_WITH_REPLANS}
-                        <span className="oyl-visually-hidden">: {row.name}</span>
-                      </>
-                    ) : (
-                      <>Ride {row.name}</>
-                    )}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+                      {withReplans ? (
+                        <>
+                          {RIDE_WITH_REPLANS}
+                          <span className="oyl-visually-hidden">: {row.name}</span>
+                        </>
+                      ) : (
+                        <>Ride {row.name}</>
+                      )}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
         {!offerReplans ? null : (
           // #1244: the disclosure's remaining sentences, in their order, under

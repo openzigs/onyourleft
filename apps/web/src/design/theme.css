@@ -2096,8 +2096,9 @@ ul.oyl-sections.oyl-game-courses__list {
 /*
  * THE TAILOR PANE — #2305 (`views/TailorBuiltIn.tsx`). Its controls are 48 px
  * targets too, the issue's floor, as the filters above: the length select,
- * the steppers' two buttons and their boxes, and *Save a copy*. The stepper
- * rules are the stage chooser's (§"the loadout's preview") in this pane.
+ * the steppers' two buttons and their boxes, *Ride it* (#2306) and *Save a
+ * copy*. The stepper rules are the stage chooser's (§"the loadout's
+ * preview") in this pane.
  */
 .oyl-tailor select,
 .oyl-tailor__save .oyl-button {
