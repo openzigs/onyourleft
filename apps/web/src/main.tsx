@@ -828,6 +828,9 @@ function buildGamePort(
           name: route.name,
           profile: route.profile,
           attempts: attempts.length,
+          bestSeconds: fastestAttempt(
+            attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
+          )?.movingSeconds,
         });
       }
       return rows;

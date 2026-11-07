@@ -785,7 +785,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and each card says "up to N houses", or is greyed
                         with the reason in words; a greyed route is still
                         choosable, for an ordinary ride, and the switch says
-                        so. **The press**, in `GameView`:
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
