@@ -750,6 +750,8 @@ function viewFor(
           port={props.workouts}
           save={props.transfer?.save}
           selected={match.parameter}
+          // #2304: the built-in list's filter, from the address.
+          query={match.query}
         />
       );
     case 'game':

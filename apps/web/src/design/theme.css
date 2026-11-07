@@ -2063,6 +2063,37 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * WORKOUTS' TWO LISTS — #2304 (`WorkoutsView.tsx` §`ListSwitch`): the rider's
+ * own or the built-ins, drawn as the section tabs (§`.oyl-subnav-link`) and
+ * the current one told the same three ways. `aria-current="true"` rather than
+ * `page`: it is a choice of list on one page.
+ */
+.oyl-list-switch {
+  margin-block: var(--oyl-space-sm);
+}
+
+.oyl-list-switch .oyl-subnav-link[aria-current='true'] {
+  background: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+}
+
+/*
+ * THE BUILT-IN WORKOUTS' FILTERS — #2304 (`views/BuiltInWorkouts.tsx`). Each
+ * control is a 48 px target, the issue's own floor, four over the 44 px every
+ * other select and checkbox row gets (§`select`, §"A checkbox or radio ROW").
+ * The rows are the target, as there: a select is its own box, and a
+ * checkbox's label is what a thumb lands on.
+ */
+.oyl-filters select,
+.oyl-filters label:has(> input[type='checkbox']) {
+  min-height: 3rem;
+}
+
+/*
  * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
  * screen's own sentences and one action, in that order, on a quiet surface so
  * it reads as one thing rather than three paragraphs and a button.
@@ -12306,9 +12337,20 @@ select.oyl-input {
     padding: 0 calc(var(--oyl-space-sm) - 2px);
   }
 
+  /* #2304: Workouts' chosen list, the same doubled edge as the current tab. */
+  .oyl-list-switch .oyl-subnav-link[aria-current='true'] {
+    border-style: double;
+    border-width: 4px;
+    padding: 0 calc(var(--oyl-space-sm) - 2px);
+  }
+
   /* The phone's narrower segment, so the doubled edge does not widen it. */
   @media (max-width: 37.49rem) {
     .oyl-subnav-link[aria-current='page'] {
+      padding: 0 calc(var(--oyl-space-xs) - 2px);
+    }
+
+    .oyl-list-switch .oyl-subnav-link[aria-current='true'] {
       padding: 0 calc(var(--oyl-space-xs) - 2px);
     }
   }

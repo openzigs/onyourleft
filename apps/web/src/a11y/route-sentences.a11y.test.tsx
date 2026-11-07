@@ -186,6 +186,13 @@
  * not gone from the product: `wind-wiring.test.tsx` §"#2330" turns the switch
  * on and finds both. Nothing is added or reworded.
  *
+ * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
+ * request's screenshots**, for two added lines and nothing else: Workouts'
+ * list pane offers its two lists, *Your workouts* and *Built-in workouts*,
+ * on both walks. The walks open on the rider's own, so the built-ins'
+ * sentences are not on them; `BuiltInWorkouts.test.tsx` reads those. No
+ * sentence is dropped or reworded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

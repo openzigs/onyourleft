@@ -439,9 +439,14 @@ describe('deleting a workout asks first', () => {
 });
 
 describe('#1043 — the block chart', () => {
-  const chart = (root: ParentNode): Element | null => root.querySelector('[data-oyl-block-chart]');
+  // The builder's chart, in the detail pane: the list's cards draw one too, and
+  // since #2304 so do the built-ins' cards.
+  const builder = (root: ParentNode): ParentNode =>
+    root.querySelector('[data-oyl-pane="detail"]') ?? root;
+  const chart = (root: ParentNode): Element | null =>
+    builder(root).querySelector('[data-oyl-block-chart]');
   const bandsDrawn = (root: ParentNode): string[] =>
-    queryAll<SVGPathElement>(root, '[data-oyl-block-chart] path')
+    queryAll<SVGPathElement>(builder(root), '[data-oyl-block-chart] path')
       .map((path) => path.getAttribute('class') ?? '')
       .filter((name) => name.includes('__band-'))
       .sort();
@@ -598,7 +603,12 @@ describe('#670 — a selected workout', () => {
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Workout not found',
     );
-    expect(view.container.textContent).not.toContain('Sweet spot');
+    // Neither listed nor shown. The built-ins below the list (#2304) hold a
+    // "Sweet spot" of their own, so the rider's own part is what is read.
+    expect(view.container.querySelector('[data-oyl-list="saved"]')?.textContent).not.toContain(
+      'Sweet spot',
+    );
+    expect(view.container.querySelector('.oyl-selected')?.textContent).not.toContain('Sweet spot');
   });
 
   it('with nothing chosen, draws the builder, and the list’s way to it is secondary', async () => {
