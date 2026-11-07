@@ -124,8 +124,10 @@ interface Run {
  * climb to 9.4 % and a 4.5 % one to 4.44 %, and the caption said "9 %" and
  * "4 %". A sample within half the window of the run's edge is measured over a
  * window that reaches the road beyond it, so the mean is taken without those
- * samples ({@link BODY_TRIM_METRES}); a slope whose body would be shorter
- * than one trim (under 150 m at 10 m samples) keeps the mean over all of it.
+ * samples ({@link BODY_TRIM_METRES}); a slope too short to have a body keeps
+ * the mean over all of it. ⚠️ **However short the body**: a short real climb
+ * is mostly ramp, and its middle samples are the nearest to its grade, so a
+ * body of one sample is kept rather than the ramps averaged back in.
  */
 export function slopesOf(profile: RouteProfile): readonly Slope[] {
   const resolution = profile.resolution as number;
@@ -162,8 +164,7 @@ export function slopesOf(profile: RouteProfile): readonly Slope[] {
   const slopeOf = (run: Run, across?: Run): Slope => {
     // Across the line on a loop, the head's samples follow the tail's.
     const samples = [...samplesOf(run), ...(across === undefined ? [] : samplesOf(across))];
-    // A body shorter than one trim is too little road to stand for the slope.
-    const body = samples.length >= 3 * trim ? samples.slice(trim, samples.length - trim) : samples;
+    const body = samples.length > 2 * trim ? samples.slice(trim, samples.length - trim) : samples;
     const mean = body.reduce((sum, value) => sum + value, 0) / body.length;
     return {
       kind: run.band as SlopeKind,

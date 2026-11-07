@@ -412,6 +412,23 @@ describe('a steady climb, as the owner’s screenshots asked — #2291', () => {
     },
   );
 
+  it('says a short real climb at its own grade: 8 % over 100 m, 12 % over 110 m', () => {
+    for (const [metres, grade, said] of [
+      [100, 8, '8 %'],
+      [110, 12, '12 %'],
+    ] as const) {
+      const profile = route([
+        100,
+        ...rise(100, 1000, 0),
+        ...rise(100, metres, grade),
+        ...rise(100 + (metres * grade) / 100, 1000, 0),
+      ]);
+      expect(nextClimbText(lookAhead(profile, 900).climb, 'metric')?.endsWith(` · ${said}`)).toBe(
+        true,
+      );
+    }
+  });
+
   it('still draws a real change of band: 300 m at 6 % then 300 m at 10 %', () => {
     const profile = route([
       100,
