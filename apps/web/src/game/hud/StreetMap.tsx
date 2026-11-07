@@ -29,7 +29,12 @@
 
 import { useMemo, type JSX } from 'react';
 
+import { metres } from '@onyourleft/domain';
+import type { UnitSystem } from '@onyourleft/store';
+
 import { MAP_COLOURS } from '../../map/basemap';
+import { useUnits } from '../../units/context';
+import { formatDistance, spokenDistanceUnit } from '../../units/format';
 import type { WorldCorridor } from '../world-data/corridor';
 import type { HudInput } from './fields';
 import { PLAN_AHEAD_STROKE_PIXELS, RIDER_MARK_RING_PIXELS, planWhere } from './plan';
@@ -68,9 +73,14 @@ export interface StreetMapProps {
   readonly distance: number;
 }
 
-/** The sentence a rider who is not looking at the panel hears. */
-function describe(props: StreetMapProps): string {
-  const across = `${String(STREET_MAP_METRES / 1000)} km`;
+/**
+ * The sentence a rider who is not looking at the panel hears. The span is in
+ * the rider's own units and SAID, not printed (`units/format.ts`
+ * §`spokenDistanceUnit`): "about 1.0 kilometres", "about 0.6 miles".
+ */
+function describe(props: StreetMapProps, units: UnitSystem): string {
+  const span = formatDistance(metres(STREET_MAP_METRES), units).value;
+  const across = `${span} ${spokenDistanceUnit(units)}`;
   return (
     `Street map around you, north up, about ${across} from top to bottom, with the route on ` +
     `it. ${planWhere(props.profile, props.distance)}`
@@ -78,6 +88,7 @@ function describe(props: StreetMapProps): string {
 }
 
 export function StreetMap(props: StreetMapProps): JSX.Element {
+  const units = useUnits();
   // Once per ride: the corridor and the route are both fixed at the press.
   const index = useMemo(
     () => streetMapIndex(props.corridor, props.profile),
@@ -98,7 +109,7 @@ export function StreetMap(props: StreetMapProps): JSX.Element {
         // height is the kilometre and its width is more of the same map.
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label={describe(props)}
+        aria-label={describe(props, units)}
       >
         <g aria-hidden="true">
           <path fill={STREET_MAP_PAINTS.land.fill} data-oyl-street-map="land" d={layers.land} />

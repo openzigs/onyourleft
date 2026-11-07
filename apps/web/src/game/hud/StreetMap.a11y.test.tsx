@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../../design/contrast';
 import { paletteColours, THEMES } from '../../design/tokens';
 import { mount, type Mounted } from '../../testing/mount';
+import { UnitsProvider } from '../../units/context';
 import { PLAN_SMALLEST_PIXELS, RIDER_MARK_MINIMUM_PIXELS, RIDER_MARK_RING_PIXELS } from './plan';
 import { STREET_MAP_PAINTS, StreetMap } from './StreetMap';
 import { STREET_MAP_METRES } from './street-map';
@@ -57,13 +58,24 @@ describe('the street map is a picture with a sentence — #2290', () => {
     const svg = root.querySelector('svg');
     expect(svg?.getAttribute('role')).toBe('img');
     expect(svg?.getAttribute('aria-label')).toBe(
-      'Street map around you, north up, about 1 km from top to bottom, with the route on it. ' +
-        'You are 20 per cent of the way along the route.',
+      'Street map around you, north up, about 1.0 kilometres from top to bottom, with the route ' +
+        'on it. You are 20 per cent of the way along the route.',
     );
     // The class every layout sizes the plan view by, phones' give-way rules included.
     expect(svg?.classList.contains('oyl-hud__plan-svg')).toBe(true);
     expect(svg?.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
     expect(root.querySelector('svg > g')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('says the span in the rider’s own units', async () => {
+    mounted = await mount(
+      <UnitsProvider units="imperial">
+        <StreetMap corridor={northCorridor()} profile={northRoute()} distance={300} />
+      </UnitsProvider>,
+    );
+    expect(mounted.container.querySelector('svg')?.getAttribute('aria-label')).toContain(
+      'about 0.6 miles from top to bottom',
+    );
   });
 });
 
