@@ -118,7 +118,15 @@ export function withChoice(draft: TailorDraft, control: TailorControl, value: st
 
 export type TailorOutcome =
   | { readonly status: 'tailored'; readonly workout: Workout }
-  | { readonly status: 'refused'; readonly message: string };
+  | {
+      readonly status: 'refused';
+      readonly message: string;
+      /**
+       * The control the refusal belongs beside, when it can be told from the
+       * draft alone; absent for a refusal of the choices together.
+       */
+      readonly control?: TailorControl;
+    };
 
 /** A box's text as a number, `undefined` for empty, `NaN` for anything else. */
 function numberIn(text: string): number | undefined {
@@ -181,16 +189,46 @@ export function tailorFromDraft(
 ): TailorOutcome {
   const choices = choicesFrom(draft, thresholdHeartRate);
   if ('message' in choices) {
-    return { status: 'refused', message: choices.message };
+    return { status: 'refused', message: choices.message, control: choices.control };
   }
   try {
     return { status: 'tailored', workout: tailorWorkout(template, choices) };
   } catch (error) {
     if (error instanceof WorkoutError) {
-      return { status: 'refused', message: sentence(error.message) };
+      const control = refusedControl(template, draft, thresholdHeartRate);
+      return {
+        status: 'refused',
+        message: sentence(error.message),
+        ...(control === undefined ? {} : { control }),
+      };
     }
     throw error;
   }
+}
+
+/**
+ * The control a domain refusal belongs to: the first whose choice is refused
+ * when it is the only one made. The domain's refusal is one error code for
+ * every choice, and the draft as a whole is refused whichever control the
+ * rider touched last, so the control is found by asking about each alone.
+ */
+function refusedControl(
+  template: WorkoutTemplate,
+  draft: TailorDraft,
+  thresholdHeartRate: number | undefined,
+): TailorControl | undefined {
+  for (const control of ['length', 'intensity', 'repeats', 'recovery'] as const) {
+    const alone = { ...EMPTY_TAILOR_DRAFT, [control]: draft[control] };
+    const choices = choicesFrom(alone, thresholdHeartRate);
+    if ('message' in choices) continue;
+    try {
+      tailorWorkout(template, choices);
+    } catch (error) {
+      if (error instanceof WorkoutError) return control;
+      throw error;
+    }
+  }
+  return undefined;
 }
 
 /** One block of the preview, in words. */

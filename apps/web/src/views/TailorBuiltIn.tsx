@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useId, useMemo, useState, type JSX } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 
 import { expandWorkout, workoutShapeText, type Workout } from '@onyourleft/domain';
 
@@ -87,6 +87,9 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
   const [saved, setSaved] = useState<{ readonly name: string; readonly id: string } | undefined>(
     undefined,
   );
+  const [saveFailed, setSaveFailed] = useState(false);
+  // A press while a save is in flight must not write a second copy.
+  const saving = useRef(false);
   const ids = {
     length: useId(),
     intensity: useId(),
@@ -113,20 +116,32 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
     const next = withChoice(draft, control, value);
     setDraft(next);
     setSaved(undefined);
+    setSaveFailed(false);
     const outcome = tailorFromDraft(card.template, next, thresholds.heartRate);
     if (outcome.status === 'tailored') {
       setValid({ draft: next, workout: outcome.workout });
       setRefusal(undefined);
     } else {
-      setRefusal({ control, message: outcome.message });
+      setRefusal({ control: outcome.control ?? control, message: outcome.message });
     }
   }
 
   async function save(): Promise<void> {
-    const timeline = expandWorkout(valid.workout);
-    const name = copyName(card.template, timeline.totalSeconds, valid.draft);
-    const id = await onSaveCopy(name, valid.workout);
-    setSaved({ name, id });
+    if (saving.current) return;
+    saving.current = true;
+    setSaveFailed(false);
+    try {
+      const timeline = expandWorkout(valid.workout);
+      const name = copyName(card.template, timeline.totalSeconds, valid.draft);
+      const id = await onSaveCopy(name, valid.workout);
+      setSaved({ name, id });
+    } catch {
+      // The store said no (or there is none): the rider is told, nothing is shown as saved.
+      setSaved(undefined);
+      setSaveFailed(true);
+    } finally {
+      saving.current = false;
+    }
   }
 
   const timeline = useMemo(() => expandWorkout(valid.workout), [valid.workout]);
@@ -332,6 +347,11 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
           Save a copy
         </Button>
       </p>
+      {saveFailed ? (
+        <StatusMessage tone="danger" live>
+          The copy could not be saved. Nothing was added to your workouts; try again.
+        </StatusMessage>
+      ) : null}
       {saved === undefined ? null : (
         <StatusMessage tone="success" live>
           Saved “{saved.name}” to your workouts.{' '}
