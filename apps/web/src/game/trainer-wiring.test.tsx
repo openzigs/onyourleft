@@ -110,6 +110,7 @@ import {
   RECORDING_STARTED_TEXT,
 } from './StageChooser';
 import type { CourseLineEvent } from '../recording/laps';
+import { formatDuration } from '../format';
 import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
@@ -1499,6 +1500,117 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     }
     // The second lap began where the first ended.
     expect(laps[1]?.startedAt).toBe((laps[0]?.startedAt ?? 0) + (laps[0]?.elapsedTime ?? 0));
+    await rig.done();
+  });
+
+  /**
+   * #2080: the lap splits panel, read off the rendered HUD over the REAL ride
+   * controller, its recorder and the #44 simulator, and then the saved ride's
+   * laps read back from the store: the times and powers the panel showed are
+   * the rows the ride's page lists.
+   */
+  it('shows lap splits on a loop that are the saved ride’s laps (#2080)', async () => {
+    /** 300 flat metres out and back, so its ends meet and it is honestly a loop. */
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 30; index += 1) {
+      const out = index <= 15 ? index : 30 - index;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (out * 10) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(20),
+      });
+    }
+    const route: RidableRoute = {
+      id: 'route-circuit',
+      name: 'Test circuit',
+      profile: routeProfile(points, { loop: true }),
+      attempts: 0,
+    };
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(route)}
+        trainer={gameTrainerPortOver(rig.controller)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+
+    /** The panel's rows as a rider reads them: label, lap, time, power. */
+    const rows = (): string[][] =>
+      [...(mounted?.container.querySelectorAll('.oyl-hud__laps-row') ?? [])].map((row) =>
+        [...row.querySelectorAll('.oyl-hud__laps-label, .oyl-hud__laps-value')].map(
+          (cell) => cell.textContent ?? '',
+        ),
+      );
+    const rideOneSecond = async (): Promise<void> => {
+      await pump(1);
+      await act(async () => {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      });
+      await pump(1);
+    };
+    const rideUntil = async (reached: () => boolean): Promise<void> => {
+      for (let second = 0; second < 400 && !reached(); second += 1) {
+        await rideOneSecond();
+      }
+      expect(reached()).toBe(true);
+    };
+
+    // On the first lap the panel is there, with no lap finished to show.
+    await rideOneSecond();
+    expect(rows()[0]?.slice(0, 2)).toEqual(['Now', '1']);
+    expect(rows().slice(1)).toEqual([
+      ['Last', '—', '—', '—'],
+      ['Best', '—', '—', '—'],
+    ]);
+    // Two laps, the second harder, and the panel as it stands on the third.
+    await rideUntil(() => rows()[1]?.[1] === '1');
+    rig.bench.rider.set({ power: watts(320) });
+    await rideUntil(() => rows()[1]?.[1] === '2');
+    const shown = rows();
+    expect(shown[0]?.slice(0, 2)).toEqual(['Now', '3']);
+
+    await clickThrough(buttonStarting('End ride'));
+    await act(async () => {
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+    });
+    await flush();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back on a fresh connection, as the ride's page reads them.
+    const laps = await rig.harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('the-ride')),
+    );
+    const [first, second] = laps;
+    if (first === undefined || second === undefined) throw new Error('two laps were not saved');
+    const row = (label: string, lap: typeof first): string[] => [
+      label,
+      String(lap.ordinal + 1),
+      formatDuration(lap.movingTime),
+      lap.averagePower === undefined ? '—' : `${String(lap.averagePower)} W`,
+    ];
+    expect(second.averagePower).toBeDefined();
+    expect(shown[1]).toEqual(row('Last', second));
+    const quicker = Math.floor(second.movingTime) < Math.floor(first.movingTime) ? second : first;
+    expect(shown[2]).toEqual(row('Best', quicker));
+
+    // And the next ride starts with none of them: its laps are its own.
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+    await rideOneSecond();
+    expect(rows().slice(1)).toEqual([
+      ['Last', '—', '—', '—'],
+      ['Best', '—', '—', '—'],
+    ]);
     await rig.done();
   });
 

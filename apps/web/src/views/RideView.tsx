@@ -44,9 +44,9 @@
  * component rendering the two buttons in the right order.
  */
 
-import { useEffect, useId, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 
-import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
+import type { Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -65,6 +65,9 @@ import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
+import { useOwnThresholds } from '../analysis/own-thresholds';
+import { LOCAL_ATHLETE } from '../local-athlete';
+import { builtInRideFromQuery, offeredWorkout } from '../workouts/built-in-ride';
 import type { RecoverableRide } from '../recording/recovery';
 import type { RecordingSessionId } from '@onyourleft/store';
 import {
@@ -78,6 +81,7 @@ import {
 import { ConnectedSensors } from '../ride/SensorPairing';
 import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
+import { ThresholdOffer } from '../ride/ThresholdOffer';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
@@ -133,6 +137,12 @@ export interface RideViewProps {
    * shell, which is what pins `AppShell`'s half.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The address's query — #2306: a tailored built-in to ride, put there by
+   * *Ride it* on the Workouts screen (`workouts/built-in-ride.ts`). Offered
+   * beside the saved workouts, never saved.
+   */
+  readonly query?: string | undefined;
 }
 
 export function RideView({
@@ -140,6 +150,7 @@ export function RideView({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: RideViewProps): JSX.Element {
   if (controller === undefined) {
     return (
@@ -159,6 +170,7 @@ export function RideView({
       workouts={workouts}
       analysis={analysis}
       sidePairing={sidePairing}
+      query={query}
     />
   );
 }
@@ -171,15 +183,39 @@ function LiveRide({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: {
   readonly controller: RideController;
   readonly workouts: WorkoutPort | undefined;
   readonly analysis: AnalysisPort | undefined;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly query: string | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  const own = useOwnThresholds(analysis);
+  // #2307: read again once the rider accepts a test's estimate.
+  const [thresholdVersion, setThresholdVersion] = useState(0);
+  const own = useOwnThresholds(analysis, thresholdVersion);
   const thresholdPower = own.power;
+  /*
+   * #2306: the tailored built-in the address asks for, made again here from
+   * the template and the rider's choices — with the rider's own threshold
+   * heart rate, as the tailor pane made it — as a record held in memory. It
+   * is offered beside the saved workouts and started through the same
+   * `onStart` below; nothing writes it to the workouts store.
+   */
+  const ride = useMemo(() => builtInRideFromQuery(query), [query]);
+  const offered = useMemo(
+    () =>
+      ride === undefined
+        ? undefined
+        : offeredWorkout(
+            ride,
+            workouts?.athleteId ?? analysis?.athleteId ?? LOCAL_ATHLETE,
+            own.heartRate,
+            Date.now() / 1000,
+          ),
+    [ride, workouts, analysis, own.heartRate],
+  );
   const sideCamera = useSideCamera(sidePairing);
   // #655: which of two voices answers a held *Set* — the ERG form's, or the
   // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
@@ -295,6 +331,20 @@ function LiveRide({
           notice before them since #647.
         */}
         <RideControls
+          // #2307: a threshold test's estimate, under the result card.
+          thresholdOffer={
+            snapshot.savedRide?.thresholdTest === undefined ? undefined : (
+              <ThresholdOffer
+                key={snapshot.savedRide.activityId}
+                offer={snapshot.savedRide.thresholdTest}
+                current={thresholdPower}
+                analysis={analysis}
+                onAccepted={() => {
+                  setThresholdVersion((version) => version + 1);
+                }}
+              />
+            )
+          }
           controller={controller}
           snapshot={snapshot}
           zoom={zoom}
@@ -381,6 +431,8 @@ function LiveRide({
           power={livePower(snapshot)}
           port={workouts}
           thresholdPower={thresholdPower}
+          // #2306: a tailored built-in from the Workouts screen, or its refusal.
+          offered={offered}
           // #551: the ride's one region says the side camera's link going.
           sideCamera={sideCamera.state}
           // #647: …and, once, that the ride may stop if the screen goes off.
@@ -469,54 +521,6 @@ function LiveRide({
       {snapshot.sensors.length === 0 && snapshot.phase === 'idle' ? <OtherRides /> : null}
     </div>
   );
-}
-
-/** The rider's own thresholds, each `undefined` when they have not set it. */
-interface OwnThresholds {
-  readonly power: Watts | undefined;
-  readonly heartRate: BeatsPerMinute | undefined;
-}
-
-const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
-
-/**
- * Read the athlete's thresholds once, for the workout panel — threshold
- * heart rate too since #1240, which a heart-rate hold needs.
- *
- * `undefined` while it is being read and `undefined` when it is not set, and
- * the two are deliberately the same value: the panel's answer to both is the
- * same sentence, and a screen that distinguished "loading" from "not set" would
- * be offering a rider a state they cannot act on.
- */
-function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
-  const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
-  useEffect(() => {
-    if (analysis === undefined) {
-      return;
-    }
-    let live = true;
-    void analysis.store
-      .getAthlete(analysis.athleteId)
-      .then((athlete) => {
-        if (live) {
-          // The rider's own, and nothing substituted: `analysis/thresholds.ts`
-          // is the one place a default is, and it is not for this screen.
-          setThreshold({
-            power: athlete?.thresholdPower,
-            heartRate: athlete?.thresholdHeartRate,
-          });
-        }
-      })
-      .catch(() => {
-        // A store that cannot be read leaves the threshold absent, which the
-        // panel already explains. There is nothing else this screen can say
-        // that a rider could act on.
-      });
-    return () => {
-      live = false;
-    };
-  }, [analysis]);
-  return threshold;
 }
 
 /**
@@ -730,9 +734,15 @@ function RideControls({
   snapshot,
   zoom,
   touchLockHelp,
+  thresholdOffer,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
+  /**
+   * #2307: a threshold test's estimate and its two answers, drawn under the
+   * result card, which it belongs to and goes with.
+   */
+  readonly thresholdOffer?: JSX.Element | undefined;
   /**
    * #1433: the zoom, set at the END of the row the ride's own controls stand
    * in — beside them where the row has room, which on a landscape tablet it
@@ -851,6 +861,7 @@ function RideControls({
             }}
           />
         )}
+        {result === undefined ? null : thresholdOffer}
         {canStartNewRide(snapshot) ? (
           <Button
             ref={startNewRide}

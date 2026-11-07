@@ -34,15 +34,26 @@
  */
 
 import type { JSX } from 'react';
-import { Bike, Ellipsis, House, RotateCcwClock, Route, type LucideIcon } from 'lucide-react';
+import {
+  Bike,
+  Ellipsis,
+  Gamepad2,
+  House,
+  RotateCcwClock,
+  Route,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type { NavIconName } from './routes';
 
-/** One stroke for every icon, so the five read as one set. */
+/** One stroke for every icon, so the six read as one set. */
 const NAV_ICON_STROKE_WIDTH = 1.8;
 
 const SHAPES: Record<NavIconName, LucideIcon> = {
   ride: Bike,
+  // #2292: the Games tab — the glyph Devices already draws beside a game
+  // controller (`ride/ControllerPairing.tsx`), so the build gains no icon.
+  games: Gamepad2,
   // ⚠️ `History` in #673's list is an ALIAS of this icon in lucide-react
   // 1.48.0 (its class is `lucide-rotate-ccw-clock`); the canonical name is
   // imported so a major release that drops the alias cannot drop the icon.

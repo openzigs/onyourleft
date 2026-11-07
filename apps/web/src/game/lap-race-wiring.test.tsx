@@ -715,6 +715,34 @@ describe('a solo lap race inside a game ride — #1906', () => {
     expect(standings).not.toContain('Hard bot');
   });
 
+  it('names every bot of a full field in the standings, on every frame, the rider last on the line (#2328)', async () => {
+    expect(RACE.bots).toBe(LAP_RACE_MOST_BOTS);
+    const bots = Array.from({ length: RACE.bots }, (_, index) => `Hard bot ${String(index + 1)}`);
+    /** The names on the standings' lines, as the rider reads them, frame by frame. */
+    const read: string[][] = [];
+    await rideTheTrace({
+      race: RACE,
+      frames: 40,
+      onFrame: () => {
+        read.push(
+          queryAll<HTMLElement>(
+            mounted?.container ?? document,
+            '.oyl-hud__standings .oyl-hud__standings-who',
+          ).map((each) => each.textContent ?? ''),
+        );
+        return Promise.resolve();
+      },
+    });
+    // On the line the rider is behind the whole field: #2328's screenshot.
+    expect(read[0]?.at(-1)).toBe('You');
+    expect(read).toHaveLength(40);
+    read.forEach((names, frame) => {
+      expect([...names].sort(), `frame ${String(frame)}`).toEqual([...bots, 'You'].sort());
+    });
+    const summary = mounted?.container.querySelector('.oyl-hud__standings-summary')?.textContent;
+    expect(summary).toMatch(/^You are \d of 8\.$/u);
+  });
+
   it('draws a hit steady under reduced motion (WCAG 2.3.1)', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: query === '(prefers-reduced-motion: reduce)',

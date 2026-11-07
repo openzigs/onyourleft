@@ -28,6 +28,7 @@
     "vite.config.ts",
     "vite.browser.config.ts",
     "vite.demo.config.ts",
+    "vite.valhalla.config.ts",
     "playwright.config.ts",
     "playwright.video.config.ts",
     "vitest.config.ts"

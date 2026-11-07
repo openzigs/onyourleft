@@ -47,13 +47,13 @@ import {
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
 import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
+import { HUD_LAYOUT_STORAGE_KEY, writeHudLayout } from './hud/hud-layout-preference';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { tap } from '../design/touch-lock-testing';
 import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { CameraThrottle } from '../camera/session';
-import type { ThermalPort } from './thermal-port';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -280,8 +280,6 @@ async function startRiding(options: {
   readonly cadence?: () => SensorReading;
   /** The camera the ladder throttles — #514. @see recordingCamera */
   readonly camera?: CameraThrottle;
-  /** The platform's thermal forecast — #247. */
-  readonly thermal?: ThermalPort;
   /** The rider's local day — #1622. @see GameViewProps.today */
   readonly today?: () => CalendarDay;
 }): Promise<SceneFrame[]> {
@@ -297,7 +295,6 @@ async function startRiding(options: {
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
       camera={options.camera}
-      thermal={options.thermal}
       today={options.today}
     />,
   );
@@ -972,14 +969,79 @@ describe('the ride’s moving time while the GAME is paused — #1111’s review
 });
 
 describe('the choice itself', () => {
+  /** The pacer's switch, found by the words beside it. */
+  function pacerSwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(
+      mounted?.container ?? document,
+      'input[type="checkbox"]',
+    ).find((input) => (input.closest('label')?.textContent ?? '').includes('pacer'));
+  }
+
+  /** The intensity box, found by its label rather than by its position. */
+  function intensityBox(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="number"]').find(
+      (input) => (input.labels?.[0]?.textContent ?? '').includes('Pacer intensity'),
+    );
+  }
+
+  function rideButton(): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
+
   it('offers the pacer the way the ghost is offered, with a default already in the box', async () => {
     mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
     await settle();
 
     const text = mounted.container.textContent ?? '';
     expect(text).toContain('pacer');
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
-    expect(intensity?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+  });
+
+  it('shows the intensity box only while the pacer is on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    const toggle = pacerSwitch();
+    expect(toggle?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+
+    await clickThrough(toggle);
+    expect(intensityBox()).toBeDefined();
+
+    await clickThrough(pacerSwitch());
+    expect(pacerSwitch()?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+  });
+
+  it('keeps a typed intensity for when the pacer is switched back on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('1.8');
+    expect(intensityBox()?.value).toBe('1.8');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe('1.8');
+  });
+
+  it('does not let a refused intensity in the hidden box block the ride (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('70');
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    expect(rideButton()?.getAttribute('aria-disabled')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-game__problem')).toBeNull();
   });
 
   it('refuses to start on an intensity the rule would reject, and says why', async () => {
@@ -1383,9 +1445,7 @@ describe('the ride’s season is the rider’s day at ride start (#1622)', () =>
  *
  * The frames are long on purpose: {@link FRAME_PERIOD_MS} is already well past
  * `FRAME_MS_REDUCE_ABOVE`, so a phone this slow is a sustained hot measurement
- * and nothing has to reach for the thermal API — which, per
- * `docs/validation/0002-android-shell-and-game.md` Part E, is `undefined` in
- * the shipped app in any case.
+ * — and since #2289 frame time is the ladder's only input.
  */
 describe('GameView — a hot phone sheds scenery before frame rate (#245)', () => {
   it('tells the renderer a leaner rung, and stops placing what it stops drawing', async () => {
@@ -1450,9 +1510,9 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     // own scope — and React invokes an updater during the *next* render, by
     // which time the loop had already moved it to `at`. So the ladder was fed
     // `frameMs: 0` on every frame of every ride: permanently "cool", never
-    // once hot. With `thermalHeadroom` `undefined` in the shipped app
-    // (validation 0002 Part E) that was the only live input to the policy, so
-    // #91's whole reduction path was unreachable — and every test of it passed,
+    // once hot. Frame time was the only live input to the policy then (the
+    // thermal forecast was `undefined` in the shipped app, and since #2289 it
+    // is not read at all), so #91's whole reduction path was unreachable — and every test of it passed,
     // because `quality.ts` is pure and was being asked the right question by
     // nobody.
     //
@@ -1867,126 +1927,6 @@ describe('GameView — leaving the game hands the camera back (#514)', () => {
 });
 
 /**
- * The thermal forecast reaches the ladder — #247.
- *
- * Until #247 `quality.ts`'s headroom half had no caller: the ladder was asked
- * `{ frameMs }` and nothing else, so `HEADROOM_REDUCE_ABOVE` could not fire on
- * any device. These drive the real loop at comfortable frame times, so frame
- * time alone would never step down, and read the rung the renderer was told.
- */
-describe('GameView — a hot forecast steps the world down (#247)', () => {
-  /** A port that always answers the same forecast. */
-  const forecasting = (headroom: number | undefined): ThermalPort => ({
-    readThermalHeadroom: () => Promise.resolve(headroom),
-  });
-  const COMFORTABLE_MS = 1000 / 60;
-
-  it('steps down on a hot forecast even though every frame is comfortable', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(0.95) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
-  });
-
-  /**
-   * The review finding on #523. The forecast is read every ten seconds and the
-   * ladder counts pressure per FRAME, so one reading handed to every frame
-   * until the next was hundreds of samples: one hot reading walked the ride to
-   * the floor, and one cool one climbed it straight back. A reading may now
-   * move the ladder one rung at most.
-   */
-  describe('one reading moves the ladder one rung at most', () => {
-    /** The poll `GameView` starts, run by the test. @see thermal.ts §everyInterval */
-    let polls: (() => void)[] = [];
-    beforeEach(() => {
-      polls = [];
-      vi.stubGlobal('setInterval', (task: () => void) => {
-        polls.push(task);
-        return polls.length;
-      });
-      vi.stubGlobal('clearInterval', () => undefined);
-    });
-
-    /** A port answering whatever the test last set. */
-    function settable(first: number): ThermalPort & { set: (next: number) => void } {
-      let headroom = first;
-      return {
-        readThermalHeadroom: () => Promise.resolve(headroom),
-        set: (next) => {
-          headroom = next;
-        },
-      };
-    }
-
-    /** Take the next reading, as the ten-second poll would. */
-    async function poll(): Promise<void> {
-      await act(async () => {
-        for (const task of polls) {
-          task();
-        }
-        await Promise.resolve();
-      });
-    }
-
-    /**
-     * Long enough for a reading that was NOT spent to take three more steps,
-     * which is what these tests catch. ⚠️ It was twenty times the sample count
-     * until CI's coverage run timed two of these out at Vitest's 5 s default.
-     */
-    const LONG_AFTER = 4 * SUSTAINED_SAMPLES;
-
-    it('steps down one rung on one hot reading, however many frames it is held for', async () => {
-      await startRiding({ pacer: false, thermal: settable(0.95) });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1]]);
-    });
-
-    it('steps down one more rung on the next hot reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
-    });
-
-    // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
-    // for this case: under coverage on CI it took 1.1 s to 3.0 s over thirteen green `main` runs on
-    // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
-    // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
-    // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
-    // that never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
-    it('climbs one rung, not all of them, on one cool reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      port.set(0.2);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
-    }, 10_000);
-  });
-
-  it('stays on the top rung under a cool forecast', async () => {
-    // The control: the same ride, the same frames, a forecast well clear.
-    await startRiding({ pacer: false, thermal: forecasting(0.2) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
-  });
-
-  it('reads a NaN forecast as no opinion, so comfortable frames keep the top rung', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(Number.NaN) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
-  });
-});
-
-/**
  * #1482 — the HUD's touch lock, through the real game: what a tap on the
  * HUD's *Pause* or *End ride* does to the ride while it is on, read off the
  * HUD and the trainer port as a rider and the Ride screen would see them.
@@ -2183,5 +2123,146 @@ describe('the rider’s W/kg and zone on the HUD — #2077', () => {
       queryAll(mounted?.container ?? document, '.oyl-hud__field dt').map((dt) => dt.textContent),
     ).not.toContain('Zone');
     expect(hudField('W/kg')).toBe(NO_READING);
+  });
+});
+
+/**
+ * #2078 — the recent graph, wired: written from the frame loop once a second
+ * of the ride's clock, from the readings the HUD shows, and drawn in the
+ * route panel. `recent-trace.test.ts` holds the ring; `RecentGraph.test.tsx`
+ * the drawing.
+ */
+describe('the last ten minutes on the HUD — #2078', () => {
+  it('writes one second of power and heart rate per second ridden, however many frames', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    // 40 frames at 250 ms: ten seconds of ride, and 40 frames that could each
+    // have drawn the graph.
+    await pump(40);
+    const graph = mounted.container.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]');
+    expect(graph).not.toBeNull();
+    const written = Number(graph?.getAttribute('data-oyl-graph-written'));
+    expect(written).toBeGreaterThanOrEqual(8);
+    expect(written).toBeLessThanOrEqual(11);
+    // The port's live 220 W and 142 bpm, as one unbroken run each.
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-power')).toHaveLength(1);
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-heart')).toHaveLength(1);
+  });
+
+  /**
+   * PR #2231's review: the frame loop is what decides a reading "dropped",
+   * and it is the ring's only production writer. Each sensor goes quiet for
+   * three seconds of the ride, as `sensors.ts` §`gameSensors` reports a
+   * paired sensor that stopped — power `0` and not live, heart rate no value
+   * and not live — and the drawn line is read back: two runs with a gap
+   * between them, and no point on the zero line (`y` 100 in the drawing's
+   * units; heart rate's floor clamps a zero there too).
+   */
+  for (const dropped of ['power', 'heart rate'] as const) {
+    it(`draws a gap where ${dropped} dropped mid-ride, never a zero`, async () => {
+      let quiet = false;
+      const port: GamePort = {
+        ...pedallingPort(testRoute()),
+        readSensors: () => ({
+          rider:
+            quiet && dropped === 'power'
+              ? { power: watts(0), live: false, paired: true }
+              : { power: watts(220), live: true, paired: true },
+          cadence: LIVE_CADENCE,
+          heartRate:
+            quiet && dropped === 'heart rate'
+              ? { value: undefined, live: false, paired: true }
+              : { value: 142, live: true, paired: true },
+        }),
+      };
+      mounted = await mount(<GameView port={port} now={() => nowMs} />);
+      await settle();
+      const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      );
+      await clickThrough(ride);
+      // Three seconds live, three dropped, three live again, at 250 ms a frame.
+      await pump(12);
+      quiet = true;
+      await pump(12);
+      quiet = false;
+      await pump(12);
+      const graph = mounted.container.querySelector(
+        '.oyl-hud__route [data-testid="oyl-hud-recent"]',
+      );
+      const line = dropped === 'power' ? '.oyl-hud__recent-power' : '.oyl-hud__recent-heart';
+      const other = dropped === 'power' ? '.oyl-hud__recent-heart' : '.oyl-hud__recent-power';
+      const runs = queryAll(graph ?? document, line).map((path) => path.getAttribute('d') ?? '');
+      expect(runs).toHaveLength(2);
+      for (const run of runs) expect(run).not.toMatch(/ 100\.00(?: |$)/);
+      // The other sensor never dropped: one unbroken run.
+      expect(queryAll(graph ?? document, other)).toHaveLength(1);
+    });
+  }
+});
+
+/**
+ * #2079 — the rider's panels and text size, read from this device as the ride
+ * starts: the choice Settings keeps (`SettingsView.hud-layout.test.tsx`) is
+ * the one the next ride draws.
+ */
+describe('the HUD the rider chose — #2079', () => {
+  afterEach(() => {
+    localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  });
+
+  async function rideOnce(): Promise<HTMLElement> {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(6);
+    const hud = mounted.container.querySelector<HTMLElement>('.oyl-hud');
+    if (hud === null) throw new Error('the ride did not start');
+    return hud;
+  }
+
+  it('draws every panel at the normal size with nothing chosen', async () => {
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('normal');
+    expect(hud.querySelector('.oyl-hud__route')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hudField('Speed')).not.toBe('');
+  });
+
+  it('draws what the device says the rider chose', async () => {
+    writeHudLayout(localStorage, { hidden: ['route', 'graph', 'readings'], textSize: 'large' });
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('large');
+    expect(hud.classList).toContain('oyl-hud--text-large');
+    // The route panel and the graph are gone…
+    expect(hud.querySelector('.oyl-hud__route')).toBeNull();
+    // …and the secondary readings but the ride's times…
+    expect(queryAll(hud, '.oyl-hud__fields--secondary dt').map((dt) => dt.textContent)).toEqual([
+      'Moving',
+      'Elapsed',
+      'Clock',
+    ]);
+    // …while power, the controls and the notices' cell are the HUD's still.
+    expect(hudField('Power')).not.toBe('');
+    expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
+  });
+
+  it('keeps the graph when only the route is turned off, and the route when only the graph is', async () => {
+    writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal' });
+    let hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hud.querySelector('.oyl-hud__profile-svg')).toBeNull();
+    mounted?.unmount();
+    writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'normal' });
+    hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route .oyl-hud__profile-svg')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).toBeNull();
   });
 });

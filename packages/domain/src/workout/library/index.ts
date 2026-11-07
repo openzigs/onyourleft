@@ -42,10 +42,15 @@ import { RECOVERY_WORKOUTS } from './recovery';
 import { SPRINT_WORKOUTS } from './sprint';
 import { SWEET_SPOT_WORKOUTS } from './sweet-spot';
 import { TEMPO_WORKOUTS } from './tempo';
+import { THRESHOLD_TESTS } from './test';
 import { THRESHOLD_WORKOUTS } from './threshold';
 import { VO2_WORKOUTS } from './vo2';
 
-/** Every built-in workout, easiest category first. */
+/**
+ * Every built-in workout, easiest category first, and the two threshold tests
+ * (#2303, `test.ts`) after them: a test is not a training category, and its
+ * estimate is what every other template here is a share of.
+ */
 export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...RECOVERY_WORKOUTS,
   ...ENDURANCE_WORKOUTS,
@@ -58,4 +63,5 @@ export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...SPRINT_WORKOUTS,
   ...PYRAMID_WORKOUTS,
   ...RACE_SIMULATION_WORKOUTS,
+  ...THRESHOLD_TESTS.map((test) => test.template),
 ];

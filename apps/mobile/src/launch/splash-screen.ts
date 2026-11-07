@@ -8,7 +8,7 @@
  * `apps/web/src/shell/launch-port.ts` declares what the page asks; this is the
  * Android answer. It does not implement that interface by name, because
  * `apps/web` already depends on this package and an import back would be a
- * workspace cycle (the reason `thermal/thermal.ts` gives). `main.tsx` composes
+ * workspace cycle (the reason `camera/camera.ts` gives). `main.tsx` composes
  * the port from {@link hideCapacitorSplashScreen} behind `isNativeShell`.
  *
  * ⚠️ **The plugin's own JavaScript is not imported**, only its types. Its

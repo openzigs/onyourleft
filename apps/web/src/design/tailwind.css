@@ -92,11 +92,22 @@
   --color-hud-zone5: var(--oyl-color-hud-zone5);
   --color-hud-zone6: var(--oyl-color-hud-zone6);
   --color-hud-zone7: var(--oyl-color-hud-zone7);
+  --color-hud-zone-band1: var(--oyl-color-hud-zone-band1);
+  --color-hud-zone-band2: var(--oyl-color-hud-zone-band2);
+  --color-hud-zone-band3: var(--oyl-color-hud-zone-band3);
+  --color-hud-zone-band4: var(--oyl-color-hud-zone-band4);
+  --color-hud-zone-band5: var(--oyl-color-hud-zone-band5);
+  --color-hud-zone-band6: var(--oyl-color-hud-zone-band6);
+  --color-hud-zone-band7: var(--oyl-color-hud-zone-band7);
   --color-hud-grade-descent: var(--oyl-color-hud-grade-descent);
   --color-hud-grade-flat: var(--oyl-color-hud-grade-flat);
   --color-hud-grade-climb: var(--oyl-color-hud-grade-climb);
   --color-hud-grade-steep: var(--oyl-color-hud-grade-steep);
   --color-hud-grade-wall: var(--oyl-color-hud-grade-wall);
+  --color-hud-map-land: var(--oyl-color-hud-map-land);
+  --color-hud-map-water: var(--oyl-color-hud-map-water);
+  --color-hud-map-street: var(--oyl-color-hud-map-street);
+  --color-hud-map-route: var(--oyl-color-hud-map-route);
 
   /* Spacing — `p-md`, `gap-sm`, `mb-lg`. `0` is the one length that is not a
      token, because nobody chooses it: `mt-0` has to exist to undo a margin. */

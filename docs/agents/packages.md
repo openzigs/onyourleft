@@ -34,8 +34,9 @@ packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
     analysis/           the power-duration curve and the critical-power fit (#75),
                         the training zones (#78), the per-ride load metrics
-                        (#76) and the fitness/fatigue series (#77) — whose
-                        NAMES are a trademark question, see §6
+                        (#76), the fitness/fatigue series (#77) — whose
+                        NAMES are a trademark question, see §6 — and the
+                        threshold estimate from a threshold test (#2303)
     identity/           the record format, the canonical bytes, verification (#61)
     hpke/               HPKE, RFC 9180 X25519/HKDF-SHA256/AES-128-GCM base mode,
                         and ADR 0047 D-2's reply keys (#1188), over a six-member

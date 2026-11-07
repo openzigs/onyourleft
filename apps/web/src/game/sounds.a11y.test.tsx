@@ -493,6 +493,7 @@ describe('a workout — #400', () => {
     lost: undefined,
     refusal: undefined,
     releaseFault: undefined,
+    easedOffTo: undefined,
     ergRescue: undefined,
     ergHeld: undefined,
   };

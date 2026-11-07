@@ -103,6 +103,12 @@ import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
+  HUD_LAYOUT_STORAGE_KEY,
+  HUD_PANELS,
+  HUD_TEXT_SIZES,
+  writeHudLayout,
+} from '../src/game/hud/hud-layout-preference';
+import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
@@ -509,6 +515,15 @@ const CORRIDOR =
  * itself, on Playwright's clock.
  */
 const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+
+/** #2079: `?text=large` or `?text=extra-large`, the HUD's text size. */
+const HUD_TEXT_ASKED = new URLSearchParams(window.location.search).get('text');
+const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
+
+/** #2079: `?hide=readings,route`, the HUD's panels turned off. */
+const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
+  (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
+);
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
 const GAME: GamePort = {
@@ -1058,7 +1073,7 @@ function measure(): StageMeasurement {
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
-    // #2075: the next kilometre, beside it.
+    // #2075: the road ahead, beside it (2 km of it since #2291).
     ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
@@ -1068,15 +1083,30 @@ function measure(): StageMeasurement {
     ['the plan change', '.oyl-hud__plan-change'],
     // #1552: the OpenStreetMap credit, on a ride with map data in its world.
     ['the map credit', '.oyl-hud__attribution'],
+    // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
+    ['the recent graph', '.oyl-hud__recent'],
   ] as const) {
     const element = document.querySelector(selector);
-    if (element !== null) {
-      items.push(item(name, element));
+    if (element === null) continue;
+    const box = element.getBoundingClientRect();
+    if (selector === '.oyl-hud__recent' && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
     }
+    items.push(item(name, element));
   }
   // #1482: and the touch lock, which is the design system's toggle rather
   // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
   for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
+    // #2080: the swap between a race's standings and a loop's lap splits is
+    // drawn only where its panel is — on a tablet — and not displayed at all
+    // on a phone, where the panel is clipped to nothing (`theme.css` §"A
+    // LOOP'S LAP SPLITS"). There it has given way, and is said so.
+    const box = control.getBoundingClientRect();
+    if (control.classList.contains('oyl-hud__swap') && box.width * box.height === 0) {
+      givenWay.push(`control: ${textOf(control)}`);
+      continue;
+    }
     items.push(item(`control: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
@@ -1329,6 +1359,12 @@ async function run(): Promise<void> {
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
+  }
+  // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
+  // written where Settings writes them, read as the ride starts.
+  localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0) {
+    writeHudLayout(localStorage, { textSize: HUD_TEXT ?? 'normal', hidden: HUD_HIDDEN });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);

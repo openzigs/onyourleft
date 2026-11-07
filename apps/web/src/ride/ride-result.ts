@@ -48,6 +48,7 @@ import type { ActivityId } from '@onyourleft/store';
 
 import { CHART_POINTS, downsample, traceMean } from '../detail/series';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
+import type { TestRideEstimate } from '../workouts/threshold-test-result';
 
 /** A saved ride's facts, as the result card states them. */
 export interface SavedRide {
@@ -67,6 +68,12 @@ export interface SavedRide {
    * ghost, or a race not settled when the game ride ended.
    */
   readonly gameOutcome: GhostOutcome | undefined;
+  /**
+   * A threshold test ridden on this ride, and its estimate or the refusal of
+   * one — #2307. `undefined` for a ride with no test on it, which the Ride
+   * screen answers with no offer at all.
+   */
+  readonly thresholdTest?: TestRideEstimate | undefined;
 }
 
 /**

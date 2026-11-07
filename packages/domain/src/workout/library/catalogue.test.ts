@@ -33,6 +33,7 @@ import { MAXIMUM_HOLD_CEILING_SHARE, validateWorkout, type Workout } from '../wo
 
 import { BUILT_IN_WORKOUTS } from '.';
 import { minutes, share } from './frame';
+import { RAMP_MAXIMUM_SHARE, RAMP_START_SHARE } from './test';
 
 /** How many templates each category must hold, at least: #2300's and #2301's tables. */
 const MINIMUM_COUNTS: Partial<Record<WorkoutCategory, number>> = {
@@ -47,6 +48,8 @@ const MINIMUM_COUNTS: Partial<Record<WorkoutCategory, number>> = {
   sprint: 4,
   pyramid: 3,
   'race-simulation': 3,
+  // #2303: the ramp and the 20-minute test.
+  test: 2,
 };
 
 /**
@@ -105,6 +108,9 @@ const KNOWN_IDS: readonly string[] = [
   'race-simulation-tempo-surges',
   'race-simulation-time-trial',
   'race-simulation-criterium',
+  // #2303, approved with their names on 2026-11-07 (#2295 ruling 8).
+  'ramp-test',
+  'twenty-minute-test',
 ];
 
 /** A threshold heart rate to resolve zone holds with: a typical one. */
@@ -219,6 +225,17 @@ const WHOLE_NAMES: readonly string[] = [
   'Hour of Power',
 ];
 
+/**
+ * Whether a template's id is led by its category, as every id is — except a
+ * test's, which ends with it: `ramp-test` and `twenty-minute-test` read as
+ * their names do, and were approved with them (#2303, #2295 ruling 8).
+ */
+function idNamesCategory(template: Pick<WorkoutTemplate, 'id' | 'category'>): boolean {
+  return template.category === 'test'
+    ? template.id.endsWith('-test')
+    : template.id.startsWith(`${template.category}-`);
+}
+
 function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -267,7 +284,10 @@ interface Band {
    * harder category holds every target to its band.
    */
   readonly easyBetween?: boolean;
-  /** An effort with the trainer released counts as the work. Same rule as above. */
+  /**
+   * An effort with the trainer released counts as the work. Set only for the
+   * tests' band (#2303): the 20-minute test's effort is a free ride by design.
+   */
   readonly mayRelease?: boolean;
 }
 
@@ -303,6 +323,14 @@ const BANDS: Partial<Record<WorkoutCategory, Band>> = {
   sprint: { lower: zone(7), upper: Infinity, easyBetween: true, mayRelease: true },
   pyramid: { lower: zone(4), upper: zone(7), easyBetween: true },
   'race-simulation': { lower: zone(3), upper: zone(7) },
+  // #2303: a ramp's steps, from its first to its declared maximum, read from
+  // `test.ts`; and the 20-minute test's effort, which is the trainer released.
+  test: {
+    lower: RAMP_START_SHARE,
+    upper: RAMP_MAXIMUM_SHARE,
+    upperInclusive: true,
+    mayRelease: true,
+  },
 };
 
 function inBand(value: number, band: Band): boolean {
@@ -451,8 +479,15 @@ describe('the catalogue: ids and names', () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const template of BUILT_IN_WORKOUTS) {
       expect(template.id).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-      expect(template.id.startsWith(`${template.category}-`), template.id).toBe(true);
+      expect(idNamesCategory(template), template.id).toBe(true);
     }
+  });
+
+  it('holds a test’s id to ending with its category, and every other id to leading with it', () => {
+    expect(idNamesCategory({ id: 'ramp-test', category: 'test' })).toBe(true);
+    expect(idNamesCategory({ id: 'test-ramp', category: 'test' })).toBe(false);
+    expect(idNamesCategory({ id: 'tempo-2x20', category: 'tempo' })).toBe(true);
+    expect(idNamesCategory({ id: 'two-by-twenty-tempo', category: 'tempo' })).toBe(false);
   });
 
   it('keeps every id it has shipped, and ships no id it has not listed', () => {
@@ -633,7 +668,8 @@ describe('the catalogue: every category matches its main set', () => {
       const released = Object.entries(BANDS)
         .filter(([, b]) => b.mayRelease === true)
         .map(([category]) => category);
-      expect(released).toEqual(['sprint']);
+      // #2303: a test's effort (the 20-minute test's) is the trainer released.
+      expect(released.sort()).toEqual(['sprint', 'test']);
     });
 
     it('lets a band that says so leave easy riding and release in', () => {
@@ -732,9 +768,13 @@ describe('the catalogue: sprints', () => {
   it.each(BUILT_IN_WORKOUTS.map((t) => [t.id, t] as const))(
     '%s holds no sprint of 20 s or less in ERG: the trainer is released for it (ruling 6)',
     (_, template) => {
+      // At the hardest the template lets it be ridden: +10 % for most, and 0
+      // for a test (#2303), which is ridden at the intensity it is written at.
       const { main } = mainSegments(
         template,
-        tailorWorkout(template, { intensityPercent: MAXIMUM_INTENSITY_PERCENT }),
+        tailorWorkout(template, {
+          intensityPercent: template.parameters.intensityPercent.maximum,
+        }),
       );
       for (const segment of main) {
         // A ramp that ends in the Sprint zone is a sprint too.
