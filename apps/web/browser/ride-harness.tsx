@@ -1058,7 +1058,7 @@ function measure(): StageMeasurement {
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
-    // #2075: the next kilometre, beside it.
+    // #2075: the road ahead, beside it (2 km of it since #2291).
     ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
