@@ -1134,8 +1134,9 @@ html {
  * The Games tab — #2292 (`views/GamesView.tsx`, `views/GameCoursesView.tsx`):
  * a card for each game, and each game's courses, a card each. The page is a
  * screen of sections (`.oyl-sections`), so on a tablet the cards stand in
- * rows. A course that cannot hold the game keeps its words and loses its fill
- * and its control: an outline, and the reason in a line of its own.
+ * rows. A course that cannot hold the game is the same filled tile (#992's
+ * look: no outline, `look.browser.spec.ts`), told apart by having no control
+ * and the reason in words in its place.
  */
 .oyl-games__card,
 .oyl-game-courses__course {
@@ -1167,11 +1168,6 @@ ul.oyl-sections.oyl-game-courses__list {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.oyl-panel.oyl-game-courses__course--unavailable {
-  background: none;
-  border: 1px solid var(--oyl-color-border);
 }
 
 /*

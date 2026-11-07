@@ -123,9 +123,7 @@ function CourseEntry(props: { readonly course: GameCourse; readonly mode: GameMo
   const units = useUnits();
   const { route, unavailable } = props.course;
   return (
-    <li
-      className={`oyl-panel oyl-game-courses__course${unavailable === undefined ? '' : ' oyl-game-courses__course--unavailable'}`}
-    >
+    <li className="oyl-panel oyl-game-courses__course">
       <h3 className="oyl-game-courses__name">{route.name}</h3>
       <p className="oyl-muted">{routeFacts(route.profile, units)}</p>
       {unavailable === undefined ? (
