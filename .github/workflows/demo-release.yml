@@ -18,9 +18,14 @@
 # workspace's dependencies and runs the repository's code with `contents:
 # read`, and uploads what it staged as an artefact. `publish` alone holds
 # `contents: write`, checks out nothing and runs only `gh release create`.
-# No secret beyond the run's own GITHUB_TOKEN, standard runners only
-# (CLAUDE.md section 8), every action pinned to a full commit SHA, and the tag
-# reaches each script as an environment variable, never pasted into it.
+# One secret beyond the run's own GITHUB_TOKEN: the basemap archive's
+# READ-ONLY R2 token (#2275), the `basemap-archive` environment's four
+# `OYL_BASEMAP_R2_*` values, in `bake`'s bake step alone. The archive's public
+# host answers a GitHub runner with HTTP 403 (Bot Fight Mode), so the bake
+# reads the same object through R2's S3 API (tools/demo/r2-archive.ts); the
+# records still name the public URL. Standard runners only (CLAUDE.md
+# section 8), every action pinned to a full commit SHA, and the tag reaches
+# each script as an environment variable, never pasted into it.
 #
 # A bake that disagrees with a preset route's committed record fails the run
 # before anything is published (`bake-route.ts` §`settleRecord`): the release
@@ -61,6 +66,8 @@ jobs:
     name: Bake the preset routes and build the demo
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Holds the archive's read token, and deploys from `main` alone.
+    environment: basemap-archive
     steps:
       - name: Refuse a ref other than main
         env:
@@ -95,7 +102,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The read token in this step only: the install above and the build
+      # below never see it.
       - name: Bake the preset routes
+        env:
+          OYL_BASEMAP_R2_ACCOUNT_ID: ${{ secrets.OYL_BASEMAP_R2_ACCOUNT_ID }}
+          OYL_BASEMAP_R2_BUCKET: ${{ secrets.OYL_BASEMAP_R2_BUCKET }}
+          OYL_BASEMAP_R2_ACCESS_KEY_ID: ${{ secrets.OYL_BASEMAP_R2_ACCESS_KEY_ID }}
+          OYL_BASEMAP_R2_SECRET_ACCESS_KEY: ${{ secrets.OYL_BASEMAP_R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
           routes=$(pnpm --silent --filter @onyourleft/web run demo:release -- --list)

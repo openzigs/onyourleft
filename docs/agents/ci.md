@@ -2228,8 +2228,11 @@ publishes a GitHub release of each route's `.bin`, `routes.json` and `LICENCE-OD
 (`tools/demo/demo-release.ts`). ⚠️ **It has no pull-request trigger, on purpose**: it bakes
 OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `bake` job holds
 `contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
-`GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
-holds its trigger, runners, pins and permissions in the required suite.
+`GITHUB_TOKEN`. Since [#2275](https://github.com/openzigs/onyourleft/issues/2275) `bake`'s bake step
+also holds the archive's read-only R2 token, from the Environment `basemap-archive` (§"The basemap
+archive's read token — #2275" below); no other step and no other job holds a secret. It is not a
+required check; `tools/demo/demo-release.test.ts` holds its trigger, runners, pins, permissions and
+that one secret in the required suite.
 Since [#2264](https://github.com/openzigs/onyourleft/issues/2264) a third job, `pages`, deploys the
 demo output `bake` built to GitHub Pages after `publish`; it alone holds `pages: write` and
 `id-token: write`, checks out nothing, and fails until the owner enables Pages with _GitHub Actions_
@@ -2251,3 +2254,44 @@ needs. Until `ROADMAP_APP_CLIENT_ID` is set the job skips, green, with a notice.
 writes, the App's setup and the views are in [`docs/roadmap-board.md`](../roadmap-board.md).
 [#1201](https://github.com/openzigs/onyourleft/issues/1201) stays the written plan; the board
 mirrors it.
+
+#### The basemap archive's read token — #2275
+
+`tiles.openzigs.com` answers a GitHub-hosted runner's range request with **HTTP 403**
+(run 42269980561): the zone's firewall events show Cloudflare **Bot Fight Mode** challenging the
+runners' network, and on the Free plan it is zone-wide and cannot be skipped for one path. Two
+things read the archive from a runner: the `Demo route release` bake and the nightly drift check
+(`apps/web/tools/demo/preset-bake-archive.test.ts`, [#2268](https://github.com/openzigs/onyourleft/issues/2268)).
+On the owner's ruling of 2026-11-07 they read the **same object** through R2's S3 API instead, with a
+signed, ranged `GetObject` (`apps/web/tools/demo/r2-archive.ts`, signed by the instance's own SigV4,
+`apps/instance/src/blob/s3-signature.ts`). The zone keeps Bot Fight Mode, the records keep naming the
+public URL, and a run with none of the four variables set — every local run — reads the public URL
+as before.
+
+| Secret (and the variable `demo:bake` reads) | What it is |
+|---|---|
+| `OYL_BASEMAP_R2_ACCOUNT_ID` | the Cloudflare account id, 32 hex digits: the endpoint is `https://<id>.r2.cloudflarestorage.com` |
+| `OYL_BASEMAP_R2_BUCKET` | the bucket behind `tiles.openzigs.com`; the object key is the archive URL's path |
+| `OYL_BASEMAP_R2_ACCESS_KEY_ID` | the R2 API token's access key id |
+| `OYL_BASEMAP_R2_SECRET_ACCESS_KEY` | the R2 API token's secret access key |
+
+- **The token** is an R2 API token with **Object Read only**, scoped to the basemap bucket alone. It
+  cannot write, list another bucket or reach the zone. The owner creates it and sets the four values;
+  the maintainer never handles them.
+- **Where they live**: as secrets of the Environment **`basemap-archive`**, whose deployment branches
+  are **`main` only** — the `roadmap` Environment's shape. **Not as repository secrets**: a
+  repository secret is readable by a workflow on any branch of this repository, an Environment's only
+  by a job that may deploy to it.
+- **Who gets them**: `demo-release.yml`'s `bake` job, which takes the Environment, and only in its
+  `Bake the preset routes` step; and `nightly.yml`'s `heavy` job, which takes it on `main` alone
+  (`environment: ${{ github.ref == 'refs/heads/main' && 'basemap-archive' || '' }}`), and only in its
+  `Tests outside coverage` step, which sets `OYL_DEMO_BAKE_ARCHIVE_CHECK` on `main` alone too. The
+  installs run before, without them. A pull request's run of the nightly — a fork's or not — takes no
+  Environment, so it holds no token and the check skips, as it did before #2275.
+  `nightly-split.test.ts` and `demo-release.test.ts` fail a workflow that hands a secret to any other
+  step.
+- **No value reaches a log**: Actions masks each secret, and the code never prints one. A missing or
+  half-set group is refused by the variable's name (`r2-archive.ts` §`r2ArchiveAccess`), and a read's
+  failure is a status or a kind with no URL in it, since the account id is in the endpoint's host.
+- ⚠️ **Until the four are set the nightly is red** at the archive check: the bake falls back to the
+  public URL and is answered 403, and the run's failure says `read through https`.

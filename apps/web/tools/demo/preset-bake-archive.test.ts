@@ -23,14 +23,15 @@
  * OYL_DEMO_BAKE_ARCHIVE_CHECK=1 pnpm exec vitest run apps/web/tools/demo/preset-bake-archive.test.ts
  * ```
  *
- * ⚠️ **CI does not set it.** `tiles.openzigs.com` answers a GitHub-hosted
- * runner with HTTP 403 for a range, where it answers a rider with 206 —
- * measured on this check's first nightly runs (run 42269980561). Until the
- * owner lets runners read the archive, a night here would only ever be red.
- * The file is in `test:uninstrumented` so that no required run selects it.
- * Its baked file goes nowhere; the record is never rewritten here
- * (`demo:bake -- --route <id> --record` does that, by hand, after a move on
- * purpose).
+ * **The nightly run on `main` sets it** (#2275), with the `OYL_BASEMAP_R2_*`
+ * variables from the `basemap-archive` environment: `tiles.openzigs.com`
+ * answers a GitHub-hosted runner with HTTP 403 for a range, where it answers
+ * a rider with 206 (run 42269980561, Bot Fight Mode), so a runner reads the
+ * same object through R2's S3 API instead (`r2-archive.ts`). Without them the
+ * read is the public URL's, as it is locally. The file is in
+ * `test:uninstrumented` so that no required run selects it. Its baked file
+ * goes nowhere; the record is never rewritten here (`demo:bake -- --route
+ * <id> --record` does that, by hand, after a move on purpose).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -66,10 +67,12 @@ describe.runIf(reachesNetwork)(
         // and record, and the published archive by default.
         const args = parseBakeArguments(['--route', id]);
         const { gpx, committed } = readBakeInput(args, PRESET_ROUTES_DIRECTORY);
-        const { archive, archiveUrl } = archiveOf(args.archive);
+        const { archive, archiveUrl, via } = archiveOf(args.archive);
         // The read's own lines (`describeCorridorFailure`, which names no
-        // coordinate) go into a failure, so a red night says why it was red.
-        const lines: string[] = [];
+        // coordinate) go into a failure, so a red night says why it was red,
+        // and through which transport: a 403 through `https` is a runner
+        // without the R2 variables.
+        const lines: string[] = [`read through ${via}`];
         const log = (line: string): void => {
           lines.push(line);
         };
