@@ -2993,6 +2993,9 @@ export class ActivityStore {
    * Refuses a corridor for a route that is not this owner's, inside the same
    * transaction as the write, so a read that finishes after the rider deleted
    * the route cannot leave a corridor that no route deletion will reach.
+   * A built-in circuit's `circuit:` key (ADR 0064 D-2.2) is the exception: it
+   * has no route to own it, so it is admitted without one and its corridor
+   * stays until the athlete is deleted.
    *
    * @throws {WorldCorridorTooLargeError} if `features` is over
    * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.

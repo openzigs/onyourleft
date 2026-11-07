@@ -245,6 +245,23 @@ describe('the built-in circuits in the chooser — #2293', () => {
     expect(text()).toContain(LAP_RACE_CHOICE_TEXT.onCircuit);
   });
 
+  it('chosen, has its corridor read under its own key, not the rider’s first route’s (D-2.2)', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    const asked: string[] = [];
+    const base = port([OWN], [FIXTURE]);
+    await open({
+      ...base,
+      loadWorldCorridor: (route) => {
+        asked.push(route.id);
+        return new Promise(() => undefined);
+      },
+    });
+    // The rider's own route is chosen first, so it is the one asked for.
+    expect(asked.at(-1)).toBe(OWN.id);
+    await choose(FIXTURE);
+    expect(asked.at(-1)).toBe(FIXTURE.id);
+  });
+
   it('are offered to a rider with no routes of their own, who is told how to add one', async () => {
     await open(port([], [FIXTURE]));
     expect(text()).toContain(`Ride ${FIXTURE.name}`);

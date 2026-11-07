@@ -1,6 +1,6 @@
 The built-in lap-race circuits of On Your Left
 
-Each file in this directory is one circuit: a closed line of points with
+Each circuit file in the data directory apps/web/src/game/circuits/data/ is one circuit: a closed line of points with
 heights, the circuit's name and length, and the licence it is offered under.
 Each line follows streets drawn from OpenStreetMap data, read through this
 project's own basemap archive, so each file is a database derived from
