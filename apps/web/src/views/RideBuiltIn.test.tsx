@@ -22,7 +22,7 @@ import { athleteId, type WorkoutRecord } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { stubAnalysis } from '../analysis/testing';
-import { ridingSnapshot, stubRideController } from '../ride/testing';
+import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { matchHash } from '../shell/routes';
 import {
   activateWithKeyboard,
@@ -53,7 +53,13 @@ function template(id: string): WorkoutTemplate {
 }
 
 const SWEET_SPOT = template('sweet-spot-3x12');
-const NAME = 'Sweet spot, three by twelve (47 min, −5%)';
+// The owner's ruling of 2026-11-07 (a): no length in the name, which the screen says beside it.
+const NAME = 'Sweet spot, three by twelve (−5%)';
+
+/** How many times `text` says `part`. */
+function times(text: string | null | undefined, part: string): number {
+  return (text ?? '').split(part).length - 1;
+}
 
 /** On the tailor pane: 45 minutes at −5 %, then the address *Ride it* links to. */
 async function rideItAddress(): Promise<string> {
@@ -91,11 +97,15 @@ function analysisWith(thresholdPower?: number) {
 /** The Ride screen at an address, as the shell renders it. */
 async function rideScreen(
   href: string,
-  options: { readonly thresholdPower?: number; readonly workouts?: WorkoutStub } = {},
+  options: {
+    readonly thresholdPower?: number;
+    readonly workouts?: WorkoutStub;
+    readonly snapshot?: ReturnType<typeof ridingSnapshot>;
+  } = {},
 ) {
   const match = matchHash(href);
   expect(match.route.id).toBe('ride');
-  const stub = stubRideController(ridingSnapshot());
+  const stub = stubRideController(options.snapshot ?? ridingSnapshot());
   const started: WorkoutRecord[] = [];
   const startWorkout = stub.controller.startWorkout.bind(stub.controller);
   const controller = {
@@ -131,6 +141,11 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
 
     const panel = document.querySelector('.oyl-ride__group--trainer');
     expect(panel?.textContent).toContain(`${NAME} — 47 min,`);
+    // (a) The length is said once on the workout's line, not in its name as well.
+    const line = queryAll(panel ?? document, 'li').find((each) =>
+      (each.textContent ?? '').startsWith(NAME),
+    );
+    expect(times(line?.textContent, '47 min')).toBe(1);
     const ride = rideButton();
     expect(ride).toBeDefined();
     await activateWithKeyboard(ride as HTMLButtonElement);
@@ -152,6 +167,7 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
     const { stub } = await rideScreen(href);
     const offered = document.querySelector('[data-oyl-offered-workout]');
     expect(offered?.textContent).toContain(`${NAME} — 47 min,`);
+    expect(times(offered?.textContent, '47 min')).toBe(1);
     expect(document.body.textContent).toContain('Set your threshold power on the Analysis screen');
     expect(rideButton()).toBeUndefined();
     expect(stub.calls.startWorkout).toEqual([]);
@@ -188,6 +204,64 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
         (each.textContent ?? '').startsWith('Ride Sweet spot'),
       ),
     ).toBe(false);
+  });
+
+  it('still says why when the rider has saved workouts, which list in its place', async () => {
+    const saved: WorkoutRecord = {
+      id: 'workout-own' as WorkoutRecord['id'],
+      createdBy: OWNER,
+      name: 'My own',
+      workout: tailorWorkout(template('tempo-2x20'), {}),
+      createdAt: unixSeconds(1),
+      updatedAt: unixSeconds(1),
+    };
+    await rideScreen('#/ride?workout=built-in%3Asweet-spot-3x12&intensity=40', {
+      thresholdPower: 250,
+      workouts: workoutStub(OWNER, [saved]),
+    });
+    const panel = document.querySelector('.oyl-ride__group--trainer');
+    expect(panel?.textContent).toContain('My own');
+    expect(panel?.textContent).toContain(
+      'Sweet spot, three by twelve cannot be ridden as it was asked for.',
+    );
+    expect(panel?.textContent).toContain('you asked for +40%');
+  });
+
+  it('names the built-in and asks for control when the trainer has not granted it', async () => {
+    const base = ridingSnapshot();
+    const href = await rideItAddress();
+    const { stub } = await rideScreen(href, {
+      thresholdPower: 250,
+      snapshot: { ...base, trainer: { ...base.trainer, hasControl: false } },
+    });
+    const panel = document.querySelector('.oyl-ride__group--trainer');
+    expect(panel?.textContent).toContain('Ask the trainer for control first');
+    expect(panel?.querySelector('[data-oyl-offered-workout]')?.textContent).toContain(
+      `${NAME} — 47 min,`,
+    );
+    expect(rideButton()).toBeUndefined();
+    expect(stub.calls.startWorkout).toEqual([]);
+  });
+
+  it('names the built-in and asks for a controllable trainer when there is none', async () => {
+    const href = await rideItAddress();
+    const { stub } = await rideScreen(href, { thresholdPower: 250, snapshot: idleSnapshot() });
+    expect(document.querySelector('[data-oyl-offered-workout]')?.textContent).toContain(
+      `${NAME} — 47 min,`,
+    );
+    expect(document.body.textContent).toContain(
+      'Pair a trainer that can be controlled to ride it.',
+    );
+    expect(rideButton()).toBeUndefined();
+    expect(stub.calls.startWorkout).toEqual([]);
+  });
+
+  it('says why a refused address cannot be ridden when there is no controllable trainer', async () => {
+    await rideScreen('#/ride?workout=built-in%3Asweet-spot-3x12&intensity=40', {
+      snapshot: idleSnapshot(),
+    });
+    expect(document.body.textContent).toContain('cannot be ridden as it was asked for.');
+    expect(document.body.textContent).not.toContain('Pair a trainer that can be controlled');
   });
 });
 

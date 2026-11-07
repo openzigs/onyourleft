@@ -20,15 +20,29 @@
  * document for a screen reader, and the rider has *Follow* and its one gap.
  */
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 import { STANDINGS_TEXT, type RaceStandingsView } from '../room-ride';
 
-export function RaceStandings(props: { readonly standings: RaceStandingsView }): JSX.Element {
+export function RaceStandings(props: {
+  readonly standings: RaceStandingsView;
+  /** The control that swaps this panel with a loop's lap splits — #2080, `LapSplits.tsx`. */
+  readonly swap?: ReactNode;
+}): JSX.Element {
   const { lines, place, of } = props.standings;
   return (
     <section className="oyl-hud__panel oyl-hud__standings" aria-label="Race standings">
-      <p className="oyl-hud__standings-summary">{STANDINGS_TEXT.summary(place, of)}</p>
+      {props.swap === undefined ? (
+        <p className="oyl-hud__standings-summary">{STANDINGS_TEXT.summary(place, of)}</p>
+      ) : (
+        // #2080: the swap on the summary's own row, so it costs the panel the
+        // control's height over the line's and not a row of its own — at
+        // 1024×768 a row of its own put the panel 23 px into the actions panel.
+        <div className="oyl-hud__standings-head">
+          <p className="oyl-hud__standings-summary">{STANDINGS_TEXT.summary(place, of)}</p>
+          {props.swap}
+        </div>
+      )}
       {/*
         `role="list"` because list-style none makes WebKit drop the semantics,
         and `start` because the list is windowed: its own numbering must agree

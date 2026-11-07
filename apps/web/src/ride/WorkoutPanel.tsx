@@ -613,7 +613,8 @@ export function WorkoutPanel({
     // itself say, so a button can never read "with re-plans" and start
     // without them. Inside the list it is the same as the old
     // `replansAvailable === true && replans`: the list needs control, a
-    // threshold and a saved workout too.
+    // threshold and a workout to ride: a saved one, or (#2306) the built-in
+    // sent here. The swap library is still the saved workouts only.
     const withReplans = offerReplans && replans;
     return (
       <section>
@@ -700,29 +701,32 @@ export function WorkoutPanel({
             <p>No workouts saved on this device yet. Build one on the Workouts screen.</p>
           </>
         ) : (
-          <ul>
-            {ridable.map((record) => {
-              const row = workoutRow(record);
-              return (
-                <li key={record.id}>
-                  {row.name} — {row.duration}, {row.shape}{' '}
-                  <Button
-                    variant="secondary"
-                    size="ride"
-                    type="button"
-                    onClick={() => {
-                      // ⚠️ #400: inside the press and before anything else — the
-                      // one place the audio context may be resumed. The choice is
-                      // re-read so one made on Settings since this panel mounted
-                      // is the one this workout sounds with.
-                      const choice = readCuePreference(storage);
-                      setSound(choice);
-                      cues.set(choice);
-                      cues.begin();
-                      onStart(record, withReplans ? { replans: true } : {});
-                    }}
-                  >
-                    {/*
+          <>
+            {/* The list stands in for a refused address, so its words come first. */}
+            {offered?.status === 'refused' ? offeredLine() : null}
+            <ul>
+              {ridable.map((record) => {
+                const row = workoutRow(record);
+                return (
+                  <li key={record.id}>
+                    {row.name} — {row.duration}, {row.shape}{' '}
+                    <Button
+                      variant="secondary"
+                      size="ride"
+                      type="button"
+                      onClick={() => {
+                        // ⚠️ #400: inside the press and before anything else — the
+                        // one place the audio context may be resumed. The choice is
+                        // re-read so one made on Settings since this panel mounted
+                        // is the one this workout sounds with.
+                        const choice = readCuePreference(storage);
+                        setSound(choice);
+                        cues.set(choice);
+                        cues.begin();
+                        onStart(record, withReplans ? { replans: true } : {});
+                      }}
+                    >
+                      {/*
                       #1329, the owner's ruling of 2026-11-05: while the switch
                       is on, every Ride reads "Ride, with re-plans". The badge
                       is on the heading's row and scrolls away; this is on the
@@ -737,19 +741,20 @@ export function WorkoutPanel({
                       in the trainer column and puts the first Ride under the
                       fold floor in the Android shell.
                     */}
-                    {withReplans ? (
-                      <>
-                        {RIDE_WITH_REPLANS}
-                        <span className="oyl-visually-hidden">: {row.name}</span>
-                      </>
-                    ) : (
-                      <>Ride {row.name}</>
-                    )}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+                      {withReplans ? (
+                        <>
+                          {RIDE_WITH_REPLANS}
+                          <span className="oyl-visually-hidden">: {row.name}</span>
+                        </>
+                      ) : (
+                        <>Ride {row.name}</>
+                      )}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
         {!offerReplans ? null : (
           // #1244: the disclosure's remaining sentences, in their order, under

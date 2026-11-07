@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useId, useMemo, useState, type JSX } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 
 import { expandWorkout, workoutShapeText, type Workout } from '@onyourleft/domain';
 
@@ -13,12 +13,14 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 import { BlockChart } from '../workouts/BlockChart';
 import type { BuiltInCard } from '../workouts/built-in';
 import { hrefForRidingBuiltIn } from '../workouts/built-in-ride';
-import { durationText, hardestShare, percentOf } from '../workouts/library';
+import { hardestShare, percentOf } from '../workouts/library';
 import {
   copyName,
-  EMPTY_TAILOR_DRAFT,
+  initialTailorDraft,
   lengthOptionText,
+  lengthText,
   previewRows,
+  repeatsIn,
   TAILOR_LENGTHS,
   tailorFromDraft,
   tailorOffer,
@@ -81,12 +83,18 @@ function signed(percent: number): string {
 
 export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInProps): JSX.Element {
   const offer = useMemo(() => tailorOffer(card.template), [card.template]);
-  const [draft, setDraft] = useState<TailorDraft>(EMPTY_TAILOR_DRAFT);
-  const [valid, setValid] = useState<Valid>({ draft: EMPTY_TAILOR_DRAFT, workout: card.workout });
+  // The ruling of 2026-11-07 (d): the template's repeats and recovery are in
+  // their boxes as values from the start, not grey placeholders.
+  const initial = useMemo(() => initialTailorDraft(offer), [offer]);
+  const [draft, setDraft] = useState<TailorDraft>(initial);
+  const [valid, setValid] = useState<Valid>({ draft: initial, workout: card.workout });
   const [refusal, setRefusal] = useState<Refusal | undefined>(undefined);
   const [saved, setSaved] = useState<{ readonly name: string; readonly id: string } | undefined>(
     undefined,
   );
+  const [saveFailed, setSaveFailed] = useState(false);
+  // A press while a save is in flight must not write a second copy.
+  const saving = useRef(false);
   const ids = {
     length: useId(),
     intensity: useId(),
@@ -110,23 +118,41 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
   }, [card.template, thresholds.heartRate]);
 
   function change(control: TailorControl, value: string): void {
-    const next = withChoice(draft, control, value);
+    const chosen = withChoice(draft, control, value);
+    // Back to the length as written with no repeat count typed: the box gets
+    // the template's own again, as a value.
+    const next =
+      control === 'length' && value === '' && chosen.repeats.trim() === ''
+        ? { ...chosen, repeats: initial.repeats }
+        : chosen;
     setDraft(next);
     setSaved(undefined);
+    setSaveFailed(false);
     const outcome = tailorFromDraft(card.template, next, thresholds.heartRate);
     if (outcome.status === 'tailored') {
       setValid({ draft: next, workout: outcome.workout });
       setRefusal(undefined);
     } else {
-      setRefusal({ control, message: outcome.message });
+      setRefusal({ control: outcome.control ?? control, message: outcome.message });
     }
   }
 
   async function save(): Promise<void> {
-    const timeline = expandWorkout(valid.workout);
-    const name = copyName(card.template, timeline.totalSeconds, valid.draft);
-    const id = await onSaveCopy(name, valid.workout);
-    setSaved({ name, id });
+    if (saving.current) return;
+    saving.current = true;
+    setSaveFailed(false);
+    try {
+      const timeline = expandWorkout(valid.workout);
+      const name = copyName(card.template, timeline.totalSeconds, valid.draft);
+      const id = await onSaveCopy(name, valid.workout);
+      setSaved({ name, id });
+    } catch {
+      // The store said no (or there is none): the rider is told, nothing is shown as saved.
+      setSaved(undefined);
+      setSaveFailed(true);
+    } finally {
+      saving.current = false;
+    }
   }
 
   const timeline = useMemo(() => expandWorkout(valid.workout), [valid.workout]);
@@ -135,6 +161,15 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
     [valid.workout, thresholds.power],
   );
   const hardest = hardestShare(valid.workout);
+  /*
+   * A chosen length chose the repeats (`withChoice` emptied the box), so the
+   * box shows the count the preview has: a value, never an empty box beside a
+   * workout that has one.
+   */
+  const repeatsShown =
+    draft.repeats === '' && draft.length !== ''
+      ? String(repeatsIn(card.template, valid.workout) ?? '')
+      : draft.repeats;
 
   const refused = (control: TailorControl): JSX.Element | null =>
     refusal?.control === control ? (
@@ -159,7 +194,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
       >
         {offer.length ? (
           <div data-oyl-tailor="length">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.length}>Length</label>
               <select
                 id={ids.length}
@@ -184,7 +219,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.intensity === undefined ? null : (
           <div data-oyl-tailor="intensity">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.intensity}>Intensity, % easier or harder</label>
               <Stepper
                 name="intensity"
@@ -213,7 +248,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.repeats === undefined ? null : (
           <div data-oyl-tailor="repeats">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.repeats}>Repeats</label>
               <Stepper
                 name="repeats"
@@ -227,8 +262,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
                   name="repeats"
                   type="text"
                   inputMode="numeric"
-                  value={draft.repeats}
-                  placeholder={String(offer.repeats.default)}
+                  value={repeatsShown}
                   onChange={(event) => {
                     change('repeats', event.target.value);
                   }}
@@ -244,7 +278,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         )}
         {offer.recovery === undefined ? null : (
           <div data-oyl-tailor="recovery">
-            <p>
+            <p className="oyl-tailor__field">
               <label htmlFor={ids.recovery}>Recovery between repeats, seconds</label>
               <Stepper
                 name="recovery seconds"
@@ -259,7 +293,6 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
                   type="text"
                   inputMode="numeric"
                   value={draft.recovery}
-                  placeholder={String(offer.recovery.default)}
                   onChange={(event) => {
                     change('recovery', event.target.value);
                   }}
@@ -279,7 +312,7 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         <dl className="oyl-activity-card__facts">
           <div>
             <dt>Length</dt>
-            <dd>{durationText(timeline.totalSeconds)}</dd>
+            <dd>{lengthText(card.template, timeline.totalSeconds, valid.draft.length)}</dd>
           </div>
           <div>
             <dt>Hardest</dt>
@@ -287,7 +320,8 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
               {hardest === undefined ? 'No target' : `${String(percentOf(hardest))}% of threshold`}
             </dd>
           </div>
-          <div>
+          {/* The ruling of 2026-11-07 (e): the sentence takes the whole row. */}
+          <div className="oyl-tailor__shape">
             <dt>Shape</dt>
             <dd>{workoutShapeText(valid.workout)}</dd>
           </div>
@@ -332,6 +366,11 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
           Save a copy
         </Button>
       </p>
+      {saveFailed ? (
+        <StatusMessage tone="danger" live>
+          The copy could not be saved. Nothing was added to your workouts; try again.
+        </StatusMessage>
+      ) : null}
       {saved === undefined ? null : (
         <StatusMessage tone="success" live>
           Saved “{saved.name}” to your workouts.{' '}

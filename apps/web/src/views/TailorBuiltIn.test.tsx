@@ -132,8 +132,8 @@ describe('the preview follows every choice — #2305', () => {
       workoutShapeText(tailorWorkout(SWEET_SPOT, { targetMinutes: 45 })),
     );
     expect(fortyFive.shape).not.toBe(sixty.shape);
-    expect(fortyFive.length).toBe('47 min');
-    expect(sixty.length).toBe('1 h 3 min');
+    expect(fortyFive.length).toBe('47 min, the nearest with whole repeats');
+    expect(sixty.length).toBe('1 h 3 min, the nearest with whole repeats');
     expect(fortyFive.graph).not.toEqual(sixty.graph);
     expect(fortyFive.graph.length).toBeGreaterThan(0);
   });
@@ -159,6 +159,37 @@ describe('the preview follows every choice — #2305', () => {
     await open('ramp-test');
     expect(pane().querySelectorAll('select, input')).toHaveLength(0);
     expect(pane().textContent).toContain('This workout is ridden as written');
+  });
+});
+
+describe('the owner’s ruling of 2026-11-07 — #2305', () => {
+  it('(d) opens with the template’s repeats and recovery in their boxes as values', async () => {
+    await open('sweet-spot-3x12');
+    const repeats = control<HTMLInputElement>('repeats', 'input');
+    const recovery = control<HTMLInputElement>('recovery', 'input');
+    expect(repeats.value).toBe('3');
+    expect(recovery.value).toBe('240');
+    // A value, not a grey hint: nothing is shown in placeholder text.
+    expect(repeats.placeholder).toBe('');
+    expect(recovery.placeholder).toBe('');
+    // The values are the template's own, so the preview is the workout as written.
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, {})));
+  });
+
+  it('(d) shows the repeats a chosen length chose, and the template’s again as written', async () => {
+    await open('sweet-spot-3x12');
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '45');
+    expect(fact('Shape')).toContain('2 × 12 min');
+    expect(control<HTMLInputElement>('repeats', 'input').value).toBe('2');
+
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '');
+    expect(control<HTMLInputElement>('repeats', 'input').value).toBe('3');
+    expect(fact('Shape')).toContain('3 × 12 min');
+  });
+
+  it('says the length once, with no reason, when no length is chosen', async () => {
+    await open('sweet-spot-3x12');
+    expect(fact('Length')).toBe('1 h 3 min');
   });
 });
 
@@ -230,6 +261,24 @@ describe('a refusal is shown beside its control, and the preview keeps the last 
   });
 });
 
+describe('a refusal belongs beside the control that caused it, not the one touched last — #1165', () => {
+  it('keeps a length refusal beside Length when the rider then types a valid intensity', async () => {
+    await open('sweet-spot-3x12');
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '30');
+    await typeInto(control<HTMLInputElement>('intensity', 'input'), '-5');
+    expect(saidBeside('length')).toContain('you asked for 30 minutes');
+    expect(hasRefusal('intensity')).toBe(false);
+  });
+
+  it('keeps an intensity refusal beside Intensity when the rider then chooses a valid length', async () => {
+    await open('sweet-spot-3x12');
+    await typeInto(control<HTMLInputElement>('intensity', 'input'), '20');
+    await chooseOption(control<HTMLSelectElement>('length', 'select'), '45');
+    expect(saidBeside('intensity')).toContain('you asked for +20%');
+    expect(hasRefusal('length')).toBe(false);
+  });
+});
+
 describe('Save a copy — #2305', () => {
   it('adds the tailored workout to the rider’s own list, and opening it shows its blocks', async () => {
     const stub = workoutStub(OWNER);
@@ -271,6 +320,41 @@ describe('Save a copy — #2305', () => {
     expect(document.querySelector('.oyl-selected')?.textContent).toContain(
       workoutShapeText(expected),
     );
+  });
+
+  it('takes the Saved line down when a choice changes after it', async () => {
+    await open('sweet-spot-3x12');
+    buttonSaying('Save a copy').click();
+    await settle();
+    expect(pane().textContent).toContain('to your workouts.');
+    await typeInto(control<HTMLInputElement>('intensity', 'input'), '-5');
+    expect(pane().textContent).not.toContain('to your workouts.');
+  });
+
+  it('says so when the copy cannot be saved, and shows no Saved line', async () => {
+    const stub = workoutStub(OWNER);
+    const failing: WorkoutStub = {
+      ...stub,
+      store: {
+        ...stub.store,
+        putWorkout: () => Promise.reject(new Error('the local store is unavailable')),
+      },
+    };
+    await open('sweet-spot-3x12', { stub: failing });
+    buttonSaying('Save a copy').click();
+    await settle();
+    expect(pane().textContent).toContain('The copy could not be saved.');
+    expect(pane().textContent).not.toContain('to your workouts.');
+    expect(stub.rows()).toHaveLength(0);
+  });
+
+  it('writes one copy for two quick presses', async () => {
+    const stub = workoutStub(OWNER);
+    await open('sweet-spot-3x12', { stub });
+    buttonSaying('Save a copy').click();
+    buttonSaying('Save a copy').click();
+    await settle();
+    expect(stub.rows()).toHaveLength(1);
   });
 
   it('starts another built-in from its own defaults', async () => {

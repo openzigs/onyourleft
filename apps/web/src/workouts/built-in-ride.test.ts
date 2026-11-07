@@ -5,6 +5,7 @@ import {
   BUILT_IN_WORKOUTS,
   seconds,
   tailorWorkout,
+  unixSeconds,
   validateProposal,
   loadPlan,
   planWorkout,
@@ -14,8 +15,9 @@ import {
   type Workout,
   type WorkoutTemplate,
 } from '@onyourleft/domain';
-import { athleteId } from '@onyourleft/store';
-import { describe, expect, it } from 'vitest';
+import { athleteId, workoutId } from '@onyourleft/store';
+import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { matchHash } from '../shell/routes';
 import {
@@ -48,6 +50,11 @@ describe('Ride it’s address — #2306', () => {
     expect(
       hrefForRidingBuiltIn(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, repeats: '5', recovery: '180' }),
     ).toBe('#/ride?workout=built-in%3Asweet-spot-3x12&repeats=5&recovery=180');
+    // The pane opens with the template's own repeats and recovery in their boxes
+    // (#2305, the ruling of 2026-11-07): those are not choices to carry either.
+    expect(
+      hrefForRidingBuiltIn(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, repeats: '3', recovery: '240' }),
+    ).toBe('#/ride?workout=built-in%3Asweet-spot-3x12');
   });
 
   it('is read back by the router as the Ride route, and its query as the same choices', () => {
@@ -78,7 +85,8 @@ describe('the workout offered on the Ride screen — #2306', () => {
     expect(outcome.record.workout.blocks).toStrictEqual(tailored.blocks);
     expect(outcome.record.id).toBe(`${BUILT_IN_RIDE_PREFIX}sweet-spot-3x12`);
     expect(outcome.record.id.startsWith('workout-')).toBe(false);
-    expect(outcome.record.name).toBe('Sweet spot, three by twelve (47 min, −5%)');
+    // The owner's ruling of 2026-11-07 (a): the Ride screen says the length beside the name.
+    expect(outcome.record.name).toBe('Sweet spot, three by twelve (−5%)');
     expect(outcome.record.workout.name).toBe(outcome.record.name);
     expect(outcome.record.createdBy).toBe(OWNER);
   });
@@ -122,10 +130,42 @@ describe('the workout offered on the Ride screen — #2306', () => {
  * same rule.
  */
 describe('a re-plan decides a tailored built-in as it decides the same blocks saved — #2306', () => {
-  const offered = offeredWorkout({ template: SWEET_SPOT, draft: CHOSEN }, OWNER, undefined, 0);
+  // The ridden side: what the address makes. The saved side is made the other
+  // way round — `tailorWorkout` called as *Save a copy* calls it, written to
+  // the real store and read back by `listWorkouts` on a fresh connection — so
+  // the two share no code but the domain's own, and a ridden workout that
+  // differed from the previewed one (its choices dropped, its blocks changed)
+  // would be decided differently below.
+  const offered = offeredWorkout({ template: SWEET_SPOT, draft: CHOSEN }, ATHLETE_A, undefined, 0);
   if (offered.status !== 'offered') throw new Error('not offered');
   const tailored = offered.record.workout;
-  const saved: Workout = { name: 'Saved by hand', blocks: [...tailored.blocks] };
+  let saved: Workout = { name: 'unset', blocks: [] };
+
+  beforeAll(async () => {
+    const harness = createStoreHarness();
+    try {
+      await seedAthletes(harness);
+      await harness.write((store) =>
+        store.putWorkout({
+          id: workoutId('workout-copy'),
+          createdBy: ATHLETE_A,
+          name: 'Saved copy',
+          workout: {
+            ...tailorWorkout(SWEET_SPOT, { targetMinutes: 45, intensityPercent: -5 }),
+            name: 'Saved copy',
+          },
+          createdAt: unixSeconds(1),
+          updatedAt: unixSeconds(1),
+        }),
+      );
+      const listed = await harness.read((store) => store.listWorkouts(ATHLETE_A));
+      const copy = listed.find((record) => record.id === 'workout-copy');
+      if (copy === undefined) throw new Error('the copy was not read back');
+      saved = copy.workout;
+    } finally {
+      await harness.destroy();
+    }
+  });
 
   function stateFor(workout: Workout): PlanState {
     return {

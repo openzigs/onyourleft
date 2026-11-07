@@ -98,6 +98,61 @@ export const EMPTY_TAILOR_DRAFT: TailorDraft = {
 };
 
 /**
+ * The draft a pane opens with — the owner's ruling of 2026-11-07 (d): the
+ * template's own repeats and recovery IN the boxes, as values, rather than as
+ * grey placeholders that read as a control switched off. Each is the
+ * template's default, so the workout it makes is the template as written.
+ */
+export function initialTailorDraft(offer: TailorOffer): TailorDraft {
+  return {
+    ...EMPTY_TAILOR_DRAFT,
+    repeats: offer.repeats === undefined ? '' : String(offer.repeats.default),
+    recovery: offer.recovery === undefined ? '' : String(offer.recovery.default),
+  };
+}
+
+/**
+ * How many repeats a tailored workout of `template` holds, read off the
+ * workout itself: what a chosen length chose. `undefined` for a template
+ * whose main set does not repeat.
+ *
+ * `tailorWorkout` keeps one block for each block of the warm-up and the
+ * cool-down (a length shortens them, never removes them), and the main set is
+ * either one intervals block or the repetition written out each time.
+ */
+export function repeatsIn(template: WorkoutTemplate, workout: Workout): number | undefined {
+  const set = template.mainSet;
+  if (set.scaling !== 'repeat') return undefined;
+  const main = workout.blocks.slice(
+    template.warmUp.length,
+    workout.blocks.length - template.coolDown.length,
+  );
+  const [only] = main;
+  if (main.length === 1 && only?.kind === 'intervals') return only.repeats;
+  const perRepeat = set.rep.length + (set.recovery === undefined ? 0 : 1);
+  return Math.round(main.length / perRepeat);
+}
+
+/**
+ * The preview's length, and why it is not the length chosen when it is not —
+ * the owner's ruling of 2026-11-07: "47 min, the nearest with whole repeats".
+ * A length is met with whole repeats, or by stretching blocks no further than
+ * the template lets them go, so it can land beside the minutes asked for.
+ */
+export function lengthText(
+  template: WorkoutTemplate,
+  totalSeconds: number,
+  chosen: string,
+): string {
+  const said = workoutDurationText(totalSeconds);
+  const minutes = numberIn(chosen);
+  if (minutes === undefined || said === workoutDurationText(minutes * 60)) return said;
+  return template.mainSet.scaling === 'repeat'
+    ? `${said}, the nearest with whole repeats`
+    : `${said}, the nearest it stretches to`;
+}
+
+/**
  * One control changed, and what that does to the others: a length and a
  * repeat count cannot both be chosen (`tailorWorkout` refuses the pair,
  * because a length IS made by choosing the repeat count), so choosing either
@@ -118,7 +173,15 @@ export function withChoice(draft: TailorDraft, control: TailorControl, value: st
 
 export type TailorOutcome =
   | { readonly status: 'tailored'; readonly workout: Workout }
-  | { readonly status: 'refused'; readonly message: string };
+  | {
+      readonly status: 'refused';
+      readonly message: string;
+      /**
+       * The control the refusal belongs beside, when it can be told from the
+       * draft alone; absent for a refusal of the choices together.
+       */
+      readonly control?: TailorControl;
+    };
 
 /** A box's text as a number, `undefined` for empty, `NaN` for anything else. */
 function numberIn(text: string): number | undefined {
@@ -181,16 +244,46 @@ export function tailorFromDraft(
 ): TailorOutcome {
   const choices = choicesFrom(draft, thresholdHeartRate);
   if ('message' in choices) {
-    return { status: 'refused', message: choices.message };
+    return { status: 'refused', message: choices.message, control: choices.control };
   }
   try {
     return { status: 'tailored', workout: tailorWorkout(template, choices) };
   } catch (error) {
     if (error instanceof WorkoutError) {
-      return { status: 'refused', message: sentence(error.message) };
+      const control = refusedControl(template, draft, thresholdHeartRate);
+      return {
+        status: 'refused',
+        message: sentence(error.message),
+        ...(control === undefined ? {} : { control }),
+      };
     }
     throw error;
   }
+}
+
+/**
+ * The control a domain refusal belongs to: the first whose choice is refused
+ * when it is the only one made. The domain's refusal is one error code for
+ * every choice, and the draft as a whole is refused whichever control the
+ * rider touched last, so the control is found by asking about each alone.
+ */
+function refusedControl(
+  template: WorkoutTemplate,
+  draft: TailorDraft,
+  thresholdHeartRate: number | undefined,
+): TailorControl | undefined {
+  for (const control of ['length', 'intensity', 'repeats', 'recovery'] as const) {
+    const alone = { ...EMPTY_TAILOR_DRAFT, [control]: draft[control] };
+    const choices = choicesFrom(alone, thresholdHeartRate);
+    if ('message' in choices) continue;
+    try {
+      tailorWorkout(template, choices);
+    } catch (error) {
+      if (error instanceof WorkoutError) return control;
+      throw error;
+    }
+  }
+  return undefined;
 }
 
 /** One block of the preview, in words. */
@@ -278,6 +371,19 @@ export function lengthOptionText(minutes: number): string {
 
 /** The lengths a rider may ask for: the five every library is browsed by. */
 export const TAILOR_LENGTHS: readonly number[] = LENGTH_CHOICES;
+
+/**
+ * The name a tailored built-in carries on the Ride screen — the owner's ruling
+ * of 2026-11-07 (a): the template's, with any intensity, and NOT its length,
+ * because the Ride screen says the length beside every workout's name
+ * ("Sweet spot, three by twelve (−5%) — 47 min, …"), and a name that carried
+ * it too said it twice.
+ */
+export function rideName(template: WorkoutTemplate, draft: TailorDraft): string {
+  const intensity = numberIn(draft.intensity) ?? 0;
+  if (intensity === 0 || Number.isNaN(intensity)) return template.name;
+  return `${template.name} (${intensity > 0 ? `+${String(intensity)}%` : `−${String(-intensity)}%`})`;
+}
 
 /**
  * The name a saved copy is given: the template's, with its length and any
