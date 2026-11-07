@@ -1156,6 +1156,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/hud-layout-preference.ts
+                        the panels a rider turns off and the HUD's text size
+                        (#2079), kept on the device and read as a ride starts;
+                        never the notices, the controls or the primary readings
     src/game/hud/recent-trace.ts, RecentGraph.tsx
                         the last ten minutes of power and heart rate (#2078):
                         a fixed ring of 600 one-second slots, written from the
@@ -1163,6 +1167,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         second, a dropped reading a gap (`NaN`), never a
                         zero; the SVG is memoised on the count written, so it
                         is redrawn at most once a second
+    src/game/hud/lap-splits.ts, LapSplits.tsx
+                        a loop's lap splits (#2080): the lap in progress, the
+                        last lap and the best, from the laps `courseLine`
+                        returned and the recorder's lap time only, so they are
+                        the saved ride's rows; on a loop only, in a race's
+                        standings' place and swapped with them
     src/game/hud/look-ahead.ts
                         the next kilometre of road on the HUD (#2075): the
                         road a line at a FIXED scale (100 m of height across the
