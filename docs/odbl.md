@@ -106,8 +106,30 @@ synthetic road and draws no OpenStreetMap data.
 
 ⚠️ **The on-device store is unchanged.** ADR 0054 D-3.5 still binds `worldCorridors` whole: nothing
 in it leaves the device, the bake never reads it, and the share-alike reasoning in the section above
-still holds for it. The bundle is a separate database, made at build time from the archive, and it
-is the only OpenStreetMap-derived database this project publishes.
+still holds for it. The bundle is a separate database, made at build time from the archive. Beside
+the routing graph below, it is one of the two OpenStreetMap-derived databases this project publishes.
+
+## The routing graph for the in-browser measurement (#2320)
+
+On the owner's ruling of 2026-11-06 on [#2320](https://github.com/openzigs/onyourleft/issues/2320),
+for the tablet measurement [#2009](https://github.com/openzigs/onyourleft/issues/2009) asks for.
+`apps/web/tools/valhalla/` builds it and its README is the detail.
+
+- **What it is.** One state's Valhalla routing graph, built from an OpenStreetMap extract by the
+  official Valhalla tools (`build-graph.sh`). It is a Derivative Database of OpenStreetMap. It holds
+  the road network and its routing attributes, as Valhalla keeps them; nothing from a rider.
+- **Where it is.** Built on the maintainer's machine, never in CI and never committed. It is hosted
+  only on the owner's word at upload time, as one immutable directory on R2,
+  `https://tiles.openzigs.com/routing/<release>/`, by `upload.sh`.
+- **Its licence.** Hosting it Publicly Uses and Publicly Conveys it, so it is offered **under ODbL
+  1.0** (§4.4 a.i). The directory carries `NOTICE.txt` with the licence's URI and §4.3 a's example
+  notice (§4.2 b and d, §4.3), and `manifest.json` names the licence too. **§4.6 a:** `graph.tar`
+  in the same directory is the entire derived database, a plain file anyone can copy.
+- **Attribution.** The measurement page shows `© OpenStreetMap contributors` and the ODbL
+  (`basemap.ts` §`OSM_ATTRIBUTION`, §`ODBL_LICENCE_URL`). It draws no map.
+- **What it does not change.** The world corridor store's reasoning above is untouched: the graph is
+  built from an extract, never from the archive or the store, and nothing a rider records goes into
+  it. When snapping ships to riders (#2009's build), how its graph is published is decided then.
 
 ## The lap race's built-in circuits
 
