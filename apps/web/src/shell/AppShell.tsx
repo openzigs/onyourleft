@@ -752,6 +752,8 @@ function viewFor(
           selected={match.parameter}
           // #2304: the built-in list's filter, from the address.
           query={match.query}
+          // #2305: the rider's thresholds, for a tailored built-in in watts.
+          analysis={props.analysis}
         />
       );
     case 'game':

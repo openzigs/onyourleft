@@ -13,12 +13,15 @@ import {
 
 import {
   expandWorkout,
+  unixSeconds,
   type Workout,
   type WorkoutBlock,
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
+import { useOwnThresholds } from '../analysis/own-thresholds';
+import type { AnalysisPort } from '../analysis/store-port';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
@@ -132,6 +135,12 @@ export interface WorkoutsViewProps {
   readonly selected?: string | undefined;
   /** The address's query, the built-in list's filter — #2304, `routes.ts` §`RouteMatch.query`. */
   readonly query?: string | undefined;
+  /**
+   * The rider's thresholds, for a tailored built-in in watts — #2305. The
+   * analysis port, as the ride screen's, because it is the one port that may
+   * read the athlete record. Absent, every target stays a share of threshold.
+   */
+  readonly analysis?: AnalysisPort | undefined;
 }
 
 /** A selected workout that was not in the list, read on its own. */
@@ -213,12 +222,20 @@ const WorkoutBlockChart = memo(function WorkoutBlockChart({
  */
 const newWorkoutId = (): WorkoutId => `workout-${globalThis.crypto.randomUUID()}` as WorkoutId;
 
-export function WorkoutsView({ port, now, save, selected, query }: WorkoutsViewProps): JSX.Element {
+export function WorkoutsView({
+  port,
+  now,
+  save,
+  selected,
+  query,
+  analysis,
+}: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
   // One object per address, so the built-in list (a `memo`) draws again only when it changes.
   const filter = useMemo(() => builtInFilterFromQuery(query), [query]);
   // #2304: a built-in is chosen by the same address and never read from the store.
   const builtIn = isBuiltInId(selected);
+  const thresholds = useOwnThresholds(analysis);
   // #2304: the rider's own workouts or the built-ins, from the address.
   const shownList = workoutsListOf(query, selected);
   // Not on every keystroke the builder causes: only when the list is read again.
@@ -473,6 +490,31 @@ export function WorkoutsView({ port, now, save, selected, query }: WorkoutsViewP
     [clock, port, reload],
   );
 
+  /**
+   * *Save a copy* of a tailored built-in — #2305: the workout `tailorWorkout`
+   * made, as an ordinary saved workout of the rider's own, through the same
+   * port and the same read-back as a workout built here. Nothing new is
+   * stored: a copy is indistinguishable from one built by hand.
+   */
+  const onSaveCopy = useCallback(
+    async (copyName: string, workout: Workout): Promise<string> => {
+      if (port === undefined) throw new Error('no store to save a copy in');
+      const id = newWorkoutId();
+      const at = unixSeconds(Math.floor(clock()));
+      await port.store.putWorkout({
+        id,
+        createdBy: port.athleteId,
+        name: copyName,
+        workout: { ...workout, name: copyName },
+        createdAt: at,
+        updatedAt: at,
+      });
+      await reload();
+      return id;
+    },
+    [clock, port, reload],
+  );
+
   const onDelete = useCallback(
     async (row: WorkoutRow): Promise<void> => {
       if (port === undefined) return;
@@ -586,7 +628,7 @@ export function WorkoutsView({ port, now, save, selected, query }: WorkoutsViewP
 
   const chosen =
     selected === undefined ? null : builtIn ? (
-      <BuiltInDetail id={selected} />
+      <BuiltInDetail id={selected} thresholds={thresholds} onSaveCopy={onSaveCopy} />
     ) : shown === undefined ? (
       <p>Reading this workout…</p>
     ) : shown.kind === 'found' ? (
