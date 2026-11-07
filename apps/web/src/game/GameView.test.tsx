@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   GameView,
+  RIDE_ENDED_LABEL,
   RIDE_ENDED_TEXT,
   RIDER_GHOST_REFUSAL_TEXT,
   type GamePort,
@@ -2176,6 +2177,48 @@ describe('ending a game ride asks first — #2349', () => {
     expect(seen.order).toEqual(['ended', 'discarded']);
     expect(seen.saved).toBe(0);
     expect(picker()).toContain(RIDE_ENDED_TEXT.discarded);
+    // #2349's review (nit): labelled as the Ride screen labels it.
+    expect(RIDE_ENDED_LABEL.discarded).toBe('Discarded');
+    expect(picker()).toContain('Discarded:');
+    expect(picker()).not.toContain('Ride ended:');
+  });
+
+  it('says “Not deleted”, with the way to the ride, when the discard throws (#2349’s review)', async () => {
+    const trainer = recordingTrainer(fresh(), { savable: true });
+    await onTheStage({
+      ...trainer,
+      discardRideRecording: () => Promise.reject(new Error('the device is unwell')),
+    });
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(picker()).toContain('Not deleted:');
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-deleted']);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
+  });
+
+  it('says the ride was not saved, and where it still is, when the save throws (#2349’s review)', async () => {
+    const trainer = recordingTrainer(fresh(), { savable: true });
+    await onTheStage({
+      ...trainer,
+      saveRideRecording: () => Promise.reject(new Error('the device is unwell')),
+    });
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Save ride'));
+    pending = [];
+    expect(picker()).toContain('Not saved:');
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-saved']);
+    expect(picker()).not.toContain(RIDE_ENDED_TEXT.saved);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
   });
 
   it('says so when the delete did not go through, and where the ride still is', async () => {

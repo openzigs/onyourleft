@@ -911,6 +911,24 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'deleteKeptCameraFramesCapturedBetween',
+    leaks: 'another athlete’s kept pictures, destroyed by a ride they never rode',
+    async run(store, mine, theirs) {
+      // The widest window there is: an owner-blind delete takes every kept
+      // frame on the device.
+      await store.deleteKeptCameraFramesCapturedBetween(
+        mine.owner,
+        unixSeconds(0),
+        unixSeconds(Number.MAX_SAFE_INTEGER),
+      );
+      const theirsAfter = await store.listCameraFrames(theirs.owner);
+      expect(theirsAfter.map((row) => row.id)).toContain(theirs.frame.id);
+      // A snapshot names its ride and follows it, not the window.
+      const mineAfter = await store.listCameraFrames(mine.owner);
+      expect(mineAfter.map((row) => row.id)).toContain(mine.snapshot.id);
+    },
+  },
+  {
     member: 'listRideSnapshots',
     leaks:
       'a picture another rider saved of themselves, on their own ride’s page — a photograph of the inside of somebody else’s house',

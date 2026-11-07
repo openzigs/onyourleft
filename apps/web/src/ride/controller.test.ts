@@ -86,6 +86,7 @@ import {
 } from '@onyourleft/sensors/simulator';
 import {
   activityId,
+  cameraFrameId,
   lapId,
   RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
@@ -96,7 +97,10 @@ import {
 } from '@onyourleft/store';
 import {
   ATHLETE_A,
+  ATHLETE_B,
+  cameraFrameFor,
   createStoreHarness,
+  recordingFor,
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
@@ -122,6 +126,8 @@ vi.mock('../recording/laps', async (importOriginal) => {
 });
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
+import { keepThisRide } from '../camera/keep';
+import { discardKeptFramesWithTheRide } from '../camera/kept-frame-discard';
 import { exportActivity, LOSSY_CHANNELS } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
 import { importActivityFiles } from '../transfer/import-batch';
@@ -7510,6 +7516,158 @@ describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding',
     expect(await rig.controller.startNewRide()).toBe(true);
     expect(rig.controller.getSnapshot().recoverable).toHaveLength(1);
     expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('says “not deleted”, never a failed save, when something throws on the way, and offers the ride back (#2349’s review)', async () => {
+    const rig = await holdingTarget();
+    const control = rig.trainerControl();
+    expect(control).toBeDefined();
+    // Something on the discard path throws — here the release's first read.
+    // Nothing on today's paths does; the controller must fail closed if one
+    // ever starts to.
+    const unwell = vi.spyOn(control as TrainerControl, 'hasControl').mockImplementation(() => {
+      throw new Error('the trainer is unwell');
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    await expect(rig.controller.confirmDiscard()).rejects.toThrow('the trainer is unwell');
+    unwell.mockRestore();
+    const after = rig.controller.getSnapshot();
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(true);
+    expect(after.stopping).toBe(false);
+    // Still on the device, and offered back.
+    expect(await onDisk(rig)).toBeDefined();
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('deletes only this ride: another athlete’s recording and this athlete’s older one stay, read back on a fresh connection', async () => {
+    const theirs = recordingFor(ATHLETE_B);
+    const older = recordingFor(ATHLETE_A, { state: 'stopped' });
+    await harness.write(async (store) => {
+      await store.putRecordingSession(theirs);
+      await store.putRecordingSession(older);
+    });
+    const rig = await holdingTarget();
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+
+    expect(await onDisk(rig)).toBeUndefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_B, theirs.id)),
+    ).resolves.toBeDefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, older.id)),
+    ).resolves.toBeDefined();
+    rig.controller.dispose();
+  });
+
+  it('takes the pictures kept during the discarded ride, and only those (B1)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    let minted = 0;
+    const keep = keepThisRide({
+      store: {
+        putCameraFrame: async (record) =>
+          harness.write(async (store) => store.putCameraFrame(record)),
+        countCameraFrames: async (owner) =>
+          harness.write(async (store) => store.countCameraFrames(owner)),
+        countSnapshots: async (owner) =>
+          harness.write(async (store) => store.countSnapshots(owner)),
+        deleteCameraFrames: async (owner) =>
+          harness.write(async (store) => store.deleteCameraFrames(owner)),
+      },
+      athleteId: ATHLETE_A,
+      newFrameId: () => {
+        minted += 1;
+        return cameraFrameId(`kept-${String(minted)}`);
+      },
+      now: () => rig.bench.now,
+    });
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+          harness.write(async (store) =>
+            store.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+          ),
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    const picture = cameraFrameFor(ATHLETE_A);
+    const frame = {
+      bytes: picture.bytes,
+      mediaType: picture.mediaType,
+      width: picture.width,
+      height: picture.height,
+    };
+    keep.setKeeping(true);
+
+    // The first ride, kept and SAVED: its picture is that ride's to keep.
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    await ride(rig, 2);
+    // Kept between the rides: before the next one started.
+    await keep.accept(frame);
+    await ride(rig, 2);
+    expect(await rig.controller.startNewRide()).toBe(true);
+
+    // The second ride: a picture kept during it, and another athlete's
+    // picture taken in the same seconds on this device.
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    const theirs = cameraFrameFor(ATHLETE_B, { capturedAt: rig.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(theirs));
+    await ride(rig, 3);
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+    await discards.settled();
+
+    // Read back on a fresh connection.
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((row) => row.id).sort()).toStrictEqual(['kept-1', 'kept-2']);
+    const others = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
+    expect(others.map((row) => row.id)).toContain(theirs.id);
+    discards.dispose();
+    rig.controller.dispose();
+  });
+
+  it('keeps the pictures of a discard whose delete did not go through: the ride is still here (B1)', async () => {
+    const rig = await holdingTarget({
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    const deleted: unknown[] = [];
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: (...window) => {
+          deleted.push(window);
+          return Promise.resolve(0);
+        },
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    await discards.settled();
+    expect(rig.controller.getSnapshot().leftover).toBe(true);
+    expect(deleted).toEqual([]);
+    discards.dispose();
     rig.controller.dispose();
   });
 

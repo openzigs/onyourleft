@@ -320,4 +320,34 @@ describe('the trainer game’s stage has the screen (#1512)', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
   });
+
+  it('asks, and stays, when a desktop browser’s Back or a typed address would leave the stage (#2349’s review, B2)', async () => {
+    globalThis.location.hash = hrefFor(routeById('game'));
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        game={GAME}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    const start = [...document.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      start?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+
+    await act(async () => {
+      globalThis.location.hash = hrefFor(routeById('home'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await settle();
+    expect(document.querySelectorAll('[data-oyl-end-ride]')).toHaveLength(1);
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
+  });
 });

@@ -669,6 +669,29 @@ describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding',
     expect(stub.calls.confirmStop).toBe(0);
   });
 
+  it('says “Not deleted”, never a failed save, when the discard throws (#2349’s review)', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true, discardArmed: true });
+    // The controller fails closed and rethrows: its snapshot says a discard
+    // that did not go through, and the screen must say that, and catch.
+    stub.controller.confirmDiscard = async () => {
+      stub.set({
+        phase: 'stopped',
+        stopArmed: false,
+        discardArmed: false,
+        saveState: 'discarded',
+        leftover: true,
+      });
+      return Promise.reject(new Error('the device is unwell'));
+    };
+    await show(stub);
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    await settle();
+    expect(document.body.textContent).toContain('Not deleted');
+    expect(document.body.textContent).toContain(DISCARDED_TEXT.leftover);
+    expect(document.body.textContent).not.toContain('could not be added to your activities');
+  });
+
   it('is said through one live region when it opens', async () => {
     const stub = stubRideController(ridingSnapshot());
     stub.set({ stopArmed: true });

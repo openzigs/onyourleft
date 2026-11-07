@@ -4125,8 +4125,15 @@ export function createRideController(options: RideControllerOptions): RideContro
         leftover = !gone;
       } catch (error: unknown) {
         // Fail closed, as `confirmStop` does: whatever threw, the checkpoint
-        // is where it was and is offered back.
-        saveState = 'failed';
+        // is where it was and is offered back. ⚠️ Said as a discard that did
+        // not go through (#2349's review), never as a failed SAVE: the rider
+        // asked for this ride to be deleted, and "not saved" would answer a
+        // question they did not ask.
+        saveState = 'discarded';
+        saveError = undefined;
+        savedActivityId = undefined;
+        savedRide = undefined;
+        leftover = true;
         throw error;
       } finally {
         finishing = false;

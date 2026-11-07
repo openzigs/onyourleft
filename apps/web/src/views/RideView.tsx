@@ -1028,7 +1028,10 @@ function RideControls({
             controller.armDiscard();
           }}
           onConfirmDiscard={() => {
-            void controller.confirmDiscard();
+            // #2349's review: a discard that throws has failed closed, and the
+            // controller says so (`discarded`, with `leftover`): the screen
+            // shows "Not deleted" from the snapshot, so nothing is left here.
+            controller.confirmDiscard().catch(() => undefined);
           }}
           onKeepRiding={keepRiding}
         />

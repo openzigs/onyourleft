@@ -228,6 +228,8 @@ import {
   routeById,
 } from '../shell/routes';
 import { useRideBack } from '../shell/ride-back';
+import { useRideLeave } from '../shell/ride-leave';
+import { useRecordingGuard } from '../ride/useRideController';
 import { END_RIDE_TEXT, EndRideQuestion, type EndRideStep } from '../ride/EndRideQuestion';
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { countCourses } from './delivery/courses';
@@ -651,16 +653,31 @@ function roomRouteId(roomId: string): string {
 export const STANDING_NOTICE_SECONDS = 15;
 
 /** How the last game ride was ended, as the picker says it — #2349. */
-type RideEndedAs = 'saved' | 'discarded' | 'not-deleted' | 'not-recorded';
+type RideEndedAs = 'saved' | 'not-saved' | 'discarded' | 'not-deleted' | 'not-recorded';
 
 /** What the picker says of a ride the rider just ended — #2349. ⚠️ Draft wording for the owner. */
 export const RIDE_ENDED_TEXT: Readonly<Record<RideEndedAs, string>> = {
   saved:
     'Your ride is stopped and being saved to your activities. Its result is on the Ride screen.',
+  'not-saved':
+    'Your ride is stopped, but it could not be saved. It is still on this device, on the Ride screen.',
   discarded: 'Your ride is discarded. It was deleted from this device, and nothing was saved.',
   'not-deleted':
     'Your ride was not saved, but it could not be deleted from this device. It is still on the Ride screen.',
   'not-recorded': 'Your ride is ended. Nothing was being recorded, so there was nothing to save.',
+};
+
+/**
+ * The label before it — #2349. *Discarded* and *Not deleted* are the Ride
+ * screen's own (`RideView.tsx` §`StoppedNotice`), so the two surfaces say one
+ * outcome one way. ⚠️ Draft wording for the owner.
+ */
+export const RIDE_ENDED_LABEL: Readonly<Record<RideEndedAs, string>> = {
+  saved: 'Stopped',
+  'not-saved': 'Not saved',
+  discarded: 'Discarded',
+  'not-deleted': 'Not deleted',
+  'not-recorded': 'Ride ended',
 };
 
 /**
@@ -670,13 +687,13 @@ export const RIDE_ENDED_TEXT: Readonly<Record<RideEndedAs, string>> = {
  * ride whose delete did not go through.
  */
 function RideEndedNotice({ ended }: { readonly ended: RideEndedAs }): JSX.Element {
-  const toRide = ended === 'saved' || ended === 'not-deleted';
+  const toRide = ended === 'saved' || ended === 'not-saved' || ended === 'not-deleted';
   return (
     <StatusMessage
       // The save itself is still running: its outcome is the Ride screen's
       // to say (`RideView.tsx` §`StoppedNotice`), so this claims only the stop.
-      tone={ended === 'not-deleted' ? 'warning' : 'info'}
-      label={ended === 'saved' ? 'Stopped' : ended === 'not-deleted' ? 'Not deleted' : 'Ride ended'}
+      tone={ended === 'not-deleted' || ended === 'not-saved' ? 'warning' : 'info'}
+      label={RIDE_ENDED_LABEL[ended]}
       live
     >
       {RIDE_ENDED_TEXT[ended]}
@@ -3452,6 +3469,18 @@ function GameScreen({
       keepRiding();
     }
   });
+  // #2349's review, B2: the browser's Back, or an address typed into the bar,
+  // would unmount this stage and end the ride through the cleanup's
+  // `teardown`. The shell's router asks here first and puts the address back
+  // (`shell/ride-leave.ts`), so it OPENS the question — and, with it open,
+  // leaves it open: a second Back is not an answer. Nothing is released until
+  // *Save ride* or *Discard ride*.
+  useRideLeave(onTheStage, () => {
+    if (endAsk === undefined) askToEnd();
+  });
+  // A real unload — the tab closed, a reload — is past any question this page
+  // can draw: the browser's own generic prompt is all it allows.
+  useRecordingGuard(onTheStage);
   /**
    * An answer that ends the ride — #2349: *Save ride*, or *Discard ride*
    * confirmed. The game ride ends exactly as *End ride* ended it before the
@@ -3494,12 +3523,24 @@ function GameScreen({
     }
     if (answer === 'save') {
       setRideEnded('saved');
-      void trainerPort?.saveRideRecording?.();
+      // #2349's review: `confirmStop` fails closed and rethrows. The
+      // checkpoint is still on the device and the Ride screen offers it back,
+      // so the picker says so rather than leaving "being saved" standing.
+      trainerPort?.saveRideRecording?.().catch(() => {
+        setRideEnded('not-saved');
+      });
       return;
     }
-    void trainerPort?.discardRideRecording?.().then((gone) => {
-      setRideEnded(gone ? 'discarded' : 'not-deleted');
-    });
+    trainerPort
+      ?.discardRideRecording?.()
+      .then((gone) => {
+        setRideEnded(gone ? 'discarded' : 'not-deleted');
+      })
+      // #2349's review: a discard that threw failed closed — the ride is
+      // still on this device — which is the "Not deleted" sentence's case.
+      .catch(() => {
+        setRideEnded('not-deleted');
+      });
   };
 
   if (!onTheStage && preview !== undefined) {

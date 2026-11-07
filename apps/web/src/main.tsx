@@ -100,6 +100,7 @@ import { jobSessionOf } from './ride-analysis/instance-job';
 import { createReplanPort, type ReplanPort } from './workout/replan-port';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
+import { discardKeptFramesWithTheRide } from './camera/kept-frame-discard';
 import {
   deviceRetiredKeyStorage,
   retireDeviceHostedKey,
@@ -1641,6 +1642,18 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #2349. A ride the rider discarded takes the pictures they kept during it
+  // (#384's "Keep the pictures from this ride"), which name no ride and are
+  // already on the device. Like the keepers, it watches the ride controller,
+  // so with none there is nothing to discard and none is made.
+  if (rideController !== undefined) {
+    discardKeptFramesWithTheRide({
+      rides: rideController,
+      store: localStore(),
+      athleteId: LOCAL_ATHLETE,
+      now: browserClock,
+    });
+  }
   // #1063. Each side-camera snapshot, held in this tab's memory and written
   // with the ride it joins, after that ride's save (ADR 0044 D-3) — so, like
   // the report, it needs the ride controller, and with none there is no ride

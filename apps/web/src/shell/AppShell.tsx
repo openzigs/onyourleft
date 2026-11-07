@@ -123,6 +123,7 @@ import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
 import { rideBack, RideBackContext } from './ride-back';
+import { rideLeave, RideLeaveContext } from './ride-leave';
 import {
   isRideRoute,
   mayAnimateBetween,
@@ -918,7 +919,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #423, and described at length below. Declared before the router because
   // #945 asks it, per navigation, whether the navigation may animate.
   const [immersive, setImmersive] = useState(false);
-  const match = useRoute((from, to) => mayAnimateBetween(from, to, immersive), props.routeUpdates);
+  // #2349's review, B2: a browser Back or a typed address under a ride on the
+  // game's stage is asked about first (`ride-leave.ts`).
+  const [rideLeaves] = useState(rideLeave);
+  const match = useRoute(
+    (from, to) => mayAnimateBetween(from, to, immersive),
+    props.routeUpdates,
+    rideLeaves,
+  );
   const route = match.route;
   // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
   const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
@@ -1084,14 +1092,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
     // whether a ride has the screen here (`route-motion.ts` §`mayCarryOn`).
     <RideHasTheScreen value={immersive}>
       <RideBackContext value={rideBackPresses}>
-        <ViewBoundary key={route.id}>
-          <Suspense fallback={<ViewLoading />}>
-            {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-              colour: kitColour,
-              onChange: setKitColour,
-            })}
-          </Suspense>
-        </ViewBoundary>
+        <RideLeaveContext value={rideLeaves}>
+          <ViewBoundary key={route.id}>
+            <Suspense fallback={<ViewLoading />}>
+              {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+                colour: kitColour,
+                onChange: setKitColour,
+              })}
+            </Suspense>
+          </ViewBoundary>
+        </RideLeaveContext>
       </RideBackContext>
     </RideHasTheScreen>
   );
