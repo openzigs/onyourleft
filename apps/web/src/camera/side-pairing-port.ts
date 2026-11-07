@@ -30,6 +30,7 @@
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
 import type { SideLiveViewPort } from './side-live-view-port';
+import type { SideSnapshotSource } from './side-snapshot-port';
 import type { PairingRefusal } from './side-link-code';
 import type { SidePicture } from './side-link-pictures';
 import type { PhoneCommand } from './side-link-messages';
@@ -165,6 +166,11 @@ export interface TabletSidePairing {
    * while it is watched.
    */
   readonly liveView?: SideLiveViewPort | undefined;
+  /**
+   * Where *Save snapshot* takes the picture on screen from (#1063) — the same
+   * analysis as {@link liveView}, or `undefined` where there is none.
+   */
+  readonly snapshots?: SideSnapshotSource | undefined;
 }
 
 /** The phone's pairing, once it has read the tablet's offer. */

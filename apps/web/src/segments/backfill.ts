@@ -36,6 +36,7 @@
 import {
   createEffort,
   geographicPosition,
+  implausibleEffort,
   indexCorpus,
   matchRide,
   unixSeconds,
@@ -186,6 +187,7 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
   }
 
   const zones = await privacyCirclesFor(athleteId, store);
+  const segmentsById = new Map(corpus.map((indexed) => [indexed.segment.id, indexed.segment]));
   const athlete = await store.getAthlete(athleteId);
   const attributes = athlete?.mass === undefined ? {} : { riderMass: athlete.mass };
 
@@ -206,16 +208,21 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     }
 
     const result = matchRide(trace, corpus);
-    const found: SegmentEffortRecord[] = result.efforts.map(
-      (effort) =>
-        createEffort(effort, {
-          activityId: summary.id,
-          athleteId,
-          positions: trace.positions,
-          privacyZones: zones,
-          attributes,
-        }) as unknown as SegmentEffortRecord,
-    );
+    const found: SegmentEffortRecord[] = result.efforts.map((effort) => {
+      const segment = segmentsById.get(effort.segmentId);
+      return createEffort(effort, {
+        activityId: summary.id,
+        athleteId,
+        positions: trace.positions,
+        privacyZones: zones,
+        attributes,
+        // #69: an implied speed impossible for the sport is not a personal
+        // best, and the instance would exclude it too — the same rule, here.
+        excluded:
+          segment !== undefined &&
+          implausibleEffort(segment.sport, segment.distance, effort.elapsed) !== undefined,
+      }) as unknown as SegmentEffortRecord;
+    });
     efforts += await store.putActivityEfforts(athleteId, summary.id, found);
     for (const note of result.abandoned) {
       abandoned.push({

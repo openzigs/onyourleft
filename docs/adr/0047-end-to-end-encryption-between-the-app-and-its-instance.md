@@ -1576,3 +1576,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   route and so in D-7's "the synced history" row already; it is listed in
   `apps/instance/src/sealed/phase-one.ts` with the rest of that row. The body above is not edited.
   (#68)
+- **2026-11-05** — **The row #68 added gains two routes, and the moderators' reads one** (#69).
+  `POST /v1/segments/{segmentId}/efforts/{effortId}/flag` and `POST
+  /v1/segments/{segmentId}/hazard` (a rider's flag on another rider's effort, and on a segment as
+  hazardous) join the published-segments row; `GET /v1/moderation/segment-log`, the leaderboard
+  integrity log, is a moderator read and so in D-7's "every moderator read" row already. All three
+  are marked `only` from the first and listed in `apps/instance/src/sealed/phase-two.ts` and
+  `phase-one.ts`. The body above is not edited. (#69)

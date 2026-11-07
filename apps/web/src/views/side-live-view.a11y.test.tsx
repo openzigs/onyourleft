@@ -89,4 +89,17 @@ describe('the side camera’s live view, audited — #1061', () => {
     );
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
+
+  // Owner ruling, 2026-11-06 (#1063): "not kept" alone is false beside the
+  // Save snapshot button, which keeps the picture on screen. Read from the
+  // rendered caption, so a second sentence saying it would be caught too.
+  it('never says the picture is not kept without the Save snapshot exception', async () => {
+    await screen(true);
+    const caption = document.querySelector('figcaption')?.textContent ?? '';
+    const saying = caption.match(/not kept[^.]*/g) ?? [];
+    expect(saying.length).toBeGreaterThan(0);
+    for (const said of saying) {
+      expect(said).toBe('not kept unless you press “Save snapshot”');
+    }
+  });
 });

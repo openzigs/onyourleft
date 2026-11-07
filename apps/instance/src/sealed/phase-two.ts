@@ -104,4 +104,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('DELETE', '/v1/segments/{segmentId}', SEGMENTS),
   only('POST', '/v1/segments/{segmentId}/efforts/{content}', SEGMENTS),
   only('GET', '/v1/segments/{segmentId}/leaderboard', SEGMENTS),
+  // #69, in the same row: a rider's flags on an effort and on a segment.
+  only('POST', '/v1/segments/{segmentId}/efforts/{effortId}/flag', SEGMENTS),
+  only('POST', '/v1/segments/{segmentId}/hazard', SEGMENTS),
 ];
