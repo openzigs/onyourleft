@@ -7,9 +7,9 @@
  *
  * Mounted through the real `GameView`, inside the landmark and heading the
  * shell supplies, over a synthetic fixture circuit (ADR 0064 D-6.4). What is
- * read is what a rider reaches: the circuits under their own heading, in the
- * same radio group as the rider's routes, chosen by keyboard; the credit and
- * its link by name; and the circuit's race-only loadout.
+ * read is what a rider reaches: the circuits in their own disclosure, in the
+ * same radio group as the rider's routes, opened and chosen by keyboard; the
+ * credit and its link by name; and the circuit's race-only loadout.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,6 +74,10 @@ async function game(routes: readonly RidableRoute[]): Promise<void> {
   await settle();
 }
 
+function circuits(): HTMLDetailsElement | null {
+  return document.querySelector<HTMLDetailsElement>('details.oyl-chooser__circuits');
+}
+
 function circuitRadio(): HTMLInputElement | undefined {
   return queryAll<HTMLInputElement>(document.body, 'input[type="radio"]').find(
     (radio) => radio.value === FIXTURE.id,
@@ -81,15 +85,33 @@ function circuitRadio(): HTMLInputElement | undefined {
 }
 
 describe('#2293 — the built-in circuits in the chooser', () => {
-  it('sit under their own heading, a level below the chooser’s, with no finding', async () => {
+  it('sit in a disclosure, closed for a rider with routes, opened by keyboard on its summary, with no finding', async () => {
     await game([OUT]);
-    const section = document.querySelector('.oyl-chooser__circuits');
-    const heading = section?.querySelector('h3');
-    expect(heading?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.heading);
-    expect(section?.getAttribute('aria-labelledby')).toBe(heading?.id);
-    // The circuit's own name is a level below its section's heading.
-    expect(section?.querySelector('h4 label')?.textContent).toBe(FIXTURE.name);
+    const section = circuits();
+    const summary = section?.querySelector('summary');
+    expect(summary?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.heading);
+    expect(section?.open).toBe(false);
     expect(formatViolations(auditAccessibility(document))).toBe('');
+    if (summary === null || summary === undefined) return;
+    await activateWithKeyboard(summary);
+    await settle();
+    expect(circuits()?.open).toBe(true);
+    // Each circuit's name is a card heading, as a route's is.
+    expect(circuits()?.querySelector('h3 label')?.textContent).toBe(FIXTURE.name);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('are open from the start when the address chooses a circuit — the Games tab’s link', async () => {
+    const before = globalThis.location.hash;
+    globalThis.location.hash = `#/game?route=${encodeURIComponent(FIXTURE.id)}`;
+    try {
+      await game([OUT]);
+      expect(circuitRadio()?.checked).toBe(true);
+      expect(circuits()?.open).toBe(true);
+      expect(document.body.textContent).toContain(`Ride ${FIXTURE.name}`);
+    } finally {
+      globalThis.location.hash = before;
+    }
   });
 
   it('are in the same radio group as the rider’s routes, labelled by name, and chosen by keyboard', async () => {
@@ -127,6 +149,7 @@ describe('#2293 — the built-in circuits in the chooser', () => {
   it('are offered, with no finding, to a rider with no routes, with the way to import one', async () => {
     await game([]);
     expect(circuitRadio()?.checked).toBe(true);
+    expect(circuits()?.open).toBe(true);
     const link = queryAll<HTMLAnchorElement>(document.body, 'a').find(
       (each) => each.textContent === BUILT_IN_CIRCUITS_TEXT.noRoutes,
     );

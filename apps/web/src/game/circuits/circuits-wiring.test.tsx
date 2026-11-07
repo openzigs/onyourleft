@@ -195,8 +195,12 @@ async function pressRide(): Promise<void> {
 describe('the built-in circuits in the chooser — #2293', () => {
   it('are offered after the rider’s own routes, under their heading, with the credit and the way to the licence', async () => {
     await open(port([OWN], [FIXTURE]));
-    const section = mounted?.container.querySelector('.oyl-chooser__circuits');
-    expect(section?.querySelector('h3')?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.heading);
+    const section = mounted?.container.querySelector<HTMLDetailsElement>(
+      'details.oyl-chooser__circuits',
+    );
+    expect(section?.querySelector('summary')?.textContent).toBe(BUILT_IN_CIRCUITS_TEXT.heading);
+    // Closed for a rider with routes of their own, so the loadout stays where #1970 put it.
+    expect(section?.open).toBe(false);
     expect(section?.textContent).toContain(FIXTURE.name);
     const credit = section?.querySelector('[data-credit="circuits"]');
     expect(credit?.textContent).toContain(OSM_ATTRIBUTION);
@@ -245,6 +249,10 @@ describe('the built-in circuits in the chooser — #2293', () => {
     await open(port([], [FIXTURE]));
     expect(text()).toContain(`Ride ${FIXTURE.name}`);
     expect(text()).toContain(BUILT_IN_CIRCUITS_TEXT.noRoutes);
+    // They are all there is to ride, so they are open from the start.
+    expect(
+      mounted?.container.querySelector<HTMLDetailsElement>('details.oyl-chooser__circuits')?.open,
+    ).toBe(true);
   });
 
   it('are not offered at all with no circuits member on the port: today’s empty chooser', async () => {

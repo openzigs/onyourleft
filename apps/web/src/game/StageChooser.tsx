@@ -949,13 +949,10 @@ function RouteCard(props: {
   readonly onPick: (routeId: string) => void;
   readonly units: UnitSystem;
   readonly course?: CourseLine | undefined;
-  /** #2293: a circuit's name is under the circuits' own heading, a level down. */
-  readonly nameLevel?: 'h3' | 'h4' | undefined;
 }): JSX.Element {
   const { route, radioId, course } = props;
   const factsId = `${radioId}-facts`;
   const courseId = `${radioId}-course`;
-  const Name = props.nameLevel ?? 'h3';
   return (
     <li
       className={`oyl-chooser__card${course?.holds === false ? ' oyl-chooser__card--no-round' : ''} tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card`}
@@ -972,11 +969,11 @@ function RouteCard(props: {
           props.onPick(route.id);
         }}
       />
-      <Name className="oyl-chooser__name tw:my-sm tw:mx-0 tw:text-md tw:wrap-anywhere">
+      <h3 className="oyl-chooser__name tw:my-sm tw:mx-0 tw:text-md tw:wrap-anywhere">
         <label htmlFor={radioId} className="tw:cursor-pointer">
           {route.name}
         </label>
-      </Name>
+      </h3>
       {/*
         ⚠️ #1011: the chosen tile is told by more than colour — the
         radio's dot, the doubled border, and THIS: a tick and a word.
@@ -1029,10 +1026,19 @@ export const BUILT_IN_CIRCUITS_TEXT = {
 } as const;
 
 /**
- * #2293: the built-in circuits, under their own heading inside the chooser's
- * one radio group, with the OpenStreetMap credit beside them and the way to
- * the licence they are offered under (ADR 0064 D-5.1): the Credits screen,
- * whose *Map data* entry reads the notice in place.
+ * #2293: the built-in circuits, after the rider's own routes inside the
+ * chooser's one radio group, with the OpenStreetMap credit beside them and
+ * the way to the licence they are offered under (ADR 0064 D-5.1): the Credits
+ * screen, whose *Map data* entry reads the notice in place.
+ *
+ * ⚠️ **A disclosure, closed for a rider who has routes of their own** and has
+ * not chosen a circuit. The chooser is one column of cards and then the
+ * loadout, and #1970 keeps a loop's race switch on a 1280×800 tablet's first
+ * screen under *Ride*: four more cards between the rider's routes and the
+ * loadout would push it under the fold for every rider. Closed, the circuits
+ * cost one line there. Open from the start for a rider with no routes (they
+ * are all there is to ride) and when a circuit is the chosen card (the Games
+ * tab's link chooses one by the address).
  */
 function CircuitCards(props: {
   readonly circuits: readonly RidableRoute[];
@@ -1045,11 +1051,17 @@ function CircuitCards(props: {
   readonly idPrefix: string;
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
-  const headingId = `${props.idPrefix}-circuits`;
+  const [open, setOpen] = useState(() => props.noRoutes || props.circuits.includes(props.chosen));
   return (
-    <section className="oyl-chooser__circuits" aria-labelledby={headingId}>
-      <h3 id={headingId}>{BUILT_IN_CIRCUITS_TEXT.heading}</h3>
-      <p className="tw:mt-0">{BUILT_IN_CIRCUITS_TEXT.lead}</p>
+    <details
+      className="oyl-details oyl-chooser__circuits tw:mt-md"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary>{BUILT_IN_CIRCUITS_TEXT.heading}</summary>
+      <p>{BUILT_IN_CIRCUITS_TEXT.lead}</p>
       {props.noRoutes ? (
         <p>
           <a href={hrefFor(routeById('routes'))}>{BUILT_IN_CIRCUITS_TEXT.noRoutes}</a>
@@ -1065,7 +1077,6 @@ function CircuitCards(props: {
             chosen={circuit.id === props.chosen.id}
             onPick={props.onPick}
             units={props.units}
-            nameLevel="h4"
           />
         ))}
       </ul>
@@ -1073,7 +1084,7 @@ function CircuitCards(props: {
         {props.credit} ·{' '}
         <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
       </p>
-    </section>
+    </details>
   );
 }
 
