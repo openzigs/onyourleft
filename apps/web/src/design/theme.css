@@ -6497,6 +6497,39 @@ select.oyl-input {
 }
 
 /*
+ * #2331, the owner's ruling on #2326: the *Built-in circuits* disclosure read
+ * as plain text. It had `.oyl-details`' marker and 44 px row (#666), but the
+ * marker was a 16 px `▸` beside a line in body ink, on the page with nothing
+ * behind it. So the row is drawn as the secondary button is: a filled
+ * `surfaceOverlay` row in `accentText` at 700, with `selected` under a pointer
+ * and the label in `accentHover` (the pairs `.oyl-button--secondary` declares),
+ * and the marker one and a half times the label, following the label's ink.
+ * The 44 px floor and the marker's glyphs stay `.oyl-details`'.
+ * `pre-ride.browser.spec.ts` §"#2331" reads all of it back, three ways for the
+ * floor (#316).
+ */
+.oyl-chooser__circuits > summary {
+  padding-inline: var(--oyl-space-md);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface-overlay);
+  color: var(--oyl-color-accent-text);
+  font-weight: 700;
+  transition: background-color var(--oyl-motion-short) var(--oyl-motion-ease-standard);
+}
+
+.oyl-chooser__circuits > summary:hover,
+.oyl-chooser__circuits > summary:active {
+  background: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+}
+
+.oyl-chooser__circuits > summary::before {
+  font-size: 1.5em;
+  line-height: 1;
+  color: inherit;
+}
+
+/*
  * #1992, PR #2113's ruling: *Preview without a trainer*, its own tile after
  * the loadout (`StageChooser.tsx` §`PreviewControl`). Every control in it is a
  * 48 px target, the ride-time size (#669), declared here for the stepper's two

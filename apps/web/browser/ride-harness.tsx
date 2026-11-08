@@ -98,6 +98,7 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
+import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
@@ -526,6 +527,15 @@ const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
 );
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
+/**
+ * `ride.html?picker=chooser&circuits=shipped` — #2331: the chooser with the
+ * app's built-in circuits beside the rider's routes, read through the
+ * product's own `loadBuiltInCircuits` as `main.tsx` hands them, so the
+ * *Built-in circuits* disclosure is drawn (closed: the rider has routes).
+ */
+const CIRCUITS =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
+
 const GAME: GamePort = {
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
@@ -549,6 +559,7 @@ const GAME: GamePort = {
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
+  ...(CIRCUITS ? { listCircuits: () => loadBuiltInCircuits() } : {}),
   ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
   // #1816: the Delivery town's corridor, ready at once, so the press fixes it.
   ...(DELIVERY_TOWN === undefined
