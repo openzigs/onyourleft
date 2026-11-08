@@ -566,6 +566,13 @@ export interface RideSnapshot {
    * `design/touch-lock.ts` is what it means on the screen.
    */
   readonly touchLocked: boolean;
+  /**
+   * When the recording under way started — the session's own `startedAt`, so
+   * a ride recovered after a crash says where it began, not where this tab
+   * first saw it (#2356: `camera/kept-frame-discard.ts` opens its window
+   * here). `undefined` with no recorder.
+   */
+  readonly startedAt: UnixSeconds | undefined;
   readonly elapsedSeconds: number;
   readonly movingSeconds: number;
   /**
@@ -2559,6 +2566,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       stopArmed,
       discardArmed,
       touchLocked,
+      startedAt: session?.startedAt,
       elapsedSeconds: session?.elapsedTime ?? 0,
       movingSeconds: session?.movingTime ?? 0,
       courseLapSeconds:

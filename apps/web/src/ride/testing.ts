@@ -101,6 +101,7 @@ export function idleSnapshot(): RideSnapshot {
     stopArmed: false,
     discardArmed: false,
     touchLocked: false,
+    startedAt: undefined,
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
