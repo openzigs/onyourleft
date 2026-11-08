@@ -77,7 +77,7 @@ export interface PressContext {
    * `ridePhase` alone does not say so. Read by `menu-music.ts` only, which
    * never suspends the context nor starts the loop by itself over one.
    */
-  readonly workoutRunning?: boolean | undefined;
+  readonly workoutRunning: boolean;
 }
 
 export interface MenuSounds {

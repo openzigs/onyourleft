@@ -1387,41 +1387,85 @@ describe('in the Android app the loop starts 3 s after the launch, and 3 s after
     expect(music.streamOpen(), 'a ride’s cues lost their context behind a hidden page').toBe(true);
   });
 
-  it('a workout running with the ride idle keeps its context awake behind a hidden page', async () => {
-    // #1319: a workout begun before a recording runs with the phase `idle`.
-    const stub = stubRideController(idleSnapshot());
-    const device = phone();
-    const music = androidRig(device);
-    await shell(music, stub.controller);
-    device.read();
-    music.elapse(AUTOPLAY_WAIT_MS);
-    expect(music.streamOpen()).toBe(true);
-    await act(async () => {
-      stub.set({ workout: workoutAt('running') });
-      await Promise.resolve();
-    });
-    await setHidden(music, true);
-    expect(stub.controller.getSnapshot().phase).toBe('idle');
-    expect(music.streamOpen(), 'the workout’s tone lost its context behind a hidden page').toBe(
-      true,
-    );
-  });
+  it.each(['running', 'paused', 'idle'] as const)(
+    'a workout %s with the ride idle keeps its context awake behind a hidden page',
+    async (status) => {
+      // #1319: a workout begun before a recording runs with the phase `idle`,
+      // and a paused one gets its tone back on resume by `rejoin()`.
+      const stub = stubRideController(idleSnapshot());
+      const device = phone();
+      const music = androidRig(device);
+      await shell(music, stub.controller);
+      device.read();
+      music.elapse(AUTOPLAY_WAIT_MS);
+      expect(music.streamOpen()).toBe(true);
+      await act(async () => {
+        stub.set({ workout: workoutAt(status) });
+        await Promise.resolve();
+      });
+      await setHidden(music, true);
+      expect(stub.controller.getSnapshot().phase).toBe('idle');
+      expect(music.streamOpen(), 'the workout’s tone lost its context behind a hidden page').toBe(
+        true,
+      );
+    },
+  );
 
-  it('the loop does not start by itself over a running workout, and starts once it is over', async () => {
-    const stub = stubRideController({ ...idleSnapshot(), workout: workoutAt('running') });
-    const device = phone();
-    const music = androidRig(device);
-    await shell(music, stub.controller);
-    device.read();
-    music.elapse(AUTOPLAY_WAIT_MS);
-    music.elapse(OWN_LOOP_SETTLE_MS);
-    expect(music.made, 'the loop started over a running workout').toEqual([]);
-    await act(async () => {
-      stub.set({ workout: workoutAt('finished') });
-      await Promise.resolve();
-    });
-    expect(music.made[0]?.paused, 'a finished workout still held the loop').toBe(false);
-  });
+  it.each(['running', 'paused'] as const)(
+    'the loop does not start by itself over a %s workout, and starts once it is over',
+    async (status) => {
+      const stub = stubRideController({ ...idleSnapshot(), workout: workoutAt(status) });
+      const device = phone();
+      const music = androidRig(device);
+      await shell(music, stub.controller);
+      device.read();
+      music.elapse(AUTOPLAY_WAIT_MS);
+      music.elapse(OWN_LOOP_SETTLE_MS);
+      expect(music.made, 'the loop started over a running workout').toEqual([]);
+      await act(async () => {
+        stub.set({ workout: workoutAt('finished') });
+        await Promise.resolve();
+      });
+      expect(music.made[0]?.paused, 'a finished workout still held the loop').toBe(false);
+    },
+  );
+
+  it.each(['running', 'paused'] as const)(
+    'a loop the rider pressed on does not come back by itself over a %s workout',
+    { timeout: RIDE_VIEWS_TIMEOUT_MS },
+    async (status) => {
+      const stub = stubRideController(idleSnapshot());
+      const device = phone();
+      // Our stream left out of the reading: with a workout the context stays
+      // awake, and its stream alone would hold the loop back. This holds the
+      // workout's own rule.
+      const music = androidRig(device, { ownStream: false });
+      await shell(music, stub.controller);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      expect(element?.paused).toBe(false);
+      await act(async () => {
+        stub.set({ workout: workoutAt(status) });
+        await Promise.resolve();
+      });
+      // Back in the app.
+      await setHidden(music, true);
+      expect(element?.paused).toBe(true);
+      await setHidden(music, false);
+      music.elapse(OWN_LOOP_SETTLE_MS);
+      expect(element?.paused, 'came back by itself over the workout on a return').toBe(true);
+      // Back from a ride route.
+      await go('#/ride');
+      music.endFades();
+      await go('#/');
+      device.read();
+      music.elapse(OWN_LOOP_SETTLE_MS);
+      expect(element?.paused, 'came back by itself over the workout after a ride route').toBe(true);
+      // The rider's own press still brings it.
+      await pressWithoutLeaving(homeControl());
+      expect(element?.paused).toBe(false);
+    },
+  );
 
   it('a press during the return’s wait, over a running workout, does not let the wait’s end start the loop', async () => {
     const stub = stubRideController({ ...idleSnapshot(), workout: workoutAt('running') });

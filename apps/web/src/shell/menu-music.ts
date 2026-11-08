@@ -63,7 +63,8 @@
  * In the Android app a page hidden on a menu route, with no ride in progress
  * and no workout running, also suspends our audio context (#2357): its open
  * stream would otherwise read as the rider's player. Nor does the loop start
- * by itself over a running workout.
+ * or come back by itself over a workout that is running or paused: only a
+ * press brings it over one.
  *
  * ## The rider's mix
  *
@@ -113,6 +114,7 @@
 import type { AudioMix } from '../game/audio-mix';
 import type { CueOutput } from '../game/audio-port';
 import { MUSIC_FADE_MS } from '../game/web-audio';
+import type { RideWorkoutSnapshot } from '../ride/controller';
 
 import { quiet, type PressContext } from './menu-sounds';
 
@@ -226,9 +228,10 @@ export interface MenuMusic {
  * Whether a workout is loaded and not finished — #2357, from the ride
  * controller's snapshot. `quiet` reads the ride's phase, which stays `idle`
  * for a workout begun before a recording (#1319), so this is asked as well
- * before the context is suspended or the loop starts by itself.
+ * before the context is suspended or the loop starts or comes back by itself.
+ * A paused workout counts: its tone comes back on resume, by `rejoin()`.
  */
-export function workoutRunning(workout: { readonly status: string } | undefined): boolean {
+export function workoutRunning(workout: Pick<RideWorkoutSnapshot, 'status'> | undefined): boolean {
   return workout !== undefined && workout.status !== 'finished';
 }
 
@@ -442,7 +445,9 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
         // reading asked for now is not it (#2357).
         if (returned && !fading) backInTheApp();
         else if (cameBack && !fading) unsettle();
-        if (wanted(deps.mix()) && (fading || mayStart())) play(element);
+        // Never back by itself over a running or paused workout (#2357):
+        // only a press brings the loop over one.
+        if (wanted(deps.mix()) && !workout && (fading || mayStart())) play(element);
       }
     },
   };
