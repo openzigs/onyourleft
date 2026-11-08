@@ -347,6 +347,27 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
   });
 });
 
+describe('the menus’ music — #2057', () => {
+  const MUSIC = 'apps/web/public/audio/upbeat-game-loop-aurora-ride.ogg';
+
+  it('credits the loop’s title, creator and licence as a courtesy, from the real manifest', async () => {
+    // CC0 asks for nothing; the owner's lane scope asked for a courtesy line
+    // where the credits already list CC0 work, and they do.
+    await render();
+    expect(sectionOf(MUSIC)).toBe('nothing');
+    const code = queryAll<HTMLElement>(mounted?.container ?? document, 'code').find(
+      (each) => each.textContent === MUSIC,
+    );
+    const credit = code?.closest('ul')?.closest('li')?.textContent ?? '';
+    expect(credit).toContain('Venus17');
+    expect(credit).toContain('CC0-1.0');
+    expect(credit).toContain('Upbeat Game Loop - Aurora Ride');
+    expect(linksOfCreditFor(MUSIC)).toContain(
+      'https://freesound.org/people/Venus17/sounds/841299/',
+    );
+  });
+});
+
 describe('when there is nothing the app must credit', () => {
   it('says so, rather than rendering an empty list', async () => {
     const onlyCourtesy = FIXTURE.split('\n').slice(10).join('\n');

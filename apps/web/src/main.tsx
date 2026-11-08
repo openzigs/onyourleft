@@ -1735,7 +1735,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     readMenuSoundPreference(deviceStorage()),
   );
   // #2058: the menus' music, over the same one output — its bus, its fade,
-  // its mute. Silent until #2057 commits the loop (`MENU_MUSIC_TRACK`).
+  // its mute. #2057's loop (`MENU_MUSIC_TRACK`).
   const menuMusic = createMenuMusic({
     output: sharedCueOutput(),
     track: MENU_MUSIC_TRACK,

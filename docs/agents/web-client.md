@@ -759,8 +759,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         press starts it (never the header's mute, never at
                         load), the same `quiet` rule as the sounds stops it with
                         a fade, a hidden page pauses it; an `<audio>` element
-                        made at that press, routed into the music bus. ⚠️ Silent
-                        until #2057 sets `MENU_MUSIC_TRACK`.
+                        made at that press, routed into the music bus. Since
+                        #2057 the loop is `public/audio/`'s one Ogg Opus file
+                        (`MENU_MUSIC_FILE`), made by
+                        `tools/audio/encode-menu-music.sh`;
+                        `tools/audio/menu-music.test.ts` holds its seam, its
+                        3 MB budget and its `ASSETS.toml` row.
                         ⚠️ Since #2292 the navigation is SIX destinations, the
                         owner's ruling that added Games: `theme.css` §"SIX IN A
                         ROW" keeps them one row at 320 px (no gap, a 2.75rem
