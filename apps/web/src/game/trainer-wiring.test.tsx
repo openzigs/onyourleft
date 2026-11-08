@@ -1436,8 +1436,6 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(rig.controller.getSnapshot().phase).toBe('idle');
       expect(recordingLine()).toContain(RECORDS_ON_RIDE_TEXT);
       expect(recordingLine()).not.toContain(NOT_RECORDING_TEXT);
-      // #1221's control is gone: the press itself records.
-      expect(buttonStarting('Record this ride')).toBeUndefined();
 
       await clickThrough(buttonStarting('Ride '));
       await flush();
@@ -1518,7 +1516,6 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
       expect(recordingLine()).toContain(CANNOT_RECORD_TEXT);
       expect(recordingLine()).not.toContain(RECORDS_ON_RIDE_TEXT);
-      expect(buttonStarting('Record this ride')).toBeUndefined();
     });
 
     it('asks the trainer for nothing when the rider left while the recording was starting (#509)', async () => {

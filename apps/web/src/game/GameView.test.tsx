@@ -2137,6 +2137,26 @@ describe('ending a game ride asks first — #2349', () => {
     expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.askNothingRecorded}`);
   });
 
+  it('does not warn of a deletion when nothing is recorded under the ride; with a recording it still does (#2381)', async () => {
+    await onTheStage(recordingTrainer(fresh(), undefined));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    const text = document.querySelector('[data-oyl-end-ride]')?.textContent ?? '';
+    expect(text).not.toContain('deleted from this device');
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.endLabel} ${END_RIDE_TEXT.endNothingRecorded}`);
+    expect(answers()).toEqual(['Discard ride', 'Keep riding']);
+    mounted?.unmount();
+    mounted = undefined;
+
+    await onTheStage(recordingTrainer(fresh(), { savable: false }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(document.querySelector('[data-oyl-end-ride]')?.textContent ?? '').toContain(
+      END_RIDE_TEXT.discardWarning,
+    );
+  });
+
   it('offers no Save ride for a recording with nothing in it', async () => {
     await onTheStage(recordingTrainer(fresh(), { savable: false }));
     await clickThrough(endRideButton());

@@ -89,12 +89,27 @@ export const END_RIDE_TEXT = {
   discardLabel: 'Discard this ride?',
   /** The `discard` step — the owner's sentence (#2349, item 2). */
   discardWarning: 'This ride will be deleted from this device. It can’t be undone.',
+  /**
+   * The `discard` step's label and sentence for a ride with NO recording
+   * under it (#2381, the owner's 2026-11-08 comment): a simulated ride, a
+   * preview, a browser that cannot record. Nothing is deleted, so the
+   * deletion warning would be false. ⚠️ Draft wording for the owner.
+   */
+  endLabel: 'End this ride?',
+  endNothingRecorded: 'Nothing was recorded, so nothing will be deleted.',
 } as const;
 
 export interface EndRideQuestionProps {
   readonly step: EndRideStep;
   /** Whether *Save ride* is offered: something is recorded to save. */
   readonly canSave: boolean;
+  /**
+   * Whether anything is recorded under the ride, so that *Discard ride*
+   * deletes something. False (#2381): the `discard` step says that nothing
+   * is deleted rather than warning of a deletion that cannot happen. Absent
+   * is true, which is every Ride-screen use.
+   */
+  readonly recorded?: boolean;
   readonly onSave: () => void;
   /** The `ask` step's *Discard ride*: asks once more. */
   readonly onDiscard: () => void;
@@ -145,14 +160,19 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
 
   const discarding = props.step === 'discard';
   const hud = props.surface === 'hud';
-  const label = discarding ? END_RIDE_TEXT.discardLabel : END_RIDE_TEXT.askLabel;
+  const nothingToDelete = props.recorded === false;
+  const discardLabel = nothingToDelete ? END_RIDE_TEXT.endLabel : END_RIDE_TEXT.discardLabel;
+  const discardSentence = nothingToDelete
+    ? END_RIDE_TEXT.endNothingRecorded
+    : END_RIDE_TEXT.discardWarning;
+  const label = discarding ? discardLabel : END_RIDE_TEXT.askLabel;
   const sentence = discarding
-    ? END_RIDE_TEXT.discardWarning
+    ? discardSentence
     : props.canSave
       ? END_RIDE_TEXT.ask
       : END_RIDE_TEXT.askNothingRecorded;
   const hudSentence = discarding
-    ? END_RIDE_TEXT.discardWarning
+    ? discardSentence
     : props.canSave
       ? undefined
       : END_RIDE_TEXT.hudNothingRecorded;

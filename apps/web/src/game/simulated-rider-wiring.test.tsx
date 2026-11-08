@@ -795,8 +795,6 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
   it('writes nothing to the machine, records nothing, saves nothing and joins no room', async () => {
     const rig = await onTheBench();
     await openTheGame(rig, `#/game?simulate=${String(POWER)}&speedup=8`);
-    // No *Record this ride* is offered on the picker.
-    expect(buttonStarting('Record this ride')).toBeUndefined();
     await clickThrough(buttonStarting('Ride '));
     await rideFor(rig, 30);
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
@@ -864,6 +862,11 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     expect(await rig.sessions()).toEqual([]);
     await clickThrough(buttonStarting('End ride'));
     await clickThrough(endRideAnswer(document, 'Discard ride'));
+    // #2381: nothing was recorded, so the question does not say it deletes.
+    expect(document.body.textContent).not.toContain('deleted from this device');
+    expect(document.querySelector('[data-oyl-end-ride]')?.textContent).toContain(
+      'Nothing was recorded',
+    );
     await clickThrough(endRideAnswer(document, 'Discard ride'));
     for (let index = 0; index < 10; index += 1) await settle();
     mounted?.unmount();

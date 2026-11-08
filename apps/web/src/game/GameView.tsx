@@ -4060,6 +4060,8 @@ function GameScreen({
               className="oyl-end-ride oyl-end-ride--hud"
               step={endAsk}
               canSave={recordedUnder?.savable === true}
+              // #2381: with nothing recorded, nothing is deleted.
+              recorded={recordedUnder !== undefined}
               // Opened by a press — *End ride*, or back — every time.
               focusOnOpen
               // The HUD's ONE region says it (#445): @see askToEnd
@@ -4069,7 +4071,11 @@ function GameScreen({
               }}
               onDiscard={() => {
                 setEndAsk('discard');
-                setAnnouncement(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+                setAnnouncement(
+                  recordedUnder === undefined
+                    ? `${END_RIDE_TEXT.endLabel} ${END_RIDE_TEXT.endNothingRecorded}`
+                    : `${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`,
+                );
               }}
               onConfirmDiscard={() => {
                 endRide('discard');
