@@ -1,19 +1,20 @@
 # ADR 0065: Built-in Delivery levels — short town rounds with their houses baked in, committed and shipped in the app under ODbL 1.0, solo only, with their obstacle roster
 
-- **Status**: **Proposed, 2026-11-08.** The owner answered #2359's four open questions on
-  2026-11-08, in a [comment on #2360](https://github.com/openzigs/onyourleft/issues/2360#issuecomment-6722601585):
+- **Status**: **Accepted, 2026-11-08**, on the owner's
+  [ruling of that day](https://github.com/openzigs/onyourleft/pull/2371#issuecomment-6723843813) on pull request #2371: Q0 accepted as written; and Q5 yes, 2 MiB a level
+  file and 8 MiB for all of them, refused at build time and never trimmed to fit. The owner had
+  answered #2359's four open questions the same day, in a
+  [comment on #2360](https://github.com/openzigs/onyourleft/issues/2360#issuecomment-6722601585):
   Q1 (b), bake the house footprints into each level file; Q2 yes, an assisted finish unlocks the
   next level; Q3 yes, level rounds stay separate from the week's rounds; Q4 a crash costs points
-  only. D-15 records each answer. The owner reviews this text before merge (Q0); the pull request
-  flips this line to Accepted before it merges, because an amendment cannot change a Status line
-  afterwards (ADR 0013)
+  only. D-15 records each answer. Proposed 2026-11-08
 - **Date**: 2026-11-08
 - **Deciders**: **the owner**, on the rulings of 2026-11-08 quoted in #2359 (about six short town
   levels of 1.5 to 5 km on real OpenStreetMap streets and mapped houses, with our own names,
   unlocking in order, kept out of the owner's home area, with four phased kinds of obstacle) and the
   answers of the same day on #2360 (D-15). The owner chose (b) for Q1 where #2360 recommended (a);
-  this ADR is written to the answer. The size ceilings of D-3 are the author's recommendation, put
-  to the owner in D-15 Q5. Everything else is the author's engineering reading of those rulings
+  this ADR is written to the answer. The size ceilings of D-3 were the author's recommendation, put
+  to the owner in D-15 Q5 and accepted. Everything else is the author's engineering reading of those rulings
 - **Issue**: [#2360](https://github.com/openzigs/onyourleft/issues/2360), phase 0 of the epic
   [#2359](https://github.com/openzigs/onyourleft/issues/2359), a child of the Delivery epic
   [#1803](https://github.com/openzigs/onyourleft/issues/1803)
@@ -215,7 +216,7 @@ check its house count once, when the file is made, rather than the rider finding
    measured sizes replace all of this. At six levels, that is **about 2 to 6 MiB** together, before
    compression. The APK's zip and the network's gzip shrink JSON several times; the precache holds
    the files as served.
-2. **The ceilings, recommended (D-15 Q5): 2 MiB for one level file, and 8 MiB for every level
+2. **The ceilings, set by the owner (D-15 Q5): 2 MiB for one level file, and 8 MiB for every level
    file together.** The build fails above either, as `vite.demo.config.ts` fails the demo build
    above `DEMO_ROUTE_MAX_BYTES`, and the build tool refuses to write a file over the first. A level
    over 2 MiB is redrawn shorter or elsewhere; the corridor is **not** narrowed to fit, because a
@@ -421,10 +422,11 @@ consulted. The ODbL clauses this relies on are the ones ADR 0056 read first-hand
 
 Q1 to Q4 were #2359's open questions, carried to #2360 and answered there on 2026-11-08 in a
 [comment](https://github.com/openzigs/onyourleft/issues/2360#issuecomment-6722601585). Q0 and Q5
-are asked in this pull request.
+were asked in this pull request and answered there on 2026-11-08 in a [comment](https://github.com/openzigs/onyourleft/pull/2371#issuecomment-6723843813).
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
-   merge**; the pull request flips the Status line. **Not yet answered.**
+   merge**; the pull request flips the Status line. **Answered: accepted**, *"ADR 0065 is accepted
+   as written"*; the Status line says Accepted.
 2. **Q1 — What does a level ship: (a) the line, heights and round parameters only, with the houses
    read from the published basemap's corridor per ride under the `level:` namespace (ADR 0064
    D-2.2), or (b) also the house footprints baked into each file, superseding ADR 0056 D-2.4 for the
@@ -441,7 +443,9 @@ are asked in this pull request.
    D-2.4). **Answered: points only** (D-11).
 6. **Q5 — The size ceilings of D-3.2: 2 MiB a level file and 8 MiB for all of them?** Recommended:
    **yes**, about the estimate's upper end with room for six levels, and well under the demo's
-   8 MiB a route. **Not yet answered.**
+   8 MiB a route. **Answered: yes**, 2 MiB per level file and 8 MiB for all the level files
+   together; a level over either ceiling is refused at build time, and its corridor is never
+   narrowed to fit (D-3.2).
 
 ---
 

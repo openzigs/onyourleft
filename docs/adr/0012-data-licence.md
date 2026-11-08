@@ -328,7 +328,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   under ODbL 1.0 and decides §4.6 a, the files themselves, as D-4's last paragraph asks a successor
   to. This ADR's decisions for segments are unchanged.
 - **2026-11-08** — **A third Publicly Used OSM-derived database is proposed: the built-in Delivery
-  level files, under [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)** ([#2360](https://github.com/openzigs/onyourleft/issues/2360), proposed that day). For that one database D-4's
+  level files, under [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)** ([#2360](https://github.com/openzigs/onyourleft/issues/2360), accepted that day). For that one database D-4's
   *"§4.6 is not the plan"* no longer describes the project: ADR 0065 offers it under ODbL 1.0 and
   decides §4.6 a, the files themselves, as D-4's last paragraph asks a successor to. This ADR's
   decisions for segments are unchanged.

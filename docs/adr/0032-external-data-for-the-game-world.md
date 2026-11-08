@@ -442,7 +442,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   for those files and for nothing else. D-1 items 1 and 3, every row of D-1's table for the world,
   and D-3 are unchanged. This entry is a pointer; the supersession is ADR 0064's.
 - **2026-11-08** — **D-1 item 2 is superseded in part again, by
-  [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, proposed that day ([#2360](https://github.com/openzigs/onyourleft/issues/2360)), for the built-in Delivery levels only. Each
+  [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, accepted that day ([#2360](https://github.com/openzigs/onyourleft/issues/2360)), for the built-in Delivery levels only. Each
   level file, committed under ODbL 1.0, holds a line drawn on the project's own archive's streets,
   its heights and the building footprints of its corridor, so *"No dataset derived from an external
   source is committed for the game world"* stops being true for those files too. D-1 items 1 and 3,

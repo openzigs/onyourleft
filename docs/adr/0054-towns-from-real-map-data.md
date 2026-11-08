@@ -515,7 +515,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   ride on a circuit shows the credit that D-3.6 says that world does not. This entry is a pointer and
   changes nothing here.
 - **2026-11-08** — **D-1's *"Still true"* for ADR 0032 D-1 item 2 stops holding for the built-in
-  Delivery levels too, under [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)** ([#2360](https://github.com/openzigs/onyourleft/issues/2360), proposed that day). Each level's line,
+  Delivery levels too, under [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)** ([#2360](https://github.com/openzigs/onyourleft/issues/2360), accepted that day). Each level's line,
   heights and corridor building footprints are committed under ODbL 1.0. What still stands,
   unchanged: D-2 and D-3.5, because a level reads no corridor from the archive and writes nothing
   to `worldCorridors`; and D-3.6's corridor key, to which ADR 0065 D-6.5 adds a ride on a level,

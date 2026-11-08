@@ -407,7 +407,7 @@ it. Each answer is the recommendation.
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
 - **2026-11-08** — **D-1, D-6.2, D-7.2 and D-8.1 are superseded in part by
-  [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, proposed that day ([#2360](https://github.com/openzigs/onyourleft/issues/2360), on the owner's rulings of that day on the
+  [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, accepted that day ([#2360](https://github.com/openzigs/onyourleft/issues/2360), on the owner's rulings of that day on the
   epic [#2359](https://github.com/openzigs/onyourleft/issues/2359)), for the built-in Delivery
   levels only. The levels are a second committed dataset derived from OpenStreetMap, so D-1's
   *"the circuit files of D-2 only"* and *"Nothing else … is committed"* stop being the whole

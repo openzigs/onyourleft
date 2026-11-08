@@ -396,7 +396,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   and no tile coordinate list. What still stands, unchanged: D-5 (the bundle is never committed),
   D-8 (attribution in the demo frame and in every exported video frame) and D-9 (CI bakes only the
   synthetic fixture), and D-1 to D-11 otherwise.
-- **2026-11-08** — **D-2.4 is superseded in part by [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, proposed that day
+- **2026-11-08** — **D-2.4 is superseded in part by [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, accepted that day
   ([#2360](https://github.com/openzigs/onyourleft/issues/2360), on the owner's answer of that day that a level ships its house footprints), **for the app's
   built-in Delivery levels only**. Each level file carries the building footprints of its corridor,
   with no OSM id, name or address, and is in `apps/web/dist`, the APK and the service worker's
