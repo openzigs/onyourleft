@@ -511,15 +511,25 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
           true,
           levelObstacleMix(level.round),
         );
-        // Every distance a rider's bicycle can be at while it overlaps any obstacle.
-        for (let along = 0; along <= level.lengthMetres; along += 0.1) {
+        // Every distance a rider's bicycle can be at, exactly: which obstacles it
+        // overlaps changes only where it starts or stops overlapping one, so
+        // each stretch between two such distances is read once, at its middle.
+        const reach = (obstacle: Obstacle): readonly [number, number] => {
+          const shape = OBSTACLE_KINDS[obstacle.kind];
+          return [
+            obstacle.along - shape.halfLength - RIDER_AHEAD_METRES,
+            obstacle.along + shape.halfLength + RIDER_BEHIND_METRES,
+          ];
+        };
+        const edges = placed.flatMap(reach).sort((a, b) => a - b);
+        expect(edges.length).toBe(2 * placed.length);
+        for (let at = 0; at + 1 < edges.length; at += 1) {
+          const along = ((edges[at] as number) + (edges[at + 1] as number)) / 2;
           const blocked = new Set<number>();
           for (const obstacle of placed) {
+            const [from, to] = reach(obstacle);
+            if (!(along > from && along < to)) continue;
             const shape = OBSTACLE_KINDS[obstacle.kind];
-            const touches =
-              along + RIDER_AHEAD_METRES > obstacle.along - shape.halfLength &&
-              obstacle.along + shape.halfLength > along - RIDER_BEHIND_METRES;
-            if (!touches) continue;
             LANE_OFFSETS_METRES.forEach((lane, index) => {
               if (
                 Math.abs(lane - (obstacle.stands as number)) <
