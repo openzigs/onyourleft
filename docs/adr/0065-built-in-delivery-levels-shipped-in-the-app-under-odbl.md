@@ -119,7 +119,7 @@ reachable is still a race. **A Delivery round with no houses is not a round**: i
 from the mapped houses the town draws (ADR 0059 D-4.1), and with too few the HUD says so and there is
 nothing to play. A level read from the archive would therefore be unplayable on its first ride with
 no network, and would draw a different number of houses after an archive refresh. Baking the houses
-makes a level the same on every device, on every ride, from first launch, and lets the build tool
+makes a level the same on every device and every ride, and playable with no network from first launch **in the Android shell**; in a browser, offline play is limited by the realistic asset set (D-8.4). It also lets the build tool
 check its house count once, when the file is made, rather than the rider finding out.
 
 ### What exists today (read at `main` `5cbf6be4`)
@@ -167,7 +167,7 @@ check its house count once, when the file is made, rather than the rider finding
 | ADR 0012 **D-4** (*"§4.6 is not the plan"*) | **Superseded for this one database**: §4.6 a, the entire database (D-6.4) |
 | ADR 0054 **D-2** and **D-3.5** (`worldCorridors`, read per route and never leaving the device) | **Unchanged.** A level reads no corridor from the archive and writes nothing to `worldCorridors` (D-2.4) |
 | ADR 0054 **D-3.6** (the ride's credit, keyed on the corridor) | **Extended, not superseded**: the credit is also keyed on a level, for the whole ride (D-6.5). Delivery runs only in the realistic world (ADR 0059 D-3.1), so no world that D-3.6 says shows none is touched |
-| ADR 0059 **D-1 to D-5** | **Unchanged** (D-11, D-12, D-13). D-2 is not reopened |
+| ADR 0059 **D-1 to D-5** | **Unchanged** (D-11, D-12, D-13), except **D-4.4** (what persists is counts only), which is **Extended, not superseded**: level progress also stores level ids (D-9.2), still no house, position or seed. D-2 is not reopened |
 | #1811's roster (*"No animal and no person is an obstacle"*) | **Superseded for level rounds** (D-10). A round on a rider's own route keeps #1811's roster until the owner rules otherwise in the issue that proposes it, and D-10's rules bind that issue |
 
 ### D-2 — What a level ships: its line, heights, round parameters and the corridor's building footprints
@@ -205,7 +205,14 @@ check its house count once, when the file is made, rather than the rider finding
    footprint with its fields is a few hundred bytes of JSON. From the demo's two measured bakes
    (Context: about 173 KB a kilometre for every layer of a dense city centre, 18 KB across open
    country, in a packed binary), a town level's building layer is expected to be **about 0.1 to
-   1.5 MiB** of JSON at 1.5 to 5 km, and **six levels about 2 to 6 MiB** together, before
+   1.5 MiB** of JSON at 1.5 to 5 km. How that was worked out, as assumptions and not
+   measurements: a 500 m wide corridor (250 m each side) is 0.75 to 2.5 km^2 at 1.5 to 5 km; a
+   town carries about 500 to 1,500 buildings a km^2; a footprint with its fields is about 300 bytes
+   of JSON. That gives about 0.1 MiB (0.75 x 500 x 300 B) to about 1.1 MiB (2.5 x 1,500 x 300 B),
+   and the 1.5 MiB upper figure leaves about a third for denser footprints. The 173 KB a kilometre
+   is every layer in a packed binary and is not used in this sum, only as a sanity check that
+   buildings alone are far smaller. The 2 MiB ceiling is about a third above 1.5 MiB. #2362's
+   measured sizes replace all of this. At six levels, that is **about 2 to 6 MiB** together, before
    compression. The APK's zip and the network's gzip shrink JSON several times; the precache holds
    the files as served.
 2. **The ceilings, recommended (D-15 Q5): 2 MiB for one level file, and 8 MiB for every level
@@ -231,9 +238,11 @@ check its house count once, when the file is made, rather than the rider finding
    source that is never stored, exported, synced, logged or derived from anything stored. **So a
    public level file cannot recompute what a rider was given**, and a ride on a level stores no more
    than a ride on a route does.
-3. **Levels rise in order** (the ruling): each later level has at least as many houses, a throw
-   window at least as tight and at least the hazards of the one before, and the build issue's test
-   reads the files and holds that.
+3. **Levels rise in order** (the ruling): each later level has **more** houses than the one before
+   (strictly, and never above `round.ts` `MOST_HOUSES`, so the first level starts low enough that
+   six strictly rising levels fit under it), a throw window at least as tight, and at least the
+   hazards of the one before, with **at least one of the three strictly harder**. The build issue's
+   test reads the files and holds that, so two identical levels in a row fail it.
 
 ### D-5 — Length, shape and provenance
 
@@ -312,9 +321,17 @@ check its house count once, when the file is made, rather than the rider finding
    `RouteRecord`, not synced to an instance, not in *export everything* and not in a shared route.
    A ride on one names it by its `level:` id and records what any Delivery ride records. No instance
    ever holds a level (ADR 0036 D-3 (c) and (d) are not engaged).
-4. **It works with no instance and no network** (the ruling): the files are in the app, and a
-   level reads nothing from the archive (D-2.4). `apps/web/src/privacy/no-network.test.ts` is not
-   widened.
+4. **It works with no instance** (the ruling), and with no network **in the Android shell only**.
+   The files are in the app and a level reads nothing from the archive (D-2.4), but Delivery runs
+   only in the realistic world (ADR 0059 D-3.1), and in a browser the realistic asset set is
+   excluded from the precache (`PRECACHE_EXCLUSIONS` in `apps/web/tools/precache/precache.ts`, ADR
+   0026 D-7; `realisticWorldNotice` says it is not kept on the device for offline use). **So a
+   browser rider with no network cannot play a level, with the buildings baked in or not.** The
+   owner's Q1 (b) answer reads "fully offline"; this ADR holds it for the Android shell and for a
+   browser that has the realistic set cached by use, and does not claim more. Putting the realistic
+   set a level needs into the browser precache would reverse ADR 0026 D-7 for those assets, adding
+   their whole size to the first-visit download; that is a decision for its own ADR and the owner,
+   not made here. `apps/web/src/privacy/no-network.test.ts` is not widened.
 
 ### D-9 — Unlocks and progress, kept on the device
 
@@ -434,8 +451,9 @@ are asked in this pull request.
 
 - **#2361 can be built**: a level format, a reader that fails closed, and a build tool, with a
   document to be checked against. #2362 to #2367 follow it.
-- **A rider with no saved route, no instance and no network can play Delivery at once**, on a real
-  town, the same on every ride.
+- **A rider with no saved route and no instance can play Delivery at once**, on a real town, the
+  same on every ride, and in the Android shell with no network either. A browser rider with no
+  network cannot (D-8.4).
 
 ### What this costs
 
