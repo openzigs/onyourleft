@@ -12,6 +12,16 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0065 is [ADR 0065](../adr/0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**,
+  taken by [#2360](https://github.com/openzigs/onyourleft/issues/2360) on 2026-11-08 for the
+  built-in Delivery levels (short town rounds with their houses baked in, committed and shipped in
+  the app under ODbL 1.0, solo only, with their obstacle roster), on the owner's rulings and answers
+  of that day on #2359 and #2360. It is **Proposed** until the owner accepts it. It supersedes in
+  part ADR 0064 D-1, D-6.2, D-7.2 and D-8.1, ADR 0032 D-1 item 2, ADR 0056 D-2.4 and ADR 0012 D-4,
+  as an ADR rather than an amendment to ADR 0064, because ADR 0013 D-3 sends a changed decision to
+  a new ADR. It took the next free number after 0064; **0057 and 0058 stay claimed** by #1748 and
+  #1752. **The next free number is 0066.** A reviewer who remembers this file offering 0065 is
+  reading the old file.
   ⚠️ **0064 is [ADR 0064](../adr/0064-built-in-lap-race-circuits-shipped-in-the-app-under-odbl.md)**,
   taken by [#2293](https://github.com/openzigs/onyourleft/issues/2293) on 2026-11-06 for the lap
   race's built-in circuits (short loops drawn on the project's own basemap, committed and shipped in
@@ -19,7 +29,7 @@ It has the same authority as the root file. Where the text below says "this file
   **Accepted** the same day, on the owner's [ruling](https://github.com/openzigs/onyourleft/pull/2297#issuecomment-6700261818)
   on #2297, and it supersedes ADR 0032 D-1 item 2 and ADR 0012 D-4 in part, as an ADR rather than the amendment the issue named, because ADR 0013 D-3 sends a reversed
   decision to a new ADR. It took the next free number after 0063; **0057 and 0058 stay claimed** by
-  #1748 and #1752. **The next free number is 0065.** A reviewer who remembers this file offering 0064
+  #1748 and #1752. The next free number was then 0065. A reviewer who remembers this file offering 0064
   is reading the old file.
   ⚠️ **0063 is [ADR 0063](../adr/0063-the-design-system-direction-hi-vis.md)**, taken by
   [#2036](https://github.com/openzigs/onyourleft/issues/2036) on 2026-11-03 for the design system's
