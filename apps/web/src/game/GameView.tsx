@@ -3560,11 +3560,15 @@ function GameScreen({
   // #2349's review, B2: the browser's Back, or an address typed into the bar,
   // would unmount this stage and end the ride through the cleanup's
   // `teardown`. The shell's router asks here first and puts the address back
-  // (`shell/ride-leave.ts`), so it OPENS the question — and, with it open,
-  // leaves it open: a second Back is not an answer. Nothing is released until
-  // *Save ride* or *Discard ride*.
+  // (`shell/ride-leave.ts`), so it OPENS the question — and, with it open, is
+  // *Keep riding*, as Android's back is just above (#2356: the two platforms
+  // used to differ). Nothing is released until *Save ride* or *Discard ride*.
   useRideLeave(onTheStage, () => {
-    if (endAsk === undefined) askToEnd();
+    if (endAsk === undefined) {
+      askToEnd();
+    } else {
+      keepRiding();
+    }
   });
   // A real unload — the tab closed, a reload — is past any question this page
   // can draw: the browser's own generic prompt is all it allows.

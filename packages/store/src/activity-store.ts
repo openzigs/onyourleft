@@ -2495,6 +2495,13 @@ export class ActivityStore {
    * window is not reached, and a side-camera snapshot (#1063) names its ride
    * and is never taken here: it follows that ride.
    *
+   * ⚠️ **One condition, `source`, and not `activityId === null` beside it**
+   * (#2356). `putCameraFrame` refuses a kept frame that names a ride and a
+   * snapshot that names none, so the two conditions select the same rows and
+   * no test could tell them apart: dropping either alone stayed green.
+   * `source` is the one that says what is meant, and the snapshot in
+   * `camera-frame-store.test.ts` §"#2349" is what goes red without it.
+   *
    * @returns how many were removed. Zero for a window that kept none, and for
    * a window that ends before it starts.
    */
@@ -2510,7 +2517,7 @@ export class ActivityStore {
       this.#cameraFrames
         .where(INDEX.cameraFrameByAthleteAndCapturedAt)
         .between([owner, from], [owner, to], true, true)
-        .filter((row) => row.source === 'kept' && row.activityId === null)
+        .filter((row) => row.source === 'kept')
         .delete(),
     );
   }

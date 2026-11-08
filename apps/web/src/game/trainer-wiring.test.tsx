@@ -712,13 +712,23 @@ describe('the road the game draws reaches the trainer', () => {
       expect(commands.written.length).toBe(writes);
     }
 
-    // A second attempt with the question open leaves it open; only an answer
-    // that ends the ride releases the gradient.
+    // A second attempt with the question open is Keep riding, as Android's
+    // back is (#2356) — even one Discard in — and sends nothing; only an
+    // answer that ends the ride releases the gradient.
+    for (const by of ['typed', 'back'] as const) {
+      const writes = commands.written.length;
+      await away(by);
+      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      expect(asked()).toBe('discard');
+      await away(by);
+      expect(asked()).toBeNull();
+      expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+      expect(globalThis.location.hash).toBe(gameAt);
+      expect(commands.releases).toEqual([]);
+      expect(commands.written.length).toBe(writes);
+    }
     await away('typed');
     await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await away('typed');
-    expect(asked()).toBe('discard');
-    expect(commands.releases).toEqual([]);
     await clickThrough(endRideAnswer(document, 'Discard ride'));
     await act(async () => {
       await Promise.resolve();
@@ -726,9 +736,12 @@ describe('the road the game draws reaches the trainer', () => {
     });
     expect(commands.releases).toHaveLength(1);
     expect(document.querySelector('.oyl-game--riding')).toBeNull();
-    // Off the stage, nothing is asked: the router goes where it is sent.
+    // Off the stage, nothing is asked: the router goes where it is sent. The
+    // game unmounts and its cleanup runs `teardown` again, which must not
+    // release a second time — validation 0002 L7's last step (#2356).
     await away('typed');
     expect(document.body.textContent).toContain('elsewhere');
+    expect(commands.releases).toHaveLength(1);
   });
 
   it('asks the browser’s own prompt before a real unload on the stage, and not on the picker (#2349’s review, B2)', async () => {
