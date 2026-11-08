@@ -35,9 +35,13 @@
  * Each row is drawn as the pairing cards are, under its own class
  * (`oyl-gamepads__row` beside `oyl-pairing__row` in `theme.css`), because
  * the screen's tests and the browser gate count `.oyl-pairing__row` as the
- * trainer's and sensors' rows, and a gamepad is neither.
+ * trainer's and sensors' rows, and a gamepad is neither. The owner's ruling
+ * of 2026-11-08 (#2370): the pad's name bold on one line and "Connected"
+ * under it, as the Steering controller card says its kind and its state, and
+ * the cards in the same `.oyl-pairing` grid, so a card on the tablet is as
+ * wide as that one.
  *
- * ⚠️ **The wording is proposed, for the owner to approve in #2358's PR.**
+ * The wording is the owner's, approved in #2370 on 2026-11-08.
  */
 
 import { Gamepad2 } from 'lucide-react';
@@ -54,9 +58,11 @@ import {
   type ListedPad,
 } from './gamepad-readout';
 
-export const GAMEPADS_HEADING = 'Controllers';
+/** The owner's words, 2026-11-08 (#2370): "Game controllers", not "Controllers". */
+export const GAMEPADS_HEADING = 'Game controllers';
 
-export const GAMEPADS_WHAT_THEY_DO = 'Steers and throws in Delivery.';
+export const GAMEPADS_WHAT_THEY_DO =
+  'A gamepad such as an Xbox controller steers and throws in Delivery.';
 
 /** A listed pad's state. */
 export const GAMEPAD_CONNECTED = 'Connected';
@@ -127,7 +133,7 @@ export function GamepadControllers({ pads }: GamepadControllersProps): JSX.Eleme
     <>
       <h2>{GAMEPADS_HEADING}</h2>
       <p>{GAMEPADS_WHAT_THEY_DO}</p>
-      <ul className="oyl-sensor-list tw:mt-0" data-oyl-gamepads="">
+      <ul className="oyl-pairing tw:mt-0" data-oyl-gamepads="">
         {(listed.length === 0 ? [undefined] : listed).map((pad) => (
           <li
             key={pad === undefined ? 'none' : `${String(pad.slot)}:${pad.name}`}
@@ -143,9 +149,14 @@ export function GamepadControllers({ pads }: GamepadControllersProps): JSX.Eleme
               focusable="false"
             />
             <div className="oyl-pairing__body">
-              <p className="tw:m-0">
-                {pad === undefined ? PRESS_SO_THE_APP_SEES_IT : `${pad.name}: ${GAMEPAD_CONNECTED}`}
-              </p>
+              {pad === undefined ? (
+                <p className="oyl-pairing__state">{PRESS_SO_THE_APP_SEES_IT}</p>
+              ) : (
+                <>
+                  <p className="oyl-pairing__kind oyl-gamepads__name">{pad.name}</p>
+                  <p className="oyl-pairing__state">{GAMEPAD_CONNECTED}</p>
+                </>
+              )}
             </div>
           </li>
         ))}

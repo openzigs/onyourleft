@@ -5412,6 +5412,15 @@ select.oyl-input {
   margin: 0;
 }
 
+/*
+ * A gamepad card's name (#2358, the owner's ruling of 2026-11-08 in #2370):
+ * bold, as the pairing cards' kind is, which is a heading there and is text
+ * here, because a pad's name names a row, not a section.
+ */
+.oyl-gamepads__name {
+  font-weight: 700;
+}
+
 .oyl-pairing__body > .oyl-sensor-list {
   flex: 1 1 100%;
   margin: 0;

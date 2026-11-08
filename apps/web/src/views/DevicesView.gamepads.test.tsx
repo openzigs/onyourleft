@@ -106,7 +106,7 @@ function sectionText(): string {
   const heading = [...document.querySelectorAll('h2')].find(
     (each) => each.textContent === GAMEPADS_HEADING,
   );
-  if (heading === undefined) throw new Error('no Controllers heading');
+  if (heading === undefined) throw new Error('no Game controllers heading');
   let text = '';
   for (let node: Element | null = heading; node !== null; node = node.nextElementSibling) {
     text += ` ${node.textContent}`;
@@ -114,9 +114,10 @@ function sectionText(): string {
   return text;
 }
 
+/** Each row's lines, one `p` each, joined with " / ". */
 function rows(): string[] {
-  return [...document.querySelectorAll('[data-oyl-gamepads] li')].map(
-    (row) => row.textContent?.trim() ?? '',
+  return [...document.querySelectorAll('[data-oyl-gamepads] li')].map((row) =>
+    [...row.querySelectorAll('p')].map((line) => line.textContent?.trim() ?? '').join(' / '),
   );
 }
 
@@ -142,7 +143,9 @@ describe('the Controllers section on the Devices screen — #2358', () => {
     const fake = fakePads();
     await browserScreen(fake.port);
     expect(rows()).toEqual([PRESS_SO_THE_APP_SEES_IT]);
-    expect(sectionText()).toContain('Steers and throws in Delivery.');
+    expect(sectionText()).toContain(
+      'A gamepad such as an Xbox controller steers and throws in Delivery.',
+    );
     expect(readout()).toBe(NOTHING_MOVED_YET);
     expect(announced()).toBe('');
     // No pad: one read at mount, and no poll a frame after it.
@@ -156,7 +159,7 @@ describe('the Controllers section on the Devices screen — #2358', () => {
     fake.list = [pad(XBOX)];
     fake.fire();
     frames(1);
-    expect(rows()).toEqual(['Xbox Wireless Controller: Connected']);
+    expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
     expect(announced()).toBe('Xbox Wireless Controller connected.');
 
     fake.list = [null];
@@ -166,11 +169,43 @@ describe('the Controllers section on the Devices screen — #2358', () => {
     expect(announced()).toBe('Xbox Wireless Controller disconnected.');
   });
 
+  it('the owner’s words of 2026-11-08 (#2370): the heading is "Game controllers", and the line names a gamepad', async () => {
+    await browserScreen(fakePads().port);
+    const headings = [...document.querySelectorAll('h2')].map((each) => each.textContent);
+    expect(headings).toContain('Game controllers');
+    expect(headings).not.toContain('Controllers');
+    const heading = [...document.querySelectorAll('h2')].find(
+      (each) => each.textContent === 'Game controllers',
+    );
+    expect(heading?.nextElementSibling?.textContent).toBe(
+      'A gamepad such as an Xbox controller steers and throws in Delivery.',
+    );
+  });
+
+  it('a pad’s card is laid out as a pairing card (#2370): its name on one line, as the kind is, and "Connected" under it', async () => {
+    const fake = fakePads();
+    fake.list = [pad(XBOX)];
+    await browserScreen(fake.port);
+    const list = document.querySelector('[data-oyl-gamepads]');
+    // The pairing cards' own grid, so a card is as wide as the Steering
+    // controller's (the width itself is measured in the browser gate).
+    expect(list?.classList.contains('oyl-pairing')).toBe(true);
+    const lines = [...(list?.querySelectorAll('li .oyl-pairing__body > p') ?? [])];
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Xbox Wireless Controller',
+      'Connected',
+    ]);
+    // The name takes the kind's line and the bold of `.oyl-gamepads__name`; the
+    // state takes the pairing cards' state class.
+    expect(lines[0]?.className).toBe('oyl-pairing__kind oyl-gamepads__name');
+    expect(lines[1]?.className).toBe('oyl-pairing__state');
+  });
+
   it('does not announce a pad that was already there when the screen opened', async () => {
     const fake = fakePads();
     fake.list = [pad(XBOX)];
     await browserScreen(fake.port);
-    expect(rows()).toEqual(['Xbox Wireless Controller: Connected']);
+    expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
     expect(announced()).toBe('');
   });
 
@@ -216,7 +251,7 @@ describe('the Controllers section on the Devices screen — #2358', () => {
       </main>,
     );
     await settle();
-    expect(rows()).toEqual(['Xbox Wireless Controller: Connected']);
+    expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
     mounted.unmount();
 
     mounted = await mount(
@@ -229,7 +264,7 @@ describe('the Controllers section on the Devices screen — #2358', () => {
       </main>,
     );
     await settle();
-    expect(rows()).toEqual(['Xbox Wireless Controller: Connected']);
+    expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
   });
 
   it('with no port handed to it, reads the platform’s pads through window', async () => {
@@ -245,7 +280,7 @@ describe('the Controllers section on the Devices screen — #2358', () => {
       window.dispatchEvent(new Event('gamepadconnected'));
     });
     frames(1);
-    expect(rows()).toEqual(['Xbox Wireless Controller: Connected']);
+    expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
     expect(readout()).toBe('Last moved: Right face button.');
   });
 });
