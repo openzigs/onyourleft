@@ -100,8 +100,8 @@ describe('a coordinate written with its labels (#854 review)', () => {
 
 describe('ordinary cycling text is not masked (#839)', () => {
   it.each([
-    'Box Hill',
-    'Three laps of Box Hill, then 2 Box Hill repeats.',
+    'Mudbury Top',
+    'Three laps of Mudbury Top, then 2 Mudbury Top repeats.',
     '20 km',
     '4x8 min',
     'Zone 2',
@@ -119,8 +119,8 @@ describe('ordinary cycling text is not masked (#839)', () => {
   });
 
   it('masks a cycling word when it is on the rider’s own list', () => {
-    const guard: MaskingGuard = { words: ['Box Hill'], zones: [] };
-    expect(maskForHosted('Three laps of box  hill today.', guard)).toBe(
+    const guard: MaskingGuard = { words: ['Quarry climb'], zones: [] };
+    expect(maskForHosted('Three laps of quarry  climb today.', guard)).toBe(
       'Three laps of [masked] today.',
     );
   });

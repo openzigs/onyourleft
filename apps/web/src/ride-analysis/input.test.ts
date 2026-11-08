@@ -263,7 +263,7 @@ function locatedIn(from: Saved): Located {
 describe('what never leaves: nothing that locates or identifies the rider', () => {
   it('carries no coordinate, no altitude, no identity and no string but its own', async () => {
     const ride = rideFor(ATHLETE_A, {
-      name: 'Home to Box Hill via the Zig Zag',
+      name: 'Home to Quarrytop via the hairpins',
       hasPosition: true,
       routeId: undefined,
     });
@@ -295,7 +295,7 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
     const route = hillRoute(DISTINCTIVE_BASE_METRES);
     const { ride, streams } = rideOverTheHill(route);
     const from = await saved(
-      { ...ride, name: 'Home to Box Hill via the Zig Zag' },
+      { ...ride, name: 'Home to Quarrytop via the hairpins' },
       withChannel(streams, 'altitude', distinctiveAltitude(streams.sampleCount)),
       {
         route,
@@ -316,7 +316,7 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
     expect(located.coordinates.length).toBeGreaterThan(100);
     expect(leaksIn({ numbers }, located)).toStrictEqual({ keys: [], numbers: [] });
     expect(coordinatesIn(parsed)).toStrictEqual([]);
-    for (const named of ['Box Hill', 'Ada', 'Lovelace', from.ride.id, ATHLETE_A]) {
+    for (const named of ['Quarrytop', 'Ada', 'Lovelace', from.ride.id, ATHLETE_A]) {
       expect(text).not.toContain(named);
     }
     // No pose: the side camera's words are nowhere in it.

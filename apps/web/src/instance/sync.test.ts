@@ -1878,7 +1878,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     const { a, b } = await twoWriters();
     const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
     await a.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Ride a century.' }));
-    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb Ventoux.' }));
+    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb a col.' }));
     expect(await a.sync()).toMatchObject({ textsPushed: 1, textConflicts: 0, failures: [] });
 
     // B has no base for the goals and different words: both are kept.
@@ -1886,7 +1886,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     const onB = await b.on.harness.read((store) =>
       store.getRiderText(LOCAL_ATHLETE, 'goal', 'goals'),
     );
-    expect(onB?.text).toBe('Climb Ventoux.');
+    expect(onB?.text).toBe('Climb a col.');
     const copies = await documents(b.on);
     expect(copies.map((row) => [row.name, row.text])).toStrictEqual([
       ['Goals (from another device)', 'Ride a century.'],
@@ -1896,7 +1896,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     expect(
       (await a.on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', 'goals')))
         ?.text,
-    ).toBe('Climb Ventoux.');
+    ).toBe('Climb a col.');
     expect((await documents(a.on)).map((row) => row.text)).toStrictEqual(['Ride a century.']);
     // And it settles.
     expect(await b.sync()).toMatchObject({ textsPushed: 0, textConflicts: 0, failures: [] });
@@ -1906,7 +1906,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     const { a, b } = await twoWriters();
     const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
     await a.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Ride a century.' }));
-    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb Ventoux.' }));
+    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb a col.' }));
     expect(await a.sync()).toMatchObject({ textsPushed: 1, failures: [] });
 
     // B's push of its goals fails once, AFTER the copy of A's was kept.
@@ -1933,14 +1933,14 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     // The next sync meets the same conflict, and keeps no second copy.
     expect(await b.sync()).toMatchObject({ failures: [] });
     expect((await documents(b.on)).map((row) => row.text)).toStrictEqual(['Ride a century.']);
-    expect(await instanceItem(a.on, 'goal', 'goals')).toStrictEqual({ text: 'Climb Ventoux.' });
+    expect(await instanceItem(a.on, 'goal', 'goals')).toStrictEqual({ text: 'Climb a col.' });
   }, 60_000);
 
   it('pushes nothing over the other device’s words when their copy cannot be fetched to keep', async () => {
     const { a, b } = await twoWriters();
     const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
     await a.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Ride a century.' }));
-    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb Ventoux.' }));
+    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb a col.' }));
     expect(await a.sync()).toMatchObject({ textsPushed: 1, failures: [] });
     const honest = b.on.transport.sync;
     const unreadable: SyncTransport = {
@@ -1984,7 +1984,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     const { a, b } = await twoWriters();
     const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
     await a.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Ride a century.' }));
-    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb Ventoux.' }));
+    await b.on.harness.write((store) => store.putRiderText({ ...goal, text: 'Climb a col.' }));
     expect(await a.sync()).toMatchObject({ textsPushed: 1, failures: [] });
     // B cannot make a new document: its id is not one the store accepts.
     const report = await b.on.harness.write((store) =>
@@ -2573,7 +2573,7 @@ describe('a pull does not undo a change made here while it waited on the instanc
     const withText = (text: string) => (store: HeldStore) => store.putRiderText({ ...goal, text });
     const goalOn = (on: Device) =>
       on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', goal.key));
-    const pending = () => pullPending(withText('Ride a century.'), withText('Climb Ventoux.'));
+    const pending = () => pullPending(withText('Ride a century.'), withText('Climb a col.'));
 
     it('keeps a text edited here in the wait, and sends it at the next sync', async () => {
       const { a, b } = await pending();
@@ -2600,7 +2600,7 @@ describe('a pull does not undo a change made here while it waited on the instanc
       // the rider never saw: #924's ruling pulls them rather than deleting
       // them there. Not this issue's to overrule — the PR says so.
       expect(await b.sync()).toMatchObject({ textsPulled: 1, textsDeletedOnInstance: 0 });
-      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+      expect((await goalOn(b.on))?.text).toBe('Climb a col.');
     }, 60_000);
 
     it('keeps a text typed here in the wait of a first sync, never held before', async () => {
@@ -2614,7 +2614,7 @@ describe('a pull does not undo a change made here while it waited on the instanc
       const { b } = await pending();
       const report = await syncEditingBefore(b.on, 'putRiderText', nothing);
       expect(report).toMatchObject({ textsPulled: 1, failures: [] });
-      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+      expect((await goalOn(b.on))?.text).toBe('Climb a col.');
     }, 60_000);
   });
 
