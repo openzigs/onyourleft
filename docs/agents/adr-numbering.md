@@ -16,7 +16,8 @@ It has the same authority as the root file. Where the text below says "this file
   taken by [#2360](https://github.com/openzigs/onyourleft/issues/2360) on 2026-11-08 for the
   built-in Delivery levels (short town rounds with their houses baked in, committed and shipped in
   the app under ODbL 1.0, solo only, with their obstacle roster), on the owner's rulings and answers
-  of that day on #2359 and #2360. It is **Proposed** until the owner accepts it. It supersedes in
+  of that day on #2359 and #2360. It is **Accepted**, on the owner's ruling of the same day on
+  #2371. It supersedes in
   part ADR 0064 D-1, D-6.2, D-7.2 and D-8.1, ADR 0032 D-1 item 2, ADR 0056 D-2.4 and ADR 0012 D-4,
   as an ADR rather than an amendment to ADR 0064, because ADR 0013 D-3 sends a changed decision to
   a new ADR. It took the next free number after 0064; **0057 and 0058 stay claimed** by #1748 and

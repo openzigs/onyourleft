@@ -97,6 +97,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 
 import { ActivityStore } from './activity-store';
+import { StoreValidationError } from './errors';
 import type {
   CameraFrameRecord,
   FramingReferenceRecord,
@@ -112,7 +113,7 @@ import type {
   SegmentEffortRecord,
 } from './records';
 import type { AthleteId } from './ids';
-import { circuitRouteId, privacyZoneId, segmentEffortId } from './ids';
+import { circuitRouteId, levelRouteId, privacyZoneId, segmentEffortId } from './ids';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -200,6 +201,13 @@ interface World {
    * so its key is shared, and only the owner half of it tells them apart.
    */
   readonly circuitCorridor: WorldCorridorRecord;
+  /**
+   * #2361, ADR 0065 D-2.4: what the store answered when this athlete offered it
+   * a corridor under a built-in level's `level:` key, which every athlete
+   * shares. A level keeps no corridor, so the answer is a refusal, and no
+   * owner's read may find one.
+   */
+  readonly levelCorridorRefusal: unknown;
   /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
   readonly binned: ReturnType<typeof rideFor>;
 }
@@ -292,6 +300,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const corridor = await worldCorridorFor(owner, route.id);
   // #2293. The same circuit key for every athlete, different features each.
   const circuitCorridor = await worldCorridorFor(owner, SCOPING_CIRCUIT, { seed: 5 });
+  // #2361. The same level key for every athlete, different features each.
+  const levelCorridor = await worldCorridorFor(owner, SCOPING_LEVEL, { seed: 7 });
+  let levelCorridorRefusal: unknown;
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -334,6 +345,10 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
     await store.putWorldCorridor(corridor);
     await store.putWorldCorridor(circuitCorridor);
+    levelCorridorRefusal = await store.putWorldCorridor(levelCorridor).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
   });
 
   return {
@@ -360,12 +375,16 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     workoutGoals,
     corridor,
     circuitCorridor,
+    levelCorridorRefusal,
     binned,
   };
 }
 
 /** #2293: the built-in circuit every athlete keeps a corridor for. */
 const SCOPING_CIRCUIT = circuitRouteId('scoping-fixture');
+
+/** #2361: the built-in Delivery level every athlete offers the store a corridor for. */
+const SCOPING_LEVEL = levelRouteId('scoping-fixture');
 
 /**
  * One member of the scoped surface, and what a missing `owner` filter on it
@@ -1120,6 +1139,13 @@ const PROBES: readonly ScopingProbe[] = [
       expect(circuit && (await unpackWorldCorridorFeatures(circuit.features))).toStrictEqual(
         await unpackWorldCorridorFeatures(mine.circuitCorridor.features),
       );
+      // #2361, ADR 0065 D-2.4: a built-in level's corridor is never kept. Mine
+      // was refused, and theirs, offered under the same key, is not mine to
+      // read — nor anyone's.
+      expect(mine.levelCorridorRefusal).toBeInstanceOf(StoreValidationError);
+      expect(theirs.levelCorridorRefusal).toBeInstanceOf(StoreValidationError);
+      await expect(store.getWorldCorridor(mine.owner, SCOPING_LEVEL)).resolves.toBeUndefined();
+      await expect(store.getWorldCorridor(theirs.owner, SCOPING_LEVEL)).resolves.toBeUndefined();
     },
   },
   {

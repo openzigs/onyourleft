@@ -83,7 +83,7 @@ import type {
   WorkoutId,
   SegmentId,
 } from './ids';
-import { isCircuitRouteId } from './ids';
+import { isCircuitRouteId, isLevelRouteId } from './ids';
 import {
   fromPersistedActivityRecord,
   fromPersistedDeviceKey,
@@ -3032,7 +3032,8 @@ export class ActivityStore {
    * the route cannot leave a corridor that no route deletion will reach.
    * A built-in circuit's `circuit:` key (ADR 0064 D-2.2) is the exception: it
    * has no route to own it, so it is admitted without one and its corridor
-   * stays until the athlete is deleted.
+   * stays until the athlete is deleted. A built-in Delivery level's `level:`
+   * key (ADR 0065 D-2.4) is refused outright: a level keeps no corridor.
    *
    * @throws {WorldCorridorTooLargeError} if `features` is over
    * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.
@@ -3050,6 +3051,13 @@ export class ActivityStore {
       throw new WorldCorridorTooLargeError(
         WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
         record.features.size,
+      );
+    }
+    // #2361, ADR 0065 D-2.4: a built-in level's buildings are in its own file,
+    // and nothing of a level is kept here, for any owner.
+    if (isLevelRouteId(record.routeId)) {
+      throw new StoreValidationError(
+        'worldCorridors.routeId: a built-in Delivery level keeps no corridor',
       );
     }
     await this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
