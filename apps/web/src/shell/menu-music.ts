@@ -60,9 +60,10 @@
  * Leaving for a ride route fades the music bus to 0 (`web-audio.ts`
  * §`setMusicOn`, a ramp) and pauses the element once the fade is over. A page
  * that is hidden pauses at once: nobody hears a fade on a screen that is off.
- * In the Android app a page hidden on a menu route, with no ride in progress,
- * also suspends our audio context (#2357): its open stream would otherwise
- * read as the rider's player.
+ * In the Android app a page hidden on a menu route, with no ride in progress
+ * and no workout running, also suspends our audio context (#2357): its open
+ * stream would otherwise read as the rider's player. Nor does the loop start
+ * by itself over a running workout.
  *
  * ## The rider's mix
  *
@@ -221,6 +222,16 @@ export interface MenuMusic {
   update(context: PressContext): void;
 }
 
+/**
+ * Whether a workout is loaded and not finished — #2357, from the ride
+ * controller's snapshot. `quiet` reads the ride's phase, which stays `idle`
+ * for a workout begun before a recording (#1319), so this is asked as well
+ * before the context is suspended or the loop starts by itself.
+ */
+export function workoutRunning(workout: { readonly status: string } | undefined): boolean {
+  return workout !== undefined && workout.status !== 'finished';
+}
+
 /** Whether the rider's mix lets the music be heard at all. */
 function wanted(mix: Pick<AudioMix, 'music' | 'masterMuted'>): boolean {
   return !mix.masterMuted && !mix.music.muted && mix.music.volume > 0;
@@ -291,7 +302,8 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
 
   const play = (into: HTMLMediaElement): void => {
     // A context suspended behind a hidden page (`quieten`) is woken first.
-    deps.output.resume();
+    // Only where `quieten` runs: in a browser `resume()` stays inside a press.
+    if (deps.riderPlayer !== undefined) deps.output.resume();
     cancelPause?.();
     cancelPause = undefined;
     playing = true;
@@ -325,8 +337,9 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
    * was suspended. Left running, it is the reading a return goes by, and the
    * loop would yield to itself for good. Only where there is a rider's player
    * to read (the Android shell, whose WebView lets the context be woken again
-   * outside a press), and never while a ride may need it (`quiet`): a ride
-   * keeps its own context, and suspends it itself (#447).
+   * outside a press), and never while a ride may need it (`quiet`) or a
+   * workout runs ({@link workoutRunning}): those keep their own context, and
+   * suspend it themselves (#447).
    */
   const quieten = (): void => {
     if (deps.riderPlayer === undefined) return;
@@ -380,7 +393,10 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       wasHidden = hidden;
       // Hidden on a menu route: our context's stream would read as the
       // rider's player until the return (#2357, measured on the tablet).
-      if (hidden && !quiet(context)) quieten();
+      // Nor over a workout, whose tone `RideCues.rejoin()` finds by the
+      // context still running (`CueOutput.suspend`'s contract).
+      const workout = context.workoutRunning === true;
+      if (hidden && !quiet(context) && !workout) quieten();
       if (element === undefined) {
         // Never played, but the header did not read while the rider was away
         // either: a press now would ask a reading from before they left, when
@@ -402,6 +418,7 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
         if (
           autoplay &&
           nowOnMenu &&
+          !workout &&
           launchWaitOver &&
           deps.track !== undefined &&
           wanted(deps.mix()) &&

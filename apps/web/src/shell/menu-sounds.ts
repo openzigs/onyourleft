@@ -71,6 +71,13 @@ export interface PressContext {
   readonly routeId: RouteId;
   /** The ride controller's phase, or `undefined` where there is no controller. */
   readonly ridePhase: RidePhase | undefined;
+  /**
+   * Whether a workout is loaded and not finished — #2357. A workout runs with
+   * the phase still `idle` when it was begun before a recording (#1319), so
+   * `ridePhase` alone does not say so. Read by `menu-music.ts` only, which
+   * never suspends the context nor starts the loop by itself over one.
+   */
+  readonly workoutRunning?: boolean | undefined;
 }
 
 export interface MenuSounds {

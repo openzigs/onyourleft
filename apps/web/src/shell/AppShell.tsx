@@ -117,7 +117,7 @@ import {
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
-import type { MenuMusic } from './menu-music';
+import { workoutRunning, type MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
@@ -1050,10 +1050,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
+    const snapshot = props.rideController?.getSnapshot();
     const context = {
       immersive,
       routeId: route.id,
-      ridePhase: props.rideController?.getSnapshot().phase,
+      ridePhase: snapshot?.phase,
+      workoutRunning: workoutRunning(snapshot?.workout),
     };
     props.menuSounds?.press(event.target, context);
     // #2058: the same press, and the only thing that can start the music.
@@ -1074,10 +1076,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
   useEffect(() => {
     if (menuMusic === undefined) return undefined;
     const tell = (): void => {
+      const snapshot = rideController?.getSnapshot();
       menuMusic.update({
         immersive,
         routeId: route.id,
-        ridePhase: rideController?.getSnapshot().phase,
+        ridePhase: snapshot?.phase,
+        workoutRunning: workoutRunning(snapshot?.workout),
       });
     };
     tell();

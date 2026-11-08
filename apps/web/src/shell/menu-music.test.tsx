@@ -31,6 +31,7 @@ import {
   MUSIC_FADE_SECONDS,
   webAudioOutput,
 } from '../game/web-audio';
+import type { RideWorkoutSnapshot } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -1182,6 +1183,11 @@ describe('in the Android app the menus’ music starts with no press — #2357',
   });
 });
 
+/** A workout at `status`, as far as the menus' music reads one: its status. */
+function workoutAt(status: RideWorkoutSnapshot['status']): RideWorkoutSnapshot {
+  return { status } as RideWorkoutSnapshot;
+}
+
 /**
  * The owner's ruling of 2026-11-08 on #2369: the start with no press comes
  * {@link AUTOPLAY_WAIT_MS} (3 s) after the launch, and again 3 s after the
@@ -1381,6 +1387,72 @@ describe('in the Android app the loop starts 3 s after the launch, and 3 s after
     expect(music.streamOpen(), 'a ride’s cues lost their context behind a hidden page').toBe(true);
   });
 
+  it('a workout running with the ride idle keeps its context awake behind a hidden page', async () => {
+    // #1319: a workout begun before a recording runs with the phase `idle`.
+    const stub = stubRideController(idleSnapshot());
+    const device = phone();
+    const music = androidRig(device);
+    await shell(music, stub.controller);
+    device.read();
+    music.elapse(AUTOPLAY_WAIT_MS);
+    expect(music.streamOpen()).toBe(true);
+    await act(async () => {
+      stub.set({ workout: workoutAt('running') });
+      await Promise.resolve();
+    });
+    await setHidden(music, true);
+    expect(stub.controller.getSnapshot().phase).toBe('idle');
+    expect(music.streamOpen(), 'the workout’s tone lost its context behind a hidden page').toBe(
+      true,
+    );
+  });
+
+  it('the loop does not start by itself over a running workout, and starts once it is over', async () => {
+    const stub = stubRideController({ ...idleSnapshot(), workout: workoutAt('running') });
+    const device = phone();
+    const music = androidRig(device);
+    await shell(music, stub.controller);
+    device.read();
+    music.elapse(AUTOPLAY_WAIT_MS);
+    music.elapse(OWN_LOOP_SETTLE_MS);
+    expect(music.made, 'the loop started over a running workout').toEqual([]);
+    await act(async () => {
+      stub.set({ workout: workoutAt('finished') });
+      await Promise.resolve();
+    });
+    expect(music.made[0]?.paused, 'a finished workout still held the loop').toBe(false);
+  });
+
+  it('a press during the return’s wait, over a running workout, does not let the wait’s end start the loop', async () => {
+    const stub = stubRideController({ ...idleSnapshot(), workout: workoutAt('running') });
+    const device = phone();
+    const music = androidRig(device);
+    await shell(music, stub.controller);
+    device.read();
+    music.elapse(AUTOPLAY_WAIT_MS);
+    await setHidden(music, true);
+    await setHidden(music, false);
+    // Inside the 3 s: the press starts nothing (the reading is not trusted
+    // yet), and it is the last thing the music was told of.
+    await pressWithoutLeaving(homeControl());
+    music.elapse(AUTOPLAY_WAIT_MS);
+    expect(music.made, 'the wait’s end started the loop over a running workout').toEqual([]);
+  });
+
+  it('the loop playing on a menu route keeps its context across menu routes', async () => {
+    const device = phone();
+    const music = androidRig(device);
+    await shell(music);
+    device.read();
+    music.elapse(AUTOPLAY_WAIT_MS);
+    const [element] = music.made;
+    expect(element?.paused).toBe(false);
+    await go('#/settings');
+    expect(music.streamOpen(), 'a visible menu route suspended the context').toBe(true);
+    expect(element?.paused).toBe(false);
+    expect(musicBus(music)).toBe(0.5);
+  });
+
   it('a browser keeps its context behind a hidden page: it could not be woken without a press', async () => {
     const music = rig(disk(), { track: TRACK });
     await shell(music);
@@ -1389,6 +1461,25 @@ describe('in the Android app the loop starts 3 s after the launch, and 3 s after
     await setHidden(music, true);
     expect(music.streamOpen(), 'a browser’s context was suspended').toBe(true);
   });
+
+  it(
+    'a browser never resumes the context outside a press, on the way back from a ride route',
+    { timeout: RIDE_VIEWS_TIMEOUT_MS },
+    async () => {
+      const music = rig(disk(), { track: TRACK });
+      await shell(music);
+      await pressWithoutLeaving(homeControl());
+      const [element] = music.made;
+      await go('#/ride');
+      music.endFades();
+      // The ride's own sounds suspended it at the ride's end (#447).
+      music.output.suspend();
+      expect(music.streamOpen()).toBe(false);
+      await go('#/');
+      expect(element?.paused).toBe(false);
+      expect(music.streamOpen(), 'a browser resumed the context outside a press').toBe(false);
+    },
+  );
 
   it('a browser, with no autoplay, starts nothing on a return', async () => {
     const music = rig(disk(), { track: TRACK });
