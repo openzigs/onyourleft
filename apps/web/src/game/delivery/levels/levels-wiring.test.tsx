@@ -192,7 +192,7 @@ async function openPicker(routes: readonly RidableRoute[] = []): Promise<void> {
 }
 
 /** The setup on `href`, as the picker's link opens it, with this test's renderer and clock. */
-async function openSetup(href: string, extra: { readonly rooms?: RoomsPort } = {}): Promise<void> {
+async function openSetup(href: string, extra: { readonly rooms?: RoomsPort; readonly roomId?: string } = {}): Promise<void> {
   globalThis.location.hash = href;
   mounted = await mount(
     <GameView
@@ -354,6 +354,27 @@ describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
     expect(houses?.querySelector('.oyl-hud__value')?.firstChild?.textContent).toBe(
       String(fixtureAs(FIRST.id).round.houses),
     );
+  });
+});
+
+describe('a level is refused where it is not a solo round — ADR 0065 D-8.1', () => {
+  it('starts no ride from a level’s Ride button while the shell holds a room', async () => {
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)), { roomId: 'room-1' });
+    await click(rideButton());
+    await pump();
+    expect(mounted?.container.querySelector('.oyl-game--riding')).toBeNull();
+  });
+
+  it('draws no round in the standard world, where the level’s own corridor is withheld', async () => {
+    writeRealisticWorldChoice(localStorage, false);
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    await pump();
+    const houses = [...document.querySelectorAll('.oyl-hud__field--delivery')].find((each) =>
+      (each.textContent ?? '').startsWith('Houses'),
+    );
+    expect(houses).toBeUndefined();
   });
 });
 
