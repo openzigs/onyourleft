@@ -192,7 +192,10 @@ async function openPicker(routes: readonly RidableRoute[] = []): Promise<void> {
 }
 
 /** The setup on `href`, as the picker's link opens it, with this test's renderer and clock. */
-async function openSetup(href: string, extra: { readonly rooms?: RoomsPort; readonly roomId?: string } = {}): Promise<void> {
+async function openSetup(
+  href: string,
+  extra: { readonly rooms?: RoomsPort; readonly roomId?: string } = {},
+): Promise<void> {
   globalThis.location.hash = href;
   mounted = await mount(
     <GameView
