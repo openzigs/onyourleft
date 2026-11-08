@@ -193,6 +193,13 @@
  * sentences are not on them; `BuiltInWorkouts.test.tsx` reads those. No
  * sentence is dropped or reworded.
  *
+ * ⚠️ **Re-recorded by #2358, awaiting the owner's approval with that pull
+ * request's screenshots**, for five added lines and nothing else: Devices
+ * gains its Controllers section on both walks, with no gamepad listed, so
+ * its empty state and the button test's "Nothing has moved yet." are what
+ * is recorded. `DevicesView.gamepads.test.tsx` reads a listed pad and the
+ * readout. No sentence is dropped or reworded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

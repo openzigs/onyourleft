@@ -3500,6 +3500,7 @@ a.oyl-button {
 .oyl-panel,
 .oyl-settings-card,
 .oyl-pairing__row,
+.oyl-gamepads__row,
 .oyl-chooser__loadout,
 .oyl-chooser__preview,
 .oyl-ride-card__body {
@@ -3510,6 +3511,7 @@ a.oyl-button {
   .oyl-panel,
   .oyl-settings-card,
   .oyl-pairing__row,
+  .oyl-gamepads__row,
   .oyl-chooser__loadout,
   .oyl-chooser__preview,
   .oyl-ride-card__body {
@@ -5357,8 +5359,9 @@ select.oyl-input {
   align-items: start;
 }
 
-/* The glyph in a column of its own, beside everything the card says. */
-.oyl-pairing__row {
+/* The glyph in a column of its own, beside everything the card says; and a gamepad's row (#2358). */
+.oyl-pairing__row,
+.oyl-gamepads__row {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: start;

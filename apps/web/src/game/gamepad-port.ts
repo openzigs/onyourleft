@@ -88,6 +88,13 @@ type ForwardButton = (button: unknown, pressed: unknown) => void;
 
 /** One pad as one poll read it: the parts of `Gamepad` Delivery reads, and nothing else. */
 export interface PadSnapshot {
+  /**
+   * The name the platform reports, often with its vendor and product codes,
+   * and untrusted like the rest (`ride/gamepad-readout.ts` trims it). Only
+   * the Devices screen reads it (#2358). Optional because a double and the
+   * shell's forwarded pad name none; a browser's `Gamepad` always has one.
+   */
+  readonly id?: string;
   readonly connected: boolean;
   /** `'standard'` when the browser maps the pad to the W3C layout; anything else is a layout nobody here knows. */
   readonly mapping: string;
