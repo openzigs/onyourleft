@@ -36,6 +36,7 @@
     "test:browser:shard-2": "pnpm --filter @onyourleft/web run test:browser:shard-2",
     "test:browser:shard-3": "pnpm --filter @onyourleft/web run test:browser:shard-3",
     "test:browser:shard-4": "pnpm --filter @onyourleft/web run test:browser:shard-4",
+    "test:browser:shard-5": "pnpm --filter @onyourleft/web run test:browser:shard-5",
     "check:a11y-suite": "node scripts/check-a11y-suite.mjs",
     "check:test-split": "node scripts/check-test-split.mjs",
     "check:wiring": "node scripts/check-wiring.mjs",

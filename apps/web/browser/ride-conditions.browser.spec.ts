@@ -13,7 +13,7 @@
  * worker on the EPYC 7763, a 9V74 and a Xeon 8573C: one file was most of the 720 s
  * `chromium` stop of whichever browser shard held it, so no division of the
  * files between shards could bring that shard under 70 % of its stop.
- * docs/agents/ci.md §4c "Four browser shards — #2376" has the measurements.
+ * docs/agents/ci.md §4c "Five browser shards — #2376" has the measurements.
  *
  * ## What is here
  *

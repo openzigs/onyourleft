@@ -58,7 +58,7 @@ const PORT = 4319;
  * about the product has to be measured against `apps/web/dist`, which that
  * server does not serve. So there are two `webServer` entries, not two
  * Playwright projects and emphatically not two CI jobs for them: since #2376
- * the gate is four jobs, `browser-1` to `browser-4`, which divide the spec
+ * the gate is five jobs, `browser-1` to `browser-5`, which divide the spec
  * files and not the servers — each starts both — and which the job named
  * `Repository rules` waits for (docs/agents/ci.md §4c).
  *

@@ -104,7 +104,7 @@
  *   cull, safe areas, #439's insets, #1441's gesture bar, a laptop's window
  *   and the end of a ride's steps. This file had grown back to 372 cases and
  *   598 to 637 s in one worker on the slower runners, most of a browser
- *   shard's 720 s stop on its own (docs/agents/ci.md §4c "Four browser shards
+ *   shard's 720 s stop on its own (docs/agents/ci.md §4c "Five browser shards
  *   — #2376"); a `§"…"` reference elsewhere to one of those sections under
  *   this file's name now names that one.
  *
