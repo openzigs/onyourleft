@@ -71,6 +71,21 @@
  * the road. No animal and no person is an obstacle: people are `people.ts`'
  * and are never on the carriageway. Nothing here is taken from another game.
  *
+ * ## A level's obstacles: parked cars and bins, standing (#2362, ADR 0065 D-10.1)
+ *
+ * A built-in level's round adds a **parked car**, which stands at the kerb
+ * side of the road — in one of the two kerb lanes of `steer.ts`
+ * §`LANE_OFFSETS_METRES`, never the middle one — and never crosses. A level
+ * hands {@link placeObstacles} its {@link ObstacleMix}: how many obstacles a
+ * kilometre, from its `round.hazardsPerKilometre.static`, and what share of
+ * them stand. Its standing obstacles are drawn from
+ * {@link LEVEL_STANDING_KINDS}, a parked car or a bin. The one-in-each-stretch
+ * rule is unchanged, with the stretch {@link OBSTACLE_SPACING_METRES} or
+ * longer, so no distance has more than one lane blocked, a car's whole length
+ * counted: an obstacle stands at least {@link OBSTACLE_SIGHT_METRES} into its
+ * stretch, far more than any obstacle's half length. A ride with no mix — a
+ * rider's own route — places exactly what it placed before.
+ *
  * ## The route's own frame, and the tick
  *
  * Positions are a distance along the route (the odometer, as the rider's) and
@@ -115,6 +130,7 @@
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
 import type { ObstacleSetting } from './assist-preference';
+import type { LevelRound } from './levels/level-file';
 import { LANE_OFFSETS_METRES } from './steer';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
@@ -162,25 +178,41 @@ export const RIDER_BEHIND_METRES = 0.84;
 export const RIDER_HALF_WIDTH_METRES = 0.2;
 
 /** What an obstacle is. */
-export type ObstacleKind = 'bin' | 'trolley' | 'cone';
+export type ObstacleKind = 'bin' | 'trolley' | 'cone' | 'parked-car';
 
 export interface ObstacleShape {
   /** Half its size along the road, in metres. */
   readonly halfLength: number;
   /** Half its size across the road, in metres. */
   readonly halfWidth: number;
-  /** How fast it crosses the road, in metres a second. */
+  /** How fast it crosses the road, in metres a second; `0` for one that never crosses. */
   readonly speed: number;
 }
 
-/** The roster, in the order placement draws from. */
+/**
+ * The roster. A parked car (#2362) is 4.4 m long and 1.8 m wide, and never
+ * crosses: it only ever stands, so its speed is nought and nothing divides by it.
+ */
 export const OBSTACLE_KINDS: Readonly<Record<ObstacleKind, ObstacleShape>> = Object.freeze({
   bin: Object.freeze({ halfLength: 0.37, halfWidth: 0.3, speed: 1 }),
   trolley: Object.freeze({ halfLength: 0.25, halfWidth: 0.3, speed: 1.5 }),
   cone: Object.freeze({ halfLength: 0.2, halfWidth: 0.2, speed: 2 }),
+  'parked-car': Object.freeze({ halfLength: 2.2, halfWidth: 0.9, speed: 0 }),
 });
 
-const KIND_ORDER = Object.keys(OBSTACLE_KINDS) as readonly ObstacleKind[];
+/**
+ * The kinds that cross the road, in the order placement draws from. Written
+ * out, not read off {@link OBSTACLE_KINDS}, so a kind added there does not
+ * move a single obstacle on a rider's own route.
+ */
+export const CROSSING_OBSTACLE_KINDS: readonly ObstacleKind[] = Object.freeze([
+  'bin',
+  'trolley',
+  'cone',
+]);
+
+/** The kinds a level's round stands in a lane (#2362, ADR 0065 D-10.1), in the order placement draws from. */
+export const LEVEL_STANDING_KINDS: readonly ObstacleKind[] = Object.freeze(['parked-car', 'bin']);
 
 /** One obstacle on the round, in memory for the ride only: one that crosses the road, or one that stands in a lane. */
 export type Obstacle = CrossingObstacle | StandingObstacle;
@@ -283,6 +315,27 @@ export const STANDING_OBSTACLE_SHARE = 0.5;
 /** Folded into the round's seed for the obstacles' own stream: any constant the target pick does not use. */
 const OBSTACLE_STREAM = 0x0b57_ac1e;
 
+/**
+ * A level's obstacles (#2362): how many a kilometre and how many of them
+ * stand. A stretch is never shorter than {@link OBSTACLE_SPACING_METRES}, so
+ * more than one in each 250 m is never placed whatever the level says (its
+ * reader holds it to that, `level-file.ts` §`LEVEL_MOST_HAZARDS_PER_KILOMETRE`).
+ */
+export interface ObstacleMix {
+  /** Obstacles a kilometre; nought or less places none. */
+  readonly perKilometre: number;
+  /** The share of them that stand in a lane, from none to all. */
+  readonly standingShare: number;
+}
+
+/**
+ * A level round's mix (#2362): its static hazards a kilometre, every one of
+ * them standing. Its moving hazards are #2364's, and place nothing yet.
+ */
+export function levelObstacleMix(round: Pick<LevelRound, 'hazardsPerKilometre'>): ObstacleMix {
+  return { perKilometre: round.hazardsPerKilometre.static, standingShare: 1 };
+}
+
 export interface ObstaclePlacementInput {
   /** The rider's odometer reading when the round starts, metres. */
   readonly from: number;
@@ -301,12 +354,16 @@ export interface ObstaclePlacementInput {
  * `steering` is whether the rider can change lane (#1820): with it,
  * {@link STANDING_OBSTACLE_SHARE} of them stand in a seeded lane, each at the
  * distance and of the kind it would have been; without it, none does.
+ * `mix` is a level's (#2362): its density sets the stretch, its share how
+ * many stand, and a standing one is one of {@link LEVEL_STANDING_KINDS}, a
+ * parked car always in a kerb lane. Without it, as before.
  */
 export function placeObstacles(
   input: ObstaclePlacementInput,
   seed: number,
   setting: ObstacleSetting = 'normal',
   steering = false,
+  mix?: ObstacleMix,
 ): readonly Obstacle[] {
   const { from, to } = input;
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
@@ -315,21 +372,41 @@ export function placeObstacles(
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) {
     refuse('the round runs from a finite distance to one no shorter');
   }
-  const count = Math.floor((to - from) / OBSTACLE_SPACING_METRES);
+  if (mix !== undefined && !(mix.perKilometre > 0)) return [];
+  const spacing =
+    mix === undefined
+      ? OBSTACLE_SPACING_METRES
+      : Math.max(OBSTACLE_SPACING_METRES, 1000 / mix.perKilometre);
+  const standingShare = mix === undefined ? STANDING_OBSTACLE_SHARE : mix.standingShare;
+  const count = Math.floor((to - from) / spacing);
   // Its own stream of the round's seed, so obstacles do not follow the target pick.
   const base = mixInto(fmix32(seed), OBSTACLE_STREAM);
   const obstacles: Obstacle[] = [];
   for (let slot = 0; slot < count; slot += 1) {
     const hash = mixInto(base, slot);
-    const kind = KIND_ORDER[Math.floor(uniformFrom(hash, 1) * KIND_ORDER.length)] as ObstacleKind;
+    const kind = CROSSING_OBSTACLE_KINDS[
+      Math.floor(uniformFrom(hash, 1) * CROSSING_OBSTACLE_KINDS.length)
+    ] as ObstacleKind;
     const along =
       from +
-      slot * OBSTACLE_SPACING_METRES +
+      slot * spacing +
       OBSTACLE_SIGHT_METRES +
-      uniformFrom(hash, 0) * (OBSTACLE_SPACING_METRES - OBSTACLE_SIGHT_METRES);
-    if (steering && uniformFrom(hash, 4) < STANDING_OBSTACLE_SHARE) {
-      const lane = Math.floor(uniformFrom(hash, 5) * LANE_OFFSETS_METRES.length);
-      obstacles.push({ kind, along, stands: LANE_OFFSETS_METRES[lane] as number });
+      uniformFrom(hash, 0) * (spacing - OBSTACLE_SIGHT_METRES);
+    if (steering && uniformFrom(hash, 4) < standingShare) {
+      const stands =
+        mix === undefined
+          ? kind
+          : (LEVEL_STANDING_KINDS[
+              Math.floor(uniformFrom(hash, 6) * LEVEL_STANDING_KINDS.length)
+            ] as ObstacleKind);
+      // A parked car stands at the kerb: the first lane or the last, never the middle.
+      const lane =
+        stands === 'parked-car'
+          ? uniformFrom(hash, 5) < 0.5
+            ? 0
+            : LANE_OFFSETS_METRES.length - 1
+          : Math.floor(uniformFrom(hash, 5) * LANE_OFFSETS_METRES.length);
+      obstacles.push({ kind: stands, along, stands: LANE_OFFSETS_METRES[lane] as number });
       continue;
     }
     const shape = OBSTACLE_KINDS[kind];

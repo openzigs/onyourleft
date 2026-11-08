@@ -18,7 +18,12 @@ import { join } from 'node:path';
 import type { BuildingFeature } from '@onyourleft/map-features';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { parseLevelFile, type LevelFile } from '../../src/game/delivery/levels/level-file';
+import {
+  levelLength,
+  parseLevelFile,
+  type LevelFile,
+  type LevelPoint,
+} from '../../src/game/delivery/levels/level-file';
 import { levelBuildingFeature } from '../../src/game/delivery/levels/levels';
 import {
   bakedBuildings,
@@ -42,12 +47,13 @@ const FIXTURE_READ = 'the synthetic fixture level of #2361';
 /** Sources that draw the fixture's line and hand back `buildings` as its corridor's. */
 function fixtureSources(
   buildings: readonly BuildingFeature[] = FIXTURE.buildings.map(levelBuildingFeature),
+  line: Pick<LevelFile, 'shape' | 'points'> = FIXTURE,
 ): LevelSources {
   return {
     drawLine: () =>
       Promise.resolve({
-        shape: FIXTURE.shape,
-        points: FIXTURE.points,
+        shape: line.shape,
+        points: line.points,
         resolutionMetres: FIXTURE.heights.resolutionMetres,
         digest: createHash('sha256').update(FIXTURE_READ),
       }),
@@ -142,6 +148,42 @@ describe('main — #2361', () => {
     await expect(run(fixtureSources())).resolves.toBe(1);
     expect(written()).toStrictEqual(['other.json']);
     expect(printed.join('')).toContain('size: not written');
+  });
+
+  it('redraws a level in place near the ceiling for every level together, its old file not counted twice (D-3.2)', async () => {
+    // #2372's review: a redraw replaces its own file, so the old one is not
+    // counted beside the new. The others and the new file fit; with the old
+    // file counted too, they would not.
+    writeFileSync(join(out, 'fixture-level.json'), FIXTURE_TEXT);
+    const fixtureBytes = Buffer.byteLength(FIXTURE_TEXT);
+    // Four others, each under the per-level ceiling, filling all but the
+    // fixture and half of it again.
+    const others = ['a.json', 'b.json', 'c.json', 'd.json'];
+    const each = Math.floor((LEVELS_TOTAL_MAX_BYTES - fixtureBytes - fixtureBytes / 2) / 4);
+    for (const name of others) writeFileSync(join(out, name), new Uint8Array(each));
+    await expect(run(fixtureSources())).resolves.toBe(0);
+    expect(written()).toStrictEqual([...others, 'fixture-level.json']);
+    expect(readFileSync(join(out, 'fixture-level.json'), 'utf8')).toBe(FIXTURE_TEXT);
+  });
+
+  it('writes a loop as a loop, its length with the closing step back to the start (D-5.2)', async () => {
+    // Out along the fixture's line and back, stopping one step short of the
+    // start, so the loop closes across one step the length must count.
+    const points: LevelPoint[] = [...FIXTURE.points, ...[...FIXTURE.points].reverse().slice(1, -1)];
+    const closing = levelLength(points, 'loop') - levelLength(points, 'point-to-point');
+    expect(closing).toBeGreaterThan(5);
+    await expect(run(fixtureSources(undefined, { shape: 'loop', points }))).resolves.toBe(0);
+    expect(written()).toStrictEqual(['fixture-level.json']);
+    const file = parseLevelFile(
+      JSON.parse(readFileSync(join(out, 'fixture-level.json'), 'utf8')),
+      'fixture-level',
+    );
+    expect(file.shape).toBe('loop');
+    expect(file.points).toHaveLength(points.length);
+    expect(file.lengthMetres).toBe(Math.round(levelLength(points, 'loop')));
+    expect(file.lengthMetres).not.toBe(Math.round(levelLength(points, 'point-to-point')));
+    // Its footprints are the corridor's, round the line out and back.
+    expect(file.buildings).toHaveLength(FIXTURE.buildings.length);
   });
 
   it('refuses a round the reader refuses, before it counts or writes anything', async () => {

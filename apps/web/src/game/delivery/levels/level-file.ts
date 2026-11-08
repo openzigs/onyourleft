@@ -27,9 +27,8 @@
  * coordinates, and the bounds of a latitude or a longitude are put in words,
  * so not even a digit of a refused coordinate can be read off the message.
  *
- * @unwired #2361 ships the format and no level (its own scope: "No level ships
- * in this issue"); the build tool and the tests read it, and #2362 wires it
- * into the app with the first two levels and the Delivery picker.
+ * Since #2362 the app reads the shipped files through it: `levels.ts`
+ * §`levelLibrary`, for the level a rider chose on the Delivery picker.
  */
 
 import { distanceBetween, LOOP_CLOSURE_METRES, type GeographicPosition } from '@onyourleft/domain';
@@ -92,8 +91,12 @@ export const LEVEL_MOST_RING_CORNERS = 1024;
 /** The most rings one footprint may have: its outline and its courtyards. */
 export const LEVEL_MOST_RINGS = 16;
 
-/** A level's id: lowercase, the file's name and the `level:` key's second half. */
-const ID_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
+/**
+ * A level's id: lowercase, the file's name and the `level:` key's second half.
+ * The one rule: `levels.ts` §`levelOfRouteId` reads a route id's second half
+ * with it too.
+ */
+export const LEVEL_ID_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
 
 /** A level's name: our own words, letters and spaces (D-12; not a place name). */
 const NAME_PATTERN = /^[A-Z][A-Za-z]*( [A-Z][A-Za-z]*){0,3}$/;
@@ -431,7 +434,7 @@ export function parseLevelFile(value: unknown, expectedId?: string): LevelFile {
   const id = text(
     file.id,
     'id',
-    ID_PATTERN,
+    LEVEL_ID_PATTERN,
     'must be 2 to 32 lowercase letters, digits and hyphens, starting with a letter',
   );
   if (expectedId !== undefined && id !== expectedId) {

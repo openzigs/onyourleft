@@ -123,6 +123,12 @@ export interface CreditsViewProps {
    */
   readonly circuitsNotice?: () => Promise<string>;
   /**
+   * Reads the built-in Delivery levels' ODbL notice (#2362, ADR 0065 D-6.2),
+   * the copy in `public/licences/`. Defaults to {@link loadLevelsNotice}; a
+   * prop so a test can hand in one that fails to load.
+   */
+  readonly levelsNotice?: () => Promise<string>;
+  /**
    * Works the build copies in rather than commits — #618. Defaults to
    * `credits.ts` §`COPIED_WORKS`; a prop so a fixture manifest can be rendered
    * with nothing beside it.
@@ -352,12 +358,18 @@ export async function loadCircuitsNotice(): Promise<string> {
   return (await import('../../public/licences/circuits-ODbL.txt?raw')).default;
 }
 
+/** The built-in Delivery levels' notice, read into the page — #2362, as {@link loadCircuitsNotice}. */
+export async function loadLevelsNotice(): Promise<string> {
+  return (await import('../../public/licences/levels-ODbL.txt?raw')).default;
+}
+
 export function CreditsView({
   manifest,
   notices,
   noticesDocument = loadNoticesDocument,
   licenceText = loadShippedLicence,
   circuitsNotice = loadCircuitsNotice,
+  levelsNotice = loadLevelsNotice,
   copied = COPIED_WORKS,
 }: CreditsViewProps): JSX.Element {
   const credits = useMemo(
@@ -505,6 +517,29 @@ export function CreditsView({
             failedLabel="Could not open the notice"
             failed="The circuits’ licence notice could not be read just now. It is also in this project’s public repository, beside the circuit files."
             marker={{ 'data-circuits-notice': '' }}
+          />
+          {/*
+          #2362, ADR 0065 D-6.5: and the files of the built-in Delivery
+          levels, a second database derived from OpenStreetMap: each level's
+          line and the building footprints of the corridor round it.
+        */}
+          <p data-credit="levels">
+            It also ships the files of its built-in Delivery levels. Each one follows streets and
+            holds the building footprints beside them, drawn from OpenStreetMap, so each file is
+            made available under the{' '}
+            <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+              Open Database License 1.0
+            </a>{' '}
+            too. Their heights come from the USGS 3D Elevation Program, which is in the public
+            domain.
+          </p>
+          <ReadInPlace
+            load={levelsNotice}
+            summary="Read the Delivery levels’ licence notice"
+            reading="Reading the notice this app carries."
+            failedLabel="Could not open the notice"
+            failed="The Delivery levels’ licence notice could not be read just now. It is also in this project’s public repository, beside the level files."
+            marker={{ 'data-levels-notice': '' }}
           />
           {/*
           #1975: the map archive also carries a land-cover layer derived from

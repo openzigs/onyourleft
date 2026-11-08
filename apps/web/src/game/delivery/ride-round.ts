@@ -91,6 +91,19 @@
  * ordinary one. With no round nothing is kept, so the week is as it was.
  * What the rider is told is `hud/delivery-announce.ts` §`TOO_FEW_HOUSES_TEXT`.
  *
+ * ## A round on a built-in level (#2362, ADR 0065)
+ *
+ * {@link DeliveryRideStart.level} is the level's round: its `houses` are the
+ * round's, in place of the week's, and its static hazards set the obstacles
+ * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
+ * standing. The assist still places fewer or none. A level round is kept
+ * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
+ * is never written to `delivery-progress.ts`. The level's throw window is not
+ * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
+ * may (`level-file.ts`), and the later levels that tighten it read it
+ * (#2367, which draws them). Its mailbox and no-delivery shares, weather and light are
+ * #2365's and #2366's.
+ *
  * ## Nothing here leaves the ride (DL11)
  *
  * The seed is drawn once at the press, handed to the pick and the
@@ -107,7 +120,9 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import type { LevelRound } from './levels/level-file';
 import {
+  levelObstacleMix,
   placeObstacles,
   roundScore,
   startObstacles,
@@ -170,6 +185,8 @@ export interface DeliveryRide {
   readonly along: number;
   /** The round's end, once every house is settled or the ride has ended it. */
   readonly outcome: RoundOutcome | undefined;
+  /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
+  readonly onLevel: boolean;
 }
 
 /** What a round needs at the press. */
@@ -191,6 +208,11 @@ export interface DeliveryRideStart {
    * nothing outside Delivery's own modules reads the setting (#1813's test).
    */
   readonly storage: PreferenceStorage | undefined;
+  /**
+   * A built-in level's round (#2362, ADR 0065 D-4.1): its houses, and its
+   * hazards for the obstacles. Absent, the week's round on a rider's route.
+   */
+  readonly level?: Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> | undefined;
 }
 
 /**
@@ -210,7 +232,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       profile: input.profile,
       origin: input.origin,
       riderDistance: input.riderDistance,
-      houses: week.houses,
+      houses: input.level?.houses ?? week.houses,
     },
     seed,
   );
@@ -224,6 +246,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
     true,
+    input.level === undefined ? undefined : levelObstacleMix(input.level),
   );
   return {
     week,
@@ -234,7 +257,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       side: target.side === 1 ? 'right' : 'left',
       clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
     })),
-    round: startRound(pick.targets.length, { assisted: assist.noFail, dayHouses: week.houses }),
+    round: startRound(pick.targets.length, {
+      assisted: assist.noFail,
+      dayHouses: input.level?.houses ?? week.houses,
+    }),
     throws: NO_PARCELS,
     obstacles,
     obstacleState: startObstacles(obstacles),
@@ -244,6 +270,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     steer: startSteer(input.lineOffset),
     along: input.riderDistance,
     outcome: undefined,
+    onLevel: input.level !== undefined,
   };
 }
 
@@ -380,11 +407,15 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
 
 /**
  * Keep the week's counts for the next ride, from the round's end — counts
- * only (DL11, `delivery-progress.ts`). `false` when the device refused.
+ * only (DL11, `delivery-progress.ts`). `false` when the device refused, and
+ * when the round was a built-in level's, which keeps nothing of the week
+ * (#2362, ADR 0065 D-9.3).
  */
 export function keepDeliveryWeek(
   storage: PreferenceStorage | undefined,
   outcome: RoundOutcome,
+  ride?: Pick<DeliveryRide, 'onLevel'>,
 ): boolean {
+  if (ride?.onLevel === true) return false;
   return writeDeliveryProgress(storage, outcome.next);
 }

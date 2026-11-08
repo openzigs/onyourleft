@@ -92,6 +92,8 @@ test.describe('Delivery’s belt — #1814', () => {
       expect(read?.bin).toEqual([true, true, true]);
       expect(read?.trolley).toEqual([false, false, true]);
       expect(read?.cone).toEqual([false, true, false]);
+      // #2362: a parked car's body, and the road under it between its wheels.
+      expect(read?.['parked-car']).toEqual([true, false, true]);
     });
   }
 

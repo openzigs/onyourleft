@@ -776,6 +776,35 @@ describe('the map data — #1552, ADR 0054 D-3.6', () => {
     expect(mapData()?.querySelector('[data-circuits-notice]')?.textContent).toBe(committed);
   });
 
+  it('says the app ships the Delivery levels’ files under ODbL 1.0, and reads their notice in place — #2362', async () => {
+    const committed = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../game/delivery/levels/data/LICENCE-ODbL.txt',
+      ),
+      'utf8',
+    );
+    await render();
+    const words = (mapData()?.querySelector('[data-credit="levels"]')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(words).toContain('built-in Delivery levels');
+    expect(words).toContain('building footprints');
+    expect(words).toContain('Open Database License 1.0');
+    const summary = queryAll<HTMLElement>(mapData() ?? document, 'details > summary').find(
+      (candidate) => candidate.textContent === 'Read the Delivery levels’ licence notice',
+    );
+    if (summary === undefined) throw new Error('no levels notice disclosure');
+    await activateWithKeyboard(summary);
+    for (let i = 0; i < 50 && mapData()?.querySelector('[data-levels-notice]') === null; i++) {
+      await settle();
+    }
+    // Through the screen's own default loader: the notice beside the level files, byte for byte.
+    expect(mapData()?.querySelector('[data-levels-notice]')?.textContent).toBe(committed);
+    expect(committed).toContain('apps/web/src/game/delivery/levels/data/');
+  });
+
   it('says so when the circuits’ notice cannot be read — #2293', async () => {
     mounted = await mount(
       <CreditsView circuitsNotice={() => Promise.reject(new Error('chunk failed'))} />,

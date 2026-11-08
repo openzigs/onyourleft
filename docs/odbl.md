@@ -47,7 +47,8 @@ A frame drawn from map data is treated as a **Produced Work** (ADR 0032 D-5, ADR
   on the corridor the ride started with, never on "the realistic world is chosen" and never on what
   is in frame: the notice is for the work. Since #2293 it has a second key: a ride on a **built-in
   circuit** shows it for the whole ride in every world, because the road itself is the circuit's
-  line (ADR 0064 D-5.3). A ride on the rider's own route drawn wholly from the procedural world (the
+  line (ADR 0064 D-5.3), and since #2362 so does a ride on a **built-in Delivery level**, whose
+  line and buildings are its file's (ADR 0065 D-6.5). A ride on the rider's own route drawn wholly from the procedural world (the
   stylised world, no archive, map tiles off, offline with nothing kept, outside coverage, a read
   still running at the press) shows **no** credit, because it owes none and saying otherwise is
   false.
@@ -109,8 +110,8 @@ synthetic road and draws no OpenStreetMap data.
 ⚠️ **The on-device store is unchanged.** ADR 0054 D-3.5 still binds `worldCorridors` whole: nothing
 in it leaves the device, the bake never reads it, and the share-alike reasoning in the section above
 still holds for it. The bundle is a separate database, made at build time from the archive. Beside
-the routing graph and, since #2293, the built-in circuits below, it is one of the three
-OpenStreetMap-derived databases this project publishes.
+the routing graph, since #2293 the built-in circuits and since #2362 the built-in Delivery levels
+below, it is one of the four OpenStreetMap-derived databases this project publishes.
 
 ## The routing graph for the in-browser measurement (#2320)
 
@@ -159,6 +160,29 @@ for the tablet measurement [#2009](https://github.com/openzigs/onyourleft/issues
 - **The on-device store is unchanged.** A circuit's corridor, with the realistic world chosen, is
   read and kept like any route's, under its `circuit:` key and the owner, and never leaves the
   device.
+
+## The built-in Delivery levels
+
+[ADR 0065](adr/0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md), **Accepted** on
+2026-11-08. The format and its build tool are #2361's; the first two levels are #2362's.
+
+- **What is in it.** Short town rounds for solo Delivery, one JSON file each, in
+  `apps/web/src/game/delivery/levels/data/`: the round's line, drawn on the project's own archive's
+  streets by `apps/web/tools/delivery-levels/author-level.ts` (run by hand, never in CI), its heights
+  from USGS 3DEP, the round's parameters, and **the building footprints of the corridor round the
+  line**, with no other layer, no OSM identifier, no address and no name but the level's own. No
+  house list and no seed: a ride picks its houses in memory. Committed, named in `ASSETS.toml` with
+  a digest each, and shipped inside the app, each file a chunk loaded only when its level is chosen.
+- **Its licence.** As the circuits': each file is offered under ODbL 1.0 with the licence fields
+  inside it and a `LICENCE-ODbL.txt` beside it, copied byte for byte into `apps/web/public/licences/`
+  as `levels-ODbL.txt`. `ASSET004` admits `ODbL-1.0` for that directory's `.json` files, and
+  `levels.test.ts` holds the fields, the notice and the size ceilings (2 MiB a file, 8 MiB in all).
+- **Where attribution is shown.** Beside the levels on the Delivery picker, with a link to the
+  credits screen, whose *Map data* entry says the app ships them and reads their notice in place;
+  and on the ride screen for the whole of a ride on a level, in every world.
+- **Solo rounds only.** A level's id is in a `level:` namespace no route id may carry; it is never
+  saved as a route, synced, exported, shared or a room's course, and nothing of it is kept in the
+  on-device corridor store.
 
 ## What does not change
 

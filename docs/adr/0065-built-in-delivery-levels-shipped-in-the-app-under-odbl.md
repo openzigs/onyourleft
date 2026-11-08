@@ -510,3 +510,14 @@ were asked in this pull request and answered there on 2026-11-08 in a [comment](
 | The demo's two measured bakes and their ceiling | `apps/web/tools/demo/demo-routes.ts` §`DEMO_ROUTE_MAX_BYTES` | 2026-11-08 |
 | The circuits' format, files, rows and repository rule | `apps/web/src/game/circuits/`, `ASSETS.toml`, `scripts/check-repo-rules.sh` §`ASSET_DATABASE_DIR` | 2026-11-08 |
 | The roster rule superseded | `apps/web/src/game/delivery/obstacles.ts`, its header's *"Our own roster (DL1)"* | 2026-11-08 |
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-08** — **`ASSET_DATABASE_DIR` is now `ASSET_DATABASE_DIRS`.** Context's *What exists
+  today* and the Sources table cite `scripts/check-repo-rules.sh` §`ASSET_DATABASE_DIR`, the one
+  directory where `ASSET004` admitted `ODbL-1.0` when this was written. #2361 (pull request #2372),
+  building D-7.2, made it a list of the two directories and renamed it `ASSET_DATABASE_DIRS`. Read
+  each `§ASSET_DATABASE_DIR` above as `§ASSET_DATABASE_DIRS`. No decision changes. Recorded by
+  #2362.

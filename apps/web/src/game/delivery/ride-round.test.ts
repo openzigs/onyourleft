@@ -651,3 +651,62 @@ describe('the round’s end — #1816', () => {
     expect(PARCEL_FLIGHT_TICKS * DELIVERY_TICK_SECONDS).toBeLessThan(2);
   });
 });
+
+describe('a round on a built-in level — #2362, ADR 0065', () => {
+  // More houses than the week's, so the round is seen to be the level's, and
+  // obstacles as dense as a level may ask, so a round this short has some.
+  const LEVEL = {
+    houses: FIRST_DAY_HOUSES + 2,
+    hazardsPerKilometre: { static: 4, moving: 0 },
+  } as const;
+
+  function onLevel(storage = storageOf()): DeliveryRide {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage,
+      level: LEVEL,
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    return ride;
+  }
+
+  it('rides the level’s houses, not the week’s, and stands every obstacle', () => {
+    const week: WeekProgress = { day: 3, houses: FIRST_DAY_HOUSES, score: 2 };
+    const ride = onLevel(storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week }));
+    expect(ride.targets).toHaveLength(LEVEL.houses);
+    expect(ride.round.dayHouses).toBe(LEVEL.houses);
+    expect(ride.onLevel).toBe(true);
+    expect(ride.obstacles.length).toBeGreaterThan(0);
+    for (const obstacle of ride.obstacles) {
+      expect(obstacle.stands).toBeDefined();
+      expect(['parked-car', 'bin']).toContain(obstacle.kind);
+    }
+    // A rider's own route is the week's round, as before.
+    expect(started().onLevel).toBe(false);
+    expect(started().targets).toHaveLength(FIRST_DAY_HOUSES);
+  });
+
+  it('places no obstacle with the assist at none', () => {
+    const assist: DeliveryAssist = { obstacles: 'none', widerWindows: false, noFail: false };
+    const ride = onLevel(storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist }));
+    expect(ride.obstacles).toEqual([]);
+    expect(onLevel().obstacles.length).toBeGreaterThan(0);
+  });
+
+  it('keeps nothing of the week when it ends, read back from the device (D-9.3)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    const ride = withoutObstacles(onLevel(storage));
+    const ended = endDeliveryRide(rideTo(ride, town.profile.totalDistance - 1).ride);
+    expect(ended.missed).toBeGreaterThan(0);
+    expect(keepDeliveryWeek(storage, ended, ride)).toBe(false);
+    expect(readDeliveryProgress(storage)).toEqual(week);
+    // The week's own round is kept, as before.
+    const own = started(storage);
+    expect(keepDeliveryWeek(storage, endDeliveryRide(own), own)).toBe(true);
+  });
+});

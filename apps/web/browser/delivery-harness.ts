@@ -97,13 +97,18 @@ declare global {
 
 const counter = drawCounter(WebGL2RenderingContext.prototype);
 
-const ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone'];
+const ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone', 'parked-car'];
+
+/** The kinds that cross the road: a parked car (#2362) only ever stands. */
+const CROSSING_ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone'];
 
 /**
  * The points `deliveryKindProbe` reads, the obstacle's own metres, `x` across
  * and `y` up: inside the bin's body above the cone's tip; low on the middle,
  * inside the bin and the cone but between the trolley's uprights; on the
- * trolley's right upright, inside the bin, wide of the cone.
+ * trolley's right upright, inside the bin, wide of the cone. A parked car
+ * (#2362) paints the first and the last, its body, and not the middle, which
+ * is under its body and between its wheels.
  */
 const KIND_POINTS: readonly (readonly [number, number])[] = [
   [0.1, 0.85],
@@ -270,7 +275,12 @@ function markerLeaves(): DeliveryMarkerReading {
 function kinds(world: 'stylised' | 'realistic'): Record<ObstacleKind, readonly boolean[]> {
   const read = (kind: ObstacleKind): readonly boolean[] =>
     deliveryKindProbe(canvas(256, 256), world, kind, KIND_POINTS);
-  return { bin: read('bin'), trolley: read('trolley'), cone: read('cone') };
+  return {
+    bin: read('bin'),
+    trolley: read('trolley'),
+    cone: read('cone'),
+    'parked-car': read('parked-car'),
+  };
 }
 
 function probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls {
@@ -306,7 +316,7 @@ function showcase(): void {
     }).state,
     { rider: { along: RIDER, speed: 8 }, targets: [], round: startRound(1), ticks: 4 },
   ).state;
-  const obstacles: Obstacle[] = ROSTER.map((kind, index) => ({
+  const obstacles: Obstacle[] = CROSSING_ROSTER.map((kind, index) => ({
     kind,
     along: RIDER + 7 + 3 * index,
     from: index === 1 ? 'right' : 'left',

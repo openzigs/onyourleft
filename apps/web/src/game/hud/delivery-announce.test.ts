@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { Obstacle } from '../delivery/obstacles';
 import {
   endRound,
   FRESH_WEEK,
@@ -37,6 +38,9 @@ import {
   ordinal,
   oweCrash,
   oweRoundChange,
+  OBSTACLE_AHEAD_METRES,
+  obstacleAheadSentence,
+  oweObstacleAhead,
   oweRoundOver,
   roundOverSentence,
   type DeliveryOwed,
@@ -50,6 +54,7 @@ const QUIET: AnnouncementPreference = {
 };
 
 const DELIVERY_KINDS = [
+  'delivery-obstacle-ahead',
   'delivery-round-over',
   'delivery-crash',
   'delivery-missed',
@@ -85,7 +90,7 @@ class Caller {
 }
 
 describe('Delivery’s place in the announcer’s order — #1812, rank 5g', () => {
-  it('ranks the round’s end, a crash, a miss and a delivery, in that order, below every other event and above every reading', () => {
+  it('ranks an obstacle ahead, the round’s end, a crash, a miss and a delivery, in that order, below every other event and above every reading', () => {
     const at = (kind: (typeof PRIORITY)[number]): number => PRIORITY.indexOf(kind);
     expect(DELIVERY_KINDS.map(at)).toEqual(
       DELIVERY_KINDS.map((_, index) => at('room-draft') + 1 + index),
@@ -406,5 +411,54 @@ describe('each said once, in the order chosen, through the real core — #1812',
     ]);
     expect(deliverySpoken(owed, 'power')).toBe(owed);
     expect(deliverySpoken(owed, undefined)).toBe(owed);
+  });
+});
+
+describe('a standing obstacle ahead, said in words — #2362, ADR 0065 D-10.9', () => {
+  const CAR: Obstacle = { kind: 'parked-car', along: 500, stands: 1.75 };
+  const BIN: Obstacle = { kind: 'bin', along: 540, stands: 0 };
+  const ROLLING: Obstacle = { kind: 'cone', along: 520, from: 'left', startAfter: 1 };
+  const ROUND = [CAR, ROLLING, BIN];
+
+  it('names the kind and the lane as the rider faces it, and no place or number', () => {
+    expect(obstacleAheadSentence(CAR)).toBe('A parked car ahead, in the right lane.');
+    expect(obstacleAheadSentence(BIN)).toBe('A bin ahead, in the middle lane.');
+    expect(obstacleAheadSentence({ ...CAR, stands: -1.75 })).toBe(
+      'A parked car ahead, in the left lane.',
+    );
+  });
+
+  it('owes the nearest standing one once it is in reach, and none before', () => {
+    const far = oweObstacleAhead(NOTHING_OWED, ROUND, CAR.along - OBSTACLE_AHEAD_METRES - 1);
+    expect(far.ahead).toBeUndefined();
+    const near = oweObstacleAhead(NOTHING_OWED, ROUND, CAR.along - OBSTACLE_AHEAD_METRES);
+    expect(deliveryEvents(near)).toEqual([
+      { kind: 'delivery-obstacle-ahead', text: 'A parked car ahead, in the right lane.' },
+    ]);
+  });
+
+  it('says each once: once said, the next standing one is owed, and a rolling one never', () => {
+    const caller = new Caller();
+    caller.owed = oweObstacleAhead(NOTHING_OWED, ROUND, 460);
+    caller.call(0);
+    caller.owed = oweObstacleAhead(caller.owed, ROUND, 490);
+    caller.ride(1, 12);
+    caller.owed = oweObstacleAhead(caller.owed, ROUND, 495);
+    caller.ride(13, 24);
+    expect(caller.said.map((each) => each.text)).toEqual([
+      'A parked car ahead, in the right lane.',
+      'A bin ahead, in the middle lane.',
+    ]);
+  });
+
+  it('drops one the rider passed before it was said', () => {
+    const owed = oweObstacleAhead(NOTHING_OWED, [CAR], 460);
+    expect(owed.ahead).toBeDefined();
+    expect(oweObstacleAhead(owed, [CAR], CAR.along + 1).ahead).toBeUndefined();
+  });
+
+  it('owes nothing after the round’s end', () => {
+    const over = oweRoundOver(NOTHING_OWED, endRound(FRESH_WEEK, startRound(3)), 0);
+    expect(oweObstacleAhead(over, ROUND, 460)).toBe(over);
   });
 });

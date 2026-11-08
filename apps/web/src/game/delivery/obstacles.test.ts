@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +18,9 @@ import {
   AVOIDABLE_SLOWEST_METRES_PER_SECOND,
   type Crash,
   CRASH_SCORE_DELTA,
+  CROSSING_OBSTACLE_KINDS,
+  LEVEL_STANDING_KINDS,
+  levelObstacleMix,
   FEWER_OBSTACLES_KEEP_ONE_IN,
   type Obstacle,
   obstacleAcross,
@@ -33,6 +40,8 @@ import {
   stepObstacles,
 } from './obstacles';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { parseLevelFile, type LevelFile } from './levels/level-file';
+import { LANE_OFFSETS_METRES } from './steer';
 import { endRound, FRESH_WEEK, recordDelivery, type Round, startRound } from './round';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
@@ -298,16 +307,14 @@ describe('placement is seeded, and every obstacle is avoidable in phase 0', () =
     expect(placeObstacles({ from: 0, to: OBSTACLE_SPACING_METRES - 1 }, 3)).toEqual([]);
   });
 
-  it('draws every kind and both kerbs from the seed', () => {
+  it('draws every crossing kind and both kerbs from the seed', () => {
     const all = SEEDS.flatMap((seed) => placeObstacles(ROUND, seed));
-    expect(new Set(all.map((obstacle) => obstacle.kind))).toEqual(
-      new Set(Object.keys(OBSTACLE_KINDS)),
-    );
+    expect(new Set(all.map((obstacle) => obstacle.kind))).toEqual(new Set(CROSSING_OBSTACLE_KINDS));
     expect(new Set(all.map((obstacle) => obstacle.from))).toEqual(new Set(['left', 'right']));
   });
 
   it('can always wait, at the fastest on-time speed, before it crosses', () => {
-    for (const shape of Object.values(OBSTACLE_KINDS)) {
+    for (const shape of CROSSING_OBSTACLE_KINDS.map((kind) => OBSTACLE_KINDS[kind])) {
       const crossToCentre = (CARRIAGEWAY_HALF_WIDTH_METRES + shape.halfWidth) / shape.speed;
       expect(OBSTACLE_SIGHT_METRES / ON_TIME_FASTEST_METRES_PER_SECOND).toBeGreaterThanOrEqual(
         crossToCentre,
@@ -412,5 +419,122 @@ describe('the assist setting places fewer obstacles, or none — #1813, DL10', (
   it('places none for `none`, and still refuses a seed it could not use', () => {
     expect(placeObstacles(span, 7, 'none')).toEqual([]);
     expect(() => placeObstacles(span, -1, 'none')).toThrow(RangeError);
+  });
+});
+
+describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0065 D-10.1', () => {
+  const SEEDS = [0, 1, 2, 7, 1811, 0xdead_beef, 0xffff_ffff];
+  const LEVELS = fileURLToPath(new URL('./levels/', import.meta.url));
+  const read = (path: string, id: string): LevelFile =>
+    parseLevelFile(JSON.parse(readFileSync(path, 'utf8')), id);
+  /** Both shipped levels and the synthetic fixture: their rounds, read through the app's reader. */
+  const ROUNDS: readonly LevelFile[] = [
+    ...readdirSync(join(LEVELS, 'data'))
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => read(join(LEVELS, 'data', name), name.slice(0, -5))),
+    read(join(LEVELS, 'fixtures', 'fixture-level.json'), 'fixture-level'),
+  ];
+
+  it('places on a rider’s own route exactly what it placed before #2362', () => {
+    // Read off `main` before this change, at 1811 steering and 0xdeadbeef not.
+    const before = [
+      [
+        { kind: 'cone', along: 363.51587194250897, from: 'right', startAfter: 5.04082865381344 },
+        { kind: 'bin', along: 469.42196573130786, stands: 0 },
+        { kind: 'cone', along: 748.5444466397166, from: 'right', startAfter: 6.547552529245429 },
+        { kind: 'cone', along: 1076.0265072761104, from: 'right', startAfter: 6.551672426682618 },
+        { kind: 'trolley', along: 1333.5871737101115, stands: 1.75 },
+      ],
+      [
+        { kind: 'cone', along: 306.567940779496, from: 'left', startAfter: 6.504658522818104 },
+        { kind: 'bin', along: 489.7116304957308, from: 'left', startAfter: 3.313342055894057 },
+        { kind: 'trolley', along: 741.4796406729147, from: 'right', startAfter: 6.937353879340478 },
+        { kind: 'cone', along: 1087.9142953688279, from: 'left', startAfter: 7.276748957743736 },
+        {
+          kind: 'trolley',
+          along: 1267.3080200492404,
+          from: 'right',
+          startAfter: 5.031714470547043,
+        },
+      ],
+    ] as const;
+    expect(placeObstacles({ from: 120, to: 1400 }, 1811, 'normal', true)).toStrictEqual(before[0]);
+    expect(placeObstacles({ from: 120, to: 1400 }, 0xdead_beef)).toStrictEqual(before[1]);
+  });
+
+  it('reads the shipped levels and the fixture, every one of them with static hazards', () => {
+    expect(ROUNDS.length).toBeGreaterThanOrEqual(3);
+    for (const level of ROUNDS) expect(level.round.hazardsPerKilometre.static).toBeGreaterThan(0);
+  });
+
+  it('places the level’s density, every one standing, a parked car or a bin, a car only at the kerb', () => {
+    const kinds = new Set<string>();
+    const carLanes = new Set<number>();
+    for (const level of ROUNDS) {
+      const mix = levelObstacleMix(level.round);
+      const span = { from: 0, to: level.lengthMetres };
+      for (const seed of SEEDS) {
+        const placed = placeObstacles(span, seed, 'normal', true, mix);
+        expect(placed).toHaveLength(Math.floor(level.lengthMetres / (1000 / mix.perKilometre)));
+        for (const obstacle of placed) {
+          expect(obstacle.stands, level.id).toBeDefined();
+          expect(LEVEL_STANDING_KINDS).toContain(obstacle.kind);
+          kinds.add(obstacle.kind);
+          if (obstacle.kind === 'parked-car') {
+            carLanes.add(obstacle.stands as number);
+            expect([LANE_OFFSETS_METRES[0], LANE_OFFSETS_METRES.at(-1)]).toContain(obstacle.stands);
+          }
+        }
+      }
+    }
+    expect(kinds).toEqual(new Set(['parked-car', 'bin']));
+    expect(carLanes).toEqual(new Set([LANE_OFFSETS_METRES[0], LANE_OFFSETS_METRES.at(-1)]));
+  });
+
+  it('blocks at most one lane at every distance of every level, a parked car’s whole length counted', () => {
+    let cars = 0;
+    for (const level of ROUNDS) {
+      for (const seed of SEEDS) {
+        const placed = placeObstacles(
+          { from: 0, to: level.lengthMetres },
+          seed,
+          'normal',
+          true,
+          levelObstacleMix(level.round),
+        );
+        // Every distance a rider's bicycle can be at while it overlaps any obstacle.
+        for (let along = 0; along <= level.lengthMetres; along += 0.1) {
+          const blocked = new Set<number>();
+          for (const obstacle of placed) {
+            const shape = OBSTACLE_KINDS[obstacle.kind];
+            const touches =
+              along + RIDER_AHEAD_METRES > obstacle.along - shape.halfLength &&
+              obstacle.along + shape.halfLength > along - RIDER_BEHIND_METRES;
+            if (!touches) continue;
+            LANE_OFFSETS_METRES.forEach((lane, index) => {
+              if (
+                Math.abs(lane - (obstacle.stands as number)) <
+                shape.halfWidth + RIDER_HALF_WIDTH_METRES
+              ) {
+                blocked.add(index);
+              }
+            });
+          }
+          expect(blocked.size, `${level.id} at seed ${String(seed)}`).toBeLessThanOrEqual(1);
+        }
+        cars += placed.filter((obstacle) => obstacle.kind === 'parked-car').length;
+      }
+    }
+    expect(cars).toBeGreaterThan(0);
+  });
+
+  it('places none for a level with no static hazards, and none with the assist at none', () => {
+    const span = { from: 0, to: 3000 };
+    expect(placeObstacles(span, 7, 'normal', true, { perKilometre: 0, standingShare: 1 })).toEqual(
+      [],
+    );
+    expect(
+      placeObstacles(span, 7, 'none', true, levelObstacleMix((ROUNDS[0] as LevelFile).round)),
+    ).toEqual([]);
   });
 });

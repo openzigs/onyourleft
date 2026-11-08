@@ -44,6 +44,10 @@
  * ordinary ride and the week as it was; and the assist setting reaching it.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,7 +62,7 @@ import {
   steeringController,
   type ControllerStep,
 } from '@onyourleft/sensors/simulator';
-import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
+import { activityId, lapId, levelRouteId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { riderMassFor } from '../athlete/mass';
@@ -73,6 +77,8 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/ass
 import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
+import { parseLevelFile } from './delivery/levels/level-file';
+import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
@@ -2019,4 +2025,154 @@ describe('the course picker: which saved routes can hold a round — #2294', () 
     expect(courseLines()).toEqual([undefined, undefined]);
     expect(mounted.container.querySelector('.oyl-chooser__courses')).toBeNull();
   });
+});
+
+describe('a built-in level’s parked cars change nothing the trainer is sent — #2362, ADR 0065 D-11', () => {
+  /** The synthetic fixture level (D-7.5): never a shipped one, as a ride draws it. */
+  const LEVEL = parseLevelFile(
+    JSON.parse(
+      readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          'delivery/levels/fixtures/fixture-level.json',
+        ),
+        'utf8',
+      ),
+    ),
+    'fixture-level',
+  );
+  const LEVEL_PROFILE = levelRoute(LEVEL).profile;
+  const LEVEL_BUILDINGS = (() => {
+    const corridor = levelCorridor(LEVEL);
+    const mask = landClassMask(corridor);
+    const urban = urbanClassMap(corridor, mask, LEVEL_PROFILE);
+    const { plans } = footprintPlans(
+      corridor,
+      mask,
+      LEVEL_PROFILE,
+      corridorOrigin(LEVEL_PROFILE),
+      FOOTPRINT_MAX_VERTICES,
+      urban,
+    );
+    return mappedBuildingsOf(plans);
+  })();
+
+  /** The first seed whose level round the unsteered rider crashes into, with a parked car on it. */
+  const CRASHING_SEED = ((): number => {
+    const simulation = new GameSimulation({
+      profile: LEVEL_PROFILE,
+      conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
+    });
+    const frames: ShadowFrame[] = [];
+    for (let frame = 1; frame <= FRAMES; frame += 1) {
+      const at = START_MS + frame * FRAME_MS;
+      const { steps } = simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
+      frames.push({
+        steps,
+        along: simulation.state.ride.distance,
+        speed: simulation.state.ride.speed,
+      });
+    }
+    for (let seed = 1; seed < 400; seed += 1) {
+      stubSeed(seed);
+      let ride = startDeliveryRide({
+        buildings: LEVEL_BUILDINGS,
+        profile: LEVEL_PROFILE,
+        origin: corridorOrigin(LEVEL_PROFILE),
+        riderDistance: 0,
+        lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
+        storage: undefined,
+        level: LEVEL.round,
+      });
+      vi.restoreAllMocks();
+      if (ride === undefined) continue;
+      if (!ride.obstacles.some((obstacle) => obstacle.kind === 'parked-car')) continue;
+      let crashes = 0;
+      for (const frame of frames) {
+        if (frame.steps === 0) continue;
+        const stepped = stepDeliveryRide(ride, {
+          ticks: frame.steps,
+          along: frame.along,
+          speed: frame.speed,
+        });
+        ride = stepped.ride;
+        crashes += stepped.crashes;
+      }
+      if (crashes > 0) return seed;
+    }
+    throw new Error('no seed put the unsteered rider into a level obstacle');
+  })();
+
+  /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
+  async function rideLevel(obstacles: 'normal' | 'none'): Promise<{
+    readonly writes: readonly Write[];
+    readonly offered: readonly string[];
+    readonly started: readonly unknown[];
+  }> {
+    pending = [];
+    nowMs = START_MS;
+    offered.length = 0;
+    startedRounds.length = 0;
+    writeRealisticWorldChoice(localStorage, true);
+    localStorage.setItem(
+      DELIVERY_ASSIST_STORAGE_KEY,
+      JSON.stringify({ widerWindows: false, obstacles, noFail: false } satisfies DeliveryAssist),
+    );
+    globalThis.location.hash = `#/game?route=${levelRouteId(LEVEL.id)}&play=delivery`;
+    const writes: Write[] = [];
+    const levelPort: GamePort = {
+      listRoutes: () => Promise.resolve([]),
+      loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+      loadGhost: () => Promise.resolve(undefined),
+      readSensors: () => ({
+        rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
+        cadence: { value: 88, live: true, paired: true },
+        heartRate: { value: 142, live: true, paired: true },
+      }),
+    };
+    stubSeed(CRASHING_SEED);
+    mounted = await mount(
+      <GameView
+        port={levelPort}
+        trainer={trainerPort(writes)}
+        renderer={() =>
+          Promise.resolve({
+            ...capturingRenderer([]),
+            loadRealisticWorld: () => Promise.resolve({ loaded: true }),
+          })
+        }
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < FRAMES; index += 1) await pump();
+    await settle();
+    const ridden = { writes, offered: [...offered], started: [...startedRounds] };
+    mounted.unmount();
+    mounted = undefined;
+    globalThis.location.hash = '';
+    return ridden;
+  }
+
+  it(
+    'sends the same writes at the same times with the level’s parked cars as with none, a crash among them',
+    { timeout: 30_000 },
+    async () => {
+      const without = await rideLevel('none');
+      const withCars = await rideLevel('normal');
+      // Non-vacuity: both rode a round on the level, and only one of them had obstacles.
+      const [round] = withCars.started as (DeliveryRide | undefined)[];
+      const [bare] = without.started as (DeliveryRide | undefined)[];
+      expect(round?.onLevel).toBe(true);
+      expect(round?.obstacles.some((obstacle) => obstacle.kind === 'parked-car')).toBe(true);
+      expect(bare?.onLevel).toBe(true);
+      expect(bare?.obstacles).toEqual([]);
+      // The rider rode into one, so a crash was counted and said.
+      expect(withCars.offered).toContain('delivery-crash');
+      expect(without.offered).not.toContain('delivery-crash');
+      expect(without.writes.length).toBeGreaterThan(20);
+      expect(withCars.writes).toStrictEqual(without.writes);
+    },
+  );
 });

@@ -525,7 +525,7 @@ export interface WaterFrame {
  * `delivery/in-view.ts` builds {@link DeliveryInView} from
  * the roster, so a kind added there and not here does not typecheck.
  */
-export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone';
+export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone' | 'parked-car';
 
 /** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
 export interface DeliveryPiece {

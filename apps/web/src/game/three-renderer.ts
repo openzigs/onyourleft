@@ -10988,6 +10988,7 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
   bin: { halfLength: 0.37, halfWidth: 0.3 },
   trolley: { halfLength: 0.25, halfWidth: 0.3 },
   cone: { halfLength: 0.2, halfWidth: 0.2 },
+  'parked-car': { halfLength: 2.2, halfWidth: 0.9 },
 };
 
 /** The roster, in order: a kind's index is its number in both attributes. */
@@ -10997,7 +10998,7 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
 
 /**
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
- * — #1814. Every obstacle instance carries all three kinds' triangles, each
+ * — #1814. Every obstacle instance carries every kind's triangles, each
  * vertex marked with its kind ({@link DELIVERY_PIECE_KIND_ATTRIBUTE}); a vertex
  * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE})
  * is collapsed to the instance's origin, so its triangles have no area and
@@ -11124,7 +11125,8 @@ function deliveryWheel(
  * with a pale tape band; a white post on the doorstep with a glowing amber
  * diamond above it and a glowing ring on the step; a green wheelie bin, a red
  * hand trolley and an orange cone with a white band, each on black wheels or
- * a black foot. No sprite, colour scheme or shape is taken from another game.
+ * a black foot; and, since #2362, a blue-grey parked car with pale windows on
+ * four black wheels. No sprite, colour scheme or shape is taken from another game.
  */
 const DELIVERY_PAINT = {
   card: 0xa8794a,
@@ -11137,6 +11139,8 @@ const DELIVERY_PAINT = {
   trolleyPlate: 0x8c8c8c,
   coneBody: 0xe8661c,
   coneBand: 0xe6e6e6,
+  carBody: 0x4a6a8c,
+  carGlass: 0x9db4c6,
   black: 0x1e1e1e,
 } as const;
 
@@ -11166,7 +11170,7 @@ function markerShape(): BufferGeometry {
 }
 
 /**
- * The obstacle roster, all three kinds in one geometry, each vertex marked
+ * The obstacle roster, every kind in one geometry, each vertex marked
  * with its kind (@see withObstacleKinds), standing on the road at the
  * origin. Each kind's footprint is its collision box in `obstacles.ts`
  * §`OBSTACLE_KINDS`, `2 × halfWidth` across and `2 × halfLength` along, so
@@ -11246,6 +11250,31 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
+  {
+    // #2362: a parked car, its box the footprint, nose along the road.
+    const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'].halfWidth;
+    const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'].halfLength;
+    const wheel = 0.32;
+    add(
+      'parked-car',
+      deliveryBox(across, 0.62, along, 0, wheel + 0.31 - 0.08, 0),
+      DELIVERY_PAINT.carBody,
+    );
+    add(
+      'parked-car',
+      deliveryBox(across - 0.16, 0.5, along * 0.5, 0, wheel + 0.62 - 0.08 + 0.25, -along * 0.05),
+      DELIVERY_PAINT.carGlass,
+    );
+    for (const side of [-1, 1]) {
+      for (const end of [-1, 1]) {
+        add(
+          'parked-car',
+          deliveryWheel(wheel, 0.22, side * (across / 2 - 0.12), wheel, end * (along / 2 - 0.7)),
+          DELIVERY_PAINT.black,
+        );
+      }
+    }
+  }
   return deliveryShape(parts);
 }
 
@@ -11258,7 +11287,7 @@ const DELIVERY_MATRIX = new Matrix4();
  * ADR 0059 D-3): **three instanced meshes and at most THREE draw calls**,
  * whatever the count, and none on a frame that carries no Delivery. Each kind
  * of piece is one instanced draw of one shape, so twenty parcels cost what
- * one does; the obstacles' three shapes share theirs ({@link withObstacleKinds}).
+ * one does; the obstacles' shapes, a parked car's among them (#2362), share theirs ({@link withObstacleKinds}).
  *
  * ⚠️ **Built by the view only on the first frame that carries a Delivery
  * round** (`SceneFrame.delivery`), so an ordinary ride has no mesh, no
