@@ -29,14 +29,17 @@
  * AUTOPLAY_WAIT_MS} (3 s, the owner's ruling of 2026-11-08 on #2369) after one
  * of two moments:
  *
- * - **The launch** — the first visible menu route. The header reads the
- *   rider's player as it mounts (`OtherPlayer.watch` asks at once), and none
- *   of our own sounds has played yet, so the reading that lands in those 3 s
- *   is the rider's alone.
+ * - **The launch**, on a menu route. The header reads the rider's player as
+ *   it mounts (`OtherPlayer.watch` asks at once), and none of our own sounds
+ *   has played yet, so the reading that lands in those 3 s is the rider's
+ *   alone. A launch on a ride route waits {@link OWN_LOOP_SETTLE_MS} from its
+ *   first menu route instead, as any return from a ride route does: the
+ *   ride's own sounds may still be counted in the header's first reading.
  * - **The rider coming back to the app** — the page shown again on a menu
  *   route, whether or not the loop had played before. Our loop paused at once
- *   when the page was hidden, so a reading taken after the return is not of
- *   our loop; one is asked for at the return ({@link RiderPlayer.poll}) rather
+ *   when the page was hidden, and our audio context was suspended with it, so
+ *   a reading taken after the return is not of us; one is asked for at the
+ *   return ({@link RiderPlayer.poll}) rather
  *   than left to the header's next 4 s poll, which a hidden page may also have
  *   held back.
  *
@@ -57,6 +60,9 @@
  * Leaving for a ride route fades the music bus to 0 (`web-audio.ts`
  * §`setMusicOn`, a ramp) and pauses the element once the fade is over. A page
  * that is hidden pauses at once: nobody hears a fade on a screen that is off.
+ * In the Android app a page hidden on a menu route, with no ride in progress,
+ * also suspends our audio context (#2357): its open stream would otherwise
+ * read as the rider's player.
  *
  * ## The rider's mix
  *
@@ -284,6 +290,8 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
   };
 
   const play = (into: HTMLMediaElement): void => {
+    // A context suspended behind a hidden page (`quieten`) is woken first.
+    deps.output.resume();
     cancelPause?.();
     cancelPause = undefined;
     playing = true;
@@ -307,6 +315,22 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       cancelPause = undefined;
       pause(into);
     }
+  };
+
+  /**
+   * Behind a hidden menu route, close our own output stream — #2357. A running
+   * audio context keeps an output stream open even with every sound stopped,
+   * and Android's `isMusicActive()` counts it: measured on the tablet, a
+   * silent running context answered `true`, and `false` again as soon as it
+   * was suspended. Left running, it is the reading a return goes by, and the
+   * loop would yield to itself for good. Only where there is a rider's player
+   * to read (the Android shell, whose WebView lets the context be woken again
+   * outside a press), and never while a ride may need it (`quiet`): a ride
+   * keeps its own context, and suspends it itself (#447).
+   */
+  const quieten = (): void => {
+    if (deps.riderPlayer === undefined) return;
+    deps.output.suspend();
   };
 
   /** Make the element if need be and play it: a press's start, and #2357's. */
@@ -354,6 +378,9 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       const returned = cameBack && wasHidden;
       onMenu = nowOnMenu;
       wasHidden = hidden;
+      // Hidden on a menu route: our context's stream would read as the
+      // rider's player until the return (#2357, measured on the tablet).
+      if (hidden && !quiet(context)) quieten();
       if (element === undefined) {
         // Never played, but the header did not read while the rider was away
         // either: a press now would ask a reading from before they left, when
@@ -384,7 +411,7 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
         }
         return;
       }
-      if (deps.hidden()) {
+      if (hidden) {
         stop(element, false);
       } else if (quiet(context)) {
         stop(element, true);
