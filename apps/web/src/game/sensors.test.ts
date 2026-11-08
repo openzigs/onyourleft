@@ -33,6 +33,7 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     stopArmed: false,
     discardArmed: false,
     touchLocked: false,
+    startedAt: undefined,
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,

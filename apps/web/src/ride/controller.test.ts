@@ -7643,6 +7643,59 @@ describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding',
     rig.controller.dispose();
   });
 
+  it('takes the pictures kept before a crash when the ride recovered from it is discarded (#2356)', async () => {
+    // The ride before the crash: a picture kept before it started, one kept
+    // during it, and then the tab goes.
+    const first = benchWith();
+    const keptBefore = cameraFrameFor(ATHLETE_A, { capturedAt: first.bench.now - 5 });
+    await harness.write(async (store) => store.putCameraFrame(keptBefore));
+    await first.controller.pair('trainer');
+    await first.controller.start();
+    await ride(first, 3);
+    const keptBeforeTheCrash = cameraFrameFor(ATHLETE_A, { capturedAt: first.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(keptBeforeTheCrash));
+    await ride(first, 3);
+    first.controller.dispose();
+    const id = recordingSessionId(first.sessionIds[0] ?? '');
+
+    // Ten minutes later, a new tab: the ride's elapsed time reaches only the
+    // last slot recorded, so a window opened at `now - elapsed` would start
+    // ten minutes after the ride did.
+    const next = benchWith({
+      rideSave: storeSavePort(),
+      simulator: { startAt: unixSeconds(first.bench.now + 600) },
+    });
+    const discards = discardKeptFramesWithTheRide({
+      rides: next.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+          harness.write(async (store) =>
+            store.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+          ),
+      },
+      athleteId: ATHLETE_A,
+      now: () => next.bench.now,
+    });
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    await next.controller.pair('trainer');
+    await next.controller.resume();
+    await ride(next, 2);
+    const keptAfter = cameraFrameFor(ATHLETE_A, { capturedAt: next.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(keptAfter));
+    await ride(next, 2);
+    next.controller.armStop();
+    next.controller.armDiscard();
+    expect(await next.controller.confirmDiscard()).toBe(true);
+    await discards.settled();
+
+    // Read back on a fresh connection: only the picture from before the ride.
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((row) => row.id)).toStrictEqual([keptBefore.id]);
+    discards.dispose();
+    next.controller.dispose();
+  });
+
   it('keeps the pictures of a discard whose delete did not go through: the ride is still here (B1)', async () => {
     const rig = await holdingTarget({
       checkpointStore: {

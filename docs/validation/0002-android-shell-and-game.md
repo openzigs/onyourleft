@@ -1076,11 +1076,24 @@ adb logcat | grep -i "BluetoothLe"
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
 | L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) it asks first — *Keep riding*, *Save ride*, *Discard ride* — and ⚠️ **the question alone must change nothing**: keep pedalling for five seconds with it open and check the HUD's power and the climb's weight are unchanged and logcat shows **no `0x08`**. Then, **still pedalling**, answer it: *Save ride* if it is offered (a recording is running on the Ride screen), otherwise *Discard ride* and *Discard ride* again. The release is sent on that answer, not on *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Record what happens; do not expect a release.** **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls — which is what the owner's trainer did after both a Stop and a Reset in 2026 (see below), and which the owner has accepted. In logcat the release is **one `0x08` Stop** (`08 01`) answered `80 08 01` — **no `0x01` Reset**, and **no `0x00` Request Control after the `0x08`**. The Ride screen afterwards shows neither *Control lost* nor *Ask the trainer for control*: control is kept. If it shows **Not released**, the trainer refused the Stop: write down exactly what logcat shows |
 | L6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
-| L7 | Start a second ride on the same route — no need to take control again, the release keeps it — climb, and **while still pedalling** use the system Back gesture. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) Back does not leave the game: it opens the same end-of-ride question as *End ride*. Keep pedalling five seconds, then Back again (*Keep riding*), pedal five more, then Back once more and answer *Discard ride* twice (or *Save ride*, if offered). Then the same cadence ramp as L5 | ⚠️ **While the question is open, and after *Keep riding*: no `0x08`**, the climb's weight unchanged and the ride still on the stage. After the answer, the same as L5: one `0x08` answered `80 08 01`, no `0x01`, no `0x00` after the `0x08`, and power recorded as cadence fell. Back now reaches the same answer as the button; the cleanup path on leaving is reached only when the page itself goes (the WebView closed or reloaded) |
+| L7 | Start a second ride on the same route — no need to take control again, the release keeps it — climb, and **while still pedalling** use the system Back gesture. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) Back does not leave the game: it opens the same end-of-ride question as *End ride*. Keep pedalling five seconds, then Back again (*Keep riding*), pedal five more, then Back once more and answer ***Discard ride* twice — even if *Save ride* is offered** (L5 takes *Save ride* when it is; L7 is the discard's release). Then the same cadence ramp as L5. Last, on the picker the discard left you on, use Back once more to leave the game | ⚠️ **While the question is open, and after *Keep riding*: no `0x08`**, the climb's weight unchanged and the ride still on the stage. After the second *Discard ride*, the same as L5: one `0x08` answered `80 08 01`, no `0x01`, no `0x00` after the `0x08`, and power recorded as cadence fell. Leaving the picker unmounts the game and runs its cleanup's `teardown`: ⚠️ **no second `0x08`** — the discard already released, and the cleanup must not send it again |
 
 ⚠️ **L3 is the step that distinguishes "a gradient was written" from "the right gradient was
 written".** A driver fed the wrong distance writes a perfectly plausible number that has nothing to
 do with the hill under the rider, and every other step here would pass.
+
+⚠️ **L7 no longer reaches the cleanup's release mid-ride, and nothing on the device does — #2356.**
+Until #2349, Back on the stage unmounted the game, so L7 checked the release in `GameView.tsx`'s
+unmount cleanup (`useEffect(() => teardown)`), *"a different line of code making the same claim"*.
+Back now opens the question, and both L5 and L7 release through the answer. The cleanup is still the
+last resort, and on the device it runs mid-ride only when the WebView itself goes, where it may
+never run at all. So that release is checked **off the device only**, by `trainer-wiring.test.tsx`
+§"releases the trainer when the rider navigates away mid-ride"; what L7's last step checks on the
+device is that the cleanup, run after a discard, sends no second release.
+
+⚠️ **A second Back with the question open is *Keep riding* on every platform** (#2356). Android's
+back (`shell/ride-back.ts`) always did that; a desktop browser's Back, or an address typed into the
+bar (`shell/ride-leave.ts`), used to leave the question open instead. Neither ever ended the ride.
 
 ⚠️ **L5 and L7 are the same claim by two paths and both are needed.** FTMS simulation parameters
 **persist on the machine until they are changed**, so a ride ended on a 9 % wall leaves the flywheel
@@ -1131,7 +1144,7 @@ trainer sends a `0xFF` at all is only in the logcat. Note it if one appears; a `
 | L4 | negative on the descent? | |
 | L5 | pedal-through on *End ride*: power with the question open (unchanged? `0x08` seen?): / answer given: / power as cadence fell (rpm → W): | `0x08` answered? `0x01` seen? `0x00` after `0x08`? `0xFF` seen? screen said: |
 | L6 | write lines in logcat: | notifications for comparison: |
-| L7 | pedal-through on system Back: question opened? power held while open and after *Keep riding*? / power as cadence fell after the answer (rpm → W): | `0x08` before the answer? `0x08` answered? `0x01` seen? `0x00` after `0x08`? |
+| L7 | pedal-through on system Back: question opened? power held while open and after *Keep riding*? / power as cadence fell after the second *Discard ride* (rpm → W): | `0x08` before the answer? `0x08` answered? `0x01` seen? `0x00` after `0x08`? a second `0x08` on leaving the picker? |
 
 **Did the hills feel like hills (in your own words)?** ______________
 

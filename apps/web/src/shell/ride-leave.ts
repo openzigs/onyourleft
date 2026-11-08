@@ -15,7 +15,8 @@
  *   apply it: the address is put back to the stage's own with
  *   `history.pushState` (which fires no `hashchange`, so nothing re-renders),
  *   and the surface opens the end-of-ride question. A second Back with the
- *   question open is taken the same way, and the question stays open.
+ *   question open is taken the same way, and is *Keep riding* — what
+ *   Android's back is there (`ride-back.ts`), and Escape (#2356).
  * - **Only a change of route.** A fragment that stays on the game's route
  *   unmounts nothing, so it is not asked about.
  * - **Nothing is released here.** The ride, its gradient and its recording are
