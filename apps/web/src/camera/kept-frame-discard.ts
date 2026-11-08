@@ -27,7 +27,11 @@
  *    `capturedAt`, and never takes a snapshot (it names its own ride). A
  *    picture kept before the ride started, or by the next ride, stays.
  * 4. **A ride recovered from an earlier visit starts where it started**, not
- *    where this tab first saw it: the window opens at `now - elapsedSeconds`.
+ *    where this tab first saw it: the window opens at the session's own
+ *    `startedAt` (#2356). Not at `now - elapsedSeconds`: after a crash the
+ *    elapsed time reaches only the last slot recorded, so that window opened
+ *    as late as the tab was gone, and a picture kept before the crash
+ *    survived the discard.
  *
  * ⚠️ **No log, and no retry.** A delete that fails says nothing: a storage
  * error can name the key it could not reach (ADR 0029 D-8), and the pictures
@@ -40,14 +44,15 @@
  * satisfies the shape structurally, and `main.tsx` hands it over.
  */
 
-import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import type { UnixSeconds } from '@onyourleft/domain';
 import type { AthleteId } from '@onyourleft/store';
 
 import type { RideProgress } from './side-report-keeper';
 
 /** The part of the ride controller's snapshot this reads. */
 export interface DiscardableRideProgress extends RideProgress {
-  readonly elapsedSeconds: number;
+  /** The session's own start: `undefined` only with no recording under way. */
+  readonly startedAt: UnixSeconds | undefined;
   readonly leftover: boolean;
 }
 
@@ -91,9 +96,9 @@ export function discardKeptFramesWithTheRide(options: KeptFrameDiscardOptions): 
   const observe = (): void => {
     const now = rides.getSnapshot();
     if (now.phase === 'recording' || now.phase === 'paused') {
-      // Rule 4: the elapsed time is the ride's own, so a recovered ride's
-      // window opens where the ride did.
-      from ??= unixSeconds(Math.max(0, options.now() - now.elapsedSeconds));
+      // Rule 4: the session's own start, so a recovered ride's window opens
+      // where the ride did.
+      from = now.startedAt ?? from;
       return;
     }
     if (from === undefined) {
