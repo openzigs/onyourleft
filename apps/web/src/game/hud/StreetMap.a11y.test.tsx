@@ -84,16 +84,19 @@ function layer(root: HTMLElement, name: string): Element {
 describe('the street map is a picture with a sentence — #2290', () => {
   it('is one image, named, in the plan view’s box, with its shapes hidden', async () => {
     const root = await rendered();
-    const svg = root.querySelector('svg');
-    expect(svg?.getAttribute('role')).toBe('img');
-    expect(svg?.getAttribute('aria-label')).toBe(
+    const box = root.querySelector('[role="img"]');
+    expect(root.querySelectorAll('[role="img"]')).toHaveLength(1);
+    expect(box?.getAttribute('aria-label')).toBe(
       'Street map around you, north up, about 1.0 kilometres from top to bottom, with the route ' +
         'on it. You are 20 per cent of the way along the route.',
     );
     // The class every layout sizes the plan view by, phones' give-way rules included.
-    expect(svg?.classList.contains('oyl-hud__plan-svg')).toBe(true);
-    expect(svg?.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
-    expect(root.querySelector('svg > g')?.getAttribute('aria-hidden')).toBe('true');
+    expect(box?.classList.contains('oyl-hud__plan-svg')).toBe(true);
+    // Its two drawings, the sheet and the mark (#2380), are inside it and hidden.
+    const drawings = [...(box?.children ?? [])];
+    expect(drawings.map((each) => each.tagName.toLowerCase())).toEqual(['svg', 'svg']);
+    for (const drawing of drawings) expect(drawing.getAttribute('aria-hidden')).toBe('true');
+    expect(root.querySelectorAll('svg')).toHaveLength(2);
   });
 
   it('says the span in the rider’s own units', async () => {
@@ -102,7 +105,7 @@ describe('the street map is a picture with a sentence — #2290', () => {
         <StreetMap corridor={northCorridor()} profile={northRoute()} distance={300} />
       </UnitsProvider>,
     );
-    expect(mounted.container.querySelector('svg')?.getAttribute('aria-label')).toContain(
+    expect(mounted.container.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain(
       'about 0.6 miles from top to bottom',
     );
   });
@@ -116,12 +119,17 @@ describe('the street map is drawn to be read at arm’s length — #2290', () =>
     const across = (2 * Number(mark?.getAttribute('r')) * PLAN_SMALLEST_PIXELS) / STREET_MAP_METRES;
     expect(across).toBeGreaterThanOrEqual(RIDER_MARK_MINIMUM_PIXELS);
     expect(Number(mark?.getAttribute('stroke-width'))).toBe(RIDER_MARK_RING_PIXELS);
-    // In the middle of the view, which is where the rider is.
-    const [x, y, width, height] = (root.querySelector('svg')?.getAttribute('viewBox') ?? '')
-      .split(' ')
-      .map(Number);
+    // In the middle of its drawing, which is the box's, fitted as the plan
+    // view's is: the box's height is the kilometre the mark's radius is in.
+    const drawing = mark?.closest('svg');
+    expect(drawing?.getAttribute('class')).toBe('oyl-hud__street-map-here');
+    expect(drawing?.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
+    const [x, y, width, height] = (drawing?.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    expect(height).toBe(STREET_MAP_METRES);
     expect(Number(mark?.getAttribute('cx'))).toBe((x ?? 0) + (width ?? 0) / 2);
     expect(Number(mark?.getAttribute('cy'))).toBe((y ?? 0) + (height ?? 0) / 2);
+    // And not on the sheet, so moving the sheet never moves it.
+    expect(root.querySelector('.oyl-hud__street-map-sheet circle')).toBeNull();
   });
 
   it('paints each layer as STREET_MAP_PAINTS says, the route widest and on top', async () => {

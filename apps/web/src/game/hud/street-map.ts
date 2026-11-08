@@ -49,17 +49,34 @@
  * the shape a rider recognises is what a turning map destroys, and a heading
  * computed here would be a second one beside `scene.ts` §`cameraPose`.
  *
- * ## The cost, bounded: an SVG, redrawn only when the rider has moved
+ * ## The cost, bounded: a sheet drawn once per 250 m, and moved by the compositor
  *
  * `HudPanel` renders sixty times a second. The per-frame work here is the
- * rider's place, which is a lookup and two multiplications. The drawing
- * changes only when that place reaches another point of a
- * {@link STREET_MAP_STEP_METRES} grid (the view is centred on the grid point,
- * under a pixel from the rider on every box `theme.css` gives the panel), and
- * the shapes in it only when the rider crosses into another
- * {@link STREET_MAP_CELL_METRES} cell. Each layer is ONE `<path>`, however many
- * streets it holds, so the panel is six elements on every ride. A rider who
- * has stopped costs no redraw at all.
+ * rider's place, which is a lookup and two multiplications. What the tablet
+ * pays for is different, and #2380 measured it: as #2290 built it, each
+ * layer was ONE `<path>` joining every shape in 13 × 5 cells of 500 m — 58 KB
+ * of streets on a real saved route — and the view box moved every
+ * {@link STREET_MAP_STEP_METRES}, which made Skia re-stroke and re-raster the
+ * whole of it on the GPU each time. A moving ride on that route ran at about
+ * 5 fps on the owner's tablet; standing still, at 60.
+ *
+ * So the map is now two things that change at two rates:
+ *
+ * 1. **The sheet**: every layer CLIPPED to a {@link StreetMapRegion} — the
+ *    widest box any layout gives the panel, plus {@link STREET_MAP_MARGIN_METRES}
+ *    above and below — round a point on a {@link STREET_MAP_MARGIN_METRES}
+ *    grid. Its shapes, and so its raster, change only when the rider's place
+ *    reaches another point of that grid: once per 250 m ridden, about every
+ *    22 s at 40 km/h. A segment off the region is not drawn at all, and a
+ *    water ring or a covered tile is cut to it ({@link streetMapLayers}).
+ * 2. **Where the sheet is**, a CSS `transform` on it ({@link streetMapSheetStyle})
+ *    and on nothing else, once per {@link STREET_MAP_STEP_METRES}. The sheet
+ *    is its own compositor layer (`theme.css` §`.oyl-hud__street-map-sheet`),
+ *    so moving it re-strokes nothing: the GPU draws the raster it has, a
+ *    fraction of a pixel further along.
+ *
+ * The rider's mark is drawn over the sheet in the middle of the box and never
+ * changes at all. A rider who has stopped costs no write.
  */
 
 import { distanceBetween, positionAt, type RouteProfile } from '@onyourleft/domain';
@@ -70,33 +87,51 @@ import { PLAN_BREAK_FACTOR, PLAN_SIZE, RIDER_MARK_RADIUS } from './plan';
 
 /**
  * How much of the world the panel shows, in metres, across its shorter side:
- * **1 km**, the owner's "about 1 km around the rider". The box is wider than it
- * is tall in every layout (`theme.css` §`.oyl-hud__plan-svg`), and the drawing
- * is fitted with `meet`, so the height is this and the width is more of the
- * same map rather than a stretched one.
+ * **1 km**, the owner's "about 1 km around the rider". The longer side is more
+ * of the same map rather than a stretched one: the sheet is sized by the box's
+ * shorter side, `cqmin` (`streetMapSheetStyle`), as #2290's `meet` fitted it.
+ * The box is wider than tall in most layouts and a little taller than wide on
+ * an upright phone (72 × 80 px at 390 × 844).
  */
 export const STREET_MAP_METRES = 1000;
 
 /**
  * The grid the view's centre moves on: **5 m**. On the largest box the panel
  * has, 8 rem, a kilometre is 128 px, so a step is 0.64 px — the map moves no
- * more than a pixel at a time and is redrawn about twice a second at 40 km/h
- * rather than sixty times.
+ * more than a pixel at a time, and its sheet is moved about twice a second at
+ * 40 km/h rather than sixty times.
  */
 export const STREET_MAP_STEP_METRES = 5;
 
 /**
  * The side of the cells the map's shapes are filed under: **500 m**. A shape
- * is filed under the cell holding the middle of its bounds, and the panel
- * draws the cells near the rider's, so the set changes once per 500 m ridden.
+ * is filed under the cell holding the middle of its bounds, and a region reads
+ * the cells that can hold a shape reaching into it.
  */
 export const STREET_MAP_CELL_METRES = 500;
 
 /**
+ * The margin the sheet is drawn beyond the box, and the grid its middle moves
+ * on: **250 m** — #2380. The middle is the rider's place on this grid, so it
+ * is never more than half of this from the rider, and the box never reaches
+ * within half of this of the sheet's edge. The sheet is re-clipped, and
+ * rasterised again, once per this many metres ridden: about every 22 s at
+ * 40 km/h, where #2290's map was re-rasterised every 5 m.
+ */
+export const STREET_MAP_MARGIN_METRES = 250;
+
+/**
  * Half the widest stretch drawn east–west: **2.5 km**. A phone upright gives
  * the panel about 22 rem by 5 rem, which at {@link STREET_MAP_METRES} tall is
- * 2.2 km wide; a shape off the box is clipped by the SVG, so this only has to
- * be wide enough.
+ * 2.2 km either side of the rider, and the rider is up to half of
+ * {@link STREET_MAP_MARGIN_METRES} from the sheet's middle: 2.325 km, under
+ * this. `street-map.browser.spec.ts` holds the streets across the box at
+ * every viewport it measures.
+ *
+ * ⚠️ The region is this wide on every box, a tablet's too, rather than as
+ * wide as the box measured: the sheet is rasterised once per 250 m, so its
+ * width costs one raster in 22 s, where measuring the box would add a resize
+ * path to every ride.
  */
 const REACH_ACROSS_METRES = 2500;
 
@@ -134,6 +169,17 @@ export interface StreetMapPoint {
   readonly south: number;
 }
 
+/**
+ * The part of the map the sheet holds, in the same metres: its `viewBox`.
+ * @see streetMapRegion
+ */
+export interface StreetMapRegion {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /** Every layer the map draws, each as one SVG path `d`, painted in this order. */
 export interface StreetMapLayers {
   /** The corridor's covered tiles: where there is map data at all. */
@@ -149,9 +195,21 @@ type Layer = keyof StreetMapLayers;
 
 const LAYERS: readonly Layer[] = ['land', 'water', 'streets', 'paths', 'route'];
 
-/** The map's shapes, filed by cell, each layer's as path fragments. */
+/** The layers whose shapes are rings, and filled; the rest are lines. */
+const RINGS: ReadonlySet<Layer> = new Set(['land', 'water']);
+
+/** A shape: `east0, south0, east1, south1, …`, its vertices thinned, and its bounds. */
+interface Shape {
+  readonly points: Float64Array;
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** The map's shapes, filed by cell. */
 export interface StreetMapIndex {
-  readonly cells: ReadonlyMap<string, Readonly<Record<Layer, readonly string[]>>>;
+  readonly cells: ReadonlyMap<string, Readonly<Record<Layer, readonly Shape[]>>>;
 }
 
 /** A cell, by its column (east) and row (south). */
@@ -177,24 +235,16 @@ export function streetMapCell(point: StreetMapPoint): StreetMapCell {
   };
 }
 
-/** A fragment and where it is filed: the middle of its bounds. */
-interface Fragment {
-  readonly d: string;
-  readonly middle: StreetMapPoint;
-}
-
 /**
  * A line or a ring of `x0, z0, x1, z1, …` in the corridor's local metres, as
- * one subpath. Vertices closer than {@link VERTEX_METRES} to the last one kept
+ * a shape. Vertices closer than {@link VERTEX_METRES} to the last one kept
  * are dropped, but never a line's last. `undefined` for fewer than two points
  * kept, or a ring of fewer than three.
  */
-function fragmentOf(values: Float32Array, closed: boolean): Fragment | undefined {
-  const points: string[] = [];
+function shapeOf(values: ArrayLike<number>, closed: boolean): Shape | undefined {
+  const points: number[] = [];
   let lastEast = Number.NaN;
   let lastSouth = Number.NaN;
-  let low = { east: Number.POSITIVE_INFINITY, south: Number.POSITIVE_INFINITY };
-  let high = { east: Number.NEGATIVE_INFINITY, south: Number.NEGATIVE_INFINITY };
   for (let index = 0; index + 1 < values.length; index += 2) {
     const east = -(values[index] as number);
     const south = -(values[index + 1] as number);
@@ -202,28 +252,37 @@ function fragmentOf(values: Float32Array, closed: boolean): Fragment | undefined
     const final = index + 3 >= values.length;
     const near = Math.hypot(east - lastEast, south - lastSouth) < VERTEX_METRES;
     if (near && !(final && !closed)) continue;
-    points.push(`${coordinate(east)} ${coordinate(south)}`);
+    points.push(east, south);
     lastEast = east;
     lastSouth = south;
-    low = { east: Math.min(low.east, east), south: Math.min(low.south, south) };
-    high = { east: Math.max(high.east, east), south: Math.max(high.south, south) };
   }
-  if (points.length < (closed ? 3 : 2)) return undefined;
-  return {
-    d: `M${points[0] as string}L${points.slice(1).join(' ')}${closed ? 'Z' : ''}`,
-    middle: { east: (low.east + high.east) / 2, south: (low.south + high.south) / 2 },
-  };
+  if (points.length < (closed ? 6 : 4)) return undefined;
+  return bounded(Float64Array.from(points));
+}
+
+function bounded(points: Float64Array): Shape {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index + 1 < points.length; index += 2) {
+    left = Math.min(left, points[index] as number);
+    right = Math.max(right, points[index] as number);
+    top = Math.min(top, points[index + 1] as number);
+    bottom = Math.max(bottom, points[index + 1] as number);
+  }
+  return { points, left, top, right, bottom };
 }
 
 /** The route's samples as pieces of line, split where they jump (`plan.ts` §`PLAN_BREAK_FACTOR`). */
-function routeFragments(origin: CorridorOrigin, profile: RouteProfile): readonly Fragment[] {
+function routeShapes(origin: CorridorOrigin, profile: RouteProfile): readonly Shape[] {
   const positions = profile.positions;
   const breakAbove = PLAN_BREAK_FACTOR * (profile.resolution as number);
-  const fragments: Fragment[] = [];
+  const shapes: Shape[] = [];
   let piece: number[] = [];
   const close = (): void => {
-    const fragment = fragmentOf(Float32Array.from(piece), false);
-    if (fragment !== undefined) fragments.push(fragment);
+    const shape = shapeOf(piece, false);
+    if (shape !== undefined) shapes.push(shape);
   };
   positions.forEach((position, index) => {
     const previous = positions[index - 1];
@@ -240,7 +299,7 @@ function routeFragments(origin: CorridorOrigin, profile: RouteProfile): readonly
     }
   });
   if (piece.length >= 4) close();
-  return fragments;
+  return shapes;
 }
 
 /**
@@ -248,32 +307,26 @@ function routeFragments(origin: CorridorOrigin, profile: RouteProfile): readonly
  * and the route are both fixed when the ride starts.
  */
 export function streetMapIndex(corridor: WorldCorridor, profile: RouteProfile): StreetMapIndex {
-  const cells = new Map<string, Record<Layer, string[]>>();
-  const file = (layer: Layer, fragment: Fragment | undefined): void => {
-    if (fragment === undefined) return;
-    const { column, row } = streetMapCell(fragment.middle);
+  const cells = new Map<string, Record<Layer, Shape[]>>();
+  const file = (layer: Layer, shape: Shape | undefined): void => {
+    if (shape === undefined) return;
+    const { column, row } = streetMapCell({
+      east: (shape.left + shape.right) / 2,
+      south: (shape.top + shape.bottom) / 2,
+    });
     const key = cellKey(column, row);
     let cell = cells.get(key);
     if (cell === undefined) {
       cell = { land: [], water: [], streets: [], paths: [], route: [] };
       cells.set(key, cell);
     }
-    cell[layer].push(fragment.d);
+    cell[layer].push(shape);
   };
   for (const box of corridor.coveredBoxes) {
     file(
       'land',
-      fragmentOf(
-        Float32Array.of(
-          box.minX,
-          box.minZ,
-          box.maxX,
-          box.minZ,
-          box.maxX,
-          box.maxZ,
-          box.minX,
-          box.maxZ,
-        ),
+      shapeOf(
+        [box.minX, box.minZ, box.maxX, box.minZ, box.maxX, box.maxZ, box.minX, box.maxZ],
         true,
       ),
     );
@@ -283,34 +336,148 @@ export function streetMapIndex(corridor: WorldCorridor, profile: RouteProfile): 
     // Every ring, outer and holes, into the one path: the archive winds a hole
     // against its outer ring, so the default `nonzero` fill leaves it open,
     // and two tiles' overlapping halves of one lake still fill as one.
-    for (const ring of feature.rings) file('water', fragmentOf(ring, true));
+    for (const ring of feature.rings) file('water', shapeOf(ring, true));
   }
-  for (const street of corridor.streets) file('streets', fragmentOf(street.line, false));
-  for (const path of corridor.paths) file('paths', fragmentOf(path.line, false));
-  for (const fragment of routeFragments(corridor.origin, profile)) file('route', fragment);
+  for (const street of corridor.streets) file('streets', shapeOf(street.line, false));
+  for (const path of corridor.paths) file('paths', shapeOf(path.line, false));
+  for (const shape of routeShapes(corridor.origin, profile)) file('route', shape);
   return { cells };
 }
 
-/** The cells either side of a cell that can hold a shape inside the view. */
-const COLUMNS_AROUND = Math.ceil(
-  (REACH_ACROSS_METRES + SHAPE_REACH_METRES) / STREET_MAP_CELL_METRES,
-);
-const ROWS_AROUND = Math.ceil(
-  (STREET_MAP_METRES / 2 + SHAPE_REACH_METRES) / STREET_MAP_CELL_METRES,
-);
+/** A value on a grid of `step`. Never `-0`. */
+function onGrid(value: number, step: number): number {
+  return Math.round(value / step) * step + 0;
+}
 
-/** Every layer's shapes near a cell, each layer joined into one `d`. */
-export function streetMapLayers(index: StreetMapIndex, centre: StreetMapCell): StreetMapLayers {
+/**
+ * The part of the map the sheet holds for a view centred on `centre` — #2380:
+ * {@link REACH_ACROSS_METRES} either side and the view's half plus
+ * {@link STREET_MAP_MARGIN_METRES} above and below, round `centre` on the
+ * {@link STREET_MAP_MARGIN_METRES} grid. It changes only when that grid point
+ * does.
+ */
+export function streetMapRegion(centre: StreetMapPoint): StreetMapRegion {
+  const east = onGrid(centre.east, STREET_MAP_MARGIN_METRES);
+  const south = onGrid(centre.south, STREET_MAP_MARGIN_METRES);
+  const across = REACH_ACROSS_METRES;
+  const tall = STREET_MAP_METRES / 2 + STREET_MAP_MARGIN_METRES;
+  return { left: east - across, top: south - tall, width: 2 * across, height: 2 * tall };
+}
+
+/** A subpath through `points`, `M` and then `L`. */
+function subpath(points: readonly number[], closed: boolean): string {
+  const pairs: string[] = [];
+  for (let index = 0; index + 1 < points.length; index += 2) {
+    pairs.push(`${coordinate(points[index] as number)} ${coordinate(points[index + 1] as number)}`);
+  }
+  return `M${pairs[0] as string}L${pairs.slice(1).join(' ')}${closed ? 'Z' : ''}`;
+}
+
+/**
+ * A line's runs of segments that reach into the region, as subpaths. A
+ * segment is kept whole when its bounds touch the region and dropped when
+ * they do not, so a kept segment can end off the region; it is drawn beyond
+ * the box either way, and the box clips it.
+ */
+function clippedLine(shape: Shape, region: StreetMapRegion, into: string[]): void {
+  const right = region.left + region.width;
+  const bottom = region.top + region.height;
+  const { points } = shape;
+  let run: number[] = [];
+  const flush = (): void => {
+    if (run.length >= 4) into.push(subpath(run, false));
+    run = [];
+  };
+  for (let index = 0; index + 3 < points.length; index += 2) {
+    const e0 = points[index] as number;
+    const s0 = points[index + 1] as number;
+    const e1 = points[index + 2] as number;
+    const s1 = points[index + 3] as number;
+    const touches =
+      Math.max(e0, e1) >= region.left &&
+      Math.min(e0, e1) <= right &&
+      Math.max(s0, s1) >= region.top &&
+      Math.min(s0, s1) <= bottom;
+    if (!touches) {
+      flush();
+      continue;
+    }
+    if (run.length === 0) run.push(e0, s0);
+    run.push(e1, s1);
+  }
+  flush();
+}
+
+/**
+ * A ring cut to the region (Sutherland–Hodgman, one side of the rectangle at
+ * a time), as a closed subpath. The cut runs along the region's edge, which
+ * is beyond the box, so it is never seen; a ring keeps its winding, so a lake's
+ * island stays dry.
+ */
+function clippedRing(shape: Shape, region: StreetMapRegion, into: string[]): void {
+  const right = region.left + region.width;
+  const bottom = region.top + region.height;
+  const sides: readonly ((east: number, south: number) => number)[] = [
+    (east) => east - region.left,
+    (east) => right - east,
+    (_, south) => south - region.top,
+    (_, south) => bottom - south,
+  ];
+  let ring = Array.from(shape.points);
+  for (const inside of sides) {
+    const kept: number[] = [];
+    const count = ring.length / 2;
+    for (let index = 0; index < count; index += 1) {
+      const e0 = ring[index * 2] as number;
+      const s0 = ring[index * 2 + 1] as number;
+      const next = (index + 1) % count;
+      const e1 = ring[next * 2] as number;
+      const s1 = ring[next * 2 + 1] as number;
+      const a = inside(e0, s0);
+      const b = inside(e1, s1);
+      if (a >= 0) kept.push(e0, s0);
+      if (a >= 0 !== b >= 0) {
+        const t = a / (a - b);
+        kept.push(e0 + (e1 - e0) * t, s0 + (s1 - s0) * t);
+      }
+    }
+    ring = kept;
+    if (ring.length < 6) return;
+  }
+  into.push(subpath(ring, true));
+}
+
+/** The cells either side of a cell that can hold a shape reaching into a region. */
+const CELL_REACH = Math.ceil(SHAPE_REACH_METRES / STREET_MAP_CELL_METRES);
+
+/**
+ * Every layer's shapes in the region, each layer joined into one `d` — and
+ * nothing off it (#2380): a line's segments off the region are dropped and a
+ * ring is cut to it, so what the sheet holds is bounded by the region's area
+ * rather than by the cells round it.
+ */
+export function streetMapLayers(index: StreetMapIndex, region: StreetMapRegion): StreetMapLayers {
   const found: Record<Layer, string[]> = { land: [], water: [], streets: [], paths: [], route: [] };
-  for (
-    let column = centre.column - COLUMNS_AROUND;
-    column <= centre.column + COLUMNS_AROUND;
-    column += 1
-  ) {
-    for (let row = centre.row - ROWS_AROUND; row <= centre.row + ROWS_AROUND; row += 1) {
+  const right = region.left + region.width;
+  const bottom = region.top + region.height;
+  const first = streetMapCell({ east: region.left, south: region.top });
+  const last = streetMapCell({ east: right, south: bottom });
+  for (let column = first.column - CELL_REACH; column <= last.column + CELL_REACH; column += 1) {
+    for (let row = first.row - CELL_REACH; row <= last.row + CELL_REACH; row += 1) {
       const cell = index.cells.get(cellKey(column, row));
       if (cell === undefined) continue;
-      for (const layer of LAYERS) found[layer].push(...cell[layer]);
+      for (const layer of LAYERS) {
+        for (const shape of cell[layer]) {
+          const off =
+            shape.right < region.left ||
+            shape.left > right ||
+            shape.bottom < region.top ||
+            shape.top > bottom;
+          if (off) continue;
+          if (RINGS.has(layer)) clippedRing(shape, region, found[layer]);
+          else clippedLine(shape, region, found[layer]);
+        }
+      }
     }
   }
   return {
@@ -320,11 +487,6 @@ export function streetMapLayers(index: StreetMapIndex, centre: StreetMapCell): S
     paths: found.paths.join(''),
     route: found.route.join(''),
   };
-}
-
-/** A value on the {@link STREET_MAP_STEP_METRES} grid. Never `-0`. */
-function onStep(value: number): number {
-  return Math.round(value / STREET_MAP_STEP_METRES) * STREET_MAP_STEP_METRES + 0;
 }
 
 /**
@@ -338,13 +500,41 @@ export function streetMapCentre(
   distance: number,
 ): StreetMapPoint {
   const local = localGroundPosition(origin, positionAt(profile, distance));
-  return { east: onStep(-local.x), south: onStep(-local.z) };
+  return {
+    east: onGrid(-local.x, STREET_MAP_STEP_METRES),
+    south: onGrid(-local.z, STREET_MAP_STEP_METRES),
+  };
 }
 
-/** The view: {@link STREET_MAP_METRES} square, centred on `centre`. */
-export function streetMapViewBox(centre: StreetMapPoint): string {
-  const half = STREET_MAP_METRES / 2;
-  return [centre.east - half, centre.south - half, STREET_MAP_METRES, STREET_MAP_METRES]
-    .map(String)
-    .join(' ');
+/** A region as a `viewBox`. */
+export function streetMapViewBox(region: StreetMapRegion): string {
+  return [region.left, region.top, region.width, region.height].map(String).join(' ');
+}
+
+/** A number to a thousandth, with its unit. Never `-0`. */
+function fixed(value: number, unit: string): string {
+  return `${String(Math.round(value * 1000) / 1000 + 0)}${unit}`;
+}
+
+/**
+ * How the sheet is placed so that `centre` is in the middle of the box —
+ * #2380. Its height is the region's at the box's scale, where the box's
+ * shorter side is {@link STREET_MAP_METRES}: `cqmin`, a hundredth of that side
+ * (`theme.css` makes the box a size container). Its width follows from its
+ * `viewBox`, and `theme.css` puts its top left corner in the middle of the
+ * box; this translates it back by the centre's place on it, in percentages of
+ * the sheet's own size (a percentage to a thousandth is a twentieth of a
+ * metre), so no pixel is measured. Only the `transform` changes as the rider
+ * moves, and only once per {@link STREET_MAP_STEP_METRES}.
+ */
+export function streetMapSheetStyle(
+  region: StreetMapRegion,
+  centre: StreetMapPoint,
+): { readonly height: string; readonly transform: string } {
+  const across = ((centre.east - region.left) / region.width) * 100;
+  const down = ((centre.south - region.top) / region.height) * 100;
+  return {
+    height: fixed((region.height / STREET_MAP_METRES) * 100, 'cqmin'),
+    transform: `translate(${fixed(-across, '%')}, ${fixed(-down, '%')})`,
+  };
 }
