@@ -35,7 +35,7 @@ import { BUILT_IN_WORKOUTS } from '.';
 import { minutes, share } from './frame';
 import { RAMP_MAXIMUM_SHARE, RAMP_START_SHARE } from './test';
 
-/** How many templates each category must hold, at least: #2300's table. */
+/** How many templates each category must hold, at least: #2300's and #2301's tables. */
 const MINIMUM_COUNTS: Partial<Record<WorkoutCategory, number>> = {
   recovery: 3,
   endurance: 6,
@@ -43,6 +43,11 @@ const MINIMUM_COUNTS: Partial<Record<WorkoutCategory, number>> = {
   'sweet-spot': 6,
   threshold: 6,
   'over-under': 4,
+  vo2: 6,
+  anaerobic: 4,
+  sprint: 4,
+  pyramid: 3,
+  'race-simulation': 3,
   // #2303: the ramp and the 20-minute test.
   test: 2,
 };
@@ -83,6 +88,26 @@ const KNOWN_IDS: readonly string[] = [
   'over-under-3x4',
   'over-under-two-minute-overs',
   'over-under-three-minute-overs',
+  'vo2-5x3',
+  'vo2-5x4',
+  'vo2-4x5',
+  'vo2-30-30',
+  'vo2-30-15',
+  'vo2-40-20',
+  'anaerobic-8x1',
+  'anaerobic-6x1-hard',
+  'anaerobic-10x1',
+  'anaerobic-8x30',
+  'sprint-6x15',
+  'sprint-8x10',
+  'sprint-10x20',
+  'sprint-endurance-base',
+  'pyramid-1-to-4',
+  'pyramid-ascending',
+  'pyramid-1-to-3',
+  'race-simulation-tempo-surges',
+  'race-simulation-time-trial',
+  'race-simulation-criterium',
   // #2303, approved with their names on 2026-11-07 (#2295 ruling 8).
   'ramp-test',
   'twenty-minute-test',
@@ -287,6 +312,17 @@ const BANDS: Partial<Record<WorkoutCategory, Band>> = {
   'sweet-spot': { ...SWEET_SPOT_FRACTIONS, upperInclusive: true },
   threshold: { lower: zone(4), upper: zone(5) },
   'over-under': { lower: zone(4), upper: zone(6) },
+  // #2301 asks for 1.06–1.30. 1.30 is not a boundary in the table, and a
+  // short-short set at 1.20–1.30 crosses into Anaerobic at 1.21, so the band
+  // is VO₂ and Anaerobic together: the nearest the table comes.
+  vo2: { lower: zone(5), upper: zone(7), easyBetween: true },
+  anaerobic: { lower: zone(6), upper: zone(7) },
+  // Every sprint is a free ride (ruling 6), so a sprint's held targets are
+  // only the easy spinning between, which `workTargets` leaves out; this band
+  // is what an ERG-held sprint would have to be in.
+  sprint: { lower: zone(7), upper: Infinity, easyBetween: true, mayRelease: true },
+  pyramid: { lower: zone(4), upper: zone(7), easyBetween: true },
+  'race-simulation': { lower: zone(3), upper: zone(7) },
   // #2303: a ramp's steps, from its first to its declared maximum, read from
   // `test.ts`; and the 20-minute test's effort, which is the trainer released.
   test: {
@@ -359,7 +395,10 @@ function categoryFaults(template: WorkoutTemplate, band: Band): string[] {
   }
   for (const target of targets) {
     if (!inBand(target, band)) {
-      faults.push(`${String(target)} in ${JSON.stringify(band)}`);
+      // JSON.stringify would print an unbounded `upper` as null.
+      faults.push(
+        `${String(target)} in [${String(band.lower)}, ${String(band.upper)}${band.upperInclusive === true ? ']' : ')'}`,
+      );
     }
   }
   const set = template.mainSet;
@@ -418,8 +457,8 @@ function offeredLengths(template: WorkoutTemplate): number[] {
 // --- The gates ---------------------------------------------------------------
 
 describe('the catalogue: what it holds', () => {
-  it('has at least 30 templates, and at least the count in each category', () => {
-    expect(BUILT_IN_WORKOUTS.length).toBeGreaterThanOrEqual(30);
+  it('has at least 50 templates, and at least the count in each category', () => {
+    expect(BUILT_IN_WORKOUTS.length).toBeGreaterThanOrEqual(50);
     for (const [category, minimum] of Object.entries(MINIMUM_COUNTS)) {
       const count = BUILT_IN_WORKOUTS.filter((t) => t.category === category).length;
       expect(count, category).toBeGreaterThanOrEqual(minimum);
@@ -598,6 +637,41 @@ describe('the catalogue: every category matches its main set', () => {
       expect(categoryFaults(released, band)).not.toEqual([]);
     });
 
+    it.each(['anaerobic', 'race-simulation'] as const)(
+      'holds %s strictly: easy riding in its main set is a fault',
+      (category) => {
+        const template = BUILT_IN_WORKOUTS.find((t) => t.category === category);
+        const strict = BANDS[category];
+        if (template === undefined || strict === undefined) {
+          throw new Error('the fixture template is missing');
+        }
+        expect(strict.easyBetween).toBeUndefined();
+        expect(strict.mayRelease).toBeUndefined();
+        expect(categoryFaults(template, strict)).toEqual([]);
+        const set = template.mainSet;
+        const sagging: WorkoutTemplate = {
+          ...template,
+          mainSet:
+            set.scaling === 'repeat'
+              ? { ...set, rep: [...set.rep, rep] }
+              : { ...set, blocks: [...set.blocks, rep] },
+        };
+        expect(categoryFaults(sagging, strict)).not.toEqual([]);
+      },
+    );
+
+    it('opts in only the categories whose sets are written with easy riding between', () => {
+      const opted = Object.entries(BANDS)
+        .filter(([, b]) => b.easyBetween === true)
+        .map(([category]) => category);
+      expect(opted.sort()).toEqual(['pyramid', 'sprint', 'vo2']);
+      const released = Object.entries(BANDS)
+        .filter(([, b]) => b.mayRelease === true)
+        .map(([category]) => category);
+      // #2303: a test's effort (the 20-minute test's) is the trainer released.
+      expect(released.sort()).toEqual(['sprint', 'test']);
+    });
+
     it('lets a band that says so leave easy riding and release in', () => {
       if (threshold === undefined || band === undefined || threshold.mainSet.scaling !== 'repeat') {
         throw new Error('the fixture template is missing');
@@ -630,6 +704,82 @@ describe('the catalogue: every template can be read without seeing it', () => {
         expect(workoutShapeText(workout).trim()).not.toBe('');
         for (const block of workout.blocks) {
           expect(workoutBlockText(block).trim()).not.toBe('');
+        }
+      }
+    },
+  );
+});
+
+/** #2301: the longest a sprint effort may be, in seconds. */
+const SPRINT_LONGEST_SECONDS = 30;
+/** #2301: the shortest easy riding after a sprint, in seconds. */
+const SPRINT_SHORTEST_RECOVERY_SECONDS = 120;
+/** The owner's ruling 6 on #2295: a sprint this short, or shorter, is a free ride. */
+const FREE_RIDE_SPRINT_SECONDS = 20;
+
+/** The segments of a tailored workout's main set, as the player reads them. */
+function mainSegments(template: WorkoutTemplate, workout: Workout) {
+  const timeline = expandWorkout(workout);
+  const first = template.warmUp.length;
+  const last = workout.blocks.length - template.coolDown.length;
+  return {
+    timeline,
+    main: timeline.segments.filter((segment) => segment.block >= first && segment.block < last),
+  };
+}
+
+/** A sprint: an effort with the trainer released, or one held in the Sprint zone. */
+function isSprint(segment: { readonly from: number | undefined }): boolean {
+  return segment.from === undefined || segment.from >= zone(7);
+}
+
+describe('the catalogue: sprints', () => {
+  const sprints = BUILT_IN_WORKOUTS.filter((t) => t.category === 'sprint');
+
+  it.each(sprints.map((t) => [t.id, t] as const))(
+    '%s sprints for 30 s at most, with at least 2 minutes of easy riding after each',
+    (_, template) => {
+      for (const targetMinutes of [undefined, ...offeredLengths(template)]) {
+        const { timeline, main } = mainSegments(
+          template,
+          tailorWorkout(template, { targetMinutes }),
+        );
+        const efforts = main.filter(isSprint);
+        expect(efforts.length, 'sprints in the main set').toBeGreaterThan(0);
+        for (const [index, effort] of efforts.entries()) {
+          expect(effort.endsAt - effort.startsAt).toBeLessThanOrEqual(SPRINT_LONGEST_SECONDS);
+          const next = efforts[index + 1]?.startsAt ?? timeline.totalSeconds;
+          expect(next - effort.endsAt, 'riding after a sprint').toBeGreaterThanOrEqual(
+            SPRINT_SHORTEST_RECOVERY_SECONDS,
+          );
+          // The riding after it is easy: below Tempo, or another free ride.
+          const after = timeline.segments.filter(
+            (segment) => segment.startsAt >= effort.endsAt && segment.endsAt <= next,
+          );
+          for (const segment of after) {
+            expect(segment.from ?? 0).toBeLessThan(zone(3));
+            expect(segment.to ?? 0).toBeLessThan(zone(3));
+          }
+        }
+      }
+    },
+  );
+
+  it.each(BUILT_IN_WORKOUTS.map((t) => [t.id, t] as const))(
+    '%s holds no sprint of 20 s or less in ERG: the trainer is released for it (ruling 6)',
+    (_, template) => {
+      // At the hardest the template lets it be ridden: +10 % for most, and 0
+      // for a test (#2303), which is ridden at the intensity it is written at.
+      const { main } = mainSegments(
+        template,
+        tailorWorkout(template, {
+          intensityPercent: template.parameters.intensityPercent.maximum,
+        }),
+      );
+      for (const segment of main) {
+        // A ramp that ends in the Sprint zone is a sprint too.
+        if (segment.from !== undefined && Math.max(segment.from, segment.to ?? 0) >= zone(7)) {
+          expect(segment.endsAt - segment.startsAt).toBeGreaterThan(FREE_RIDE_SPRINT_SECONDS);
         }
       }
     },

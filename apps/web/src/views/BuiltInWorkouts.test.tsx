@@ -239,7 +239,7 @@ describe('filtering changes which cards render — #2304', () => {
     expect(cardNames()).toEqual(['Sweet spot, rising block', 'Sweet spot, one long block']);
     expect(select('Category').value).toBe('sweet-spot');
     expect(select('Length').value).toBe('45');
-    expect(builtIns().textContent).toContain('2 of 32 built-in workouts.');
+    expect(builtIns().textContent).toContain('2 of 52 built-in workouts.');
   });
 });
 
