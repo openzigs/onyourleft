@@ -4,8 +4,10 @@ import { useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import type { GamepadPort } from '../game/gamepad-port';
 import type { RideController } from '../ride/controller';
 import { ControllerPairing } from '../ride/ControllerPairing';
+import { GamepadControllers } from '../ride/GamepadControllers';
 import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
 import type { SteeringController } from '../ride/steering-controller';
 import type { SignalStrengthPort } from '../ride/signal-port';
@@ -74,6 +76,12 @@ export interface DevicesViewProps {
    * screen offers no controller block.
    */
   readonly steering?: SteeringController | undefined;
+  /**
+   * The gamepads — #2358, through #1821's port. Absent is the platform's, as
+   * the HUD's: a gamepad pairs with the operating system, so the Controllers
+   * section is on the screen in every state, beneath everything else.
+   */
+  readonly gamepads?: GamepadPort | undefined;
 }
 
 /**
@@ -126,18 +134,24 @@ export function DevicesView({
   bluetoothAsk,
   settings,
   steering,
+  gamepads,
 }: DevicesViewProps): JSX.Element {
-  return shell === undefined ? (
-    <BrowserDevices capabilities={capabilities} controller={controller} steering={steering} />
-  ) : (
-    <ShellDevices
-      port={shell}
-      controller={controller}
-      signal={signal}
-      ask={bluetoothAsk}
-      settings={settings}
-      steering={steering}
-    />
+  return (
+    <>
+      {shell === undefined ? (
+        <BrowserDevices capabilities={capabilities} controller={controller} steering={steering} />
+      ) : (
+        <ShellDevices
+          port={shell}
+          controller={controller}
+          signal={signal}
+          ask={bluetoothAsk}
+          settings={settings}
+          steering={steering}
+        />
+      )}
+      <GamepadControllers pads={gamepads} />
+    </>
   );
 }
 

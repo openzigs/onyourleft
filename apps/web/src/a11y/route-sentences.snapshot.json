@@ -243,7 +243,12 @@
     "Native apps for iPhone and Android are planned and are the only path that will ever work on an iPhone.",
     "iWhat still works here: Rides already on this device stay readable, and files can still be imported and exported.",
     "Paired sensors",
-    "Sensors cannot be paired in this browser, so there is nothing to list."
+    "Sensors cannot be paired in this browser, so there is nothing to list.",
+    "Game controllers",
+    "A gamepad such as an Xbox controller steers and throws in Delivery.",
+    "Press any button so the app can see it.",
+    "Press a button to test",
+    "Nothing has moved yet."
   ],
   "transfer empty": [
     "Import and export",
@@ -2113,7 +2118,12 @@
     "Native apps for iPhone and Android are planned and are the only path that will ever work on an iPhone.",
     "iWhat still works here: Rides already on this device stay readable, and files can still be imported and exported.",
     "Paired sensors",
-    "Sensors cannot be paired in this browser, so there is nothing to list."
+    "Sensors cannot be paired in this browser, so there is nothing to list.",
+    "Game controllers",
+    "A gamepad such as an Xbox controller steers and throws in Delivery.",
+    "Press any button so the app can see it.",
+    "Press a button to test",
+    "Nothing has moved yet."
   ],
   "transfer populated": [
     "Import and export",
