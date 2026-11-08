@@ -368,20 +368,23 @@ export interface GameTrainerPort {
    */
   recordRoomRide?(): Promise<boolean>;
   /**
-   * The rider pressed *Record this ride* on the game's chooser — #1221. A
-   * game ride is recorded only by the Ride screen's recording (`RideSession`,
-   * above the router), so a rider who rode the game with none running lost
-   * the ride with only a dash to show for it; the chooser now says so under
-   * *Ride* and offers this. The ride controller's own `recordForRoom` — the
-   * one way a game starts a recording, so the two cannot drift apart: a
-   * recording or paused ride carries on, an idle controller starts one, and a
-   * stopped ride whose save is done is put away first. Answers whether a
-   * recording is now running.
+   * The rider pressed *Ride* on the game's chooser, for a ride in no room —
+   * #2381, the owner's ruling of 2026-11-08: a game ride is recorded by
+   * default (#1221 offered *Record this ride* instead). A game ride is
+   * recorded only by the Ride screen's recording (`RideSession`, above the
+   * router), so a rider who rode the game with none running lost the ride
+   * with only a dash to show for it. The ride controller's own
+   * `recordForRoom` — the one way a game starts a recording, so the two
+   * cannot drift apart: a recording or paused ride carries on, an idle
+   * controller starts one, and a stopped ride whose save is done is put away
+   * first. Answers whether a recording is now running. *End ride* asks
+   * whether to save it or discard it (#2349).
    *
    * ⚠️ **Absent where there is no ride controller** (Safari, Firefox, plain
    * HTTP: `main.tsx` §`buildGameTrainerPort`), and that absence is what the
-   * chooser reads to say this browser cannot record rather than offer a
-   * control that would do nothing. Not about the trainer: on this port for
+   * chooser reads to say this browser cannot record. A simulated ride and a
+   * preview are handed no port at all (`GameView.tsx` §`useSimulatedRide`),
+   * so they never reach this. Not about the trainer: on this port for
    * {@link gameRideEnded}'s reason, and named so nothing else in production
    * calls a method of that name. Writes nothing to the trainer.
    */
@@ -722,7 +725,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       controller?.noteGameRideEnded(outcome);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
-    // #1221: offered only where something can record. @see GameTrainerPort.recordGameRide
+    // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide
     ...(recordFor === undefined ? {} : { recordGameRide: () => recordFor() }),
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);

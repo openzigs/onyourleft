@@ -973,9 +973,9 @@ const TRAINER: GameTrainerPort = {
   // #1360's re-review (R3). @see ROOM_NOTICE
   recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
-  // #1221: the tallest chooser has nothing recording under it, so the line
-  // under *Ride* and its *Record this ride* are laid out and measured with the
-  // rest. This double records nothing.
+  // #1221, #2381: the tallest chooser has nothing recording under it, so the
+  // line under *Ride* saying the press records is laid out and measured with
+  // the rest. This double records nothing.
   rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
   // #2072: the elapsed time at the same widest figure, so the clock row is
   // laid out and measured with its widest time in it.

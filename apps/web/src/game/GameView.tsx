@@ -2116,6 +2116,30 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
+      // #2381, the owner's ruling of 2026-11-08: a game ride is RECORDED by
+      // default, through the one way the game starts a recording
+      // (`trainer-port.ts` §`recordGameRide`, the ride controller's
+      // `recordForRoom`): a recording or paused ride carries on, an idle
+      // controller starts one. Nothing is lost by it — *End ride* asks whether
+      // to save or discard (#2349). Absent with no ride controller, and on a
+      // simulated ride or a preview, which are handed no trainer port
+      // (`useSimulatedRide`), so those still record nothing. A ride in a room
+      // records once the room lets the rider in (#785, N6), not here.
+      // Awaited BEFORE the course line below, so a course's first lap is the
+      // recording's. A start that fails or throws leaves the ride unrecorded,
+      // as one with no recording was before: the ride still starts.
+      if (roomId === undefined && props.trainer?.recordGameRide !== undefined) {
+        try {
+          await props.trainer.recordGameRide();
+        } catch {
+          // The HUD's *Moving* is a dash: nothing is recording.
+        }
+        // #509: the rider may have left while the recording started. It runs
+        // on, as one started on the Ride screen does, which is where it is.
+        if (unmountedRef.current) {
+          return;
+        }
+      }
       const realistic = readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
@@ -4253,13 +4277,14 @@ function startOf(
  * side camera* while there is something to stop. `undefined` with no pairing.
  */
 /**
- * What the chooser says about the ride being saved — #1221. @see RecordingOffer
+ * What the chooser says about the ride being saved — #1221, #2381. @see RecordingOffer
  *
  * `undefined` with no trainer port, which only a test or harness renders:
  * production always hands one over (`main.tsx` §`buildGameTrainerPort`), even
  * with no ride controller. A ride is recorded exactly when the recorder has a
  * moving time to give (`GameTrainerPort.rideMovingSeconds`: recording or
- * paused), which is the figure the HUD's *Moving* shows.
+ * paused), which is the figure the HUD's *Moving* shows; and since #2381 the
+ * press of *Ride* starts one wherever the port can (`begin`).
  */
 function recordingOfferOf(
   trainer: GameTrainerPort | undefined,
@@ -4270,12 +4295,7 @@ function recordingOfferOf(
   }
   return {
     recorded: movingSeconds !== undefined,
-    // ⚠️ A call, not a bound reference, so `WIRE003` sees the port's method
-    // called by production.
-    onRecord:
-      trainer.recordGameRide === undefined
-        ? undefined
-        : async () => (await trainer.recordGameRide?.()) ?? false,
+    records: trainer.recordGameRide !== undefined,
   };
 }
 

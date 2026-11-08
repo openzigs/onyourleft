@@ -6363,10 +6363,9 @@ select.oyl-input {
 }
 
 /*
- * #1221: the line under *Ride* saying the ride will not be saved, and the
- * control that records it. Words in `ink` on `canvas` and an ordinary
- * secondary button, so nothing here is a new colour pair. Under *Ride*, so it
- * moves nothing #940 measures above it.
+ * #1221, #2381: the line under *Ride* saying whether the press records the
+ * ride. Words in `ink` on `canvas`, so nothing here is a new colour pair.
+ * Under *Ride*, so it moves nothing #940 measures above it.
  */
 .oyl-chooser__recording {
   display: flex;

@@ -756,7 +756,11 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
 
   type Bench = Awaited<ReturnType<typeof onTheBench>>;
 
-  async function openTheGame(rig: Bench, hash: string): Promise<void> {
+  /**
+   * The game over the bench, in the shell's room — or, with `inRoom` false
+   * (#2381), in none, where the press of *Ride* is what records a ride.
+   */
+  async function openTheGame(rig: Bench, hash: string, inRoom = true): Promise<void> {
     globalThis.location.hash = hash;
     mounted = await mount(
       <GameView
@@ -764,8 +768,12 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
         trainer={gameTrainerPortOver(rig.controller)}
         renderer={() => Promise.resolve(capturingRenderer([]))}
         now={() => nowMs}
-        room={roomPortOver(() => rig.room.link(), { timers: rig.clock, now: () => nowMs })}
-        roomId="room-1"
+        room={
+          inRoom
+            ? roomPortOver(() => rig.room.link(), { timers: rig.clock, now: () => nowMs })
+            : undefined
+        }
+        roomId={inRoom ? 'room-1' : undefined}
         riderMass={kilograms(72)}
       />,
     );
@@ -835,6 +843,49 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await rideFor(rig, 30);
     expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
     expect(rig.written.length).toBeGreaterThan(0);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect((await rig.sessions()).length).toBeGreaterThan(0);
+    await rig.done();
+  });
+
+  /**
+   * #2381: a game ride in no room is recorded by the press of *Ride* — and a
+   * simulated ride, from the address switch or the picker's Preview, still
+   * records nothing, because it is handed no trainer port at all
+   * (`GameView.tsx` §`useSimulatedRide`).
+   */
+  it('records nothing in no room either, from the switch or the Preview — #2381', async () => {
+    const rig = await onTheBench();
+    await openTheGame(rig, `#/game?simulate=${String(POWER)}&speedup=8`, false);
+    await clickThrough(buttonStarting('Ride '));
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(100);
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    for (let index = 0; index < 10; index += 1) await settle();
+    mounted?.unmount();
+    mounted = undefined;
+
+    await openTheGame(rig, '#/game', false);
+    await preview(String(POWER), 8);
+    await rideFor(rig, 30);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.written).toEqual([]);
+    await rig.done();
+  });
+
+  it('records in no room on the same bench with the switch off — the control (#2381)', async () => {
+    const rig = await onTheBench();
+    await openTheGame(rig, '#/game', false);
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 10; index += 1) await settle();
+    await rideFor(rig, 30);
     expect(rig.controller.getSnapshot().phase).toBe('recording');
     expect((await rig.sessions()).length).toBeGreaterThan(0);
     await rig.done();
