@@ -294,6 +294,20 @@ test('#2370: on the tablet a gamepad’s card is as wide as the Steering control
       configurable: true,
       value: () => [pad, null, null, null],
     });
+    // A Web Bluetooth that says its adapter is there, so the screen draws the
+    // pairing cards and the Steering controller card on every runner: the
+    // Linux runner's Chromium reports none (the first CI run of this test).
+    // Nothing here pairs, so a chooser is refused.
+    const bluetooth = {
+      getAvailability: async () => Promise.resolve(true),
+      requestDevice: async () => Promise.reject(new Error('no chooser in this test')),
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    Object.defineProperty(Navigator.prototype, 'bluetooth', {
+      configurable: true,
+      get: () => bluetooth,
+    });
   });
   // The product build, not this harness: the harness hands the screen no
   // steering controller, so it draws no Steering controller card to measure.
