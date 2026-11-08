@@ -344,6 +344,9 @@ export function ActivityDetailView({
   // The channels a read has been started for, and which units' reads count.
   const requested = useRef(new Set<TraceChannel>());
   const generation = useRef(0);
+  // #2373: set once the page has unmounted, for the read that is not a reaction
+  // to an effect and so has no cleanup of its own (`revealShared`).
+  const gone = useRef(false);
   // #2069: the ride's time in zone, read once its section is in view.
   const zonesSlot = useRef<HTMLDivElement | null>(null);
   // Held with the ride they belong to: a page that moves to another ride must
@@ -453,6 +456,23 @@ export function ActivityDetailView({
   }, [units]);
 
   /**
+   * #2373: a read that settles after the page has gone reaches no setter.
+   *
+   * Unmounting does not change `generation` by itself, so a channel read still
+   * in flight when the rider leaves would, on settling, pass its
+   * `generation.current === asked` check and call `setTraces` on a page that is
+   * not there — in a test, after the environment has torn `window` down, which
+   * made that an unhandled rejection that dropped a merge-queue entry.
+   */
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      gone.current = true;
+      generation.current += 1;
+    };
+  }, []);
+
+  /**
    * Watch every chart's slot, and note each channel once it is in view — #2068.
    *
    * The slots are drawn as soon as the overview is ready, one per chartable
@@ -497,6 +517,11 @@ export function ActivityDetailView({
     const asked = generation.current;
     void (async () => {
       for (const channel of wanted) {
+        // #2373: a page that has gone, or reads in other units now, wants none
+        // of the channels still to come.
+        if (generation.current !== asked) {
+          return;
+        }
         let trace: Trace | undefined;
         try {
           trace = await loadTrace(
@@ -662,7 +687,10 @@ export function ActivityDetailView({
     }
     setShowShared(true);
     if (shared === undefined) {
-      setShared(await loadSharedTrack(port, id));
+      const track = await loadSharedTrack(port, id);
+      if (!gone.current) {
+        setShared(track);
+      }
     }
   }, [port, id, shared]);
 

@@ -184,7 +184,7 @@ describe('the Connect screen — #777, #778', () => {
     expect(scripted.calls).toContain('connect https://ride.example');
     expect(text()).toContain('Name from the instance');
     expect(text()).not.toContain('Anna');
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
     // #773: this athlete's devices, this one named.
     expect(text()).toContain('This device');
     expect(text()).toContain('Another device');
@@ -657,7 +657,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     await settle();
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.confirm);
     expect(statements.asked()).toBe(0);
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
   });
 
   it('deletes it on confirmation, and the screen READ BACK shows this device disconnected', async () => {
@@ -673,7 +673,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     // What shows is what the port reads now, not what the press assumed.
     expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(1);
     expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
-    expect(text()).not.toContain('Lanes of the Weald');
+    expect(text()).not.toContain('Lanes by the old quarry');
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
     expect(button('Connect')).toBeDefined();
   });
@@ -690,7 +690,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     expect(statements.asked()).toBe(1);
     expect(text()).toContain(ERASE_REFUSAL_TEXT);
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.erased);
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
   });
 
   it('cannot be kept once the deletion is sent: the confirmation stays until the answer', async () => {

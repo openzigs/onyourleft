@@ -23,6 +23,7 @@ import { build, defineConfig, type Plugin } from 'vite';
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
 import { lazyViewsStayLazy } from './tools/bundle/entry-graph';
 import { demoStaysOut } from './tools/demo/demo-stays-out';
+import { levelSizes } from './tools/delivery-levels/level-sizes';
 import { onlyImportedIcons } from './tools/bundle/icon-modules';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
@@ -204,6 +205,8 @@ export default defineConfig({
     onlyImportedIcons(),
     // #1645: nothing of the demo (`vite.demo.config.ts`) is in what riders download.
     demoStaysOut(ROOT),
+    // #2361, ADR 0065 D-3.2: no built-in Delivery level over 2 MiB, and not 8 MiB of them.
+    levelSizes(join(ROOT, 'src/game/delivery/levels/data')),
   ],
   worker: {
     rolldownOptions: {

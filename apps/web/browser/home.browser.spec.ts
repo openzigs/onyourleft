@@ -244,7 +244,7 @@ test.describe('#1010 — Next up is the first thing, and its Ride starts above t
       expect(next, 'Next up was not drawn').toBeDefined();
       // The apparatus: the fixture's newest ride was on a saved route, so this
       // is the route kind, drawing that route's own shape.
-      expect(next?.name).toBe('Box Hill and back');
+      expect(next?.name).toBe('The ridge and back');
       expect(next?.drawsProfile).toBe(true);
       expect(next?.rideText).toBe('Ride');
       expect(next?.rideHref).toBe('#/game?route=harness-route');

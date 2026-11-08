@@ -124,7 +124,7 @@ const ROUTE: RouteRecord = ((): RouteRecord => {
   return {
     id: stubRouteId('harness-route'),
     createdBy: ATHLETE,
-    name: 'Box Hill and back',
+    name: 'The ridge and back',
     profile: routeProfile(points),
     visibility: 'private',
     createdAt: unixSeconds(1_700_000_000),

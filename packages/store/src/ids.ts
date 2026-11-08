@@ -180,14 +180,32 @@ export function segmentEffortId(value: string): SegmentEffortId {
 export const CIRCUIT_ROUTE_PREFIX = 'circuit:';
 
 /**
+ * The id namespace reserved for the app's built-in Delivery levels — #2361,
+ * [ADR 0065](../../../docs/adr/0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)
+ * D-8.2. A level is not a route the rider saved and not a circuit: it has no
+ * `RouteRecord`, and, unlike a circuit, **nothing of it is kept in the world
+ * corridor store** (D-2.4: its buildings are in its own file), so
+ * `putWorldCorridor` refuses a key in it. **No route id and no circuit id may
+ * carry it**: {@link routeId} refuses one, and {@link levelRouteId} refuses a
+ * level id that is itself a route id in either reserved namespace.
+ */
+export const LEVEL_ROUTE_PREFIX = 'level:';
+
+/**
  * @throws {StoreValidationError} if empty or blank, or if it starts with
- * {@link CIRCUIT_ROUTE_PREFIX}, which only {@link circuitRouteId} makes.
+ * {@link CIRCUIT_ROUTE_PREFIX} or {@link LEVEL_ROUTE_PREFIX}, which only
+ * {@link circuitRouteId} and {@link levelRouteId} make.
  */
 export function routeId(value: string): RouteId {
   assertUsableId(value, 'route id');
   if (isCircuitRouteId(value)) {
     throw new StoreValidationError(
       `route id must not start with "${CIRCUIT_ROUTE_PREFIX}", which is reserved for the built-in circuits`,
+    );
+  }
+  if (isLevelRouteId(value)) {
+    throw new StoreValidationError(
+      `route id must not start with "${LEVEL_ROUTE_PREFIX}", which is reserved for the built-in Delivery levels`,
     );
   }
   return value as RouteId;
@@ -207,6 +225,28 @@ export function circuitRouteId(circuit: string): RouteId {
 /** Whether an id is a built-in circuit's ({@link circuitRouteId}), never a saved route's. */
 export function isCircuitRouteId(value: string): boolean {
   return value.startsWith(CIRCUIT_ROUTE_PREFIX);
+}
+
+/**
+ * The key a built-in Delivery level is known by where a route id is asked
+ * for — #2361: {@link LEVEL_ROUTE_PREFIX} and the level's id.
+ *
+ * @throws {StoreValidationError} if the level's id is empty or blank, or is
+ * itself a circuit's or a level's route id, so the two namespaces stay apart.
+ */
+export function levelRouteId(level: string): RouteId {
+  assertUsableId(level, 'level id');
+  if (isCircuitRouteId(level) || isLevelRouteId(level)) {
+    throw new StoreValidationError(
+      'level id must be the level’s own id, not a route id in a reserved namespace',
+    );
+  }
+  return `${LEVEL_ROUTE_PREFIX}${level}` as RouteId;
+}
+
+/** Whether an id is a built-in Delivery level's ({@link levelRouteId}), never a saved route's or a circuit's. */
+export function isLevelRouteId(value: string): boolean {
+  return value.startsWith(LEVEL_ROUTE_PREFIX);
 }
 
 /** @throws {StoreValidationError} if empty or blank. */

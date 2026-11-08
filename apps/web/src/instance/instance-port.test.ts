@@ -77,7 +77,7 @@ interface IdentityTesting {
 
 const INSTANCE_TESTING = new URL('../../../instance/src/auth/identity-testing.ts', import.meta.url)
   .href;
-const NAME = 'Lanes of the Weald';
+const NAME = 'Lanes by the old quarry';
 const NOW = unixSeconds(1_790_000_000);
 
 let testing: IdentityTesting;

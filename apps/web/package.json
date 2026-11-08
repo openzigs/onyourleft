@@ -15,6 +15,7 @@
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
     "basemap:compare": "node tools/basemap/run-compare.mjs",
     "circuits:author": "node tools/circuits/run-author.mjs",
+    "levels:author": "node tools/delivery-levels/run-author.mjs",
     "valhalla:graph": "bash tools/valhalla/build-graph.sh",
     "valhalla:upload": "bash tools/valhalla/upload.sh",
     "valhalla:measure": "vite --config vite.valhalla.config.ts",

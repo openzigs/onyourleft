@@ -21,6 +21,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { PRODUCT_ORIGIN } from '../playwright.config';
+
 import { STRAP_BATTERY_PERCENT, STRAP_NAME, TRAINER_NAME } from './devices-fixture';
 import type { DevicesHarness } from './devices-harness';
 
@@ -269,6 +271,78 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
       { exact: true },
     ),
   ).toBeVisible();
+});
+
+/** The owner's tablet, landscape — #2370's ruling names it for the card width. */
+const TABLET = { width: 1280, height: 800 } as const;
+
+test('#2370: on the tablet a gamepad’s card is as wide as the Steering controller’s, its name bold above "Connected"', async ({
+  page,
+}) => {
+  // A standard pad the page can see, as the platform lists one after a press.
+  await page.addInitScript(() => {
+    const pad = {
+      id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',
+      index: 0,
+      connected: true,
+      mapping: 'standard',
+      timestamp: 0,
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })),
+    };
+    Object.defineProperty(Navigator.prototype, 'getGamepads', {
+      configurable: true,
+      value: () => [pad, null, null, null],
+    });
+    // A Web Bluetooth that says its adapter is there, so the screen draws the
+    // pairing cards and the Steering controller card on every runner: the
+    // Linux runner's Chromium reports none (the first CI run of this test).
+    // Nothing here pairs, so a chooser is refused.
+    const bluetooth = {
+      getAvailability: async () => Promise.resolve(true),
+      requestDevice: async () => Promise.reject(new Error('no chooser in this test')),
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    Object.defineProperty(Navigator.prototype, 'bluetooth', {
+      configurable: true,
+      get: () => bluetooth,
+    });
+  });
+  // The product build, not this harness: the harness hands the screen no
+  // steering controller, so it draws no Steering controller card to measure.
+  await page.setViewportSize(TABLET);
+  await page.goto(`${PRODUCT_ORIGIN}/#/devices`);
+  const steering = page
+    .locator('.oyl-pairing__row')
+    .filter({ has: page.getByRole('heading', { name: 'Controller', exact: true }) });
+  const card = page.locator('.oyl-gamepads__row');
+  await expect(steering).toHaveCount(1, { timeout: STEP_MS });
+  await expect(card).toHaveCount(1, { timeout: STEP_MS });
+  await expect(card.locator('p')).toHaveText(['Xbox Wireless Controller', 'Connected']);
+
+  const measured = await page.evaluate(() => {
+    const kind = [...document.querySelectorAll('.oyl-pairing__row')].find(
+      (row) => row.querySelector('h3')?.textContent === 'Controller',
+    );
+    const pad = document.querySelector('.oyl-gamepads__row');
+    const [name, state] = [...(pad?.querySelectorAll('p') ?? [])];
+    return {
+      steering: kind?.getBoundingClientRect().width,
+      pad: pad?.getBoundingClientRect().width,
+      nameWeight: name === undefined ? 0 : Number(getComputedStyle(name).fontWeight),
+      stateWeight: state === undefined ? 0 : Number(getComputedStyle(state).fontWeight),
+      nameBottom: name?.getBoundingClientRect().bottom,
+      stateTop: state?.getBoundingClientRect().top,
+    };
+  });
+  // Two cards a row on the tablet, so neither is the full width.
+  expect(measured.steering ?? 0).toBeLessThan(TABLET.width / 2);
+  expect(Math.abs((measured.pad ?? 0) - (measured.steering ?? Infinity))).toBeLessThanOrEqual(1);
+  expect(measured.nameWeight).toBeGreaterThanOrEqual(700);
+  expect(measured.stateWeight).toBeLessThan(700);
+  // "Connected" on a line of its own, under the name.
+  expect(measured.stateTop ?? -Infinity).toBeGreaterThanOrEqual(measured.nameBottom ?? Infinity);
 });
 
 test('the control — today’s dead end fails the same walk, on the pairing control', async ({

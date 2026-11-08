@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS } from './insets';
 import { SUBPIXEL_TOLERANCE, openRide } from './ride-stage';
 
-import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 
 /*
  * #940 — THE PRE-RIDE CHOOSER.
@@ -1055,4 +1055,129 @@ test.describe('#1970 — the lap race’s switch is on the screen on a loop, on 
     );
     expect(seen.top).toBeGreaterThan(seen.fold);
   });
+});
+
+/*
+ * #2331 — THE *BUILT-IN CIRCUITS* DISCLOSURE IS DRAWN AS A CONTROL.
+ *
+ * The owner's ruling on #2326: its open/close control read as plain text — a
+ * 16 px `▸` beside a line in body ink, with nothing behind it.
+ * `ride.html?picker=chooser&circuits=shipped` hands the chooser the shipped
+ * circuits through `loadBuiltInCircuits` (`ride-harness.tsx` §`CIRCUITS`), so
+ * the disclosure is drawn closed, as a rider with routes of their own sees it,
+ * under the real `theme.css`.
+ *
+ * Read back: the 44 px row #316's three ways (the shipped box, the
+ * declaration, and the box with the floor stripped, which must be shorter —
+ * so the declaration is what holds the target); the marker the rule's own,
+ * at one and a half times the label and in the label's `accentText`; the row
+ * filled with `surfaceOverlay`, the label at 700 and a text pair on the fill;
+ * under a pointer, `selected` and `accentHover`, still a text pair; and a
+ * press opening it to the circuits, with the marker turned.
+ */
+interface CircuitsRow {
+  readonly height: number;
+  readonly width: number;
+  readonly declared: number;
+  readonly stripped: number;
+  readonly weight: number;
+  readonly size: number;
+  readonly ink: string;
+  readonly fill: string;
+  readonly marker: string;
+  readonly markerSize: number;
+  readonly markerInk: string;
+}
+
+const CIRCUITS_SUMMARY = 'details.oyl-chooser__circuits > summary';
+
+async function readCircuitsRow(page: Page): Promise<CircuitsRow> {
+  return page.locator(CIRCUITS_SUMMARY).evaluate((element) => {
+    const style = getComputedStyle(element);
+    const marker = getComputedStyle(element, '::before');
+    const shipped = element.getBoundingClientRect();
+    const read = {
+      height: shipped.height,
+      width: shipped.width,
+      declared: Number.parseFloat(style.minHeight),
+      weight: Number(style.fontWeight),
+      size: Number.parseFloat(style.fontSize),
+      ink: style.color,
+      fill: style.backgroundColor,
+      marker: marker.content,
+      markerSize: Number.parseFloat(marker.fontSize),
+      markerInk: marker.color,
+    };
+    (element as HTMLElement).style.minHeight = '0';
+    const stripped = element.getBoundingClientRect().height;
+    (element as HTMLElement).style.minHeight = '';
+    return { ...read, stripped };
+  });
+}
+
+async function colourToken(page: Page, property: string): Promise<string> {
+  const value = await page.evaluate(
+    (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(),
+    property,
+  );
+  return value.toLowerCase();
+}
+
+test.describe('#2331 — the built-in circuits disclosure is drawn as a control', () => {
+  for (const viewport of [
+    CHOOSER_VIEWPORTS[0] as ChooserViewport,
+    TABLET_IN_THE_SHELL_CHOOSER,
+  ] as const) {
+    test(viewport.name, async ({ page }) => {
+      await openChooser(page, viewport, 'chooser', 'promise', '&circuits=shipped');
+      const details = page.locator('details.oyl-chooser__circuits');
+      const summary = page.locator(CIRCUITS_SUMMARY);
+      await summary.scrollIntoViewIfNeeded();
+      await expect(summary).toHaveText('Built-in circuits');
+      await expect(details).not.toHaveAttribute('open');
+      const accentText = await colourToken(page, '--oyl-color-accent-text');
+      const accentHover = await colourToken(page, '--oyl-color-accent-hover');
+      const surfaceOverlay = await colourToken(page, '--oyl-color-surface-overlay');
+      const selected = await colourToken(page, '--oyl-color-selected');
+
+      const rest = await readCircuitsRow(page);
+      console.log(
+        `#2331 ${viewport.name}: the row ${rest.width.toFixed(1)}×${rest.height.toFixed(1)} px ` +
+          `(${rest.stripped.toFixed(1)} without its floor), the marker ${String(rest.markerSize)} px ` +
+          `beside a ${String(rest.size)} px label, ` +
+          `${contrastRatio(hexOf(rest.ink), hexOf(rest.fill)).toFixed(2)}:1 on its fill`,
+      );
+      expect(rest.height, 'the shipped box').toBeGreaterThanOrEqual(44);
+      expect(rest.width, 'the shipped box').toBeGreaterThanOrEqual(44);
+      expect(rest.declared, 'the declaration').toBeGreaterThanOrEqual(44);
+      expect(rest.stripped, 'with the floor stripped').toBeLessThan(44);
+      // `.oyl-details`' own glyph, never the UA triangle, and half as big again.
+      expect(rest.marker).toContain('▸');
+      expect(rest.markerSize).toBeGreaterThanOrEqual(1.5 * rest.size);
+      expect(hexOf(rest.markerInk)).toBe(accentText);
+      // A filled row in the secondary button's pair, not a line of body ink.
+      expect(hexOf(rest.ink)).toBe(accentText);
+      expect(hexOf(rest.fill)).toBe(surfaceOverlay);
+      expect(rest.weight).toBeGreaterThanOrEqual(700);
+      expect(contrastRatio(hexOf(rest.ink), hexOf(rest.fill))).toBeGreaterThanOrEqual(AA_TEXT);
+
+      await summary.hover();
+      await expect
+        .poll(async () => hexOf((await readCircuitsRow(page)).fill), {
+          message: 'the fill under a pointer',
+        })
+        .toBe(selected);
+      const hovered = await readCircuitsRow(page);
+      expect(hexOf(hovered.ink)).toBe(accentHover);
+      expect(hexOf(hovered.markerInk)).toBe(accentHover);
+      expect(contrastRatio(hexOf(hovered.ink), hexOf(hovered.fill))).toBeGreaterThanOrEqual(
+        AA_TEXT,
+      );
+
+      await summary.click();
+      await expect(details).toHaveAttribute('open');
+      await expect(details.getByRole('radio').first()).toBeVisible();
+      expect((await readCircuitsRow(page)).marker).toContain('▾');
+    });
+  }
 });

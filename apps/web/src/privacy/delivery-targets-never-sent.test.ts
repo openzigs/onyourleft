@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { deliveryTown, DISTINCTIVE_TOWN_LAYOUT } from '../game/delivery/delivery-town-testing';
+import { parseLevelFile } from '../game/delivery/levels/level-file';
 import { placeObstacles, startObstacles, stepObstacles } from '../game/delivery/obstacles';
 import { startDeliveryRide, stepDeliveryRide } from '../game/delivery/ride-round';
 import { recordMiss, startRound } from '../game/delivery/round';
@@ -315,6 +316,104 @@ const THROWS: Readonly<Record<string, readonly (readonly [string, () => unknown]
         }),
     ],
   ],
+  // #2361: a level file's reader. Each case is the synthetic fixture level
+  // with one thing wrong, carrying the fixture town's numbers where it can.
+  'levels/level-file.ts': [
+    ['a file that is not an object', () => parseLevelFile(FIRST.x)],
+    ['a key the format does not have', () => parseLevelFile({ ...level(), osmId: FIRST.x })],
+    [
+      'a field missing',
+      () => parseLevelFile(levelWith((raw) => Reflect.deleteProperty(raw, 'points'))),
+    ],
+    [
+      'a length that is not a number',
+      () => parseLevelFile({ ...level(), lengthMetres: String(FIRST.distance) }),
+    ],
+    ['a length out of range', () => parseLevelFile({ ...level(), lengthMetres: FIRST.distance })],
+    [
+      'a round size that is not whole',
+      () => parseLevelFile(levelWith((raw) => (raw.round.houses = 3 + (FIRST.fromRoad % 1)))),
+    ],
+    [
+      'a latitude out of range',
+      () =>
+        parseLevelFile(levelWith((raw) => ((raw.points[0] as number[])[0] = 90 + FIRST.distance))),
+    ],
+    ['a format it is not', () => parseLevelFile({ ...level(), format: String(FIRST.x) })],
+    ['an id it is not', () => parseLevelFile({ ...level(), id: String(FIRST.x) })],
+    ['a shape it is not', () => parseLevelFile({ ...level(), shape: String(FIRST.z) })],
+    [
+      'a roof direction off its step',
+      () => parseLevelFile(levelWith((raw) => (firstFields(raw).roofDirectionDegrees = 7))),
+    ],
+    [
+      'footprint rings that are not a list',
+      () => parseLevelFile(levelWith((raw) => (firstBuilding(raw).rings = FIRST.x))),
+    ],
+    [
+      'too many footprint rings',
+      () =>
+        parseLevelFile(
+          levelWith(
+            (raw) =>
+              (firstBuilding(raw).rings = Array.from({ length: 17 }, () => [
+                FIRST.x,
+                FIRST.z,
+                1,
+                1,
+                2,
+                2,
+              ])),
+          ),
+        ),
+    ],
+    [
+      'a footprint ring of one corner',
+      () => parseLevelFile(levelWith((raw) => (firstBuilding(raw).rings = [[FIRST.x, FIRST.z]]))),
+    ],
+    [
+      'a footprint corner that is not a number',
+      () =>
+        parseLevelFile(
+          levelWith((raw) => (firstBuilding(raw).rings = [[String(FIRST.x), FIRST.z, 1, 1, 2, 2]])),
+        ),
+    ],
+    ['an id that is not its file’s name', () => parseLevelFile(level(), `x${String(FIRST.x)}`)],
+    [
+      'an archive build its archive does not name',
+      () =>
+        parseLevelFile(
+          levelWith(
+            (raw) => ((raw.archive as Record<string, unknown>).build = 'basemap-z-20261108'),
+          ),
+        ),
+    ],
+    ['buildings that are not a list', () => parseLevelFile({ ...level(), buildings: FIRST.x })],
+    [
+      'too many buildings',
+      () => parseLevelFile({ ...level(), buildings: Array(50_001).fill(level().buildings[0]) }),
+    ],
+    ['too few points', () => parseLevelFile({ ...level(), points: [[FIRST.x, FIRST.z, 1]] })],
+    [
+      'a point of two numbers',
+      () => parseLevelFile(levelWith((raw) => (raw.points[0] = [FIRST.x, FIRST.z]))),
+    ],
+    [
+      'a point too far from the one before it',
+      () =>
+        parseLevelFile(
+          levelWith((raw) => {
+            const point = raw.points[1] as [number, number, number];
+            point[0] += FIRST.distance / 1_000;
+          }),
+        ),
+    ],
+    ['a loop that does not close', () => parseLevelFile({ ...level(), shape: 'loop' })],
+    [
+      'a length its points do not measure',
+      () => parseLevelFile({ ...level(), lengthMetres: 2_000 + FIRST.distance }),
+    ],
+  ],
   'throw.ts': [
     [
       'the ticks',
@@ -328,6 +427,37 @@ const THROWS: Readonly<Record<string, readonly (readonly [string, () => unknown]
     ],
   ],
 };
+
+/** The synthetic fixture level (#2361), fresh, as its raw JSON. */
+function level(): {
+  points: unknown[];
+  buildings: unknown[];
+  round: Record<string, unknown>;
+} & Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL('../game/delivery/levels/fixtures/fixture-level.json', import.meta.url),
+      ),
+      'utf8',
+    ),
+  ) as ReturnType<typeof level>;
+}
+
+/** The fixture level with `change` made to it. */
+function levelWith(change: (raw: ReturnType<typeof level>) => unknown): ReturnType<typeof level> {
+  const raw = level();
+  change(raw);
+  return raw;
+}
+
+function firstBuilding(raw: ReturnType<typeof level>): Record<string, unknown> {
+  return raw.buildings[0] as Record<string, unknown>;
+}
+
+function firstFields(raw: ReturnType<typeof level>): Record<string, unknown> {
+  return firstBuilding(raw).fields as Record<string, unknown>;
+}
 
 function pickInput() {
   return {

@@ -50,6 +50,8 @@ import { simulatedOpenTrainer } from './simulated-trainer-testing';
 
 const THRESHOLD = watts(250);
 const RIDE = 'the-built-in-ride';
+/** The page's own words for a read not yet done: "Reading power…", "Reading the power curve…". */
+const PENDING_READ = /Reading (?!this ride)[^.…]*…/;
 
 let harness: StoreHarness;
 let mounted: Mounted | undefined;
@@ -170,7 +172,19 @@ describe('a built-in ridden to its end shows its blocks on its ride’s page —
       expect(rows.map((row) => row.querySelector('th')?.textContent)).toEqual(
         tailored.blocks.map((_, index) => String(index + 1)),
       );
+      // #2373: the page also starts its charts' reads, which this test does not
+      // assert on. Let them finish before it ends, rather than leave them to
+      // settle after the environment has gone (the unhandled rejection that
+      // dropped a merge-queue entry, run 42509922500).
+      for (let turn = 0; PENDING_READ.test(document.body.textContent ?? ''); turn += 1) {
+        if (turn > 200) throw new Error('the ride’s page still had a chart reading');
+        await settle();
+      }
     } finally {
+      // Unmounted before the store closes: a page that outlives its store reads
+      // from a connection that has gone.
+      mounted?.unmount();
+      mounted = undefined;
       store.close();
     }
   }, 120_000);

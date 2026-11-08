@@ -98,6 +98,7 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
+import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
@@ -428,8 +429,8 @@ const RELEASE_AND_PROMISE =
  */
 const LONGEST_ROUTE_NAME = (() => {
   const words =
-    'Box Hill, Leith Hill, Ranmore Common, Coldharbour, Holmbury St Mary, Peaslake, Shere, ' +
-    'Abinger and every lane between them, twice over, the long way round';
+    'The mill, the ridge, the reservoir, the old quarry, the ford, the farm, the beacon, the green, ' +
+    'the common and every lane between them, twice over, the long way round';
   const name = words.slice(0, MAXIMUM_ROUTE_NAME_LENGTH);
   if (name.length !== MAXIMUM_ROUTE_NAME_LENGTH || name !== name.trim()) {
     throw new Error('ride harness: the longest route name is not the store’s bound');
@@ -452,7 +453,7 @@ function chooserRoutes(): readonly {
     'The coast road',
     'Two bridges',
     'Old railway line',
-    'Box Hill, Leith Hill and every lane between them the long way round',
+    'The mill, the ridge and every lane between them the long way round',
     LONGEST_ROUTE_NAME,
   ];
   return names.map((name, index) => {
@@ -526,6 +527,15 @@ const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
 );
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
+/**
+ * `ride.html?picker=chooser&circuits=shipped` — #2331: the chooser with the
+ * app's built-in circuits beside the rider's routes, read through the
+ * product's own `loadBuiltInCircuits` as `main.tsx` hands them, so the
+ * *Built-in circuits* disclosure is drawn (closed: the rider has routes).
+ */
+const CIRCUITS =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
+
 const GAME: GamePort = {
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
@@ -549,6 +559,7 @@ const GAME: GamePort = {
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
+  ...(CIRCUITS ? { listCircuits: () => loadBuiltInCircuits() } : {}),
   ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
   // #1816: the Delivery town's corridor, ready at once, so the press fixes it.
   ...(DELIVERY_TOWN === undefined

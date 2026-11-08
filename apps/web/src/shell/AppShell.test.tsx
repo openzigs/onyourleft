@@ -287,7 +287,7 @@ describe('the router', () => {
           {
             id: stubRouteId('route-1'),
             createdBy: owner,
-            name: 'Box Hill loop',
+            name: 'Old mill loop',
             profile: routeProfile(points),
             visibility: 'private',
             createdAt: unixSeconds(1),
