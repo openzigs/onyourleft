@@ -15,7 +15,7 @@ It has the same authority as the root file. Where the text below says "this file
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
 shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
 shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
-the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
+the browser gate in four parts, `browser-1` to `browser-4` (§"Four browser shards — #2376"; three since #1720) — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
@@ -2295,3 +2295,54 @@ as before.
   failure is a status or a kind with no URL in it, since the account id is in the endpoint's host.
 - ⚠️ **Until the four are set the nightly is red** at the archive check: the bake falls back to the
   public URL and is answered 403, and the run's failure says `read through https`.
+
+#### Four browser shards — #2376
+
+⚠️ **The browser gate is four jobs since [#2376](https://github.com/openzigs/onyourleft/issues/2376),
+`browser-1` to `browser-4`, and a reviewer who remembers three is reading the old file.** On
+2026-11-08 `browser-2`'s `chromium` part reached its 720 s stop twice ("Timed out waiting 720s for
+the test suite to run"), once on #2374's pull request and once in merge-queue run
+[42511044605](https://github.com/openzigs/onyourleft/actions/runs/42511044605), which took #2353 out
+of the queue. Over the ten green runs read for this change (`main` and the merge queue, that day)
+`browser-1`'s part took 654 to 690 s on the slower runners, `browser-2`'s 708 to 714 s and
+`browser-3`'s up to 672 s, each against the same 720 s. **No stop moved**: each part keeps 720 s and
+three workers, the game run 85 s, the wrapper 825 s and its 14 minutes, each job its 25 minutes and
+the browser install its ten. Nothing left the gate, moved to nightly, or is retried.
+
+**Why a fourth shard and a seventh ride file.** Each spec file's time in its worker was read from
+those ten runs' logs (the first case's start to the last case's end, as the list reporter prints
+them; a simulation of Playwright's queue over them — files in path order, each to the first of
+three workers to come free — came within 2 % of every run's own `passed (…)` figure). Taking every
+file at the SLOWEST time measured for it, the `chromium` project is about 5 400 s of worker time:
+three shards of three workers cannot hold it under 70 % of 720 s (504 s) however it is divided,
+since a ninth of it is 600 s. And one file, `ride.browser.spec.ts`, took 598 to 637 s in its one
+worker on the EPYC 7763, a 9V74 and a Xeon 8573C — most of a stop on its own, in any shard. So:
+
+- **`ride.browser.spec.ts` is two files**, divided by section with nothing changed inside a case
+  (#1414's way): the overlay and stacked stage, the moving time and a standing notice stay, and
+  `ride-conditions.browser.spec.ts` takes the rest — a workout eased (#585), sounds on, a side
+  camera (#551), a notice put away (#437), the cull, safe areas, #439's insets, #1441's gesture
+  bar, a laptop's window and the end steps. Estimated from the cases' own times, the two are 356
+  and 334 s at the slowest. `playwright test --list --project chromium` gives the same 2 397
+  titles before and after, compared as sorted `file › describe › title` with the second file's
+  name read as the first's.
+- **The lists were drawn again for four shards**, by a search over assignments that makes the
+  slowest simulated part as short as it can be at those slowest figures:
+
+| Script | Job | Spec files | Cases | Slowest files (s, slowest measured) | Simulated part, slowest / median figures |
+|---|---|--:|--:|---|--:|
+| `test:browser:shard-1` | `browser-1` | 12 (and five that hold only `@nightly` describes) | 494 | `ride-laps` 341, `ride-conditions` 334, `ride-hud-layout` 258 | 459 / 344 s |
+| `test:browser:shard-2` | `browser-2` | 18 | 523 | `controls-first` 217, `list-detail` 210, `links` 169 | 455 / 364 s |
+| `test:browser:shard-3` | `browser-3` | 10, then the `game` run | 648 | `ride-room` 446, `ride` 356, `pre-ride` 197 | 458 / 372 s |
+| `test:browser:shard-4` | `browser-4` | 18 | 732 | `rideview` 297, `shell` 262, `ride-workout` 240 | 459 / 390 s |
+
+`shell-demo.browser.spec.ts` is still in `browser-3`'s list and the `game` run still after its part,
+as `nightly-split.test.ts` holds. The cases are 494 + 523 + 648 + 732 = 2 397, the whole `chromium`
+project (`playwright test --list` over each script's file filters). ⚠️ **A NEW spec file goes into
+the list of the shard whose newest row below is furthest inside 504 s**, in the same pull request,
+or `nightly-split.test.ts` is red.
+
+⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
+run's log and draw the lists again the same way, divide the file that is the floor (one file is
+one worker: `ride-room.browser.spec.ts`, 446 s at its slowest, is the largest now), or add a fifth
+shard (a script, a job, a column here, the job in `needs:`). Not a longer stop.

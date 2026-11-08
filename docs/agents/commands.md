@@ -304,10 +304,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ THREE CI jobs since #1720 — the shards
-# `browser-1` to `browser-3`, which the job named `Repository rules` waits for
-# (§4c §"Three browser shards — #1720") — and each runs its own spec files of
-# this command, as `test:browser:shard-1` to `-3` below; this is the whole. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ FOUR CI jobs since #2376 — the shards
+# `browser-1` to `browser-4`, which the job named `Repository rules` waits for
+# (§4c §"Four browser shards — #2376") — and each runs its own spec files of
+# this command, as `test:browser:shard-1` to `-4` below; this is the whole. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
@@ -365,7 +365,7 @@ pnpm run test:browser:nightly:shard-3
 pnpm run test:browser:nightly:shard-4
 pnpm run test:browser:nightly:shard-5
 
-# The browser gate as CI runs it, in three parts (#1720, §4c §"Three browser
+# The browser gate as CI runs it, in four parts (#2376, §4c §"Four browser
 # shards"): each builds both pages and runs the `chromium` project over the
 # spec files it names, on the whole gate's workers and stop; the third runs
 # the `game` project after its part. Together they are `test:browser`, every
@@ -374,6 +374,7 @@ pnpm run test:browser:nightly:shard-5
 pnpm run test:browser:shard-1
 pnpm run test:browser:shard-2
 pnpm run test:browser:shard-3
+pnpm run test:browser:shard-4
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth

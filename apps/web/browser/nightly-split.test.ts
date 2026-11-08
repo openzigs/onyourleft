@@ -13,7 +13,8 @@
  *
  * Since #1285 the required check is one job over several shards (five since
  * #1720, which split the browser gate in three by spec file; six since #2154,
- * which split the Vitest suite in two by project), and the same
+ * which split the Vitest suite in two by project; seven since #2376, which
+ * split the browser gate in four), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -592,7 +593,9 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // longer decides its shard and this list does. `browser-3` is the
     // lightest of the three (§4c §"Three browser shards — #1720": 3.1 to
     // 4.6 m of its 720 s on #1720's runs, against 6.1 to 6.5 m for
-    // `browser-1`), so the demo spec is named there.
+    // `browser-1`), so the demo spec is named there. Since #2376 the four
+    // lists are drawn to finish together (§4c §"Four browser shards"), and
+    // the demo spec's list is still `browser-3`'s.
     const demo = SPECS.filter(
       (name) => /demo\.browser\.spec\.ts$/.test(name) && !name.startsWith('demo-'),
     );
@@ -822,9 +825,9 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(commands).toEqual(
       expect.arrayContaining([
         ...requiredShardScripts().map((name) => `pnpm run ${name}`),
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3',
+        // Every browser shard's gate, read from the scripts so a fourth (#2376)
+        // or a fifth cannot be left out of the required run unnoticed.
+        ...shardScripts().map(([name]) => gateCommand(name)),
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');
