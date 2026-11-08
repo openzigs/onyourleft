@@ -581,9 +581,26 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     expect(crashes).toBe(1);
     expect(crashedAt).toBeDefined();
     expect(drawnInside).toBe(0);
-    // Steering on for the middle lane, the one the car leaves clear.
-    expect(ride.steer.lane).toBe(1);
+    // Their own lane kept, and once past the car, drawn back in it.
+    expect(ride.steer.lane).toBe(LANE_OFFSETS_METRES.length - 1);
+    expect(ride.steer.offset).toBe(LANE_OFFSETS_METRES.at(-1));
     expect(ride.score).toBe(0);
+  });
+
+  it('scores no second crash from the move-aside: another obstacle beside the car meets the rider in their own lane', () => {
+    const ride = carAhead();
+    // A bin beside the car where the held rider is met if the move-aside counted, clear of their own lane.
+    const stands = parkedCarStands('right');
+    const moved = stands - (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + 0.05);
+    const bin: Obstacle = { kind: 'bin', along: 41, stands: moved - 0.15 };
+    const lane = LANE_OFFSETS_METRES.at(-1) as number;
+    expect(Math.abs(lane - bin.stands)).toBeGreaterThan(
+      OBSTACLE_KINDS.bin.halfWidth + RIDER_HALF_WIDTH_METRES,
+    );
+    const both = [...ride.obstacles, bin];
+    const ridden = rideTo({ ...ride, obstacles: both, obstacleState: startObstacles(both) }, 60);
+    expect(ridden.ride.obstacleState.crashed).toEqual([true, false]);
+    expect(ridden.crashes).toBe(1);
   });
 
   it('keeps the rider out of it when they steer back in beside it', () => {

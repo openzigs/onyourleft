@@ -91,10 +91,11 @@
  *
  * A crash into a parked car is drawn as one, not as a ride through it: from
  * the tick the rider touches it, {@link clearOfParkedCars} moves the rider's
- * drawn place to the car's road side, into the nearest lane it leaves clear,
- * for as long as the rider is beside it. It is a sideways move of the
- * drawing only, the steering's, and never a slow-down (ADR 0065 D-11): the
- * rider's distance, speed and the trainer's grade are the simulation's.
+ * drawn place to the car's road side for as long as the rider is beside it,
+ * and leaves the lane they steer to as they chose it. It is a sideways move
+ * of the drawing only and never a slow-down (ADR 0065 D-11): the rider's
+ * distance, speed and the trainer's grade are the simulation's, and no other
+ * obstacle meets the moved place (`ride-round.ts`), so it scores nothing.
  *
  * ## The route's own frame, and the tick
  *
@@ -553,10 +554,14 @@ export interface DrawnLane {
  * #2362: the rider moved clear of every parked car they have crashed into
  * and are still beside, or `undefined` when they are inside none. A crash is
  * drawn as one, not as a ride through the car: the rider's drawn place is the
- * car's road side, {@link PARKED_CAR_CLEARANCE_METRES} from it, and they steer
- * on to the nearest lane the car leaves clear. Only the drawing and the lane
- * move; the rider's distance and speed are the simulation's (ADR 0065 D-11).
- * A car not yet touched is left to {@link stepObstacles}, which counts it.
+ * car's road side, {@link PARKED_CAR_CLEARANCE_METRES} from it. **Only the
+ * drawn offset moves**: the lane the rider steers to is theirs, kept as it
+ * was (round 3 of PR #2378's review), so once past the car they ease back to
+ * it at the steering's own speed. Their distance and speed are the
+ * simulation's (ADR 0065 D-11). A car not yet touched is left to
+ * {@link stepObstacles}, which counts it. While a rider is held clear,
+ * `ride-round.ts` meets every other obstacle at the lane they steer to, not at
+ * the moved offset, so the move-aside never scores a crash of its own.
  */
 export function clearOfParkedCars(
   obstacles: readonly Obstacle[],
@@ -585,25 +590,12 @@ export function clearOfParkedCars(
     ) {
       return;
     }
-    const stands = obstacle.stands;
     const reach = shape.halfWidth + RIDER_HALF_WIDTH_METRES;
-    const clear = stands + (stands > 0 ? -1 : 1) * (reach + PARKED_CAR_CLEARANCE_METRES);
-    const blocked = (lane: number): boolean =>
-      Math.abs((LANE_OFFSETS_METRES[lane] as number) - stands) < reach;
-    // The lane they steer to, if the car leaves it clear; else the clear lane nearest.
-    let lane = moved?.lane ?? rider.lane;
-    if (blocked(lane)) {
-      LANE_OFFSETS_METRES.forEach((each, at) => {
-        if (blocked(at)) return;
-        if (
-          blocked(lane) ||
-          Math.abs(each - clear) < Math.abs((LANE_OFFSETS_METRES[lane] as number) - clear)
-        ) {
-          lane = at;
-        }
-      });
-    }
-    moved = { lane, offset: clear };
+    const side = obstacle.stands > 0 ? -1 : 1;
+    moved = {
+      lane: rider.lane,
+      offset: obstacle.stands + side * (reach + PARKED_CAR_CLEARANCE_METRES),
+    };
   });
   return moved;
 }

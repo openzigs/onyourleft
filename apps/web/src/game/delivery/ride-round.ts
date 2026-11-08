@@ -46,8 +46,10 @@
  * §`lateralOf` draws the rider at, exactly, so a crash is drawn as one
  * (#1853). Since #2362 a parked car the rider hits moves them to its road
  * side, so a crash into one is drawn as a crash and not as a ride through it
- * (`obstacles.ts` §`clearOfParkedCars`): the steering's offset and lane, never
- * the rider's distance or speed. It is held in memory for the round, as the
+ * (`obstacles.ts` §`clearOfParkedCars`): the steering's drawn offset only,
+ * never their lane, distance or speed. While they are held clear, the
+ * obstacles meet them in the lane they steer to, so the move scores no crash
+ * of its own. It is held in memory for the round, as the
  * rest is, and never stored: a stored ride has no lateral field.
  *
  * ## A house is missed when its window has closed behind the rider
@@ -145,7 +147,7 @@ import {
   type RoundOutcome,
   type WeekProgress,
 } from './round';
-import { startSteer, stepSteer, type SteerState } from './steer';
+import { LANE_OFFSETS_METRES, startSteer, stepSteer, type SteerState } from './steer';
 import {
   drawRoundSeed,
   pickRoundTargets,
@@ -361,8 +363,14 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
     steer = stepSteer(steer, DELIVERY_TICK_SECONDS);
+    // #2362: while held clear of a parked car already hit, the obstacles meet
+    // the rider in the lane they steer to, never at the move-aside's offset,
+    // so the move scores no crash of its own (review of PR #2378, round 3).
+    const held =
+      clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) !== undefined;
+    const lateral = held ? (LANE_OFFSETS_METRES[steer.lane] as number) : steer.offset;
     const obstaclesNow = stepObstacles(obstacleState, {
-      rider: { along: at, lateral: steer.offset, speed: (at - before) / DELIVERY_TICK_SECONDS },
+      rider: { along: at, lateral, speed: (at - before) / DELIVERY_TICK_SECONDS },
       obstacles: ride.obstacles,
     });
     obstacleState = obstaclesNow.state;

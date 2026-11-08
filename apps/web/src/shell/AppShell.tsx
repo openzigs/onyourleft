@@ -47,7 +47,12 @@ import {
   type MouseEvent,
 } from 'react';
 
-import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
+import {
+  DEFAULT_UNIT_SYSTEM,
+  isLevelRouteId,
+  type KitColour,
+  type UnitSystem,
+} from '@onyourleft/store';
 import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
@@ -107,8 +112,10 @@ import type { UpdateWatcher } from '../offline/update';
 
 import { NavIcon } from './NavIcon';
 import {
+  gameRouteFromHash,
   groupDestination,
   hrefFor,
+  LEVEL_GAME_SUMMARY,
   NAV_GROUPS,
   navGroupOf,
   routesInGroup,
@@ -1221,7 +1228,15 @@ export function AppShell(props: AppShellProps): JSX.Element {
             <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
               {route.title}
             </h1>
-            {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+            {immersive ? null : (
+              <p className="oyl-muted">
+                {/* #2362: the setup opened on a built-in level is a Delivery round's, not a saved route's. */}
+                {route.id === 'game' &&
+                isLevelRouteId(gameRouteFromHash(globalThis.location.hash) ?? '')
+                  ? LEVEL_GAME_SUMMARY
+                  : route.summary}
+              </p>
+            )}
             {/*
               #993: one line under the title, and the rest one press away.
               AFTER the line rather than inside the heading, so the `h1` is

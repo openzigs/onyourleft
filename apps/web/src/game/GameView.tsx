@@ -2026,7 +2026,9 @@ function GameScreen({
   // round, counted on this device through the same corridor port, one route
   // at a time, while the rider chooses — and abandoned, as the read above
   // is, when a ride starts or the round is switched off. Only with the
-  // realistic world chosen, where the round is offered (DL6).
+  // realistic world chosen, where a round is offered on a saved route (DL6).
+  // A built-in level is counted by nothing here: it holds its own round, which
+  // the chooser says in either world (#2362, `RoutePicker`'s `level`).
   const coursesWanted =
     choosing && withDelivery && routes !== undefined && readRealisticWorldChoice(deviceStorage());
   useEffect(() => {
@@ -3683,7 +3685,13 @@ function GameScreen({
           // #2362: the level the Delivery picker opened this on: its card, its
           // credit beside it (ADR 0065 D-6.5), and its world.
           level={
-            level === undefined ? undefined : { routeId: level.route.id, credit: OSM_ATTRIBUTION }
+            level === undefined
+              ? undefined
+              : {
+                  routeId: level.route.id,
+                  credit: OSM_ATTRIBUTION,
+                  houses: level.file.round.houses,
+                }
           }
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
@@ -3717,15 +3725,10 @@ function GameScreen({
               level !== undefined && picked === level.route.id
                 ? { ...week, houses: level.file.round.houses }
                 : week)(readDeliveryProgress(deviceStorage())),
-            // #2294: what each saved route holds for the round, as counted;
-            // and #2362, a level holds its own round, counted when it was drawn.
-            courses:
-              courses === undefined || level === undefined
-                ? courses
-                : new Map(courses).set(level.route.id, {
-                    kind: 'counted',
-                    houses: level.file.round.houses,
-                  }),
+            // #2294: what each saved route holds for the round, as counted. A
+            // level's own count is its offer's (#2362, `level` above), in
+            // either world.
+            courses,
           }}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.

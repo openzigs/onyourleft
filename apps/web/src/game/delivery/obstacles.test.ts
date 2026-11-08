@@ -557,13 +557,13 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
       expect(clearOfParkedCars(obstacles, fresh, rider)).toBeUndefined();
       const moved = clearOfParkedCars(obstacles, crashed, rider);
       expect(moved, side).toBeDefined();
-      // On the road side, clear of it by the clearance, steering for the middle lane.
+      // On the road side, clear of it by the clearance, still steering for their own lane.
       expect(Math.abs((moved?.offset ?? 0) - stands)).toBeCloseTo(
         reach + PARKED_CAR_CLEARANCE_METRES,
         9,
       );
       expect(Math.abs(moved?.offset ?? 0)).toBeLessThan(Math.abs(stands));
-      expect(moved?.lane).toBe(1);
+      expect(moved?.lane).toBe(kerbLane);
       // Past it, or a lane away, nothing moves.
       expect(
         clearOfParkedCars(obstacles, crashed, { ...rider, along: 100 + car.halfLength + 1 }),
@@ -571,10 +571,8 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
       expect(
         clearOfParkedCars(obstacles, crashed, { along: 99, lane: 1, offset: 0 }),
       ).toBeUndefined();
-      // A rider steering for a lane the car leaves clear keeps steering for it.
-      expect(
-        clearOfParkedCars(obstacles, crashed, { ...rider, lane: 1 - (kerbLane - 1) })?.lane,
-      ).toBe(1 - (kerbLane - 1));
+      // A rider steering for another lane keeps steering for it.
+      expect(clearOfParkedCars(obstacles, crashed, { ...rider, lane: 1 })?.lane).toBe(1);
     }
     // A crashed bin moves nobody: only a parked car.
     const bins: Obstacle[] = [{ kind: 'bin', along: 100, stands: 0 }];

@@ -32,7 +32,7 @@ import { GAME_COURSES_TEXT } from '../../../views/GameCoursesView';
 import { GameView, type GamePort, type RidableRoute } from '../../GameView';
 import { northRoute } from '../../route-fixtures-testing';
 import { SHIPPED_LEVELS } from '../../shipped-levels';
-import { BUILT_IN_CIRCUITS_TEXT } from '../../StageChooser';
+import { BUILT_IN_CIRCUITS_TEXT, LEVEL_WORLD_ID } from '../../StageChooser';
 import { writeRealisticWorldChoice } from '../../world-preference';
 
 import { parseLevelFile } from './level-file';
@@ -153,7 +153,7 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
       expect(document.querySelector('[data-credit="level"]')?.textContent).toContain(
         OSM_ATTRIBUTION,
       );
-      expect(document.querySelector('[data-level-world]') !== null).toBe(!realistic);
+      expect(document.getElementById(LEVEL_WORLD_ID) !== null).toBe(!realistic);
       expect(formatViolations(auditAccessibility(document))).toBe('');
     });
   }

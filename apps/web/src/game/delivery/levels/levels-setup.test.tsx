@@ -26,10 +26,13 @@ import { hrefFor, routeById } from '../../../shell/routes';
 import { mount, queryAll, settle, type Mounted } from '../../../testing/mount';
 import { pacerChoice } from '../../pacer-choice';
 import { DEFAULT_RIDING_POSITION, type RidingPosition } from '../../rider';
+import { DEFAULT_LAP_RACE_CHOICE } from '../../lap-race/choice';
 import {
   BUILT_IN_CIRCUITS_TEXT,
   DELIVERY_CHOICE_TEXT,
+  LAP_RACE_CHOICE_TEXT,
   LEVEL_SETUP_TEXT,
+  LEVEL_WORLD_ID,
   RoutePicker,
   type DeliveryCourse,
   type RidableRoute,
@@ -44,14 +47,24 @@ const FIXTURE = parseLevelFile(
   JSON.parse(readFileSync(join(HERE, 'fixtures', 'fixture-level.json'), 'utf8')) as unknown,
   'fixture-level',
 );
-const LEVEL = levelRoute(FIXTURE);
 
-const OWN: readonly RidableRoute[] = ['First road', 'Second road'].map((name, index) => ({
-  id: `saved-${String(index)}`,
-  name,
-  profile: northRoute(1_500 + 100 * index, () => 0),
-  attempts: 0,
-}));
+function ownRoute(index: number): RidableRoute {
+  return {
+    id: `saved-${String(index)}`,
+    name: index === 0 ? 'First road' : 'Second road',
+    profile: northRoute(1_500 + 100 * index, () => 0),
+    attempts: 0,
+  };
+}
+const OWN: readonly RidableRoute[] = [ownRoute(0), ownRoute(1)];
+
+// The shipped levels are loops; the fixture's line is not, so it is ridden here as one.
+const LEVEL: RidableRoute = (() => {
+  const route = levelRoute(FIXTURE);
+  return { ...route, profile: { ...route.profile, loop: true } };
+})();
+/** A built-in circuit, as the lap race's chooser holds one. */
+const CIRCUIT: RidableRoute = { ...ownRoute(9), id: 'circuit:ring', name: 'Ring' };
 
 interface Options {
   readonly own?: readonly RidableRoute[];
@@ -67,7 +80,7 @@ function Chooser(options: Options): JSX.Element {
     <main>
       <RoutePicker
         routes={[LEVEL, ...(options.own ?? OWN)]}
-        level={{ routeId: LEVEL.id, credit: OSM_ATTRIBUTION }}
+        level={{ routeId: LEVEL.id, credit: OSM_ATTRIBUTION, houses: FIXTURE.round.houses }}
         picked={picked}
         onPick={setPicked}
         units="metric"
@@ -93,6 +106,14 @@ function Chooser(options: Options): JSX.Element {
         position={position}
         onPosition={setPosition}
         worldChosen={options.worldChosen ?? true}
+        lapRace={{
+          chosen: false,
+          onChoose: () => undefined,
+          choice: DEFAULT_LAP_RACE_CHOICE,
+          onChoice: () => undefined,
+          assisted: false,
+        }}
+        circuits={{ circuits: [CIRCUIT], credit: OSM_ATTRIBUTION }}
         delivery={{
           chosen: true,
           onChoose: () => undefined,
@@ -139,6 +160,30 @@ describe('the setup on a built-in level — #2362, round 2', () => {
       ]),
     });
     expect(summary(root)).toBe('1 of your 2 routes can hold today’s Delivery round.');
+    // Drawn over the rider's own cards, after the level's card and its credit, so it
+    // does not read as describing the level (review of PR #2378, round 3).
+    const line = [...root.querySelectorAll('.oyl-chooser__routes p')].find(
+      (each) => each.textContent === summary(root),
+    );
+    const credit = root.querySelector('[data-credit="level"]');
+    const ownCard = [...root.querySelectorAll('.oyl-chooser__card')].find(
+      (card) => card.querySelector('input')?.getAttribute('value') === first.id,
+    );
+    expect(
+      credit && line && credit.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      line && ownCard && line.compareDocumentPosition(ownCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('tells a browser rider the realistic world is downloaded, and the Android app nothing of the kind', () => {
+    expect(LEVEL_SETUP_TEXT.world(false)).toContain('downloads when the ride starts, about 33 MB');
+    expect(LEVEL_SETUP_TEXT.world(true)).not.toMatch(/download|MB/);
+    for (const inShell of [false, true]) {
+      expect(LEVEL_SETUP_TEXT.world(inShell)).toContain('Your choice in Settings stays as it is.');
+      expect(LEVEL_SETUP_TEXT.world(inShell)).not.toContain('—');
+    }
   });
 
   it('says nothing of “your routes” when the level is the only card', async () => {
@@ -172,7 +217,13 @@ describe('the setup on a built-in level — #2362, round 2', () => {
 
   it('with the standard world chosen, says the level rides in the realistic world and offers its round', async () => {
     const root = await render({ worldChosen: false });
-    expect(root.querySelector('[data-level-world]')?.textContent).toBe(LEVEL_SETUP_TEXT.world);
+    const notice = root.querySelector(`#${LEVEL_WORLD_ID}`);
+    expect(notice?.textContent).toContain(
+      `${LEVEL_SETUP_TEXT.worldLabel}: ${LEVEL_SETUP_TEXT.world(false)}`,
+    );
+    // The app's info notice, not the compact world line (review of PR #2378, round 3).
+    expect(notice?.classList.contains('oyl-status')).toBe(true);
+    expect(notice?.closest('.oyl-chooser__world')).toBeNull();
     expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.label);
     // A saved route chosen instead keeps the standard world's chooser: no round, no level line.
     const own = queryAll<HTMLInputElement>(root, '.oyl-chooser__card input[type="radio"]').find(
@@ -180,13 +231,29 @@ describe('the setup on a built-in level — #2362, round 2', () => {
     );
     own?.click();
     await settle();
-    expect(root.querySelector('[data-level-world]')).toBeNull();
+    expect(root.querySelector(`#${LEVEL_WORLD_ID}`)).toBeNull();
     expect(root.textContent).not.toContain(DELIVERY_CHOICE_TEXT.label);
   });
 
   it('with the realistic world chosen, says that world’s own line, not the level’s', async () => {
     const root = await render({ worldChosen: true });
-    expect(root.querySelector('[data-level-world]')).toBeNull();
+    expect(root.querySelector(`#${LEVEL_WORLD_ID}`)).toBeNull();
     expect(root.querySelector('.oyl-chooser__world-label')?.textContent).toBe('Realistic world');
+  });
+
+  it('offers no lap race and no built-in circuits on a level, and says what a level’s round is', async () => {
+    const root = await render();
+    expect(root.textContent).not.toContain(LAP_RACE_CHOICE_TEXT.label);
+    expect(root.textContent).not.toContain(BUILT_IN_CIRCUITS_TEXT.heading);
+    expect(root.querySelector('[data-credit="circuits"]')).toBeNull();
+    expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.levelHint);
+    expect(root.textContent).not.toContain(DELIVERY_CHOICE_TEXT.hint);
+    // A saved route chosen instead says the round's own hint.
+    const own = queryAll<HTMLInputElement>(root, '.oyl-chooser__card input[type="radio"]').find(
+      (radio) => radio.value === OWN[0]?.id,
+    );
+    own?.click();
+    await settle();
+    expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.hint);
   });
 });

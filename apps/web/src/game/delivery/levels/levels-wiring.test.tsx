@@ -36,7 +36,13 @@ import { levelRouteId } from '@onyourleft/store';
 import { OSM_ATTRIBUTION } from '../../../map/basemap';
 import type { RoomsPort } from '../../../net/rooms-port';
 import { AppShell } from '../../../shell/AppShell';
-import { gamePlayFromHash, gameRouteFromHash, hrefForGamePlay } from '../../../shell/routes';
+import {
+  gamePlayFromHash,
+  gameRouteFromHash,
+  hrefForGamePlay,
+  LEVEL_GAME_SUMMARY,
+  routeById,
+} from '../../../shell/routes';
 import type { CapabilityProbe } from '../../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../../testing/mount';
 import { stripComments } from '../../../units/no-inline-units';
@@ -336,6 +342,18 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     }
   });
 
+  it('says under the title that a level’s setup is a built-in round’s, and a saved route’s setup as before', async () => {
+    globalThis.location.hash = hrefForGamePlay('delivery', levelRouteId(FIRST.id));
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port()} />);
+    await until(() => document.querySelector('.oyl-view-head p') !== null);
+    expect(document.querySelector('.oyl-view-head p')?.textContent).toBe(LEVEL_GAME_SUMMARY);
+    mounted.unmount();
+    globalThis.location.hash = '#/game';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port()} />);
+    await until(() => document.querySelector('.oyl-view-head p') !== null);
+    expect(document.querySelector('.oyl-view-head p')?.textContent).toBe(routeById('game').summary);
+  });
+
   it('lists no level on the lap race’s picker', async () => {
     globalThis.location.hash = '#/games/lap-race';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port()} />);
@@ -398,6 +416,36 @@ describe('a level rides in the realistic world whatever Settings chose — the o
     expect(readRealisticWorldChoice(localStorage)).toBe(false);
     expect({ ...localStorage }).toStrictEqual(stored);
   });
+
+  for (const realistic of [false, true]) {
+    it(`says on the level’s card in the setup what its round holds, ${realistic ? 'in the realistic world' : 'with the standard world chosen'} (review of PR #2378, round 3)`, async () => {
+      writeRealisticWorldChoice(localStorage, realistic);
+      globalThis.location.hash = hrefForGamePlay('delivery', levelRouteId(FIRST.id));
+      mounted = await mount(
+        <GameView
+          port={port([
+            { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
+          ])}
+          renderer={() => Promise.resolve(renderer())}
+          now={() => nowMs}
+          riderMass={kilograms(72)}
+        />,
+      );
+      await until(() => !text().includes('Loading your routes'));
+      const card = (id: string): Element | undefined =>
+        [...document.querySelectorAll('.oyl-chooser__card')].find(
+          (each) => each.querySelector('input')?.getAttribute('value') === id,
+        );
+      const houses = fixtureAs(FIRST.id).round.houses;
+      expect(card(levelRouteId(FIRST.id))?.querySelector('.oyl-chooser__course')?.textContent).toBe(
+        `Delivery: up to ${String(houses)} houses on the round`,
+      );
+      // A saved route says nothing in the standard world, where it offers no round.
+      if (!realistic) {
+        expect(card('saved-0')?.querySelector('.oyl-chooser__course')).toBeNull();
+      }
+    });
+  }
 
   it('lists the levels on the Delivery picker with the standard world chosen, the routes’ notice under them', async () => {
     writeRealisticWorldChoice(localStorage, false);

@@ -67,8 +67,10 @@ export const GAME_COURSES_TEXT = {
   // the sentence above is no longer true.
   noRoutesBesideLevels: 'You have no saved routes yet. A route you save is listed here too.',
   importRoute: 'Import a GPX file on the Routes screen',
+  // #2362, round 3, for the owner's approval: about the saved routes only, so
+  // the built-in rounds above it do not read as unplayable.
   deliveryNeedsWorld:
-    'A Delivery round rides in the realistic world, and this device has the standard one chosen.',
+    'A Delivery round on one of your saved routes rides in the realistic world, and this device has the standard one chosen.',
   changeWorld: 'Choose the realistic world in Settings',
   back: 'Back to Games',
   noLoops: 'None of your routes is a loop yet. A lap race needs a route that ends where it starts.',
