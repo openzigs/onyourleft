@@ -2336,18 +2336,32 @@ at the SLOWEST time measured for it, the `chromium` project is about 5 500 s of 
 
 | Script | Job | Spec files (of them nightly-only) | Cases | Slowest files (s, slowest measured) | Simulated part, slowest / median figures |
 |---|---|--:|--:|---|--:|
-| `test:browser:shard-1` | `browser-1` | 8 (1) | 776 | `ride-room` 446, `ride` 356, `rideview` 297 | 446 / 359 s |
-| `test:browser:shard-2` | `browser-2` | 15 | 428 | `pre-ride` 197, `ride-targets` 140, `room` 109 | 358 / 295 s |
-| `test:browser:shard-3` | `browser-3` | 9 (1), then the `game` run | 296 | `ride-laps` 359, `ride-workout` 240, `shell-demo` 181 | 359 / 258 s |
-| `test:browser:shard-4` | `browser-4` | 18 (1) | 363 | `controls-first` 217, `list-detail` 210, `links` 169 | 357 / 275 s |
-| `test:browser:shard-5` | `browser-5` | 13 (2) | 534 | `ride-conditions` 334, `shell` 276, `ride-hud-layout` 261 | 358 / 297 s |
+| `test:browser:shard-1` | `browser-1` | 6 | 513 | `ride-room` 448, `ride-conditions` 334, `controls-first` 217 | 448 / 349 s |
+| `test:browser:shard-2` | `browser-2` | 18 (1) | 458 | `pre-ride` 197, `links` 169, `ride-notices` 111 | 369 / 283 s |
+| `test:browser:shard-3` | `browser-3` | 16 (1), then the `game` run | 252 | `list-detail` 210, `shell-demo` 181, `corridor` 122 | 369 / 258 s |
+| `test:browser:shard-4` | `browser-4` | 15 | 557 | `shell` 276, `ride-hud-layout` 261, `ride-workout` 240 | 367 / 308 s |
+| `test:browser:shard-5` | `browser-5` | 8 (3) | 617 | `ride-laps` 370, `ride` 356, `rideview` 297 | 370 / 316 s |
 
-`browser-1`'s 446 s is `ride-room.browser.spec.ts` alone in one worker, and that figure is already
-the Xeon 8370C's. The nightly-only files are the five realistic specs that hold only `@nightly`
-describes, in the lists so that every spec is in exactly one. `shell-demo.browser.spec.ts` is still
-in `browser-3`'s list and the `game` run still after its part, as `nightly-split.test.ts` holds. The
-cases are 776 + 428 + 296 + 363 + 534 = 2 397, the whole `chromium` project (`playwright test
---list` over each script's file filters). ⚠️ **A NEW spec file goes into the list of the shard whose
+`browser-1`'s 448 s is `ride-room.browser.spec.ts` in one worker, the slowest it was measured (on
+an EPYC 7763 beside `ride` and `rideview`). The nightly-only files are the five realistic specs that
+hold only `@nightly` describes, in the lists so that every spec is in exactly one.
+
+⚠️ **The demo's two specs are in a shard with no spec that opens the ride harness**, and that is a
+constraint on the search, not its outcome. `shell-demo.browser.spec.ts` and
+`demo-world.browser.spec.ts` draw the realistic world on the CPU, and beside one a ride-harness case
+waiting its 10 s for the race standings (`ride-harness.tsx` §`PATIENCE_MS`) ran out of it twice while
+this was measured, each on an EPYC 7763 in the demo's shard: `ride-laps.browser.spec.ts` §"#2080 …
+at large text — a landscape tablet" (18.8 s, run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), the mutation probe
+below) and, with `ride-room` moved there instead, `ride-room.browser.spec.ts` §"#1356 … the control
+— the smallest corners layout" (16.4 s, run
+[42532792084](https://github.com/openzigs/onyourleft/actions/runs/42532792084) attempt 3). Before
+#2376 `ride-room` and the demo shared `browser-3` on every run read and it did not happen, which is
+what order in a list can hide. `nightly-split.test.ts` holds the constraint from each spec's code
+(`ride.html`, `openRide`, `sharedRide`, `./ride-stage`), so a NEW spec that rides goes red in the
+demo's list. `shell-demo.browser.spec.ts` is still in `browser-3`'s list and the `game` run still
+after its part. The cases are 513 + 458 + 252 + 557 + 617 = 2 397, the whole `chromium` project
+(`playwright test --list` over each script's file filters). ⚠️ **A NEW spec file goes into the list of the shard whose
 newest row below is furthest inside 504 s**, in the same pull request, or `nightly-split.test.ts`
 is red.
 
@@ -2389,5 +2403,5 @@ and 1 121 s. Attempts 2, 4 and 5 waited at most 227, 83 and 236 s.
 
 ⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
 run's log and draw the lists again the same way, divide the file that is the floor (one file is
-one worker: `ride-room.browser.spec.ts`, 446 s at its slowest, is the largest now), or add a sixth
+one worker: `ride-room.browser.spec.ts`, 448 s at its slowest, is the largest now), or add a sixth
 shard (a script, a job, a column here, the job in `needs:`). Not a longer stop.

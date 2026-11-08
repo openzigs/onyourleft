@@ -606,6 +606,31 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(homes).toEqual(['test:browser:shard-3']);
   });
 
+  it('keeps the demo’s realistic world out of every shard that opens the ride harness — #2376', () => {
+    // The two demo specs draw the realistic world on the CPU. Beside one, a
+    // ride harness case waiting its 10 s for the race standings ran out of
+    // it on an EPYC 7763 twice while #2376 was measured: `ride-laps` (18.8 s)
+    // and `ride-room` (16.4 s), each in the demo's shard (§4c §"Five browser
+    // shards — #2376"). So the shard that holds them names no spec that
+    // drives `ride.html`, read from the spec's own code rather than a list.
+    const demos = ['shell-demo.browser.spec.ts', 'demo-world.browser.spec.ts'];
+    const RIDE_HARNESS = /ride\.html|\bopenRide\b|\bsharedRide\b|from '\.\/ride-stage'/;
+    expect(SPECS.filter((spec) => RIDE_HARNESS.test(codeOf(spec))).length).toBeGreaterThan(0);
+    for (const demo of demos) {
+      const homes = shardScripts().filter(([, script]) => script.includes(` /${demo}`));
+      expect(homes, demo).toHaveLength(1);
+      const [, script = ''] = homes[0] ?? [];
+      const filters = (playwrightRuns(script)[0] ?? '')
+        .split(/\s+/)
+        .filter((one) => one.startsWith('/'));
+      const riders = SPECS.filter(
+        (spec) =>
+          filters.some((filter) => selects(filter, spec)) && RIDE_HARNESS.test(codeOf(spec)),
+      );
+      expect(riders, demo).toEqual([]);
+    }
+  });
+
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
     // Until #651 they summed to 815 s against a 765 s wrapper, and a `chromium`
     // run that used its 720 s left the game run 35 s of its 85. What the step

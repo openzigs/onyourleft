@@ -662,8 +662,10 @@ jobs:
   # every file's time in its worker over eleven runs, so that each part is
   # under 70 % of its stop at the slowest time measured for every one of its
   # files. Four parts would have been about 465 s each at those times, 65 %,
-  # with the slowest runner seen still past 70 %; five are about 360 s, and
-  # 446 s for the part whose one worker runs `ride-room.browser.spec.ts`.
+  # with the slowest runner seen still past 70 %; five are about 370 s, and
+  # 448 s for the part whose one worker runs `ride-room.browser.spec.ts`.
+  # The demo's two specs, which draw the realistic world, share a part with
+  # no spec that opens the ride harness (nightly-split.test.ts holds it).
   # No stop moved. docs/agents/ci.md section 4c "Five browser shards --
   # #2376" has the measurements.
   browser-1:
