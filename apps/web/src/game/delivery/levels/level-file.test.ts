@@ -161,9 +161,9 @@ describe('parseLevelFile — #2361', () => {
     ] as const)('a key added to %s', (_where, add, field) => {
       const raw = fixture();
       add(raw);
-      expect(refusal(raw)).toMatch(
-        new RegExp(`^level file: ${field.replace(/[[\].]/g, '\\$&')} holds a key the format`),
-      );
+      expect(
+        refusal(raw).startsWith(`level file: ${field} holds a key the format does not have (`),
+      ).toBe(true);
     });
 
     it('a field missing', () => {
