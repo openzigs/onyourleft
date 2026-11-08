@@ -537,6 +537,27 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
     expect(cars).toBeGreaterThan(0);
   });
 
+  it('keeps every level obstacle out of sight at the start and of the one before, at every density', () => {
+    const span = { from: 120, to: 120 + 5000 };
+    for (const perKilometre of [0.5, 1, 2, 3, 4]) {
+      for (let seed = 0; seed < 200; seed += 1) {
+        const placed = placeObstacles(span, (seed * 2_654_435_761) >>> 0, 'normal', true, {
+          perKilometre,
+          standingShare: 1,
+        });
+        expect(placed.length).toBeGreaterThan(0);
+        expect(placed[0]?.along).toBeGreaterThanOrEqual(span.from + OBSTACLE_SIGHT_METRES);
+        placed.forEach((obstacle, index) => {
+          expect(obstacle.along).toBeLessThanOrEqual(span.to);
+          const next = placed[index + 1];
+          if (next !== undefined) {
+            expect(next.along - obstacle.along).toBeGreaterThanOrEqual(OBSTACLE_SIGHT_METRES);
+          }
+        });
+      }
+    }
+  });
+
   it('places none for a level with no static hazards, and none with the assist at none', () => {
     const span = { from: 0, to: 3000 };
     expect(placeObstacles(span, 7, 'normal', true, { perKilometre: 0, standingShare: 1 })).toEqual(
