@@ -53,3 +53,11 @@ apps/mobile/android/capacitor-cordova-android-plugins/
 # for byte by `apps/instance/src/openapi.test.ts`. Prettier would fold its short
 # arrays onto one line and the two would disagree about every regeneration.
 apps/instance/openapi.json
+
+# The built-in Delivery levels (#2361, ADR 0065) and their synthetic fixture,
+# WRITTEN by `apps/web/tools/delivery-levels/author-level.ts` §`serialise`, one
+# footprint and one point a line, and compared byte for byte by its test.
+# Prettier would fold every footprint over 100 columns across a dozen lines,
+# for files whose size is held under the owner's ceilings (D-3.2).
+apps/web/src/game/delivery/levels/data/*.json
+apps/web/src/game/delivery/levels/fixtures/*.json

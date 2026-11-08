@@ -16,7 +16,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openActivityStore } from './activity-store';
 import { StoreReferentialError, StoreValidationError, WorldCorridorTooLargeError } from './errors';
-import { CIRCUIT_ROUTE_PREFIX, circuitRouteId, isCircuitRouteId, routeId } from './ids';
+import {
+  CIRCUIT_ROUTE_PREFIX,
+  circuitRouteId,
+  isCircuitRouteId,
+  isLevelRouteId,
+  LEVEL_ROUTE_PREFIX,
+  levelRouteId,
+  routeId,
+} from './ids';
 import { WORLD_CORRIDOR_FEATURES_LIMIT_BYTES, type WorldCorridorRecord } from './records';
 import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
@@ -236,6 +244,40 @@ describe('a built-in circuit’s corridor — #2293, ADR 0064 D-2.2', () => {
     const minted = routeId(globalThis.crypto.randomUUID());
     expect(isCircuitRouteId(minted)).toBe(false);
     expect(() => circuitRouteId(' ')).toThrow(StoreValidationError);
+  });
+});
+
+describe('a built-in Delivery level’s key — #2361, ADR 0065 D-2.4 and D-8.2', () => {
+  const LEVEL = levelRouteId('fixture-level');
+
+  it('keeps no corridor, for any owner, and reads none back on a fresh ActivityStore', async () => {
+    const corridor = await worldCorridorFor(ATHLETE_A, LEVEL);
+    await expect(harness.write(async (store) => store.putWorldCorridor(corridor))).rejects.toThrow(
+      /a built-in Delivery level keeps no corridor/,
+    );
+    await harness.discard();
+    const fresh = openActivityStore(harness.databaseName);
+    const read = await fresh.getWorldCorridor(ATHLETE_A, LEVEL);
+    fresh.close();
+    expect(read).toBeUndefined();
+    await expect(rowsOnDisk()).resolves.toStrictEqual([]);
+  });
+
+  it('is a namespace no route id and no circuit id may carry', () => {
+    expect(LEVEL).toBe('level:fixture-level');
+    expect(isLevelRouteId(LEVEL)).toBe(true);
+    expect(isCircuitRouteId(LEVEL)).toBe(false);
+    expect(() => routeId('level:fixture-level')).toThrow(StoreValidationError);
+    expect(() => routeId(`${LEVEL_ROUTE_PREFIX}anything`)).toThrow(
+      /reserved for the built-in Delivery levels/,
+    );
+    // A circuit's key and a level's key are never one another's.
+    expect(isLevelRouteId(circuitRouteId('fixture-circuit'))).toBe(false);
+    expect(() => levelRouteId(circuitRouteId('fixture-circuit'))).toThrow(StoreValidationError);
+    expect(() => levelRouteId(LEVEL)).toThrow(StoreValidationError);
+    // A route id as `main.tsx` mints them is never a level's.
+    expect(isLevelRouteId(routeId(globalThis.crypto.randomUUID()))).toBe(false);
+    expect(() => levelRouteId(' ')).toThrow(StoreValidationError);
   });
 });
 

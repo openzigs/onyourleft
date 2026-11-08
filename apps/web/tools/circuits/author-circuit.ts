@@ -184,7 +184,7 @@ function toLine(flat: Float32Array): LocalPoint[] {
 }
 
 /** The inverse of `localMetres` for `frame`. */
-function geographic(
+export function geographic(
   frame: CorridorFrame,
   point: LocalPoint,
 ): { latitude: number; longitude: number } {
@@ -246,7 +246,7 @@ export async function readStreets(archiveUrl: string, frame: CorridorFrame): Pro
 }
 
 /** USGS 3DEP heights at `points`, in order; the answers go into `digest`. */
-async function sampleHeights(
+export async function sampleHeights(
   points: readonly { latitude: number; longitude: number }[],
   digest: ReturnType<typeof createHash>,
 ): Promise<{ heights: number[]; resolution: number }> {
