@@ -188,6 +188,57 @@ describe('erasing the pictures', () => {
  * The red/green pair. See this file's header.
  * -------------------------------------------------------------------------- */
 
+describe('the pictures kept during a discarded ride (#2349)', () => {
+  it('go, and only those: before, after, another athlete’s and a snapshot stay, read back on a fresh connection', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const before = cameraFrameFor(ATHLETE_A, { capturedAt: 1_700_000_099 });
+    const first = cameraFrameFor(ATHLETE_A, { capturedAt: 1_700_000_100 });
+    const last = cameraFrameFor(ATHLETE_A, { capturedAt: 1_700_000_200 });
+    const after = cameraFrameFor(ATHLETE_A, { capturedAt: 1_700_000_201 });
+    const theirs = cameraFrameFor(ATHLETE_B, { capturedAt: 1_700_000_150 });
+    const snapshot = { ...snapshotFor(ATHLETE_A, ride.id), capturedAt: unixSeconds(1_700_000_150) };
+    await harness.write(async (store) => {
+      for (const frame of [before, first, last, after, theirs, snapshot]) {
+        await store.putCameraFrame(frame);
+      }
+    });
+
+    const removed = await harness.write(async (store) =>
+      store.deleteKeptCameraFramesCapturedBetween(
+        ATHLETE_A,
+        unixSeconds(1_700_000_100),
+        unixSeconds(1_700_000_200),
+      ),
+    );
+    expect(removed).toBe(2);
+
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((each) => each.id).sort()).toStrictEqual(
+      [before.id, after.id, snapshot.id].sort(),
+    );
+    const others = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
+    expect(others.map((each) => each.id)).toStrictEqual([theirs.id]);
+  });
+
+  it('deletes nothing for a window that ends before it starts', async () => {
+    await harness.write(async (store) =>
+      store.putCameraFrame(cameraFrameFor(ATHLETE_A, { capturedAt: 1_700_000_150 })),
+    );
+    await expect(
+      harness.write(async (store) =>
+        store.deleteKeptCameraFramesCapturedBetween(
+          ATHLETE_A,
+          unixSeconds(1_700_000_200),
+          unixSeconds(1_700_000_100),
+        ),
+      ),
+    ).resolves.toBe(0);
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      1,
+    );
+  });
+});
+
 describe('the harness catches a delete that reports success and removes nothing', () => {
   it('goes GREEN against the real store', async () => {
     const real = createStoreHarness();

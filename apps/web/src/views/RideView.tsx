@@ -38,10 +38,12 @@
  * ## Stop takes two presses and that is the point
  *
  * #49: *"Stop is confirmed before it destroys a session; a test asserts a single
- * click cannot discard a ride."* The first press arms; the second, in a
- * different control with a different label, stops. The controller refuses
- * `confirmStop` unless the arm happened, so the guarantee does not rest on this
- * component rendering the two buttons in the right order.
+ * click cannot discard a ride."* The first press opens the end-of-ride
+ * question (#2349, `ride/EndRideQuestion.tsx`): *Keep riding*, *Save ride* or
+ * *Discard ride*, and a discard is asked once more. The controller refuses
+ * `confirmStop` unless the question was opened and `confirmDiscard` unless the
+ * discard was asked, so the guarantee does not rest on this component
+ * rendering the buttons in the right order.
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
@@ -79,6 +81,8 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { EndRideQuestion } from '../ride/EndRideQuestion';
+import { useRideBack } from '../shell/ride-back';
 import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
 import { ThresholdOffer } from '../ride/ThresholdOffer';
@@ -782,23 +786,40 @@ function RideControls({
       startRecording.current?.focus();
     }
   }, [snapshot.phase]);
-  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the confirmation replace each other,
+  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the question replace each other,
   // so each press unmounts the control it was made on. Focus goes to the
-  // control that replaced it: *Keep riding* after *Stop* — the step that does
-  // NOT end the ride, so a key held down or pressed twice cannot carry a
-  // keyboard rider through the confirmation — and *Stop* again after *Keep
-  // riding*. Only after a press on this screen: a screen mounted with a stop
-  // already armed leaves focus where it is.
-  const keepRiding = useRef<HTMLButtonElement>(null);
+  // control that replaced it: *Keep riding* after *Stop* — the answer that
+  // does NOT end the ride, so a key held down or pressed twice cannot carry a
+  // keyboard rider through the question (`EndRideQuestion`'s `focusOnOpen`) —
+  // and *Stop* again after *Keep riding*. Only after a press on this screen: a
+  // screen mounted with the question already open leaves focus where it is.
   const stopButton = useRef<HTMLButtonElement>(null);
   const focusAfterStopChange = useRef(false);
+  const [askedHere, setAskedHere] = useState(false);
   useEffect(() => {
     if (!focusAfterStopChange.current) {
       return;
     }
     focusAfterStopChange.current = false;
-    (snapshot.stopArmed ? keepRiding : stopButton).current?.focus();
+    if (!snapshot.stopArmed) {
+      stopButton.current?.focus();
+    }
   }, [snapshot.stopArmed]);
+  const keepRiding = (): void => {
+    focusAfterStopChange.current = true;
+    setAskedHere(false);
+    controller.cancelStop();
+  };
+  // #2349: Android's back, on this screen while a ride is on, is the
+  // question's own key — it opens it, and is Keep riding once it is open.
+  useRideBack(rideInProgress(snapshot.phase), () => {
+    if (snapshot.stopArmed) {
+      keepRiding();
+    } else {
+      setAskedHere(true);
+      controller.armStop();
+    }
+  });
 
   if (snapshot.phase === 'idle') {
     return (
@@ -961,7 +982,7 @@ function RideControls({
               size="ride"
               ref={stopButton}
               onClick={() => {
-                focusAfterStopChange.current = true;
+                setAskedHere(true);
                 controller.armStop();
               }}
             >
@@ -991,36 +1012,40 @@ function RideControls({
       </div>
 
       {snapshot.stopArmed ? (
-        <>
-          <StatusMessage tone="warning" label="Confirm" live>
-            Stopping ends this ride. It stays on this device either way.
-          </StatusMessage>
-          <div className="oyl-ride__actions">
-            <Button
-              size="ride"
-              onClick={() => {
-                void controller.confirmStop();
-              }}
-            >
-              Yes, stop the ride
-            </Button>
-            <Button
-              variant="secondary"
-              size="ride"
-              ref={keepRiding}
-              onClick={() => {
-                focusAfterStopChange.current = true;
-                controller.cancelStop();
-              }}
-            >
-              Keep riding
-            </Button>
-          </div>
-        </>
+        // #2349: the one end-of-ride question, the game's too. Keep riding
+        // (and Escape, and back) closes it and changes nothing else.
+        <EndRideQuestion
+          className="oyl-end-ride oyl-end-ride--ride-screen"
+          step={snapshot.discardArmed ? 'discard' : 'ask'}
+          // `recording/finish.ts`: a recording with no samples is no ride.
+          canSave={snapshot.sampleCount > 0}
+          focusOnOpen={askedHere}
+          surface="ride-screen"
+          onSave={() => {
+            void controller.confirmStop();
+          }}
+          onDiscard={() => {
+            controller.armDiscard();
+          }}
+          onConfirmDiscard={() => {
+            // #2349's review: a discard that throws has failed closed, and the
+            // controller says so (`discarded`, with `leftover`): the screen
+            // shows "Not deleted" from the snapshot, so nothing is left here.
+            controller.confirmDiscard().catch(() => undefined);
+          }}
+          onKeepRiding={keepRiding}
+        />
       ) : null}
     </>
   );
 }
+
+/** #2349: what a discarded ride's screen says. ⚠️ Draft wording for the owner. */
+export const DISCARDED_TEXT = {
+  gone: 'The ride is stopped and discarded. It was deleted from this device, and nothing was saved.',
+  leftover:
+    'The ride is stopped and was not saved, but it could not be deleted from this device. It is still here, and will be offered back so it can be discarded again.',
+} as const;
 
 /** What a stopped ride ends on — where it got to, and whether the tab is safe to close. */
 function StoppedNotice({
@@ -1044,6 +1069,23 @@ function StoppedNotice({
   // is saved … Closing the tab is safe now" directly above `StorageNotice`
   // saying the device had no room left. The rider believes the reassuring one
   // and closes the tab.
+  if (snapshot.saveState === 'discarded') {
+    // #2349: the rider answered Discard ride twice. FIRST, before the storage
+    // check below: a discarded ride's last seconds are not being kept, and a
+    // delete that failed is what sets `storage` here, so that warning would
+    // tell the rider to keep a tab open for a ride they asked to delete. ⚠️ A delete that did not
+    // go through is said, never hidden: the ride is still on this device and
+    // is offered back, which a rider who was told "deleted" would not expect.
+    return snapshot.leftover ? (
+      <StatusMessage tone="warning" label="Not deleted" live>
+        {DISCARDED_TEXT.leftover}
+      </StatusMessage>
+    ) : (
+      <StatusMessage tone="info" label="Discarded" live>
+        {DISCARDED_TEXT.gone}
+      </StatusMessage>
+    );
+  }
   if (snapshot.storage !== 'ok') {
     return (
       <StatusMessage tone="warning" label="Stopped" live>

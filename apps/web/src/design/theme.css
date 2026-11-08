@@ -4432,6 +4432,83 @@ a.oyl-button {
   margin-inline-start: auto;
 }
 
+/*
+ * #2349: the end-of-ride question (`ride/EndRideQuestion.tsx`), on the Ride
+ * screen and in the HUD's actions panel: its sentence, then its answers as
+ * one row with #669's 8 px between boxes, wrapping onto a second line where
+ * the row is narrow (the HUD's panel on a phone). A gap rather than a margin,
+ * for `.oyl-ride__actions`' reason. ⚠️ Its layout over the stage is for the
+ * browser gate to measure, never to be read off this rule.
+ */
+.oyl-end-ride {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-end-ride__answers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+/*
+ * #2349 — UPRIGHT, THE MOVING TIME GIVES WAY TO THE END-OF-RIDE QUESTION.
+ *
+ * Upright the moving time is drawn beside *Pause* and *End ride*, hung from
+ * the controls' row (§"#1111 UPRIGHT" below, with anchors and without). While
+ * the question stands in that row's place there is no row to hang it from:
+ * with anchors it fell back into the secondary grid, over *Gradient*, and
+ * without them it is at the top-end corner of a panel whose first lines are
+ * now the question's. So for as long as the question is open it is clipped to
+ * a pixel — never removed: it is still in the document where a screen reader
+ * meets it — as a reading a layout gives way to is (#419). It comes back
+ * with *Pause* and *End ride*. `ride-hud-layout.browser.spec.ts` §"#2349".
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has([data-oyl-end-ride])
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--moving {
+    position: absolute;
+    inset: auto;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Without anchors the trainer line gave the moving time its 7 rem, and
+     took a second line for it; with the time given way it has its width
+     back. Measured: with the margin the actions panel was 212 px at 360×752
+     and over the leaning rider. */
+  .oyl-game--riding .oyl-hud:has([data-oyl-end-ride]) .oyl-hud__actions > .oyl-hud__trainer {
+    margin-inline-end: 0;
+  }
+}
+
+/* #2349: in the HUD, one short line and nothing else above the answers, and
+   no margin of its own — the column's gap spaces it. Measured, not chosen:
+   with the Ride screen's message the actions panel was 307 px tall and ran
+   off a phone on its side (`ride-hud-layout.browser.spec.ts` §"#2349"). */
+.oyl-end-ride__question {
+  margin: 0;
+}
+
+/* #2349: in the HUD's 16 rem panel on a phone on its side, the discard step's
+   two answers on ONE row: at the buttons' own inline padding they need 249 px
+   of the panel's 238, wrapped onto a second row, and ran the panel off a
+   736×360 stage by 17 px. The block padding, and with it the 48 px height
+   (`ride-targets.browser.spec.ts`), is unchanged. */
+.oyl-end-ride--hud .oyl-end-ride__answers > .oyl-button {
+  padding-inline: var(--oyl-space-sm);
+}
+
 .oyl-trainer__state {
   font-size: var(--oyl-font-size-lg);
 }

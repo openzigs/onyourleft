@@ -37,6 +37,7 @@ import {
 
 import { tabbableElements } from '../a11y/audit';
 import type { GamePort, RidableRoute } from '../game/GameView';
+import { endRideAnswer } from '../game/end-ride-testing';
 import { UPDATE_REGION_LABEL } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
@@ -235,6 +236,8 @@ describe('a ride takes the screen over — #423', () => {
     await openTheGame();
     await press('Ride ');
     await press('End ride');
+    await press('Discard ride');
+    await press('Discard ride');
 
     for (const [name, element] of Object.entries(chrome())) {
       expect(element, name).not.toBeNull();
@@ -242,20 +245,40 @@ describe('a ride takes the screen over — #423', () => {
     expect(document.querySelector('h1')?.className).toBe('');
   });
 
-  it('gives it back when the rider leaves by the platform’s own Back', async () => {
+  it('gives it back when the rider leaves by the platform’s own Back — after the end-of-ride question (#2349)', async () => {
     // Nothing on the stage navigates — `GameViewProps.onImmersive` says why —
-    // so this is the only other way out, and it must not strand a rider on a
-    // page with no header.
+    // so Back is the only other way out, and it must not strand a rider on a
+    // page with no header. Since #2349's review it asks first: the stage keeps
+    // the screen while the question is open, and gives it back once answered.
     await openTheGame();
     await press('Ride ');
-
-    await act(async () => {
-      globalThis.location.hash = hrefFor(routeById('about'));
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
+    const leave = async (): Promise<void> => {
+      await act(async () => {
+        globalThis.location.hash = hrefFor(routeById('about'));
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
       });
+      await settle();
+    };
+
+    await leave();
+    expect(document.querySelector('[data-oyl-end-ride]')).not.toBeNull();
+    expect(chrome().header).toBeNull();
+    expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
+
+    // Nothing is recorded under this ride, so Discard ride, asked twice.
+    await act(async () => {
+      endRideAnswer(document, 'Discard ride').click();
+      await Promise.resolve();
     });
     await settle();
+    await act(async () => {
+      endRideAnswer(document, 'Discard ride').click();
+      await Promise.resolve();
+    });
+    await settle();
+    await leave();
 
     expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);
     for (const [name, element] of Object.entries(chrome())) {
@@ -302,6 +325,8 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     await press('Ride ');
     expect(updateOffer()).toBeNull();
     await press('End ride');
+    await press('Discard ride');
+    await press('Discard ride');
 
     expect(updateOffer()).not.toBeNull();
     expect(button('Update now')).toBeDefined();

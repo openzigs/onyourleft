@@ -217,6 +217,24 @@ describe('the Ride screen’s touch lock — #1432', () => {
     expect(ride.getSnapshot().stopArmed).toBe(true);
   });
 
+  it('stops a tap on every answer of the end-of-ride question, which a key still answers (#2349)', async () => {
+    const ride = await riding();
+    await tapAndSettle(buttonNamed('Stop'));
+    expect(ride.getSnapshot().stopArmed).toBe(true);
+    await tapAndSettle(lock());
+
+    for (const answer of ['Save ride', 'Discard ride', 'Keep riding']) {
+      await tapAndSettle(buttonNamed(answer));
+    }
+    expect(ride.getSnapshot().phase).toBe('recording');
+    expect(ride.getSnapshot().stopArmed).toBe(true);
+    expect(ride.getSnapshot().discardArmed).toBe(false);
+
+    await activateWithKeyboard(buttonNamed('Keep riding'));
+    await settle();
+    expect(ride.getSnapshot().stopArmed).toBe(false);
+  });
+
   it('is still on when the rider comes back to the screen', async () => {
     const ride = await riding();
     await tapAndSettle(lock());
@@ -235,7 +253,7 @@ describe('the Ride screen’s touch lock — #1432', () => {
     await tapAndSettle(lock());
 
     await activateWithKeyboard(buttonNamed('Stop'));
-    await activateWithKeyboard(buttonNamed('Yes, stop the ride'));
+    await activateWithKeyboard(buttonNamed('Save ride'));
     await act(async () => {
       await Promise.resolve();
     });

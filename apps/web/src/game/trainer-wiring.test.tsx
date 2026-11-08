@@ -31,7 +31,7 @@
  * `createGradientSession`.
  */
 
-import { act } from 'react';
+import { act, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
@@ -113,6 +113,10 @@ import type { CourseLineEvent } from '../recording/laps';
 import { formatDuration } from '../format';
 import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
+import { endRideAnswer } from './end-ride-testing';
+import { rideLeave, RideLeaveContext } from '../shell/ride-leave';
+import { hrefFor, routeById } from '../shell/routes';
+import { useRoute } from '../shell/useRoute';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 import { roomPortOver } from '../net/room-port';
 import { frameRider, ManualClock, ScriptedRoom } from '../net/testing';
@@ -613,12 +617,132 @@ describe('the road the game draws reaches the trainer', () => {
     await ride(trainerPort(READY, commands));
     expect(commands.releases).toHaveLength(0);
 
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(commands.releases).toHaveLength(1);
+  });
+
+  it('releases nothing while the end-of-ride question is open, nor on Keep riding (#2349)', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort(READY, commands));
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(commands.releases).toHaveLength(0);
+    await clickThrough(endRideAnswer(document, 'Keep riding'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(commands.releases).toHaveLength(0);
+    // The ride is on: End ride is back, on the stage.
+    expect(buttonStarting('End ride')).toBeDefined();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+  });
+
+  it('asks, and releases nothing, when the browser’s Back or a typed address would leave the stage (#2349’s review, B2)', async () => {
+    // The router the shell uses, over this stage: a change of route unmounts
+    // the game, as `AppShell`'s `ViewBoundary key={route.id}` does, unless the
+    // stage takes it (`shell/ride-leave.ts`).
+    const leave = rideLeave();
+    function Routed({ children }: { readonly children: JSX.Element }): JSX.Element {
+      const match = useRoute(undefined, 'synchronous', leave);
+      return (
+        <RideLeaveContext value={leave}>
+          {match.route.id === 'game' ? children : <p>elsewhere</p>}
+        </RideLeaveContext>
+      );
+    }
+    const gameAt = hrefFor(routeById('game'));
+    const awayAt = hrefFor(routeById('routes'));
+    globalThis.location.hash = awayAt;
+    globalThis.location.hash = gameAt;
+    await settle();
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    mounted = await mount(
+      <Routed>
+        <GameView
+          port={pedallingPort(hillRoute())}
+          trainer={trainerPort(READY, commands)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+        />
+      </Routed>,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await pump(20);
+    await settle();
+    expect(commands.written.length).toBeGreaterThan(0);
+    const asked = (): string | null =>
+      document.querySelector('[data-oyl-end-ride]')?.getAttribute('data-oyl-end-ride') ?? null;
+    const away = async (by: 'typed' | 'back'): Promise<void> => {
+      await act(async () => {
+        if (by === 'typed') {
+          globalThis.location.hash = awayAt;
+        } else {
+          globalThis.history.back();
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      await settle();
+    };
+
+    for (const by of ['typed', 'back'] as const) {
+      const writes = commands.written.length;
+      await away(by);
+      // Asked, on the stage, with the address put back and nothing released
+      // or written.
+      expect(asked()).toBe('ask');
+      expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+      expect(globalThis.location.hash).toBe(gameAt);
+      expect(commands.releases).toEqual([]);
+      expect(commands.written.length).toBe(writes);
+      // Keep riding: the stage, as it was, and still nothing sent.
+      await clickThrough(endRideAnswer(document, 'Keep riding'));
+      expect(asked()).toBeNull();
+      expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+      expect(commands.releases).toEqual([]);
+      expect(commands.written.length).toBe(writes);
+    }
+
+    // A second attempt with the question open leaves it open; only an answer
+    // that ends the ride releases the gradient.
+    await away('typed');
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await away('typed');
+    expect(asked()).toBe('discard');
+    expect(commands.releases).toEqual([]);
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(commands.releases).toHaveLength(1);
+    expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    // Off the stage, nothing is asked: the router goes where it is sent.
+    await away('typed');
+    expect(document.body.textContent).toContain('elsewhere');
+  });
+
+  it('asks the browser’s own prompt before a real unload on the stage, and not on the picker (#2349’s review, B2)', async () => {
+    const unload = (): boolean => {
+      const event = new Event('beforeunload', { cancelable: true });
+      globalThis.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort(READY, commands));
+    expect(unload()).toBe(true);
+    await endTheRide();
+    expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    expect(unload()).toBe(false);
   });
 
   it('releases the trainer when the rider navigates away mid-ride', async () => {
@@ -736,7 +860,7 @@ describe('the Ride press asks the trainer for control — #503', () => {
     const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort({ ...READY, hasControl: false }, commands, false, false), 4);
     expect(commands.requests).toHaveLength(1);
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await settle();
     // Back on the picker: nothing asked by being there.
     expect(commands.requests).toHaveLength(1);
@@ -845,7 +969,7 @@ describe('a standing notice gives the route panel back once it has been read —
     await clickThrough(noticeParts().toggle);
     expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('false');
 
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await clickThrough(buttonStarting('Ride '));
     await pump(2);
     expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('true');
@@ -1132,12 +1256,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     }
 
     async function endAndSave(rig: Awaited<ReturnType<typeof onTheBench>>) {
-      await clickThrough(buttonStarting('End ride'));
-      await flush();
-      await act(async () => {
-        rig.controller.armStop();
-        await rig.controller.confirmStop();
-      });
+      await endAndSaveOnTheHud(rig.controller);
       await flush();
       expect(rig.controller.getSnapshot().saveState).toBe('saved');
       const activity = await rig.harness.read(async (store) =>
@@ -1302,12 +1421,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
           await rig.controller.tick(rig.bench.now);
         });
       }
-      await clickThrough(buttonStarting('End ride'));
-      await flush();
-      await act(async () => {
-        rig.controller.armStop();
-        await rig.controller.confirmStop();
-      });
+      await endAndSaveOnTheHud(rig.controller);
       await flush();
       expect(rig.controller.getSnapshot().saveState).toBe('saved');
       // ⚠️ Read back through the library's own list, on a fresh read of the
@@ -1471,11 +1585,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     for (let second = 0; second < 5; second += 1) {
       await rideOneSecond();
     }
-    await clickThrough(buttonStarting('End ride'));
-    await act(async () => {
-      rig.controller.armStop();
-      await rig.controller.confirmStop();
-    });
+    await endAndSaveOnTheHud(rig.controller);
     await flush();
     expect(rig.controller.getSnapshot().saveState).toBe('saved');
 
@@ -1578,11 +1688,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const shown = rows();
     expect(shown[0]?.slice(0, 2)).toEqual(['Now', '3']);
 
-    await clickThrough(buttonStarting('End ride'));
-    await act(async () => {
-      rig.controller.armStop();
-      await rig.controller.confirmStop();
-    });
+    await endAndSaveOnTheHud(rig.controller);
     await flush();
     expect(rig.controller.getSnapshot().saveState).toBe('saved');
 
@@ -1871,7 +1977,7 @@ describe('a press on Ride while the trainer is being asked — #509', () => {
     trainer.grant();
     await settle();
     await pump(4);
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await settle();
 
     expect(buttonStarting('Ride ')?.getAttribute('aria-disabled')).toBeNull();
@@ -2042,7 +2148,7 @@ describe('the ride gives the screen back, and does not take it again — #566’
     expect(lock.page.requests()).toBe(2);
     expect(lock.page.live()).toBe(1);
 
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await settle();
     expect(lock.released()).toBe(1);
     expect(lock.page.live()).toBe(0);
@@ -2234,6 +2340,33 @@ describe('other riders never reach the trainer — #782 review (N8)', () => {
   });
 });
 
+/**
+ * #2349: *End ride*, then *Discard ride* twice — how a game ride with nothing
+ * recorded under it ends now that *End ride* asks first.
+ */
+async function endTheRide(): Promise<void> {
+  await clickThrough(buttonStarting('End ride'));
+  await clickThrough(endRideAnswer(document, 'Discard ride'));
+  await clickThrough(endRideAnswer(document, 'Discard ride'));
+}
+
+/**
+ * #2349: *End ride*, then *Save ride* — the HUD's own way to the ride
+ * controller's Stop and its save, through `gameTrainerPortOver`, rather than
+ * a Stop pressed on the controller by the test. Waits for the save to settle.
+ */
+async function endAndSaveOnTheHud(controller: {
+  getSnapshot(): { readonly saveState: string; readonly stopping: boolean };
+}): Promise<void> {
+  await clickThrough(buttonStarting('End ride'));
+  await clickThrough(endRideAnswer(document, 'Save ride'));
+  for (let index = 0; index < 100; index += 1) {
+    const now = controller.getSnapshot();
+    if (!now.stopping && now.saveState !== 'saving' && now.saveState !== 'unavailable') return;
+    await settle();
+  }
+}
+
 async function flushRoom(): Promise<void> {
   for (let index = 0; index < 5; index += 1) await settle();
 }
@@ -2332,7 +2465,7 @@ describe('a second game ride in one mount begins with no lap of the first — #1
     await pumpUntilLaps(events, 2);
     // End ride with the second lap's notice on the HUD and its sentence owed.
     expect(hudText()).toMatch(/Lap 1: /);
-    await clickThrough(buttonStarting('End ride'));
+    await endTheRide();
     await settle();
 
     events.length = 0;

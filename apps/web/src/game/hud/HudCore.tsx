@@ -24,7 +24,7 @@
  * `HudPanel` renders it.
  */
 
-import { useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import type { UnitSystem } from '@onyourleft/store';
 
@@ -219,6 +219,18 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const hud = useRef<HTMLElement>(null);
   const [touchLocked, setTouchLocked] = useState(false);
   useTouchLock(hud, touchLocked);
+  // #2349: while the end-of-ride question is open it stands where Pause and
+  // End ride do, and when it closes with the ride still on (Keep riding),
+  // focus goes back to End ride — the control that opened it (SC 2.4.3).
+  const asking = props.endQuestion !== undefined;
+  const endButton = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !asking) {
+      endButton.current?.focus();
+    }
+    wasAsking.current = asking;
+  }, [asking]);
 
   return (
     <section
@@ -304,69 +316,73 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
         )}
 
-        <div className="oyl-hud__controls">
-          <button
-            type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-            onClick={props.onPause}
-            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-          >
-            {props.paused ? props.labels.resume : 'Pause'}
-          </button>
-          {props.withoutEnd === true ? null : (
+        {props.endQuestion === undefined ? null : props.endQuestion}
+        {props.endQuestion !== undefined ? null : (
+          <div className="oyl-hud__controls">
             <button
               type="button"
               className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-              onClick={props.onEnd}
+              onClick={props.onPause}
               style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-              // #1482: never stopped by the touch lock. It ends the game's
-              // gradient session — what the app asks of the trainer — and a
-              // rider who wants that gone must not first have to unlock, the
-              // rule `End ERG` and `End workout` follow on the Ride screen. It
-              // does not end the recording (`GameView.tsx` §`teardown`).
-              {...{ [TOUCH_LOCK_EXEMPT]: '' }}
             >
-              {props.labels.end}
+              {props.paused ? props.labels.resume : 'Pause'}
             </button>
-          )}
-          {props.touchLock ? (
-            <TouchLockButton
-              locked={touchLocked}
-              onLock={() => {
-                setTouchLocked(true);
-              }}
-              onUnlock={() => {
-                setTouchLocked(false);
-              }}
-              className="oyl-hud__lock"
-            />
-          ) : null}
-          {/*
+            {props.withoutEnd === true ? null : (
+              <button
+                ref={endButton}
+                type="button"
+                className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+                onClick={props.onEnd}
+                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+                // #1482: never stopped by the touch lock. It ends the game's
+                // gradient session — what the app asks of the trainer — and a
+                // rider who wants that gone must not first have to unlock, the
+                // rule `End ERG` and `End workout` follow on the Ride screen. It
+                // does not end the recording (`GameView.tsx` §`teardown`).
+                {...{ [TOUCH_LOCK_EXEMPT]: '' }}
+              >
+                {props.labels.end}
+              </button>
+            )}
+            {props.touchLock ? (
+              <TouchLockButton
+                locked={touchLocked}
+                onLock={() => {
+                  setTouchLocked(true);
+                }}
+                onUnlock={() => {
+                  setTouchLocked(false);
+                }}
+                className="oyl-hud__lock"
+              />
+            ) : null}
+            {/*
             #437. A constant name and `aria-expanded`, rather than a label that
             flips between "Show" and "Hide": a screen reader then says what the
             control is and which way it stands, and a speech-control user has
             one thing to say. Last, so Pause and End ride keep their places.
           */}
-          {props.standingNotice === undefined ? null : (
-            <button
-              type="button"
-              className="oyl-hud__control oyl-hud__notice-toggle"
-              aria-expanded={props.standingNotice.expanded}
-              aria-controls={STANDING_NOTICE_ID}
-              onClick={props.standingNotice.onToggle}
-              style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-            >
-              Trainer notice
-            </button>
-          )}
-        </div>
+            {props.standingNotice === undefined ? null : (
+              <button
+                type="button"
+                className="oyl-hud__control oyl-hud__notice-toggle"
+                aria-expanded={props.standingNotice.expanded}
+                aria-controls={STANDING_NOTICE_ID}
+                onClick={props.standingNotice.onToggle}
+                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+              >
+                Trainer notice
+              </button>
+            )}
+          </div>
+        )}
         {/*
           #1810: a Delivery round's throws, under the controls a rider presses
           every ride so those keep their places. Inside this region, so the
           touch lock refuses a tap on them as on Pause: none is exempt
           (ADR 0059 D-5). What the lock does to them is why it is handed in.
         */}
-        {props.throwing === undefined ? null : (
+        {props.throwing === undefined || asking ? null : (
           <ThrowControl port={props.throwing} touchLocked={touchLocked} />
         )}
         {/*
@@ -374,7 +390,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           Inside this region, so the lock refuses a tap on it as on Pause: it
           is not exempt (ADR 0060 D-13), and a key or a pad still uses the item.
         */}
-        {props.items === undefined ? null : (
+        {props.items === undefined || asking ? null : (
           <ItemControl
             port={props.items}
             touchLocked={touchLocked}
@@ -401,7 +417,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             lanes={props.lanes}
           />
         )}
-        {props.moreActions}
+        {asking ? null : props.moreActions}
       </div>
 
       {props.afterActions}

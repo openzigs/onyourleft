@@ -86,6 +86,7 @@ import {
 } from '@onyourleft/sensors/simulator';
 import {
   activityId,
+  cameraFrameId,
   lapId,
   RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
@@ -96,7 +97,10 @@ import {
 } from '@onyourleft/store';
 import {
   ATHLETE_A,
+  ATHLETE_B,
+  cameraFrameFor,
   createStoreHarness,
+  recordingFor,
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
@@ -122,6 +126,8 @@ vi.mock('../recording/laps', async (importOriginal) => {
 });
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
+import { keepThisRide } from '../camera/keep';
+import { discardKeptFramesWithTheRide } from '../camera/kept-frame-discard';
 import { exportActivity, LOSSY_CHANNELS } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
 import { importActivityFiles } from '../transfer/import-batch';
@@ -7343,10 +7349,10 @@ async function recordAndStop(rig: Bench, forSeconds: number): Promise<void> {
 
 describe('#548 — canStartNewRide, the one rule the screen and the controller share', () => {
   it('allows a stopped ride whose last checkpoint landed, once the save is settled safely', () => {
-    const allowed = (['saved', 'empty', 'unavailable'] as const).map((saveState) =>
+    const allowed = (['saved', 'empty', 'unavailable', 'discarded'] as const).map((saveState) =>
       canStartNewRide({ phase: 'stopped', stopping: false, storage: 'ok', saveState }),
     );
-    expect(allowed).toEqual([true, true, true]);
+    expect(allowed).toEqual([true, true, true, true]);
   });
 
   it('refuses while the ride exists only in this tab, or is still being explained', () => {
@@ -7369,6 +7375,22 @@ describe('#548 — canStartNewRide, the one rule the screen and the controller s
     ).toBe(false);
   });
 
+  it('allows a discarded ride whatever its storage says, and never while it is still stopping (#2349)', () => {
+    // A failed delete is what leaves the recorder's storage `failed` here, and
+    // the rider asked twice for the ride to go: there is nothing to protect.
+    expect(
+      (['failed', 'quota-exceeded'] as const).map((storage) =>
+        canStartNewRide({ phase: 'stopped', stopping: false, storage, saveState: 'discarded' }),
+      ),
+    ).toEqual([true, true]);
+    expect(
+      canStartNewRide({ phase: 'stopped', stopping: true, storage: 'ok', saveState: 'discarded' }),
+    ).toBe(false);
+    expect(
+      canStartNewRide({ phase: 'paused', stopping: false, storage: 'ok', saveState: 'discarded' }),
+    ).toBe(false);
+  });
+
   it('refuses while the stop is still settling, whatever the save state says', () => {
     // #565's review: the phase is `stopped` before the release, the flush and
     // the save have run, and `saveState` can still read the previous ride's.
@@ -7383,6 +7405,310 @@ describe('#548 — canStartNewRide, the one rule the screen and the controller s
       canStartNewRide({ phase, stopping: false, storage: 'ok', saveState: 'saved' }),
     );
     expect(phases).toEqual([false, false, false]);
+  });
+});
+
+describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding', () => {
+  /** A ride holding an ERG target, so a write to the trainer would show. */
+  async function holdingTarget(options: Parameters<typeof benchWith>[0] = {}) {
+    const rig = benchWith({ rideSave: storeSavePort(), ...options });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+    await ride(rig, 6);
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    return rig;
+  }
+
+  const library = async () => harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+  const onDisk = async (rig: Bench) =>
+    harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, rig.sessionIds[0] as RecordingSessionId),
+    );
+
+  it('keeps riding: the question and its discard step write nothing to the trainer, and the ride records on', async () => {
+    const rig = await holdingTarget();
+    const writes = rig.written.length;
+
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(rig.controller.getSnapshot().stopArmed).toBe(true);
+    expect(rig.controller.getSnapshot().discardArmed).toBe(true);
+    rig.controller.cancelStop();
+
+    // Nothing was sent: no Stop, no new target, no Reset.
+    expect(rig.written.slice(writes)).toEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    const after = rig.controller.getSnapshot();
+    expect(after.phase).toBe('recording');
+    expect(after.stopArmed).toBe(false);
+    expect(after.discardArmed).toBe(false);
+    const samples = after.sampleCount;
+    await ride(rig, 3);
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(samples);
+    rig.controller.dispose();
+  });
+
+  it('never discards on one press, however the confirmation was reached', async () => {
+    const rig = await holdingTarget();
+    // The confirmation with no discard asked: refused.
+    rig.controller.armStop();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // The discard step with no question open: refused, so still one short.
+    rig.controller.cancelStop();
+    rig.controller.armDiscard();
+    expect(rig.controller.getSnapshot().discardArmed).toBe(false);
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(await onDisk(rig)).toBeDefined();
+    rig.controller.dispose();
+  });
+
+  it('discards on the second Discard: the trainer released as a Stop releases it, the recording gone from the store, nothing saved', async () => {
+    const rig = await holdingTarget();
+    const writes = rig.written.length;
+
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+
+    const after = rig.controller.getSnapshot();
+    expect(after.phase).toBe('stopped');
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(false);
+    expect(after.stopping).toBe(false);
+    // The existing release (`stopTrainer`): the ERG target let go with a Stop.
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    // Read back on a fresh connection: no recording to offer back, no activity.
+    expect(await onDisk(rig)).toBeUndefined();
+    expect(await library()).toEqual([]);
+    // Nothing left in this tab to protect: a new ride may start, offered nothing.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().recoverable).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('saves on Save ride, and the saved ride is listed', async () => {
+    const rig = await holdingTarget();
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect((await library()).map((summary) => summary.id)).toEqual(['ride-1']);
+    rig.controller.dispose();
+  });
+
+  it('says so, and offers the ride back, when the delete does not go through', async () => {
+    const rig = await holdingTarget({
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    const after = rig.controller.getSnapshot();
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(true);
+    // Never lost silently: on the device, and offered once a new ride starts.
+    expect(await onDisk(rig)).toBeDefined();
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().recoverable).toHaveLength(1);
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('says “not deleted”, never a failed save, when something throws on the way, and offers the ride back (#2349’s review)', async () => {
+    const rig = await holdingTarget();
+    const control = rig.trainerControl();
+    expect(control).toBeDefined();
+    // Something on the discard path throws — here the release's first read.
+    // Nothing on today's paths does; the controller must fail closed if one
+    // ever starts to.
+    const unwell = vi.spyOn(control as TrainerControl, 'hasControl').mockImplementation(() => {
+      throw new Error('the trainer is unwell');
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    await expect(rig.controller.confirmDiscard()).rejects.toThrow('the trainer is unwell');
+    unwell.mockRestore();
+    const after = rig.controller.getSnapshot();
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(true);
+    expect(after.stopping).toBe(false);
+    // Still on the device, and offered back.
+    expect(await onDisk(rig)).toBeDefined();
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('deletes only this ride: another athlete’s recording and this athlete’s older one stay, read back on a fresh connection', async () => {
+    const theirs = recordingFor(ATHLETE_B);
+    const older = recordingFor(ATHLETE_A, { state: 'stopped' });
+    await harness.write(async (store) => {
+      await store.putRecordingSession(theirs);
+      await store.putRecordingSession(older);
+    });
+    const rig = await holdingTarget();
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+
+    expect(await onDisk(rig)).toBeUndefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_B, theirs.id)),
+    ).resolves.toBeDefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, older.id)),
+    ).resolves.toBeDefined();
+    rig.controller.dispose();
+  });
+
+  it('takes the pictures kept during the discarded ride, and only those (B1)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    let minted = 0;
+    const keep = keepThisRide({
+      store: {
+        putCameraFrame: async (record) =>
+          harness.write(async (store) => store.putCameraFrame(record)),
+        countCameraFrames: async (owner) =>
+          harness.write(async (store) => store.countCameraFrames(owner)),
+        countSnapshots: async (owner) =>
+          harness.write(async (store) => store.countSnapshots(owner)),
+        deleteCameraFrames: async (owner) =>
+          harness.write(async (store) => store.deleteCameraFrames(owner)),
+      },
+      athleteId: ATHLETE_A,
+      newFrameId: () => {
+        minted += 1;
+        return cameraFrameId(`kept-${String(minted)}`);
+      },
+      now: () => rig.bench.now,
+    });
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+          harness.write(async (store) =>
+            store.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+          ),
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    const picture = cameraFrameFor(ATHLETE_A);
+    const frame = {
+      bytes: picture.bytes,
+      mediaType: picture.mediaType,
+      width: picture.width,
+      height: picture.height,
+    };
+    keep.setKeeping(true);
+
+    // The first ride, kept and SAVED: its picture is that ride's to keep.
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    await ride(rig, 2);
+    // Kept between the rides: before the next one started.
+    await keep.accept(frame);
+    await ride(rig, 2);
+    expect(await rig.controller.startNewRide()).toBe(true);
+
+    // The second ride: a picture kept during it, and another athlete's
+    // picture taken in the same seconds on this device.
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    const theirs = cameraFrameFor(ATHLETE_B, { capturedAt: rig.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(theirs));
+    await ride(rig, 3);
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+    await discards.settled();
+
+    // Read back on a fresh connection.
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((row) => row.id).sort()).toStrictEqual(['kept-1', 'kept-2']);
+    const others = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
+    expect(others.map((row) => row.id)).toContain(theirs.id);
+    discards.dispose();
+    rig.controller.dispose();
+  });
+
+  it('keeps the pictures of a discard whose delete did not go through: the ride is still here (B1)', async () => {
+    const rig = await holdingTarget({
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    const deleted: unknown[] = [];
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: (...window) => {
+          deleted.push(window);
+          return Promise.resolve(0);
+        },
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    await discards.settled();
+    expect(rig.controller.getSnapshot().leftover).toBe(true);
+    expect(deleted).toEqual([]);
+    discards.dispose();
+    rig.controller.dispose();
+  });
+
+  it('the game’s port: nothing to offer before a recording or after it stops', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    expect(game.rideRecording?.()).toBeUndefined();
+    // A recording holds its first slot from the press, so it is savable at
+    // once (`recording/finish.ts` saves anything of one sample or more); the
+    // empty case is the port's own rule, in `trainer-port.test.ts`.
+    await rig.controller.start();
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(0);
+    expect(game.rideRecording?.()).toEqual({ savable: true });
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    // Stopped is not in progress: there is nothing under a game ride now.
+    expect(game.rideRecording?.()).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('the game’s Save ride stops and saves through the controller, and the ride is listed', async () => {
+    const rig = await holdingTarget();
+    const game = gameTrainerPortOver(rig.controller);
+    const writes = rig.written.length;
+    await game.saveRideRecording?.();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    expect((await library()).map((summary) => summary.id)).toEqual(['ride-1']);
+    rig.controller.dispose();
+  });
+
+  it('the game’s Discard ride deletes the recording through the controller, and saves nothing', async () => {
+    const rig = await holdingTarget();
+    const game = gameTrainerPortOver(rig.controller);
+    const writes = rig.written.length;
+    expect(await game.discardRideRecording?.()).toBe(true);
+    expect(rig.controller.getSnapshot().saveState).toBe('discarded');
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    expect(await onDisk(rig)).toBeUndefined();
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
   });
 });
 

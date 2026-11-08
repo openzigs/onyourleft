@@ -120,8 +120,20 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
     { readonly samples: readonly TraceSample[]; readonly written: number } | undefined;
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
-  /** Ends it. Same. */
+  /**
+   * *End ride*. Same size. Since #2349 it ASKS rather than ends: `GameView`
+   * opens the end-of-ride question, handed in as {@link endQuestion}.
+   */
   readonly onEnd: () => void;
+  /**
+   * The end-of-ride question while it is open — #2349, `ride/EndRideQuestion`
+   * as `GameView` builds it — or `undefined`. While it is open it stands in
+   * the actions panel IN PLACE of *Pause*, *End ride* and the rows under
+   * them, so the panel holds the trainer line and the question and nothing
+   * else: no answer can be missed among other controls, and the panel is no
+   * taller than it must be. Closed, focus goes back to *End ride*.
+   */
+  readonly endQuestion?: ReactNode;
   /** Whether the ride is currently paused, so the control says which it does. */
   readonly paused: boolean;
   /**

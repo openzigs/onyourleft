@@ -506,6 +506,35 @@ export interface GameTrainerPort {
    * {@link courseLine}'s reason.
    */
   rideLapSeconds?(): number | undefined;
+  /**
+   * The recording under this game ride, as the end-of-ride question needs it
+   * — #2349: `undefined` when nothing is being recorded, and otherwise
+   * whether it holds anything to save (`recording/finish.ts`: one sample).
+   * The question offers *Save ride* only when it does. A snapshot read.
+   *
+   * ⚠️ Not about the trainer: on this port for {@link gameRideEnded}'s
+   * reason, and named so nothing else in production calls a method of that
+   * name. Optional, as {@link rideLapSeconds} is; `gameTrainerPortOver`
+   * always supplies the three of #2349.
+   */
+  rideRecording?(): { readonly savable: boolean } | undefined;
+  /**
+   * *Save ride*, answered in the game — #2349. The ride controller's own Stop,
+   * `armStop` then `confirmStop`: the same release of the trainer, the same
+   * save and the same result card on the Ride screen as a Stop pressed there.
+   * Nothing when nothing is being recorded. `GameView` calls it AFTER its own
+   * `teardown`, so the outcome of the ride's race is noted first
+   * ({@link gameRideEnded}) and saved with it.
+   */
+  saveRideRecording?(): Promise<void>;
+  /**
+   * *Discard ride*, answered twice in the game — #2349. The ride controller's
+   * own discard (`armStop`, `armDiscard`, `confirmDiscard`): the trainer
+   * released as a Stop releases it, and the recording deleted from this device
+   * instead of saved. Answers whether it is gone; `true` also when nothing was
+   * being recorded, so there was nothing to delete.
+   */
+  discardRideRecording?(): Promise<boolean>;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -552,6 +581,8 @@ interface GameTrainerSource {
      * moving time to show.
      */
     readonly phase?: RidePhase;
+    /** #2349. @see GameTrainerPort.rideRecording */
+    readonly sampleCount?: number;
     readonly movingSeconds?: number;
     /** #2072. @see GameTrainerPort.rideElapsedSeconds */
     readonly elapsedSeconds?: number;
@@ -588,6 +619,14 @@ interface GameTrainerSource {
   keepThePlan?(): void;
   /** #1329. @see GameTrainerPort.switchReplansOff. Optional for {@link keepThePlan}'s reason. */
   switchReplansOff?(): void;
+  /**
+   * #2349. @see GameTrainerPort.saveRideRecording, GameTrainerPort.discardRideRecording.
+   * Optional for {@link keepThePlan}'s reason; the ride controller has all four.
+   */
+  armStop?(): void;
+  confirmStop?(): Promise<void>;
+  armDiscard?(): void;
+  confirmDiscard?(): Promise<boolean>;
 }
 
 /** Whether a source's workout says enough to draw — the ride controller's always does. */
@@ -719,6 +758,32 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? controller?.powerZoneTime?.(threshold)
         : undefined;
+    },
+    rideRecording: () => {
+      // #2349: the phase and the count from one snapshot.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? { savable: (snapshot.sampleCount ?? 0) > 0 }
+        : undefined;
+    },
+    saveRideRecording: async () => {
+      const phase = controller?.getSnapshot().phase;
+      if (controller === undefined || phase === undefined || !rideInProgress(phase)) {
+        return;
+      }
+      // The game's question was the two presses; these are the controller's
+      // own two steps, so its guard and its order of release still hold.
+      controller.armStop?.();
+      await controller.confirmStop?.();
+    },
+    discardRideRecording: async () => {
+      const phase = controller?.getSnapshot().phase;
+      if (controller === undefined || phase === undefined || !rideInProgress(phase)) {
+        return true;
+      }
+      controller.armStop?.();
+      controller.armDiscard?.();
+      return (await controller.confirmDiscard?.()) ?? false;
     },
     rideTotals: () => {
       // #2076: the phase and the totals from one snapshot. The same object

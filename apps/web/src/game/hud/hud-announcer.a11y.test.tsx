@@ -56,6 +56,7 @@ import {
   DEFAULT_ANNOUNCEMENTS,
   type AnnouncementPreference,
 } from './announce-preference';
+import { endRideAnswer } from '../end-ride-testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -293,6 +294,8 @@ describe('the HUD’s one live region — #397', () => {
     expect(region()?.textContent).not.toBe('');
 
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'Discard ride'));
+    await press(endRideAnswer(document, 'Discard ride'));
     await press(button('Ride '));
     expect(region()?.textContent).toBe('');
   });

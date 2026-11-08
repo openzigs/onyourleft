@@ -55,6 +55,7 @@ import { NO_SENSORS, type GameSensors } from './sensors';
 import { GameSimulation } from './simulation';
 import { simulatedRideText, type PreviewSpeedup } from './simulated-rider';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
+import { endRideAnswer } from './end-ride-testing';
 
 /**
  * Every frame `sceneFrame` built, with where it drew the rider — the real
@@ -457,6 +458,8 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     await pump(4);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
 
     expect(buttonStarting('Ride ')?.textContent).toBe(`Ride ${other.name}`);
     expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
@@ -467,6 +470,8 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     await ridePreview(String(POWER), 8, { trainer: readyTrainer(commands), frames: 40 });
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
 
     expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
@@ -658,6 +663,8 @@ describe('a simulated ride reaches no trainer — #1992, CLAUDE.md §6', () => {
     });
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
 
     expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
@@ -670,6 +677,8 @@ describe('a simulated ride reaches no trainer — #1992, CLAUDE.md §6', () => {
       frames: 40,
     });
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
 
     expect(commands.requests.length).toBeGreaterThan(0);
     expect(commands.written.length).toBeGreaterThan(0);
@@ -784,6 +793,8 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await rideFor(rig, 30);
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
     for (let index = 0; index < 10; index += 1) await settle();
 
     expect(rig.written).toEqual([]);
@@ -803,6 +814,8 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
     for (let index = 0; index < 10; index += 1) await settle();
 
     expect(rig.written).toEqual([]);

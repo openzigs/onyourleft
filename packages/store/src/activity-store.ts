@@ -2478,6 +2478,43 @@ export class ActivityStore {
     );
   }
 
+  /**
+   * Deletes the pictures this athlete KEPT between two instants — #2349's
+   * *Discard ride*.
+   *
+   * ⚠️ **Why a capture window rather than a ride.** A kept frame (#384) names
+   * no ride: its `activityId` is `null`, because a frame is taken while the
+   * ride is still being recorded and an `ActivityRecord` exists only once it
+   * is saved (`records.ts` §`CameraFrameRecord`). A rider who discards a ride
+   * asked for it to go, and the pictures they kept of it with it. The ride's
+   * own time — from its start to the discard — is the only thing that links
+   * them, and one device records one ride at a time.
+   *
+   * ⚠️ **Kept frames only, and this athlete's only.** The rows are found
+   * through `[athleteId+capturedAt]`, so another athlete's picture in the same
+   * window is not reached, and a side-camera snapshot (#1063) names its ride
+   * and is never taken here: it follows that ride.
+   *
+   * @returns how many were removed. Zero for a window that kept none, and for
+   * a window that ends before it starts.
+   */
+  async deleteKeptCameraFramesCapturedBetween(
+    owner: AthleteId,
+    from: UnixSeconds,
+    to: UnixSeconds,
+  ): Promise<number> {
+    if (!(from <= to)) {
+      return 0;
+    }
+    return this.#db.transaction('rw', [this.#cameraFrames], async () =>
+      this.#cameraFrames
+        .where(INDEX.cameraFrameByAthleteAndCapturedAt)
+        .between([owner, from], [owner, to], true, true)
+        .filter((row) => row.source === 'kept' && row.activityId === null)
+        .delete(),
+    );
+  }
+
   // --- The side camera's framing reference (#528) ---------------------------
 
   /**

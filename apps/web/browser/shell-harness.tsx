@@ -205,7 +205,7 @@ function TouchTargets(): JSX.Element {
       <Button variant="secondary">Pause</Button>
       <Button>Resume</Button>
       <Button variant="secondary">Stop</Button>
-      <Button>Yes, stop the ride</Button>
+      <Button variant="secondary">Save ride</Button>
       <Button variant="secondary">Keep riding</Button>
     </section>
   );
