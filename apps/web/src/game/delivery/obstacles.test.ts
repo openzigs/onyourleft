@@ -476,6 +476,15 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
       for (const seed of SEEDS) {
         const placed = placeObstacles(span, seed, 'normal', true, mix);
         expect(placed).toHaveLength(Math.floor(level.lengthMetres / (1000 / mix.perKilometre)));
+        // None in sight at the start, none past the end, none in sight of the one before.
+        expect(placed[0]?.along).toBeGreaterThanOrEqual(span.from + OBSTACLE_SIGHT_METRES);
+        placed.forEach((obstacle, index) => {
+          expect(obstacle.along).toBeLessThanOrEqual(span.to);
+          const next = placed[index + 1];
+          if (next !== undefined) {
+            expect(next.along - obstacle.along).toBeGreaterThanOrEqual(OBSTACLE_SIGHT_METRES);
+          }
+        });
         for (const obstacle of placed) {
           expect(obstacle.stands, level.id).toBeDefined();
           expect(LEVEL_STANDING_KINDS).toContain(obstacle.kind);

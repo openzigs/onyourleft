@@ -43,6 +43,7 @@ import { stripComments } from '../../../units/no-inline-units';
 import { GAME_COURSES_TEXT } from '../../../views/GameCoursesView';
 import { endRideAnswer } from '../../end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from '../../GameView';
+import { DELIVERY_CHOICE_TEXT } from '../../StageChooser';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../../hud/announce-preference';
 import type { GameRenderer } from '../../port';
 import { northRoute } from '../../route-fixtures-testing';
@@ -331,6 +332,28 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     await settle();
     expect(document.querySelector('[data-level]')).toBeNull();
     expect(document.querySelector('[data-credit="levels"]')).toBeNull();
+  });
+});
+
+describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
+  it('rides the level’s round with the chooser’s Delivery switch turned off', async () => {
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    const toggle = queryAll<HTMLInputElement>(document, 'input[role="switch"]').find((box) =>
+      (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
+    );
+    expect(toggle?.checked).toBe(true);
+    await click(toggle);
+    expect(toggle?.checked).toBe(false);
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    await pump();
+    const houses = [...document.querySelectorAll('.oyl-hud__field--delivery')].find((each) =>
+      (each.textContent ?? '').startsWith('Houses'),
+    );
+    // The level's round, every house still expecting: its own count, not the week's.
+    expect(houses?.querySelector('.oyl-hud__value')?.firstChild?.textContent).toBe(
+      String(fixtureAs(FIRST.id).round.houses),
+    );
   });
 });
 
