@@ -5,16 +5,34 @@
  * ride (owner ruling 2 of 2026-11-03, epic #2033), decided here and nowhere
  * else, as `menu-sounds.ts` decides the menus' short sounds.
  *
- * ## Only from the rider's first press
+ * ## Only from the rider's first press — except in the Android app
  *
- * Nothing plays at load: a browser refuses audio that starts without a user
- * gesture, Android WebView's `mediaPlaybackRequiresUserGesture` is on, and WCAG
- * 2.2 SC 1.4.2 is about audio that starts by itself. So the loop starts inside
- * {@link MenuMusic.press}, which `AppShell` calls from its `click` handler and
- * nowhere else — the audio context is resumed there, inside the gesture. A
+ * Nothing plays at load in a browser, the demo included: a browser refuses
+ * audio that starts without a user gesture, and a web page cannot lift that.
+ * So the loop starts inside {@link MenuMusic.press}, which `AppShell` calls
+ * from its `click` handler — the audio context is resumed there, inside the
+ * gesture. A
  * press on the header's *Mute all sound* ({@link HOLDS_THE_MUSIC}) never starts
  * it: a rider reaching for the mute first has said what they want. Nor does
  * any press on the rider's own player's controls ({@link THE_RIDERS_PLAYER}).
+ *
+ * In the Android app the loop also starts with no press — owner ruling of
+ * 2026-11-08, #2357 — but only when the shell itself says its WebView lets
+ * media start without a gesture ({@link MenuMusicDeps.autoplay}, read from the
+ * WebView's own setting by `AutoplayPlugin.java`, never guessed from the user
+ * agent). Capacitor 8.5.2 turns `mediaPlaybackRequiresUserGesture` off
+ * (`Bridge.initWebView`) and `MainActivity` says so again, and under that
+ * policy Chromium lets an audio context run without a gesture too. That start
+ * is {@link MenuMusic.update}'s, on the first visible menu route it is told
+ * of, and it keeps every rule below: never on a ride route, while immersive or
+ * while hidden, never against the rider's mix, and never before the rider's
+ * player has been asked — at launch the header has not read yet, so the loop
+ * first waits {@link OWN_LOOP_SETTLE_MS}, as after its own silence.
+ *
+ * WCAG 2.2 SC 1.4.2 asks that audio playing by itself for more than 3 s can
+ * be stopped from the page: the header's *Mute all sound* does that, and is
+ * on the page before the loop can start, since the loop starts from an effect
+ * `AppShell` runs after the header has rendered.
  *
  * ## Never during a ride
  *
@@ -148,12 +166,23 @@ export interface MenuMusicDeps {
    * in the Android shell, #2073's `OtherPlayer`.
    */
   readonly riderPlayer: RiderPlayer | undefined;
+  /**
+   * Whether the shell lets the loop start with no press — #2357: in the
+   * Android shell, its WebView's own answer (`AutoplayPlugin.java`);
+   * `undefined` in a browser and the demo, which keep the first-press rule.
+   * Until it answers, and for any answer but `true`, only a press starts it.
+   */
+  readonly autoplay: Promise<boolean> | undefined;
 }
 
 export interface MenuMusic {
   /** A press — a `click` — landed on `target`. The one place the loop can start. */
   press(target: EventTarget | null, context: PressContext): void;
-  /** The route, the ride, immersion or the page's visibility changed. Never a start. */
+  /**
+   * The route, the ride, immersion or the page's visibility changed. Never a
+   * start, except where the shell allows one with no press ({@link
+   * MenuMusicDeps.autoplay}), and then only of a loop that has not yet played.
+   */
   update(context: PressContext): void;
 }
 
@@ -179,6 +208,10 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
   /** Whether the last {@link MenuMusic.update} was on a visible menu route. */
   let onMenu: boolean | undefined;
   let lastContext: PressContext | undefined;
+  /** Whether the shell has said the loop may start with no press (#2357). */
+  let autoplay = false;
+  /** Whether the launch's wait for the header's first reading has been set (#2357). */
+  let launchWaited = false;
 
   /** The loop is silent from now: wait before believing the rider's player again. */
   const unsettle = (): void => {
@@ -228,6 +261,20 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
     }
   };
 
+  /** Make the element if need be and play it: a press's start, and #2357's. */
+  const start = (track: string): void => {
+    deps.output.resume();
+    if (element === undefined) {
+      const made = deps.createElement();
+      made.loop = true;
+      made.preload = 'none';
+      made.src = track;
+      deps.output.attachMusic(made);
+      element = made;
+    }
+    if (!playing) play(element);
+  };
+
   const music: MenuMusic = {
     press(target, context) {
       lastContext = context;
@@ -246,17 +293,9 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       }
       // The rider's player is in use, or our loop was heard too lately to tell.
       if (!playing && !mayStart()) return;
-      // Inside the press: the one place a context may be made and resumed.
-      deps.output.resume();
-      if (element === undefined) {
-        const made = deps.createElement();
-        made.loop = true;
-        made.preload = 'none';
-        made.src = deps.track;
-        deps.output.attachMusic(made);
-        element = made;
-      }
-      if (!playing) play(element);
+      // Inside the press: in a browser, the one place a context may be made
+      // and resumed.
+      start(deps.track);
     },
     update(context) {
       lastContext = context;
@@ -268,6 +307,16 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
         // either: a press now would ask a reading from before they left, when
         // they may have started their own player (#2242's review).
         if (cameBack) unsettle();
+        // #2357: the shell lets it start with no press, and this is a visible
+        // menu route. At launch the header has not read the rider's player
+        // yet: wait for a reading first, then start only if it is not in use.
+        if (autoplay && nowOnMenu && deps.track !== undefined && wanted(deps.mix())) {
+          if (!launchWaited) {
+            launchWaited = true;
+            unsettle();
+          }
+          if (mayStart()) start(deps.track);
+        }
         return;
       }
       if (deps.hidden()) {
@@ -285,5 +334,13 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       }
     },
   };
+  void deps.autoplay?.then(
+    (allowed) => {
+      autoplay = allowed === true;
+      // Answered after the first route was told of: tell it again.
+      if (autoplay && lastContext !== undefined) music.update(lastContext);
+    },
+    () => undefined,
+  );
   return music;
 }

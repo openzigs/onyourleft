@@ -1065,7 +1065,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * new route, the stage taking or giving back the screen, the ride
    * controller's phase moving, the page hidden or shown. None of these is a
    * press, so none can start it (`menu-music.ts` §"Only from the rider's first
-   * press").
+   * press"), except in the Android app, whose shell lets the first visible
+   * menu route start it (#2357). That runs here, after the header — and its
+   * mute — has rendered.
    */
   const menuMusic = props.menuMusic;
   const rideController = props.rideController;

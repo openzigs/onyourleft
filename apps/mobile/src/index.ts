@@ -78,6 +78,12 @@ export type {
   OtherPlayerPlugin,
 } from './other-player/other-player';
 export {
+  AUTOPLAY_CALL_DEADLINE_MILLISECONDS,
+  capacitorAutoplayAllowed,
+  capacitorAutoplayPlugin,
+} from './autoplay/autoplay';
+export type { AutoplayPlugin } from './autoplay/autoplay';
+export {
   capacitorRecordingServicePlugin,
   recordingServiceKeepAlive,
   recordingServiceNotificationPermission,

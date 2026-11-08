@@ -70,6 +70,12 @@ interface FakeElement {
   src: string;
   paused: boolean;
   plays: number;
+  /**
+   * Whether the header's *Mute all sound* was on the page, and could be
+   * pressed, when the element first played: WCAG 1.4.2 for a loop that starts
+   * by itself (#2357).
+   */
+  muteOnPageAtFirstPlay: boolean | undefined;
 }
 
 interface Rig {
@@ -86,7 +92,15 @@ interface Rig {
 
 function rig(
   store: PreferenceStorage,
-  { track, riderPlayer }: { track: string | undefined; riderPlayer?: RiderPlayer | undefined } = {
+  {
+    track,
+    riderPlayer,
+    autoplay,
+  }: {
+    track: string | undefined;
+    riderPlayer?: RiderPlayer | undefined;
+    autoplay?: Promise<boolean> | undefined;
+  } = {
     track: TRACK,
   },
 ): Rig {
@@ -130,7 +144,9 @@ function rig(
           src: '',
           paused: true,
           plays: 0,
+          muteOnPageAtFirstPlay: undefined,
           play: () => {
+            element.muteOnPageAtFirstPlay ??= headerMute()?.disabled === false;
             element.paused = false;
             element.plays += 1;
             return Promise.resolve();
@@ -150,6 +166,7 @@ function rig(
       },
       hidden: () => built.hidden,
       riderPlayer,
+      autoplay,
     }),
   };
   return built;
@@ -896,5 +913,199 @@ describe('back from another app before the loop ever played — #2242 review', (
     device.read();
     await pressWithoutLeaving(homeControl());
     expect(music.made[0]?.paused).toBe(false);
+  });
+});
+
+/**
+ * #2357, the owner's ruling of 2026-11-08: in the Android app the loop starts
+ * with no press, where the shell says its WebView allows it; a browser and the
+ * demo keep the first press. Every "playing" is the element's and every level
+ * the graph's, as above.
+ */
+describe('in the Android app the menus’ music starts with no press — #2357', () => {
+  it('the shell says yes: the loop starts on Home with no press, at the default level', async () => {
+    const music = rig(disk(), { track: TRACK, autoplay: Promise.resolve(true) });
+    await shell(music);
+    expect(music.made).toHaveLength(1);
+    const [element] = music.made;
+    expect(element).toMatchObject({ paused: false, loop: true, preload: 'none', src: TRACK });
+    expect(musicBus(music)).toBe(0.5);
+    // Nothing plays it again: a press finds it playing.
+    await pressWithoutLeaving(homeControl());
+    expect(element?.plays).toBe(1);
+  });
+
+  it('the header’s mute is on the page before it starts, and stops it — WCAG 1.4.2', async () => {
+    // This device's own storage: the header's mute writes there, as in the app.
+    const music = rig(localStorage, { track: TRACK, autoplay: Promise.resolve(true) });
+    await shell(music);
+    const [element] = music.made;
+    expect(element?.muteOnPageAtFirstPlay, 'it started before the mute could be reached').toBe(
+      true,
+    );
+    await pressWithoutLeaving(headerMute() ?? null);
+    expect(element?.paused).toBe(true);
+    expect(musicPath(music.fake).master.gain.value).toBe(0);
+    // Muted, it stays stopped across menu routes: nothing starts it by itself again.
+    await go('#/settings');
+    expect(element?.paused).toBe(true);
+    expect(music.made).toHaveLength(1);
+  });
+
+  it('a browser, the demo, or a shell that says no never starts it without a press', async () => {
+    // Made one at a time, so the refusal is not a rejection nothing is waiting on yet.
+    const answers: (() => Promise<boolean> | undefined)[] = [
+      () => undefined,
+      () => Promise.resolve(false),
+      () => Promise.reject(new Error('not implemented')),
+    ];
+    for (const answer of answers) {
+      const music = rig(disk(), { track: TRACK, autoplay: answer() });
+      await shell(music);
+      await go('#/settings');
+      await go('#/');
+      music.endSettle();
+      expect(music.made, 'it started with no press').toEqual([]);
+      expect(music.fake.gains, 'a graph was built with no press').toEqual([]);
+      // The first press still starts it, as before.
+      await pressWithoutLeaving(homeControl());
+      expect(music.made[0]?.paused).toBe(false);
+      mounted?.unmount();
+      mounted = undefined;
+      window.location.hash = '#/';
+    }
+  });
+
+  it('a shell that answers after the first route has painted starts it then', async () => {
+    let answer: (allowed: boolean) => void = () => undefined;
+    const music = rig(disk(), {
+      track: TRACK,
+      autoplay: new Promise<boolean>((resolve) => {
+        answer = resolve;
+      }),
+    });
+    await shell(music);
+    expect(music.made).toEqual([]);
+    await act(async () => {
+      answer(true);
+      await Promise.resolve();
+    });
+    expect(music.made[0]?.paused).toBe(false);
+  });
+
+  it('under the master mute, or with music muted, it does not start', async () => {
+    const master = disk();
+    writeMasterMuted(master, true);
+    const first = rig(master, { track: TRACK, autoplay: Promise.resolve(true) });
+    await shell(first);
+    expect(first.made).toEqual([]);
+    mounted?.unmount();
+
+    const muted = disk();
+    writeAudioBus(muted, 'music', { volume: 0.5, muted: true });
+    const second = rig(muted, { track: TRACK, autoplay: Promise.resolve(true) });
+    await shell(second);
+    expect(second.made).toEqual([]);
+  });
+
+  it('a page that opens hidden starts nothing, and starts once it is shown', async () => {
+    const music = rig(disk(), { track: TRACK, autoplay: Promise.resolve(true) });
+    music.hidden = true;
+    await shell(music);
+    expect(music.made).toEqual([]);
+    await setHidden(music, false);
+    expect(music.made[0]?.paused).toBe(false);
+  });
+
+  it(
+    'an app that opens on a ride route starts nothing there, and starts on the first menu route',
+    { timeout: RIDE_VIEWS_TIMEOUT_MS },
+    async () => {
+      for (const ride of ['#/ride', '#/game']) {
+        const music = rig(disk(), { track: TRACK, autoplay: Promise.resolve(true) });
+        window.location.hash = ride;
+        await shell(music);
+        expect(music.made, ride).toEqual([]);
+        expect(music.fake.gains, ride).toEqual([]);
+        await go('#/');
+        expect(music.made[0]?.paused, `on Home after ${ride}`).toBe(false);
+        mounted?.unmount();
+        mounted = undefined;
+      }
+    },
+  );
+
+  it('a ride in progress on a menu route starts nothing until it is over', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    const music = rig(disk(), { track: TRACK, autoplay: Promise.resolve(true) });
+    await shell(music, stub.controller);
+    expect(music.made).toEqual([]);
+    await act(async () => {
+      stub.set({ phase: 'idle' });
+      await Promise.resolve();
+    });
+    expect(music.made[0]?.paused).toBe(false);
+  });
+
+  it('the rider’s own player already playing at launch wins: the loop waits for a reading, and stays silent', async () => {
+    const device = phone();
+    const music = rig(disk(), {
+      track: TRACK,
+      riderPlayer: device.player,
+      autoplay: Promise.resolve(true),
+    });
+    device.hear(music.made);
+    await shell(music);
+    // Before the header's first reading has landed: nothing.
+    expect(music.made, 'it started before the rider’s player was asked').toEqual([]);
+    device.riderPlaying = true;
+    device.read();
+    music.endSettle();
+    expect(music.made, 'the loop talked over the rider’s own player').toEqual([]);
+    expect(music.fake.gains).toEqual([]);
+  });
+
+  it('with the rider’s player silent at launch, the loop starts once the header has read', async () => {
+    const device = phone();
+    const music = rig(disk(), {
+      track: TRACK,
+      riderPlayer: device.player,
+      autoplay: Promise.resolve(true),
+    });
+    device.hear(music.made);
+    await shell(music);
+    expect(music.made).toEqual([]);
+    device.read();
+    music.endSettle();
+    expect(music.made[0]?.paused).toBe(false);
+    expect(musicBus(music)).toBe(0.5);
+  });
+
+  it('through the header’s real OtherPlayer: a rider’s player heard on mount keeps the loop silent', async () => {
+    const player = new OtherPlayer(
+      {
+        sendKey: () => Promise.resolve(),
+        otherAudioActive: () => Promise.resolve(true),
+      },
+      { now: () => 0, every: () => () => undefined },
+    );
+    const music = rig(disk(), {
+      track: TRACK,
+      riderPlayer: player,
+      autoplay: Promise.resolve(true),
+    });
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        menuMusic={music.music}
+        soundOutput={music.output}
+        otherPlayer={player}
+      />,
+    );
+    await settle();
+    // Non-vacuity: the header's poll on mount is what heard the rider's player.
+    expect(player.getSnapshot().playing).toBe(true);
+    music.endSettle();
+    expect(music.made, 'the loop talked over the rider’s own player').toEqual([]);
   });
 });
