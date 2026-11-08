@@ -388,3 +388,103 @@ function compiled(material: Compilable): { readonly vertexShader: string } {
   material.onBeforeCompile(shader, undefined);
   return shader;
 }
+
+describe('a parked car looks like one — #2362, the owner’s ruling on PR #2378', () => {
+  /** Every vertex of the car of kind number `kind`: where it is, and its paint as its vertex colour's three channels. */
+  function carVertices(
+    belt: DeliveryBelt,
+    kind: number,
+  ): { readonly x: number; readonly y: number; readonly z: number; readonly paint: string }[] {
+    const geometry = belt.meshOf('obstacles').geometry;
+    const position = geometry.getAttribute('position');
+    const colour = geometry.getAttribute('color');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const found = [];
+    for (let at = 0; at < position.count; at += 1) {
+      if (kinds.getX(at) !== kind) continue;
+      found.push({
+        x: position.getX(at),
+        y: position.getY(at),
+        z: position.getZ(at),
+        paint: [colour.getX(at), colour.getY(at), colour.getZ(at)].join(','),
+      });
+    }
+    return found;
+  }
+
+  const CAR_KIND = ROSTER.indexOf('parked-car');
+
+  it('draws a car’s outline: its cabin narrower at the roof than at its base, its wheels showing in arches', () => {
+    const belt = new DeliveryBelt('stylised');
+    const car = carVertices(belt, CAR_KIND);
+    expect(car.length).toBeGreaterThan(0);
+    const tall = Math.max(...car.map((each) => each.y));
+    expect(tall).toBeGreaterThan(1.3);
+    // A cabin, not a box: its roof is shorter along the road than the body under it…
+    const roof = car.filter((each) => each.y > tall - 0.1);
+    const roofLength =
+      Math.max(...roof.map((each) => each.z)) - Math.min(...roof.map((each) => each.z));
+    const cabinBase = car.filter((each) => each.y > 0.85 && each.y < 0.95);
+    const baseLength =
+      Math.max(...cabinBase.map((each) => each.z)) - Math.min(...cabinBase.map((each) => each.z));
+    expect(roofLength).toBeLessThan(0.6 * baseLength);
+    // …and the bonnet and the boot are low: nothing at either end stands over a metre.
+    const ends = car.filter((each) => Math.abs(each.z) > 1.8);
+    expect(Math.max(...ends.map((each) => each.y))).toBeLessThan(1);
+    // Its wheels show from the side: over each wheel, nothing but the wheel below its top.
+    // The wheels are the paint of the car's lowest point, on the road.
+    const lowest = car.reduce((low, each) => (each.y < low.y ? each : low));
+    const BLACK = lowest.paint;
+    const wheels = car.filter((each) => each.paint === BLACK);
+    expect(Math.min(...wheels.map((each) => each.y))).toBeCloseTo(0, 6);
+    const wheelTop = Math.max(...wheels.map((each) => each.y));
+    for (const along of [-1.35, 1.38]) {
+      const over = car.filter((each) => each.paint !== BLACK && Math.abs(each.z - along) < 0.15);
+      expect(over.length, `over the wheel at ${String(along)}`).toBeGreaterThan(0);
+      expect(
+        Math.min(...over.map((each) => each.y)),
+        `over the wheel at ${String(along)}`,
+      ).toBeGreaterThan(wheelTop);
+    }
+    belt.dispose();
+  });
+
+  it('paints its cars in three body colours, in the one call, each keeping its colour by its place on the round', () => {
+    const belt = new DeliveryBelt('stylised');
+    // Three cars of their own in the one geometry, each the same shape and its own paint.
+    const kindsOfCar = [CAR_KIND, ROSTER.length, ROSTER.length + 1];
+    const bodies = kindsOfCar.map((kind) => {
+      const car = carVertices(belt, kind);
+      expect(car.length, `kind ${String(kind)}`).toBe(carVertices(belt, CAR_KIND).length);
+      // The body is its most-used paint.
+      const counts = new Map<string, number>();
+      for (const each of car) counts.set(each.paint, (counts.get(each.paint) ?? 0) + 1);
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    });
+    expect(new Set(bodies).size).toBe(3);
+
+    const cars = [0, 1, 2, 3, 4].map((index) => ({
+      x: 0,
+      y: 0,
+      z: 10 * index,
+      yaw: 0,
+      kind: 'parked-car' as const,
+      index,
+    }));
+    belt.update({ parcels: [], markers: [], obstacles: cars });
+    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([0, 1, 2, 0, 1]);
+    expect(belt.drawn('obstacles').every((each) => each.kind === 'parked-car')).toBe(true);
+    const kinds = belt.meshOf('obstacles').geometry.getAttribute('oylObstacleKind');
+    expect([0, 1, 2, 3, 4].map((at) => kinds.getX(at))).toEqual([
+      CAR_KIND,
+      ROSTER.length,
+      ROSTER.length + 1,
+      CAR_KIND,
+      ROSTER.length,
+    ]);
+    // The same car, a frame later and the first off the road: still its own paint.
+    belt.update({ parcels: [], markers: [], obstacles: cars.slice(1) });
+    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([1, 2, 0, 1]);
+    belt.dispose();
+  });
+});

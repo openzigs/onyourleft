@@ -538,6 +538,12 @@ export interface DeliveryPiece {
 /** An obstacle, and which of the roster it is. */
 export interface DeliveryObstaclePiece extends DeliveryPiece {
   readonly kind: DeliveryObstacleKind;
+  /**
+   * Which of the round's obstacles it is, its place in the round's list, the
+   * same for the whole ride — #2362: the view picks a parked car's paint from
+   * it, so a car keeps its colour. Absent, the first paint.
+   */
+  readonly index?: number;
 }
 
 /**

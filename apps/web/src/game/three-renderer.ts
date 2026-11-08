@@ -164,6 +164,7 @@ import {
   EqualDepth,
   EquirectangularReflectionMapping,
   Euler,
+  ExtrudeGeometry,
   FileLoader,
   FogExp2,
   Group,
@@ -192,6 +193,7 @@ import {
   Scene,
   ShaderMaterial,
   ShadowMaterial,
+  Shape,
   SphereGeometry,
   RGB_ETC1_Format,
   RGB_ETC2_Format,
@@ -10962,6 +10964,8 @@ export interface DrawnDeliveryPiece {
   readonly z: number;
   /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
   readonly kind: DeliveryObstacleKind | undefined;
+  /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
+  readonly paint?: number | undefined;
 }
 
 /**
@@ -10995,6 +10999,45 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
 const DELIVERY_OBSTACLE_ORDER = Object.keys(
   DELIVERY_OBSTACLE_FOOTPRINTS,
 ) as readonly DeliveryObstacleKind[];
+
+/**
+ * A parked car's body paints — #2362: blue-grey, brick red and pale silver.
+ * Each is a whole car of its own in the roster's one geometry, marked with a
+ * kind number of its own (the first is the car's place in
+ * {@link DELIVERY_OBSTACLE_ORDER}, the others follow the roster), so three
+ * colours of car cost no draw call: an instance draws one of them, as it draws
+ * one kind ({@link withObstacleKinds}). This project's own colours.
+ */
+const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
+
+/** The kind number a parked car of paint `paint` is drawn with. @see PARKED_CAR_PAINTS */
+function parkedCarKindNumber(paint: number): number {
+  return paint === 0
+    ? DELIVERY_OBSTACLE_ORDER.indexOf('parked-car')
+    : DELIVERY_OBSTACLE_ORDER.length + paint - 1;
+}
+
+/**
+ * The kind number an obstacle piece is drawn with: its kind's, or for a parked
+ * car one of {@link PARKED_CAR_PAINTS}, chosen by the piece's place on the
+ * round so a car keeps its colour for the whole ride.
+ */
+function obstacleKindNumber(piece: DeliveryObstaclePiece): number {
+  if (piece.kind !== 'parked-car') return DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
+  return parkedCarKindNumber((piece.index ?? 0) % PARKED_CAR_PAINTS.length);
+}
+
+/** The kind and the paint a kind number stands for. @see obstacleKindNumber */
+function obstacleOfKindNumber(number: number): {
+  readonly kind: DeliveryObstacleKind | undefined;
+  readonly paint: number | undefined;
+} {
+  if (number >= DELIVERY_OBSTACLE_ORDER.length) {
+    return { kind: 'parked-car', paint: number - DELIVERY_OBSTACLE_ORDER.length + 1 };
+  }
+  const kind = DELIVERY_OBSTACLE_ORDER[number];
+  return { kind, paint: kind === 'parked-car' ? 0 : undefined };
+}
 
 /**
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
@@ -11125,8 +11168,9 @@ function deliveryWheel(
  * with a pale tape band; a white post on the doorstep with a glowing amber
  * diamond above it and a glowing ring on the step; a green wheelie bin, a red
  * hand trolley and an orange cone with a white band, each on black wheels or
- * a black foot; and, since #2362, a blue-grey parked car with pale windows on
- * four black wheels. No sprite, colour scheme or shape is taken from another game.
+ * a black foot; and, since #2362, a parked car in one of three body paints
+ * ({@link PARKED_CAR_PAINTS}) with pale windows, pale lamps and red tail
+ * lamps, on four black wheels. No sprite, colour scheme or shape is taken from another game.
  */
 const DELIVERY_PAINT = {
   card: 0xa8794a,
@@ -11139,8 +11183,9 @@ const DELIVERY_PAINT = {
   trolleyPlate: 0x8c8c8c,
   coneBody: 0xe8661c,
   coneBand: 0xe6e6e6,
-  carBody: 0x4a6a8c,
   carGlass: 0x9db4c6,
+  carLamp: 0xece6cf,
+  carTail: 0xa8261e,
   black: 0x1e1e1e,
 } as const;
 
@@ -11167,6 +11212,94 @@ function markerShape(): BufferGeometry {
       glows: true,
     },
   ]);
+}
+
+/**
+ * A side profile, `(along, up)` points in metres, made solid `width` across
+ * the road: its own `+z` along the road, `x` across it, centred on `x = 0`.
+ */
+function deliveryProfile(
+  points: readonly (readonly [number, number])[],
+  width: number,
+): BufferGeometry {
+  const shape = new Shape(points.map(([along, up]) => new Vector2(along, up)));
+  // Extruded along its own z, then turned so that z is across the road.
+  return new ExtrudeGeometry(shape, { depth: width, bevelEnabled: false, curveSegments: 1 })
+    .rotateY(-Math.PI / 2)
+    .translate(width / 2, 0, 0);
+}
+
+/** Where a parked car's wheels stand along it, metres from its middle, and their radius. */
+const PARKED_CAR_WHEELS = { rear: -1.35, front: 1.38, radius: 0.31 } as const;
+
+/**
+ * A parked car — #2362, the owner's ruling on PR #2378: a car's outline seen
+ * from the side, its bonnet low at the front, a cabin of glass under a roof,
+ * a boot at the back, and its four wheels showing in arches cut into the body.
+ * Its footprint is `obstacles.ts`' 4.4 m by 1.8 m, its nose along `+z`; it
+ * stands 1.45 m tall. `paint` is the body's.
+ */
+function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'];
+  const { rear, front, radius } = PARKED_CAR_WHEELS;
+  const sill = 0.28;
+  const arch = radius + 0.09;
+  /** An arch over the wheel at `along`, from its back to its front, at the sill. */
+  const archOver = (along: number): (readonly [number, number])[] => {
+    const points: (readonly [number, number])[] = [];
+    const steps = 8;
+    const low = Math.asin((sill - radius) / arch);
+    for (let step = 0; step <= steps; step += 1) {
+      const angle = Math.PI - low - ((Math.PI - 2 * low) * step) / steps;
+      points.push([along + arch * Math.cos(angle), radius + arch * Math.sin(angle)]);
+    }
+    return points;
+  };
+  const body: (readonly [number, number])[] = [
+    [-halfLength, 0.38],
+    [-halfLength + 0.1, sill],
+    ...archOver(rear),
+    ...archOver(front),
+    [halfLength - 0.1, sill],
+    [halfLength, 0.38],
+    [halfLength, 0.72],
+    [halfLength - 0.15, 0.8],
+    [1.0, 0.9],
+    [-1.5, 0.92],
+    [-halfLength + 0.15, 0.9],
+    [-halfLength, 0.8],
+  ];
+  const cabin: (readonly [number, number])[] = [
+    [-1.5, 0.92],
+    [1.0, 0.9],
+    [0.25, 1.38],
+    [-1.05, 1.4],
+  ];
+  const parts: (readonly [BufferGeometry, number])[] = [
+    [deliveryProfile(body, 2 * halfWidth), paint],
+    [deliveryProfile(cabin, 2 * halfWidth - 0.2), DELIVERY_PAINT.carGlass],
+    // The roof, and the pillar between the side windows, in the body's paint.
+    [deliveryBox(2 * halfWidth - 0.18, 0.07, 1.36, 0, 1.415, -0.39), paint],
+    [deliveryBox(2 * halfWidth - 0.18, 0.48, 0.1, 0, 1.15, -0.38), paint],
+  ];
+  for (const side of [-1, 1]) {
+    const lamp = side * (halfWidth - 0.25);
+    parts.push([
+      deliveryBox(0.3, 0.1, 0.02, lamp, 0.64, halfLength - 0.01),
+      DELIVERY_PAINT.carLamp,
+    ]);
+    parts.push([
+      deliveryBox(0.3, 0.1, 0.02, lamp, 0.72, -halfLength + 0.01),
+      DELIVERY_PAINT.carTail,
+    ]);
+    for (const along of [rear, front]) {
+      parts.push([
+        deliveryWheel(radius, 0.2, side * (halfWidth - 0.12), radius, along),
+        DELIVERY_PAINT.black,
+      ]);
+    }
+  }
+  return parts;
 }
 
 /**
@@ -11250,31 +11383,11 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
-  {
-    // #2362: a parked car, its box the footprint, nose along the road.
-    const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'].halfWidth;
-    const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'].halfLength;
-    const wheel = 0.32;
-    add(
-      'parked-car',
-      deliveryBox(across, 0.62, along, 0, wheel + 0.31 - 0.08, 0),
-      DELIVERY_PAINT.carBody,
-    );
-    add(
-      'parked-car',
-      deliveryBox(across - 0.16, 0.5, along * 0.5, 0, wheel + 0.62 - 0.08 + 0.25, -along * 0.05),
-      DELIVERY_PAINT.carGlass,
-    );
-    for (const side of [-1, 1]) {
-      for (const end of [-1, 1]) {
-        add(
-          'parked-car',
-          deliveryWheel(wheel, 0.22, side * (across / 2 - 0.12), wheel, end * (along / 2 - 0.7)),
-          DELIVERY_PAINT.black,
-        );
-      }
+  PARKED_CAR_PAINTS.forEach((paint, at) => {
+    for (const [made, colour] of parkedCarParts(paint)) {
+      parts.push({ made, colour, kind: parkedCarKindNumber(at) });
     }
-  }
+  });
   return deliveryShape(parts);
 }
 
@@ -11371,7 +11484,7 @@ export class DeliveryBelt {
     const kinds = this.#kinds.array as Float32Array;
     const count = this.#meshes.obstacles.count;
     for (let at = 0; at < count; at += 1) {
-      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf((obstacles[at] as DeliveryObstaclePiece).kind);
+      kinds[at] = obstacleKindNumber(obstacles[at] as DeliveryObstaclePiece);
     }
     if (count > 0) this.#kinds.needsUpdate = true;
   }
@@ -11401,11 +11514,13 @@ export class DeliveryBelt {
     const kinds = this.#kinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
+      const obstacle = what === 'obstacles' ? obstacleOfKindNumber(kinds[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
         z: matrices[at * 16 + 14] as number,
-        kind: what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined,
+        kind: obstacle?.kind,
+        paint: obstacle?.paint,
       });
     }
     return drawn;

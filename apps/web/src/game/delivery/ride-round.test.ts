@@ -20,6 +20,10 @@ import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  parkedCarStands,
+  RIDER_AHEAD_METRES,
+  RIDER_BEHIND_METRES,
+  RIDER_HALF_WIDTH_METRES,
   startObstacles,
   type Obstacle,
 } from './obstacles';
@@ -528,6 +532,87 @@ describe('a round the rider steers — #1853', () => {
     expect(stepDeliveryRide(pressed, { ticks: 0, along: 5, speed: SPEED }).ride.steer).toBe(
       pressed.steer,
     );
+  });
+});
+
+describe('a crash into a parked car is drawn as one — #2362, the owner’s ruling on PR #2378', () => {
+  const CAR = OBSTACLE_KINDS['parked-car'];
+
+  /** The ride in the right-hand lane with one parked car at that lane's kerb, 40 m ahead. */
+  function carAhead(): DeliveryRide {
+    const ride = started();
+    const car: Obstacle = { kind: 'parked-car', along: 40, stands: parkedCarStands('right') };
+    const right = LANE_OFFSETS_METRES.length - 1;
+    return {
+      ...ride,
+      obstacles: [car],
+      obstacleState: startObstacles([car]),
+      steer: { lane: right, offset: LANE_OFFSETS_METRES[right] as number },
+    };
+  }
+
+  /** The rider's drawn bicycle overlaps the car, along the road and across it. */
+  function inside(along: number, offset: number): boolean {
+    const stands = parkedCarStands('right');
+    return (
+      along + RIDER_AHEAD_METRES > 40 - CAR.halfLength &&
+      along - RIDER_BEHIND_METRES < 40 + CAR.halfLength &&
+      offset + RIDER_HALF_WIDTH_METRES > stands - CAR.halfWidth &&
+      offset - RIDER_HALF_WIDTH_METRES < stands + CAR.halfWidth
+    );
+  }
+
+  it('counts the crash, then never draws the rider inside the car: beside it, steering for the clear lane', () => {
+    let ride = carAhead();
+    let crashes = 0;
+    let drawnInside = 0;
+    let crashedAt: number | undefined;
+    while (ride.along < 60) {
+      const stepped = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      });
+      ride = stepped.ride;
+      crashes += stepped.crashes;
+      if (stepped.crashes > 0) crashedAt = ride.along;
+      if (inside(ride.along, ride.steer.offset)) drawnInside += 1;
+    }
+    expect(crashes).toBe(1);
+    expect(crashedAt).toBeDefined();
+    expect(drawnInside).toBe(0);
+    // Steering on for the middle lane, the one the car leaves clear.
+    expect(ride.steer.lane).toBe(1);
+    expect(ride.score).toBe(0);
+  });
+
+  it('keeps the rider out of it when they steer back in beside it', () => {
+    let ride = carAhead();
+    while (ride.obstacleState.crashed[0] !== true) {
+      ride = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      }).ride;
+    }
+    let drawnInside = 0;
+    while (ride.along < 60) {
+      ride = stepDeliveryRide(
+        { ...ride, steer: steerToward(ride.steer, 'lane-right') },
+        { ticks: 1, along: ride.along + SPEED * DELIVERY_TICK_SECONDS, speed: SPEED },
+      ).ride;
+      if (inside(ride.along, ride.steer.offset)) drawnInside += 1;
+    }
+    expect(drawnInside).toBe(0);
+  });
+
+  it('moves no rider who is clear of the car, and none at all on a ride with no car', () => {
+    // A lane away, the car is passed with the steering untouched.
+    const ride = carAhead();
+    const middle = { ...ride, steer: { lane: 1, offset: LANE_OFFSETS_METRES[1] as number } };
+    const passed = rideTo(middle, 60);
+    expect(passed.crashes).toBe(0);
+    expect(passed.ride.steer).toEqual(middle.steer);
   });
 });
 

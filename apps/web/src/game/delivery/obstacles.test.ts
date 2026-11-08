@@ -27,7 +27,11 @@ import {
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
   OBSTACLE_SPACING_METRES,
+  clearOfParkedCars,
   ON_TIME_FASTEST_METRES_PER_SECOND,
+  PARKED_CAR_CLEARANCE_METRES,
+  PARKED_CAR_KERB_GAP_METRES,
+  parkedCarStands,
   ON_TIME_SLOWEST_METRES_PER_SECOND,
   placeObstacles,
   RIDER_AHEAD_METRES,
@@ -491,13 +495,96 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
           kinds.add(obstacle.kind);
           if (obstacle.kind === 'parked-car') {
             carLanes.add(obstacle.stands as number);
-            expect([LANE_OFFSETS_METRES[0], LANE_OFFSETS_METRES.at(-1)]).toContain(obstacle.stands);
+            expect([parkedCarStands('left'), parkedCarStands('right')]).toContain(obstacle.stands);
           }
         }
       }
     }
     expect(kinds).toEqual(new Set(['parked-car', 'bin']));
-    expect(carLanes).toEqual(new Set([LANE_OFFSETS_METRES[0], LANE_OFFSETS_METRES.at(-1)]));
+    expect(carLanes).toEqual(new Set([parkedCarStands('left'), parkedCarStands('right')]));
+  });
+
+  it('stands a parked car at the kerb side of its kerb lane, not its middle, and it still blocks that lane alone', () => {
+    const car = OBSTACLE_KINDS['parked-car'];
+    const reach = car.halfWidth + RIDER_HALF_WIDTH_METRES;
+    for (const [side, lane] of [
+      ['left', 0],
+      ['right', LANE_OFFSETS_METRES.length - 1],
+    ] as const) {
+      const stands = parkedCarStands(side);
+      const middle = LANE_OFFSETS_METRES[lane] as number;
+      // Nearer the kerb than its lane's middle, its outer side the gap off the kerb.
+      expect(Math.abs(stands)).toBeGreaterThan(Math.abs(middle) + 0.5);
+      expect(Math.abs(stands) + car.halfWidth).toBeCloseTo(
+        CARRIAGEWAY_HALF_WIDTH_METRES - PARKED_CAR_KERB_GAP_METRES,
+        9,
+      );
+      // No bicycle fits between it and the kerb.
+      expect(PARKED_CAR_KERB_GAP_METRES).toBeLessThan(2 * RIDER_HALF_WIDTH_METRES);
+      // A rider on its lane's middle meets it; on any other lane, does not.
+      LANE_OFFSETS_METRES.forEach((each, at) => {
+        expect(Math.abs(each - stands) < reach, `${side} car, lane ${String(at)}`).toBe(
+          at === lane,
+        );
+      });
+      // And the crash is counted: ridden straight at it down the middle of its lane.
+      const obstacles: Obstacle[] = [{ kind: 'parked-car', along: 100, stands }];
+      let state = startObstacles(obstacles);
+      let crashes = 0;
+      for (let along = 30; along < 110; along += 0.4) {
+        const step = stepObstacles(state, {
+          rider: { along, lateral: middle, speed: 8 },
+          obstacles,
+        });
+        state = step.state;
+        crashes += step.crashes.length;
+      }
+      expect(crashes, `${side} car`).toBe(1);
+    }
+  });
+
+  it('moves a rider beside a crashed parked car to its road side, and leaves any other rider be', () => {
+    const car = OBSTACLE_KINDS['parked-car'];
+    const reach = car.halfWidth + RIDER_HALF_WIDTH_METRES;
+    for (const side of ['left', 'right'] as const) {
+      const stands = parkedCarStands(side);
+      const kerbLane = side === 'left' ? 0 : LANE_OFFSETS_METRES.length - 1;
+      const obstacles: Obstacle[] = [{ kind: 'parked-car', along: 100, stands }];
+      const fresh = startObstacles(obstacles);
+      const crashed = { ...fresh, crashed: [true] };
+      const rider = { along: 99, lane: kerbLane, offset: LANE_OFFSETS_METRES[kerbLane] as number };
+      // Not yet touched: left to `stepObstacles`, which counts it.
+      expect(clearOfParkedCars(obstacles, fresh, rider)).toBeUndefined();
+      const moved = clearOfParkedCars(obstacles, crashed, rider);
+      expect(moved, side).toBeDefined();
+      // On the road side, clear of it by the clearance, steering for the middle lane.
+      expect(Math.abs((moved?.offset ?? 0) - stands)).toBeCloseTo(
+        reach + PARKED_CAR_CLEARANCE_METRES,
+        9,
+      );
+      expect(Math.abs(moved?.offset ?? 0)).toBeLessThan(Math.abs(stands));
+      expect(moved?.lane).toBe(1);
+      // Past it, or a lane away, nothing moves.
+      expect(
+        clearOfParkedCars(obstacles, crashed, { ...rider, along: 100 + car.halfLength + 1 }),
+      ).toBeUndefined();
+      expect(
+        clearOfParkedCars(obstacles, crashed, { along: 99, lane: 1, offset: 0 }),
+      ).toBeUndefined();
+      // A rider steering for a lane the car leaves clear keeps steering for it.
+      expect(
+        clearOfParkedCars(obstacles, crashed, { ...rider, lane: 1 - (kerbLane - 1) })?.lane,
+      ).toBe(1 - (kerbLane - 1));
+    }
+    // A crashed bin moves nobody: only a parked car.
+    const bins: Obstacle[] = [{ kind: 'bin', along: 100, stands: 0 }];
+    expect(
+      clearOfParkedCars(
+        bins,
+        { ...startObstacles(bins), crashed: [true] },
+        { along: 100, lane: 1, offset: 0 },
+      ),
+    ).toBeUndefined();
   });
 
   it('blocks at most one lane at every distance of every level, a parked car’s whole length counted', () => {

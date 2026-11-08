@@ -270,6 +270,29 @@ export interface CircuitsOffer {
   readonly credit: string;
 }
 
+/**
+ * The built-in Delivery level the setup was opened on — #2362, ADR 0065:
+ * its card is among {@link RoutePickerProps.routes}, first, and this says
+ * which one it is. It is never one of the rider's own routes, so the cards'
+ * summary does not count it; the OpenStreetMap credit and the way to the
+ * licence stand beside its card (D-6.5); and it rides in the realistic world
+ * whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378).
+ */
+export interface LevelOffer {
+  /** The level's card's route id, in the `level:` namespace. */
+  readonly routeId: string;
+  /** `map/basemap.ts` §`OSM_ATTRIBUTION`, handed in for {@link CircuitsOffer.credit}'s reason. */
+  readonly credit: string;
+}
+
+/**
+ * The rider-facing words of a built-in level in the setup — #2362, round 2,
+ * for the owner's approval: the project's own, naming no place.
+ */
+export const LEVEL_SETUP_TEXT = {
+  world: 'This round rides in the realistic world. Your choice in Settings stays as it is.',
+} as const;
+
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
   readonly routes: readonly RidableRoute[] | undefined;
@@ -358,6 +381,8 @@ interface RoutePickerProps {
    * `undefined`, or none, draws nothing. @see CircuitsOffer
    */
   readonly circuits?: CircuitsOffer | undefined;
+  /** The built-in level among {@link routes} — #2362. `undefined`, none is. @see LevelOffer */
+  readonly level?: LevelOffer | undefined;
   /**
    * *Preview without a trainer* — #1992, the owner's ruling on PR #2113: the
    * chosen route ridden by the simulated rider. `undefined` draws nothing.
@@ -494,8 +519,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       .filter((id) => id !== undefined)
       .join(' ') || undefined;
   const headingId = `${ids}-heading`;
+  // #2362: a built-in level is chosen, which rides in the realistic world
+  // whatever Settings chose; and the rider's own routes, without it.
+  const levelId = props.level?.routeId;
+  const onLevel = levelId !== undefined && chosen.id === levelId;
+  const ownRoutes = props.routes.filter((route) => route.id !== levelId);
   // #1818: offered with the realistic world only (DL6), so asked for only then.
-  const deliveryOffer = props.worldChosen ? props.delivery : undefined;
+  const deliveryOffer = props.worldChosen || onLevel ? props.delivery : undefined;
   // #2294: every card says what its route holds for a round, once one is chosen.
   const courses =
     deliveryOffer?.chosen === true && deliveryOffer.courses !== undefined
@@ -509,6 +539,11 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       // and #503's promise has to be the last thing before Ride.
       // @see RealisticWorldLine
       <RealisticWorldLine key="world" />
+    ) : onLevel ? (
+      // #2362: the level's world, for this ride only, and Settings untouched.
+      <div key="world" className="oyl-chooser__world" data-level-world>
+        <p className="tw:m-0 tw:flex-1">{LEVEL_SETUP_TEXT.world}</p>
+      </div>
     ) : undefined,
     props.corridor === undefined ? undefined : (
       // #1539: towns from map data, in one line that names no place — beside
@@ -666,8 +701,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
         summary={
-          courses === undefined ? undefined : (
-            <CoursesLine routes={props.routes} courses={courses.courses} week={courses.week} />
+          // #2362: the rider's own routes only; a built-in level is not one of them.
+          courses === undefined || ownRoutes.length === 0 ? undefined : (
+            <CoursesLine routes={ownRoutes} courses={courses.courses} week={courses.week} />
           )
         }
         routes={props.routes}
@@ -676,6 +712,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         units={props.units}
         labelledBy={headingId}
         idPrefix={ids}
+        level={props.level}
         course={
           courses === undefined
             ? undefined
@@ -916,28 +953,49 @@ function RouteCards(props: {
    * same fieldset and radio group: a route and a circuit are one choice.
    */
   readonly circuits?: JSX.Element | undefined;
+  /** #2362: which of {@link routes} is a built-in level, its credit drawn beside its card. */
+  readonly level?: LevelOffer | undefined;
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
+  const card = (route: RidableRoute, index: number): JSX.Element => (
+    <RouteCard
+      key={route.id}
+      route={route}
+      radioId={`${group}-${String(index)}`}
+      group={group}
+      chosen={route.id === props.chosen.id}
+      onPick={props.onPick}
+      units={props.units}
+      course={props.course?.(route)}
+    />
+  );
+  const levelAt = props.routes.findIndex((route) => route.id === props.level?.routeId);
+  const level = levelAt < 0 ? undefined : props.routes[levelAt];
+  const own = props.routes
+    .map((route, index) => ({ route, index }))
+    .filter(({ index }) => index !== levelAt);
   return (
     <fieldset
       className="oyl-chooser__routes tw:mt-0 tw:mx-0 tw:mb-md tw:p-0 tw:border-0 tw:min-w-0"
       aria-labelledby={props.labelledBy}
     >
       {props.summary}
-      {props.routes.length === 0 ? null : (
+      {level === undefined || props.level === undefined ? null : (
+        // #2362, ADR 0065 D-6.5: the level's card, and beside it the
+        // OpenStreetMap credit and the way to the licence its file is under.
+        <>
+          <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
+            {card(level, levelAt)}
+          </ul>
+          <p className="oyl-chooser__circuits-credit" data-credit="level">
+            {props.level.credit} ·{' '}
+            <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+          </p>
+        </>
+      )}
+      {own.length === 0 ? null : (
         <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
-          {props.routes.map((route, index) => (
-            <RouteCard
-              key={route.id}
-              route={route}
-              radioId={`${group}-${String(index)}`}
-              group={group}
-              chosen={route.id === props.chosen.id}
-              onPick={props.onPick}
-              units={props.units}
-              course={props.course?.(route)}
-            />
-          ))}
+          {own.map(({ route, index }) => card(route, index))}
         </ul>
       )}
       {props.circuits}

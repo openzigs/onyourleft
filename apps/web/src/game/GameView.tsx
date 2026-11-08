@@ -1988,8 +1988,9 @@ function GameScreen({
   // `circuit:` key (ADR 0064 D-2.2); the chooser's first choice is the
   // rider's first route, or the first circuit when they have none.
   // #2362: and a built-in level's is its own file's, with no request and
-  // nothing stored (ADR 0065 D-2.4), in the realistic world where a round
-  // rides (DL6); with the standard world chosen it is off, as the port's is.
+  // nothing stored (ADR 0065 D-2.4). A level rides in the realistic world
+  // whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378),
+  // so its corridor is always there.
   const levelRoutes = level === undefined ? [] : [level.route];
   const corridorRoute =
     routes === undefined
@@ -2001,9 +2002,7 @@ function GameScreen({
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
     if (corridorRoute !== undefined && choosing && corridorRoute.id === level?.route.id) {
-      const own: CorridorState = readRealisticWorldChoice(deviceStorage())
-        ? { kind: 'ready', corridor: level.corridor }
-        : { kind: 'off', why: 'stylised-world' };
+      const own: CorridorState = { kind: 'ready', corridor: level.corridor };
       corridorStateRef.current = own;
       setCorridorState(own);
       return;
@@ -2196,7 +2195,11 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
-      const realistic = readRealisticWorldChoice(deviceStorage());
+      // #2362, the owner's ruling of 2026-11-08 on PR #2378: a built-in level
+      // rides in the realistic world for this ride only, whatever Settings
+      // chose, and the choice is never written. Where that world cannot load,
+      // D-7's fallback below says so, as for any realistic ride.
+      const realistic = onLevel || readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
       // for it, like the mass below. A view left from a previous ride is
@@ -3677,6 +3680,11 @@ function GameScreen({
           worldChosen={readRealisticWorldChoice(deviceStorage())}
           // #1539: the one line about the chosen route's corridor.
           corridor={corridorState}
+          // #2362: the level the Delivery picker opened this on: its card, its
+          // credit beside it (ADR 0065 D-6.5), and its world.
+          level={
+            level === undefined ? undefined : { routeId: level.route.id, credit: OSM_ATTRIBUTION }
+          }
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
           onGhost={chooseOwnGhost}

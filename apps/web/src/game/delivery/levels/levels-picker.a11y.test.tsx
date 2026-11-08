@@ -117,29 +117,44 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
     });
   }
 
-  it('open a setup on level 1 whose card is in the chooser’s one radio group, with no finding', async () => {
-    const [first] = SHIPPED_LEVELS.list();
-    if (first === undefined) throw new Error('the app ships no level');
-    globalThis.location.hash = hrefForGamePlay('delivery', first.routeId);
-    mounted = await mount(
-      <main>
-        <h1>Trainer game</h1>
-        <GameView port={port([OWN])} />
-      </main>,
-    );
-    for (
-      let i = 0;
-      i < 50 && !(mounted.container.textContent ?? '').includes(`Ride ${first.name}`);
-      i++
-    ) {
-      await settle();
-    }
-    const radios = queryAll<HTMLInputElement>(document, 'input').filter(
-      (input) => input.type === 'radio' && input.closest('.oyl-chooser__routes') !== null,
-    );
-    expect(radios.map((radio) => radio.value)).toStrictEqual([first.routeId, OWN.id]);
-    expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
-    expect(radios[0]?.checked).toBe(true);
+  it('are listed with the standard world chosen, above the routes’ notice, with no finding', async () => {
+    writeRealisticWorldChoice(localStorage, false);
+    await picker([OWN]);
+    expect(document.querySelectorAll('[data-level]')).toHaveLength(SHIPPED_LEVELS.list().length);
+    expect(document.body.textContent).toContain(GAME_COURSES_TEXT.deliveryNeedsWorld);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
+
+  for (const realistic of [true, false]) {
+    it(`open a setup on level 1 whose card is in the chooser’s one radio group, its credit beside it, ${realistic ? 'in the realistic world' : 'with the standard world chosen'}, with no finding`, async () => {
+      writeRealisticWorldChoice(localStorage, realistic);
+      const [first] = SHIPPED_LEVELS.list();
+      if (first === undefined) throw new Error('the app ships no level');
+      globalThis.location.hash = hrefForGamePlay('delivery', first.routeId);
+      mounted = await mount(
+        <main>
+          <h1>Trainer game</h1>
+          <GameView port={port([OWN])} />
+        </main>,
+      );
+      for (
+        let i = 0;
+        i < 50 && !(mounted.container.textContent ?? '').includes(`Ride ${first.name}`);
+        i++
+      ) {
+        await settle();
+      }
+      const radios = queryAll<HTMLInputElement>(document, 'input').filter(
+        (input) => input.type === 'radio' && input.closest('.oyl-chooser__routes') !== null,
+      );
+      expect(radios.map((radio) => radio.value)).toStrictEqual([first.routeId, OWN.id]);
+      expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+      expect(radios[0]?.checked).toBe(true);
+      expect(document.querySelector('[data-credit="level"]')?.textContent).toContain(
+        OSM_ATTRIBUTION,
+      );
+      expect(document.querySelector('[data-level-world]') !== null).toBe(!realistic);
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+    });
+  }
 });

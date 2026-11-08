@@ -2057,7 +2057,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     return mappedBuildingsOf(plans);
   })();
 
-  /** The first seed whose level round the unsteered rider crashes into, with a parked car on it. */
+  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
   const CRASHING_SEED = ((): number => {
     const simulation = new GameSimulation({
       profile: LEVEL_PROFILE,
@@ -2098,9 +2098,15 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         ride = stepped.ride;
         crashes += stepped.crashes;
       }
-      if (crashes > 0) return seed;
+      // A crash into a parked car itself (#2362, round 2), so the ride below
+      // also draws the rider moved clear of it.
+      const intoCar = ride.obstacles.some(
+        (obstacle, index) =>
+          obstacle.kind === 'parked-car' && ride.obstacleState.crashed[index] === true,
+      );
+      if (crashes > 0 && intoCar) return seed;
     }
-    throw new Error('no seed put the unsteered rider into a level obstacle');
+    throw new Error('no seed put the unsteered rider into a parked car');
   })();
 
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */

@@ -75,7 +75,10 @@
  *
  * A built-in level's round adds a **parked car**, which stands at the kerb
  * side of the road — in one of the two kerb lanes of `steer.ts`
- * §`LANE_OFFSETS_METRES`, never the middle one — and never crosses. A level
+ * §`LANE_OFFSETS_METRES`, never the middle one, its outer side
+ * {@link PARKED_CAR_KERB_GAP_METRES} off the kerb rather than on the lane's
+ * middle ({@link parkedCarStands}) — and never crosses. It still blocks its
+ * lane: a rider on that lane's middle meets it. A level
  * hands {@link placeObstacles} its {@link ObstacleMix}: how many obstacles a
  * kilometre, from its `round.hazardsPerKilometre.static`, and what share of
  * them stand. Its standing obstacles are drawn from
@@ -85,6 +88,13 @@
  * counted: an obstacle stands at least {@link OBSTACLE_SIGHT_METRES} into its
  * stretch, far more than any obstacle's half length. A ride with no mix — a
  * rider's own route — places exactly what it placed before.
+ *
+ * A crash into a parked car is drawn as one, not as a ride through it: from
+ * the tick the rider touches it, {@link clearOfParkedCars} moves the rider's
+ * drawn place to the car's road side, into the nearest lane it leaves clear,
+ * for as long as the rider is beside it. It is a sideways move of the
+ * drawing only, the steering's, and never a slow-down (ADR 0065 D-11): the
+ * rider's distance, speed and the trainer's grade are the simulation's.
  *
  * ## The route's own frame, and the tick
  *
@@ -211,6 +221,32 @@ export const CROSSING_OBSTACLE_KINDS: readonly ObstacleKind[] = Object.freeze([
   'cone',
 ]);
 
+/**
+ * How far a parked car's outer side stands off the kerb, in metres — #2362:
+ * **0.2**, less than the bicycle's width, so no rider squeezes past it on the
+ * kerb side. This project's own number.
+ */
+export const PARKED_CAR_KERB_GAP_METRES = 0.2;
+
+/**
+ * How far a rider moved clear of a parked car is drawn from its side, in
+ * metres — #2362: a hand's breadth, so the two are drawn apart, not touching.
+ */
+export const PARKED_CAR_CLEARANCE_METRES = 0.05;
+
+/**
+ * Where a parked car stands across the road, in metres right of the centre
+ * line, at the kerb on `side`: its outer side {@link PARKED_CAR_KERB_GAP_METRES}
+ * inside the carriageway's edge, so in the kerb lane but not on its middle.
+ */
+export function parkedCarStands(side: 'left' | 'right'): number {
+  const offset =
+    CARRIAGEWAY_HALF_WIDTH_METRES -
+    OBSTACLE_KINDS['parked-car'].halfWidth -
+    PARKED_CAR_KERB_GAP_METRES;
+  return side === 'left' ? -offset : offset;
+}
+
 /** The kinds a level's round stands in a lane (#2362, ADR 0065 D-10.1), in the order placement draws from. */
 export const LEVEL_STANDING_KINDS: readonly ObstacleKind[] = Object.freeze(['parked-car', 'bin']);
 
@@ -235,7 +271,11 @@ export interface StandingObstacle {
   readonly kind: ObstacleKind;
   /** Its distance along the route, in metres: the odometer, as the rider's. */
   readonly along: number;
-  /** Where it stands across the road, in metres right of the centre line: one of `steer.ts` §`LANE_OFFSETS_METRES`. */
+  /**
+   * Where it stands across the road, in metres right of the centre line: one
+   * of `steer.ts` §`LANE_OFFSETS_METRES`, or for a parked car (#2362) its
+   * kerb lane's kerb side, {@link parkedCarStands}.
+   */
   readonly stands: number;
   /** It comes from no kerb. @see CrossingObstacle.from */
   readonly from?: undefined;
@@ -399,13 +439,14 @@ export function placeObstacles(
           : (LEVEL_STANDING_KINDS[
               Math.floor(uniformFrom(hash, 6) * LEVEL_STANDING_KINDS.length)
             ] as ObstacleKind);
-      // A parked car stands at the kerb: the first lane or the last, never the middle.
-      const lane =
-        stands === 'parked-car'
-          ? uniformFrom(hash, 5) < 0.5
-            ? 0
-            : LANE_OFFSETS_METRES.length - 1
-          : Math.floor(uniformFrom(hash, 5) * LANE_OFFSETS_METRES.length);
+      // A parked car stands at the kerb: in the first lane or the last, never
+      // the middle, and at its kerb side rather than on its middle.
+      if (stands === 'parked-car') {
+        const side = uniformFrom(hash, 5) < 0.5 ? 'left' : 'right';
+        obstacles.push({ kind: stands, along, stands: parkedCarStands(side) });
+        continue;
+      }
+      const lane = Math.floor(uniformFrom(hash, 5) * LANE_OFFSETS_METRES.length);
       obstacles.push({ kind: stands, along, stands: LANE_OFFSETS_METRES[lane] as number });
       continue;
     }
@@ -500,6 +541,71 @@ export function stepObstacles(state: ObstacleState, input: ObstacleInput): Obsta
     crashes.push({ scoreDelta: CRASH_SCORE_DELTA });
   });
   return { state: { tick, startedAt, crashed }, crashes };
+}
+
+/** Where a steered rider is drawn, and the lane they steer to: `lanes.ts` §`SteerState`'s shape. */
+export interface DrawnLane {
+  readonly lane: number;
+  readonly offset: number;
+}
+
+/**
+ * #2362: the rider moved clear of every parked car they have crashed into
+ * and are still beside, or `undefined` when they are inside none. A crash is
+ * drawn as one, not as a ride through the car: the rider's drawn place is the
+ * car's road side, {@link PARKED_CAR_CLEARANCE_METRES} from it, and they steer
+ * on to the nearest lane the car leaves clear. Only the drawing and the lane
+ * move; the rider's distance and speed are the simulation's (ADR 0065 D-11).
+ * A car not yet touched is left to {@link stepObstacles}, which counts it.
+ */
+export function clearOfParkedCars(
+  obstacles: readonly Obstacle[],
+  state: ObstacleState,
+  rider: { readonly along: number; readonly lane: number; readonly offset: number },
+): DrawnLane | undefined {
+  let moved: DrawnLane | undefined;
+  obstacles.forEach((obstacle, index) => {
+    if (obstacle.kind !== 'parked-car' || obstacle.stands === undefined) return;
+    if (state.crashed[index] !== true) return;
+    const shape = OBSTACLE_KINDS[obstacle.kind];
+    const offset = moved?.offset ?? rider.offset;
+    if (
+      !overlaps(
+        rider.along - RIDER_BEHIND_METRES,
+        rider.along + RIDER_AHEAD_METRES,
+        obstacle.along - shape.halfLength,
+        obstacle.along + shape.halfLength,
+      ) ||
+      !overlaps(
+        offset - RIDER_HALF_WIDTH_METRES,
+        offset + RIDER_HALF_WIDTH_METRES,
+        obstacle.stands - shape.halfWidth,
+        obstacle.stands + shape.halfWidth,
+      )
+    ) {
+      return;
+    }
+    const stands = obstacle.stands;
+    const reach = shape.halfWidth + RIDER_HALF_WIDTH_METRES;
+    const clear = stands + (stands > 0 ? -1 : 1) * (reach + PARKED_CAR_CLEARANCE_METRES);
+    const blocked = (lane: number): boolean =>
+      Math.abs((LANE_OFFSETS_METRES[lane] as number) - stands) < reach;
+    // The lane they steer to, if the car leaves it clear; else the clear lane nearest.
+    let lane = moved?.lane ?? rider.lane;
+    if (blocked(lane)) {
+      LANE_OFFSETS_METRES.forEach((each, at) => {
+        if (blocked(at)) return;
+        if (
+          blocked(lane) ||
+          Math.abs(each - clear) < Math.abs((LANE_OFFSETS_METRES[lane] as number) - clear)
+        ) {
+          lane = at;
+        }
+      });
+    }
+    moved = { lane, offset: clear };
+  });
+  return moved;
 }
 
 /** One change to the round's score, in the order it happened: a delivery, a point on, or a crash. */

@@ -48,7 +48,7 @@ import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../../hud/anno
 import type { GameRenderer } from '../../port';
 import { northRoute } from '../../route-fixtures-testing';
 import { SHIPPED_LEVELS } from '../../shipped-levels';
-import { writeRealisticWorldChoice } from '../../world-preference';
+import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../../world-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from '../delivery-progress';
 import type { WeekProgress } from '../round';
 
@@ -95,9 +95,15 @@ function port(routes: readonly RidableRoute[] = []): GamePort {
   };
 }
 
+/** How many times the ride asked for the realistic world's files. */
+let realisticAsked = 0;
+
 function renderer(): GameRenderer {
   return {
-    loadRealisticWorld: () => Promise.resolve({ loaded: true }),
+    loadRealisticWorld: () => {
+      realisticAsked += 1;
+      return Promise.resolve({ loaded: true });
+    },
     create: () => ({
       hasContext: true,
       prepare: () => Promise.resolve(),
@@ -119,6 +125,7 @@ let mounted: Mounted | undefined;
 beforeEach(() => {
   pending = [];
   nowMs = 0;
+  realisticAsked = 0;
   read.length = 0;
   localStorage.clear();
   writeRealisticWorldChoice(localStorage, true);
@@ -240,9 +247,10 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
       expect(document.querySelector('[data-credit="levels"]')?.textContent).toContain(
         OSM_ATTRIBUTION,
       );
-      expect(document.querySelector('[data-oyl-empty-state]')?.textContent).toContain(
-        GAME_COURSES_TEXT.noRoutes,
-      );
+      // #2362, round 2: in words that are true beside the levels.
+      const empty = document.querySelector('[data-oyl-empty-state]')?.textContent ?? '';
+      expect(empty).toContain(GAME_COURSES_TEXT.noRoutesBesideLevels);
+      expect(empty).not.toContain(GAME_COURSES_TEXT.noRoutes);
       // Listing read no level's file (D-2.5).
       expect(read).toStrictEqual([]);
 
@@ -367,9 +375,12 @@ describe('a level is refused where it is not a solo round — ADR 0065 D-8.1', (
     await pump();
     expect(mounted?.container.querySelector('.oyl-game--riding')).toBeNull();
   });
+});
 
-  it('draws no round in the standard world, where the level’s own corridor is withheld', async () => {
+describe('a level rides in the realistic world whatever Settings chose — the owner’s ruling on PR #2378', () => {
+  it('rides its round in the realistic world with the standard world chosen, and writes no choice', async () => {
     writeRealisticWorldChoice(localStorage, false);
+    const stored = { ...localStorage };
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
     await click(rideButton());
     await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
@@ -377,12 +388,63 @@ describe('a level is refused where it is not a solo round — ADR 0065 D-8.1', (
     const houses = [...document.querySelectorAll('.oyl-hud__field--delivery')].find((each) =>
       (each.textContent ?? '').startsWith('Houses'),
     );
-    expect(houses).toBeUndefined();
+    // The level's round, every house still expecting.
+    expect(houses?.querySelector('.oyl-hud__value')?.firstChild?.textContent).toBe(
+      String(fixtureAs(FIRST.id).round.houses),
+    );
+    // Its world asked for, for this ride.
+    expect(realisticAsked).toBe(1);
+    // And the rider's choice left as it was: nothing on the device written but what was there.
+    expect(readRealisticWorldChoice(localStorage)).toBe(false);
+    expect({ ...localStorage }).toStrictEqual(stored);
+  });
+
+  it('lists the levels on the Delivery picker with the standard world chosen, the routes’ notice under them', async () => {
+    writeRealisticWorldChoice(localStorage, false);
+    const routes: readonly RidableRoute[] = [
+      { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
+    ];
+    await openPicker(routes);
+    const levels = [...document.querySelectorAll('[data-level]')];
+    expect(levels.map((each) => each.querySelector('h3')?.textContent)).toStrictEqual(
+      SHIPPED_LEVELS.list().map((level) => level.name),
+    );
+    for (const level of SHIPPED_LEVELS.list()) {
+      expect(link(`${GAME_COURSES_TEXT.choose}: ${level.name}`)).toBeDefined();
+    }
+    expect(document.querySelector('[data-credit="levels"]')?.textContent).toContain(
+      OSM_ATTRIBUTION,
+    );
+    // The rider's own routes: the notice and the way to Settings, as before, and no route offered.
+    expect(text()).toContain(GAME_COURSES_TEXT.deliveryNeedsWorld);
+    expect(link(GAME_COURSES_TEXT.changeWorld)).toBeDefined();
+    expect(text()).not.toContain('First road');
+    expect(readRealisticWorldChoice(localStorage)).toBe(false);
+  });
+
+  it('asks for no realistic world on a saved route with the standard world chosen', async () => {
+    writeRealisticWorldChoice(localStorage, false);
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={port([
+          { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
+        ])}
+        renderer={() => Promise.resolve(renderer())}
+        now={() => nowMs}
+        riderMass={kilograms(72)}
+      />,
+    );
+    await until(() => !text().includes('Loading your routes'));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    await pump();
+    expect(realisticAsked).toBe(0);
   });
 });
 
 describe('a ride on a level carries the OpenStreetMap credit in every world — ADR 0065 D-6.5', () => {
-  it('shows it for the whole ride with the standard world chosen, where no round and no town is drawn', async () => {
+  it('shows it for the whole ride with the standard world chosen', async () => {
     writeRealisticWorldChoice(localStorage, false);
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
     await click(rideButton());

@@ -44,8 +44,11 @@
  * ran steps it ({@link stepDeliveryRide}) BEFORE the obstacles, and hands them
  * its offset as the rider's lateral. The same offset is what `scene.ts`
  * §`lateralOf` draws the rider at, exactly, so a crash is drawn as one
- * (#1853). It is held in memory for the round, as the rest is, and never
- * stored: a stored ride has no lateral field.
+ * (#1853). Since #2362 a parked car the rider hits moves them to its road
+ * side, so a crash into one is drawn as a crash and not as a ride through it
+ * (`obstacles.ts` §`clearOfParkedCars`): the steering's offset and lane, never
+ * the rider's distance or speed. It is held in memory for the round, as the
+ * rest is, and never stored: a stored ride has no lateral field.
  *
  * ## A house is missed when its window has closed behind the rider
  *
@@ -122,6 +125,7 @@ import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
 import type { LevelRound } from './levels/level-file';
 import {
+  clearOfParkedCars,
   levelObstacleMix,
   placeObstacles,
   roundScore,
@@ -362,6 +366,8 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       obstacles: ride.obstacles,
     });
     obstacleState = obstaclesNow.state;
+    // #2362: a parked car hit is drawn as a crash, the rider beside it, never through it.
+    steer = clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) ?? steer;
     before = at;
     if (outcome !== undefined) continue;
     for (const landing of thrownNow.landings) {

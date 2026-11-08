@@ -24,9 +24,12 @@
  *
  * ⚠️ **Delivery rides in the realistic world only** (the owner's ruling DL6:
  * its houses are the mapped houses a realistic town draws), so with the
- * stylised world chosen the setup offers no round. This page says so, with
- * the way to Settings, and offers no course: a course chosen here would open
- * a setup with no Delivery in it.
+ * stylised world chosen the setup offers no round on a rider's own route.
+ * This page says so, with the way to Settings, and offers no saved route: one
+ * chosen here would open a setup with no Delivery in it. The built-in levels
+ * are still listed above it (the owner's ruling of 2026-11-08 on PR #2378):
+ * a level rides in the realistic world for that ride only, and Settings is
+ * not changed.
  */
 
 import { metres, type RouteProfile } from '@onyourleft/domain';
@@ -60,6 +63,9 @@ export const GAME_COURSES_TEXT = {
   loading: 'Reading your routes…',
   noRoutesHeading: 'No saved routes yet',
   noRoutes: 'You have no saved routes yet. Each game is ridden on one of your saved routes.',
+  // #2362, round 2, for the owner's approval: under the built-in rounds, where
+  // the sentence above is no longer true.
+  noRoutesBesideLevels: 'You have no saved routes yet. A route you save is listed here too.',
   importRoute: 'Import a GPX file on the Routes screen',
   deliveryNeedsWorld:
     'A Delivery round rides in the realistic world, and this device has the standard one chosen.',
@@ -159,10 +165,18 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       controller.abort();
     };
   }, [port, routes, countsWanted]);
+  // #2362: the built-in levels, first, above every saved route (ADR 0065 D-8.1).
+  const builtInLevels =
+    mode === 'delivery' && levels.length > 0 ? <LevelsSection levels={levels} /> : null;
   if (mode === 'delivery' && !worldChosen) {
+    // The owner's ruling of 2026-11-08 on PR #2378: the levels are listed in
+    // the standard world too, each ridden in the realistic world for that
+    // ride only. The rider's own routes keep the notice and the way to
+    // Settings, as before.
     return (
       <div className="oyl-game-courses">
         <BackToGames />
+        {builtInLevels}
         <StatusMessage tone="info" label="Delivery">
           {GAME_COURSES_TEXT.deliveryNeedsWorld}
         </StatusMessage>
@@ -192,12 +206,9 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
         <ButtonLink href={hrefFor(routeById('routes'))}>{GAME_COURSES_TEXT.importRoute}</ButtonLink>
       }
     >
-      <p>{GAME_COURSES_TEXT.noRoutes}</p>
+      <p>{GAME_COURSES_TEXT.noRoutesBesideLevels}</p>
     </EmptyState>
   );
-  // #2362: the built-in levels, first, above every saved route (ADR 0065 D-8.1).
-  const builtInLevels =
-    mode === 'delivery' && levels.length > 0 ? <LevelsSection levels={levels} /> : null;
   if (routes.length === 0 && circuits.length === 0) {
     if (builtInLevels !== null) {
       return (
