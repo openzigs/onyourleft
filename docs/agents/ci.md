@@ -1810,19 +1810,17 @@ minutes clear of its slowest measured run.
 [41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6, and
 run [41934894471](https://github.com/openzigs/onyourleft/actions/runs/41934894471), the first with
 every shard green.
-Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
-a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
+Columns as in §"Three browser shards — #1720". This was the table `nightly-split.test.ts` reads
+until #2376 added two browser shards: the table it reads is §"Five browser shards — #2376"'s now,
+in the same shape, and this one is the record. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
 the one case that reads this table, before it had their columns; every other case passed.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
 | 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
 | attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
 | attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
 | 41934894471 attempt 1 | 769 | **EPYC 7763** | 373 | Xeon 8370C | 586 | **EPYC 7763** | 411 | EPYC 9V45 | 283 | Xeon 6975P-C | 384 | **EPYC 7763** | 508 | 48 | 250 | 332 | 466 |
-<!-- shard-measurements:end -->
 
 - **`tests-1` took 536 to 586 s, 374 s inside its 960 s stop at the slowest (a Xeon 8370C; 567 s
   on the EPYC 7763), and `tests-2` 279 to 411 s (the slowest on the 7763)**, against the one job's
@@ -2352,6 +2350,42 @@ cases are 776 + 428 + 296 + 363 + 534 = 2 397, the whole `chromium` project (`pl
 --list` over each script's file filters). ⚠️ **A NEW spec file goes into the list of the shard whose
 newest row below is furthest inside 504 s**, in the same pull request, or `nightly-split.test.ts`
 is red.
+
+**Measured** on this change's own pull request, run
+[42522620509](https://github.com/openzigs/onyourleft/actions/runs/42522620509), attempts 1 to 5 —
+each attempt the same commit, and each part's `chromium` run against its 720 s stop (Playwright's
+own `passed (…)` figure; the `game` run after `browser-3`'s part against its 85 s):
+
+| Attempt | `browser-1` | `browser-2` | `browser-3` | `browser-4` | `browser-5` | `game` run |
+|---|--:|--:|--:|--:|--:|--:|
+| 1 | 294 s on an EPYC 9V45, 41 % | 366 s on the EPYC 7763, 51 % | 366 s on the EPYC 7763, 51 % | 288 s on an EPYC 9V74, 40 % | 252 s on an EPYC 9V45, 35 % | 72 s |
+| 2 | 456 s on the EPYC 7763, 63 % | 306 s on an EPYC 9V74, 42 % | 378 s on the EPYC 7763, 52 % | 294 s on an EPYC 9V74, 41 % | 336 s on the EPYC 7763, 47 % | 72 s |
+| 3 | 342 s on an EPYC 9V74, 48 % | 360 s on the EPYC 7763, 50 % | 246 s on an EPYC 9V45, 34 % | 282 s on an EPYC 9V45, 39 % | 336 s on a Xeon 8370C, 47 % | 41 s |
+| 4 | 474 s on a Xeon 8573C, 66 % | 282 s on an EPYC 9V45, 39 % | 276 s on an EPYC 9V74, 38 % | 366 s on the EPYC 7763, 51 % | 372 s on a Xeon 8370C, 52 % | 56 s |
+| 5 | 480 s on the EPYC 7763, 67 % | 372 s on the EPYC 7763, 52 % | 228 s on an EPYC 9V45, 32 % | 366 s on a Xeon 8370C, 51 % | 276 s on an EPYC 9V74, 38 % | 39 s |
+
+**Every part of every attempt is under 70 % of its stop: the slowest is 480 s, 67 %**, and it is
+`browser-1`, whose one worker runs `ride-room.browser.spec.ts` (448 s of attempt 2's 456 on the
+EPYC 7763; it took 385 s there when it shared a part with lighter files, so three heavy files on
+four vCPUs slow each other). Every other part took 228 to 378 s, 32 to 53 %. Against the three-shard
+gate on the same CPUs that day (§ above): `browser-1` 654 to 690 s, `browser-2` 708 to 714 s.
+
+**This is the table `nightly-split.test.ts` reads**: columns as in §"Three browser shards — #1720",
+a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
+with no column fails it too. ⚠️ Every row is from an attempt whose `tests-1` shard was red on the
+one case that reads this table, before it had the `browser-4` and `browser-5` columns; every other
+case passed. ⚠️ **Attempts 1 and 3 are not in it, as #2154 left out its queued attempts**: each
+waited for runners (the longest wait between a job being created and starting was 1 138 s and
+492 s, beside the nightly workflow's own jobs for the same push in attempt 1), so `Wall` was 1 651
+and 1 121 s. Attempts 2, 4 and 5 waited at most 227, 83 and 236 s.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
+| 42522620509 attempt 2 | 661 | EPYC 9V74 | 321 | Xeon 6975P-C | 391 | EPYC 9V45 | 317 | **EPYC 7763** | 489 | EPYC 9V74 | 338 | **EPYC 7763** | 484 | EPYC 9V74 | 329 | **EPYC 7763** | 373 | 23 | 465 | 312 | 460 | 304 | 348 |
+| attempt 4 | 710 | EPYC 9V45 | 273 | **EPYC 7763** | 610 | Xeon 8573C | 458 | Xeon 8573C | 509 | EPYC 9V45 | 309 | EPYC 9V74 | 367 | **EPYC 7763** | 403 | Xeon 8370C | 405 | 24 | 483 | 287 | 342 | 375 | 381 |
+| attempt 5 | 717 | EPYC 9V74 | 327 | EPYC 9V74 | 470 | **EPYC 7763** | 467 | **EPYC 7763** | 519 | **EPYC 7763** | 412 | EPYC 9V45 | 296 | Xeon 8370C | 401 | EPYC 9V74 | 309 | 26 | 490 | 383 | 274 | 376 | 285 |
+<!-- shard-measurements:end -->
 
 ⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
 run's log and draw the lists again the same way, divide the file that is the floor (one file is
