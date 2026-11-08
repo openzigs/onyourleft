@@ -1977,3 +1977,125 @@ describe('#2081 — a distance axis beside time', () => {
     ).toEqual(['0:00', '5:00', '10:00']);
   });
 });
+
+describe('#2373 — a read that settles after the page has gone reaches no setter', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /**
+   * Count the reads of `window` from now on.
+   *
+   * React's `dispatchSetState` reads `window.event` to choose the update's
+   * priority, which is the line the merge-queue failure threw from once the
+   * environment had torn `window` down (run 42509922500). So a read of `window`
+   * after the page has unmounted is a setter that ran: the observable end of the
+   * defect, without reaching into React.
+   */
+  function countWindowReads(): { readonly reads: () => number; readonly restore: () => void } {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const held = globalThis.window;
+    let reads = 0;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      get: () => {
+        reads += 1;
+        return held;
+      },
+    });
+    return {
+      reads: () => reads,
+      restore: () => {
+        if (original === undefined) {
+          Reflect.deleteProperty(globalThis, 'window');
+        } else {
+          Object.defineProperty(globalThis, 'window', original);
+        }
+      },
+    };
+  }
+
+  it('does not set a trace, nor read the channels still to come, once the page is unmounted', async () => {
+    observers = installFakeIntersectionObserver();
+    const base = indoorRide();
+    const asked: StreamChannel[] = [];
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const port: StubDetail = {
+      ...base,
+      store: {
+        ...base.store,
+        getStreamChannel: async (owner, id, channel) => {
+          asked.push(channel);
+          if (channel === 'power') {
+            await held;
+          }
+          return base.store.getStreamChannel(owner, id, channel);
+        },
+      },
+    };
+    mounted = await open(port);
+    await observers.reveal(
+      ['power', 'heartRate', 'cadence'].map(
+        (channel) => document.querySelector(`[data-oyl-trace-slot="${channel}"]`) as Element,
+      ),
+    );
+    await settle();
+    // The first channel's read is in flight, and the rider leaves.
+    expect(asked).toEqual(['power']);
+    mounted.unmount();
+    mounted = undefined;
+
+    const watch = countWindowReads();
+    try {
+      release?.();
+      await settle();
+      await settle();
+      expect(watch.reads(), 'a setter ran after the page had unmounted').toBe(0);
+      expect(asked, 'a channel was read after the page had unmounted').toEqual(['power']);
+    } finally {
+      watch.restore();
+    }
+  });
+
+  it('does not set the shared track once the page is unmounted', async () => {
+    const port = outdoorRide([homeZone()]);
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = {
+      ...port.store,
+      listPrivacyZones: async (owner: typeof ATHLETE) => {
+        await held;
+        return port.store.listPrivacyZones(owner);
+      },
+    };
+    mounted = await open({ ...port, store });
+    const button = queryAll(document, 'button').find((each) =>
+      each.textContent?.includes('Show what a shared copy would contain'),
+    );
+    if (button === undefined) throw new Error('no shared-view button');
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    mounted.unmount();
+    mounted = undefined;
+
+    const watch = countWindowReads();
+    try {
+      release?.();
+      await settle();
+      await settle();
+      expect(watch.reads(), 'a setter ran after the page had unmounted').toBe(0);
+    } finally {
+      watch.restore();
+    }
+  });
+});
