@@ -37,6 +37,8 @@ import config, {
   GATE_STEP_MS,
 } from '../playwright.config';
 
+import { R2_ARCHIVE_VARIABLES } from '../tools/demo/r2-archive';
+
 import { NIGHTLY, NIGHTLY_CHECKS } from './nightly';
 
 const BROWSER = dirname(fileURLToPath(import.meta.url));
@@ -654,6 +656,31 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   const nightly = read(ROOT, '.github', 'workflows', 'nightly.yml');
   const runCommands = (workflow: string): string[] =>
     [...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => String(match[1]).trim());
+
+  it('runs the uninstrumented Vitest files with the preset-route archive check on, on main — #2268, #2275', () => {
+    // Unset, `preset-bake-archive.test.ts` skips and the step is green over a
+    // check that never ran. On `main` only: the R2 token's environment
+    // deploys from `main`, and a pull request's run without it would read the
+    // public URL and be answered 403.
+    const onMain = (value: string): string =>
+      `\${{ github.ref == 'refs/heads/main' && '${value}' || '' }}`;
+    const step = /- name: Tests outside coverage\n((?: {8}.*\n)+)/.exec(uncommented(nightly))?.[1];
+    const secrets = Object.values(R2_ARCHIVE_VARIABLES).map(
+      (name) => `          ${name}: \${{ secrets.${name} }}\n`,
+    );
+    expect(step).toBe(
+      '        env:\n' +
+        `          OYL_DEMO_BAKE_ARCHIVE_CHECK: ${onMain('1')}\n` +
+        secrets.join('') +
+        '        run: pnpm run test:uninstrumented\n',
+    );
+    // The job takes the token's environment on `main` alone.
+    expect(jobField(jobsOf(nightly).get('heavy') ?? '', 'environment')).toBe(
+      onMain('basemap-archive'),
+    );
+    // And no other step or job is handed a secret.
+    expect(uncommented(nightly).match(/secrets\./g)).toHaveLength(secrets.length);
+  });
 
   it('runs the uninstrumented Vitest files, and each half of the nightly browser checks in a job of its own — #1675', () => {
     const commands = runCommands(nightly);

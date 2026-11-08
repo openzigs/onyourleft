@@ -20,7 +20,9 @@
  *   the browser gate's synthetic fixture (D-9), never OpenStreetMap data.
  * - **The read is a ride's.** `corridor.ts` §`planCorridor` and
  *   §`readCorridorTiles`, through `world-data/corridor-source.ts`
- *   §`corridorArchiveFrom` (with its own `archiveSource` for a URL), and
+ *   §`corridorArchiveFrom` (with its own `archiveSource` for a URL, or
+ *   `r2-archive.ts` for the published archive where `OYL_BASEMAP_R2_*` is set:
+ *   CI's runners, which the public host refuses, #2275), and
  *   §`packedCorridorFeatures` — so the demo draws exactly what a rider on the
  *   route would get. At most `CORRIDOR_MAX_TILES` (600) tiles, each one range
  *   read. A route that leaves the archive's bounds, or a tile that is refused,
@@ -89,6 +91,7 @@ import { PUBLISHED_BASEMAP_URL } from '../../src/map/basemap';
 import { archiveSource, corridorArchiveFrom } from '../../src/world-data/corridor-source';
 
 import { DEMO_ROUTE_MAX_BYTES, ODBL_NOTICE_FILE, ROUTE_MANIFEST_FILE } from './demo-routes';
+import { r2ArchiveAccess, r2ArchiveSource, type Environment } from './r2-archive';
 import {
   bundleLicence,
   encodeRouteBundle,
@@ -480,15 +483,42 @@ export function fileSource(path: string): Source {
   };
 }
 
-/** The archive an `--archive` value names, and the URL the manifest records for it. */
-export function archiveOf(value: string): { archive: CorridorArchive; archiveUrl: string } {
+/** How a bake reads its archive: R2's S3 API, the archive's own URL, or a file. */
+export type ArchiveTransport = 'r2' | 'https' | 'file';
+
+/**
+ * The archive an `--archive` value names, the URL the manifest records for
+ * it, and how it is read.
+ *
+ * The published archive is read through R2's S3 API when `env` carries the
+ * `OYL_BASEMAP_R2_*` variables (`r2-archive.ts`, #2275) — CI, whose runners
+ * the public host refuses — and through its URL otherwise. Either way the
+ * record names the public URL: it is the same object. Another host's URL is
+ * never read through R2, so the credential goes to no other host.
+ */
+export function archiveOf(
+  value: string,
+  env: Environment = process.env,
+): { archive: CorridorArchive; archiveUrl: string; via: ArchiveTransport } {
   if (/^https:\/\//.test(value)) {
-    return { archive: corridorArchiveFrom(archiveSource(value)), archiveUrl: value };
+    const published = new URL(value).origin === new URL(PUBLISHED_BASEMAP_URL).origin;
+    const access = published ? r2ArchiveAccess(env) : undefined;
+    return access === undefined
+      ? { archive: corridorArchiveFrom(archiveSource(value)), archiveUrl: value, via: 'https' }
+      : {
+          archive: corridorArchiveFrom(r2ArchiveSource(value, access)),
+          archiveUrl: value,
+          via: 'r2',
+        };
   }
   if (/^[a-z]+:/i.test(value)) throw new Error('demo:bake: --archive is an https: URL or a file');
   // A file's directory is the baker's own, so only its name is recorded.
   const path = resolve(value);
-  return { archive: corridorArchiveFrom(fileSource(path)), archiveUrl: `file:${basename(path)}` };
+  return {
+    archive: corridorArchiveFrom(fileSource(path)),
+    archiveUrl: `file:${basename(path)}`,
+    via: 'file',
+  };
 }
 
 export interface BakeArguments {
@@ -608,7 +638,8 @@ async function main(): Promise<void> {
     return;
   }
   const { gpx, recordPath, committed } = readBakeInput(args, PRESET_ROUTES_DIRECTORY);
-  const { archive, archiveUrl } = archiveOf(args.archive);
+  const { archive, archiveUrl, via } = archiveOf(args.archive);
+  if (via === 'r2') console.log("demo:bake: reading the archive through R2's S3 API");
   const baked = await bakeRoute({
     routeId: args.route,
     gpx,

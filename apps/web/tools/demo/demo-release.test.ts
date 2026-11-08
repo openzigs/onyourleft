@@ -11,8 +11,9 @@
  *   real bake (never OpenStreetMap data, ADR 0056 D-9). Every check reads the
  *   staged files back from disk.
  * - **The workflow, read as text**: its only trigger, its runners, its pins,
- *   its permissions and its one token, and that it bakes and stages through
- *   the scripts this file tests.
+ *   its permissions, its one token and its one secret (the archive's R2 read
+ *   token, #2275), and that it bakes and stages through the scripts this file
+ *   tests.
  *
  * ⚠️ What this file does NOT claim: that the release is published. That is
  * settled by running the workflow from `main`, and never by a pull request.
@@ -43,6 +44,7 @@ import {
   stageRelease,
 } from './demo-release';
 import { ODBL_NOTICE_FILE, ROUTE_MANIFEST_FILE } from './demo-routes';
+import { R2_ARCHIVE_VARIABLES } from './r2-archive';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROOT = join(WEB, '..', '..');
@@ -279,8 +281,22 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
     for (const reference of uses) expect(reference).toMatch(/@[0-9a-f]{40}$/);
   });
 
-  it('reads no secret, and writes only from the job that runs no repository code', () => {
-    expect(WORKFLOW).not.toMatch(/secrets\./);
+  it('reads one secret, the archive’s R2 read token, in the bake step alone — #2275', () => {
+    // The public host answers a runner 403, so the bake reads the archive
+    // through R2 (`r2-archive.ts`); the token is the four variables that
+    // module reads, from an environment that deploys from `main`.
+    const bake = job('bake');
+    expect(bake).toMatch(/^ {4}environment: basemap-archive$/m);
+    const step = /- name: Bake the preset routes\n((?: {8}.*\n)+)/.exec(bake)?.[1] ?? '';
+    const secrets = Object.values(R2_ARCHIVE_VARIABLES).map(
+      (name) => `          ${name}: \${{ secrets.${name} }}\n`,
+    );
+    expect(step.startsWith(`        env:\n${secrets.join('')}        run: |\n`)).toBe(true);
+    const code = WORKFLOW.split('\n').filter((line) => !line.trimStart().startsWith('#'));
+    expect(code.join('\n').match(/secrets\./g)).toHaveLength(secrets.length);
+  });
+
+  it('writes only from the job that runs no repository code', () => {
     expect(/^permissions:\n {2}contents: read\n/m.test(WORKFLOW)).toBe(true);
     expect(job('bake')).not.toMatch(/permissions:/);
     const publish = job('publish');
