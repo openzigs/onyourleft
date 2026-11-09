@@ -216,6 +216,29 @@ describe('which ride a session’s report goes with', () => {
     expect(puts).toStrictEqual([]);
   });
 
+  it('drops the report at once, and stops listening, when the rider discards the ride (#2349)', () => {
+    const rides = scriptedRides();
+    const { puts, store } = recordingStore();
+    const session = sideReportKeeper({
+      rides: rides.source,
+      store,
+      athleteId: ATHLETE_A,
+    }).beginSideReportSession();
+    rides.start();
+    session.endSideReportSession(REPORT, POSE);
+    // `confirmDiscard`'s order: stopped, then discarded, never saving.
+    rides.set({ phase: 'stopped' });
+    expect(rides.listening()).toBe(1);
+    rides.set({ saveState: 'discarded' });
+    expect(puts).toStrictEqual([]);
+    // Settled now, not left waiting for the next ride's idle.
+    expect(rides.listening()).toBe(0);
+    rides.set({ phase: 'idle', saveState: 'unavailable' });
+    rides.start();
+    rides.stopAndSave(activityId('the-next-ride'));
+    expect(puts).toStrictEqual([]);
+  });
+
   it('drops the report when a stopped ride is reset to idle without being saved (#548)', () => {
     // Stopped, never saved — `saveState` stays what it was — then reset.
     const rides = scriptedRides();

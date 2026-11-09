@@ -60,8 +60,6 @@ export { openCapacitorSettings } from './permission/settings';
 export type { SettingsPage } from './permission/settings';
 export { ANALYSIS_READ_TIMEOUT_MILLISECONDS, capacitorAnalysisPost } from './http/analysis-http';
 export type { AnalysisPostReply, AnalysisPostRequest } from './http/analysis-http';
-export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';
-export type { ThermalPlugin, ThermalReply } from './thermal/thermal';
 export { capacitorSplashScreenPlugin, hideCapacitorSplashScreen } from './launch/splash-screen';
 export type { LaunchSplashPlugin } from './launch/splash-screen';
 export {
@@ -69,6 +67,22 @@ export {
   setCapacitorSecureWindow,
 } from './secure-window/secure-window';
 export type { SecureWindowPlugin } from './secure-window/secure-window';
+export {
+  capacitorOtherPlayer,
+  capacitorOtherPlayerPlugin,
+  OTHER_PLAYER_CALL_DEADLINE_MILLISECONDS,
+} from './other-player/other-player';
+export type {
+  CapacitorOtherPlayer,
+  OtherPlayerKey,
+  OtherPlayerPlugin,
+} from './other-player/other-player';
+export {
+  AUTOPLAY_CALL_DEADLINE_MILLISECONDS,
+  capacitorAutoplayAllowed,
+  capacitorAutoplayPlugin,
+} from './autoplay/autoplay';
+export type { AutoplayPlugin } from './autoplay/autoplay';
 export {
   capacitorRecordingServicePlugin,
   recordingServiceKeepAlive,

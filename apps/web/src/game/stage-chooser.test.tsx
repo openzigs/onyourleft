@@ -33,7 +33,11 @@ import { pacerChoice } from './pacer-choice';
 import { DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
 import {
   DELIVERY_CHOICE_TEXT,
+  DELIVERY_COURSE_TEXT,
+  deliveryCourseLine,
+  deliveryCoursesText,
   deliveryWeekText,
+  type DeliveryCourse,
   LOADOUT_HELP,
   RoutePicker,
   steepestClimbPercent,
@@ -56,8 +60,8 @@ function ridable(id: string, name: string, attempts: number, rise: number): Rida
 }
 
 const ROUTES: readonly RidableRoute[] = [
-  ridable('a', 'Box Hill', 0, 40),
-  ridable('b', 'Ditchling', 3, 120),
+  ridable('a', 'Quarry climb', 0, 40),
+  ridable('b', 'Reservoir road', 3, 120),
 ];
 
 const NOTICES = {
@@ -203,7 +207,7 @@ describe('#940 — the order of the notices and Ride', () => {
     const asking = text.indexOf('Asking your trainer for control');
     expect(asking).toBeGreaterThanOrEqual(0);
     expect(text).not.toContain(NOTICES.trainerPromise);
-    expect(asking).toBeLessThan(text.indexOf('Ride Box Hill'));
+    expect(asking).toBeLessThan(text.indexOf('Ride Quarry climb'));
     expect(rideButton(tree.container).getAttribute('aria-disabled')).toBe('true');
   });
 
@@ -245,12 +249,12 @@ describe('#940 — the route cards', () => {
     expect(group).toHaveLength(ROUTES.length);
     expect(new Set(group.map((radio) => radio.name)).size).toBe(1);
     expect(group.map((radio) => radio.checked)).toEqual([true, false]);
-    expect(rideButton(tree.container).textContent).toBe('Ride Box Hill');
+    expect(rideButton(tree.container).textContent).toBe('Ride Quarry climb');
 
     await activateWithKeyboard(group[1] as HTMLInputElement);
     await settle();
     expect(radios(tree.container).map((radio) => radio.checked)).toEqual([false, true]);
-    expect(rideButton(tree.container).textContent).toBe('Ride Ditchling');
+    expect(rideButton(tree.container).textContent).toBe('Ride Reservoir road');
   });
 
   it('starts the CHOSEN route, with the ghost only where there is an attempt', async () => {
@@ -553,4 +557,135 @@ describe('#1818 — a Delivery round in the loadout', () => {
   });
 
   // The audit is `delivery-chooser.a11y.test.tsx`'s, inside `test:a11y`.
+});
+
+describe('#2294 — what each route card says it holds for a Delivery round', () => {
+  const counted = (houses: number): DeliveryCourse => ({ kind: 'counted', houses });
+
+  it('holds a round with the day’s count, or at least the fewest, and says up to the smaller', () => {
+    const eight = { houses: 8 };
+    expect(deliveryCourseLine(counted(12), eight)).toEqual({
+      text: 'Delivery: up to 8 houses on the round',
+      holds: true,
+    });
+    // A shorter round than the day's, still a round.
+    expect(deliveryCourseLine(counted(3), eight)).toEqual({
+      text: 'Delivery: up to 3 houses on the round',
+      holds: true,
+    });
+    // A week whose count has fallen below the fewest still rides its whole round.
+    expect(deliveryCourseLine(counted(2), { houses: 2 })).toEqual({
+      text: 'Delivery: up to 2 houses on the round',
+      holds: true,
+    });
+    expect(deliveryCourseLine(counted(1), { houses: 1 })).toEqual({
+      text: 'Delivery: up to 1 house on the round',
+      holds: true,
+    });
+  });
+
+  it('greys a route with too few houses, saying how many and how many a round needs', () => {
+    expect(deliveryCourseLine(counted(2), { houses: 8 })).toEqual({
+      text: 'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3',
+      holds: false,
+    });
+    expect(deliveryCourseLine(counted(1), { houses: 2 })).toEqual({
+      text: 'No Delivery round on this route: 1 mapped house in reach, and a round needs 2',
+      holds: false,
+    });
+    expect(deliveryCourseLine(counted(0), { houses: 1 })).toEqual({
+      text: 'No Delivery round on this route: no mapped house is in reach of the road',
+      holds: false,
+    });
+  });
+
+  it('greys a route whose map gave nothing to count, with the reason in words', () => {
+    const week = { houses: 8 };
+    const reasons: [DeliveryCourse, string][] = [
+      [
+        { kind: 'unread', state: { kind: 'off', why: 'map-tiles-off' } },
+        'map tiles are off in Settings',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'off', why: 'stylised-world' } },
+        'the stylised world is chosen',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'off', why: 'no-archive' } },
+        'this build has no map archive',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'off', why: 'wrong-schema' } },
+        'this build’s map archive is not one this reads',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'unavailable', why: 'offline' } },
+        'its map cannot be read while this device is offline',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'unavailable', why: 'outside-coverage' } },
+        'there is no map data for it',
+      ],
+      [
+        { kind: 'unread', state: { kind: 'unavailable', why: 'refused' } },
+        'its map could not be read',
+      ],
+      [{ kind: 'failed' }, 'its houses could not be counted'],
+    ];
+    for (const [course, reason] of reasons) {
+      expect(deliveryCourseLine(course, week)).toEqual({
+        text: `No Delivery round on this route: ${reason}`,
+        holds: false,
+      });
+    }
+  });
+
+  it('says a route not yet counted, or still being read, is being counted, and greys nothing', () => {
+    const counting = { text: DELIVERY_COURSE_TEXT.counting, holds: undefined };
+    expect(deliveryCourseLine(undefined, { houses: 8 })).toEqual(counting);
+    expect(
+      deliveryCourseLine(
+        { kind: 'unread', state: { kind: 'reading', done: 1, of: 4 } },
+        { houses: 8 },
+      ),
+    ).toEqual(counting);
+  });
+
+  it('sums the cards up once every one is counted', () => {
+    const [a, b] = ROUTES;
+    if (a === undefined || b === undefined) throw new Error('the fixture has two routes');
+    const week = { houses: 8 };
+    expect(deliveryCoursesText([a, b], new Map([[a.id, counted(8)]]), week)).toBe(
+      DELIVERY_COURSE_TEXT.allCounting,
+    );
+    expect(
+      deliveryCoursesText(
+        [a, b],
+        new Map([
+          [a.id, counted(8)],
+          [b.id, counted(0)],
+        ]),
+        week,
+      ),
+    ).toBe('1 of your 2 routes can hold today’s Delivery round.');
+    expect(
+      deliveryCoursesText(
+        [a, b],
+        new Map<string, DeliveryCourse>([
+          [a.id, { kind: 'failed' }],
+          [b.id, counted(0)],
+        ]),
+        week,
+      ),
+    ).toBe('None of your routes can hold today’s Delivery round: each card says why.');
+    expect(deliveryCoursesText([a], new Map([[a.id, counted(8)]]), week)).toBe(
+      'Your route can hold today’s Delivery round.',
+    );
+  });
+
+  it('names no other game in anything it says', () => {
+    expect(Object.values(DELIVERY_COURSE_TEXT).join(' ')).not.toMatch(
+      /paper|subscriber|newspaper/i,
+    );
+  });
 });

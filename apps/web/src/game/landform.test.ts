@@ -182,6 +182,85 @@ function topHeightAt(ground: TerrainMesh, x: number, z: number): number | undefi
   return top;
 }
 
+/** The side of {@link triangleCells}' cells, in metres. */
+const TRIANGLE_CELL_METRES = 8;
+
+/**
+ * A mesh's triangles by the cells of {@link TRIANGLE_CELL_METRES} they could
+ * be found over — each its box in plan, widened by the metre
+ * {@link heightsOver}'s and {@link heightOver}'s own test of a box is — as
+ * each triangle's first index, in the mesh's order — #1688.
+ */
+type TriangleCells = ReadonlyMap<number, readonly number[]>;
+
+/** The key of the cell a point in plan is in. @see TriangleCells */
+function triangleCellKey(cellX: number, cellZ: number): number {
+  return cellX * 100_003 + cellZ;
+}
+
+/**
+ * A mesh's {@link TriangleCells}, or `undefined` where a triangle's box is
+ * not finite, whose test then passes everywhere.
+ *
+ * ⚠️ **Build it again for every frame**: a terrain mesh's buffers are the
+ * next build's scratch (`landform.ts` §`terrainScratchFor`). With them, a
+ * lookup tests only the triangles whose widened box holds the point, in the
+ * mesh's order, so it finds what the walk over every triangle finds: that
+ * walk, once per metre of every ray from the eye, was most of this file's
+ * time under the nightly coverage run.
+ */
+function triangleCells(mesh: {
+  readonly vertices: Float32Array;
+  readonly indices: Uint32Array;
+}): TriangleCells | undefined {
+  const { vertices, indices } = mesh;
+  const cells = new Map<number, number[]>();
+  for (let at = 0; at + 2 < indices.length; at += 3) {
+    const a = (indices[at] as number) * 3;
+    const b = (indices[at + 1] as number) * 3;
+    const c = (indices[at + 2] as number) * 3;
+    const ax = vertices[a] as number;
+    const az = vertices[a + 2] as number;
+    const bx = vertices[b] as number;
+    const bz = vertices[b + 2] as number;
+    const cx = vertices[c] as number;
+    const cz = vertices[c + 2] as number;
+    const minX = Math.min(ax, bx, cx) - 1;
+    const maxX = Math.max(ax, bx, cx) + 1;
+    const minZ = Math.min(az, bz, cz) - 1;
+    const maxZ = Math.max(az, bz, cz) + 1;
+    if (!Number.isFinite(minX + maxX + minZ + maxZ)) return undefined;
+    const lastX = Math.floor(maxX / TRIANGLE_CELL_METRES);
+    const lastZ = Math.floor(maxZ / TRIANGLE_CELL_METRES);
+    for (let cellX = Math.floor(minX / TRIANGLE_CELL_METRES); cellX <= lastX; cellX += 1) {
+      for (let cellZ = Math.floor(minZ / TRIANGLE_CELL_METRES); cellZ <= lastZ; cellZ += 1) {
+        const key = triangleCellKey(cellX, cellZ);
+        const filed = cells.get(key);
+        if (filed === undefined) cells.set(key, [at]);
+        else filed.push(at);
+      }
+    }
+  }
+  return cells;
+}
+
+/**
+ * The triangles to test over a point, as each one's first index; `undefined`
+ * for every triangle — with no cells, or at a point that is not finite.
+ */
+function trianglesNear(
+  cells: TriangleCells | undefined,
+  x: number,
+  z: number,
+): readonly number[] | undefined {
+  if (cells === undefined || !Number.isFinite(x) || !Number.isFinite(z)) return undefined;
+  const key = triangleCellKey(
+    Math.floor(x / TRIANGLE_CELL_METRES),
+    Math.floor(z / TRIANGLE_CELL_METRES),
+  );
+  return cells.get(key) ?? [];
+}
+
 /**
  * Every triangle of a mesh over a point in plan: its height there and the
  * row pair it spans (its lowest vertex's row). `inside` is as {@link heightOver}'s.
@@ -191,10 +270,14 @@ function heightsOver(
   x: number,
   z: number,
   inside: number,
+  cells?: TriangleCells,
 ): { readonly height: number; readonly row: number }[] {
   const { vertices, indices } = mesh;
   const found: { readonly height: number; readonly row: number }[] = [];
-  for (let at = 0; at + 2 < indices.length; at += 3) {
+  const near = trianglesNear(cells, x, z);
+  const count = near === undefined ? Math.floor(indices.length / 3) : near.length;
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    const at = near === undefined ? triangle * 3 : (near[triangle] as number);
     const ia = indices[at] as number;
     const ib = indices[at + 1] as number;
     const ic = indices[at + 2] as number;
@@ -239,9 +322,13 @@ function heightOver(
   x: number,
   z: number,
   inside: number,
+  cells?: TriangleCells,
 ): number | undefined {
   const { vertices, indices } = mesh;
-  for (let at = 0; at + 2 < indices.length; at += 3) {
+  const near = trianglesNear(cells, x, z);
+  const count = near === undefined ? Math.floor(indices.length / 3) : near.length;
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    const at = near === undefined ? triangle * 3 : (near[triangle] as number);
     // No array per triangle, and a bounding box before any division: since
     // #543 the road has five times the triangles and this is called for every
     // vertex of five times the ground, so the old shape of this loop took the
@@ -512,6 +599,7 @@ describe('a fold tapers back rather than standing up as a wall — #2096', () =>
           vertices: corridor.vertices,
           indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
         };
+        const cells = triangleCells(surface);
         for (let vertex = 0; vertex < ground.vertices.length / 3; vertex += 1) {
           if (vertex % COLUMNS < 2) continue;
           const road = heightOver(
@@ -519,6 +607,7 @@ describe('a fold tapers back rather than standing up as a wall — #2096', () =>
             ground.vertices[vertex * 3] as number,
             ground.vertices[vertex * 3 + 2] as number,
             1e-3,
+            cells,
           );
           if (road === undefined) continue;
           worst = Math.max(worst, (ground.vertices[vertex * 3 + 1] as number) - road);
@@ -1196,6 +1285,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
         const frame = sceneAt(profile, at);
         const rig = cameraRig(frame.camera);
         const ground = frame.terrain.mesh;
+        const cells = triangleCells(ground);
         const centre = frame.corridor.centre;
         for (const point of centre) {
           if (!(point.distance > bend + 15)) continue;
@@ -1210,7 +1300,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
             const share = step / span;
             const x = rig.eye.x + dx * share;
             const z = rig.eye.z + dz * share;
-            const others = heightsOver(ground, x, z, -1e-6).filter((hit) => {
+            const others = heightsOver(ground, x, z, -1e-6, cells).filter((hit) => {
               const row = centre[hit.row] as { along: number; distance: number };
               return row.distance <= bend || Math.abs(row.along - point.along) >= 40;
             });
@@ -1775,10 +1865,18 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       const list = cells.get(key) ?? [];
       let top = Number.NEGATIVE_INFINITY;
       for (let at = 0; at + 2 < list.length && !(any && Number.isFinite(top)); at += 3) {
-        const [a, b, c] = [list[at], list[at + 1], list[at + 2]] as [number, number, number];
-        const [ax, az, bx, bz, cx, cz] = [a, a + 2, b, b + 2, c, c + 2].map(
-          (index) => vertices[index] as number,
-        ) as [number, number, number, number, number, number];
+        // No array per triangle (#1688): this runs for every metre of every
+        // ray, and under the nightly coverage run two arrays and a callback a
+        // triangle were most of this describe's time.
+        const a = list[at] as number;
+        const b = list[at + 1] as number;
+        const c = list[at + 2] as number;
+        const ax = vertices[a] as number;
+        const az = vertices[a + 2] as number;
+        const bx = vertices[b] as number;
+        const bz = vertices[b + 2] as number;
+        const cx = vertices[c] as number;
+        const cz = vertices[c + 2] as number;
         const area = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
         if (Math.abs(area) < 1e-9) continue;
         const u = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / area;
@@ -2134,5 +2232,108 @@ describe('the distant hills — #458', () => {
     expect(low.base).toBeLessThan(low.foot);
     // Not one height all the way round: hills rather than a wall.
     expect(Math.max(...low.tops) - Math.min(...low.tops)).toBeGreaterThan(20);
+  });
+});
+
+describe('this file’s own lookup of a triangle by its cell — #1688', () => {
+  // `triangleCells` is what makes the sharp-bend rays affordable under the
+  // nightly coverage run, and a cell that missed a triangle would make every
+  // case that reads it pass on ground it never looked at. So each lookup is
+  // held to the walk over every triangle, over a sharp bend's ground and its
+  // road, on the corners and middle of every 24th triangle of the ground and
+  // every 4th of the road, and every 4 m over the apex from a multiple of 8,
+  // so on cell edges too. Built in the case: the ground's buffers are the
+  // next build's.
+  const bend = 1_500;
+
+  it.each([
+    ['the ground', 24],
+    ['the road', 4],
+  ] as const)(
+    'finds every triangle over a point the walk finds, in its order, on %s',
+    (name, every) => {
+      const { corridor, ground } = frameAt(plannerCornerRoute(143, 'left', 0.03), bend - 60);
+      const mesh =
+        name === 'the ground'
+          ? ground
+          : {
+              vertices: corridor.vertices,
+              indices: corridor.indices.slice(0, (corridor.centre.length - 1) * 3 * 6),
+            };
+      const v = mesh.vertices;
+      const points: { readonly x: number; readonly z: number }[] = [];
+      for (let at = 0; at + 2 < mesh.indices.length; at += 3 * every) {
+        const corners = [0, 1, 2].map((k) => (mesh.indices[at + k] as number) * 3);
+        for (const corner of corners) {
+          points.push({ x: v[corner] as number, z: v[corner + 2] as number });
+        }
+        points.push({
+          x: corners.reduce((sum, corner) => sum + (v[corner] as number), 0) / 3,
+          z: corners.reduce((sum, corner) => sum + (v[corner + 2] as number), 0) / 3,
+        });
+      }
+      const apex = corridor.centre.find(
+        (point) => point.distance >= bend,
+      ) as RoadCorridor['centre'][number];
+      const west = Math.floor(apex.x / 8) * 8 - 32;
+      const south = Math.floor(apex.z / 8) * 8 - 32;
+      for (let x = west; x <= west + 64; x += 4) {
+        for (let z = south; z <= south + 64; z += 4) points.push({ x, z });
+      }
+
+      const cells = triangleCells(mesh);
+      expect(cells).toBeDefined();
+      let over = 0;
+      for (const { x, z } of points) {
+        for (const inside of [-1e-6, 1e-3]) {
+          const walked = heightsOver(mesh, x, z, inside);
+          expect(heightsOver(mesh, x, z, inside, cells)).toEqual(walked);
+          expect(heightOver(mesh, x, z, inside, cells)).toBe(heightOver(mesh, x, z, inside));
+          if (walked.length > 0) over += 1;
+        }
+      }
+      // Non-vacuity: hundreds of the points are over a triangle.
+      expect(over).toBeGreaterThan(500);
+    },
+  );
+
+  it('walks every triangle where a box is not finite, or the point is not', () => {
+    // One triangle a metre across at the origin, and beside it one with a
+    // corner that is not a number, which the walk finds over every point, at
+    // a height that is not one: the cells would file it nowhere and miss it.
+    const corners = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+      [50, 0, 50],
+      [Number.NaN, 0, Number.NaN],
+      [50, 0, 51],
+    ];
+    const vertices = new Float32Array(corners.flat());
+    const one = { vertices: vertices.slice(0, 9), indices: new Uint32Array([0, 1, 2]) };
+    const broken = { vertices, indices: new Uint32Array([0, 1, 2, 3, 4, 5]) };
+    expect(triangleCells(broken)).toBeUndefined();
+    expect(heightsOver(broken, 0.2, 0.2, -1e-6, triangleCells(broken))).toHaveLength(2);
+    const cells = triangleCells(one);
+    expect(heightOver(one, 0.2, 0.2, -1e-6, cells)).toBe(0);
+    expect(heightOver(one, 30, 30, -1e-6, cells)).toBeUndefined();
+    // A point that is not a number is over every triangle, to the walk.
+    expect(heightsOver(one, Number.NaN, 0.2, -1e-6, cells)).toEqual(
+      heightsOver(one, Number.NaN, 0.2, -1e-6),
+    );
+    expect(heightsOver(one, Number.NaN, 0.2, -1e-6)).toHaveLength(1);
+  });
+
+  it('files a triangle under the cell beside its box too, as the walk takes a point a hair outside it', () => {
+    // A triangle whose west edge is on a cell's edge, x = 8, and a point a
+    // tenth of a micrometre west of it: in the cell before, and inside the
+    // triangle by the walk's millionth. Only the metre the box is widened by
+    // files the triangle under that cell.
+    const edge = {
+      vertices: new Float32Array([8, 0, 0, 9, 0, 0, 8, 0, 1]),
+      indices: new Uint32Array([0, 1, 2]),
+    };
+    expect(heightOver(edge, 8 - 1e-7, 0.2, -1e-6)).toBe(0);
+    expect(heightOver(edge, 8 - 1e-7, 0.2, -1e-6, triangleCells(edge))).toBe(0);
   });
 });

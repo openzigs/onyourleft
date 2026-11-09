@@ -136,6 +136,13 @@ const SCENES: readonly Scene[] = [
     query: '?sounds=on&paused=yes',
     surfaces: ['game-hud'],
   },
+  // #2349: *End ride* pressed, so the end-of-ride question's three answers.
+  {
+    name: 'the game, End ride asked',
+    page: 'ride',
+    query: '?end=asked',
+    surfaces: ['game-hud'],
+  },
   // #785: a private race waiting on its line, with *Start the race* on the HUD.
   {
     name: 'the game, a race on its line',

@@ -37,7 +37,7 @@ import {
   type JSX,
 } from 'react';
 
-import type { KitColour } from '@onyourleft/store';
+import { isCircuitRouteId, isLevelRouteId, type KitColour } from '@onyourleft/store';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
@@ -52,14 +52,14 @@ import {
   sideCameraOnRide,
   sideCameraStoppable,
 } from '../ride/side-camera';
+import type { LapFigures } from '../recording/laps';
+import type { RideTotals } from '../recording/totals';
 import { useSideCamera, type SideCameraOnRideState } from '../ride/useSideCamera';
 import {
   KEEP_SCREEN_ON_LABEL,
   RIDE_MAY_STOP_SPOKEN,
   RIDE_MAY_STOP_WITH_SCREEN_OFF,
 } from '../ride/controller';
-import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
-import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
 import { advanceCrank, cadenceTurns, turningCadence } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
@@ -69,11 +69,13 @@ import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wa
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
+  ARRIVING_REALISTIC_QUALITY,
   INITIAL_QUALITY,
-  INITIAL_REALISTIC_QUALITY,
   keepsShadowMap,
   nextWorldQuality,
   qualitySettings,
+  realisticArrivalLapsed,
+  realisticWorldArrived,
   readShadowMapChoice,
   rungFor,
   worldRung,
@@ -81,7 +83,13 @@ import {
   type QualitySettings,
   type WorldQualityState,
 } from './quality';
-import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from './realistic-assets';
+import {
+  REALISTIC_WORLD_LEFT_NOTICE,
+  realisticWorldNotice,
+  type RealisticWorldOutcome,
+} from './realistic-assets';
+import { writeRealisticReport } from './realistic-report';
+import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
@@ -92,6 +100,7 @@ import {
   NO_GAME_TRAINER,
   trainerRoadNotice,
   trainerRoadPromise,
+  type GameNotRecordedReason,
   type GameTrainer,
   type GameTrainerPort,
 } from './trainer-port';
@@ -189,7 +198,12 @@ import {
   type CuePreference,
 } from './cue-preference';
 import { SoundControls } from './SoundControls';
-import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
+import {
+  RoutePicker,
+  type DeliveryCourse,
+  type RecordingOffer,
+  type RidableRoute,
+} from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
@@ -207,8 +221,27 @@ import {
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
-import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
+import {
+  gameDeliveryFromHash,
+  gamePlayFromHash,
+  gameRouteFromHash,
+  hrefFor,
+  routeById,
+} from '../shell/routes';
+import { useRideBack } from '../shell/ride-back';
+import { useRideLeave } from '../shell/ride-leave';
+import { useRecordingGuard } from '../ride/useRideController';
+import { END_RIDE_TEXT, EndRideQuestion, type EndRideStep } from '../ride/EndRideQuestion';
 import { readDeliveryProgress } from './delivery/delivery-progress';
+import { countCourses } from './delivery/courses';
+import type { LevelFile } from './delivery/levels/level-file';
+import {
+  levelCorridor,
+  levelOfRouteId,
+  levelRoute,
+  type ListedLevel,
+} from './delivery/levels/levels';
+import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -259,13 +292,26 @@ import {
   NO_ROUND_LABEL,
   NOTHING_OWED,
   oweCrash,
+  oweObstacleAhead,
   oweNoRound,
   oweRoundChange,
   oweRoundOver,
   TOO_FEW_HOUSES_TEXT,
+  TOWN_LOADING_TEXT,
   type DeliveryOwed,
 } from './hud/delivery-announce';
 import { lineOffsetAt, racingLine } from './racing-line';
+import {
+  createRecentTrace,
+  sampleSecond,
+  type RecentTrace,
+  type TraceSample,
+} from './hud/recent-trace';
+import {
+  DEFAULT_HUD_LAYOUT,
+  readHudLayout,
+  type HudLayoutPreference,
+} from './hud/hud-layout-preference';
 import {
   ghostDistanceAt,
   pacerGap,
@@ -273,6 +319,8 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type TimeInZones,
+  type Watts,
   type Wind,
   type WorkoutRescue,
 } from '@onyourleft/domain';
@@ -307,6 +355,31 @@ export interface GamePort {
   /** The rider's saved routes (#89, #73). */
   listRoutes(): Promise<readonly RidableRoute[]>;
   /**
+   * The app's built-in lap-race circuits — #2293, ADR 0064: shipped in the
+   * bundle (`circuits/circuits.ts` §`loadBuiltInCircuits`), each with an id
+   * in the `circuit:` namespace, raced solo against bots and never anything
+   * else. Absent, the chooser offers none. ⚠️ An optional member threaded
+   * through JSX, so a `main.tsx` that stopped supplying it is GREEN in
+   * `check:wiring`; `circuits/circuits-wiring.test.tsx` is what goes red.
+   */
+  listCircuits?(): Promise<readonly RidableRoute[]>;
+  /**
+   * The app's built-in Delivery levels, as the Delivery picker lists them —
+   * #2362, ADR 0065 D-8.1: each one's id, name, length and houses, from
+   * `delivery/levels/catalogue.ts`, **reading no level file** (D-2.5). Solo
+   * Delivery rounds only. Absent, the picker offers none. ⚠️ An optional
+   * member, for {@link listCircuits}' reason; `delivery/levels/levels-wiring.test.tsx`
+   * is what goes red.
+   */
+  listDeliveryLevels?(): Promise<readonly ListedLevel[]>;
+  /**
+   * One built-in level, read in full — #2362: only the file of the level
+   * the rider chose (D-2.5). `undefined` for an id the app does not ship.
+   * Its id is the `level:` route id's second half (`levels.ts`
+   * §`levelOfRouteId`).
+   */
+  loadDeliveryLevel?(id: string): Promise<LevelFile | undefined>;
+  /**
    * The ghost for the rider's best previous attempt on a route, if any.
    *
    * ⚠️ Returns `undefined` rather than throwing when there is none. The
@@ -322,6 +395,14 @@ export interface GamePort {
    * drawn. A rider with no instance loses this and nothing else.
    */
   riderGhostOffered?(): boolean;
+  /**
+   * The rider's OWN threshold power, or `undefined` when they have set none —
+   * #2077: the zone indicator is drawn from it and from nothing substituted
+   * (`analysis/thresholds.ts` is the one place a default is, and it is not for
+   * the HUD: a zone of a threshold the rider never set is a guess). Read once
+   * as the game opens. Absent, there is no zone indicator.
+   */
+  ownThresholdPower?(): Promise<Watts | undefined>;
   /**
    * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
    * 0039. Fetched from the instance by the route's digest
@@ -371,20 +452,11 @@ export interface GameViewProps {
    */
   readonly camera?: CameraThrottle | undefined;
   /**
-   * The platform's thermal forecast — #247. @see thermal-port.ts
-   *
-   * `BROWSER_THERMAL` when absent, which answers `undefined`: the honest answer
-   * everywhere but the Android shell. ⚠️ An optional prop threaded through JSX,
-   * so a `main.tsx` that stopped passing the Android port is GREEN in
-   * `check:wiring` (§Limits); `GameView.test.tsx` §"#247" drives this half.
-   */
-  readonly thermal?: ThermalPort | undefined;
-  /**
    * A steering controller paired on the Devices screen — #1826, #1827. A
    * Delivery round's HUD hands its lane changes, lanes and throws to the
    * round's ports (`hud/ControllerIntents.tsx`); no other ride reads it, and
-   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX, as
-   * {@link thermal} is: `delivery-wiring.test.tsx` §"#1827" drives it.
+   * a room runs no round (DL9). ⚠️ An optional prop threaded through JSX:
+   * `delivery-wiring.test.tsx` §"#1827" drives it.
    */
   readonly controller?: ControllerPort | undefined;
   /**
@@ -506,6 +578,13 @@ export interface GameViewProps {
    */
   readonly onImmersive?: ((immersive: boolean) => void) | undefined;
   /**
+   * Whether the setup's chosen card is a built-in Delivery level — #2362,
+   * round 4 of PR #2378's review: the shell's line under the title follows the
+   * chosen card, not the address. Told `false` when it stops being one, when
+   * a ride starts and when this unmounts.
+   */
+  readonly onLevelChosen?: ((chosen: boolean) => void) | undefined;
+  /**
    * The tablet's side-camera pairing — #551. While a phone is paired its state
    * is one line on the HUD, its link going is said through the HUD's one
    * region, and *Stop side camera* is on the stage while it films.
@@ -608,6 +687,98 @@ function roomRouteId(roomId: string): string {
 export const STANDING_NOTICE_SECONDS = 15;
 
 /**
+ * What the ride's HUD says when the press of *Ride* could not start the
+ * recording under it — #2381, the owner's ruling of 2026-11-08 (item 3).
+ *
+ * `GameTrainerPort.recordGameRide` answers `false` whenever the ride
+ * controller's `canStartNewRide` refuses, and since round 3 (the review of
+ * 4f726fde) each cause is said as itself, from `whyNotRecording`
+ * (`trainer-port.ts` §`notRecordedReason`), in the Ride screen's own words for
+ * that state (`RideView.tsx` §`StoppedNotice`, §`StorageNotice`):
+ *
+ * - `still-saving` — the ride before is stopping or its save is running.
+ *   **Approved by the owner, 2026-11-08.**
+ * - `not-saved` — its save failed: the Ride screen's "could not be added to
+ *   your activities". ⚠️ Draft wording for the owner (round 3).
+ * - `device-full` — the Ride screen's *Device full*, "no room left".
+ *   ⚠️ Draft wording for the owner (round 3).
+ * - `checkpoint-failed` — the Ride screen's "the last checkpoint did not save,
+ *   so its final seconds are only in this tab". ⚠️ Draft (round 3).
+ * - `failed` — it threw, or refused with none of those causes: no reason is
+ *   claimed. **Approved by the owner, 2026-11-08.**
+ */
+export const RIDE_NOT_RECORDED_TEXT = {
+  label: 'Not recording',
+  'still-saving':
+    'This ride is not being recorded, because the ride before it is not finished saving.',
+  'not-saved':
+    'This ride is not being recorded, because the ride before it could not be added to your activities. It is still on this device, on the Ride screen.',
+  'device-full':
+    'This ride is not being recorded, because this device has no room left. Free some space; the ride before it is on the Ride screen.',
+  'checkpoint-failed':
+    'This ride is not being recorded, because the last seconds of the ride before it did not save. They are only in this tab: do not close it.',
+  failed: 'This ride is not being recorded: a recording could not be started on this device.',
+} as const;
+
+/** Why this ride's recording did not start, if it did not — #2381. @see RIDE_NOT_RECORDED_TEXT */
+type NotRecordedAs = GameNotRecordedReason | 'failed';
+
+/** How the last game ride was ended, as the picker says it — #2349. */
+type RideEndedAs = 'saved' | 'not-saved' | 'discarded' | 'not-deleted' | 'not-recorded';
+
+/** What the picker says of a ride the rider just ended — #2349. ⚠️ Draft wording for the owner. */
+export const RIDE_ENDED_TEXT: Readonly<Record<RideEndedAs, string>> = {
+  saved:
+    'Your ride is stopped and being saved to your activities. Its result is on the Ride screen.',
+  'not-saved':
+    'Your ride is stopped, but it could not be saved. It is still on this device, on the Ride screen.',
+  discarded: 'Your ride is discarded. It was deleted from this device, and nothing was saved.',
+  'not-deleted':
+    'Your ride was not saved, but it could not be deleted from this device. It is still on the Ride screen.',
+  'not-recorded': 'Your ride is ended. Nothing was being recorded, so there was nothing to save.',
+};
+
+/**
+ * The label before it — #2349. *Discarded* and *Not deleted* are the Ride
+ * screen's own (`RideView.tsx` §`StoppedNotice`), so the two surfaces say one
+ * outcome one way. ⚠️ Draft wording for the owner.
+ */
+export const RIDE_ENDED_LABEL: Readonly<Record<RideEndedAs, string>> = {
+  saved: 'Stopped',
+  'not-saved': 'Not saved',
+  discarded: 'Discarded',
+  'not-deleted': 'Not deleted',
+  'not-recorded': 'Ride ended',
+};
+
+/**
+ * The picker's one sentence about the ride that just ended — #2349. Live,
+ * because it appears in answer to the rider's press. A way to the Ride screen
+ * where that is where the ride now is: the result card of a saved ride, or a
+ * ride whose delete did not go through.
+ */
+function RideEndedNotice({ ended }: { readonly ended: RideEndedAs }): JSX.Element {
+  const toRide = ended === 'saved' || ended === 'not-saved' || ended === 'not-deleted';
+  return (
+    <StatusMessage
+      // The save itself is still running: its outcome is the Ride screen's
+      // to say (`RideView.tsx` §`StoppedNotice`), so this claims only the stop.
+      tone={ended === 'not-deleted' || ended === 'not-saved' ? 'warning' : 'info'}
+      label={RIDE_ENDED_LABEL[ended]}
+      live
+    >
+      {RIDE_ENDED_TEXT[ended]}
+      {toRide ? (
+        <>
+          {' '}
+          <a href={hrefFor(routeById('ride'))}>Go to the Ride screen</a>
+        </>
+      ) : null}
+    </StatusMessage>
+  );
+}
+
+/**
  * The upright phones whose ONE notice cell cannot hold #647's *"Keep the
  * screen on"* and the road notice together — #693's review, finding N2.
  *
@@ -642,13 +813,6 @@ const ONE_NOTICE_ONLY_QUERY = '(min-width: 22.5rem) and (width < 25rem) and (min
  * region says a waiting move's sentence (`replan-text.ts`).
  */
 const REPLANS_OFF_SAID = `${REPLAN_LABEL}: ${REPLANS_OFF}`;
-
-/** Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names. `false` with no `matchMedia`. */
-function oneNoticeOnly(): boolean {
-  return (
-    typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
-  );
-}
 
 /** What there is to watch with no trainer port: nothing, and nothing to stop. */
 function watchNothing(): () => void {
@@ -709,6 +873,66 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * The rider's own threshold power, read once as the game opens — #2077.
+ * `undefined` while it is read and when none is set: the zone indicator's
+ * answer to both is not to be drawn. @see GamePort.ownThresholdPower
+ */
+function useOwnThresholdPower(port: GamePort | undefined): Watts | undefined {
+  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void port
+      ?.ownThresholdPower?.()
+      .then((found) => {
+        if (live) setThreshold(found);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves no threshold, and so no zone
+        // indicator: there is nothing else the HUD could say a rider could act on.
+      });
+    return () => {
+      live = false;
+    };
+  }, [port]);
+  return threshold;
+}
+
+/**
+ * The recorder's time in each power zone of the rider's threshold, kept
+ * current — #2077. Subscribed for {@link useRideMovingSeconds}'s reason; the
+ * port hands back the same object until the recording moves on.
+ */
+function useRidePowerZoneTime(
+  trainer: GameTrainerPort | undefined,
+  threshold: Watts | undefined,
+): TimeInZones | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(
+    () => (threshold === undefined ? undefined : trainer?.ridePowerZoneTime?.(threshold)),
+    [trainer, threshold],
+  );
+  return useSyncExternalStore(watch, read);
+}
+
+/**
+ * The ride so far — distance, climb and average power — kept current: #2076.
+ * The recorder's figures (`recording/totals.ts` §`rideTotals`), subscribed for
+ * {@link useRideMovingSeconds}'s reason. The port hands back the same object
+ * until the recording moves on, as `useSyncExternalStore` requires.
+ */
+function useRideTotals(trainer: GameTrainerPort | undefined): RideTotals | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideTotals?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * Whether the recording under the ride is paused, kept current — #1360's
  * review (N1). Subscribed for {@link useRideMovingSeconds}'s reason: the
  * rider's Pause and Resume are the Ride screen's, and the game must see them
@@ -724,7 +948,7 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
 }
 
 /**
- * {@link oneNoticeOnly}, kept current — #693's re-review.
+ * Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names, kept current — #693's re-review.
  *
  * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
  * every frame, but a PAUSED one does not, so a rider who paused and turned a
@@ -733,12 +957,39 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
  * keep off the rider. The `change` event re-renders the HUD by itself.
  */
 function useOneNoticeOnly(): boolean {
-  const [matches, setMatches] = useState(oneNoticeOnly);
+  return useMediaMatch(ONE_NOTICE_ONLY_QUERY);
+}
+
+/**
+ * Whether this window is a phone's — #2381, the owner's ruling of 2026-11-08
+ * on PR #2390's round 3: *"the road notice gives way to Not recording only
+ * where space is short (phones). On a tablet both notices show."* A phone is
+ * a window whose shorter side is 30 rem (480 px) or less, the line the
+ * browser gate draws between its phone and tablet viewports
+ * (`ride-stage.ts` §`TABLET_VIEWPORTS`); both of a phone's layouts, corners
+ * on its side and column upright, have no free cell for a second notice
+ * (`theme.css` §"WHERE THERE IS NO FREE CELL").
+ */
+const SHORT_OF_SPACE_QUERY = '(max-width: 30rem), (max-height: 30rem)';
+
+/** {@link SHORT_OF_SPACE_QUERY}, kept current, for {@link useOneNoticeOnly}'s reason. */
+function useShortOfSpace(): boolean {
+  return useMediaMatch(SHORT_OF_SPACE_QUERY);
+}
+
+/**
+ * A media query's answer, subscribed rather than read during render — #693's
+ * re-review, for {@link useOneNoticeOnly}. `false` with no `matchMedia`.
+ */
+function useMediaMatch(query: string): boolean {
+  const [matches, setMatches] = useState(
+    () => typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
+  );
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
       return undefined;
     }
-    const list = window.matchMedia(ONE_NOTICE_ONLY_QUERY);
+    const list = window.matchMedia(query);
     const changed = (): void => {
       setMatches(list.matches);
     };
@@ -748,12 +999,24 @@ function useOneNoticeOnly(): boolean {
     return () => {
       list.removeEventListener('change', changed);
     };
-  }, []);
+  }, [query]);
   return matches;
 }
 
 /** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
 const STYLISED_START: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
+
+/** The town's loading sentence (#2392), as `announce.ts` holds it while it waits for the window. */
+function isTownLoadingEvent(event: AnnouncementEvent): boolean {
+  return event.kind === 'delivery-round-over' && event.text === TOWN_LOADING_TEXT;
+}
+
+/** Begin the Delivery round a ride is waiting to begin, once: `GameScreen`'s `deliveryWaitingRef` (#2392). */
+function beginWaitingRound(waiting: { current: (() => void) | undefined }): void {
+  const begin = waiting.current;
+  waiting.current = undefined;
+  begin?.();
+}
 
 /**
  * The settings a ride draws with — #475. On the realistic ladder,
@@ -817,6 +1080,15 @@ interface PreviewAsked {
 }
 
 /**
+ * The wall clock a simulated ride's frames are timed by when none is injected.
+ * A module-level function so its identity is the same on every render
+ * (#2379): `frameNow` is a dependency of the ride effect.
+ */
+function performanceNow(): number {
+  return performance.now();
+}
+
+/**
  * What a simulated ride is given in place of the shell's props — #1992.
  *
  * ⚠️ **No trainer port, no room and no rooms, and no Delivery round**, and
@@ -843,7 +1115,7 @@ function useSimulatedRide(
     () =>
       simulated === undefined
         ? givenNow
-        : simulatedClock(givenNow ?? (() => performance.now()), simulated.speedup),
+        : simulatedClock(givenNow ?? performanceNow, simulated.speedup),
     [givenNow, simulated],
   );
   if (simulated === undefined) return given;
@@ -851,7 +1123,11 @@ function useSimulatedRide(
     ...given,
     port,
     now,
-    frameNow: givenNow ?? (() => performance.now()),
+    // ⚠️ #2379: `performanceNow`, not an arrow written here. This is a
+    // dependency of the ride effect, and an arrow made on every render re-ran
+    // that effect on every render of the screen — a loader call (every scenery
+    // model again) cancelled before its view was made, so no frame was drawn.
+    frameNow: givenNow ?? performanceNow,
     trainer: undefined,
     room: undefined,
     roomId: undefined,
@@ -885,6 +1161,12 @@ function GameScreen({
   // the control that shows the refusal and the button the refusal blocks.
   const units = useUnits();
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
+  /**
+   * The app's built-in lap-race circuits — #2293, ADR 0064: `GamePort.listCircuits`,
+   * read with the routes. Never in {@link routes}: a room's course list is
+   * the rider's routes, and a circuit is never a room's course (D-8.1).
+   */
+  const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
@@ -907,18 +1189,33 @@ function GameScreen({
     if (value) setWithGhost(false);
   }, []);
   const [withPacer, setWithPacer] = useState(false);
+  // #2292: a course chosen on a game's course picker (the Games tab) opens
+  // this setup with that game's switch on (`shell/routes.ts`
+  // §`hrefForGamePlay`). Read once, on mount, as the route is; the switch is
+  // the rider's from then on, so switching it off is a ride with no game.
+  const [played] = useState(() => gamePlayFromHash(globalThis.location.hash));
   /**
    * Whether the rider switched on a Delivery round in the chooser — #1818.
    * Per ride, like the pacer. The chooser asks for it only with the realistic
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
-  const [withDelivery, setWithDelivery] = useState(false);
+  const [withDelivery, setWithDelivery] = useState(() => played === 'delivery');
+  /**
+   * Each saved route's houses for a round, by route id, once the round is
+   * chosen — #2294, `delivery/courses.ts`. In memory only, and one number a
+   * route. `courseCountsRef` keeps the counts made by profile, for the next
+   * time the round is switched on.
+   */
+  const [courses, setCourses] = useState<ReadonlyMap<string, DeliveryCourse> | undefined>(
+    undefined,
+  );
+  const courseCountsRef = useRef(new WeakMap<RouteProfile, number>());
   /**
    * Whether the rider switched on a lap race in the chooser, and which race
    * — #1907. Per ride, like the round beside it; one mode a ride, so turning
    * either on turns the other off, as the two ghosts do.
    */
-  const [withLapRace, setWithLapRace] = useState(false);
+  const [withLapRace, setWithLapRace] = useState(() => played === 'lap-race');
   const [lapRaceChoice, setLapRaceChoice] = useState<LapRaceChoice>(DEFAULT_LAP_RACE_CHOICE);
   const chooseDelivery = useCallback((value: boolean) => {
     setWithDelivery(value);
@@ -968,6 +1265,17 @@ function GameScreen({
       }
     | undefined
   >(undefined);
+  /**
+   * The end-of-ride question, while it is open — #2349. *End ride* opens it
+   * (and so does Android's back, `shell/ride-back.ts`); nothing ends the ride
+   * but an answer to it. ⚠️ The game's own state rather than the ride
+   * controller's `stopArmed`: a game ride need not be recording, and one that
+   * is not is asked too (#2349, item 6). Opening it changes nothing about the
+   * ride: the simulation runs on as it was and nothing is sent to the trainer.
+   */
+  const [endAsk, setEndAsk] = useState<EndRideStep | undefined>(undefined);
+  /** How the last game ride was ended, said on the picker — #2349. */
+  const [rideEnded, setRideEnded] = useState<RideEndedAs | undefined>(undefined);
   /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
   const [starting, setStarting] = useState<'asking' | 'refused' | undefined>(undefined);
   /**
@@ -980,6 +1288,11 @@ function GameScreen({
   /** The words last set, so an unchanged notice costs no render at all (#482's rule). */
   const raceShownRef = useRef('');
   const [state, setState] = useState<GameState | undefined>(undefined);
+  /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
+  const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
+  const [recentTrace, setRecentTrace] = useState<
+    { readonly samples: readonly TraceSample[]; readonly written: number } | undefined
+  >(undefined);
   /**
    * The rung the ride is drawing at. Only the LEVEL is state — #482.
    *
@@ -1009,6 +1322,18 @@ function GameScreen({
    * loop feeds; for a ride that did not choose realism it IS `nextQuality`.
    */
   const qualityRef = useRef<WorldQualityState>(STYLISED_START);
+  /**
+   * THIS ride's record of why the realistic ladder moved — #2289. A new one
+   * for each realistic ride; none for a stylised one. What it returns is kept
+   * on the device (`realistic-report.ts`) and shown under Settings › Game world.
+   */
+  const realisticWatchRef = useRef<RealisticWatch | undefined>(undefined);
+  /**
+   * The loop clock's reading when this ride's realistic load started, or
+   * undefined for a ride that has not started one — #2289's review.
+   * @see REALISTIC_ARRIVAL_LIMIT_MS
+   */
+  const arrivingSinceRef = useRef<number | undefined>(undefined);
   /**
    * The kit colour THIS ride is drawn in — #623. Read when the ride starts, as
    * the mass is, and handed to the view when the view exists: the view may be
@@ -1050,6 +1375,12 @@ function GameScreen({
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
+   * Whether the HUD says the round is waiting for the town — #2392, the
+   * owner's ruling of 2026-11-09: from the press of a realistic Delivery ride
+   * until its round begins (@see deliveryWaitingRef). `false` on every other ride.
+   */
+  const [townLoading, setTownLoading] = useState(false);
+  /**
    * The lap that has just ended, and the ride time it ended at — #1312. On
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
    * notice's rule, and `undefined` until the rider completes the course with
@@ -1065,6 +1396,12 @@ function GameScreen({
   const [lapNotice, setLapNotice] = useState<
     { readonly summary: LapSummary; readonly from: number; readonly status: boolean } | undefined
   >(undefined);
+  /**
+   * Every lap the recording has stated on this ride — #2080, the last answer
+   * of `courseLine` that had laps in it — for the HUD's lap splits panel.
+   * Emptied as each ride starts, as the recording's own laps are.
+   */
+  const [rideLaps, setRideLaps] = useState<readonly LapFigures[]>([]);
   /** How many times this ride has completed its course. @see course-laps.ts */
   const lapsDoneRef = useRef(0);
   /** The ride second the recording was last told how far round its lap is — #1322. */
@@ -1198,8 +1535,24 @@ function GameScreen({
    * never said. It is offered on every frame until the core returns it.
    */
   const mayStopSaidRef = useRef(false);
+  /**
+   * Why this ride is not being recorded, where the press of *Ride* could not
+   * start its recording — #2381. Set in `begin`, cleared by the next ride.
+   * The HUD shows it for the ride's first {@link STANDING_NOTICE_SECONDS}, the
+   * road notice's time open (#437), and then gives the cell back: the dashed
+   * *Moving* stays for the rest of the ride.
+   */
+  const [notRecorded, setNotRecorded] = useState<NotRecordedAs | undefined>(undefined);
+  /**
+   * Its sentence, owed to the HUD's one region until said — #2381, on #647's
+   * rule (@see mayStopSaidRef): offered on every frame but the road notice's,
+   * until the core returns it, and then never again this ride.
+   */
+  const notRecordedOwedRef = useRef<string | undefined>(undefined);
   /** @see useOneNoticeOnly */
   const narrowUpright = useOneNoticeOnly();
+  /** #2381, round 4. @see SHORT_OF_SPACE_QUERY */
+  const shortOfSpace = useShortOfSpace();
   /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
@@ -1214,6 +1567,12 @@ function GameScreen({
   const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
+  /** @see useRideTotals */
+  const rideTotals = useRideTotals(props.trainer);
+  /** @see useOwnThresholdPower */
+  const thresholdPower = useOwnThresholdPower(props.port);
+  /** @see useRidePowerZoneTime */
+  const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
@@ -1376,6 +1735,21 @@ function GameScreen({
    * press and held for the ride; `undefined` on every ordinary ride.
    */
   const deliveryRef = useRef<DeliveryRide | undefined>(undefined);
+  /**
+   * The Delivery round this ride asked for and has not yet begun — #2392, the
+   * owner's ruling of 2026-11-08 on #2362: a round on a realistic ride does
+   * not count its first house until the realistic world has loaded or has
+   * failed to load, so no house is scored or missed in the stylised world drawn
+   * while the town arrives. Set at the press, for a realistic ride only, and
+   * taken once by {@link beginWaitingRound}: when the load settles either way,
+   * or when the arrival window lapses (`quality.ts`
+   * §`REALISTIC_ARRIVAL_LIMIT_MS`), so a load that never settles does not hold
+   * the round for the whole ride. (The ladder cannot leave realism before
+   * either: it is not fed while the world arrives.) It begins from where the
+   * rider is then (`targets.ts` picks the houses ahead of them), and a ride
+   * ended first has begun no round, so its week is as it was.
+   */
+  const deliveryWaitingRef = useRef<(() => void) | undefined>(undefined);
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
   /**
@@ -1525,6 +1899,8 @@ function GameScreen({
    * of each ride, like the announcements.
    */
   const draftShownRef = useRef(false);
+  /** #2079: the HUD's panels and text size, read as each ride begins. */
+  const [hudLayout, setHudLayout] = useState<HudLayoutPreference>(DEFAULT_HUD_LAYOUT);
   /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
   const inDraftRef = useRef(false);
   /**
@@ -1552,6 +1928,23 @@ function GameScreen({
   // `setChosen` so the credit's render depends on it explicitly rather than on
   // the ref having been written before `setPhase` re-rendered.
   const [rideHasCorridor, setRideHasCorridor] = useState(false);
+  // #2293: whether THIS ride is on a built-in circuit, set beside the one above
+  // for the same reason: the credit's render reads it (ADR 0064 D-5.3).
+  const [rideOnBuiltIn, setRideOnBuiltIn] = useState(false);
+  /**
+   * The built-in level the setup was opened on, read in full — #2362, ADR
+   * 0065: from `GamePort.loadDeliveryLevel`, with the routes, and only when
+   * the address names a `level:` route (the Delivery picker's link). Its
+   * route is a card in the chooser and its corridor is its own file's
+   * (`levels.ts` §`levelCorridor`, D-2.4): no archive, no store. Never in
+   * {@link routes}, so it is never a room's course (D-8.1).
+   */
+  const [level, setLevel] = useState<
+    | { readonly file: LevelFile; readonly route: RidableRoute; readonly corridor: WorldCorridor }
+    | undefined
+  >(undefined);
+  /** The address's route as the screen opened, which names the level to read. */
+  const openedOn = useRef(picked);
   /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
   /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
@@ -1565,11 +1958,38 @@ function GameScreen({
       return;
     }
     let cancelled = false;
-    void port.listRoutes().then((found) => {
-      if (!cancelled) {
-        setRoutes(found);
-      }
-    });
+    // #2293: the built-in circuits with the routes, so a rider with none of
+    // their own sees the circuits at once rather than an empty chooser that
+    // fills a moment later. A circuit that cannot be read costs the circuits
+    // and never the rider's routes.
+    const builtIn = (port.listCircuits?.() ?? Promise.resolve([])).catch(
+      (): readonly RidableRoute[] => [],
+    );
+    // #2362: the level the Delivery picker opened this on, read with the
+    // routes for the same reason, so its card is there when the chooser is.
+    const levelId = openedOn.current === undefined ? undefined : levelOfRouteId(openedOn.current);
+    const levelRead = (
+      levelId === undefined
+        ? Promise.resolve(undefined)
+        : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined))
+    ).catch((): undefined => undefined);
+    void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
+      ([found, circuitsFound, levelFound]) => {
+        if (!cancelled) {
+          setCircuits(circuitsFound);
+          setLevel(
+            levelFound === undefined
+              ? undefined
+              : {
+                  file: levelFound,
+                  route: levelRoute(levelFound),
+                  corridor: levelCorridor(levelFound),
+                },
+          );
+          setRoutes(found);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -1650,7 +2070,7 @@ function GameScreen({
       // then, in the tick.
       const delivery = deliveryRef.current;
       if (delivery !== undefined && delivery.outcome === undefined) {
-        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery));
+        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery), delivery);
       }
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
@@ -1693,11 +2113,29 @@ function GameScreen({
   // port decides whether anything is requested at all (the world chosen, the
   // tiles switch, the store); this only says which route and when to stop.
   const choosing = phase === 'choosing';
+  // #2293: a built-in circuit's corridor is read like any route's, under its
+  // `circuit:` key (ADR 0064 D-2.2); the chooser's first choice is the
+  // rider's first route, or the first circuit when they have none.
+  // #2362: and a built-in level's is its own file's, with no request and
+  // nothing stored (ADR 0065 D-2.4). A level rides in the realistic world
+  // whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378),
+  // so its corridor is always there.
+  const levelRoutes = level === undefined ? [] : [level.route];
   const corridorRoute =
-    routes === undefined ? undefined : (routes.find((route) => route.id === picked) ?? routes[0]);
+    routes === undefined
+      ? undefined
+      : ([...levelRoutes, ...routes, ...circuits].find((route) => route.id === picked) ??
+        routes[0] ??
+        circuits[0]);
   useEffect(() => {
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
+    if (corridorRoute !== undefined && choosing && corridorRoute.id === level?.route.id) {
+      const own: CorridorState = { kind: 'ready', corridor: level.corridor };
+      corridorStateRef.current = own;
+      setCorridorState(own);
+      return;
+    }
     if (port?.loadWorldCorridor === undefined || corridorRoute === undefined || !choosing) {
       return;
     }
@@ -1711,7 +2149,36 @@ function GameScreen({
     return () => {
       controller.abort();
     };
-  }, [port, corridorRoute, choosing]);
+  }, [port, corridorRoute, choosing, level]);
+
+  // #2294: with a Delivery round chosen, every saved route's houses for a
+  // round, counted on this device through the same corridor port, one route
+  // at a time, while the rider chooses — and abandoned, as the read above
+  // is, when a ride starts or the round is switched off. Only with the
+  // realistic world chosen, where a round is offered on a saved route (DL6).
+  // A built-in level is counted by nothing here: it holds its own round, which
+  // the chooser says in either world (#2362, `RoutePicker`'s `level`).
+  const coursesWanted =
+    choosing && withDelivery && routes !== undefined && readRealisticWorldChoice(deviceStorage());
+  useEffect(() => {
+    setCourses(undefined);
+    const load = port?.loadWorldCorridor?.bind(port);
+    if (load === undefined || routes === undefined || !coursesWanted) return;
+    const controller = new AbortController();
+    setCourses(new Map());
+    void countCourses(
+      routes,
+      load,
+      controller.signal,
+      (routeId, count) => {
+        setCourses((before) => new Map(before).set(routeId, count));
+      },
+      courseCountsRef.current,
+    );
+    return () => {
+      controller.abort();
+    };
+  }, [port, routes, coursesWanted]);
 
   useEffect(() => teardown, [teardown]);
 
@@ -1735,6 +2202,30 @@ function GameScreen({
       lapRace: LapRaceChoice | undefined = undefined,
     ): Promise<void> => {
       const profile = route.profile;
+      // #2293, ADR 0064 D-8.1: a built-in circuit is a solo race against bots
+      // and nothing else — never a free ride, a preview, a round or a room's
+      // ride. A press on one that would not race is refused HERE, before
+      // anything is asked of the trainer or drawn, rather than ridden as
+      // something the circuit is not offered for.
+      const onCircuit = isCircuitRouteId(route.id);
+      // #2362, ADR 0065 D-8.1: a built-in level is a solo Delivery round and
+      // nothing else, so a press on one is always a round, never in a room,
+      // and only on the level this screen read.
+      const onLevel = isLevelRouteId(route.id);
+      const levelRidden = onLevel && level?.route.id === route.id ? level : undefined;
+      if (onLevel && (levelRidden === undefined || props.roomId !== undefined)) {
+        return;
+      }
+      const circuitRace = props.lapRace ?? lapRace;
+      if (
+        onCircuit &&
+        (circuitRace === undefined ||
+          !profile.loop ||
+          props.roomId !== undefined ||
+          !lapRaceChoiceRaceable(circuitRace))
+      ) {
+        return;
+      }
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
       // rider's press on *Ride*, and after an `await` it would not. A browser
       // refuses audio that starts outside a gesture, silently, so this is
@@ -1787,6 +2278,8 @@ function GameScreen({
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
       draftShownRef.current = readDraftReadingChoice(deviceStorage());
+      // #2079: the rider's panels and text size, as Settings left them.
+      setHudLayout(readHudLayout(deviceStorage()));
       // #551: a link already lost when the ride starts is on the HUD's line,
       // and is not news — only a link that goes DURING this ride is said.
       sideLostRef.current = sideCameraLost(
@@ -1810,8 +2303,11 @@ function GameScreen({
       // and nor does a choice that cannot be raced, which is refused
       // HERE, before the trainer is asked or a session made, as an ordinary
       // ride rather than a throw from a ride already begun.
+      // #2293: never on a built-in circuit, whatever the address says.
       const deliveryWanted =
-        props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
+        onLevel ||
+        (!onCircuit &&
+          (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash))));
       // #784: the room entered on the picker's panel — but only for a ride
       // started from the panel, on the room's own road: a rider in a room who
       // presses *Ride* on one of their own routes rides it alone. Else the
@@ -1830,7 +2326,40 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
-      const realistic = readRealisticWorldChoice(deviceStorage());
+      // #2381, the owner's ruling of 2026-11-08: a game ride is RECORDED by
+      // default, through the one way the game starts a recording
+      // (`trainer-port.ts` §`recordGameRide`, the ride controller's
+      // `recordForRoom`): a recording or paused ride carries on, an idle
+      // controller starts one. Nothing is lost by it — *End ride* asks whether
+      // to save or discard (#2349). Absent with no ride controller, and on a
+      // simulated ride or a preview, which are handed no trainer port
+      // (`useSimulatedRide`), so those still record nothing. A ride in a room
+      // records once the room lets the rider in (#785, N6), not here.
+      // Awaited BEFORE the course line below, so a course's first lap is the
+      // recording's. A start that fails or throws leaves the ride unrecorded,
+      // as one with no recording was before: the ride still starts.
+      // #2381 (the owner's ruling, item 3): a start that fails is SAID, on
+      // the HUD's notice cell and once through its one region.
+      let unrecorded: NotRecordedAs | undefined;
+      if (roomId === undefined && props.trainer?.recordGameRide !== undefined) {
+        try {
+          unrecorded = (await props.trainer.recordGameRide())
+            ? undefined
+            : (props.trainer.whyNotRecording?.() ?? 'failed');
+        } catch {
+          unrecorded = 'failed';
+        }
+        // #509: the rider may have left while the recording started. It runs
+        // on, as one started on the Ride screen does, which is where it is.
+        if (unmountedRef.current) {
+          return;
+        }
+      }
+      // #2362, the owner's ruling of 2026-11-08 on PR #2378: a built-in level
+      // rides in the realistic world for this ride only, whatever Settings
+      // chose, and the choice is never written. Where that world cannot load,
+      // D-7's fallback below says so, as for any realistic ride.
+      const realistic = onLevel || readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
       // for it, like the mass below. A view left from a previous ride is
@@ -1855,7 +2384,11 @@ function GameScreen({
       } catch {
         seasonRef.current = NO_SEASON;
       }
-      qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
+      // #2289: a realistic ride does not feed the ladder until its world has
+      // arrived and settled. @see quality.ts REALISTIC_SETTLING_SAMPLES
+      qualityRef.current = realistic ? ARRIVING_REALISTIC_QUALITY : STYLISED_START;
+      realisticWatchRef.current = realistic ? new RealisticWatch() : undefined;
+      arrivingSinceRef.current = undefined;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
       setWorldNotice(undefined);
@@ -1897,6 +2430,11 @@ function GameScreen({
         ...startOf(simulated, profile.totalDistance),
       });
       simulationRef.current = simulation;
+      // #2078: a new ride, a new ring — its clock starts again from nought —
+      // and the graph drawn empty from the first frame, so the route panel is
+      // the height it will be and nothing moves when the first second lands.
+      recentTraceRef.current = createRecentTrace();
+      setRecentTrace({ samples: [], written: 0 });
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
@@ -1906,6 +2444,7 @@ function GameScreen({
       lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
       setLapNotice(undefined);
+      setRideLaps([]);
       props.trainer?.courseLine?.({ kind: 'started' });
       // ⚠️ #362: the line that makes #90's whole gradient path reachable from a
       // ride. `createSimulationDriver` and `createSimulationWriter` were both
@@ -1958,6 +2497,12 @@ function GameScreen({
       planDiscardedSaidRef.current = trainerPortRef.current?.workoutPlanDiscarded?.();
       replansOffOwedRef.current = false;
       mayStopSaidRef.current = false;
+      // #2381: this ride's own answer, and never the last ride's.
+      setNotRecorded(unrecorded);
+      notRecordedOwedRef.current =
+        unrecorded === undefined
+          ? undefined
+          : `${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT[unrecorded]}`;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -1977,6 +2522,9 @@ function GameScreen({
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
+      // #2349: a new ride starts with no question open and nothing said of the last.
+      setEndAsk(undefined);
+      setRideEnded(undefined);
       // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
       // The panel's room says whether this rider made it — made here, or as
@@ -2027,6 +2575,10 @@ function GameScreen({
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
+      // #2293, ADR 0064 D-5.3: the road this ride draws is a circuit's line,
+      // drawn from OpenStreetMap, so the credit is owed in every world; and
+      // #2362, ADR 0065 D-6.5, a level's line and its buildings, the same.
+      setRideOnBuiltIn(onCircuit || onLevel);
       // #1546: the mask every placement rule reads, built ONCE, here — never
       // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
       landClassRef.current =
@@ -2074,31 +2626,68 @@ function GameScreen({
       const deliveryAsked = deliveryWanted;
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
-      deliveryRef.current =
-        deliveryAsked && roomId === undefined && mappedBuildingsRef.current !== undefined
-          ? startDeliveryRide({
-              buildings: mappedBuildingsRef.current,
-              profile,
-              origin: corridorOrigin(profile),
-              riderDistance: simulation.state.ride.distance,
-              // #1853: the steering starts from the racing line, never from
-              // where a level bot or ghost has eased the drawn rider.
-              lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
-              storage: deviceStorage(),
-            })
-          : undefined;
-      const noRoundText: string | undefined =
-        !deliveryAsked || roomId !== undefined || deliveryRef.current !== undefined
-          ? undefined
-          : mappedBuildingsRef.current === undefined
-            ? HOUSES_NOT_READY_TEXT
-            : TOO_FEW_HOUSES_TEXT;
-      if (noRoundText !== undefined) deliveryOwedRef.current = oweNoRound(noRoundText);
-      setNoRound(
-        noRoundText === undefined
-          ? undefined
-          : { text: noRoundText, from: simulation.state.elapsed },
-      );
+      deliveryRef.current = undefined;
+      deliveryWaitingRef.current = undefined;
+      setNoRound(undefined);
+      setTownLoading(false);
+      // #2392: the round, its houses picked from where the rider is when it
+      // begins — at the press on a stylised ride, and once the realistic world
+      // has loaded or failed to on a realistic one. @see deliveryWaitingRef
+      const buildings = mappedBuildingsRef.current;
+      const beginRound = (): void => {
+        // #2392: the town's wait is over, so its notice goes, and its sentence
+        // is no longer owed if it has not been said: it is no longer true.
+        setTownLoading(false);
+        if (deliveryOwedRef.current.roundOver === TOWN_LOADING_TEXT) {
+          deliveryOwedRef.current = NOTHING_OWED;
+        }
+        // #2392, found on the owner's tablet on 2026-11-09: and wherever else it
+        // sits. Handed to the announcer behind a sentence still in its window
+        // ("Keep the screen on…"), it waits there and is said after the round
+        // has begun; so it is taken back. Already said, the region keeps it
+        // until the next cue, 24–40 s on; so the region lets it go.
+        announcerRef.current = withdrawPending(announcerRef.current, isTownLoadingEvent);
+        setAnnouncement((shown) => (shown === TOWN_LOADING_TEXT ? '' : shown));
+        const from = simulation.state.ride.distance;
+        deliveryRef.current =
+          buildings === undefined
+            ? undefined
+            : startDeliveryRide({
+                buildings,
+                profile,
+                origin: corridorOrigin(profile),
+                riderDistance: from,
+                // #1853: the steering starts from the racing line, never from
+                // where a level bot or ghost has eased the drawn rider.
+                lineOffset: lineOffsetAt(racingLine(profile), from),
+                storage: deviceStorage(),
+                // #2362: a level's round is its own houses and its parked cars and bins.
+                level:
+                  levelRidden === undefined
+                    ? undefined
+                    : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
+              });
+        const noRoundText: string | undefined =
+          deliveryRef.current !== undefined
+            ? undefined
+            : buildings === undefined
+              ? HOUSES_NOT_READY_TEXT
+              : TOO_FEW_HOUSES_TEXT;
+        if (noRoundText !== undefined) deliveryOwedRef.current = oweNoRound(noRoundText);
+        setNoRound(
+          noRoundText === undefined
+            ? undefined
+            : { text: noRoundText, from: simulation.state.elapsed },
+        );
+      };
+      if (deliveryAsked && roomId === undefined) {
+        if (realistic) {
+          deliveryWaitingRef.current = beginRound;
+          // #2392, the owner's ruling of 2026-11-09: said while the town arrives.
+          setTownLoading(true);
+          deliveryOwedRef.current = oweNoRound(TOWN_LOADING_TEXT);
+        } else beginRound();
+      }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
       // the rider's mass; its seed is drawn inside and kept by nothing.
@@ -2143,6 +2732,7 @@ function GameScreen({
       props.lapRace,
       soundsOut,
       simulated,
+      level,
     ],
   );
 
@@ -2211,6 +2801,23 @@ function GameScreen({
     };
   }, [onTheStage, onImmersive]);
 
+  // #2362: whether the chosen card is the level, as the chooser chooses it:
+  // the card the address or a press picked, else the first, which is the level.
+  const levelPicked =
+    phase === 'choosing' &&
+    level !== undefined &&
+    (picked === undefined ||
+      picked === level.route.id ||
+      ![...(routes ?? []), ...circuits].some((route) => route.id === picked));
+  const onLevelChosen = props.onLevelChosen;
+  useEffect(() => {
+    if (onLevelChosen === undefined) return;
+    onLevelChosen(levelPicked);
+    return () => {
+      onLevelChosen(false);
+    };
+  }, [levelPicked, onLevelChosen]);
+
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
   useEffect(() => {
     if (phase !== 'riding' || chosen === undefined || port === undefined) {
@@ -2224,13 +2831,6 @@ function GameScreen({
     // #476: which animation frames are drawn under the rung's cap, and what the
     // ladder is told about them. @see FramePacer
     const pacer = new FramePacer();
-    // #247. Read on its own slow clock and held for the frame, because the
-    // forecast is a bridge round trip that Android rate-limits. @see thermal.ts
-    const headroom = watchThermalHeadroom(props.thermal ?? BROWSER_THERMAL, everyInterval);
-    // The last reading held when the ladder moved. One reading moves it one
-    // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
-    // spent reading is neutral rather than absent.
-    let spentReading = 0;
     // #1994: the chase camera's heading on the last DRAWN frame, and when it
     // was drawn, which `camera.ts` §`dampedHeading` turns from. Undefined until
     // the first, which takes the road's own: a resumed ride starts afresh.
@@ -2246,52 +2846,76 @@ function GameScreen({
       // simulation advances regardless, which is exactly the decoupling
       // `simulation.ts` is about. A rider whose GPU is slow to hand over a
       // context still gets a HUD and a ride.
-      void load().then((renderer) => {
-        // ⚠️ Not after this effect has been cleaned up — found by #475's
-        // tests. A rider who ends the ride while `three` is still arriving has
-        // had the stage unmounted, and a view built then would hold a GL
-        // context on a detached canvas that nothing destroys — and the NEXT
-        // ride would find `viewRef` set, build no view of its own, and draw
-        // into that detached canvas: a black world. A pause cleans up too, and
-        // the resume's own run of this effect builds the view instead.
-        if (cancelled) {
-          return;
-        }
-        if (viewRef.current === undefined) {
-          const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
-          viewRef.current = view;
-          // #623: dressed before its first frame. @see kitColourRef
-          view.setRiderKit(kitColourRef.current);
-          // #1622: the season this ride started with, not a fresh read.
-          view.setSeason(seasonRef.current);
-          view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
-          // #475: the realistic world, for a ride that asked for it — AFTER
-          // the view exists, so the rider rides the stylised world while ~33
-          // MiB arrive rather than a black canvas, and the swap is one whole
-          // world for another (ADR 0026 D-3) the moment it is all here.
-          if (realisticWantedRef.current) {
-            void renderer.loadRealisticWorld().then((outcome) => {
-              // The ride this was for may have ended, or stepped out of
-              // realism, while the files arrived.
-              if (viewRef.current !== view || !qualityRef.current.realistic) {
-                return;
-              }
-              if (outcome.loaded) {
-                view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
-                return;
-              }
-              // D-7: the stylised world's TOP, every kind at once, and said.
-              qualityRef.current = STYLISED_START;
-              setQualityLevel(INITIAL_QUALITY.level);
-              setRealisticRung(false);
-              const text = realisticWorldNotice(outcome);
-              if (text !== undefined) {
-                setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
-              }
-            });
+      void load().then(
+        (renderer) => {
+          // ⚠️ Not after this effect has been cleaned up — found by #475's
+          // tests. A rider who ends the ride while `three` is still arriving has
+          // had the stage unmounted, and a view built then would hold a GL
+          // context on a detached canvas that nothing destroys — and the NEXT
+          // ride would find `viewRef` set, build no view of its own, and draw
+          // into that detached canvas: a black world. A pause cleans up too, and
+          // the resume's own run of this effect builds the view instead.
+          if (cancelled) {
+            return;
           }
-        }
-      });
+          if (viewRef.current === undefined) {
+            const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
+            viewRef.current = view;
+            // #623: dressed before its first frame. @see kitColourRef
+            view.setRiderKit(kitColourRef.current);
+            // #1622: the season this ride started with, not a fresh read.
+            view.setSeason(seasonRef.current);
+            view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
+            // #475: the realistic world, for a ride that asked for it — AFTER
+            // the view exists, so the rider rides the stylised world while ~33
+            // MiB arrive rather than a black canvas, and the swap is one whole
+            // world for another (ADR 0026 D-3) the moment it is all here.
+            if (realisticWantedRef.current) {
+              // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
+              arrivingSinceRef.current = clock();
+              const arrived = (outcome: RealisticWorldOutcome): void => {
+                // The ride this was for may have ended while the files arrived,
+                // or the arrival window may have lapsed and the ladder left
+                // realism on the stylised world's frames.
+                if (viewRef.current !== view || !qualityRef.current.realistic) {
+                  return;
+                }
+                if (outcome.loaded) {
+                  // #2289: the next frames upload the world; they are not counted.
+                  qualityRef.current = realisticWorldArrived(qualityRef.current);
+                  view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  // #2392: the town is here, so the round begins from where the rider is.
+                  beginWaitingRound(deliveryWaitingRef);
+                  return;
+                }
+                // D-7: the stylised world's TOP, every kind at once, and said.
+                qualityRef.current = STYLISED_START;
+                setQualityLevel(INITIAL_QUALITY.level);
+                setRealisticRung(false);
+                const text = realisticWorldNotice(outcome);
+                if (text !== undefined) {
+                  setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
+                }
+                // #2392: the round begins in the world the ride fell back to.
+                beginWaitingRound(deliveryWaitingRef);
+              };
+              // #2289's review: a load that REJECTS takes D-7's fallback too, as
+              // a failed one does — otherwise the ride would stay arriving until
+              // the window lapsed, drawing the stylised world under a realistic
+              // rung. The port does not promise never to reject.
+              void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
+                arrived({ loaded: false, offline: false, detail: String(error) });
+              });
+            }
+          }
+        },
+        () => {
+          // #2392's review: `three` failed to arrive, so no view and no realistic
+          // load will ever settle. The round was always allowed to run on the HUD
+          // alone, so it begins now rather than being lost for the whole ride.
+          if (!cancelled) beginWaitingRound(deliveryWaitingRef);
+        },
+      );
     }
 
     // ⚠️ **#423 made this necessary rather than nice.** The canvas used to be
@@ -2435,12 +3059,29 @@ function GameScreen({
         ghostRef.current,
         simulation.state,
       );
+      // #2078: the last ten minutes of power and heart rate, one sample a
+      // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
+      // no whole second writes nothing, so the graph changes at most once a
+      // second, and a reading that is not live is a gap, never a zero.
+      const traceSecond = sampleSecond(recentTraceRef.current.second, simulation.state.elapsed);
+      if (traceSecond !== undefined) {
+        const trace = recentTraceRef.current;
+        trace.write(traceSecond, {
+          power: sensors.rider.live ? sensors.rider.power : undefined,
+          heartRate:
+            sensors.heartRate.live && sensors.heartRate.value !== undefined
+              ? sensors.heartRate.value
+              : undefined,
+        });
+        setRecentTrace({ samples: trace.read(), written: trace.written });
+      }
       if (paced.draw) {
         setState(simulation.state);
       }
 
-      // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
-      // run while the ride is paused — nor does this loop), from the same
+      // #397: the announcer, on the RIDE's clock (`elapsed`, the wall clock:
+      // no frame runs while the game is paused, so nothing announces then,
+      // and the pause is counted on resume), from the same
       // readings the HUD renders. Pure: its carry-over lives in the ref.
       const readings = hudReadings({
         state: simulation.state,
@@ -2513,6 +3154,11 @@ function GameScreen({
         );
       } else if (!noticeThisFrame && !mayStopSaidRef.current) {
         events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
+      }
+      // #2381: this ride is not being recorded — owed until said, once, and
+      // not on the road notice's frame, for the eased sentence's reason above.
+      if (!noticeThisFrame && notRecordedOwedRef.current !== undefined) {
+        events.push({ kind: 'not-recording', text: notRecordedOwedRef.current });
       }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
@@ -2633,6 +3279,9 @@ function GameScreen({
       if (crossed !== undefined) {
         lapsDoneRef.current = courseLapsDone(chosen.profile, simulation.state.ride.distance);
         const laps = trainerPortRef.current?.courseLine?.(crossed);
+        if (laps !== undefined) {
+          setRideLaps(laps);
+        }
         const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
         if (summary !== undefined) {
           setLapNotice({
@@ -2695,6 +3344,9 @@ function GameScreen({
       }
       if (heard.kind === 'screen-off-risk') {
         mayStopSaidRef.current = true;
+      }
+      if (heard.kind === 'not-recording') {
+        notRecordedOwedRef.current = undefined;
       }
       if (heard.kind === 'lap-ended') {
         lapOwedRef.current = undefined;
@@ -2771,12 +3423,16 @@ function GameScreen({
         deliveryRef.current = stepped.ride;
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
+        if (stepped.ride.onLevel) {
+          owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
+        }
         const ended = stepped.ride.outcome;
         if (ended !== undefined && delivery.outcome === undefined) {
           owed = oweRoundOver(owed, ended, stepped.ride.score);
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
-          keepDeliveryWeek(deviceStorage(), ended);
+          keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
@@ -2842,6 +3498,11 @@ function GameScreen({
           roomRacing === undefined
             ? undefined
             : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        // #1853: where the round has steered the rider, the place the
+        // obstacles meet them; none on a ride with no round, or in a room (DL9).
+        const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
+          inRoom: roomRef.current !== undefined,
+        });
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -2905,11 +3566,19 @@ function GameScreen({
           // (DL9). Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads it back off every frame's input.
           steeredLateral:
-            raceDrawn?.steeredLateral ??
-            roomRaceDrawn?.steeredLateral ??
-            steeredLateralFor(deliveryRef.current?.steer, {
-              inRoom: roomRef.current !== undefined,
-            }),
+            raceDrawn?.steeredLateral ?? roomRaceDrawn?.steeredLateral ?? deliverySteered,
+          // #2396: and the camera's eye moved off any parked car it is
+          // alongside, so it never passes through one. A drawing only.
+          // Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads it back off every frame's input.
+          cameraLateral:
+            deliverySteered === undefined || deliveryRef.current === undefined
+              ? undefined
+              : eyeLateralBesideParkedCars(
+                  deliveryRef.current.obstacles,
+                  drawn.riderDistance,
+                  deliverySteered,
+                ),
           ...(raceDrawn === undefined
             ? {}
             : {
@@ -3021,25 +3690,32 @@ function GameScreen({
       // render, by which time the line below has already moved it to `at`. The
       // ladder was therefore fed `frameMs: 0` on every frame of every ride:
       // always "cool", never hot, so the reduction path #91 asks for could not
-      // fire at all. `thermalHeadroom` was `undefined` in the shipped app
-      // until #247 (`docs/validation/0002-android-shell-and-game.md` Part E),
-      // so this was the only live input to the whole policy. Since #247 the
-      // Android shell supplies the forecast too, and outside it this is still
-      // the only live input.
+      // fire at all. Since #2289 it is the ladder's only input.
       const frameMs = paced.frameMs;
       lastFrameAt = at;
       if (frameMs !== undefined) {
-        const previous = qualityRef.current;
-        const forecast = headroom.latest();
-        const next = nextWorldQuality(previous, {
-          frameMs,
-          thermalHeadroom: forecastForFrame(forecast, spentReading),
-        });
-        if (
-          next.quality.level !== previous.quality.level ||
-          next.realistic !== previous.realistic
-        ) {
-          spentReading = forecast.reading;
+        // #2289's review: a load that never settles stops holding the ladder
+        // off once REALISTIC_ARRIVAL_LIMIT_MS has passed since it started.
+        const since = arrivingSinceRef.current;
+        const previous =
+          since === undefined
+            ? qualityRef.current
+            : realisticArrivalLapsed(qualityRef.current, at - since);
+        // #2392: a load that has not settled in the arrival window holds the round no longer.
+        if (previous !== qualityRef.current) beginWaitingRound(deliveryWaitingRef);
+        // #2289: frame time alone. The thermal forecast is not read — the
+        // owner's ruling; Android throttles a hot device itself.
+        const sample = { frameMs };
+        const next = nextWorldQuality(previous, sample);
+        // #2289: why the realistic ladder moved, kept where the owner can read it.
+        const report = realisticWatchRef.current?.observe(
+          previous,
+          next,
+          sample,
+          simulation.state.elapsed,
+        );
+        if (report !== undefined) {
+          writeRealisticReport(deviceStorage(), report);
         }
         qualityRef.current = next;
         // A render only when the RUNG changes — #482. @see qualityLevel
@@ -3060,7 +3736,6 @@ function GameScreen({
       loopRunningRef.current = false;
       cancelAnimationFrame(frame);
       observer?.disconnect();
-      headroom.stop();
     };
     // ⚠️ The quality level is read inside `tick` and is deliberately NOT a
     // dependency. Re-running this effect on every quality change would cancel
@@ -3069,7 +3744,7 @@ function GameScreen({
     // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
     // updater form until then), and the level is applied to the live renderer
     // by the effect below instead.
-  }, [phase, chosen, port, props.renderer, props.now, props.frameNow, props.thermal]);
+  }, [phase, chosen, port, props.renderer, props.now, props.frameNow]);
 
   useEffect(() => {
     // #426, the latch: a step down takes the shadow map away for the rest of
@@ -3116,6 +3791,123 @@ function GameScreen({
     };
   }, [props.camera]);
 
+  /**
+   * *End ride*, and back on the stage — #2349: open the question, and say it
+   * through the HUD's one region, as a press's answer (#445: the HUD speaks
+   * through nothing else). Nothing about the ride changes.
+   */
+  const askToEnd = (): void => {
+    setEndAsk('ask');
+    const under = props.trainer?.rideRecording?.();
+    // #2381: with no recording under the ride, nothing is saved or deleted.
+    const sentence =
+      under === undefined
+        ? END_RIDE_TEXT.askNotRecorded
+        : under.savable
+          ? END_RIDE_TEXT.ask
+          : END_RIDE_TEXT.askNothingRecorded;
+    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${sentence}`);
+  };
+  /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
+  const keepRiding = (): void => {
+    setEndAsk(undefined);
+  };
+  useRideBack(onTheStage, () => {
+    if (endAsk === undefined) {
+      askToEnd();
+    } else {
+      keepRiding();
+    }
+  });
+  // #2349's review, B2: the browser's Back, or an address typed into the bar,
+  // would unmount this stage and end the ride through the cleanup's
+  // `teardown`. The shell's router asks here first and puts the address back
+  // (`shell/ride-leave.ts`), so it OPENS the question — and, with it open, is
+  // *Keep riding*, as Android's back is just above (#2356: the two platforms
+  // used to differ). Nothing is released until *Save ride* or *Discard ride*.
+  useRideLeave(onTheStage, () => {
+    if (endAsk === undefined) {
+      askToEnd();
+    } else {
+      keepRiding();
+    }
+  });
+  // A real unload — the tab closed, a reload — is past any question this page
+  // can draw: the browser's own generic prompt is all it allows.
+  useRecordingGuard(onTheStage);
+  /**
+   * An answer that ends the ride — #2349: *Save ride*, or *Discard ride*
+   * confirmed. The game ride ends exactly as *End ride* ended it before the
+   * question existed — the race's result kept, `teardown`'s release of the
+   * gradient first, back to the picker — and then the recording under it, if
+   * any, is ended through the ride controller's own Stop: saved, with its
+   * result card on the Ride screen, or deleted from this device.
+   *
+   * ⚠️ `teardown` BEFORE the recording ends, so the ride's race outcome and
+   * its part lap reach the recording (`gameRideEnded`, `courseLine`) before it
+   * is saved with them.
+   */
+  const endRide = (answer: 'save' | 'discard' | 'end'): void => {
+    // #2381's review (round 3): *End ride*, the one-step answer for a ride
+    // with nothing recorded, NEVER discards. A recording that turned up
+    // since the question was drawn (a room reaching `joined` fires
+    // `recordRoomRide`) is asked about afresh — *Save ride*, or *Discard
+    // ride* with the owner's warning — and nothing ends on this press.
+    if (answer === 'end' && props.trainer?.rideRecording?.() !== undefined) {
+      askToEnd();
+      return;
+    }
+    // #785: a race the room said is over has a result, shown on the
+    // picker once the ride has ended — and only then. A race the rider
+    // left while it ran has one too, kept for them: the picker offers
+    // to ask for it, and the instance answers once the race is over
+    // (#785's review, N5).
+    const over = roomRef.current?.race();
+    const roomId = roomIdRef.current;
+    if ((over?.kind === 'finished' || over?.kind === 'running') && roomId !== undefined) {
+      const { wattSeconds, seconds } = raceWattsRef.current;
+      setRaceOver({
+        roomId,
+        finishers: over.kind === 'finished' ? over.order.length : undefined,
+        ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
+      });
+    }
+    const trainerPort = props.trainer;
+    const recorded = trainerPort?.rideRecording?.() !== undefined;
+    teardown();
+    setEndAsk(undefined);
+    // #2392's review: a ride ended while its town loaded has no round waiting.
+    setTownLoading(false);
+    setPhase('choosing');
+    setChosen(undefined);
+    // PR #2113: a preview ends back on an ordinary picker, a new screen.
+    if (preview !== undefined) onPreviewEnd();
+    if (!recorded) {
+      setRideEnded('not-recorded');
+      return;
+    }
+    if (answer === 'save') {
+      setRideEnded('saved');
+      // #2349's review: `confirmStop` fails closed and rethrows. The
+      // checkpoint is still on the device and the Ride screen offers it back,
+      // so the picker says so rather than leaving "being saved" standing.
+      trainerPort?.saveRideRecording?.().catch(() => {
+        setRideEnded('not-saved');
+      });
+      return;
+    }
+    trainerPort
+      ?.discardRideRecording?.()
+      .then((gone) => {
+        setRideEnded(gone ? 'discarded' : 'not-deleted');
+      })
+      // #2349's review: a discard that threw failed closed — the ride is
+      // still on this device — which is the "Not deleted" sentence's case.
+      .catch(() => {
+        setRideEnded('not-deleted');
+      });
+  };
+
   if (!onTheStage && preview !== undefined) {
     // PR #2113: the preview's own screen, between the press and its first
     // frame — never a picker, whose Ride this screen has no trainer for.
@@ -3126,6 +3918,7 @@ function GameScreen({
     const trainerNow = props.trainer?.readTrainer();
     return (
       <>
+        {rideEnded === undefined ? null : <RideEndedNotice ended={rideEnded} />}
         {raceOver === undefined || props.rooms === undefined ? undefined : (
           // #785: the result of the race this rider just rode, once the room
           // said it was over — and never while it ran.
@@ -3137,7 +3930,8 @@ function GameScreen({
           />
         )}
         <RoutePicker
-          routes={routes}
+          // #2362: the level the Delivery picker opened this on, first, as a card.
+          routes={routes === undefined ? undefined : [...levelRoutes, ...routes]}
           // #940: the card the rider chose, kept here so it survives a ride.
           picked={picked}
           onPick={setPicked}
@@ -3156,6 +3950,17 @@ function GameScreen({
           worldChosen={readRealisticWorldChoice(deviceStorage())}
           // #1539: the one line about the chosen route's corridor.
           corridor={corridorState}
+          // #2362: the level the Delivery picker opened this on: its card, its
+          // credit beside it (ADR 0065 D-6.5), and its world.
+          level={
+            level === undefined
+              ? undefined
+              : {
+                  routeId: level.route.id,
+                  credit: OSM_ATTRIBUTION,
+                  houses: level.file.round.houses,
+                }
+          }
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
           onGhost={chooseOwnGhost}
@@ -3183,7 +3988,15 @@ function GameScreen({
           delivery={{
             chosen: withDelivery,
             onChoose: chooseDelivery,
-            week: readDeliveryProgress(deviceStorage()),
+            // #2362: on a level, its round's houses stand for the day's.
+            week: ((week) =>
+              level !== undefined && picked === level.route.id
+                ? { ...week, houses: level.file.round.houses }
+                : week)(readDeliveryProgress(deviceStorage())),
+            // #2294: what each saved route holds for the round, as counted. A
+            // level's own count is its offer's (#2362, `level` above), in
+            // either world.
+            courses,
           }}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
@@ -3194,6 +4007,9 @@ function GameScreen({
             onChoice: setLapRaceChoice,
             assisted: lapRaceAssisted(deviceStorage()),
           }}
+          // #2293: the built-in circuits, beside the race they are raced in,
+          // with the OpenStreetMap credit the chooser cannot import.
+          circuits={{ circuits, credit: OSM_ATTRIBUTION }}
           onStart={start}
           // PR #2113: *Preview without a trainer*, on an ordinary screen only.
           onPreview={
@@ -3285,6 +4101,10 @@ function GameScreen({
   // #647: read during render, like `rescue` — a later successful ask for the
   // recording service clears it mid-ride.
   const mayStop = props.trainer?.recordingMayStop() ?? false;
+  // #2349: the recording under this ride, for the question's *Save ride* —
+  // read during render like `mayStop`, so a ride that has just recorded its
+  // first second is offered it.
+  const recordedUnder = props.trainer?.rideRecording?.();
   // ⚠️ **ONE notice cell on a phone, so the Eased notice takes it from the
   // road notice while a rescue is in force** — PR #599's review, finding B1.
   // A running workout ALWAYS has a road notice, and on a phone both sentences
@@ -3311,13 +4131,39 @@ function GameScreen({
   // the ride, it is about the hills rather than about the ride being lost, and
   // it comes back the moment the recording service does. Everywhere else it
   // behaves exactly as it does without the refusal.
+  // #2381: this ride is not being recorded — for its first
+  // STANDING_NOTICE_SECONDS, the road notice's own time open (#437).
+  //
+  // ⚠️ Round 3 (the review of 4f726fde), measured: **in its tallest stack —
+  // the longest cause, the road notice and #647's *Keep the screen on* — the
+  // cell ran off a phone in landscape** (844×390, 736×360), pushing *Pause*
+  // and *End ride* below the stage, and upright at 360×752 it ended 34 px
+  // above the rider. So, #585's and #693's trade again:
+  // - while it stands ON A PHONE (@see SHORT_OF_SPACE_QUERY: the owner's
+  //   ruling on round 3, "only where space is short"), the road notice is not
+  //   on the HUD, its control included. That notice was said at the start of
+  //   the ride and is about the hills; this one is about the ride not being
+  //   kept. It comes back, in whatever state the rider's choice and the
+  //   ride's clock give it, once this one has gone. On a tablet both show:
+  //   measured, the stack clears everything there.
+  // - on the narrowest upright phones while the ride may stop with the screen
+  //   off (@see ONE_NOTICE_ONLY_QUERY), the cell holds that one sentence,
+  //   which is never put away, and this one is off the HUD. It is still SAID
+  //   once (`not-recording` is in `announce.ts` §`ALWAYS_SPOKEN`), and the
+  //   dashed *Moving* stays.
+  // `ride-notices.browser.spec.ts` §"#2381" measures both, both ways.
+  const notRecordedShown =
+    notRecorded !== undefined &&
+    (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS &&
+    !(mayStop && narrowUpright);
   const roadNotice =
-    eased === undefined && !(mayStop && narrowUpright)
+    eased === undefined && !(mayStop && narrowUpright) && !(notRecordedShown && shortOfSpace)
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
-  // way unless the rider asks for it — on the RIDE's clock, so a paused ride
-  // does not put away a notice nobody has had time to read.
+  // way unless the rider asks for it — on the RIDE's clock (`elapsed`, the
+  // wall clock: frozen on screen while the game is paused, and on resume it
+  // counts the whole pause, so a long pause puts the notice away).
   const noticeOpen =
     noticeChoice === 'open' ||
     (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
@@ -3384,6 +4230,20 @@ function GameScreen({
         elapsedSeconds={elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
+        // #2080: and every lap it has stated, for the lap splits panel.
+        laps={rideLaps}
+        // #2076: the ride so far, the recorder's again. @see useRideTotals
+        rideTotals={rideTotals}
+        // #2078: the last ten minutes, written once a second by the loop.
+        recent={recentTrace}
+        // #2079: the rider's panels and text size.
+        layout={hudLayout}
+        // #2077: the rider's W/kg from the weight the physics rides (`undefined`
+        // when none is set, never the default), and the zone indicator from
+        // their own threshold and the recorder's time in each zone.
+        riderMass={props.riderMass}
+        thresholdPower={thresholdPower}
+        powerZoneTime={powerZoneTime}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
@@ -3559,32 +4419,53 @@ function GameScreen({
         // with no footprint in it (D-5.3: no procedural village there). A
         // procedural world owes nothing, and a credit there would be false.
         // Since #1549 the realistic world draws its mapped buildings from it.
-        attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
+        // ⚠️ Since #2293 (ADR 0064 D-5.3) a SECOND key: a ride on a built-in
+        // circuit, in every world, the stylised one included, because the
+        // road itself is the circuit's line drawn from OpenStreetMap. A ride
+        // on the stylised world on the rider's own route still shows none.
+        attribution={rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined}
+        // #2290: and the plan view draws that corridor as a street map around
+        // the rider — on exactly the rides that carry the corridor's credit
+        // (a stylised-world ride on a circuit carries the credit and draws no
+        // map), from the corridor fixed at the press, so it makes no request
+        // during the ride.
+        corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
-        onEnd={() => {
-          // #785: a race the room said is over has a result, shown on the
-          // picker once the ride has ended — and only then. A race the rider
-          // left while it ran has one too, kept for them: the picker offers
-          // to ask for it, and the instance answers once the race is over
-          // (#785's review, N5).
-          const over = roomRef.current?.race();
-          const roomId = roomIdRef.current;
-          if ((over?.kind === 'finished' || over?.kind === 'running') && roomId !== undefined) {
-            const { wattSeconds, seconds } = raceWattsRef.current;
-            setRaceOver({
-              roomId,
-              finishers: over.kind === 'finished' ? over.order.length : undefined,
-              ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
-            });
-          }
-          teardown();
-          setPhase('choosing');
-          setChosen(undefined);
-          // PR #2113: a preview ends back on an ordinary picker, a new screen.
-          if (preview !== undefined) onPreviewEnd();
-        }}
+        // #2349: *End ride* ASKS, and never ends the ride on one press.
+        onEnd={askToEnd}
+        endQuestion={
+          endAsk === undefined ? undefined : (
+            <EndRideQuestion
+              className="oyl-end-ride oyl-end-ride--hud"
+              step={endAsk}
+              canSave={recordedUnder?.savable === true}
+              // #2381: with nothing recorded, one step: *End ride* or
+              // *Keep riding*, and no deletion to warn of.
+              recorded={recordedUnder !== undefined}
+              // Opened by a press — *End ride*, or back — every time.
+              focusOnOpen
+              // The HUD's ONE region says it (#445): @see askToEnd
+              surface="hud"
+              onSave={() => {
+                endRide('save');
+              }}
+              onDiscard={() => {
+                setEndAsk('discard');
+                setAnnouncement(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+              }}
+              onConfirmDiscard={() => {
+                endRide('discard');
+              }}
+              // #2381, round 3: its own answer, which never discards.
+              onEnd={() => {
+                endRide('end');
+              }}
+              onKeepRiding={keepRiding}
+            />
+          )
+        }
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices
         standingNotice={
@@ -3705,6 +4586,21 @@ function GameScreen({
           voiceLink?.place === 'notice' ? (
             <VoiceNotice key="voice" invite={voiceLink.invite} />
           ) : undefined,
+          // #2381: the press of *Ride* could not start this ride's recording
+          // — said, with the controller's reason where it gave one, rather
+          // than left to a dashed *Moving*. Before #647's, in `announce.ts`'s
+          // order (`not-recording` is rank 5a⁗). Not `live`: the HUD's one
+          // region says it, once. For STANDING_NOTICE_SECONDS of ride, the
+          // world notice's rule, so on a phone it gives the route panel's
+          // cell back (#437); and, since round 3, what it gives way to and
+          // what gives way to it: @see notRecordedShown.
+          // `ride-notices.browser.spec.ts` §"#2381" measures it at every
+          // overlay viewport, over no ride control, in its tallest stack.
+          !notRecordedShown || notRecorded === undefined ? undefined : (
+            <StatusMessage key="not-recorded" tone="warning" label={RIDE_NOT_RECORDED_TEXT.label}>
+              {RIDE_NOT_RECORDED_TEXT[notRecorded]}
+            </StatusMessage>
+          ),
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.
@@ -3746,6 +4642,15 @@ function GameScreen({
               {noRound.text}
             </StatusMessage>
           ),
+          // #2392, the owner's ruling of 2026-11-09: the round waiting for the
+          // town, from the press until it begins — not on a clock, because the
+          // wait is up to the arrival window. Not `live`, for #1818's reason:
+          // the HUD's one region says it once (`oweNoRound`, announcements on).
+          townLoading ? (
+            <StatusMessage key="town-loading" tone="info" label={NO_ROUND_LABEL}>
+              {TOWN_LOADING_TEXT}
+            </StatusMessage>
+          ) : undefined,
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of
@@ -3784,13 +4689,14 @@ function startOf(
  * side camera* while there is something to stop. `undefined` with no pairing.
  */
 /**
- * What the chooser says about the ride being saved — #1221. @see RecordingOffer
+ * What the chooser says about the ride being saved — #1221, #2381. @see RecordingOffer
  *
  * `undefined` with no trainer port, which only a test or harness renders:
  * production always hands one over (`main.tsx` §`buildGameTrainerPort`), even
  * with no ride controller. A ride is recorded exactly when the recorder has a
  * moving time to give (`GameTrainerPort.rideMovingSeconds`: recording or
- * paused), which is the figure the HUD's *Moving* shows.
+ * paused), which is the figure the HUD's *Moving* shows; and since #2381 the
+ * press of *Ride* starts one wherever the port can (`begin`).
  */
 function recordingOfferOf(
   trainer: GameTrainerPort | undefined,
@@ -3801,12 +4707,7 @@ function recordingOfferOf(
   }
   return {
     recorded: movingSeconds !== undefined,
-    // ⚠️ A call, not a bound reference, so `WIRE003` sees the port's method
-    // called by production.
-    onRecord:
-      trainer.recordGameRide === undefined
-        ? undefined
-        : async () => (await trainer.recordGameRide?.()) ?? false,
+    records: trainer.recordGameRide !== undefined,
   };
 }
 

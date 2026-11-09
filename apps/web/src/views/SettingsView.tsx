@@ -125,6 +125,18 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 import {
+  HUD_ARRANGEMENTS,
+  HUD_PANELS,
+  HUD_TEXT_SIZES,
+  panelShown,
+  readHudLayout,
+  writeHudLayout,
+  type HudArrangement,
+  type HudLayoutPreference,
+  type HudPanelId,
+  type HudTextSize,
+} from '../game/hud/hud-layout-preference';
+import {
   readCuePreference,
   steppedVolume,
   writeCuePreference,
@@ -141,6 +153,8 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT } from '../game/realistic-assets';
+import { readRealisticReport, realisticReportText } from '../game/realistic-report';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
 import {
@@ -705,6 +719,14 @@ export function SettingsView({
           storage={announcements === undefined ? deviceStorage() : announcements}
           output={soundOutput}
         />
+
+        {/*
+          #2079: the ride HUD's panels and the size of its numbers — how the
+          ride looks. Here rather than in *The ride* because there it made
+          that card 2.53× the shortest in its row at 1280×800, over #1026's
+          balance rule (`sections.browser.spec.ts` §`ROW_BALANCE_LIMIT`).
+        */}
+        <HudLayoutPanel storage={announcements === undefined ? deviceStorage() : announcements} />
       </SettingsCard>
 
       <SettingsCard
@@ -1213,7 +1235,7 @@ function SoundsPanel({
           Play sounds during a ride
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-sounds-volume">Sound volume</label>{' '}
         <input
           id="oyl-sounds-volume"
@@ -1306,7 +1328,7 @@ function MenuSoundsPanel({
         the tab order that does nothing. Kept, not reset, while they are off.
       */}
       {preference.enabled ? (
-        <p>
+        <p className="oyl-volume-row">
           <label htmlFor="oyl-menu-sounds-volume">Menu sound volume</label>{' '}
           <input
             id="oyl-menu-sounds-volume"
@@ -1389,7 +1411,7 @@ function MusicPanel({
           Play music in the menus
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-music-volume">Music volume</label>{' '}
         <input
           id="oyl-music-volume"
@@ -1436,6 +1458,11 @@ function GameWorldPanel({
   readonly storage: PreferenceStorage | undefined;
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  // #2289: why the last realistic ride stepped down or left, read once.
+  const [report] = useState(() => {
+    const kept = readRealisticReport(storage);
+    return kept === undefined ? undefined : realisticReportText(kept);
+  });
   // #1622: on by default, in either world — only a stored "off" turns it off.
   const [decorated, setDecorated] = useState(() => readHolidayDecorations(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
@@ -1462,10 +1489,10 @@ function GameWorldPanel({
               on one tablet, not on phones.
             </p>
             <p className="oyl-muted">
-              In a browser the realistic world is downloaded when a ride starts — about 33 MB — and
-              is not kept on this device for use offline. With no network, or if it cannot be
-              loaded, the ride is in the standard world instead and the ride screen says so. In the
-              Android app it is already on the device.
+              In a browser the realistic world is downloaded when a ride starts —{' '}
+              {REALISTIC_DOWNLOAD_SIZE_TEXT} — and is not kept on this device for use offline. With
+              no network, or if it cannot be loaded, the ride is in the standard world instead and
+              the ride screen says so. In the Android app it is already on the device.
             </p>
           </>
         }
@@ -1491,6 +1518,25 @@ function GameWorldPanel({
           Ride in the realistic world
         </label>
       </p>
+      {/* #2289: what the last realistic ride's ladder read — the owner's
+        diagnostic, and a rider's answer to "why did it go standard". Counts and
+        milliseconds only: `realistic-report.ts` keeps no coordinate. One plain
+        line; the figures behind a native "Details" disclosure (2026-11-07). */}
+      {report === undefined ? null : (
+        <div className="oyl-world__report">
+          <p className="oyl-muted">{report.summary}</p>
+          {report.details.length === 0 ? null : (
+            <details className="oyl-world__report-details">
+              <summary>Details</summary>
+              {report.details.map((line) => (
+                <p className="oyl-muted" key={line}>
+                  {line}
+                </p>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
       <p>
         <label className="oyl-announce__switch">
           <input
@@ -1799,6 +1845,136 @@ function LapRaceAssistPanel({
       <KeptVisible>
         <p className="oyl-muted">{text.stays}</p>
       </KeptVisible>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/** #2079: what each panel the rider may turn off is called here. */
+const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
+  readings: 'Ride readings: speed, distance, the pacer and the rest',
+  route: 'The route: its height profile and its map',
+  graph: 'The last ten minutes of power and heart rate',
+  standings: 'A race’s standings',
+};
+
+/** #2383: what each arrangement is called here. */
+const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
+  full: 'Full: every reading',
+  focus:
+    'Focus: power, cadence and heart rate large, with speed, average power, distance and ride time under them',
+};
+
+/** #2079: what each text size is called here. */
+const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
+  normal: 'Normal',
+  large: 'Large',
+  'extra-large': 'Extra large',
+};
+
+/**
+ * The ride HUD's panels and the size of its numbers — #2079. Kept on this
+ * device (`game/hud/hud-layout-preference.ts`) and read as the next ride
+ * starts. **The notices, the controls and power, cadence and heart rate are
+ * not offered**: a notice is where the HUD's safety sentences stand, and a
+ * rider must always be able to pause. Since #2383 the rider may choose the
+ * focus arrangement, which shows the gradient nowhere: it is a choice of
+ * fewer numbers, made off the bike, and the full HUD is one choice away.
+ *
+ * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
+ * as every ride-time control is: it is set from the bars as often as the sofa.
+ */
+function HudLayoutPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [layout, setLayout] = useState<HudLayoutPreference>(() => readHudLayout(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function keep(next: HudLayoutPreference): void {
+    setLayout(next);
+    setMessage(
+      writeHudLayout(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  return (
+    <section className="oyl-panel oyl-hud-layout" aria-labelledby="oyl-hud-layout-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-hud-layout-heading"
+        help={
+          <p className="oyl-muted">
+            What the game shows while you ride, from your next ride. Power, cadence and heart rate,
+            the ride controls and every notice are always shown. Focus shows one compact readout at
+            the top in place of every reading; a ride in a room, a Delivery round or a lap race
+            keeps the full layout. The text size applies on tablets: a phone or a short window keeps
+            the normal size, because it has no room for larger numbers beside the road.
+          </p>
+        }
+      >
+        Ride HUD
+      </SectionHeading>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Layout</legend>
+        {HUD_ARRANGEMENTS.map((arrangement) => (
+          <label key={arrangement} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-arrangement"
+              checked={(layout.arrangement ?? 'full') === arrangement}
+              onChange={() => {
+                keep({ ...layout, arrangement });
+              }}
+            />{' '}
+            {HUD_ARRANGEMENT_LABELS[arrangement]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Show</legend>
+        {HUD_PANELS.map((panel) => (
+          <label key={panel} className="oyl-hud-layout__choice">
+            <input
+              type="checkbox"
+              checked={panelShown(layout, panel)}
+              onChange={(event) => {
+                const show = event.currentTarget.checked;
+                keep({
+                  ...layout,
+                  hidden: show
+                    ? layout.hidden.filter((each) => each !== panel)
+                    : [...layout.hidden, panel],
+                });
+              }}
+            />{' '}
+            {HUD_PANEL_LABELS[panel]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Size of the numbers</legend>
+        {HUD_TEXT_SIZES.map((size) => (
+          <label key={size} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-text-size"
+              checked={layout.textSize === size}
+              onChange={() => {
+                keep({ ...layout, textSize: size });
+              }}
+            />{' '}
+            {HUD_TEXT_SIZE_LABELS[size]}
+          </label>
+        ))}
+      </fieldset>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

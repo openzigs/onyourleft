@@ -210,7 +210,11 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
       started === undefined
         ? 0
         : (obstacleState.tick - started + sinceStep) * DELIVERY_TICK_SECONDS;
-    obstacles.push({ ...placed(at, obstacleAcross(obstacle, seconds), 0, 0), kind: obstacle.kind });
+    obstacles.push({
+      ...placed(at, obstacleAcross(obstacle, seconds), 0, 0),
+      kind: obstacle.kind,
+      index,
+    });
   });
 
   return { parcels, markers, obstacles };

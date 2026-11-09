@@ -18,5 +18,10 @@ export default {
     // `room/conformance.test.ts` runs here too, against the reference and the
     // adapter under fakes, and says in a skipped case that `workerd` was not.
     exclude: ['**/node_modules/**', 'src/**/*.workerd.test.ts'],
+    // #2398: each test file's `os.tmpdir()` is a directory of its own on
+    // `/dev/shm` where that is a tmpfs with room, so the stores the tests open
+    // do not wait on the disk for every commit's `fsync`. No timeout was raised.
+    // `src/testing/temporary-directory.ts` has the measurements.
+    setupFiles: ['src/testing/temporary-directory-setup.ts'],
   },
 };

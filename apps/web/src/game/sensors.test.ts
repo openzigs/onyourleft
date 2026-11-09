@@ -31,12 +31,15 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
   return {
     phase: 'recording',
     stopArmed: false,
+    discardArmed: false,
     touchLocked: false,
+    startedAt: undefined,
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
+    totals: undefined,
     metrics: Object.entries(states).map(([id, state]) => ({
       id: id as 'power' | 'cadence' | 'heartRate' | 'speed',
       state: state as MetricState,

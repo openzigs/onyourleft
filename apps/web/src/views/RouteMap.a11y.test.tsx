@@ -58,7 +58,7 @@ function aRoute(): RouteRecord {
   return {
     id: stubRouteId('route-1'),
     createdBy: ATHLETE,
-    name: 'Box Hill loop',
+    name: 'Old mill loop',
     profile: routeProfile(points),
     visibility: 'private',
     createdAt: unixSeconds(1_700_000_000),

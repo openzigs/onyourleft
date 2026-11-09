@@ -74,6 +74,8 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
@@ -81,6 +83,7 @@ import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
@@ -93,8 +96,8 @@ import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
-import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
+import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
@@ -106,16 +109,28 @@ import { NavIcon } from './NavIcon';
 import {
   groupDestination,
   hrefFor,
+  LEVEL_GAME_SUMMARY,
   NAV_GROUPS,
+  navGroupOf,
   routesInGroup,
+  type NavGroupId,
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
-import type { MenuMusic } from './menu-music';
+import { workoutRunning, type MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
+import type { OtherPlayer } from './other-player';
+import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
-import { isRideRoute, mayAnimateBetween, RideHasTheScreen } from './route-motion';
+import { rideBack, RideBackContext } from './ride-back';
+import { rideLeave, RideLeaveContext } from './ride-leave';
+import {
+  isRideRoute,
+  mayAnimateBetween,
+  RideHasTheScreen,
+  ROUTE_TRANSITION_CLASS,
+} from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
@@ -131,6 +146,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * not be reachable from the entry chunk.
  */
 const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const GAMES_GROUP = viewGroup(async () => import('./lazy/games'));
 const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
 const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
 const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
@@ -138,6 +154,7 @@ const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
 /** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
 export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
   RIDE_GROUP,
+  GAMES_GROUP,
   HISTORY_GROUP,
   ROUTES_GROUP,
   MORE_GROUP,
@@ -146,6 +163,8 @@ export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
 const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
 const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
 const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const GamesView = lazyView(GAMES_GROUP, (group) => group.GamesView);
+const GameCoursesView = lazyView(GAMES_GROUP, (group) => group.GameCoursesView);
 const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
 const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
 const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
@@ -153,6 +172,7 @@ const SegmentsView = lazyView(HISTORY_GROUP, (group) => group.SegmentsView);
 const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetailView);
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
+const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -172,6 +192,14 @@ const MAIN_ID = 'oyl-main';
  * title's suffix (#671). One constant, so the three cannot disagree.
  */
 const APP_NAME = 'On Your Left';
+
+/**
+ * The rail's mark — #2066: the launcher icon `tools/brand/` cuts into
+ * `public/` (`brand.json`), precached with the rest of `public/`. Its
+ * intrinsic size, so the box is reserved before the file decodes.
+ */
+const NAV_MARK_FILE = 'icon-192.png';
+const NAV_MARK_PIXELS = 192;
 
 /** The id of the `h1`, which names the `main` landmark through `aria-labelledby`. */
 const VIEW_TITLE_ID = 'oyl-view-title';
@@ -216,6 +244,12 @@ export interface AppShellProps {
    * Present only inside the Android shell, built beside {@link shell}.
    */
   readonly signal?: SignalStrengthPort | undefined;
+  /**
+   * Each connected sensor's battery on Home's sensors module — #2047.
+   * Present in a browser, where the Web Bluetooth transport reads the Battery
+   * Service; absent inside the shell, whose plugin reads none yet.
+   */
+  readonly battery?: BatteryLevelPort | undefined;
   /**
    * Inside the shell: whether the rider has been told why Android asks for
    * Bluetooth, and the way to Android's settings — #1436. Built beside
@@ -270,6 +304,17 @@ export interface AppShellProps {
    */
   readonly sidePairing?: SidePairingPort | undefined;
   /**
+   * Where *Save snapshot* holds a side-camera picture until the ride it joins
+   * is saved — #1063, `camera/snapshot-keeper.ts`. One per tab, built by
+   * `main.tsx` beside the side-camera report's keeper.
+   */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
+  /**
+   * A ride's side-camera snapshots, read only once the rider opens their
+   * section on that ride's page — #1063, `detail/ride-snapshots-port.ts`.
+   */
+  readonly rideSnapshots?: RideSnapshotsPort | undefined;
+  /**
    * The rider's instance, as the Camera page asks about it to offer it the
    * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
    * and the page then has no such section.
@@ -295,11 +340,6 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
-  /**
-   * Android's thermal forecast, for the game's quality ladder (#247). Absent
-   * in a browser. @see game/thermal-port.ts
-   */
-  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -349,6 +389,12 @@ export interface AppShellProps {
    * context until a press asks for sound; a test hands in a recording double.
    */
   readonly soundOutput?: import('../game/audio-port').CueOutput | undefined;
+  /**
+   * The rider's own music player, another app — #2073. Made by `main.tsx`
+   * inside the Android shell only (`other-player.ts` §`otherPlayerOffered`);
+   * `undefined` in a browser, where the header offers no such control.
+   */
+  readonly otherPlayer?: OtherPlayer | undefined;
   /**
    * The trainer game's store reads and sensor sampling (#85).
    *
@@ -473,6 +519,12 @@ export interface AppShellProps {
    * sentence rather than crashing the audit.
    */
   readonly efforts?: EffortPort | undefined;
+  /**
+   * The rider's instance's segments and leaderboards (#68), on the Segments
+   * screen and each segment's own. `undefined` with no instance, and then
+   * nothing about one renders.
+   */
+  readonly boards?: LeaderboardPort | undefined;
   /**
    * The settings screen's one write (#238).
    *
@@ -603,6 +655,7 @@ function viewFor(
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
   },
+  onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -612,6 +665,7 @@ function viewFor(
           controller={props.rideController}
           routes={props.routes}
           now={props.homeNow}
+          battery={props.battery}
         />
       );
     case 'ride':
@@ -620,6 +674,8 @@ function viewFor(
           controller={props.rideController}
           workouts={props.workouts}
           analysis={props.analysis}
+          // #2306: a tailored built-in to ride, from the address.
+          query={match.query}
           // #551: the side camera's line, its Stop, and its link going said.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
@@ -639,6 +695,8 @@ function viewFor(
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
           analysis={props.analysis}
+          // #1063: the chosen ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'activity-detail':
@@ -651,12 +709,14 @@ function viewFor(
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
           analysis={props.analysis}
+          // #1063: the ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'analysis':
       return <AnalysisView port={props.analysis} />;
     case 'segments':
-      return <SegmentsView port={props.segments} match={props.match} />;
+      return <SegmentsView port={props.segments} match={props.match} boards={props.boards} />;
     case 'routes':
       return (
         <RoutesView
@@ -679,12 +739,27 @@ function viewFor(
           routes={props.routes}
         />
       );
+    case 'route-editor':
+      return (
+        <RouteEditorView
+          // #2007: a saved route's line, kept, with one stretch at a time redrawn.
+          routes={props.routes}
+          selected={match.parameter}
+          provider={props.routing}
+          map={props.map}
+          basemap={props.basemap}
+        />
+      );
     case 'workouts':
       return (
         <WorkoutsView
           port={props.workouts}
           save={props.transfer?.save}
           selected={match.parameter}
+          // #2304: the built-in list's filter, from the address.
+          query={match.query}
+          // #2305: the rider's thresholds, for a tailored built-in in watts.
+          analysis={props.analysis}
         />
       );
     case 'game':
@@ -703,11 +778,11 @@ function viewFor(
           kitColour={kit.colour}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
+          // #2362: a built-in level's card chosen, for the line under the title.
+          onLevelChosen={onLevelChosen}
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
-          // #247. The forecast half of the ladder; only the shell supplies one.
-          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
           // #1827. The steering controller paired on Devices; a Delivery
           // round's HUD reads it, through the game's controller port.
           {...(props.steering === undefined ? {} : { controller: props.steering })}
@@ -721,13 +796,24 @@ function viewFor(
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
+    case 'games':
+      // #2292: a card for each game, the lap race's reading the rider's loops.
+      return <GamesView port={props.game} />;
+    case 'delivery-courses':
+      return <GameCoursesView mode="delivery" port={props.game} />;
+    case 'lap-race-courses':
+      return <GameCoursesView mode="lap-race" port={props.game} />;
     case 'segment-detail':
-      return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
+      return (
+        <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
+      );
     case 'camera':
       return (
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1063: where Save snapshot holds a picture for its ride.
+          {...(props.sideSnapshots === undefined ? {} : { sideSnapshots: props.sideSnapshots })}
           // #1106: the rider's instance, for the side camera's pictures.
           {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
@@ -837,7 +923,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #423, and described at length below. Declared before the router because
   // #945 asks it, per navigation, whether the navigation may animate.
   const [immersive, setImmersive] = useState(false);
-  const match = useRoute((from, to) => mayAnimateBetween(from, to, immersive), props.routeUpdates);
+  /**
+   * Whether the trainer game's setup has a built-in Delivery level's card
+   * chosen — #2362, round 4 of PR #2378's review: the line under the title
+   * follows the chosen card, never the address, which stays on the level
+   * when the rider picks a saved route. Told by `GameViewProps.onLevelChosen`.
+   */
+  const [levelChosen, setLevelChosen] = useState(false);
+  // #2349's review, B2: a browser Back or a typed address under a ride on the
+  // game's stage is asked about first (`ride-leave.ts`).
+  const [rideLeaves] = useState(rideLeave);
+  const match = useRoute(
+    (from, to) => mayAnimateBetween(from, to, immersive),
+    props.routeUpdates,
+    rideLeaves,
+  );
   const route = match.route;
   // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
   const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
@@ -884,13 +984,32 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   // #1512: Android's back, inside the shell. Read at each press: a ride on —
   // recording, paused, or the game's stage with the screen — consumes it.
-  useAndroidBack(props.nativeShell === true, () => {
-    const phase = props.rideController?.getSnapshot().phase;
-    return {
-      routeId: route.id,
-      rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
-    };
-  });
+  // #2349: and hands it to the ride screen on show, whose end-of-ride
+  // question it opens or answers with *Keep riding* (`ride-back.ts`).
+  const [rideBackPresses] = useState(rideBack);
+  useAndroidBack(
+    props.nativeShell === true,
+    () => {
+      const phase = props.rideController?.getSnapshot().phase;
+      return {
+        routeId: route.id,
+        rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
+      };
+    },
+    () => {
+      rideBackPresses.press();
+    },
+  );
+
+  // #2073: the header asks whether the rider's own player is playing only
+  // where its controls may show, so never on a ride route or while a ride has
+  // the screen, where the ride's own cues would read as the rider's music.
+  const otherPlayer = props.otherPlayer;
+  const otherPlayerMayShow = !immersive && !isRideRoute(route.id);
+  useEffect(() => {
+    if (otherPlayer === undefined || !otherPlayerMayShow) return undefined;
+    return otherPlayer.watch();
+  }, [otherPlayer, otherPlayerMayShow]);
 
   /*
    * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
@@ -942,10 +1061,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
+    const snapshot = props.rideController?.getSnapshot();
     const context = {
       immersive,
       routeId: route.id,
-      ridePhase: props.rideController?.getSnapshot().phase,
+      ridePhase: snapshot?.phase,
+      workoutRunning: workoutRunning(snapshot?.workout),
     };
     props.menuSounds?.press(event.target, context);
     // #2058: the same press, and the only thing that can start the music.
@@ -957,17 +1078,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * new route, the stage taking or giving back the screen, the ride
    * controller's phase moving, the page hidden or shown. None of these is a
    * press, so none can start it (`menu-music.ts` §"Only from the rider's first
-   * press").
+   * press"), except in the Android app, whose shell lets the first visible
+   * menu route start it (#2357). That runs here, after the header — and its
+   * mute — has rendered.
    */
   const menuMusic = props.menuMusic;
   const rideController = props.rideController;
   useEffect(() => {
     if (menuMusic === undefined) return undefined;
     const tell = (): void => {
+      const snapshot = rideController?.getSnapshot();
       menuMusic.update({
         immersive,
         routeId: route.id,
-        ridePhase: rideController?.getSnapshot().phase,
+        ridePhase: snapshot?.phase,
+        workoutRunning: workoutRunning(snapshot?.workout),
       });
     };
     tell();
@@ -983,14 +1108,28 @@ export function AppShell(props: AppShellProps): JSX.Element {
     // #1072's review (N5): a view deciding about motion of its own reads
     // whether a ride has the screen here (`route-motion.ts` §`mayCarryOn`).
     <RideHasTheScreen value={immersive}>
-      <ViewBoundary key={route.id}>
-        <Suspense fallback={<ViewLoading />}>
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-            colour: kitColour,
-            onChange: setKitColour,
-          })}
-        </Suspense>
-      </ViewBoundary>
+      <RideBackContext value={rideBackPresses}>
+        <RideLeaveContext value={rideLeaves}>
+          <ViewBoundary key={route.id}>
+            <Suspense fallback={<ViewLoading />}>
+              {viewFor(
+                match,
+                props,
+                units,
+                setUnits,
+                riderMass,
+                setRiderMass,
+                setImmersive,
+                {
+                  colour: kitColour,
+                  onChange: setKitColour,
+                },
+                setLevelChosen,
+              )}
+            </Suspense>
+          </ViewBoundary>
+        </RideLeaveContext>
+      </RideBackContext>
     </RideHasTheScreen>
   );
 
@@ -1047,7 +1186,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
         {/*
           #671: the header is the wordmark and, since #2056, the one-press
-          mute on a menu route — nothing else. The navigation is
+          mute on a menu route, and since #2073 the rider's own music player's
+          controls once other audio was seen, on a menu route inside the
+          Android shell — nothing else. The navigation is
           its own landmark beside it rather than inside it — a bar or a rail
           since #427, so it was never in the header's box on any screen but the
           shortest, where it made the header 191 px of 256.
@@ -1069,12 +1210,20 @@ export function AppShell(props: AppShellProps): JSX.Element {
               ride route, whose own sound controls stay as they are.
             */}
             {isRideRoute(route.id) ? null : <HeaderMute output={props.soundOutput} />}
+            {/*
+              #2073, owner ruling 2 of 2026-11-05: never on a ride route, whose
+              controls have their own rules (`design/ride-time-controls.ts`).
+              After the mute, which stays first in the tab order (#2056).
+            */}
+            {otherPlayer === undefined || !otherPlayerMayShow ? null : (
+              <OtherPlayerControls player={otherPlayer} />
+            )}
           </header>
         )}
 
-        {immersive ? null : <PrimaryNav route={route} />}
+        {immersive ? null : <PrimaryNav route={route} group={navGroupOf(match)} />}
 
-        {immersive ? null : <SectionNav route={route} />}
+        {immersive ? null : <SectionNav route={route} group={navGroupOf(match)} />}
 
         <main
           id={MAIN_ID}
@@ -1085,19 +1234,36 @@ export function AppShell(props: AppShellProps): JSX.Element {
           tabIndex={-1}
           aria-labelledby={VIEW_TITLE_ID}
         >
-          <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
-            {route.title}
-          </h1>
-          {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
           {/*
-            #993: one line under the title, and the rest one press away. AFTER
-            the summary rather than inside the heading, so the `h1` is the
-            title alone and `main > h1 + p` is still the line under it;
-            `theme.css` §`.oyl-help` draws the ⓘ beside the title.
+            #2065: the title block — the `h1`, the line under it and the
+            screen's ⓘ in one box, which `theme.css` §"THE TITLE BLOCK" lays
+            out as a row that wraps: the line sits beside the title where it
+            fits and under it where it does not. The `h1` is still `main`'s
+            first heading, `.oyl-view-head > h1 + p` is still the line under
+            it, and the order is still title, line, help. No class while a
+            ride has the screen (#423): the box then holds only the hidden
+            title and takes no room.
           */}
-          {immersive || route.help === undefined ? null : (
-            <ScreenHelp title={route.title} paragraphs={route.help} />
-          )}
+          <div className={immersive ? undefined : 'oyl-view-head'}>
+            <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
+              {route.title}
+            </h1>
+            {immersive ? null : (
+              <p className="oyl-muted">
+                {/* #2362: a built-in level's card chosen in the setup is a Delivery round's, not a saved route's. */}
+                {route.id === 'game' && levelChosen ? LEVEL_GAME_SUMMARY : route.summary}
+              </p>
+            )}
+            {/*
+              #993: one line under the title, and the rest one press away.
+              AFTER the line rather than inside the heading, so the `h1` is
+              the title alone; `theme.css` §`.oyl-help` draws the ⓘ at the end
+              of the title's row, and the panel opens under the row.
+            */}
+            {immersive || route.help === undefined ? null : (
+              <ScreenHelp title={route.title} paragraphs={route.help} />
+            )}
+          </div>
           {/*
             #674: a view in a lazy group is not in the entry chunk, so on its
             first visit it suspends and the fallback stands under the `h1` until
@@ -1116,12 +1282,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
             was not animated is not a first one. ⚠️ A navigation to or from a
             ride route, or while a ride has the screen, is applied outside
             `startTransition` (`route-motion.ts` says why), and React animates
-            no other update.
+            no other update. #2054: the class is by which way the navigation
+            goes (`route-motion.ts` §`ROUTE_TRANSITION_CLASS`), a slide into a
+            page below and back out of it, the cross-fade otherwise.
           */}
           <ViewTransition
             key={route.id}
-            enter="oyl-route"
-            exit="oyl-route"
+            enter={ROUTE_TRANSITION_CLASS}
+            exit={ROUTE_TRANSITION_CLASS}
             update="none"
             default="none"
           >
@@ -1177,15 +1345,41 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * colours border — is `theme.css` §"NAVIGATION", because a state keyed on
  * `aria-current` is a rule a browser control can delete through the CSSOM.
  * The span is not `aria-hidden`: it holds the label, which names the link.
+ *
+ * ## The mark — #2066
+ *
+ * The app's own mark, its launcher icon, heads the RAIL on a tablet, so the
+ * brand is where the eye starts on the column a rider steers by. It is
+ * decoration and is hidden from assistive technology twice over (`alt=""`
+ * and `aria-hidden`): the header's wordmark and its `aria-label` already name
+ * the app once, and a second name would read it twice. `theme.css`
+ * §"THE MARK" draws it only on a rail with the height to spare; whether a
+ * phone's bar carries one is the owner's open question on #2030.
  */
-function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
+function PrimaryNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /** The group the rider is under: {@link navGroupOf}, not always the route's own. */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
+      <img
+        className="oyl-nav-mark"
+        src={`${import.meta.env.BASE_URL}${NAV_MARK_FILE}`}
+        width={NAV_MARK_PIXELS}
+        height={NAV_MARK_PIXELS}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
       <ul className="oyl-nav-list">
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
-          const here = route.group === group.id;
+          const here = under === group.id;
           // `page` where no section row will say which page this is: a group
           // of one, or the group's own menu page (#1429), which has none.
           const current = !here
@@ -1216,15 +1410,25 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
  * list tells it apart from the primary one (`audit.ts`'s
  * `landmarks-are-distinguishable`).
  */
-function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element | null {
-  if (route.group === undefined) {
+function SectionNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /**
+   * The group the rider is under ({@link navGroupOf}). #2292: a setup opened
+   * from Games is under Games, a group of one page, so it has no Ride row.
+   */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element | null {
+  if (under === undefined) {
     return null;
   }
-  const group = NAV_GROUPS.find((each) => each.id === route.group);
-  const pages = routesInGroup(route.group);
+  const group = NAV_GROUPS.find((each) => each.id === under);
+  const pages = routesInGroup(under);
   // #1429: the group's menu page lists the same pages itself, with a line
   // each, so a row of them above it would be the list twice.
-  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  const menu = route.id === groupDestination(under).id && !pages.includes(route);
   if (group === undefined || pages.length < 2 || menu) {
     return null;
   }

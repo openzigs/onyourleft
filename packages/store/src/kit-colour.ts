@@ -43,9 +43,9 @@
 /**
  * | Key | Colour (`bicycle.ts` §`KIT_PALETTE`) |
  * |---|---|
- * | `house` | The On Your Left house kit, the app's accent. **The default.** |
+ * | `house` | The On Your Left house kit, teal: its own colour, not the page's accent (#2123). **The default.** |
  * | `green` | Green |
- * | `lime` | Lime |
+ * | `lime` | Yellow-green. Lime until #2255; the key stays `lime` so a saved choice still resolves. |
  * | `purple` | Purple |
  * | `magenta` | Magenta |
  *

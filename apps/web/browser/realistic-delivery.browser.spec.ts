@@ -18,6 +18,13 @@
  * Delivery ceiling is never what an ordinary frame is held to is
  * `realistic-budget-village.test.ts`, in the required suite.
  *
+ * #2362 adds the same round on the synthetic fixture level (`town=level`):
+ * the level's line and its own file's footprints, with every obstacle kind a
+ * parked car among them, still in the one instanced mesh, held to the same
+ * ceiling. Here and not in `realistic-town.browser.spec.ts`, which #2362's
+ * issue names, because that file already holds the loads its nightly shard
+ * may (`nightly-split.test.ts`).
+ *
  * A file of its own because `realistic-town.browser.spec.ts` holds the 7
  * loads a nightly shard may (`nightly-split.test.ts`, #1698); this one runs
  * in `browser-5`, beside `realistic-mapped.browser.spec.ts`.
@@ -27,6 +34,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   DELIVERY_VILLAGE_DRAW_CALLS,
+  DELIVERY_VILLAGE_FRAME_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
@@ -39,6 +47,10 @@ const PIECES = 20;
 
 /** #1689's frame, exactly as `realistic-town.browser.spec.ts` §`DECORATED` writes it, with a round. */
 const DELIVERING = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31&delivery=${String(PIECES)}`;
+
+/** #2362: on the fixture level, half way along, its footprints either side (ADR 0065 D-7.5). */
+const LEVEL_HOLD_METRES = 1000;
+const ON_THE_LEVEL = `?ladder=0&panel=0&seconds=1&at=${String(LEVEL_HOLD_METRES)}&town=level&delivery=${String(PIECES)}`;
 
 test.describe('the realistic page’s village frame, delivering — #1815', { tag: NIGHTLY }, () => {
   test('draws the decorated village hold with a Delivery round’s worst case inside DELIVERY_VILLAGE_DRAW_CALLS', async ({
@@ -63,9 +75,32 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     // The ceiling the page chose for the frame it drew is Delivery's, not the frozen one.
     expect(village.page.villageCeiling).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
     expect(village.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
+    // #2362, round 6: and its triangles, which the belt's three calls do not bound.
+    expect(village.result.lastFrame.triangles).toBeLessThanOrEqual(
+      DELIVERY_VILLAGE_FRAME_TRIANGLES,
+    );
     // And it is a ceiling Delivery needs: the same frame is over the frozen 50 by the belt's calls.
     expect(village.result.lastFrame.calls).toBeGreaterThan(REALISTIC_VILLAGE_DRAW_CALLS);
     // A held frame's mean is its count (#1294).
     expect(village.result.drawCalls).toBe(village.result.lastFrame.calls);
+  });
+
+  test('draws a round on the fixture level, a parked car among the obstacles, inside DELIVERY_VILLAGE_DRAW_CALLS — #2362', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    const level = await ride(page, ON_THE_LEVEL);
+    console.log(
+      `#2362 town=level at=${String(LEVEL_HOLD_METRES)}, delivering ` +
+        `${JSON.stringify(level.page.delivery)}: ${String(level.result.lastFrame.calls)} ` +
+        `draw calls a frame (the page's mean ${String(level.result.drawCalls)}), ` +
+        `${String(level.result.lastFrame.triangles)} triangles, held to ${String(level.page.villageCeiling)}`,
+    );
+    // Not vacuous: the belt drew every piece, every kind with a parked car among them.
+    expect(level.page.delivery).toEqual({ parcels: PIECES, markers: PIECES, obstacles: PIECES });
+    expect(level.page.villageCeiling).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
+    expect(level.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
+    expect(level.result.lastFrame.triangles).toBeLessThanOrEqual(DELIVERY_VILLAGE_FRAME_TRIANGLES);
+    expect(level.result.drawCalls).toBe(level.result.lastFrame.calls);
   });
 });

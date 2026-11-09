@@ -60,6 +60,7 @@ import { rideToSave, saveFinishedRide } from '../recording/finish';
 import { createRecorder, type RecordingCheckpointStore } from '../recording/recorder';
 import { exportActivity } from '../transfer/export-activity';
 import { createWorkoutSession } from './session';
+import { workoutTrainerOver } from './session-testing';
 
 const THRESHOLD = watts(250);
 const ACTIVITY = toActivityId('erg-ride');
@@ -141,7 +142,7 @@ async function rideAndRecord(): Promise<Uint8Array> {
   const session = createWorkoutSession({
     timeline: PLAN(),
     thresholdPower: THRESHOLD,
-    control: trainer.control,
+    control: workoutTrainerOver(trainer.control),
     powerFloor: trainer.powerRange.minimum,
   });
 

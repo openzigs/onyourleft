@@ -20,6 +20,11 @@ import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  PARKED_CAR_CLEARANCE_METRES,
+  parkedCarStands,
+  RIDER_AHEAD_METRES,
+  RIDER_BEHIND_METRES,
+  RIDER_HALF_WIDTH_METRES,
   startObstacles,
   type Obstacle,
 } from './obstacles';
@@ -531,6 +536,134 @@ describe('a round the rider steers — #1853', () => {
   });
 });
 
+describe('a crash into a parked car is drawn as one — #2362, the owner’s ruling on PR #2378', () => {
+  const CAR = OBSTACLE_KINDS['parked-car'];
+
+  /** The ride in the right-hand lane with one parked car at that lane's kerb, 40 m ahead. */
+  function carAhead(): DeliveryRide {
+    const ride = started();
+    const car: Obstacle = { kind: 'parked-car', along: 40, stands: parkedCarStands('right') };
+    const right = LANE_OFFSETS_METRES.length - 1;
+    return {
+      ...ride,
+      obstacles: [car],
+      obstacleState: startObstacles([car]),
+      steer: { lane: right, offset: LANE_OFFSETS_METRES[right] as number },
+    };
+  }
+
+  /** The rider's drawn bicycle overlaps the car, along the road and across it. */
+  function inside(along: number, offset: number): boolean {
+    const stands = parkedCarStands('right');
+    return (
+      along + RIDER_AHEAD_METRES > 40 - CAR.halfLength &&
+      along - RIDER_BEHIND_METRES < 40 + CAR.halfLength &&
+      offset + RIDER_HALF_WIDTH_METRES > stands - CAR.halfWidth &&
+      offset - RIDER_HALF_WIDTH_METRES < stands + CAR.halfWidth
+    );
+  }
+
+  it('counts the crash, then never draws the rider inside the car: beside it, still steering for their own lane, and drawn back in it after the car', () => {
+    let ride = carAhead();
+    let crashes = 0;
+    let drawnInside = 0;
+    let crashedAt: number | undefined;
+    while (ride.along < 60) {
+      const stepped = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      });
+      ride = stepped.ride;
+      crashes += stepped.crashes;
+      if (stepped.crashes > 0) crashedAt = ride.along;
+      if (inside(ride.along, ride.steer.offset)) drawnInside += 1;
+    }
+    expect(crashes).toBe(1);
+    expect(crashedAt).toBeDefined();
+    expect(drawnInside).toBe(0);
+    // Their own lane kept, and once past the car, drawn back in it.
+    expect(ride.steer.lane).toBe(LANE_OFFSETS_METRES.length - 1);
+    expect(ride.steer.offset).toBe(LANE_OFFSETS_METRES.at(-1));
+    expect(ride.score).toBe(0);
+  });
+
+  it('draws the held rider at the clearance on every tick beside the car, though the clearance is more than a tick’s lane step — #2396', () => {
+    // #2362 held the rider only while one tick's step back toward the kerb lane
+    // re-entered the car's own width, so its clearance had to be under that
+    // step. #2396 holds by the car's width plus the clearance, so a gap wider
+    // than one step holds steady rather than drifting out and snapping back.
+    const step =
+      (((LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number)) /
+        LANE_CHANGE_SECONDS) *
+      DELIVERY_TICK_SECONDS;
+    expect(PARKED_CAR_CLEARANCE_METRES).toBeGreaterThan(step);
+    const moved =
+      parkedCarStands('right') -
+      (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + PARKED_CAR_CLEARANCE_METRES);
+    let ride = carAhead();
+    const offsets: number[] = [];
+    while (ride.along < 60) {
+      ride = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      }).ride;
+      const beside =
+        ride.along + RIDER_AHEAD_METRES > 40 - CAR.halfLength &&
+        ride.along - RIDER_BEHIND_METRES < 40 + CAR.halfLength;
+      if (ride.obstacleState.crashed[0] === true && beside) offsets.push(ride.steer.offset);
+    }
+    expect(offsets.length).toBeGreaterThan(5);
+    for (const offset of offsets) expect(offset).toBeCloseTo(moved, 9);
+  });
+
+  it('scores no second crash from the move-aside: another obstacle beside the car meets the rider in their own lane', () => {
+    const ride = carAhead();
+    // A bin beside the car where the held rider is met if the move-aside counted, clear of their own lane.
+    const stands = parkedCarStands('right');
+    const moved = stands - (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + PARKED_CAR_CLEARANCE_METRES);
+    const bin: Obstacle = { kind: 'bin', along: 41, stands: moved - 0.15 };
+    const lane = LANE_OFFSETS_METRES.at(-1) as number;
+    expect(Math.abs(lane - bin.stands)).toBeGreaterThan(
+      OBSTACLE_KINDS.bin.halfWidth + RIDER_HALF_WIDTH_METRES,
+    );
+    const both = [...ride.obstacles, bin];
+    const ridden = rideTo({ ...ride, obstacles: both, obstacleState: startObstacles(both) }, 60);
+    expect(ridden.ride.obstacleState.crashed).toEqual([true, false]);
+    expect(ridden.crashes).toBe(1);
+  });
+
+  it('keeps the rider out of it when they steer back in beside it', () => {
+    let ride = carAhead();
+    while (ride.obstacleState.crashed[0] !== true) {
+      ride = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      }).ride;
+    }
+    let drawnInside = 0;
+    while (ride.along < 60) {
+      ride = stepDeliveryRide(
+        { ...ride, steer: steerToward(ride.steer, 'lane-right') },
+        { ticks: 1, along: ride.along + SPEED * DELIVERY_TICK_SECONDS, speed: SPEED },
+      ).ride;
+      if (inside(ride.along, ride.steer.offset)) drawnInside += 1;
+    }
+    expect(drawnInside).toBe(0);
+  });
+
+  it('moves no rider who is clear of the car, and none at all on a ride with no car', () => {
+    // A lane away, the car is passed with the steering untouched.
+    const ride = carAhead();
+    const middle = { ...ride, steer: { lane: 1, offset: LANE_OFFSETS_METRES[1] as number } };
+    const passed = rideTo(middle, 60);
+    expect(passed.crashes).toBe(0);
+    expect(passed.ride.steer).toEqual(middle.steer);
+  });
+});
+
 describe('the round’s end — #1816', () => {
   /** Ride the whole round, delivering to every house but the ones in `skip`. */
   function rideRound(skip: ReadonlySet<number>): DeliveryRide {
@@ -649,5 +782,84 @@ describe('the round’s end — #1816', () => {
 
   it('flies every parcel within its flight, so a miss waits a bounded time', () => {
     expect(PARCEL_FLIGHT_TICKS * DELIVERY_TICK_SECONDS).toBeLessThan(2);
+  });
+});
+
+describe('a round on a built-in level — #2362, ADR 0065', () => {
+  // More houses than the week's, so the round is seen to be the level's, and
+  // obstacles as dense as a level may ask, so a round this short has some.
+  const LEVEL = {
+    houses: FIRST_DAY_HOUSES + 2,
+    hazardsPerKilometre: { static: 4, moving: 0 },
+    lengthMetres: 3000,
+  } as const;
+
+  function onLevel(storage = storageOf()): DeliveryRide {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage,
+      level: LEVEL,
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    return ride;
+  }
+
+  it('sizes a level’s most from the level’s stated length, never the road measured (round 6)', () => {
+    // The town's road is far longer than half a kilometre; a level stating 500 m at 4 a km
+    // may place at most 2, where the road measured would allow 6 or more.
+    expect(town.profile.totalDistance).toBeGreaterThan(1_500);
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      level: { ...LEVEL, hazardsPerKilometre: { static: 4, moving: 0 }, lengthMetres: 500 },
+    });
+    const last = ride?.throwTargets.at(-1)?.along ?? 0;
+    // A span long enough that its own density would place more than two.
+    expect(Math.ceil((last / 1000) * 4)).toBeGreaterThan(2);
+    expect(ride?.obstacles).toHaveLength(2);
+  });
+
+  it('rides the level’s houses, not the week’s, and stands every obstacle', () => {
+    const week: WeekProgress = { day: 3, houses: FIRST_DAY_HOUSES, score: 2 };
+    const ride = onLevel(storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week }));
+    expect(ride.targets).toHaveLength(LEVEL.houses);
+    expect(ride.round.dayHouses).toBe(LEVEL.houses);
+    expect(ride.onLevel).toBe(true);
+    expect(ride.obstacles.length).toBeGreaterThan(0);
+    for (const obstacle of ride.obstacles) {
+      expect(obstacle.stands).toBeDefined();
+      expect(['parked-car', 'bin']).toContain(obstacle.kind);
+    }
+    // A rider's own route is the week's round, as before.
+    expect(started().onLevel).toBe(false);
+    expect(started().targets).toHaveLength(FIRST_DAY_HOUSES);
+  });
+
+  it('places no obstacle with the assist at none', () => {
+    const assist: DeliveryAssist = { obstacles: 'none', widerWindows: false, noFail: false };
+    const ride = onLevel(storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist }));
+    expect(ride.obstacles).toEqual([]);
+    expect(onLevel().obstacles.length).toBeGreaterThan(0);
+  });
+
+  it('keeps nothing of the week when it ends, read back from the device (D-9.3)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    const ride = withoutObstacles(onLevel(storage));
+    const ended = endDeliveryRide(rideTo(ride, town.profile.totalDistance - 1).ride);
+    expect(ended.missed).toBeGreaterThan(0);
+    expect(keepDeliveryWeek(storage, ended, ride)).toBe(false);
+    expect(readDeliveryProgress(storage)).toEqual(week);
+    // The week's own round is kept, as before.
+    const own = started(storage);
+    expect(keepDeliveryWeek(storage, endDeliveryRide(own), own)).toBe(true);
   });
 });

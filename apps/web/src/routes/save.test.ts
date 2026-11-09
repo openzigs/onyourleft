@@ -83,7 +83,7 @@ describe('importing a route — #73 criterion 4', () => {
   });
 
   it('takes the file’s own name when it has one', () => {
-    expect(imported(gpx(2000, 2000, 'Box Hill loop')).name).toBe('Box Hill loop');
+    expect(imported(gpx(2000, 2000, 'Old mill loop')).name).toBe('Old mill loop');
   });
 
   it('falls back to the file name, and only then to a generic', () => {
@@ -131,7 +131,7 @@ describe('importing a route — #73 criterion 4', () => {
 describe('naming', () => {
   it('requires one', () => {
     expect(checkName('   ')?.code).toBe('name-required');
-    expect(checkName('Box Hill')).toBeUndefined();
+    expect(checkName('Quarry climb')).toBeUndefined();
   });
 
   it('bounds it, and says the bound', () => {

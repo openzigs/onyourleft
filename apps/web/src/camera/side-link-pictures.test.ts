@@ -15,7 +15,8 @@ import {
   sidePictureMessage,
   type SidePicture,
 } from './side-link-pictures';
-import { cleanFrameBytes } from './testing';
+import { metadataMarkersIn } from './frame';
+import { cleanFrameBytes, exifPastTheScanWindow } from './testing';
 
 const PICTURE: SidePicture = { sequence: 7, milliseconds: 1400, bytes: cleanFrameBytes(2048) };
 
@@ -111,5 +112,12 @@ describe('what is refused on arrival (D-4)', () => {
     const exif = PICTURE.bytes.slice();
     exif.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 40);
     expect(sidePictureFrom(raw(exif))).toBeUndefined();
+  });
+
+  it('Exif placed past the signature scan’s window, behind a long APP2 — #1063’s review, B2', () => {
+    const hidden = exifPastTheScanWindow();
+    // The control: the scan alone misses it, which was the bypass.
+    expect(metadataMarkersIn(hidden)).toStrictEqual([]);
+    expect(sidePictureFrom(raw(hidden))).toBeUndefined();
   });
 });

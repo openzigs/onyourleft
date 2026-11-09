@@ -201,7 +201,7 @@ Run by the owner from the afternoon of 2026-09-25 into the morning of 2026-09-26
 
 | | |
 |---|---|
-| An Android phone, API 30+ | API 30 is the floor for `getThermalHeadroom()`; the app's `minSdkVersion` is 24 |
+| An Android phone, API 30+ | The app's `minSdkVersion` is 24. API 30 was the floor for `getThermalHeadroom()`, which the app no longer reads since #2289 (Part AK); `adb`'s `dumpsys thermalservice` below still wants a recent Android |
 | **A second Android phone from a different OEM** | #87's Definition of Done says *tested on at least two OEMs*. One phone leaves that open |
 | A USB cable and `adb` | `platform-tools` is installed; `adb devices` must list the phone |
 | Developer options + USB debugging | On the phone. `adb` sees nothing without it |
@@ -433,22 +433,18 @@ load nothing told them about.
 
 ### ⚠️ Read this before planning the measurement
 
-**`getThermalHeadroom()` is not wired up, and the procedure works around it rather than around the
-truth.** `apps/web/src/game/quality.ts` takes `thermalHeadroom` as an optional field of
-`QualitySample` and documents it as *"Android's own forecast — `PowerManager.getThermalHeadroom()`,
-API 30+"*. **Nothing in `apps/mobile` provides it.** `apps/mobile/src/index.ts` exports the BLE
-transport and the permission notice and nothing else; there is no thermal port implementation.
+**The app does not read the thermal forecast, and the procedure measures heat outside it.** Since
+#2289 (2026-11-06, Part AK) the owner's ruling is that the quality ladder decides on **frame time
+alone**: `apps/web/src/game/quality.ts`'s `QualitySample` is `{ frameMs }`, and nothing in
+`apps/web` or `apps/mobile` asks `PowerManager.getThermalHeadroom()` for anything. Android throttles
+a hot device itself, and the ladder sees that only as slower frames.
 
-Two consequences, both of which shape this part:
+One consequence shapes this part:
 
-- In the shipped app `thermalHeadroom` is always `undefined`, so `nextQuality` degrades on **frame
-  timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`, `SUSTAINED_SAMPLES = 30`). The
-  `HEADROOM_REDUCE_ABOVE`/`HEADROOM_RESTORE_BELOW` hysteresis **cannot fire at all**.
-- ⚠️ docs/agents/game.md §4h describes the thermal port as having "Capacitor implementations in
-  `apps/mobile`". For the foreground service that has been true since
-  [#524](https://github.com/openzigs/onyourleft/issues/524) — before it the service existed and
-  nothing started it; **for thermal headroom it describes the
-  design and not the tree.**
+- `nextQuality` degrades on **frame timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`,
+  `SUSTAINED_SAMPLES = 30`) and recovers below `FRAME_MS_RESTORE_BELOW = 30`. There is no thermal
+  threshold to fire. A reading taken before #2289 that names a thermal hysteresis is describing code
+  that no longer exists.
 
 So thermal state is measured **externally, with `adb`**, which needs no app change:
 
@@ -466,7 +462,7 @@ Sample all three every five minutes for the hour.
 | E2 | Start a ride on a route with the game visible; pedal | — |
 | E3 | Every 5 min for 60 min | the three `adb` readings, plus the quality level the HUD is showing |
 | E4 | Watch for a quality drop | **when** it first dropped, and to which level |
-| E5 | Note whether it ever recovered | `HEADROOM_RESTORE_BELOW` cannot fire; a frame-timing recovery can |
+| E5 | Note whether it ever recovered | Only frame timing can recover it (below `FRAME_MS_RESTORE_BELOW`) |
 | E6 | ⚠️ Read the HUD in sunlight, phone on the bars | Is it legible at a glance? #94's contrast is gated in CI, **legibility at arm's length in daylight is not** |
 | E7 | Note battery % at the end | A rider needs the ride to outlast the phone |
 
@@ -1078,13 +1074,26 @@ adb logcat | grep -i "BluetoothLe"
 | L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal. Scroll the HUD down until *Pause* is on screen | Within a second or two the HUD's trainer line — just above the controls — reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts. ⚠️ Do this in **landscape as well as portrait** and say which orientations you read it in; that is what #373 was about |
 | L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
-| L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Record what happens; do not expect a release.** **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls — which is what the owner's trainer did after both a Stop and a Reset in 2026 (see below), and which the owner has accepted. In logcat the release is **one `0x08` Stop** (`08 01`) answered `80 08 01` — **no `0x01` Reset**, and **no `0x00` Request Control after the `0x08`**. The Ride screen afterwards shows neither *Control lost* nor *Ask the trainer for control*: control is kept. If it shows **Not released**, the trainer refused the Stop: write down exactly what logcat shows |
+| L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) it asks first — *Keep riding*, *Save ride*, *Discard ride* — and ⚠️ **the question alone must change nothing**: keep pedalling for five seconds with it open and check the HUD's power and the climb's weight are unchanged and logcat shows **no `0x08`**. Then, **still pedalling**, answer it: *Save ride* if it is offered (a recording is running on the Ride screen), otherwise *Discard ride* and *Discard ride* again. The release is sent on that answer, not on *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Record what happens; do not expect a release.** **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls — which is what the owner's trainer did after both a Stop and a Reset in 2026 (see below), and which the owner has accepted. In logcat the release is **one `0x08` Stop** (`08 01`) answered `80 08 01` — **no `0x01` Reset**, and **no `0x00` Request Control after the `0x08`**. The Ride screen afterwards shows neither *Control lost* nor *Ask the trainer for control*: control is kept. If it shows **Not released**, the trainer refused the Stop: write down exactly what logcat shows |
 | L6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
-| L7 | Start a second ride on the same route — no need to take control again, the release keeps it — climb, and **while still pedalling navigate away from the game screen** with the system Back gesture. Then the same cadence ramp as L5 | The same as L5: one `0x08` answered `80 08 01`, no `0x01`, no `0x00` after the `0x08`, and power recorded as cadence fell. This is the cleanup path rather than the button, and it is a different line of code making the same claim |
+| L7 | Start a second ride on the same route — no need to take control again, the release keeps it — climb, and **while still pedalling** use the system Back gesture. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) Back does not leave the game: it opens the same end-of-ride question as *End ride*. Keep pedalling five seconds, then Back again (*Keep riding*), pedal five more, then Back once more and answer ***Discard ride* twice — even if *Save ride* is offered** (L5 takes *Save ride* when it is; L7 is the discard's release). Then the same cadence ramp as L5. Last, on the picker the discard left you on, use Back once more to leave the game | ⚠️ **While the question is open, and after *Keep riding*: no `0x08`**, the climb's weight unchanged and the ride still on the stage. After the second *Discard ride*, the same as L5: one `0x08` answered `80 08 01`, no `0x01`, no `0x00` after the `0x08`, and power recorded as cadence fell. Leaving the picker unmounts the game and runs its cleanup's `teardown`: ⚠️ **no second `0x08`** — the discard already released, and the cleanup must not send it again |
 
 ⚠️ **L3 is the step that distinguishes "a gradient was written" from "the right gradient was
 written".** A driver fed the wrong distance writes a perfectly plausible number that has nothing to
 do with the hill under the rider, and every other step here would pass.
+
+⚠️ **L7 no longer reaches the cleanup's release mid-ride, and nothing on the device does — #2356.**
+Until #2349, Back on the stage unmounted the game, so L7 checked the release in `GameView.tsx`'s
+unmount cleanup (`useEffect(() => teardown)`), *"a different line of code making the same claim"*.
+Back now opens the question, and both L5 and L7 release through the answer. The cleanup is still the
+last resort, and on the device it runs mid-ride only when the WebView itself goes, where it may
+never run at all. So that release is checked **off the device only**, by `trainer-wiring.test.tsx`
+§"releases the trainer when the rider navigates away mid-ride"; what L7's last step checks on the
+device is that the cleanup, run after a discard, sends no second release.
+
+⚠️ **A second Back with the question open is *Keep riding* on every platform** (#2356). Android's
+back (`shell/ride-back.ts`) always did that; a desktop browser's Back, or an address typed into the
+bar (`shell/ride-leave.ts`), used to leave the question open instead. Neither ever ended the ride.
 
 ⚠️ **L5 and L7 are the same claim by two paths and both are needed.** FTMS simulation parameters
 **persist on the machine until they are changed**, so a ride ended on a 9 % wall leaves the flywheel
@@ -1133,9 +1142,9 @@ trainer sends a `0xFF` at all is only in the logcat. Note it if one appears; a `
 | L2 | first gradient seen / writes reported: | orientation(s) read in: |
 | L3 | HUD gradient vs trainer line: | |
 | L4 | negative on the descent? | |
-| L5 | pedal-through on *End ride*: power as cadence fell (rpm → W): | `0x08` answered? `0x01` seen? `0x00` after `0x08`? `0xFF` seen? screen said: |
+| L5 | pedal-through on *End ride*: power with the question open (unchanged? `0x08` seen?): / answer given: / power as cadence fell (rpm → W): | `0x08` answered? `0x01` seen? `0x00` after `0x08`? `0xFF` seen? screen said: |
 | L6 | write lines in logcat: | notifications for comparison: |
-| L7 | pedal-through on navigating away: power as cadence fell (rpm → W): | `0x08` answered? `0x01` seen? `0x00` after `0x08`? |
+| L7 | pedal-through on system Back: question opened? power held while open and after *Keep riding*? / power as cadence fell after the second *Discard ride* (rpm → W): | `0x08` before the answer? `0x08` answered? `0x01` seen? `0x00` after `0x08`? a second `0x08` on leaving the picker? |
 
 **Did the hills feel like hills (in your own words)?** ______________
 
@@ -1622,7 +1631,7 @@ viewport.
 |---|---|---|
 | The game during a ride | a 16 : 9 canvas capped at 60 % of the height, the HUD stacked under it, under the page's header, title and summary | ⚠️ **the world fills the screen**; the header, navigation, title, summary and footer are **not rendered**; the HUD is four small **opaque** panels laid over the world's corners |
 | HUD readings | nine equal fields at 2.5 rem | two tiers: **power, cadence, heart rate** at 2.5 rem; everything else at 1.5 rem |
-| Leaving a ride | any navigation link | ⚠️ ***End ride*, and only that.** There is no navigation on the stage. The platform's own Back still works and ends the ride exactly as *End ride* does |
+| Leaving a ride | any navigation link | ⚠️ ***End ride*, and only that.** There is no navigation on the stage. Since [#2349](https://github.com/openzigs/onyourleft/issues/2349) the platform's own Back opens the same end-of-ride question as *End ride*, and a second Back is *Keep riding*; nothing ends the ride but *Save ride* or *Discard ride* (asked twice) |
 | The Ride screen | one column under a 68-character reading measure | three groups — live, trainer, sensors — side by side where there is width |
 | The camera | 8 m back, 3 m up, 60° lens, level gaze | **4.5 m back, 2 m up, 70° lens**, and it **pitches with the road** |
 | The rider, share of a 16 : 9 frame's height | 18.1 % | **27.3 %** by arithmetic, **28.1 %** read back off the drawing buffer in the pinned Chromium |
@@ -1664,7 +1673,7 @@ and this part is where they say it.**
 | Q2 | The same ride. Look at the four panels | Is any panel over the rider, or over the road directly ahead? Are power, cadence and heart rate readable at arm's length, and visibly larger than the rest? |
 | Q3 | Rotate to **portrait** mid-ride | Does the layout follow? Does the world redraw at the new shape without stretching — are the wheels still round? ⚠️ This is the orientation that was already working and must not have regressed. ⚠️ Then **pause, rotate back, and look before resuming**: the paused frame is **expected to be stretched** until *Resume* — a known limit, `apps/web/src/game/GameView.tsx` says why — so what to record is whether it corrects itself on the first frame after resuming, and whether it is bad enough to matter when re-seating a tablet on the bars |
 | Q4 | Both orientations | ⚠️ Is any panel under the **status bar**, the **gesture bar** or a camera cut-out? Is any panel's edge clipped? |
-| Q5 | Press *End ride* | Does the header come back? Then start another ride and leave with the **system Back** gesture instead | 
+| Q5 | Press *End ride*, then *Discard ride* twice (or *Save ride*, if offered) | Does the header come back? Then start another ride and use the **system Back** gesture instead: does the end-of-ride question open, with the header still hidden? Back again: is it *Keep riding*, the ride carrying on? Back once more and *Discard ride* twice: does the header come back? | 
 | Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Start a recording first. Are ***Pause* and *Stop*** visible **without scrolling**, and is *Ride a workout*? ⚠️ By measurement *Pause* / *Stop* are the lowest ride controls on this screen, not the workout — they are what a short WebView loses first. Then **record the WebView's size** — see below. Then start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372, and Part R2 is how to tell; on the owner's trainer it did not, and that is accepted. Capture `adb logcat` filtered for `BluetoothLe`: there must be **`0x05`** Set Target Power writes this time |
 
 ⚠️ **Q6's number has been read once, and it changed the gate — #439.** On 2026-09-21 the probe below
@@ -1740,7 +1749,7 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 
 **Any panel under a system bar or a cut-out (Q4)?** ______________
 
-**Header back after *End ride*, and after system Back (Q5)?** ______________
+**Header back after *End ride* → *Discard ride* ×2, and after system Back → the question → *Discard ride* ×2 (Q5)? Did a second Back keep riding?** ______________
 
 ***Pause* / *Stop* visible without scrolling on the Ride screen, mid-recording, landscape (Q6)?** ______________
 
@@ -1841,8 +1850,8 @@ adb logcat | grep -i "BluetoothLe"
 | Step | What to do | What should happen |
 |---|---|---|
 | R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | In logcat: one **`0x08`** (`08 01`) answered `80 08 01`, **no `0x01`**, and **no `0x00`** after it. Record power as cadence fell — on the owner's trainer, expect it to **hold or rise** (accepted). Then set a new target of 150 W and confirm the trainer holds 150 W: **the app can still drive it**, which is the condition the acceptance rests on |
-| R2 | Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | `0x05` writes during the workout, then one `0x08`, no `0x01`, no `0x00` after it. The workout **ends** — it is not shown paused, and there is no *Control lost*. Record power as cadence fell |
-| R3 | Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x08` after the last `0x05` |
+| R2 | Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | `0x05` writes during the workout, then a **`0x05` at the trainer's lowest target** and one `0x08` (#2348), no `0x01`, no `0x00` after it. The workout **ends** — it is not shown paused, and there is no *Control lost*. Record power as cadence fell |
+| R3 | Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x08`, straight after the `0x05` at the lowest target |
 | R4 | Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a **`0x05` at the trainer's lowest target** and no `0x08` — that is #441's ease, and Part S is where it is measured. At the end of the workout there is **one `0x08`** — the release the old code skipped because the free ride had already sent a Stop |
 
 ⚠️ **R4 used to expect a `0x08` during the free ride, and a reviewer who remembers that is reading the
@@ -1850,6 +1859,11 @@ old procedure.** Since [#441](https://github.com/openzigs/onyourleft/issues/441)
 trainer — a free-ride block, a stalled rider, a paused ride — by writing its **lowest target**, because
 on the owner's trainer a Stop does not ease an ERG target and a `0x05` is honoured to within ±2 W.
 What R4 checks here is that the **end** of such a workout still reaches the release.
+
+⚠️ **R2 and R3 used to expect the `0x08` straight after the workout's last target.** Since
+[#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout steps the trainer down
+to its lowest target first, so what the Stop leaves applied is the floor rather than the last block's
+target. R4's workout is already at the floor when it ends, so it still sends the `0x08` alone.
 
 ### R results
 
@@ -2078,7 +2092,7 @@ Sounds **on** (Settings → Sounds). Headphones as in
 
 | Step | What to do | What should happen |
 |---|---|---|
-| U1 | Start a game ride and press **End ride** as fast as you can after **Ride** | Nothing left sounding, and — the check — music started in another app straight afterwards is **not** ducked or interrupted |
+| U1 | Start a game ride and, as fast as you can after **Ride**, press **End ride** and answer *Discard ride* twice (nothing is recorded, so *Save ride* is not offered) | Nothing left sounding, and — the check — music started in another app straight afterwards is **not** ducked or interrupted |
 | U2 | Straight after U1, start another game ride | Its distance sound is heard at the first mark: the press on *Ride* woke the audio |
 | U3 | Repeat U1 five times in a row | The same every time. A single run where the music stays ducked is the finding |
 
@@ -2743,8 +2757,8 @@ lake or a stone wall at all. #501 changed each, and each has a gate in CI that s
 
 - **That the scene looks right.** There is no reference image and ADR 0009 forbids deriving one from
   another product.
-- **That the thermal half of the quality ladder works.** It cannot fire, because nothing feeds it.
-  Wiring the port is a separate piece of work; measuring it is impossible until that lands.
+- **That the thermal half of the quality ladder works.** There is none: the owner ruled heat out of
+  the ladder on 2026-11-06 (#2289, Part AK), which now decides on frame time alone.
 - **Anything about iOS.** [ADR 0018](../adr/0018-native-client-platform.md) decides the platform;
   #15 owns the reach.
 - **Anything about a release build.** This is a debug APK. #95 owns signing and distribution.
@@ -2793,7 +2807,7 @@ adb logcat | grep -i "BluetoothLe"
 | AC1 | Pair the trainer on the Ride screen and **do not** take control. Open the game and choose the route. Wait ten seconds on the picker | The picker reads *"Your trainer will follow this route’s hills. Pressing Ride asks it for control…"*, above the *Ride* button. ⚠️ **No `0x00` in logcat yet, and no write at all** — entering the game asks nothing |
 | AC2 | ⚠️ **On the bike, low gear, seated.** Press ***Ride*** and pedal | **One `0x00` Request Control**, answered `80 00 01`, **before** the first `0x11`. Within a second or two the HUD's trainer line reads `Trainer: simulating …%` with a non-zero count, and **no road notice** is on the stage |
 | AC3 | Ride into the climb | The resistance **follows the climb**, and the trainer line's percentage tracks the HUD's gradient as in L3 — without the Ride screen having been visited |
-| AC4 | Press *End ride*, return to the Ride screen | One `0x08` Stop as in L5, and **no `0x00` after it**. The Trainer panel reads *"This app has control of the trainer…"*: the game's request is the Ride screen's control, not a second one. The ERG line is labelled *ERG, optional* — one of the things control is for, not the thing it is |
+| AC4 | Press *End ride* and answer *Discard ride* twice (no recording is running, so *Save ride* is not offered), then return to the Ride screen | ⚠️ **No `0x08` until the second *Discard ride***, then one `0x08` Stop as in L5, and **no `0x00` after it**. The Trainer panel reads *"This app has control of the trainer…"*: the game's request is the Ride screen's control, not a second one. The ERG line is labelled *ERG, optional* — one of the things control is for, not the thing it is |
 | AC5 | Start a saved workout on the Ride screen, then open the game and press *Ride* | The picker shows the *"A workout is driving your trainer…"* notice, and ⚠️ **no `0x00` and no `0x11`** follow the Ride press — a workout keeps the control point |
 | AC6 | *(Only if you have a second app that can take control, e.g. the manufacturer's.)* Take control with the other app, then press *Ride* in this one | Either this app is granted control (AC2's result) or the trainer refuses — in which case the ride still starts and the stage says *"Your trainer did not grant control when you pressed Ride…"*. Record which, and the `80 00 xx` answer |
 
@@ -4124,3 +4138,49 @@ build gives the pair. Its hard limit is #1523's: the top rung off the GPU ceilin
 limit with people on and inside it with `-people` is **no room**: `QualitySettings.people` goes to
 0 on the top realistic rung too, until there is — the owner's ruling. Post the table on #1541 and
 #733.
+
+## Part AK — does the Pixel 8 stay in the realistic world? ([#2289](https://github.com/openzigs/onyourleft/issues/2289))
+
+**Added 2026-11-06** by #2289. Checked with `grep '^## Part'` for a duplicate letter first — AJ was
+the last, and AK was free. It changes no resistance: no trainer is needed, and no debugger either.
+
+On 2026-11-06 the owner's Pixel 8 (Android 17, WebView 156, `main` at `d1df5f74`) left the realistic
+world at 46 s and 66 s into two rides. **The cause was the thermal forecast, not frame time**: the
+forecast passed 0.85 after 35–65 s, and one reading over it made every frame "hot" until the next, so
+the 30-frame count was met in about half a second. Frame time never came near the 45 ms trigger
+(realistic rung 0 ran at 59–60 fps: median 16.7 ms, p99 21.5–24.7 ms) and load-phase pressure peaked
+at 3 of 30.
+
+**Owner ruling on #2289, 2026-11-06: ignore heat entirely.** The quality ladder decides on frame
+time alone, and Android throttles the device itself if it gets too hot. Since #2289 `quality.ts`
+reads no thermal figure; the 45 ms and 30-frame thresholds are unchanged. The earlier statement in
+this document (Part E) that the thermal half of the ladder is a thing to measure is superseded by
+that ruling. Separately, the ladder is not fed until the realistic world is here, and then ignores
+`quality.ts` §`REALISTIC_SETTLING_SAMPLES` (30) drawn frames; that window is kept because it is
+cheap, **not because it fixed this**, and the 30 is chosen, not measured. Each realistic ride keeps
+what its ladder read (`realistic-report.ts`), and Settings › Game world shows it under the switch:
+what the settling window cost, and each step down, always on frame time, with the readings and the
+rung. It holds no coordinate.
+
+| Step | What to do |
+|---|---|
+| AK1 | Install #2289's merge on the Pixel 8. Settings › Game world: **Ride in the realistic world** on |
+| AK2 | Ride any route for **10 minutes**, on charge, from a cool start (AH3's band). The ruling's bar is that realism holds for the whole ten |
+| AK3 | Open Settings › Game world and copy the lines under the switch into the table below, word for word |
+| AK4 | Only if the ride left: a second 10-minute ride, cooled first, to see whether the reading repeats |
+
+| Reading (AK3) | Ride 1 | Ride 2 (AK4) |
+|---|---|---|
+| Settling: frames over 45 ms of the 30, and the longest, ms | | |
+| Stayed realistic for 10 minutes? | | |
+| If it stepped down: after how many seconds, from which rung | | |
+| If it stepped down: frames over 45 ms of the last 30, median and longest, ms | | |
+
+**Reading it.** If more than about half the settling frames are over 45 ms and the longest is
+several hundred milliseconds, the swap is longer than the window: raise
+`REALISTIC_SETTLING_SAMPLES` to cover it, never the thresholds. If the settling is cheap and the ride
+still leaves **on frame time** with a median well over 45 ms from the reduced rung (the report's
+"realistic rung 2"), the phone is genuinely too slow for it, and the proposal for the owner is a lower one — for example no
+people near and a lower render scale — rather than leaving. The thermal
+forecast is not an input any more (the owner's ruling above), so heat alone cannot end a ride; if the
+phone still leaves, the lines name frame time. Post the table on #2289.

@@ -1934,6 +1934,90 @@ inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
 tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-mdpi/oyl_splash_mark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "a99168159c814f52051051772baf270bd0f8165705dab0a12c506204a65282b5"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-hdpi/oyl_splash_mark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "b578d8cf99643b03586d1ab816a7828fbc437b44fda759549e6a05c20357d840"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-xhdpi/oyl_splash_mark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "0eb7fb2e45bddc614b06b1cc0f095da56671d1958e98297684534b5a8e07e1b9"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-xxhdpi/oyl_splash_mark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "d87071e2102dda5135945f3d2597fc308b2c654dd31fda43792de95e62e6ec6d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-xxxhdpi/oyl_splash_mark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "52c765da78d988e1ac23c64802474498738de1cbe62d818ea369a8a82aeb6b90"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/src/brand/splash-mark.webp"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "bd1a22fd81c3bf41ac60b68605d24392650ad8f7124b69723ce1de94ad21022f"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
 # ---------------------------------------------------------------------------
 # #1167: the lossless WebP reader's own fixtures. Pictures drawn from arithmetic
 # (nothing read or downloaded) and written by Pillow 12.3.0 with the libwebp
@@ -2402,3 +2486,117 @@ inputsha256 = "d55f4dbbe6a5565f585aac6e922509ebb94c2991826917dcaacccaf4a6e90682"
 script = "apps/web/tools/realistic/encode-ktx2.ts"
 tool = "KTX-Software v4.4.2"
 
+
+# ⚠️ **The built-in lap-race circuits (#2293, ADR 0064) are DATABASES, not art.**
+# Each line follows streets drawn from this project's own basemap archive, so
+# each file is a database derived from OpenStreetMap and is offered under
+# `ODbL-1.0` (D-3), with the licence fields inside it and `LICENCE-ODbL.txt`
+# beside it (D-3.2). A JSON file is not discovered by ASSET001 or ASSET008;
+# they are named here on purpose (D-6.2), which buys each one ASSET002 to
+# ASSET004 and ASSET007, and ASSET004 admits `ODbL-1.0` for this one
+# directory's `.json` files and for nothing else. `sha256` is the digest D-6.3
+# records with the archive build each was drawn through (`input`), so a redraw
+# after an archive refresh is a reviewable change. `inputsha256` is the
+# authoring script's own digest of every tile it read and every 3DEP answer, in
+# order: 3DEP's service is not pinned, so it records what was read rather than
+# promising a byte-identical redraw. No `creator` key: the Credits screen's Map
+# data entry carries the OpenStreetMap credit, not the art list.
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/bellwether.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "fdeb87a9995c9584cb7395607a9ef3f8886d62205f4d26cbcc982923e3e706fc"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "c340639baf4c64479c4ff11954711f9ccbed5400b59a71b8188f9974a3e056cc"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/ember.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "0ccb630edf9f1ad978b8a26b4cced68e5b64629e1da093ae72a4fdcdb6763252"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "9f6fb38ef7394f04cb91ae392f5c4f83bdce66dad0637b1040b8c16eef644344"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/fieldfare.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "5d89abfbc7383211d3dfe547bcf77a713ae72f2c0bca040f2aa7cba9cea15a1f"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "eeb118d2e956d4c70d92f4749befb9f19285c2991ef3d181bd996ee3f848953d"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/circuits/data/kestrel.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring script (#2293)"
+licence = "ODbL-1.0"
+read = "2026-11-06"
+sha256 = "4811733664fcd3dcc8b92f2dbe14b18b92ba3da3f5ccca03bf3e413b1f04b6ff"
+modified = "the archive's street lines round a start, clipped to their tiles and joined into one closed loop of this project's own design, keeping no OSM identifier and no name; heights sampled from USGS 3DEP at every point and ramped across bridges (ADR 0064 D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "3712a11785134d1a96ef6e05892c595a4c65bd78b01abf076eb27284d256d651"
+script = "apps/web/tools/circuits/author-circuit.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+# ⚠️ **The built-in Delivery levels (#2361, ADR 0065) are DATABASES too**, the
+# second ODbL one. Each level's line and its corridor's building footprints are
+# drawn from this project's own basemap archive, so each file is offered under
+# `ODbL-1.0` (D-6.1), with the licence fields inside it and `LICENCE-ODbL.txt`
+# beside it (D-6.2). `ASSET004` admits `ODbL-1.0` for `.json` files directly in
+# `apps/web/src/game/delivery/levels/data/` and, beyond the circuits' directory
+# above, nowhere else (D-7.2). Each level file gets a row here in the shape of
+# the circuits' rows, with `script = "apps/web/tools/delivery-levels/author-level.ts"`;
+# #2361 shipped none, and #2362 added the first two, below.
+# `inputsha256` is the file's own `archive.sha256`: the authoring tool's digest
+# of every tile it read and every 3DEP answer, in order. No region is named in
+# a row (D-13.2).
+
+[[asset]]
+path = "apps/web/src/game/delivery/levels/data/morning-round.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring tool (#2362)"
+licence = "ODbL-1.0"
+read = "2026-11-08"
+sha256 = "15e5de6ca16f74da649e0662065349b17612f5e6e9f186562930b2fdf079af3c"
+modified = "the archive's street lines round a start, joined into one closed loop of this project's own design, and the building footprints of the corridor within 250 m of it, keeping no OSM identifier, no name, no address and no other layer; heights sampled from USGS 3DEP at every point (ADR 0065 D-2, D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "6df48e74109aaf8cda8558f07f70ffadfe65446b0b7593c289f2431fc2d22915"
+script = "apps/web/tools/delivery-levels/author-level.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/delivery/levels/data/busy-round.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring tool (#2362)"
+licence = "ODbL-1.0"
+read = "2026-11-08"
+sha256 = "ad2cb90d2877e1fec58c20dbade0cc5d3329c7d37fad358b3fa129345f1d2502"
+modified = "the archive's street lines round a start, joined into one closed loop of this project's own design, and the building footprints of the corridor within 250 m of it, keeping no OSM identifier, no name, no address and no other layer; heights sampled from USGS 3DEP at every point (ADR 0065 D-2, D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "061df1cb7fd8ed28e18ae65b2230d1ba1ef271699e4cdae485783312ea10405d"
+script = "apps/web/tools/delivery-levels/author-level.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/public/audio/upbeat-game-loop-aurora-ride.ogg"
+source = "Upbeat Game Loop - Aurora Ride, by Venus17, on Freesound (sound 841299), the menus' music loop (#2057, the owner's choice of 2026-11-06); the item page states Creative Commons 0, linked to http://creativecommons.org/publicdomain/zero/1.0/; downloaded signed in, as Freesound serves an original only to an account, as a 16-bit 44.1 kHz stereo WAV of 5507198 bytes"
+licence = "CC0-1.0"
+read = "2026-11-07"
+sha256 = "a25e986a94b015d322d23ebd244a28fe6605d1b2fcf383b95c057afaaa8a70f8"
+creator = "Venus17"
+url = "https://freesound.org/people/Venus17/sounds/841299/"
+modified = "Upbeat Game Loop - Aurora Ride re-encoded from the original WAV to Ogg Opus at 96 kbit/s, resampled to 48 kHz, its metadata dropped; not trimmed or padded, so it still loops at exactly 16 bars"
+input = "https://freesound.org/people/Venus17/sounds/841299/"
+inputsha256 = "8f4f23f822c32d5d46cd7dc1334841ea474321b6071504acbc2e71b3e29e48b0"
+script = "apps/web/tools/audio/encode-menu-music.sh"
+tool = "FFmpeg 8.0.1 with libopus 1.6.1"

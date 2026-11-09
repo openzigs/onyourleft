@@ -871,6 +871,14 @@ export function realisticWorldNotice(
 }
 
 /**
+ * How big the realistic world's download is, in a rider's words — #2362,
+ * round 4 of PR #2378's review: one constant for every sentence that names
+ * it (Settings' world help and a built-in level's setup), so a grown set is
+ * not said one way in one place and another way in the other.
+ */
+export const REALISTIC_DOWNLOAD_SIZE_TEXT = 'about 33 MB';
+
+/**
  * What a rider who chose the realistic world is told BEFORE a ride, on the
  * route picker — #475's *"the offline fallback stated in the ride UI"*.
  *

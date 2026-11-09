@@ -20,6 +20,8 @@ import {
   segmentRefusals,
   type SegmentOverlap,
 } from '../segments/create';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
+import { InstanceSegments } from '../segments/InstanceSegments';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import {
@@ -113,6 +115,11 @@ export interface SegmentsViewProps {
    * both structurally, so `main.tsx` passes one object twice.
    */
   readonly match?: MatchPort | undefined;
+  /**
+   * The rider's instance's segments (#68), or `undefined` with no instance —
+   * in which case nothing about one renders and nothing is sent.
+   */
+  readonly boards?: LeaderboardPort | undefined;
 }
 
 /**
@@ -132,7 +139,7 @@ interface Outcome {
   readonly overlaps: readonly SegmentOverlap[];
 }
 
-export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
+export function SegmentsView({ port, match, boards }: SegmentsViewProps): JSX.Element {
   const [segments, setSegments] = useState<readonly SegmentRecord[] | undefined>(undefined);
   const [rides, setRides] = useState<readonly ActivitySummary[] | undefined>(undefined);
   const [outcome, setOutcome] = useState<Outcome | undefined>(undefined);
@@ -368,7 +375,17 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
 
   return (
     // #1014: the sections flow into columns where `main` is wide enough.
-    <div className="oyl-sections">
+    // #2197: with segments listed, "Your segments" spans (its table) and the
+    // two forms are the two sections in a column, so two tracks at most
+    // (`theme.css` §`--halves`). With none yet, or while they are read, the
+    // list is a third section in a column: three tracks.
+    <div
+      className={
+        segments !== undefined && segments.length > 0
+          ? 'oyl-sections oyl-sections--halves'
+          : 'oyl-sections'
+      }
+    >
       {noSegments ? yours : null}
       <section aria-labelledby="segments-make">
         {/* #1031: why a climb and its descent are two segments, and why the
@@ -533,6 +550,15 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       )}
 
       {noSegments ? null : yours}
+
+      {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
+      {boards?.offered() === true ? (
+        <InstanceSegments
+          port={boards}
+          held={new Set((segments ?? []).map((segment) => segment.id as string))}
+          onAdded={() => void refresh()}
+        />
+      ) : null}
     </div>
   );
 }

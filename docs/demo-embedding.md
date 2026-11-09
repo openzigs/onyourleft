@@ -20,15 +20,6 @@ routes `demo:bake` wrote into `dist/routes/` and fails if a route's ODbL notice 
 ([#1651](https://github.com/openzigs/onyourleft/issues/1651)). Without `demo:bake` there is no
 `routes/` directory, and the demo rides only its synthetic road.
 
-> ⚠️ **`demo:bake` does not start on Node 26** ([#1931](https://github.com/openzigs/onyourleft/issues/1931)),
-> the repository's Node line since 2026-10-29: its
-> script passes `--experimental-transform-types`, which Node 26 refuses (`node: bad option`). The
-> bake for this page was run on Node 24.22.1, directly:
-> `node --experimental-transform-types --import ./tools/ts-extensionless-resolve.mjs tools/demo/bake-route.ts --route upstate-climb`
-> from `apps/web`. It printed `6 of 6 tiles` and `19625 bytes (68476 uncompressed)`, and the digest
-> matched the one recorded in `demo/routes/upstate-climb.bake.json`. `build:demo` itself runs on
-> Node 26.
-
 ## The files
 
 Serve the whole of `apps/web/demo/dist/` **unchanged**, as one directory, at any path. The page loads
@@ -182,3 +173,77 @@ not crop, cover or restyle away any of these.
   demo publicly conveys that data, so **serve the output unchanged**: the route's `.bin` file and
   `routes/LICENCE-ODbL.txt` with it. Serving the demo's routes without their notice file is not
   allowed (ADR 0056 D-4.4).
+
+## The route data as a release asset
+
+ADR 0056 D-4.2 offers each preset route's map data (ODbL §4.6 a) in two places: beside the demo,
+which the output above already does, and **as an asset on a GitHub release of the demo**
+([#1932](https://github.com/openzigs/onyourleft/issues/1932)). A video is often seen far from the
+demo, so its post names the release asset rather than a site that may move (D-4.3, D-8.3).
+
+The workflow [`demo-release.yml`](../.github/workflows/demo-release.yml), **Demo route release**,
+builds a release. It runs by hand and only from `main`, never on a pull request (ADR 0056 D-9):
+
+```sh
+gh workflow run demo-release.yml --ref main -f tag=demo-YYYY-MM-DD
+```
+
+It bakes every preset route with `demo:bake`, builds the demo, and runs `demo:release`
+(`tools/demo/demo-release.ts`), which checks each file against the digest `routes.json` names. It
+then publishes the release with three kinds of asset: each route's `<id>.<digest>.bin`, `routes.json`
+and `LICENCE-ODbL.txt`. Its notes carry the ODbL notice and each file's SHA-256. A bake that
+disagrees with its route's committed record fails the run, so nothing is published. The release
+is never marked the repository's latest, which stays the app's. The same run then deploys the demo to GitHub Pages
+([below](#hosted-on-github-pages)). The workflow never replaces a
+release's files: a later bake is a new tag (`demo-YYYY-MM-DD.2` for a second one that day).
+
+A video's post cites the release it was made from:
+
+| What                  | URL                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| the release           | `https://github.com/openzigs/onyourleft/releases/tag/<tag>`                         |
+| a route's data file   | `https://github.com/openzigs/onyourleft/releases/download/<tag>/<id>.<digest>.bin`  |
+| the notice            | `https://github.com/openzigs/onyourleft/releases/download/<tag>/LICENCE-ODbL.txt`   |
+
+`<id>.<digest>.bin` is the file name in the release's `routes.json`, the same name the demo output
+uses.
+
+## Hosted on GitHub Pages
+
+The project hosts the demo itself on GitHub Pages, at **<https://openzigs.github.io/onyourleft/>**
+([#2264](https://github.com/openzigs/onyourleft/issues/2264), the owner's ruling of 2026-11-07). A
+website embeds it with [the snippet](#the-snippet), `src` set to
+`https://openzigs.github.io/onyourleft/?preset=climb` or another of
+[the URL parameters](#the-url-parameters).
+
+Each run of **Demo route release** deploys it: after `publish`, a third job, `pages`, deploys the
+demo output the `bake` job built, baked routes and `routes/LICENCE-ODbL.txt` included, so the route
+data the hosted demo serves is always on a release as well (ADR 0056 D-4.2). `pages` alone holds
+`pages: write` and `id-token: write`, and checks out nothing.
+
+> ⚠️ **Not live until the owner enables Pages.** In the repository's _Settings → Pages_, set the
+> source to _GitHub Actions_. Until then the `pages` job fails, after the release is published;
+> re-running that job deploys the same build.
+
+**What Pages cannot send.** Pages sends no custom header, so [the headers](#the-headers) above are
+not all met there. The demo's own `<meta>` policy is enforced without any header (the browser gate's
+`demo-csp.browser.spec.ts` serves the page with a content type and nothing else), and it is the whole
+of the demo's Content-Security-Policy on Pages. What that gives up:
+
+| Header                       | On Pages                                                                     | What is lost                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `frame-ancestors`            | not sent: `<meta>` cannot carry it                                           | The choice of who may frame the demo: any site can. Nothing there to clickjack: the demo has no sign-in, stores nothing, reaches no Bluetooth and no trainer, and its only controls are _Pause_, _Stop_ and links. A site framing it takes on what [it must leave visible](#what-the-site-must-leave-visible) |
+| `X-Content-Type-Options`     | not sent                                                                     | MIME sniffing is not refused. Every file is the build's own output, never a visitor's, and Pages names the type of each script, stylesheet and model                                                                                                                                 |
+| `Cache-Control`              | `max-age=600` on every file                                                  | The hashed `assets/*` and `routes/*.bin` are revalidated after ten minutes instead of kept for a year. A new release shows within ten minutes, not at once                                                                                                                           |
+| `Content-Type`               | `text/html; charset=utf-8`, `application/javascript; charset=utf-8`, `text/css; charset=utf-8`, `application/wasm`, `model/gltf-binary`, `application/octet-stream` (`.hdr`), `image/png` | Nothing: a module script runs with any JavaScript type, and the rest is read as bytes                                                                                                                                                                                                |
+
+The **On Pages** column was read on 2026-11-07 with `curl -sSI` from `threejs.org`, a GitHub Pages
+site (`server: GitHub.com`) serving the same kinds of file: `.html`, `.js`, `.css`, `.wasm`, `.glb`,
+`.hdr` and `.png`. Pages also sends `access-control-allow-origin: *`, which changes nothing for a
+page that is public anyway. Not read from a Pages site: `.ktx2`, `.pbf`, `.bin`, `.json`, `.txt` and
+`.woff2`, which the demo reads as bytes or as data.
+
+**Bandwidth.** GitHub Pages has a soft limit of 100 GB a month
+([GitHub Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)). A first visit downloads about
+50 MB, most of it the realistic world, which loads from the start, so the limit is about two
+thousand first visits a month, embeds on other sites included.

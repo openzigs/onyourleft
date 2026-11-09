@@ -209,9 +209,11 @@ describe('#942 — the garage: one card per kind of device, its state in words',
     await activateWithKeyboard(button('Forget KICKR 1F2A'));
     expect(stub.calls).toMatchInlineSnapshot(`
       {
+        "armDiscard": 0,
         "armStop": 0,
         "cancelStop": 0,
         "clearTarget": 0,
+        "confirmDiscard": 0,
         "confirmStop": 0,
         "continueRecovered": [],
         "discardRecovered": [],

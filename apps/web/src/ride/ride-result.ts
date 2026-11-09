@@ -10,8 +10,8 @@
  * | what | where it was computed |
  * |---|---|
  * | the ride's elapsed time | the recording engine, written to the activity (`recording/finish.ts`) |
- * | its distance | `finish.ts` §`distanceOf`, written to the activity |
- * | its average power | `finish.ts` §`averagePowerOf`, written to the activity — and not shown when it is 0 W (`format.ts` §`shownAveragePower`, #1054) |
+ * | its distance | `totals.ts` §`rideDistance`, written to the activity |
+ * | its average power | `totals.ts` §`rideAveragePower`, written to the activity — and not shown when it is 0 W (`format.ts` §`shownAveragePower`, #1054) |
  * | its average heart rate, where there is one | {@link statedAverageHeartRate} — the figure the ride's page states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`), computed by the page's OWN two steps over the samples the save wrote |
  * | how the race against the rider's own best ended, in the trainer game | `game/ghost-outcome.ts`, LATCHED — carried here, never re-derived |
  *
@@ -48,6 +48,7 @@ import type { ActivityId } from '@onyourleft/store';
 
 import { CHART_POINTS, downsample, traceMean } from '../detail/series';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
+import type { TestRideEstimate } from '../workouts/threshold-test-result';
 
 /** A saved ride's facts, as the result card states them. */
 export interface SavedRide {
@@ -67,6 +68,12 @@ export interface SavedRide {
    * ghost, or a race not settled when the game ride ended.
    */
   readonly gameOutcome: GhostOutcome | undefined;
+  /**
+   * A threshold test ridden on this ride, and its estimate or the refusal of
+   * one — #2307. `undefined` for a ride with no test on it, which the Ride
+   * screen answers with no offer at all.
+   */
+  readonly thresholdTest?: TestRideEstimate | undefined;
 }
 
 /**

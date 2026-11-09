@@ -53,6 +53,8 @@ import * as suspendedIndex from './0034-suspended-index.ts';
 import * as blockHandles from './0035-block-handles.ts';
 import * as noticeErasure from './0036-notice-erasure.ts';
 import * as roomLapRace from './0037-room-lap-race.ts';
+import * as segmentLeaderboards from './0038-segment-leaderboards.ts';
+import * as leaderboardIntegrity from './0039-leaderboard-integrity.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -98,4 +100,6 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0035-block-handles': blockHandles,
   '0036-notice-erasure': noticeErasure,
   '0037-room-lap-race': roomLapRace,
+  '0038-segment-leaderboards': segmentLeaderboards,
+  '0039-leaderboard-integrity': leaderboardIntegrity,
 };

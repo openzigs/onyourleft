@@ -71,6 +71,16 @@
  * this file ever sees it. That reads as a straight road and nothing here can
  * tell it from one. Recovering it would need the source points, which this panel
  * deliberately does not have.
+ *
+ * ## ⚠️ Since #2290 a ride with a corridor draws a street map instead
+ *
+ * A reviewer who remembers this panel as the route's outline on every ride is
+ * reading the old file. Where the ride's world was given a corridor of map data
+ * (ADR 0054), `street-map.ts` draws that data around the rider in this
+ * panel's box, and it still makes no request: the corridor was read before the
+ * ride and is kept on the device. Everywhere else — the stylised world, map
+ * tiles off, no archive, outside its coverage — this file's outline is the
+ * panel, as it was.
  */
 
 import { distanceBetween, distanceOnRoute, positionAt } from '@onyourleft/domain';
@@ -500,15 +510,23 @@ export function describePlan(
   if (plan.runs.length === 0) {
     return 'Route in plan: this route has no points to draw.';
   }
+  const broken =
+    plan.runs.length === 1
+      ? ''
+      : ` The route is drawn in ${String(plan.runs.length)} parts, where its points jump.`;
+  return `Route in plan, north up. ${planWhere(profile, distance)}${broken}`;
+}
+
+/**
+ * Where the rider is, as the plan's sentence says it — and the street map's
+ * (#2290, `StreetMap.tsx`), so the two panels say it in the same words.
+ */
+export function planWhere(profile: RouteProfile, distance: number): string {
   const percent = Math.round(planProgress(profile, distance) * 100);
   const lap = planLap(profile, distance);
   const where = profile.loop
     ? `${String(percent)} per cent of the way round the loop` +
       (lap === undefined ? '' : `, on lap ${String(lap)}`)
     : `${String(percent)} per cent of the way along the route`;
-  const broken =
-    plan.runs.length === 1
-      ? ''
-      : ` The route is drawn in ${String(plan.runs.length)} parts, where its points jump.`;
-  return `Route in plan, north up. You are ${where}.${broken}`;
+  return `You are ${where}.`;
 }

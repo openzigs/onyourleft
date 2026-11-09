@@ -37,6 +37,7 @@ import {
 
 import { tabbableElements } from '../a11y/audit';
 import type { GamePort, RidableRoute } from '../game/GameView';
+import { endRideAnswer } from '../game/end-ride-testing';
 import { UPDATE_REGION_LABEL } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
@@ -160,7 +161,7 @@ function chrome(): Record<string, Element | null> {
     skipLink: document.querySelector('.oyl-skip-link'),
     header: document.querySelector('header.oyl-header'),
     navigation: document.querySelector('nav[aria-label="Primary"]'),
-    summary: document.querySelector('main > p.oyl-muted'),
+    summary: document.querySelector('main > .oyl-view-head > p.oyl-muted'),
     footer: document.querySelector('footer.oyl-footer'),
   };
 }
@@ -235,6 +236,7 @@ describe('a ride takes the screen over — #423', () => {
     await openTheGame();
     await press('Ride ');
     await press('End ride');
+    await press('End ride');
 
     for (const [name, element] of Object.entries(chrome())) {
       expect(element, name).not.toBeNull();
@@ -242,20 +244,35 @@ describe('a ride takes the screen over — #423', () => {
     expect(document.querySelector('h1')?.className).toBe('');
   });
 
-  it('gives it back when the rider leaves by the platform’s own Back', async () => {
+  it('gives it back when the rider leaves by the platform’s own Back — after the end-of-ride question (#2349)', async () => {
     // Nothing on the stage navigates — `GameViewProps.onImmersive` says why —
-    // so this is the only other way out, and it must not strand a rider on a
-    // page with no header.
+    // so Back is the only other way out, and it must not strand a rider on a
+    // page with no header. Since #2349's review it asks first: the stage keeps
+    // the screen while the question is open, and gives it back once answered.
     await openTheGame();
     await press('Ride ');
-
-    await act(async () => {
-      globalThis.location.hash = hrefFor(routeById('about'));
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
+    const leave = async (): Promise<void> => {
+      await act(async () => {
+        globalThis.location.hash = hrefFor(routeById('about'));
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
       });
+      await settle();
+    };
+
+    await leave();
+    expect(document.querySelector('[data-oyl-end-ride]')).not.toBeNull();
+    expect(chrome().header).toBeNull();
+    expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
+
+    // Nothing is recorded under this ride, so End ride, asked once (#2381).
+    await act(async () => {
+      endRideAnswer(document, 'End ride').click();
+      await Promise.resolve();
     });
     await settle();
+    await leave();
 
     expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);
     for (const [name, element] of Object.entries(chrome())) {
@@ -302,6 +319,7 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     await press('Ride ');
     expect(updateOffer()).toBeNull();
     await press('End ride');
+    await press('End ride');
 
     expect(updateOffer()).not.toBeNull();
     expect(button('Update now')).toBeDefined();
@@ -337,8 +355,9 @@ describe('which routes keep the reading measure — #422', () => {
   });
 
   it('leaves a page that is read at the measure', async () => {
-    // Credits, not About: since #1014 About is a screen of sections.
-    globalThis.location.hash = hrefFor(routeById('credits'));
+    // Not-found, not About or Credits: since #1014 About, and since #2067
+    // Credits, are screens of sections.
+    globalThis.location.hash = hrefFor(routeById('not-found'));
     await openTheGame();
 
     expect(document.querySelector('main')?.className).toBe('oyl-main oyl-main--prose');

@@ -178,6 +178,34 @@
  * on both walks — `07:05`, the fixed local time this file now reads every
  * route at. No sentence is dropped or reworded.
  *
+ * ⚠️ **Re-recorded by #2330, awaiting the owner's approval with that pull
+ * request's screenshots**, for two dropped lines and nothing else: the game's
+ * picker shows its wind speed and direction boxes only while *Ride in a wind*
+ * is on, so "Wind speed, km/h" and "Wind direction, degrees it blows from"
+ * are no longer on the populated walk, which leaves the switch off. They are
+ * not gone from the product: `wind-wiring.test.tsx` §"#2330" turns the switch
+ * on and finds both. Nothing is added or reworded.
+ *
+ * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
+ * request's screenshots**, for two added lines and nothing else: Workouts'
+ * list pane offers its two lists, *Your workouts* and *Built-in workouts*,
+ * on both walks. The walks open on the rider's own, so the built-ins'
+ * sentences are not on them; `BuiltInWorkouts.test.tsx` reads those. No
+ * sentence is dropped or reworded.
+ *
+ * ⚠️ **Re-recorded by #2358, awaiting the owner's approval with that pull
+ * request's screenshots**, for five added lines and nothing else: Devices
+ * gains its Controllers section on both walks, with no gamepad listed, so
+ * its empty state and the button test's "Nothing has moved yet." are what
+ * is recorded. `DevicesView.gamepads.test.tsx` reads a listed pad and the
+ * readout. No sentence is dropped or reworded.
+ *
+ * ⚠️ **Re-recorded by #2358 after the owner's ruling of 2026-11-08 in
+ * #2370**, for two reworded lines on Devices on both walks: the heading
+ * "Controllers" is now "Game controllers", and "Steers and throws in
+ * Delivery." is now "A gamepad such as an Xbox controller steers and throws
+ * in Delivery.". Both are lines this pull request added; nothing else moves.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

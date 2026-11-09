@@ -36,12 +36,16 @@
  * that fits from a value that was never marked, and this can.
  */
 
-import { act } from 'react';
+import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { auditAccessibility, formatViolations, tabbableElements } from '../../a11y/audit';
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
+import { simulatedRideSentences } from '../simulated-rider';
+import { FRESH_WEEK, startRound } from '../delivery/round';
+import { hudOf, startRace } from './lap-race-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import {
@@ -57,6 +61,8 @@ import {
   routeProfile,
   seconds,
   thresholdShare,
+  unixSeconds,
+  watts,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -249,10 +255,24 @@ describe('the HUD is four panels (#423)', () => {
       'To go',
       'Moving',
       // #2072: the elapsed time and the clock, after the moving time.
-      'Elapsed',
+      'Ride', // #2382: nothing recorded here, so the ride's own clock
       'Clock',
+      // #2076: the ride so far, after the clock and before every gap.
+      'Distance',
+      'Climbed',
+      'Avg power',
+      // #2077: the rider's W/kg (no threshold here, so no zone).
+      'W/kg',
       'Pacer',
     ]);
+    // #2076: marked, so a phone's overlay can leave them out (`theme.css`
+    // §"THE RIDE SO FAR").
+    expect(labelsIn('.oyl-hud__field--total')).toEqual(['Distance', 'Climbed', 'Avg power']);
+    // And *Avg power* by name, which the 4:3 tablet sets in its narrowest
+    // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
+    expect(labelsIn('.oyl-hud__field--average-power')).toEqual(['Avg power']);
+    expect(labelsIn('.oyl-hud__field--distance')).toEqual(['Distance']);
+    expect(labelsIn('.oyl-hud__field--climbed')).toEqual(['Climbed']);
     // Document order is the order a screen reader meets them in, and it is
     // the order `hudReadings` returns: primary first.
     expect(labelsIn('.oyl-hud')).toEqual([
@@ -271,8 +291,12 @@ describe('the HUD is four panels (#423)', () => {
       'Speed',
       'To go',
       'Moving',
-      'Elapsed',
+      'Ride',
       'Clock',
+      'Distance',
+      'Climbed',
+      'Avg power',
+      'W/kg',
       'Pacer',
       'Following',
       'Nearby',
@@ -532,11 +556,17 @@ describe('the elapsed time and the clock beside the moving time — #2072', () =
     expect(labels.indexOf('Clock')).toBe(labels.indexOf('Elapsed') + 1);
   });
 
-  it('shows a dash for each where nothing is being recorded', async () => {
-    mounted = await mount(<HudPanel {...base} />);
+  it('shows a dash for the moving time and the ride’s own clock where nothing is being recorded — #2382', async () => {
+    mounted = await mount(<HudPanel {...base} state={{ ...base.state, elapsed: seconds(754) }} />);
 
     expect(field('Moving').value).toBe('—');
-    expect(field('Elapsed').value).toBe('—');
+    // #2382: not a dash, and not *Elapsed*: the ride's clock, under its own
+    // label, in the elapsed field's place.
+    expect(field('Ride').value).toBe('0:12:34');
+    expect(field('Ride').classes).toContain('oyl-hud__field--elapsed');
+    expect(queryAll(mounted.container, 'dt').map((each) => each.textContent)).not.toContain(
+      'Elapsed',
+    );
   });
 
   it('leaves the demo’s HUD with neither: no clock handed in, and its elapsed time left out', async () => {
@@ -641,5 +671,609 @@ describe('the gradient on the primary row — #2071', () => {
     expect(
       mounted.container.querySelector('.oyl-hud__fields--primary')?.getAttribute('aria-label'),
     ).toBe('Power, cadence, heart rate and gradient');
+  });
+});
+
+/**
+ * #2291 — the gradient's digits in their grade band's colour, and a slope
+ * glyph steeper for a steeper band, read off the rendered primary row. The
+ * class is the wire; `hud-value-size.test.ts` holds the rule each class
+ * names, and `ride.browser.spec.ts` reads the colour and size Chromium paints.
+ */
+describe('the gradient in its band’s colour — #2291', () => {
+  const profile = route();
+  const at = (grade: number) => ({
+    profile,
+    state: { ...atStartLine(profile), grade: gradePercent(grade) },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  });
+
+  function primaryGradient(): Element | undefined {
+    return queryAll(
+      mounted?.container ?? document,
+      '.oyl-hud__fields--primary .oyl-hud__field',
+    ).find((each) => each.querySelector('dt')?.textContent === 'Gradient');
+  }
+
+  async function bandAt(grade: number): Promise<string | null | undefined> {
+    mounted?.unmount();
+    mounted = await mount(<HudPanel {...at(grade)} />);
+    const field = primaryGradient();
+    const band = field?.getAttribute('data-grade-band');
+    expect(field?.classList.contains(`oyl-hud__field--grade-${band ?? ''}`)).toBe(true);
+    return band;
+  }
+
+  it('bands the field by the grade it shows, through the road ahead’s five bands', async () => {
+    expect(await bandAt(-6)).toBe('descent');
+    expect(await bandAt(-2)).toBe('flat');
+    expect(await bandAt(0)).toBe('flat');
+    expect(await bandAt(4.5)).toBe('climb');
+    expect(await bandAt(7)).toBe('steep');
+    expect(await bandAt(12)).toBe('wall');
+    // 2.96 SHOWS +3.0, and is coloured as the climb it says it is.
+    expect(await bandAt(2.96)).toBe('climb');
+  });
+
+  it('sets the digits apart from the sign, so the sign keeps its ink', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    const value = primaryGradient()?.querySelector('dd');
+    expect(value?.querySelector('.oyl-hud__digits')?.textContent).toBe('4.5');
+    expect(value?.querySelector('.oyl-hud__digits .oyl-hud__sign')).toBeNull();
+    // What a screen reader reads is the value as it was.
+    expect(value?.textContent).toBe('+4.5 %');
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(0)} />);
+    expect(primaryGradient()?.querySelector('.oyl-hud__digits')?.textContent).toBe('0.0');
+  });
+
+  it('colours no other reading', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    expect(queryAll(mounted.container, '.oyl-hud__digits')).toHaveLength(1);
+    expect(queryAll(mounted.container, '[data-grade-band]')).toHaveLength(1);
+  });
+
+  /** How far the drawn stroke climbs from left to right, in its box's units. */
+  async function riseAt(grade: number): Promise<number> {
+    mounted?.unmount();
+    mounted = await mount(<HudPanel {...at(grade)} />);
+    const line = primaryGradient()?.querySelector('.oyl-hud__slope line');
+    return Number(line?.getAttribute('y1')) - Number(line?.getAttribute('y2'));
+  }
+
+  it('draws the glyph steeper for a steeper band, so the band is a shape as well', async () => {
+    const flat = await riseAt(1.5);
+    const climbing = await riseAt(4.5);
+    const steep = await riseAt(7);
+    const wall = await riseAt(12);
+    expect(flat).toBeGreaterThan(0);
+    expect(climbing).toBeGreaterThan(flat);
+    expect(steep).toBeGreaterThan(climbing);
+    expect(wall).toBeGreaterThan(steep);
+    // A descent falls, and further than a flat stretch that dips.
+    expect(await riseAt(-6)).toBeLessThan(await riseAt(-1.5));
+    expect(await riseAt(-1.5)).toBeLessThan(0);
+  });
+});
+
+/** #2077: the zone indicator as the HUD draws it — the swatch and the bar. */
+describe('the zone indicator on the HUD — #2077', () => {
+  const profile = route();
+  const state = atStartLine(profile);
+  const base = {
+    profile,
+    state: { ...state, input: { power: watts(342), live: true } },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    thresholdPower: watts(250),
+    powerZoneTime: {
+      perZone: [0, 600, 0, 300, 100, 0, 0].map((spent) => seconds(spent)),
+      covered: seconds(1000),
+    },
+  };
+
+  it('draws the number beside its zone’s swatch, the name under it, and the time in each zone', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    const field = mounted.container.querySelector(
+      '.oyl-hud__field--effort:has(.oyl-hud__zone-bar)',
+    );
+    expect(field?.querySelector('dt')?.textContent).toBe('Zone');
+    // The number and the name, in words — never the colour alone.
+    expect(field?.querySelector('dd')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '6 Anaerobic',
+    );
+    const swatch = field?.querySelector('.oyl-hud__zone-swatch');
+    expect(swatch?.classList).toContain('oyl-hud__zone-swatch--6');
+    expect(swatch?.getAttribute('aria-hidden')).toBe('true');
+    const bar = field?.querySelector('.oyl-hud__zone-bar');
+    expect(bar?.getAttribute('aria-hidden')).toBe('true');
+    expect(bar?.getAttribute('data-oyl-zone-shares')).toBe(
+      '0.000,0.600,0.000,0.300,0.100,0.000,0.000',
+    );
+    // A segment only for a zone the ride has spent time in, each its own zone's.
+    expect(
+      queryAll(bar ?? document, '.oyl-hud__zone-bar-part').map((part) => [
+        part.getAttribute('class'),
+        part.getAttribute('width'),
+      ]),
+    ).toEqual([
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--2', '60'],
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--4', '30'],
+      ['oyl-hud__zone-bar-part oyl-hud__zone-bar-part--5', '10'],
+    ]);
+  });
+
+  it('draws no swatch with the power reading lost', async () => {
+    mounted = await mount(
+      <HudPanel {...base} state={{ ...state, input: { power: watts(342), live: false } }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__zone-swatch')).toBeNull();
+  });
+});
+
+/** #2079: a race's standings, turned off by the rider, and the text size's class. */
+describe('the rider’s HUD layout — #2079', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    room: { nearby: 2 },
+    standings: {
+      place: 1,
+      of: 2,
+      lines: [
+        {
+          riderId: 3,
+          place: 1,
+          who: 'You',
+          gap: '',
+          figure: '3.5 W/kg',
+          flagged: false,
+          you: true,
+        },
+        {
+          riderId: 7,
+          place: 2,
+          who: 'Bea',
+          gap: '+4 s',
+          figure: '3.1 W/kg',
+          flagged: false,
+          you: false,
+        },
+      ],
+    },
+  };
+
+  it('draws a race’s standings unless the rider turned them off', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} layout={{ hidden: ['standings'], textSize: 'normal' }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+  });
+
+  /**
+   * PR #2235's review: with the readings turned off, a room's, a Delivery
+   * round's and a lap race's own readings stay, beside the ride's three
+   * times (`HudCore.tsx` §`keptWithReadingsHidden`). Each mode is drawn whole
+   * first, so the readings it marks as its own are read rather than listed.
+   */
+  const secondaryLabels = (): (string | null)[] =>
+    queryAll(mounted?.container ?? document, '.oyl-hud__fields--secondary dt').map(
+      (each) => each.textContent,
+    );
+  const modes = [
+    ['a room', '.oyl-hud__field--room', {}],
+    [
+      'a Delivery round',
+      '.oyl-hud__field--delivery',
+      {
+        room: undefined,
+        standings: undefined,
+        delivery: { round: startRound(8), week: FRESH_WEEK, score: 0 },
+      },
+    ],
+    [
+      'a lap race',
+      '.oyl-hud__field--lap-race',
+      { room: undefined, standings: undefined, lapRace: hudOf(startRace({ laps: 3 })) },
+    ],
+  ] as const;
+  for (const [mode, marked, input] of modes) {
+    it(`keeps ${mode}'s own readings, and the times, with the readings turned off`, async () => {
+      mounted = await mount(<HudPanel {...base} {...input} />);
+      const own = queryAll(mounted.container, `${marked} dt`).map((each) => each.textContent);
+      expect(own.length).toBeGreaterThan(0);
+      mounted.unmount();
+      mounted = await mount(
+        <HudPanel {...base} {...input} layout={{ hidden: ['readings'], textSize: 'normal' }} />,
+      );
+      expect(secondaryLabels()).toEqual(['Moving', 'Ride', 'Clock', ...own]);
+    });
+  }
+
+  it('carries the text size as a class the stylesheet reads, and none at the normal size', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ hidden: [], textSize: 'extra-large' }} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.className).toBe(
+      'oyl-hud oyl-hud--text-extra-large',
+    );
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.className).toBe('oyl-hud');
+  });
+});
+
+/** #2080: a loop's lap splits, where a race's standings are, and swapped with them. */
+describe('the lap splits panel — #2080', () => {
+  /** A level loop, out and back, so its two ends meet. */
+  const loop = (() => {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 8; index += 1) {
+      const out = index <= 4 ? index : 8 - index;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (out * 100) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(60),
+      });
+    }
+    return routeProfile(points, { loop: true });
+  })();
+  const laps = [
+    {
+      startedAt: unixSeconds(1_800_000_000),
+      elapsedTime: seconds(312),
+      movingTime: seconds(312),
+      distance: loop.totalDistance,
+      averagePower: watts(205),
+    },
+    {
+      startedAt: unixSeconds(1_800_000_312),
+      elapsedTime: seconds(298),
+      movingTime: seconds(298),
+      distance: loop.totalDistance,
+      averagePower: watts(231),
+    },
+  ];
+  const standings = {
+    place: 1,
+    of: 2,
+    lines: [
+      { riderId: 3, place: 1, who: 'You', gap: '', figure: '3.5 W/kg', flagged: false, you: true },
+      {
+        riderId: 7,
+        place: 2,
+        who: 'Bea',
+        gap: '+4 s',
+        figure: '3.1 W/kg',
+        flagged: false,
+        you: false,
+      },
+    ],
+  };
+  const base = {
+    state: atStartLine(loop),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  };
+  /** The panel's rows as read: each row's cells, its label first. */
+  const rows = (): string[][] =>
+    queryAll(mounted?.container ?? document, '.oyl-hud__laps-row').map((row) =>
+      [...row.querySelectorAll('.oyl-hud__laps-label, .oyl-hud__laps-value')].map(
+        (cell) => cell.textContent ?? '',
+      ),
+    );
+  const button = (name: string): HTMLButtonElement | undefined =>
+    queryAll(mounted?.container ?? document, 'button').find(
+      (each): each is HTMLButtonElement => each.textContent === name,
+    );
+
+  it('draws the lap in progress, the last lap and the best on a loop', async () => {
+    mounted = await mount(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />);
+    expect(mounted.container.querySelector('.oyl-hud__laps')?.getAttribute('aria-label')).toBe(
+      'Lap splits',
+    );
+    expect(rows()).toEqual([
+      ['Now', '3', '1:15', '—'],
+      ['Last', '2', '4:58', '231 W'],
+      ['Best', '2', '4:58', '231 W'],
+    ]);
+    // What a screen reader hears, row by row: the column headings are drawn
+    // `aria-hidden`, so each figure must say its own (PR #2248's review).
+    expect(
+      queryAll(mounted.container, '.oyl-hud__laps-row').map((row) =>
+        (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
+    ).toEqual([
+      'Now Lap 3 Time 1:15 Avg power —',
+      'Last Lap 2 Time 4:58 Avg power 231 W',
+      'Best Lap 2 Time 4:58 Avg power 231 W',
+    ]);
+    expect(
+      mounted.container.querySelector('.oyl-hud__laps-head')?.getAttribute('aria-hidden'),
+    ).toBe('true');
+    // Not a live region: it changes every second.
+    expect(mounted.container.querySelector('.oyl-hud__laps [aria-live]')).toBeNull();
+    // With no race there is nothing to swap with.
+    expect(button('Show standings')).toBeUndefined();
+  });
+
+  it('is not drawn on a point-to-point route', async () => {
+    const profile = route();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        state={atStartLine(profile)}
+        profile={profile}
+        laps={laps}
+        lapSeconds={75}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+  });
+
+  it('swaps with a race’s standings, standings first, and keeps the focus on the swap', async () => {
+    mounted = await mount(
+      <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} standings={standings} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+
+    await act(async () => {
+      button('Show laps')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+    expect(rows()[1]).toEqual(['Last', '2', '4:58', '231 W']);
+    expect(document.activeElement).toBe(button('Show standings'));
+
+    await act(async () => {
+      button('Show standings')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    expect(document.activeElement).toBe(button('Show laps'));
+  });
+
+  it('takes the standings’ place alone when the rider turned the standings off', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        profile={loop}
+        laps={laps}
+        lapSeconds={75}
+        standings={standings}
+        layout={{ hidden: ['standings'], textSize: 'normal' }}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    expect(button('Show standings')).toBeUndefined();
+  });
+
+  /**
+   * PR #2248's review: the panel was a `<table>` outside a scroll region, the
+   * a11y gate's `table-in-scroll-region`, and no audited route rides a loop.
+   * So the gate's own audit runs over the HUD here, with the splits drawn,
+   * alone and in a race with the swap.
+   */
+  it('audits clean, alone and beside a race’s standings', async () => {
+    // In the page's one `main`, under its one `h1`, as the shell draws a ride.
+    const onAPage = (hud: JSX.Element): JSX.Element => (
+      <main>
+        <h1>Ride</h1>
+        {hud}
+      </main>
+    );
+    // A HUD panel adds no tab stop to a ride: the same HUD with no laps handed
+    // to it draws no splits, and has exactly as many tab stops.
+    mounted = await mount(onAPage(<HudPanel {...base} profile={loop} lapSeconds={75} />));
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    const withoutSplits = tabbableElements(document).length;
+    mounted.unmount();
+    mounted = await mount(
+      onAPage(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />),
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    expect(tabbableElements(document)).toHaveLength(withoutSplits);
+    const alone = auditAccessibility(document);
+    expect(alone, formatViolations(alone)).toEqual([]);
+    mounted.unmount();
+    mounted = await mount(
+      onAPage(
+        <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} standings={standings} />,
+      ),
+    );
+    const standingsShown = auditAccessibility(document);
+    expect(standingsShown, formatViolations(standingsShown)).toEqual([]);
+    // The swap is one button either way round: swapping adds no tab stop
+    // (the owner's ruling of 2026-11-06, #2034).
+    const withStandings = tabbableElements(document).length;
+    await act(async () => {
+      button('Show laps')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+    const splitsShown = auditAccessibility(document);
+    expect(splitsShown, formatViolations(splitsShown)).toEqual([]);
+    expect(tabbableElements(document)).toHaveLength(withStandings);
+    expect(
+      tabbableElements(document).filter((each) => each.classList.contains('oyl-hud__swap')),
+    ).toHaveLength(1);
+  });
+});
+
+/**
+ * #2383: the focus arrangement, read off the rendered HUD — the readout in
+ * place of the two tiers, its seven readings in their order, the same figures
+ * the full HUD shows, and the full HUD kept on a ride with a mode of its own.
+ */
+describe('the focus readout — #2383', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: {
+      ...atStartLine(profile),
+      elapsed: seconds(30),
+      input: { power: watts(250), live: true },
+    },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    elapsedSeconds: 754,
+    movingSeconds: 700,
+    rideTotals: { distance: metres(12_345), climbed: metres(80), averagePower: watts(212) },
+  };
+  const focus = { hidden: [], textSize: 'normal', arrangement: 'focus' } as const;
+  const labelsIn = (selector: string): (string | null)[] =>
+    queryAll(mounted?.container ?? document, `${selector} dt`).map((each) => each.textContent);
+  const valueOf = (label: string): string => {
+    const field = queryAll(mounted?.container ?? document, '.oyl-hud__field').find(
+      (each) => each.querySelector('dt')?.textContent === label,
+    );
+    return field?.querySelector('dd')?.textContent ?? '';
+  };
+
+  it('draws one readout in place of the two tiers, its readings in their order', async () => {
+    mounted = await mount(<HudPanel {...base} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.classList).toContain('oyl-hud--focus');
+    expect(mounted.container.querySelector('.oyl-hud__fields--primary')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__fields--secondary')).toBeNull();
+    expect(labelsIn('.oyl-hud__focus-main')).toEqual(['Power', 'Cadence', 'Heart rate']);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+    // Every label in the HUD is one of the readout's: nothing else is drawn.
+    expect(labelsIn('.oyl-hud')).toEqual([
+      ...labelsIn('.oyl-hud__focus-main'),
+      ...labelsIn('.oyl-hud__focus-more'),
+    ]);
+  });
+
+  it('keeps the focus readout whole when the ride readings are hidden', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ ...focus, hidden: ['readings'] }} />);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+  });
+
+  it('shows the figures the full HUD shows, and no dash for a figure that exists', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    const full = [
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      'Elapsed',
+    ].map(valueOf);
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} layout={focus} />);
+    const shown = [
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      'Elapsed',
+    ].map(valueOf);
+    expect(shown).toEqual(full);
+    expect(valueOf('Power')).toBe('250 W');
+    expect(valueOf('Avg power')).toBe('212 W');
+    expect(valueOf('Distance')).toBe('12.3 km');
+    expect(valueOf('Elapsed')).toBe('0:12:34');
+    expect(shown.filter((value) => value.startsWith('—'))).toEqual([]);
+  });
+
+  it('shows the ride’s own clock where nothing records — #2382', async () => {
+    mounted = await mount(
+      <HudPanel {...base} elapsedSeconds={undefined} rideTotals={undefined} layout={focus} />,
+    );
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Ride']);
+    expect(valueOf('Ride')).toBe('0:00:30');
+  });
+
+  it('keeps the full HUD on a ride with a mode of its own', async () => {
+    mounted = await mount(<HudPanel {...base} room={{ nearby: 2 }} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+    expect(mounted.container.querySelector('.oyl-hud')?.classList).not.toContain('oyl-hud--focus');
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0 }}
+        layout={focus}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} lapRace={hudOf(startRace({ laps: 3 }))} layout={focus} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+  });
+
+  it('draws the full HUD with nothing chosen, and with full chosen', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} layout={{ hidden: [], textSize: 'normal', arrangement: 'full' }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+  });
+
+  // Owner ruling of 2026-11-09 on PR #2406: the focus readout has no Moving
+  // field, so the simulated mark's sentence about it goes with Focus on and
+  // stays with Full. The sentences are the ones GameView hands in.
+  const mark = simulatedRideSentences({ watts: 200, speedup: 8, startMetres: undefined });
+  const markText = (): string | null | undefined =>
+    mounted?.container.querySelector('.oyl-hud__simulated')?.textContent;
+
+  it('leaves "Moving needs a recording." out of the simulated mark with Focus on', async () => {
+    mounted = await mount(<HudPanel {...base} simulated={mark} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(markText()).toBe('Simulated ride at 200 W, 8× real time. Not recorded or shared.');
+    expect(mounted.container.textContent).not.toContain('Moving needs a recording.');
+  });
+
+  it('keeps "Moving needs a recording." in the simulated mark with Full', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        simulated={mark}
+        layout={{ hidden: [], textSize: 'normal', arrangement: 'full' }}
+      />,
+    );
+    expect(markText()).toBe(
+      'Simulated ride at 200 W, 8× real time. Not recorded or shared. Moving needs a recording.',
+    );
   });
 });

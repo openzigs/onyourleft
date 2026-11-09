@@ -44,6 +44,10 @@
  * ordinary ride and the week as it was; and the assist setting reaching it.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,7 +62,7 @@ import {
   steeringController,
   type ControllerStep,
 } from '@onyourleft/sensors/simulator';
-import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
+import { activityId, lapId, levelRouteId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { riderMassFor } from '../athlete/mass';
@@ -73,6 +77,8 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/ass
 import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
+import { parseLevelFile } from './delivery/levels/level-file';
+import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
@@ -100,6 +106,7 @@ import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from 
 import { urbanClassMap } from './urban-class';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { writeRealisticWorldChoice } from './world-preference';
+import { endRideAnswer } from './end-ride-testing';
 
 /**
  * What `GameView` offered the announcer, kind by kind — `trainer-wiring.test.tsx`'s
@@ -146,12 +153,19 @@ vi.mock('./delivery/ride-round', async (importOriginal) => {
  * round, so it is read back off the input the drawn frame was made from.
  */
 const steeredInputs = vi.hoisted((): (number | undefined)[] => []);
+/**
+ * The `cameraLateral` of every input `GameView` built a frame from, in order
+ * — #2396, read back for `steeredLateral`'s reason: `scene.ts`
+ * §`SceneInput.cameraLateral` is optional the unsafe way round too.
+ */
+const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
     ...actual,
     sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
       steeredInputs.push(args[0].steeredLateral);
+      cameraInputs.push(args[0].cameraLateral);
       return actual.sceneFrame(...args);
     },
   };
@@ -596,6 +610,7 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
     keptRiding: readDeliveryProgress(localStorage),
   };
   await clickThrough(buttonStarting('End ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
   const stored = JSON.parse(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? '{}') as object;
   const result: RideResult = {
     ...read,
@@ -782,6 +797,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     // No house passed, so none is delivered or missed, and a mis-pressed End
     // ride does not reset the week to a fresh one (`round.ts` §`endRound`).
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
@@ -810,6 +826,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(Number(houses?.value)).toBeGreaterThan(0);
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     // The week the device keeps differs from the one it held: the passed house is missed.
     expect(readDeliveryProgress(localStorage)).toEqual({
       day: WEEK.day + 1,
@@ -852,6 +869,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
       expect(said).not.toContain(text);
     }
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
   });
 
@@ -1269,6 +1287,7 @@ describe('a steering controller inside a game ride — #1827', () => {
         },
       });
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Non-vacuity: the whole script played, its burst included, and the
       // controller moved the rider off the shadow's lanes.
       expect(rig.controller.sent()).toHaveLength(47);
@@ -1319,6 +1338,7 @@ describe('a steering controller inside a game ride — #1827', () => {
     await rideARound([], handed);
     expect(listening).toBe(1);
     await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     expect(listening).toBe(0);
   });
 });
@@ -1595,6 +1615,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
       // Every house passed with no throw, so each of the three missed, as the HUD says.
       expect(field('Houses')).toEqual({ value: '0', detail: '0\u00a0delivered, 3\u00a0missed' });
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Tomorrow: the day's eight less the three missed, not the round's three less three,
       // which would have left none and ended the week. Read back by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
@@ -1630,6 +1651,55 @@ describe('offered in the chooser, with the short round and the no-round fallback
       if (Number(hud) !== Number(stated)) expect(line).toContain('up to');
     },
   );
+
+  describe('the course count is abandoned (#2294)', () => {
+    /** A read that never answers, keeping each call's signal. */
+    function hangingReads(): {
+      readonly signals: AbortSignal[];
+      readonly load: GamePort['loadWorldCorridor'];
+    } {
+      const signals: AbortSignal[] = [];
+      return {
+        signals,
+        load: (_route, signal) => {
+          signals.push(signal);
+          return new Promise<CorridorState>(() => undefined);
+        },
+      };
+    }
+
+    async function mountChoosing(load: GamePort['loadWorldCorridor']): Promise<void> {
+      writeRealisticWorldChoice(localStorage, true);
+      mounted = await mount(
+        <GameView
+          port={{ ...portWith(town.corridor), loadWorldCorridor: load }}
+          renderer={() => Promise.resolve(realisticNotLoaded())}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+    }
+
+    it('abandons the walk when the round is switched off', async () => {
+      const reads = hangingReads();
+      await mountChoosing(reads.load);
+      const before = reads.signals.length;
+      await clickThrough(deliverySwitch());
+      const walk = reads.signals.slice(before);
+      expect(walk.some((signal) => !signal.aborted)).toBe(true);
+      await clickThrough(deliverySwitch());
+      expect(walk.every((signal) => signal.aborted)).toBe(true);
+    });
+
+    it('abandons the walk when a ride starts', async () => {
+      const reads = hangingReads();
+      await mountChoosing(reads.load);
+      await clickThrough(deliverySwitch());
+      expect(reads.signals.some((signal) => !signal.aborted)).toBe(true);
+      await clickThrough(buttonStarting('Ride '));
+      expect(reads.signals.every((signal) => signal.aborted)).toBe(true);
+    });
+  });
 
   /** A corridor read that has told the chooser `state` and goes no further. */
   const stopsAt =
@@ -1702,6 +1772,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
       expect(notices()).not.toContain(other);
       expect(said).not.toContain(other);
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // The week as it was, read back from the device by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     },
@@ -1729,6 +1800,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
         detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
       });
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // No fail: tomorrow's round keeps all three houses. Without the assist,
       // three misses of three would leave none, and end the week.
       expect(readDeliveryProgress(localStorage)).toEqual({
@@ -1736,6 +1808,397 @@ describe('offered in the chooser, with the short round and the no-round fallback
         houses: WEEK.houses,
         score: WEEK.score,
       });
+    },
+  );
+});
+
+describe('the course picker: which saved routes can hold a round — #2294', () => {
+  /** A renderer for a ride that chose the realistic world, which does not load here. */
+  function realisticNotLoaded(): GameRenderer {
+    return {
+      ...capturingRenderer([]),
+      loadRealisticWorld: () =>
+        Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
+    };
+  }
+
+  /** Two more saved routes beside {@link ROUTE}: one with two houses in reach, one with the tiles off. */
+  const short = deliveryTown('short-town', { lastAlong: 220 });
+  const SHORT: RidableRoute = {
+    id: 'short-town',
+    name: 'Short town',
+    profile: short.profile,
+    attempts: 0,
+  };
+  const UNREAD: RidableRoute = {
+    id: 'tiles-off-town',
+    name: 'Tiles-off town',
+    profile: deliveryTown('tiles-off-town').profile,
+    attempts: 0,
+  };
+
+  const CORRIDORS: ReadonlyMap<string, CorridorState> = new Map<string, CorridorState>([
+    [ROUTE.id, { kind: 'ready', corridor: town.corridor }],
+    [SHORT.id, { kind: 'ready', corridor: short.corridor }],
+    [UNREAD.id, { kind: 'off', why: 'map-tiles-off' }],
+  ]);
+
+  /** The game's port over the three routes, each read through its own corridor. */
+  function threeRoutes(asked: string[]): GamePort {
+    return {
+      ...portWith(undefined),
+      listRoutes: () => Promise.resolve([ROUTE, SHORT, UNREAD]),
+      loadWorldCorridor: (route) => {
+        asked.push(route.id);
+        return Promise.resolve(
+          CORRIDORS.get(route.id) ?? { kind: 'unavailable', why: 'outside-coverage' },
+        );
+      },
+    };
+  }
+
+  /** The chooser's switch, by its label. */
+  function deliverySwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[role="switch"]').find(
+      (box) => (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
+    );
+  }
+
+  interface Card {
+    /** What the card's radio is described by after its facts, read as a screen reader reads it. */
+    readonly course: string | undefined;
+    readonly greyed: boolean;
+    readonly radio: HTMLInputElement;
+  }
+
+  /** Each route card, by its route's name. */
+  function cards(): Map<string, Card> {
+    const found = new Map<string, Card>();
+    for (const card of queryAll<HTMLElement>(
+      mounted?.container ?? document,
+      '.oyl-chooser__card',
+    )) {
+      const radio = card.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (radio === null) continue;
+      const described = (radio.getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '');
+      found.set(card.querySelector('label')?.textContent ?? '', {
+        course: described[1],
+        greyed: card.classList.contains('oyl-chooser__card--no-round'),
+        radio,
+      });
+    }
+    return found;
+  }
+
+  function courseLines(): (string | undefined)[] {
+    return [...cards().values()].map((card) => card.course);
+  }
+
+  /** The summary over the cards, as it is announced. */
+  function summary(): string {
+    return (
+      mounted?.container.querySelector('.oyl-chooser__courses [role="status"]')?.textContent ?? ''
+    );
+  }
+
+  /** Settle until every card is counted; the expectations say so if it never is. */
+  async function counted(): Promise<void> {
+    for (let turn = 0; turn < 20 && summary() === ''; turn += 1) await settle();
+  }
+
+  async function mountThree(asked: string[] = []): Promise<void> {
+    writeRealisticWorldChoice(localStorage, true);
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={threeRoutes(asked)}
+        renderer={() => Promise.resolve(realisticNotLoaded())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+  }
+
+  it('counts nothing and draws no line until the round is chosen', async () => {
+    const asked: string[] = [];
+    await mountThree(asked);
+    // The chosen route's corridor is read for the world, as before; no other.
+    expect(asked).toEqual([ROUTE.id]);
+    expect(courseLines()).toEqual([undefined, undefined, undefined]);
+    expect(mounted?.container.querySelector('.oyl-chooser__courses')).toBeNull();
+  });
+
+  it(
+    'lists every saved route with its houses once the round is chosen, greying with the reason those that cannot hold one',
+    { timeout: 16_000 },
+    async () => {
+      const asked: string[] = [];
+      await mountThree(asked);
+      await clickThrough(deliverySwitch());
+      await counted();
+      // Every saved route read through the corridor port, after the chosen one's own read.
+      expect(asked.slice(1)).toEqual([ROUTE.id, SHORT.id, UNREAD.id]);
+      const shown = cards();
+      expect(shown.get(ROUTE.name)).toMatchObject({
+        course: 'Delivery: up to 3 houses on the round',
+        greyed: false,
+      });
+      expect(shown.get(SHORT.name)).toMatchObject({
+        course: 'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3',
+        greyed: true,
+      });
+      expect(shown.get(UNREAD.name)).toMatchObject({
+        course: 'No Delivery round on this route: map tiles are off in Settings',
+        greyed: true,
+      });
+      expect(summary()).toBe('1 of your 3 routes can hold today’s Delivery round.');
+      // Switched off, the lines go.
+      await clickThrough(deliverySwitch());
+      expect(courseLines()).toEqual([undefined, undefined, undefined]);
+    },
+  );
+
+  it(
+    'says beside the switch, before the press, that a greyed route rides an ordinary ride, and it does',
+    { timeout: 16_000 },
+    async () => {
+      await mountThree();
+      await clickThrough(deliverySwitch());
+      await counted();
+      expect(document.getElementById('oyl-game-delivery-course')).toBeNull();
+      await clickThrough(cards().get(SHORT.name)?.radio);
+      expect(document.getElementById('oyl-game-delivery-course')?.textContent).toBe(
+        'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3. ' +
+          'Ridden with the round on, it is an ordinary ride.',
+      );
+      expect(deliverySwitch()?.getAttribute('aria-describedby')?.split(' ')).toContain(
+        'oyl-game-delivery-course',
+      );
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < 20; index += 1) await pump();
+      await settle();
+      // What the card said is what the ride did: no round, in the HUD's own words.
+      expect(field('Houses')).toBeUndefined();
+      expect(said.filter((each) => each === TOO_FEW_HOUSES_TEXT)).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    // The day's three on a town of many: the line's count and the HUD's are one.
+    { cause: 'the day’s three on a town of many', week: WEEK, line: 3 },
+    // A week of eight on the same town: up to eight, and eight on the HUD.
+    { cause: 'a day of eight on the same town', week: { day: 2, houses: 8, score: 4 }, line: 8 },
+  ])(
+    'states the round the press then rides: $cause',
+    { timeout: 16_000 },
+    async ({ week, line }) => {
+      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(week));
+      await mountThree();
+      await clickThrough(deliverySwitch());
+      await counted();
+      expect(cards().get(ROUTE.name)?.course).toBe(
+        `Delivery: up to ${String(line)} houses on the round`,
+      );
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < 5; index += 1) await pump();
+      await settle();
+      expect(field('Houses')?.value).toBe(String(line));
+    },
+  );
+
+  it('draws no line where the game has no corridor port: nothing could be counted', async () => {
+    writeRealisticWorldChoice(localStorage, true);
+    mounted = await mount(
+      <GameView
+        port={{ ...portWith(undefined), listRoutes: () => Promise.resolve([ROUTE, SHORT]) }}
+        renderer={() => Promise.resolve(realisticNotLoaded())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(deliverySwitch());
+    expect(deliverySwitch()?.checked).toBe(true);
+    expect(courseLines()).toEqual([undefined, undefined]);
+    expect(mounted.container.querySelector('.oyl-chooser__courses')).toBeNull();
+  });
+});
+
+describe('a built-in level’s parked cars change nothing the trainer is sent — #2362, ADR 0065 D-11', () => {
+  /** The synthetic fixture level (D-7.5): never a shipped one, as a ride draws it. */
+  const LEVEL = parseLevelFile(
+    JSON.parse(
+      readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          'delivery/levels/fixtures/fixture-level.json',
+        ),
+        'utf8',
+      ),
+    ),
+    'fixture-level',
+  );
+  const LEVEL_PROFILE = levelRoute(LEVEL).profile;
+  const LEVEL_BUILDINGS = (() => {
+    const corridor = levelCorridor(LEVEL);
+    const mask = landClassMask(corridor);
+    const urban = urbanClassMap(corridor, mask, LEVEL_PROFILE);
+    const { plans } = footprintPlans(
+      corridor,
+      mask,
+      LEVEL_PROFILE,
+      corridorOrigin(LEVEL_PROFILE),
+      FOOTPRINT_MAX_VERTICES,
+      urban,
+    );
+    return mappedBuildingsOf(plans);
+  })();
+
+  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
+  const CRASHING_SEED = ((): number => {
+    const simulation = new GameSimulation({
+      profile: LEVEL_PROFILE,
+      conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
+    });
+    const frames: ShadowFrame[] = [];
+    for (let frame = 1; frame <= FRAMES; frame += 1) {
+      const at = START_MS + frame * FRAME_MS;
+      const { steps } = simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
+      frames.push({
+        steps,
+        along: simulation.state.ride.distance,
+        speed: simulation.state.ride.speed,
+      });
+    }
+    for (let seed = 1; seed < 400; seed += 1) {
+      stubSeed(seed);
+      let ride = startDeliveryRide({
+        buildings: LEVEL_BUILDINGS,
+        profile: LEVEL_PROFILE,
+        origin: corridorOrigin(LEVEL_PROFILE),
+        riderDistance: 0,
+        lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
+        storage: undefined,
+        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
+      });
+      vi.restoreAllMocks();
+      if (ride === undefined) continue;
+      if (!ride.obstacles.some((obstacle) => obstacle.kind === 'parked-car')) continue;
+      let crashes = 0;
+      for (const frame of frames) {
+        if (frame.steps === 0) continue;
+        const stepped = stepDeliveryRide(ride, {
+          ticks: frame.steps,
+          along: frame.along,
+          speed: frame.speed,
+        });
+        ride = stepped.ride;
+        crashes += stepped.crashes;
+      }
+      // A crash into a parked car itself (#2362, round 2), so the ride below
+      // also draws the rider moved clear of it.
+      const intoCar = ride.obstacles.some(
+        (obstacle, index) =>
+          obstacle.kind === 'parked-car' && ride.obstacleState.crashed[index] === true,
+      );
+      if (crashes > 0 && intoCar) return seed;
+    }
+    throw new Error('no seed put the unsteered rider into a parked car');
+  })();
+
+  /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
+  async function rideLevel(obstacles: 'normal' | 'none'): Promise<{
+    readonly writes: readonly Write[];
+    readonly offered: readonly string[];
+    readonly started: readonly unknown[];
+  }> {
+    pending = [];
+    nowMs = START_MS;
+    offered.length = 0;
+    startedRounds.length = 0;
+    writeRealisticWorldChoice(localStorage, true);
+    localStorage.setItem(
+      DELIVERY_ASSIST_STORAGE_KEY,
+      JSON.stringify({ widerWindows: false, obstacles, noFail: false } satisfies DeliveryAssist),
+    );
+    globalThis.location.hash = `#/game?route=${levelRouteId(LEVEL.id)}&play=delivery`;
+    const writes: Write[] = [];
+    const levelPort: GamePort = {
+      listRoutes: () => Promise.resolve([]),
+      loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+      loadGhost: () => Promise.resolve(undefined),
+      readSensors: () => ({
+        rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
+        cadence: { value: 88, live: true, paired: true },
+        heartRate: { value: 142, live: true, paired: true },
+      }),
+    };
+    stubSeed(CRASHING_SEED);
+    mounted = await mount(
+      <GameView
+        port={levelPort}
+        trainer={trainerPort(writes)}
+        renderer={() =>
+          Promise.resolve({
+            ...capturingRenderer([]),
+            loadRealisticWorld: () => Promise.resolve({ loaded: true }),
+          })
+        }
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < FRAMES; index += 1) await pump();
+    await settle();
+    const ridden = { writes, offered: [...offered], started: [...startedRounds] };
+    mounted.unmount();
+    mounted = undefined;
+    globalThis.location.hash = '';
+    return ridden;
+  }
+
+  it(
+    'sends the same writes at the same times with the level’s parked cars as with none, a crash among them',
+    { timeout: 30_000 },
+    async () => {
+      const without = await rideLevel('none');
+      const withCars = await rideLevel('normal');
+      // Non-vacuity: both rode a round on the level, and only one of them had obstacles.
+      const [round] = withCars.started as (DeliveryRide | undefined)[];
+      const [bare] = without.started as (DeliveryRide | undefined)[];
+      expect(round?.onLevel).toBe(true);
+      expect(round?.obstacles.some((obstacle) => obstacle.kind === 'parked-car')).toBe(true);
+      expect(bare?.onLevel).toBe(true);
+      expect(bare?.obstacles).toEqual([]);
+      // The rider rode into one, so a crash was counted and said.
+      expect(withCars.offered).toContain('delivery-crash');
+      expect(without.offered).not.toContain('delivery-crash');
+      expect(without.writes.length).toBeGreaterThan(20);
+      expect(withCars.writes).toStrictEqual(without.writes);
+    },
+  );
+
+  it(
+    'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',
+    { timeout: 30_000 },
+    async () => {
+      steeredInputs.length = 0;
+      cameraInputs.length = 0;
+      const ridden = await rideLevel('normal');
+      expect(ridden.offered).toContain('delivery-crash');
+      // Every frame a round steered carried the eye too: none forgot it.
+      const steered = steeredInputs.flatMap((lateral, index) =>
+        lateral === undefined ? [] : [{ lateral, eye: cameraInputs[index] }],
+      );
+      expect(steered.length).toBeGreaterThan(20);
+      for (const frame of steered) expect(typeof frame.eye).toBe('number');
+      // And passing the car, the eye stood off it, toward the middle of the road.
+      const movedOff = steered.filter(
+        (frame) => frame.eye !== undefined && frame.lateral - frame.eye > 0.5,
+      );
+      expect(movedOff.length).toBeGreaterThan(0);
     },
   );
 });

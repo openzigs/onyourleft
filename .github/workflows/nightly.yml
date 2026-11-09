@@ -26,6 +26,18 @@
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
 #   owner's ruling of 2026-10-03: the opt-in realistic world, #866's class.
+#   Since #2268 it also runs apps/web/tools/demo/preset-bake-archive.test.ts,
+#   which bakes each preset demo route from the PUBLISHED archive and fails
+#   when the result drifts from its committed `.bake.json` record. It is the
+#   one Vitest file that reaches the network, so it is in this run, and it
+#   runs only with OYL_DEMO_BAKE_ARCHIVE_CHECK=1. Since #2275 that is set on
+#   `main` only, with the read-only R2 token of the `basemap-archive`
+#   environment: tiles.openzigs.com answers a GitHub runner with HTTP 403 for
+#   a range (run 42269980561, Bot Fight Mode), so the runner reads the same
+#   object through R2's S3 API (apps/web/tools/demo/r2-archive.ts). On a pull
+#   request the environment and the check are both off, and it skips. The
+#   record's offline half (archive URL, reader version, GPX digest) is
+#   required, in bake-route.test.ts.
 #
 #   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
 #   which is the reviewed list in apps/web/browser/nightly.ts, with each
@@ -53,7 +65,9 @@
 #   request's run summary to one run a night. Since #1701 it is the
 #   `coverage` job, on a runner of its own: after browser shard 1 in `heavy`
 #   it took that job to 1 242 s of its 1 800 s stop (run 40853930991), and a
-#   slow runner would have cancelled shard 1's tests with it.
+#   slow runner would have cancelled shard 1's tests with it. Since #2285 the
+#   run is two halves, `coverage-1` and `coverage-2`, each on a runner of its
+#   own, and `coverage` merges them into the one report it publishes.
 name: Nightly heavy checks
 
 # `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
@@ -112,6 +126,12 @@ jobs:
     # measured, and nightly-split.test.ts holds every nightly job's slowest
     # measured run inside 60 % of its stop.
     timeout-minutes: 30
+    # The basemap archive's read token (#2275) is the `basemap-archive`
+    # environment's, and that environment deploys from `main` alone, so a pull
+    # request's run -- or a branch's -- never holds it. Off `main` the job
+    # takes no environment (an empty name) and the archive check skips.
+    # docs/agents/ci.md section 4c "The basemap archive's read token -- #2275".
+    environment: ${{ github.ref == 'refs/heads/main' && 'basemap-archive' || '' }}
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, as in rules.yml:
@@ -148,10 +168,26 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
+      # OYL_DEMO_BAKE_ARCHIVE_CHECK: preset-bake-archive.test.ts reads the
+      # published archive only when it is set (#2268), and it is set on `main`
+      # alone (#2275). The OYL_BASEMAP_R2_* four are the read-only R2 token's,
+      # in this step and no other, so nothing else in the job's processes sees
+      # them; the install above ran without them. A runner without them reads
+      # the public URL and is answered 403, which the failure names.
       - name: Tests outside coverage
+        env:
+          OYL_DEMO_BAKE_ARCHIVE_CHECK: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
+          OYL_BASEMAP_R2_ACCOUNT_ID: ${{ secrets.OYL_BASEMAP_R2_ACCOUNT_ID }}
+          OYL_BASEMAP_R2_BUCKET: ${{ secrets.OYL_BASEMAP_R2_BUCKET }}
+          OYL_BASEMAP_R2_ACCESS_KEY_ID: ${{ secrets.OYL_BASEMAP_R2_ACCESS_KEY_ID }}
+          OYL_BASEMAP_R2_SECRET_ACCESS_KEY: ${{ secrets.OYL_BASEMAP_R2_SECRET_ACCESS_KEY }}
         run: pnpm run test:uninstrumented
 
       # One worker: the realistic loads draw on the CPU through SwiftShader,
@@ -175,19 +211,23 @@ jobs:
       - name: Nightly browser checks (1 of 5)
         run: pnpm run test:browser:nightly:shard-1
 
-  # The coverage report (#1280), in a job of its own since #1701: in `heavy`,
-  # after browser shard 1, it was 679 to 783 s of a job that reached 1 242 s
-  # of its 1 800 s stop, and it grows with every test file. On a runner of its
-  # own a slow report cannot cancel a browser check, nor a browser check the
-  # report. No Chromium: the required job's Vitest files run in `jsdom` and
-  # Node, and its `Tests` shard installs no browser either. Every other step
-  # and pin is `heavy`'s, whose comments say why.
-  coverage:
-    name: Nightly coverage report
+  # The coverage report (#1280), in a job of its own since #1701 and in two
+  # since #2285: the required job's Vitest files under coverage, each half on
+  # a runner of its own, and the `coverage` job below merges the two into the
+  # one report. As one job it took 1 201 to 1 798 s of its 1 800 s stop from
+  # 2026-11-04, past nightly-split.test.ts's 60 %, and with #1688's cheaper
+  # cases still 1 015 to 1 448 s. Divided by PATH, not by Vitest project:
+  # a `--project` filter keeps only that project's files in the report, and
+  # `check:test-split` (rule 6) refuses it and holds every file of the run in
+  # exactly one half. No Chromium: the required job's Vitest files run in
+  # `jsdom` and Node, and its `Tests` shards install no browser either. Every
+  # other step and pin is `heavy`'s, whose comments say why.
+  coverage-1:
+    name: Nightly tests under coverage (1 of 2)
     runs-on: ubuntu-latest
-    # A stop, not a budget: the run took 679 to 783 s as a step of `heavy`,
-    # and docs/agents/ci.md section 4c "Coverage in a job of its own -- #1701"
-    # has what it measured here.
+    # A stop, not a budget, and the one job's 30 minutes unchanged (#2285:
+    # never a longer stop). docs/agents/ci.md section 4c "Two coverage jobs
+    # -- #2285" has what each half measured.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -214,17 +254,160 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The required job's Vitest files, under coverage. Its `!cancelled()` is
-      # #1280's, from when it followed the browser checks in `heavy`; the two
-      # steps after it keep theirs so that a red run still publishes what it
-      # measured. ⚠️ A test that fails HERE turns this job red and opens the
-      # nightly issue, and that is meant: these are the required job's own tests, so a failure
-      # here and not there is a case that passes only without instrumentation
-      # -- a timeout tuned too close (docs/agents/ci.md section 4c), which is worth an
-      # issue. The coverage FIGURES gate nothing, here or anywhere.
-      - name: Tests under coverage
+      # `apps/web/src/game/`, about half the case time (docs/agents/ci.md
+      # section 4c "Two coverage jobs -- #2285"). ⚠️ A test that fails HERE
+      # turns this job red and opens the nightly issue, and that is meant:
+      # these are the required job's own tests, so a failure here and not
+      # there is a case that passes only without instrumentation -- a timeout
+      # tuned too close (docs/agents/ci.md section 4c), which is worth an issue.
+      #
+      # ⚠️ TWO Vitest workers, not the three Vitest starts on this runner's
+      # four vCPUs (two cores of two threads, docs/agents/ci.md section 4c
+      # "Two Vitest shards -- #2154"): with three, two share a core, and the
+      # whole-ride cases ran past their own timeouts on the EPYC 7763 in the
+      # split's first reading -- the lap race at 10.0 of its 10 s, the 32x
+      # ride at 5.0 of 5 s -- exactly as they had in the one job. On an EPYC
+      # 9V74, two workers ran those cases in two thirds of the time three
+      # did, and this half took no longer (section 4c "Two coverage jobs --
+      # #2285"). No timeout moved: a worker count is a share of the CPU, not
+      # a stop.
+      - name: Tests under coverage (1 of 2)
+        env:
+          VITEST_MAX_WORKERS: '2'
+        run: pnpm run test:coverage:shard-1
+
+      # What the merge reads: this half's results and coverage, which Vitest
+      # writes even when a case failed, so `!cancelled()` and a red half
+      # still counts in the report. A day is enough: the merge job is in
+      # the same run. `error` if it is missing: a half that wrote nothing is
+      # a report missing half its files.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload this half for the merge
         if: ${{ !cancelled() }}
-        run: pnpm run test:coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-blob-1
+          path: coverage-blobs/coverage-1.json
+          retention-days: 1
+          if-no-files-found: error
+
+  coverage-2:
+    name: Nightly tests under coverage (2 of 2)
+    runs-on: ubuntu-latest
+    # A stop, not a budget, and the one job's 30 minutes unchanged (#2285:
+    # never a longer stop). docs/agents/ci.md section 4c "Two coverage jobs
+    # -- #2285" has what each half measured.
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every other file of the run. ⚠️ A failure here opens the nightly
+      # issue too, for the reason the first half's step gives. Vitest's own
+      # three workers: every case that has passed its timeout under coverage
+      # since 2026-11-04 is a game case, in the first half, and with two
+      # workers this half took 854 to 880 s on a Xeon Platinum 8573C against
+      # 780 s with three on an EPYC 7763, the slowest type the one job ran
+      # on (section 4c "Two coverage jobs -- #2285").
+      - name: Tests under coverage (2 of 2)
+        run: pnpm run test:coverage:shard-2
+
+      # What the merge reads: this half's results and coverage, which Vitest
+      # writes even when a case failed, so `!cancelled()` and a red half
+      # still counts in the report. A day is enough: the merge job is in
+      # the same run. `error` if it is missing: a half that wrote nothing is
+      # a report missing half its files.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload this half for the merge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-blob-2
+          path: coverage-blobs/coverage-2.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # The one report, from the halves' blobs: `test:coverage:merge` replays
+  # their results and merges their coverage, and the two reporting steps
+  # publish it as the one job did. `!cancelled()` so a red half still has
+  # its report published; a half that uploaded nothing fails its download,
+  # and the report is then not merged from the other half alone.
+  coverage:
+    name: Nightly coverage report
+    needs: [coverage-1, coverage-2]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the merge measured in docs/agents/ci.md section 4c
+    # "Two coverage jobs -- #2285".
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # SHA from:
+      #   gh api repos/actions/download-artifact/git/ref/tags/v8.0.2 --jq .object.sha
+      - name: Download the first half
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-blob-1
+          path: coverage-blobs
+
+      - name: Download the second half
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-blob-2
+          path: coverage-blobs
+
+      # Red when a half was: the replayed results include its failed cases,
+      # and the report is still written, so the steps after it still run.
+      - name: Merge the coverage report
+        run: pnpm run test:coverage:merge
 
       # Reported, never gated -- ADR 0005 decision C and CLAUDE.md section 5
       # make the mutation list the gate and forbid a percentage floor. It
@@ -292,8 +475,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (2 of 5)
         run: pnpm run test:browser:nightly:shard-2
@@ -339,8 +526,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (3 of 5)
         run: pnpm run test:browser:nightly:shard-3
@@ -384,8 +575,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (4 of 5)
         run: pnpm run test:browser:nightly:shard-4
@@ -433,8 +628,12 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
 
+      # rules.yml's `Install the pinned Chromium`, for its reason (#2207):
+      # the headless shell, which is what every nightly project launches,
+      # and nothing from apt (#2209), so a nightly frame is drawn with the
+      # fonts a required one is.
       - name: Install the pinned Chromium
-        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
       - name: Nightly browser checks (5 of 5)
         run: pnpm run test:browser:nightly:shard-5
@@ -444,8 +643,9 @@ jobs:
   report:
     name: Report a red run
     # Every job since #1675 (four since #1698, five since #1636 met #1689, six
-    # since #1701's `coverage`): a red realistic shard has to open the issue too.
-    needs: [heavy, coverage, browser-2, browser-3, browser-4, browser-5]
+    # since #1701's `coverage`, eight since #2285's two halves of it): a red
+    # realistic shard or coverage half has to open the issue too.
+    needs: [heavy, coverage-1, coverage-2, coverage, browser-2, browser-3, browser-4, browser-5]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)

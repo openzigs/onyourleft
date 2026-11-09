@@ -189,7 +189,7 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
     held: {
       connected: options.connected ?? false,
       origin: 'https://ride.example',
-      instanceName: 'Lanes of the Weald',
+      instanceName: 'Lanes by the old quarry',
       displayName: 'Rider',
       sourceUrl:
         'https://github.com/openzigs/onyourleft/tree/0123456789abcdef0123456789abcdef01234567',

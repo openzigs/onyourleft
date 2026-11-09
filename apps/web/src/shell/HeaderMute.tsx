@@ -17,7 +17,10 @@
  * `AppShell` renders it beside the wordmark everywhere but the two ride routes
  * (`route-motion.ts` §`RIDE_ROUTE_IDS`). There the ride's own *Mute sounds*
  * and volume (`game/SoundControls.tsx`) stay as they are, and nothing on a
- * ride-time screen moves (`design/ride-time-controls.ts`).
+ * ride-time screen moves (`design/ride-time-controls.ts`). Since #2219 that
+ * *Mute sounds* shows pressed while the master is muted, and the press that
+ * unmutes it clears the master too, so a mute set here is never silent on a
+ * ride with nothing on screen to say why.
  *
  * ## On a phone, an icon at the end of the title's line
  *

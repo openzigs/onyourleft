@@ -75,6 +75,7 @@ import {
   segmentEffortId,
   type ActivityId,
   type AthleteId,
+  type CameraFrameId,
   type RouteId,
   type WorkoutId,
   type SegmentId,
@@ -151,6 +152,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     listRaceableAttempts: async (query, limit) => real.listRaceableAttempts(query, limit),
     setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
       real.setActivityMayBeRaced(owner, activity, mayBeRaced),
+    setActivityVisibility: async (owner, activity, visibility) =>
+      real.setActivityVisibility(owner, activity, visibility),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
     moveActivityToRecentlyDeleted: async (owner, id, deletedAt) =>
       real.moveActivityToRecentlyDeleted(owner, id, deletedAt),
@@ -188,6 +191,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     putActivityEfforts: async (owner, activityId, efforts) =>
       real.putActivityEfforts(owner, activityId, efforts),
     listEfforts: async (owner, segment, limit) => real.listEfforts(owner, segment, limit),
+    listExcludedEfforts: async (owner, segment, limit) =>
+      real.listExcludedEfforts(owner, segment, limit),
     listSharedEfforts: async (owner, segment, limit) =>
       real.listSharedEfforts(owner, segment, limit),
     listActivityEfforts: async (owner, activityId) => real.listActivityEfforts(owner, activityId),
@@ -205,7 +210,14 @@ function bindStore(real: ActivityStore): PersistentStore {
     putCameraFrame: async (record) => real.putCameraFrame(record),
     listCameraFrames: async (owner, limit) => real.listCameraFrames(owner, limit),
     countCameraFrames: async (owner) => real.countCameraFrames(owner),
+    countExportableCameraFrames: async (owner) => real.countExportableCameraFrames(owner),
     deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
+    deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+      real.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+    listRideSnapshots: async (owner, activity) => real.listRideSnapshots(owner, activity),
+    countRideSnapshots: async (owner, activity) => real.countRideSnapshots(owner, activity),
+    countSnapshots: async (owner) => real.countSnapshots(owner),
+    deleteRideSnapshot: async (owner, activity, id) => real.deleteRideSnapshot(owner, activity, id),
     putFramingReference: async (record) => real.putFramingReference(record),
     getFramingReference: async (owner) => real.getFramingReference(owner),
     deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
@@ -1121,6 +1133,41 @@ export function survivingFrameStoreFactory(): StoreFactory {
           // a weaker proof: what is being calibrated is the *round trip*, not
           // the arithmetic.
           real.countCameraFrames(owner),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **reports one snapshot deleted and keeps the picture** —
+ * #1063.
+ *
+ * ADR 0044 D-3: *"The rider can also delete one snapshot."* This store answers
+ * `deleteRideSnapshot` with `true` whenever the ride holds the snapshot — an
+ * honest answer about what it would have removed — and removes nothing. The
+ * snapshot section then drops the picture from the screen, the rider is told
+ * it is gone, and the photograph is still on the device, which is the
+ * `survivingFrameStoreFactory` failure one picture at a time.
+ *
+ * Only a read on a fresh connection notices, and
+ * `camera-frame-store.test.ts` §"one snapshot is deleted" is the red/green
+ * pair.
+ */
+export function survivingSnapshotStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        deleteRideSnapshot: async (
+          owner: AthleteId,
+          activity: ActivityId,
+          id: CameraFrameId,
+        ): Promise<boolean> =>
+          (await real.listRideSnapshots(owner, activity)).some((frame) => frame.id === id),
       };
     },
     destroy: async (name) => {

@@ -98,6 +98,18 @@ export function stubEffortPort(options: StubEffortOptions): StubEfforts {
       return read(`efforts:${segment}`, limit === undefined ? found : found.slice(0, limit));
     },
 
+    listExcludedEfforts: (owner, segment, limit) => {
+      const found = options.efforts
+        .filter(
+          (effort) =>
+            effort.athleteId === owner &&
+            effort.segmentId === segment &&
+            effort.visibility === 'excluded',
+        )
+        .sort((a, b) => a.elapsed - b.elapsed);
+      return read(`excluded:${segment}`, limit === undefined ? found : found.slice(0, limit));
+    },
+
     getActivity: (owner, id) => read(`activity:${id}`, rideOf(owner, id)?.activity),
 
     getStreamSetSummary: (owner, id) => {

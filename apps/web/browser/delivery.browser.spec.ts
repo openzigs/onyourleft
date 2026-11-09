@@ -19,6 +19,20 @@
  *    call do not draw over each other.
  * 4. **The owner's photograph**: a real frame with a parcel, a marker and
  *    each obstacle, attached to the run.
+ * 5. **An obstacle in the rider's own lane is not behind their back** (#2396):
+ *    each kind standing in the lane the rider is steered into, from 60 m to
+ *    2 m ahead, on the owner's 16 : 10 tablet and an upright phone; at three
+ *    distances in four, of the whole approach and of its last 30 m, some of
+ *    what it and its hazard marker draw stands clear above the rider's top.
+ *    With no marker (`three-renderer.ts` §`obstacleHazardMarker`) every case
+ *    is red: the obstacle sits on the helmet, then behind the rider.
+ * 6. **The camera stays out of a parked car** (#2396): the rider back in the
+ *    car's lane just past it, the camera 4.5 m behind still beside it, the
+ *    eye where `delivery/camera-clear.ts` puts it; the car covers at most a
+ *    fifth of the road under the rider. With the eye behind the rider, a
+ *    flat block of the car's paint covers 65 % to 98 % of it.
+ * 7. **The owner's photographs** of #2396: a bin in the rider's lane, and a
+ *    parked car being passed, before and after.
  *
  * ⚠️ An ordinary ride's village frame is `realistic-town.browser.spec.ts`',
  * which this change does not touch: no view builds the belt until a frame
@@ -38,6 +52,71 @@ async function open(page: Page): Promise<void> {
 
 /** DL6b's "instanced so the raise stays small": the most calls the belt may add. */
 const MOST_DELIVERY_CALLS = 3;
+
+/**
+ * #2396's approach: from `obstacles.ts` §`OBSTACLE_SIGHT_METRES`, where the
+ * obstacle is spoken, to 2 m in front of the rider, every 2 m.
+ */
+const APPROACH: readonly number[] = Array.from({ length: 30 }, (_, index) => 60 - 2 * index);
+
+/**
+ * The last of the approach, metres: **30**, the stretch the rider steers in.
+ * At `obstacles.ts` §`AVOIDABLE_FASTEST_METRES_PER_SECOND` it is 2.5 s, a
+ * lane change (`lanes.ts` §`LANE_CHANGE_SECONDS`, 0.4 s) and a reaction.
+ * Held on its own because the whole approach can pass while this fails: on
+ * the tablet a bin with no marker stands clear of the rider from 60 m to
+ * about 18 m, then is behind their back for the last 15 m, which is
+ * three-quarters of the approach and none of the part that counts.
+ */
+const STEERING_WINDOW_METRES = 30;
+
+/**
+ * How far above the rider's top an obstacle's pixels must stand to count as
+ * clear of the rider: **4 %** of the frame's height. #2396's own number:
+ * nearer the helmet than that, a speck reads as part of the rider.
+ */
+const CLEAR_SHARE = 0.04;
+
+/** The fewest such pixels that count as the obstacle being seen there. */
+const CLEAR_PIXELS = 4;
+
+/** #2396's "for most of the approach": three distances in four, of the whole and of its last 30 m. */
+const MOST_OF_THE_APPROACH = 0.75;
+
+/** The owner's tablet, 16 : 10, and a phone held upright. */
+const IN_LANE_FRAMES = [
+  { name: 'a 16 : 10 tablet', width: 1280, height: 800 },
+  { name: 'an upright phone', width: 390, height: 844 },
+] as const;
+
+/**
+ * #2396: where the camera's eye is, metres past a parked car's middle, while
+ * the rider 4.5 m ahead is back in the car's lane and clear of it: from half
+ * a metre behind the car's back (the near plane's reach) to its front, every
+ * half metre. The car is 4.4 m long.
+ */
+const EYE_BESIDE_CAR: readonly number[] = Array.from(
+  { length: 10 },
+  (_, index) => -2.7 + 0.5 * index,
+);
+
+/**
+ * The most of the road under the rider — the middle third of the frame's
+ * bottom quarter — a car the camera is beside may cover: **a fifth**. #2396's
+ * own number, from its measurement: with the eye moved off the car its side
+ * reaches 10 % of that strip on the tablet and none on a phone; with the eye
+ * behind the rider, inside the car, a flat block of its paint covers 65 % to
+ * 98 %, the frame the owner saw.
+ */
+const MOST_CAR_IN_THE_BOTTOM = 0.2;
+
+/** Each kind in the right-hand lane, the racing line's home, and a bin on the centre line. */
+const IN_LANE_CASES = [
+  { kind: 'bin', lane: 1.75 },
+  { kind: 'trolley', lane: 1.75 },
+  { kind: 'cone', lane: 1.75 },
+  { kind: 'bin', lane: 0 },
+] as const;
 
 test.describe('Delivery’s belt — #1814', () => {
   test('adds the same calls to a real view’s frame for one of each piece as for twenty, and no more than three', async ({
@@ -92,6 +171,8 @@ test.describe('Delivery’s belt — #1814', () => {
       expect(read?.bin).toEqual([true, true, true]);
       expect(read?.trolley).toEqual([false, false, true]);
       expect(read?.cone).toEqual([false, true, false]);
+      // #2362: a parked car's body, and the road under it between its wheels.
+      expect(read?.['parked-car']).toEqual([true, false, true]);
     });
   }
 
@@ -106,6 +187,91 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(reading?.after).toEqual({ markers: 1, first: false, second: true });
   });
 
+  test('photographs the parked cars for the owner — #2362, round 5', async ({ page }, testInfo) => {
+    await open(page);
+    await page.evaluate(() => window.__oylDelivery?.carsShowcase());
+    const shot = await page.locator('#delivery-cars').screenshot();
+    await testInfo.attach('delivery-cars', { body: shot, contentType: 'image/png' });
+    expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(shot.byteLength).toBeGreaterThan(5000);
+  });
+  for (const { name, width, height } of IN_LANE_FRAMES) {
+    for (const { kind, lane } of IN_LANE_CASES) {
+      test(`#2396: a ${kind} standing in the rider’s own lane (${String(lane)} m) is clear of the rider for most of its approach, on ${name}`, async ({
+        page,
+      }) => {
+        await open(page);
+        const reading = await page.evaluate(
+          (asked) =>
+            window.__oylDelivery?.inLane(
+              asked.kind,
+              asked.lane,
+              asked.aheads,
+              asked.clearShare,
+              asked.width,
+              asked.height,
+            ),
+          { kind, lane, aheads: APPROACH, clearShare: CLEAR_SHARE, width, height },
+        );
+        if (reading === undefined) throw new Error('no harness');
+        const isClear = (sample: { readonly clear: number }): boolean =>
+          sample.clear >= CLEAR_PIXELS;
+        const clear = reading.samples.filter(isClear);
+        const steering = reading.samples.filter((sample) => sample.ahead <= STEERING_WINDOW_METRES);
+        console.log(
+          `#2396 ${kind} in lane ${String(lane)} on ${name}: rider's top ${(100 * reading.riderTop).toFixed(1)} %, ` +
+            `clear at ${String(clear.length)} of ${String(reading.samples.length)}: ` +
+            reading.samples
+              .map(
+                (sample) =>
+                  `${String(sample.ahead)} m ${String(sample.clear)}/${String(sample.drawn)}`,
+              )
+              .join(', '),
+        );
+        // The control: the obstacle is drawn, ahead of the rider, at every distance.
+        for (const sample of reading.samples) {
+          expect(sample.drawn, `drawn ${String(sample.ahead)} m ahead`).toBeGreaterThan(0);
+        }
+        expect(clear.length / reading.samples.length, 'the whole approach').toBeGreaterThanOrEqual(
+          MOST_OF_THE_APPROACH,
+        );
+        expect(
+          steering.filter(isClear).length / steering.length,
+          `the last ${String(STEERING_WINDOW_METRES)} m`,
+        ).toBeGreaterThanOrEqual(MOST_OF_THE_APPROACH);
+      });
+    }
+  }
+
+  for (const { name, width, height } of IN_LANE_FRAMES) {
+    test(`#2396: the camera stays out of a parked car the rider has just passed, on ${name}`, async ({
+      page,
+    }) => {
+      await open(page);
+      const samples = await page.evaluate(
+        (asked) => window.__oylDelivery?.pastParkedCar(asked.eyes, asked.width, asked.height),
+        { eyes: EYE_BESIDE_CAR, width, height },
+      );
+      if (samples === undefined) throw new Error('no harness');
+      console.log(
+        `#2396 past a parked car on ${name}: ` +
+          samples
+            .map(
+              (sample) =>
+                `eye ${sample.eyeAhead.toFixed(1)} m at ${sample.eyeLateral.toFixed(2)} m, ` +
+                `${(100 * sample.underRiderCovered).toFixed(1)} %`,
+            )
+            .join('; '),
+      );
+      expect(samples).toHaveLength(EYE_BESIDE_CAR.length);
+      for (const sample of samples) {
+        expect(sample.underRiderCovered, `eye ${String(sample.eyeAhead)} m`).toBeLessThanOrEqual(
+          MOST_CAR_IN_THE_BOTTOM,
+        );
+      }
+    });
+  }
+
   test('photographs a Delivery frame for the owner', async ({ page }, testInfo) => {
     await open(page);
     await page.evaluate(() => window.__oylDelivery?.showcase());
@@ -115,4 +281,34 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
     expect(shot.byteLength).toBeGreaterThan(5000);
   });
+
+  for (const ahead of [25, 8]) {
+    test(`#2396: photographs a bin ${String(ahead)} m ahead in the rider’s own lane for the owner`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((at) => window.__oylDelivery?.inLaneShowcase(at), ahead);
+      const shot = await page.locator('#delivery-in-lane').screenshot();
+      await testInfo.attach(`delivery-in-lane-${String(ahead)}m`, {
+        body: shot,
+        contentType: 'image/png',
+      });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+
+  for (const behind of [true, false]) {
+    const when = behind ? 'before' : 'after';
+    test(`#2396: photographs a parked car being passed for the owner, the camera as it was ${when} the fix`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((b) => window.__oylDelivery?.pastCarShowcase(-1.2, b), behind);
+      const shot = await page.locator('#delivery-past-car').screenshot();
+      await testInfo.attach(`delivery-past-car-${when}`, { body: shot, contentType: 'image/png' });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
 });

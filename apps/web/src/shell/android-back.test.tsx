@@ -74,6 +74,25 @@ describe('pressBack (#1512)', () => {
     expect(pressBack({ routeId: 'home', rideOn: false, canGoBack: true }, target)).toBe(false);
     expect(target.calls).toEqual(['back', `replace ${hrefFor(routeById('home'))}`]);
   });
+
+  it('hands a press consumed by a ride to the ride, and only that one (#2349)', () => {
+    const target = scripted();
+    const stayed: string[] = [];
+    const onStay = (): void => {
+      stayed.push('stay');
+    };
+    expect(pressBack({ routeId: 'ride', rideOn: true, canGoBack: true }, target, onStay)).toBe(
+      true,
+    );
+    expect(pressBack({ routeId: 'routes', rideOn: false, canGoBack: true }, target, onStay)).toBe(
+      true,
+    );
+    expect(pressBack({ routeId: 'home', rideOn: false, canGoBack: true }, target, onStay)).toBe(
+      false,
+    );
+    expect(stayed).toEqual(['stay']);
+    expect(target.calls).toEqual(['back']);
+  });
 });
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -162,7 +181,7 @@ describe('the shell answers MainActivity’s back press (#1512)', () => {
     ['recording', ridingSnapshot()],
     ['paused', { ...ridingSnapshot(), phase: 'paused' as const }],
   ] as const) {
-    it(`does nothing at all while a ride is ${name}, even from Home`, async () => {
+    it(`never goes back or leaves while a ride is ${name}, even from Home`, async () => {
       for (const at of [hrefFor(routeById('ride')), hrefFor(routeById('home'))]) {
         mounted?.unmount();
         await openShell(at, snapshot);
@@ -178,6 +197,40 @@ describe('the shell answers MainActivity’s back press (#1512)', () => {
       mounted = undefined;
     });
   }
+
+  it('opens the end-of-ride question on the Ride screen mid-ride, then is Keep riding — and does nothing more on Home (#2349)', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    globalThis.location.hash = hrefFor(routeById('ride'));
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} nativeShell rideController={stub.controller} />,
+    );
+    await settle();
+    await act(async () => {
+      expect(press(true)).toBe(true);
+      await Promise.resolve();
+    });
+    expect(stub.calls.armStop).toBe(1);
+    stub.set({ stopArmed: true });
+    await settle();
+    await act(async () => {
+      expect(press(true)).toBe(true);
+      await Promise.resolve();
+    });
+    expect(stub.calls.cancelStop).toBe(1);
+    expect(stub.calls.confirmStop).toBe(0);
+    expect(stub.calls.confirmDiscard).toBe(0);
+    mounted.unmount();
+
+    // Another screen mid-ride: consumed, and nothing is asked.
+    const elsewhere = stubRideController(ridingSnapshot());
+    globalThis.location.hash = hrefFor(routeById('home'));
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} nativeShell rideController={elsewhere.controller} />,
+    );
+    await settle();
+    expect(press(true)).toBe(true);
+    expect(elsewhere.calls.armStop).toBe(0);
+  });
 
   it('takes the global back when the shell unmounts', async () => {
     await openShell(hrefFor(routeById('routes')));
@@ -248,10 +301,53 @@ describe('the trainer game’s stage has the screen (#1512)', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
 
     const back = vi.spyOn(globalThis.history, 'back').mockImplementation(() => undefined);
-    expect(press(true)).toBe(true);
-    expect(press(false)).toBe(true);
-    expect(back).not.toHaveBeenCalled();
+    const asked = (): number => document.querySelectorAll('[data-oyl-end-ride]').length;
+    // #2349: the first press opens the end-of-ride question…
+    await act(async () => {
+      expect(press(true)).toBe(true);
+      await Promise.resolve();
+    });
     await settle();
+    expect(asked()).toBe(1);
+    // …and the second is Keep riding. Neither leaves, nor ends the ride.
+    await act(async () => {
+      expect(press(false)).toBe(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked()).toBe(0);
+    expect(back).not.toHaveBeenCalled();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
+  });
+
+  it('asks, and stays, when a desktop browser’s Back or a typed address would leave the stage (#2349’s review, B2)', async () => {
+    globalThis.location.hash = hrefFor(routeById('game'));
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        game={GAME}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    const start = [...document.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      start?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+
+    await act(async () => {
+      globalThis.location.hash = hrefFor(routeById('home'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await settle();
+    expect(document.querySelectorAll('[data-oyl-end-ride]')).toHaveLength(1);
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
   });
 });

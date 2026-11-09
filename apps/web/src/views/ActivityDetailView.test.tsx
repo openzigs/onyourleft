@@ -41,13 +41,19 @@ import {
   resetFixtureIds,
   seedAthletes,
   seedRide,
+  snapshotFor,
   streamSetFor,
 } from '@onyourleft/store/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { stubAnalysis, type StubAnalysis } from '../analysis/testing';
 import { trimRadius } from '../detail/privacy';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import { snapshotCountText } from '../detail/RideSnapshotsSection';
 import {
   installFakeIntersectionObserver,
   stubActivity,
@@ -82,7 +88,12 @@ import {
 } from '../testing/mount';
 import { UnitsProvider } from '../units/context';
 
-import { ActivityDetailView, DISTANCE_AXIS_TITLE, READING_RIDE_TEXT } from './ActivityDetailView';
+import {
+  ActivityDetailView,
+  DISTANCE_AXIS_TITLE,
+  HOVER_SETTLE_MS,
+  READING_RIDE_TEXT,
+} from './ActivityDetailView';
 import { AnalysisView } from './AnalysisView';
 
 const ATHLETE = athleteId('athlete-a');
@@ -1083,6 +1094,92 @@ describe('a trace is not left converted into the units the rider has left (#238)
   });
 });
 
+describe('a ride’s snapshots do not carry over to the next ride — #1063’s review', () => {
+  /** Two rides behind one port, each answering for its own id. */
+  function twoRides(first: StubDetail, second: StubDetail, secondId: string): StubDetail {
+    const pick = (id: string) => (id === secondId ? second : first).store;
+    return {
+      ...first,
+      store: {
+        getActivity: (owner, id) => pick(id).getActivity(owner, id),
+        setActivityMayBeRaced: (owner, id, wanted) =>
+          pick(id).setActivityMayBeRaced(owner, id, wanted),
+        getRoute: (owner, id) => first.store.getRoute(owner, id),
+        getStreamSetSummary: (owner, id) => pick(id).getStreamSetSummary(owner, id),
+        getStreamChannel: (owner, id, channel) => pick(id).getStreamChannel(owner, id, channel),
+        listLaps: (owner, id) => pick(id).listLaps(owner, id),
+        listPrivacyZones: (owner) => first.store.listPrivacyZones(owner),
+        getSideCameraReport: (owner, id) => pick(id).getSideCameraReport(owner, id),
+        getRideWriteUp: (owner, id) => pick(id).getRideWriteUp(owner, id),
+      },
+    };
+  }
+
+  it('moving from one ride’s page to another’s leaves the second ride’s section closed, and reads none of its pictures', async () => {
+    const rideB = activityId('ride-2');
+    const port = twoRides(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: {},
+        laps: [],
+      }),
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ id: rideB, name: 'Thursday evening', hasPosition: false }),
+        channels: {},
+        laps: [],
+      }),
+      rideB,
+    );
+    const calls: string[] = [];
+    const snapshots: RideSnapshotsPort = {
+      athleteId: ATHLETE_A,
+      store: {
+        countRideSnapshots: (_owner, ride) => {
+          calls.push(`count:${ride}`);
+          return Promise.resolve(2);
+        },
+        listRideSnapshots: (owner, ride) => {
+          calls.push(`list:${ride}`);
+          return Promise.resolve([snapshotFor(owner, ride), snapshotFor(owner, ride)]);
+        },
+        deleteRideSnapshot: () => Promise.resolve(false),
+      },
+      objectUrls: { create: () => 'blob:test/1', revoke: () => undefined },
+      holdSecureWindow: () => () => undefined,
+    };
+    const section = (): HTMLDetailsElement => {
+      const found = [...document.querySelectorAll('details')].find(
+        (each) => each.querySelector('summary')?.textContent === snapshotCountText(2),
+      );
+      if (found === undefined) throw new Error('no snapshot section');
+      return found;
+    };
+    mounted = await mount(
+      <ActivityDetailView port={port} activityId={RIDE} snapshots={snapshots} />,
+    );
+    await settle();
+    await settle();
+    await act(async () => {
+      section().open = true;
+      section().dispatchEvent(new Event('toggle'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(calls).toContain(`list:${RIDE}`);
+
+    calls.length = 0;
+    await mounted.rerender(
+      <ActivityDetailView port={port} activityId={rideB} snapshots={snapshots} />,
+    );
+    await settle();
+    await settle();
+    expect(document.body.textContent).toContain('Thursday evening');
+    expect(section().open).toBe(false);
+    expect(calls).toStrictEqual([`count:${rideB}`]);
+    expect(document.querySelectorAll('img')).toHaveLength(0);
+  });
+});
+
 describe('#2068 — the stacked charts, read back from the real store (docs/agents/quality-gate.md §5)', () => {
   /** Turns of the event loop a real-store read may take before the test gives up (#575's bound). */
   const READ_TURNS = 200;
@@ -1179,6 +1276,124 @@ describe('#2068 — the stacked charts, read back from the real store (docs/agen
       'speed',
       'altitude',
     ]);
+  });
+});
+
+/** `port`, with every read of `channel` refused as a corrupt blob would be. */
+function failing(port: StubDetail, channel: StreamChannel): StubDetail {
+  return {
+    ...port,
+    store: {
+      ...port.store,
+      getStreamChannel: (owner, id, asked) =>
+        asked === channel
+          ? Promise.reject(new Error('The stored channel is corrupt.'))
+          : port.store.getStreamChannel(owner, id, asked),
+    },
+  };
+}
+
+describe('#2194 — a read that fails says so, never “Reading…” for good', () => {
+  it('says the power chart and the power curve could not be read, and why', async () => {
+    await import('../detail/PowerCurveChart');
+    mounted = await open(failing(indoorRide(), 'power'));
+    await settle();
+    const slot = document.querySelector('[data-oyl-trace-slot="power"]');
+    expect(slot?.textContent).toContain(
+      'Could not read this ride’s power. The stored channel is corrupt.',
+    );
+    expect(slot?.textContent).not.toContain('Reading power');
+    expect(slot?.querySelector('.oyl-status--warning')).not.toBeNull();
+    // The owner's ruling of 2026-11-06: no chart-sized space under the warning.
+    expect(slot?.classList.contains('oyl-trace-slot--failed')).toBe(true);
+    expect(
+      document
+        .querySelector('[data-oyl-trace-slot="heartRate"]')
+        ?.classList.contains('oyl-trace-slot--failed'),
+    ).toBe(false);
+    const curve = document.querySelector('[data-oyl-curve-slot]');
+    expect(curve?.textContent).toContain(
+      'Could not read this ride’s power, so its power curve cannot be drawn. The stored channel is corrupt.',
+    );
+    expect(curve?.textContent).not.toContain('Reading the power curve');
+    // The channels that did read are drawn as ever.
+    expect(
+      document.querySelector('[data-oyl-trace-slot="heartRate"] svg.oyl-trace'),
+    ).not.toBeNull();
+  });
+
+  it('says the distance could not be read when the speed would not, and stays on time', async () => {
+    mounted = await open(
+      failing(
+        stubDetail(ATHLETE, {
+          activity: stubActivity({ hasPosition: false }),
+          channels: {
+            power: powerSeries(600),
+            speed: Array.from({ length: 600 }, () => metresPerSecond(10)),
+          },
+          laps: [],
+        }),
+        'speed',
+      ),
+    );
+    await act(async () => {
+      document
+        .querySelector<HTMLInputElement>('input[name="oyl-trace-axis"][value="distance"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    expect(document.body.textContent).toContain(
+      'Could not read this ride’s speed, so its charts stay drawn against time. The stored channel is corrupt.',
+    );
+    expect(document.body.textContent).not.toContain('Reading the distance ridden');
+    // The owner's ruling of 2026-11-06: said once, by the axis choice, and not
+    // again in the speed slot, which keeps no chart's height either.
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    const speed = document.querySelector('[data-oyl-trace-slot="speed"]');
+    expect(speed?.textContent).toBe('');
+    expect(speed?.classList.contains('oyl-trace-slot--failed')).toBe(true);
+    expect(
+      queryAll(
+        document.querySelector('[data-oyl-trace-slot="power"]') as Element,
+        '.oyl-trace-chart__times > div',
+      ).map((each) => each.textContent),
+    ).toEqual(['0:00', '5:00', '10:00']);
+  });
+});
+
+describe('#2194 — the owner’s screenshot rulings of 2026-11-06', () => {
+  it('says a failed speed read once on the time axis, in the speed slot and not at the axis choice', async () => {
+    mounted = await open(
+      failing(
+        stubDetail(ATHLETE, {
+          activity: stubActivity({ hasPosition: false }),
+          channels: {
+            power: powerSeries(600),
+            speed: Array.from({ length: 600 }, () => metresPerSecond(10)),
+          },
+          laps: [],
+        }),
+        'speed',
+      ),
+    );
+    await settle();
+    await settle();
+    expect(document.body.textContent?.split('Could not read this ride’s speed')).toHaveLength(2);
+    expect(document.querySelector('[data-oyl-trace-slot="speed"]')?.textContent).toContain(
+      'Could not read this ride’s speed. The stored channel is corrupt.',
+    );
+  });
+
+  it('gives a failed slot no chart’s height in the stylesheet', () => {
+    const theme = readFileSync(join(import.meta.dirname, '../design/theme.css'), 'utf8');
+    const slot = theme.indexOf('.oyl-trace-slot {');
+    const failed = theme.indexOf('.oyl-trace-slot--failed {');
+    expect(slot).toBeGreaterThan(-1);
+    // After the slot's own rule, so it wins at the same specificity.
+    expect(failed).toBeGreaterThan(slot);
+    expect(theme.slice(failed, theme.indexOf('}', failed))).toMatch(/min-height:\s*0;/);
   });
 });
 
@@ -1508,6 +1723,25 @@ describe('#2081 — laps marked on every trace', () => {
 });
 
 describe('#2081 — the tap and hover read-out', () => {
+  /** One pointer event on `svg`, at `clientX`. */
+  async function pointer(
+    svg: Element,
+    type: 'pointerdown' | 'pointerup' | 'pointermove',
+    clientX: number,
+    pointerType: string,
+  ): Promise<void> {
+    await act(async () => {
+      svg.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, pointerType }));
+      await Promise.resolve();
+    });
+  }
+
+  /** A finger down and up again in one place: a tap (#2194). */
+  async function tap(svg: Element, clientX: number): Promise<void> {
+    await pointer(svg, 'pointerdown', clientX, 'touch');
+    await pointer(svg, 'pointerup', clientX, 'touch');
+  }
+
   function laidOut(svg: Element): void {
     vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
       left: 0,
@@ -1526,12 +1760,7 @@ describe('#2081 — the tap and hover read-out', () => {
     mounted = await open(indoorRide());
     const [, heartRate] = queryAll(document, 'svg.oyl-trace');
     laidOut(heartRate as Element);
-    await act(async () => {
-      heartRate?.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 151, pointerType: 'touch' }),
-      );
-      await Promise.resolve();
-    });
+    await tap(heartRate as Element, 151);
     await settle();
     // A quarter of a 1 200 s ride is 300 s, already on a 2 s step.
     const slider = document.querySelector<HTMLInputElement>('#oyl-trace-cursor');
@@ -1555,12 +1784,7 @@ describe('#2081 — the tap and hover read-out', () => {
     mounted = await open(indoorRide());
     const [, heartRate] = queryAll(document, 'svg.oyl-trace');
     laidOut(heartRate as Element);
-    await act(async () => {
-      heartRate?.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 150.6, pointerType: 'touch' }),
-      );
-      await Promise.resolve();
-    });
+    await tap(heartRate as Element, 150.6);
     await settle();
     // 150.6 of 600 units is 301.2 s of 1 200; the nearest 2 s step is 302.
     expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
@@ -1577,6 +1801,49 @@ describe('#2081 — the tap and hover read-out', () => {
     expect(document.querySelector('#oyl-trace-cursor')?.getAttribute('aria-valuetext')).toBe(
       '11:40',
     );
+  });
+
+  it('moves the line under a hovering mouse at once, and says where only once it rests — #2194', async () => {
+    mounted = await open(indoorRide());
+    const [power] = queryAll(document, 'svg.oyl-trace');
+    laidOut(power as Element);
+    const output = (): string =>
+      document.querySelector('output[for="oyl-trace-cursor"]')?.textContent ?? '';
+    const before = output();
+    expect(before.startsWith('0:00')).toBe(true);
+    // A mouse crossing three steps on its way.
+    for (const clientX of [100, 140, 151]) {
+      await pointer(power as Element, 'pointermove', clientX, 'mouse');
+    }
+    // The line and the slider follow it…
+    expect(document.querySelector<HTMLInputElement>('#oyl-trace-cursor')?.value).toBe('302');
+    expect(
+      queryAll(document, 'svg.oyl-trace line.oyl-trace__cursor').map((line) =>
+        line.getAttribute('x1'),
+      ),
+    ).toEqual(['151.00', '151.00', '151.00']);
+    // …and the polite read-out has not changed for any of the three steps.
+    expect(output()).toBe(before);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, HOVER_SETTLE_MS + 50));
+    });
+    // Once it rests, it says where it rested, once.
+    expect(output()).toBe('5:02, lap 1: Power 153 W, Heart rate 142 bpm, Cadence 88 rpm');
+  });
+
+  it('says a tap at once, and a hover still settling is not said after it — #2194', async () => {
+    mounted = await open(indoorRide());
+    const [power] = queryAll(document, 'svg.oyl-trace');
+    laidOut(power as Element);
+    const output = (): string =>
+      document.querySelector('output[for="oyl-trace-cursor"]')?.textContent ?? '';
+    await pointer(power as Element, 'pointermove', 100, 'mouse');
+    await tap(power as Element, 151);
+    expect(output().startsWith('5:02,')).toBe(true);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, HOVER_SETTLE_MS + 50));
+    });
+    expect(output().startsWith('5:02,')).toBe(true);
   });
 
   it('shows a dash, never a number, for a chart whose sensor gave nothing at the cursor', async () => {
@@ -1708,5 +1975,127 @@ describe('#2081 — a distance axis beside time', () => {
     expect(
       queryAll(document, '.oyl-trace-chart__times > div').map((each) => each.textContent),
     ).toEqual(['0:00', '5:00', '10:00']);
+  });
+});
+
+describe('#2373 — a read that settles after the page has gone reaches no setter', () => {
+  let observers: FakeIntersectionObservers | undefined;
+
+  afterEach(() => {
+    observers?.restore();
+    observers = undefined;
+  });
+
+  /**
+   * Count the reads of `window` from now on.
+   *
+   * React's `dispatchSetState` reads `window.event` to choose the update's
+   * priority, which is the line the merge-queue failure threw from once the
+   * environment had torn `window` down (run 42509922500). So a read of `window`
+   * after the page has unmounted is a setter that ran: the observable end of the
+   * defect, without reaching into React.
+   */
+  function countWindowReads(): { readonly reads: () => number; readonly restore: () => void } {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const held = globalThis.window;
+    let reads = 0;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      get: () => {
+        reads += 1;
+        return held;
+      },
+    });
+    return {
+      reads: () => reads,
+      restore: () => {
+        if (original === undefined) {
+          Reflect.deleteProperty(globalThis, 'window');
+        } else {
+          Object.defineProperty(globalThis, 'window', original);
+        }
+      },
+    };
+  }
+
+  it('does not set a trace, nor read the channels still to come, once the page is unmounted', async () => {
+    observers = installFakeIntersectionObserver();
+    const base = indoorRide();
+    const asked: StreamChannel[] = [];
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const port: StubDetail = {
+      ...base,
+      store: {
+        ...base.store,
+        getStreamChannel: async (owner, id, channel) => {
+          asked.push(channel);
+          if (channel === 'power') {
+            await held;
+          }
+          return base.store.getStreamChannel(owner, id, channel);
+        },
+      },
+    };
+    mounted = await open(port);
+    await observers.reveal(
+      ['power', 'heartRate', 'cadence'].map(
+        (channel) => document.querySelector(`[data-oyl-trace-slot="${channel}"]`) as Element,
+      ),
+    );
+    await settle();
+    // The first channel's read is in flight, and the rider leaves.
+    expect(asked).toEqual(['power']);
+    mounted.unmount();
+    mounted = undefined;
+
+    const watch = countWindowReads();
+    try {
+      release?.();
+      await settle();
+      await settle();
+      expect(watch.reads(), 'a setter ran after the page had unmounted').toBe(0);
+      expect(asked, 'a channel was read after the page had unmounted').toEqual(['power']);
+    } finally {
+      watch.restore();
+    }
+  });
+
+  it('does not set the shared track once the page is unmounted', async () => {
+    const port = outdoorRide([homeZone()]);
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = {
+      ...port.store,
+      listPrivacyZones: async (owner: typeof ATHLETE) => {
+        await held;
+        return port.store.listPrivacyZones(owner);
+      },
+    };
+    mounted = await open({ ...port, store });
+    const button = queryAll(document, 'button').find((each) =>
+      each.textContent?.includes('Show what a shared copy would contain'),
+    );
+    if (button === undefined) throw new Error('no shared-view button');
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    mounted.unmount();
+    mounted = undefined;
+
+    const watch = countWindowReads();
+    try {
+      release?.();
+      await settle();
+      await settle();
+      expect(watch.reads(), 'a setter ran after the page had unmounted').toBe(0);
+    } finally {
+      watch.restore();
+    }
   });
 });

@@ -164,6 +164,7 @@ import {
   EqualDepth,
   EquirectangularReflectionMapping,
   Euler,
+  ExtrudeGeometry,
   FileLoader,
   FogExp2,
   Group,
@@ -192,6 +193,7 @@ import {
   Scene,
   ShaderMaterial,
   ShadowMaterial,
+  Shape,
   SphereGeometry,
   RGB_ETC1_Format,
   RGB_ETC2_Format,
@@ -331,6 +333,7 @@ import {
   GARAGE,
   minimumAreaRectangle,
   ROOF_ROLES,
+  SPIRE_SURFACE,
   SHINGLE_COURSE_METRES,
   STOREY_METRES,
   STYLE_BRICK_FOUNDATION,
@@ -855,7 +858,7 @@ export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
 
 /**
  * The kit each kind wears UNDER its tint — #623. The rider wears the house kit
- * (`bicycle.ts` §`HOUSE_KIT`, the app's accent); the pacer and the ghost wear
+ * (`bicycle.ts` §`HOUSE_KIT`, teal, its own colour since #2123); the pacer and the ghost wear
  * `bicycle.ts` §`PACER_KIT`, the blue #368 told them apart in, because
  * {@link RIDER_TINTS} multiplies and cannot put back a hue the kit lacks.
  *
@@ -10961,6 +10964,8 @@ export interface DrawnDeliveryPiece {
   readonly z: number;
   /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
   readonly kind: DeliveryObstacleKind | undefined;
+  /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
+  readonly paint?: number | undefined;
 }
 
 /**
@@ -10987,6 +10992,7 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
   bin: { halfLength: 0.37, halfWidth: 0.3 },
   trolley: { halfLength: 0.25, halfWidth: 0.3 },
   cone: { halfLength: 0.2, halfWidth: 0.2 },
+  'parked-car': { halfLength: 2.2, halfWidth: 0.9 },
 };
 
 /** The roster, in order: a kind's index is its number in both attributes. */
@@ -10995,8 +11001,30 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
 ) as readonly DeliveryObstacleKind[];
 
 /**
+ * A parked car's body paints — #2362: blue-grey, brick red and pale silver,
+ * this project's own colours. **One car in the geometry, painted per
+ * instance** (round 6 of PR #2378's review): the car's body vertices carry
+ * {@link DELIVERY_PAINTED_ATTRIBUTE}, and {@link withObstacleKinds} takes their
+ * colour from the instance's {@link DELIVERY_OBSTACLE_PAINT_ATTRIBUTE} instead
+ * of the vertex's. Round 5 held three whole cars, one a paint, and every
+ * instance of every kind submitted all three.
+ */
+const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
+
+/** The vertex attribute marking a parked car's body, whose colour is the instance's paint. @see PARKED_CAR_PAINTS */
+const DELIVERY_PAINTED_ATTRIBUTE = 'oylPainted';
+
+/** The instanced attribute holding each obstacle instance's body paint, linear RGB. @see PARKED_CAR_PAINTS */
+const DELIVERY_OBSTACLE_PAINT_ATTRIBUTE = 'oylObstaclePaint';
+
+/** Which of {@link PARKED_CAR_PAINTS} a car piece wears: by its place on the round, so it keeps its colour for the ride. */
+function parkedCarPaint(piece: DeliveryObstaclePiece): number {
+  return (piece.index ?? 0) % PARKED_CAR_PAINTS.length;
+}
+
+/**
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
- * — #1814. Every obstacle instance carries all three kinds' triangles, each
+ * — #1814. Every obstacle instance carries every kind's triangles, each
  * vertex marked with its kind ({@link DELIVERY_PIECE_KIND_ATTRIBUTE}); a vertex
  * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE})
  * is collapsed to the instance's origin, so its triangles have no area and
@@ -11022,12 +11050,20 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};`,
+        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PAINTED_ATTRIBUTE};\nattribute vec3 ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
       `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) );`,
+      'vertex',
+      spliced,
+    );
+    // #2362, round 6: a car's body wears its instance's paint.
+    shader.vertexShader = replacedOrThrown(
+      shader.vertexShader,
+      '#include <color_vertex>',
+      `#include <color_vertex>\n\tvColor.xyz = mix( vColor.xyz, ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE}, ${DELIVERY_PAINTED_ATTRIBUTE} );`,
       'vertex',
       spliced,
     );
@@ -11043,6 +11079,8 @@ interface DeliveryPart {
   readonly glows?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
+  /** For a parked car's body: its colour is the instance's paint (#2362). */
+  readonly painted?: boolean;
 }
 
 /**
@@ -11062,6 +11100,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
   const kinds = new Float32Array(vertices);
+  const painted = new Float32Array(vertices);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
@@ -11076,6 +11115,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       colours[corner * 3 + 2] = paint.b;
       glow[corner] = part.glows === true ? 1 : 0;
       kinds[corner] = part.kind ?? 0;
+      painted[corner] = part.painted === true ? 1 : 0;
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -11088,6 +11128,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
+    geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
   }
   geometry.computeBoundingSphere();
   return geometry;
@@ -11105,15 +11146,16 @@ function deliveryBox(
   return new BoxGeometry(width, height, length).translate(x, y, z);
 }
 
-/** A wheel of `radius`, `width` across, its axle across the road, its middle at `(x, y, z)`. */
+/** A wheel of `radius`, `width` across, its axle across the road, its middle at `(x, y, z)`, round in `segments`. */
 function deliveryWheel(
   radius: number,
   width: number,
   x: number,
   y: number,
   z: number,
+  segments = 8,
 ): BufferGeometry {
-  return new CylinderGeometry(radius, radius, width, 8, 1, false)
+  return new CylinderGeometry(radius, radius, width, segments, 1, false)
     .rotateZ(Math.PI / 2)
     .translate(x, y, z);
 }
@@ -11123,7 +11165,9 @@ function deliveryWheel(
  * with a pale tape band; a white post on the doorstep with a glowing amber
  * diamond above it and a glowing ring on the step; a green wheelie bin, a red
  * hand trolley and an orange cone with a white band, each on black wheels or
- * a black foot. No sprite, colour scheme or shape is taken from another game.
+ * a black foot; and, since #2362, a parked car in one of three body paints
+ * ({@link PARKED_CAR_PAINTS}) with dark windows, pale head lamps, red tail
+ * lamps, dark trim, pale number plates and black tyres on silver rims. No sprite, colour scheme or shape is taken from another game.
  */
 const DELIVERY_PAINT = {
   card: 0xa8794a,
@@ -11136,8 +11180,70 @@ const DELIVERY_PAINT = {
   trolleyPlate: 0x8c8c8c,
   coneBody: 0xe8661c,
   coneBand: 0xe6e6e6,
+  carGlass: 0x2c3a46,
+  carLamp: 0xf1ecd8,
+  carTail: 0xb3241c,
+  carRim: 0xb8bdc3,
+  carTrim: 0x2a2d31,
+  carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
+  hazard: 0xe8432f,
 } as const;
+
+/**
+ * How high the middle of an obstacle's hazard marker floats above the road,
+ * in metres — #2396: **2.7**. @see obstacleHazardMarker
+ *
+ * Two bounds and the number between them. **Above the rider's line of
+ * sight**: the chase camera's eye is 2 m up and 4.5 m behind a 1.515 m helmet
+ * (`camera.ts` §`roadAppearsOverRiderMetres`), so anything in the rider's
+ * lane lower than that sight line is behind their back, and a bin 15 m to
+ * 60 m ahead, though drawn, sits within a few pixels of the helmet and reads
+ * as part of the rider — the defect #2396 is. A marker whose bottom is over
+ * about 1.6 m clears the helmet from a metre ahead, and at this height it
+ * stands about 7° above it at every distance. **Above the near plane's
+ * reach**: the eye passes over an obstacle a rider rode into, and the frustum
+ * nearer than `camera.ts` §`NEAR_PLANE_METRES` reaches 0.5 m above the eye
+ * on the widest (90 degree) lens, which the test holds, so 2.5 m above the
+ * road with the eye at 2.0 m; a marker lower than that would be cut through
+ * by the camera, #2396's other defect. Its bottom is at 2.52 m, a 0.02 m
+ * margin over that cut-off.
+ */
+const HAZARD_MARKER_MIDDLE_METRES = 2.7;
+
+/** How tall the hazard marker is, apex to base, in metres. @see obstacleHazardMarker */
+const HAZARD_MARKER_HEIGHT_METRES = 0.36;
+
+/**
+ * How far the hazard marker's corners reach from its middle, in metres:
+ * **0.2**, the cone's half width, so the marker stands inside every kind's
+ * collision box and the footprint `delivery-belt.test.ts` holds is unchanged.
+ */
+const HAZARD_MARKER_REACH_METRES = 0.2;
+
+/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+
+/**
+ * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
+ * at the obstacle from {@link HAZARD_MARKER_MIDDLE_METRES} above the road.
+ * From behind it is a ▼, which a doorstep's amber diamond on a white post is
+ * not. Every kind carries one, so it is drawn in the obstacles' own instanced
+ * call: no draw call, no instance and no wiring of its own.
+ *
+ * ⚠️ **On every bin, trolley and cone, not only one in the rider's lane.**
+ * The rider changes lane, a crossing obstacle crosses theirs, and a marker
+ * that came and went with the lane would be a second thing to watch. It is a
+ * drawing and decides nothing: no collision reads it. **Not on a parked
+ * car** ({@link HAZARD_MARKED_KINDS}): 1.8 m wide, a car is never behind a
+ * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
+ * the street does not have.
+ */
+function obstacleHazardMarker(): BufferGeometry {
+  return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
+    .rotateX(Math.PI)
+    .translate(0, HAZARD_MARKER_MIDDLE_METRES, 0);
+}
 
 /** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
 function parcelShape(): BufferGeometry {
@@ -11164,18 +11270,173 @@ function markerShape(): BufferGeometry {
   ]);
 }
 
+/** Where a parked car's wheels stand along it, metres from its middle, and their radius. */
+const PARKED_CAR_WHEELS = { rear: -1.35, front: 1.38, radius: 0.33 } as const;
+
+/** A shape drawn in a car's side view, `(along, up)` metres, made solid `width` across with rounded edges. */
+function roundedProfile(shape: Shape, width: number, round: number): BufferGeometry {
+  // The bevel rounds every edge by `round`; the depth is what is left of the width.
+  return new ExtrudeGeometry(shape, {
+    depth: width - 2 * round,
+    bevelEnabled: true,
+    bevelThickness: round,
+    bevelSize: round,
+    bevelSegments: 2,
+    curveSegments: 4,
+  })
+    .rotateY(-Math.PI / 2)
+    .translate(width / 2 - round, 0, 0);
+}
+
+/** A box turned `pitch` radians about the axis across the road, its middle at `(x, y, z)`. */
+function pitchedBox(
+  width: number,
+  height: number,
+  length: number,
+  pitch: number,
+  x: number,
+  y: number,
+  z: number,
+): BufferGeometry {
+  return new BoxGeometry(width, height, length).rotateX(pitch).translate(x, y, z);
+}
+
 /**
- * The obstacle roster, all three kinds in one geometry, each vertex marked
+ * Every part of `parts` scaled and moved together so that their joint box is
+ * exactly `obstacles.ts`' footprint across and along, standing on the road:
+ * what the rider sees is what the rider hits.
+ */
+function fittedToFootprint(
+  parts: readonly (readonly [BufferGeometry, number])[],
+  halfWidth: number,
+  halfLength: number,
+): readonly (readonly [BufferGeometry, number])[] {
+  const box = new Box3();
+  for (const [made] of parts) {
+    made.computeBoundingBox();
+    if (made.boundingBox !== null) box.union(made.boundingBox);
+  }
+  const across = (2 * halfWidth) / (box.max.x - box.min.x);
+  const along = (2 * halfLength) / (box.max.z - box.min.z);
+  const middleX = (box.max.x + box.min.x) / 2;
+  const middleZ = (box.max.z + box.min.z) / 2;
+  for (const [made] of parts) {
+    made.translate(-middleX, -box.min.y, -middleZ).scale(across, 1, along);
+  }
+  return parts;
+}
+
+/**
+ * A parked car — #2362, the owner's rulings on PR #2378 (round 5: "a real
+ * car, not stacked boxes"), modelled here in code, this project's own: a body
+ * drawn as a car's side view with a rounded nose and tail, a sloping bonnet
+ * and a boot, its edges rounded, and wheel arches over four tyres on silver
+ * rims; a glasshouse of dark windows framed by the roof and pillars in the
+ * body's paint; head lamps, tail lamps, a grille, bumpers, number plates and
+ * door mirrors. Its nose is along `+z`; it stands about 1.45 m tall, and
+ * {@link fittedToFootprint} holds it to `obstacles.ts`' 4.4 m by 1.8 m.
+ * `paint` is the body's.
+ */
+function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'];
+  const { rear, front, radius } = PARKED_CAR_WHEELS;
+  // The arch's own radius, before the body's rounding (0.07) narrows it to a hand's gap over the tyre.
+  const arch = radius + 0.15;
+  const sill = 0.3;
+  const body = new Shape();
+  body.moveTo(-halfLength, 0.34);
+  body.lineTo(rear - arch - 0.1, sill);
+  body.lineTo(rear - arch, radius);
+  body.absarc(rear, radius, arch, Math.PI, 0, true);
+  body.lineTo(front - arch, sill);
+  body.lineTo(front - arch, radius);
+  body.absarc(front, radius, arch, Math.PI, 0, true);
+  body.lineTo(front + arch + 0.12, sill);
+  // The nose: a rounded bumper, the lamps' face, then over onto the bonnet.
+  body.quadraticCurveTo(halfLength, sill, halfLength, 0.42);
+  body.lineTo(halfLength, 0.7);
+  body.quadraticCurveTo(halfLength - 0.02, 0.84, halfLength - 0.3, 0.86);
+  body.quadraticCurveTo(1.45, 0.92, 0.9, 0.95);
+  // The waist, under the glasshouse, then the boot and the rounded tail.
+  body.lineTo(-1.45, 0.98);
+  body.lineTo(-1.85, 0.97);
+  body.quadraticCurveTo(-halfLength + 0.02, 0.95, -halfLength, 0.8);
+  body.lineTo(-halfLength, 0.34);
+  const glasshouse = new Shape();
+  glasshouse.moveTo(-1.5, 0.96);
+  glasshouse.lineTo(0.92, 0.94);
+  glasshouse.quadraticCurveTo(0.5, 1.22, 0.12, 1.39);
+  glasshouse.quadraticCurveTo(-0.45, 1.46, -0.98, 1.39);
+  glasshouse.quadraticCurveTo(-1.3, 1.24, -1.5, 0.96);
+  const roof = new Shape();
+  roof.moveTo(0.14, 1.37);
+  roof.quadraticCurveTo(-0.45, 1.44, -1.0, 1.37);
+  roof.lineTo(-1.0, 1.43);
+  roof.quadraticCurveTo(-0.45, 1.5, 0.14, 1.43);
+  roof.lineTo(0.14, 1.37);
+  const bodyWidth = 2 * halfWidth - 0.12;
+  const glassWidth = bodyWidth - 0.22;
+  /** Where the body's rounded nose and tail end, its rounding (0.07) past the profile: the lamps' face. */
+  const nose = halfLength + 0.07;
+  const parts: (readonly [BufferGeometry, number])[] = [
+    [roundedProfile(body, bodyWidth, 0.07), paint],
+    [roundedProfile(glasshouse, glassWidth, 0.04), DELIVERY_PAINT.carGlass],
+    [roundedProfile(roof, glassWidth + 0.04, 0.02), paint],
+    // The pillars between the windows, in the body's paint: the windscreen's,
+    // the middle one and the rear window's, each on both sides.
+    [pitchedBox(glassWidth + 0.03, 0.5, 0.08, 0, 0, 1.17, -0.42), paint],
+  ];
+  for (const side of [-1, 1]) {
+    const edge = side * (glassWidth / 2 - 0.01);
+    parts.push([pitchedBox(0.06, 0.9, 0.07, -1.06, edge, 1.165, 0.52), paint]);
+    parts.push([pitchedBox(0.06, 0.66, 0.07, 0.88, edge, 1.175, -1.24), paint]);
+    // A door mirror at the windscreen's foot, its outside at the footprint's side.
+    parts.push([deliveryBox(0.12, 0.1, 0.16, side * (halfWidth - 0.06), 1.0, 0.72), paint]);
+    // Lamps: a head lamp each side of the grille, a tail lamp each side of the boot.
+    parts.push([deliveryBox(0.36, 0.12, 0.04, side * 0.55, 0.62, nose), DELIVERY_PAINT.carLamp]);
+    parts.push([deliveryBox(0.32, 0.14, 0.04, side * 0.58, 0.7, -nose), DELIVERY_PAINT.carTail]);
+    for (const along of [rear, front]) {
+      const x = side * (halfWidth - 0.14);
+      parts.push([deliveryWheel(radius, 0.22, x, radius, along, 12), DELIVERY_PAINT.black]);
+      parts.push([deliveryWheel(0.2, 0.23, x, radius, along, 8), DELIVERY_PAINT.carRim]);
+    }
+  }
+  // The grille, the bumpers' dark strips and the number plates, front and back,
+  // each standing a hair proud of the body's rounded face.
+  const trim = (width: number, height: number, y: number, z: number, colour: number): void => {
+    parts.push([deliveryBox(width, height, 0.04, 0, y, z), colour]);
+  };
+  trim(0.6, 0.12, 0.62, nose, DELIVERY_PAINT.carTrim);
+  trim(bodyWidth - 0.16, 0.08, 0.36, nose - 0.02, DELIVERY_PAINT.carTrim);
+  trim(bodyWidth - 0.16, 0.08, 0.38, -nose + 0.02, DELIVERY_PAINT.carTrim);
+  trim(0.5, 0.11, 0.46, nose + 0.005, DELIVERY_PAINT.carPlate);
+  trim(0.5, 0.11, 0.5, -nose - 0.005, DELIVERY_PAINT.carPlate);
+  return fittedToFootprint(parts, halfWidth, halfLength);
+}
+
+/**
+ * The obstacle roster, every kind in one geometry, each vertex marked
  * with its kind (@see withObstacleKinds), standing on the road at the
  * origin. Each kind's footprint is its collision box in `obstacles.ts`
  * §`OBSTACLE_KINDS`, `2 × halfWidth` across and `2 × halfLength` along, so
  * what the rider sees is what the rider hits; the test holds the two equal.
+ * Each kind also carries its hazard marker overhead ({@link
+ * obstacleHazardMarker}, #2396), inside that footprint.
  */
 function obstacleShape(): BufferGeometry {
   const parts: DeliveryPart[] = [];
   const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
     parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
   };
+  // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
+  for (const kind of HAZARD_MARKED_KINDS) {
+    parts.push({
+      made: obstacleHazardMarker(),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
+    });
+  }
   {
     const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfWidth;
     const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfLength;
@@ -11245,11 +11506,38 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
+  // One car: its body's vertices take the instance's paint (round 6).
+  const body = PARKED_CAR_PAINTS[0] as number;
+  for (const [made, colour] of parkedCarParts(body)) {
+    parts.push({
+      made,
+      colour,
+      kind: DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+      painted: colour === body,
+    });
+  }
   return deliveryShape(parts);
 }
 
+/**
+ * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
+ * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
+ * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
+ * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
+ * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
+ * obstacles cost this many times the instances drawn in vertex work, and no
+ * fragment for the collapsed ones.
+ *
+ * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
+ * builds the geometry and does not read this number
+ */
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
+
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
+
+/** Reused by {@link DeliveryBelt.update}, so a frame allocates no colour. */
+const DELIVERY_PAINT_COLOUR = new Color();
 
 /**
  * Delivery's parcels in flight, the markers on the houses still on the round
@@ -11257,7 +11545,7 @@ const DELIVERY_MATRIX = new Matrix4();
  * ADR 0059 D-3): **three instanced meshes and at most THREE draw calls**,
  * whatever the count, and none on a frame that carries no Delivery. Each kind
  * of piece is one instanced draw of one shape, so twenty parcels cost what
- * one does; the obstacles' three shapes share theirs ({@link withObstacleKinds}).
+ * one does; the obstacles' shapes, a parked car's among them (#2362), share theirs ({@link withObstacleKinds}).
  *
  * ⚠️ **Built by the view only on the first frame that carries a Delivery
  * round** (`SceneFrame.delivery`), so an ordinary ride has no mesh, no
@@ -11283,6 +11571,9 @@ export class DeliveryBelt {
   readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
   /** Each obstacle instance's kind, by its index in the roster. */
   readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
+  /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
+  readonly #paints = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
+  readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
   #shown = true;
 
   constructor(world: 'stylised' | 'realistic') {
@@ -11296,6 +11587,8 @@ export class DeliveryBelt {
     const obstacles = obstacleShape();
     this.#kinds.setUsage(DynamicDrawUsage);
     obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
+    this.#paints.setUsage(DynamicDrawUsage);
+    obstacles.setAttribute(DELIVERY_OBSTACLE_PAINT_ATTRIBUTE, this.#paints);
     const made = (geometry: BufferGeometry, material: Material): InstancedMesh => {
       const mesh = new InstancedMesh(geometry, material, DELIVERY_PIECE_CAPACITY);
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
@@ -11340,10 +11633,21 @@ export class DeliveryBelt {
     this.#place(this.#meshes.obstacles, obstacles);
     const kinds = this.#kinds.array as Float32Array;
     const count = this.#meshes.obstacles.count;
+    const paints = this.#paints.array as Float32Array;
     for (let at = 0; at < count; at += 1) {
-      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf((obstacles[at] as DeliveryObstaclePiece).kind);
+      const piece = obstacles[at] as DeliveryObstaclePiece;
+      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
+      const paint = piece.kind === 'parked-car' ? parkedCarPaint(piece) : -1;
+      this.#paintOf[at] = paint;
+      DELIVERY_PAINT_COLOUR.set(PARKED_CAR_PAINTS[Math.max(0, paint)] as number);
+      paints[at * 3] = DELIVERY_PAINT_COLOUR.r;
+      paints[at * 3 + 1] = DELIVERY_PAINT_COLOUR.g;
+      paints[at * 3 + 2] = DELIVERY_PAINT_COLOUR.b;
     }
-    if (count > 0) this.#kinds.needsUpdate = true;
+    if (count > 0) {
+      this.#kinds.needsUpdate = true;
+      this.#paints.needsUpdate = true;
+    }
   }
 
   #place(mesh: InstancedMesh, pieces: readonly DeliveryPiece[]): void {
@@ -11371,11 +11675,14 @@ export class DeliveryBelt {
     const kinds = this.#kinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
+      const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
+      const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
         z: matrices[at * 16 + 14] as number,
-        kind: what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined,
+        kind,
+        paint,
       });
     }
     return drawn;
@@ -16792,6 +17099,8 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   porch: 1,
   'porch-roof': REALISTIC_ROLE_SHADE.roof,
   'porch-trim': 1,
+  // #2206: a spire is shaded as the roof it is built of.
+  spire: REALISTIC_ROLE_SHADE.roof,
 };
 
 /**
@@ -16813,6 +17122,12 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
     case 'porch-roof':
       return (
         roofPaintsOf(plan.surfaces.roof, plan.cladding.roof === 'shingle')?.[plan.paint.roof] ??
+        unpainted
+      );
+    case 'spire':
+      // #2206: slate's own paint, the plan's where its roof is slate too, and the first otherwise.
+      return (
+        paintsOf(SPIRE_SURFACE)?.[plan.surfaces.roof === SPIRE_SURFACE ? plan.paint.roof : 0] ??
         unpainted
       );
     case 'driveway':
@@ -19157,6 +19472,8 @@ export interface DrawnMappedBuilding {
   /** Its first vertex in its wall surface's range, and in its roof surface's; -1 for a model. */
   readonly wallAt: number;
   readonly roofAt: number;
+  /** Its first vertex of its spire, in the slate's range; -1 for a model — #2206. */
+  readonly spireAt: number;
   /** Its first vertex in the house models' buffer, or -1 for an extrusion — #1585. */
   readonly modelAt: number;
 }
@@ -19236,6 +19553,8 @@ export class MappedBuildingBelt {
   /** Each drawn building's first vertex in its wall surface's range and in its roof's. */
   readonly #wallAt: Int32Array;
   readonly #roofAt: Int32Array;
+  /** Each drawn building's first vertex of its spire, in the slate's range — #2206. */
+  readonly #spireAt: Int32Array;
   /** Each drawn building's vertex after its model, or -1 for an extrusion — #1835. */
   readonly #modelEnd: Int32Array;
   /** Which drawn buildings the near plane would cut this frame, so are drawn as nothing — #1835. @see clearOf */
@@ -19273,6 +19592,7 @@ export class MappedBuildingBelt {
     this.#houses = houses;
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
+    this.#spireAt = new Int32Array(this.#selection.plans.length);
     this.#materials = new Map(
       FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
     );
@@ -19441,6 +19761,7 @@ export class MappedBuildingBelt {
         this.#modelAt[at] = modelEnd;
         this.#wallAt[at] = -1;
         this.#roofAt[at] = -1;
+        this.#spireAt[at] = -1;
         modelEnd = this.#appendModel(plan, plan.model, modelEnd);
         this.#modelEnd[at] = modelEnd;
         continue;
@@ -19449,10 +19770,13 @@ export class MappedBuildingBelt {
       this.#modelEnd[at] = -1;
       const wall = surfaces.indexOf(plan.surfaces.wall);
       const roof = surfaces.indexOf(plan.surfaces.roof);
+      const spire = surfaces.indexOf(SPIRE_SURFACE);
+      this.#spireAt[at] = -1;
       this.#wallAt[at] = this.#cursors[wall] as number;
       this.#roofAt[at] = this.#cursors[roof] as number;
       for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
-        const slot = ROOF_ROLES.has(role) ? roof : wall;
+        const slot = role === 'spire' ? spire : ROOF_ROLES.has(role) ? roof : wall;
+        if (role === 'spire') this.#spireAt[at] = this.#cursors[slot] as number;
         this.#cursors[slot] = this.#append(plan, role, this.#cursors[slot] as number);
       }
     }
@@ -19540,14 +19864,20 @@ export class MappedBuildingBelt {
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
       let walls = 0;
       let roofs = 0;
+      let spires = 0;
       for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
-        if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
+        if (role === 'spire') spires += roleTriangles(plan, role) * 3;
+        else if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
         else walls += roleTriangles(plan, role) * 3;
       }
       const geometry = this.mesh.geometry;
       const surfaces = selection.surfaces;
       geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
       geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
+      // #2206: a spire's slate, a group of its own where the roof is not slate.
+      if (spires > 0) {
+        geometry.addGroup(this.#spireAt[at] as number, spires, surfaces.indexOf(SPIRE_SURFACE));
+      }
     }
   }
 
@@ -19585,7 +19915,7 @@ export class MappedBuildingBelt {
     const repeat = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface]);
     // A plan's texture coordinates are bays across and storeys up, and a
     // roof's storeys both ways: back to metres, then the photograph's repeats.
-    const acrossMetres = role === 'roof' ? STOREY_METRES : BAY_METRES;
+    const acrossMetres = role === 'roof' || role === 'spire' ? STOREY_METRES : BAY_METRES;
     const shade = MAPPED_ROLE_SHADE[role];
     const [red, green, blue] = mappedRolePaint(plan, role);
     const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
@@ -19692,6 +20022,8 @@ export class MappedBuildingBelt {
     const position = this.#position.array as Float32Array;
     let wall = this.#wallAt[at] as number;
     let roof = this.#roofAt[at] as number;
+    let spire = this.#spireAt[at] as number;
+    const spireFrom = spire;
     const wallFrom = wall;
     const roofFrom = roof;
     // A wall's surface is never a roof's (`footprint-buildings.ts`
@@ -19699,8 +20031,9 @@ export class MappedBuildingBelt {
     for (const role of this.#selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
       const floats = plan.triangles[role];
       const vertices = roleTriangles(plan, role) * 3;
-      const onRoof = ROOF_ROLES.has(role);
-      const from = onRoof ? roof : wall;
+      const onSpire = role === 'spire';
+      const onRoof = !onSpire && ROOF_ROLES.has(role);
+      const from = onSpire ? spire : onRoof ? roof : wall;
       for (let vertex = 0; vertex < vertices; vertex += 1) {
         const source = vertex * FOOTPRINT_VERTEX_FLOATS;
         const to = (from + vertex) * 3;
@@ -19708,11 +20041,13 @@ export class MappedBuildingBelt {
         position[to + 1] = hide ? 0 : (floats[source + 1] as number);
         position[to + 2] = hide ? 0 : (floats[source + 2] as number);
       }
-      if (onRoof) roof += vertices;
+      if (onSpire) spire += vertices;
+      else if (onRoof) roof += vertices;
       else wall += vertices;
     }
     if (wall > wallFrom) this.#position.addUpdateRange(wallFrom * 3, (wall - wallFrom) * 3);
     if (roof > roofFrom) this.#position.addUpdateRange(roofFrom * 3, (roof - roofFrom) * 3);
+    if (spire > spireFrom) this.#position.addUpdateRange(spireFrom * 3, (spire - spireFrom) * 3);
     this.#position.needsUpdate = true;
   }
 
@@ -19740,6 +20075,7 @@ export class MappedBuildingBelt {
       far: this.#selection.far[place] === 1,
       wallAt: this.#wallAt[place] as number,
       roofAt: this.#roofAt[place] as number,
+      spireAt: this.#spireAt[place] as number,
       modelAt: this.#modelAt[place] as number,
     };
   }

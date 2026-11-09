@@ -537,8 +537,8 @@ const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepa
  * #1430: a paused ride with no stop armed, for the row Lap, Resume, Stop). The ride-time controls
  * that the fullest state does not render: *Start recording* and *Ask the
  * trainer for control* before a ride (a trainer paired, control not yet
- * granted), and *Resume*, *Yes, stop the ride* and *Keep riding* on a paused
- * ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
+ * granted), and *Resume* and the end-of-ride question's *Keep riding*, *Save
+ * ride* and *Discard ride* (#2349) on a paused ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
  * geometry cases in `rideview.browser.spec.ts` never ask for either.
  */
 const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
@@ -643,6 +643,28 @@ const SAVED_RIDE = {
   gameOutcome: 'not-beaten' as const,
 };
 
+/**
+ * `rideview.html?ride=saved&test=ramp` — #2307: the saved ride was a ramp
+ * test, so the result card is followed by `ride/ThresholdOffer.tsx` with an
+ * estimate to answer. The owner's ruling of 2026-11-07 (f) is measured on it:
+ * its two answers, *Set* and *Keep*, the same width on a phone.
+ */
+const SAVED_TEST =
+  QUERY.get('test') === 'ramp'
+    ? {
+        thresholdTest: {
+          test: 'ramp' as const,
+          estimate: {
+            kind: 'estimate' as const,
+            thresholdPower: watts(269),
+            basis: watts(359),
+            windowSeconds: 60,
+            multiplier: 0.75,
+          },
+        },
+      }
+    : {};
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -650,6 +672,10 @@ function snapshot(): RideSnapshot {
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
     manualLap: { available: true, last: LAP_ENDED ? WIDEST_LAP : undefined },
+    // #2076: the ride's distance, at a three-digit figure, so the clock row
+    // (`RideView.tsx` §`RideClock`), where it is drawn, is laid out and
+    // measured at its widest.
+    totals: { distance: metres(123_456), climbed: undefined, averagePower: undefined },
   };
   if (WIDEST_READINGS) {
     const at = unixSeconds(1_800_000_000);
@@ -693,6 +719,7 @@ function snapshot(): RideSnapshot {
       elapsedSeconds: 0,
       movingSeconds: 0,
       sampleCount: 0,
+      totals: undefined,
       trainer: { ...riding.trainer, hasControl: false, target: { kind: 'none' } },
     };
   }
@@ -702,7 +729,7 @@ function snapshot(): RideSnapshot {
       phase: 'stopped',
       saveState: 'saved',
       savedActivityId: SAVED_RIDE.activityId,
-      savedRide: SAVED_RIDE,
+      savedRide: { ...SAVED_RIDE, ...SAVED_TEST },
     };
   }
   if (RIDE_STATE === 'armed') {
@@ -1127,8 +1154,8 @@ function measure(): RideViewMeasurement {
   const main = document.querySelector('main');
   const nav = document.querySelector('nav[aria-label="Primary"]');
   const card = document.querySelector('.oyl-metric');
-  const title = document.querySelector('main > h1');
-  const summary = document.querySelector('main > h1 + p');
+  const title = document.querySelector('main > .oyl-view-head > h1');
+  const summary = document.querySelector('main > .oyl-view-head > h1 + p');
   const metricGrid = document.querySelector('.oyl-ride__group--live .oyl-metric-grid');
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },

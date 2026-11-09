@@ -75,6 +75,7 @@ import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { GameSimulation, SIMULATION_STEP_SECONDS, type RiderInput } from './simulation';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { writeRealisticWorldChoice } from './world-preference';
+import { endRideAnswer } from './end-ride-testing';
 
 /** Every sentence the real announcer said, in order. */
 const said = vi.hoisted((): string[] => []);
@@ -495,6 +496,7 @@ async function rideOnce(race: LapRaceChoice | undefined): Promise<RideResult> {
   });
   const read = { said: [...said], inputs: seen, fields: raceFields(), standings: midRace };
   await clickThrough(buttonStarting('End ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
   mounted?.unmount();
   mounted = undefined;
   return { ...read, writes, drawn, reached: [...reached] };
@@ -653,6 +655,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       await rideTheTrace({ race: RACE, frames: 70 });
       expect(raceFields()[0]).toMatch(/Lap 2 of 2/u);
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Back on the picker: no race on the screen, and no frame asked for.
       expect(raceFields()).toEqual([]);
       expect(buttonStarting('Ride ')).toBeDefined();
@@ -668,6 +671,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       expect(fields).toHaveLength(2);
       expect(fields[0]).toMatch(/Lap 1 of 2/u);
       await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       for (let index = 0; index < 5; index += 1) await settle();
       expect(rejected).toEqual([]);
     } finally {
@@ -713,6 +717,34 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // One tier below the chosen 'hard'.
     expect(standings).toContain('Brisk bot');
     expect(standings).not.toContain('Hard bot');
+  });
+
+  it('names every bot of a full field in the standings, on every frame, the rider last on the line (#2328)', async () => {
+    expect(RACE.bots).toBe(LAP_RACE_MOST_BOTS);
+    const bots = Array.from({ length: RACE.bots }, (_, index) => `Hard bot ${String(index + 1)}`);
+    /** The names on the standings' lines, as the rider reads them, frame by frame. */
+    const read: string[][] = [];
+    await rideTheTrace({
+      race: RACE,
+      frames: 40,
+      onFrame: () => {
+        read.push(
+          queryAll<HTMLElement>(
+            mounted?.container ?? document,
+            '.oyl-hud__standings .oyl-hud__standings-who',
+          ).map((each) => each.textContent ?? ''),
+        );
+        return Promise.resolve();
+      },
+    });
+    // On the line the rider is behind the whole field: #2328's screenshot.
+    expect(read[0]?.at(-1)).toBe('You');
+    expect(read).toHaveLength(40);
+    read.forEach((names, frame) => {
+      expect([...names].sort(), `frame ${String(frame)}`).toEqual([...bots, 'You'].sort());
+    });
+    const summary = mounted?.container.querySelector('.oyl-hud__standings-summary')?.textContent;
+    expect(summary).toMatch(/^You are \d of 8\.$/u);
   });
 
   it('draws a hit steady under reduced motion (WCAG 2.3.1)', async () => {

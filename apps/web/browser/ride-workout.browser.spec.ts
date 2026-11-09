@@ -35,6 +35,11 @@ import {
 
 import type { Box, StageMeasurement } from './ride-harness';
 import { longestReplanSentence } from './replan-longest';
+import {
+  RIDE_TIME_CONTROLS,
+  RIDE_TIME_TARGET_PIXELS,
+  namesControl,
+} from '../src/design/ride-time-controls';
 
 /**
  * #1307 — the running workout drawn on the HUD, `ride-harness.tsx` §`GRAPH`.
@@ -180,37 +185,93 @@ async function planBox(page: Page): Promise<Box | undefined> {
  *
  * ⚠️ Those 3 s are not waited out: the case installs Playwright's clock before
  * its first load, and this moves the page's clock {@link GAPS_SETTLE_AFTER_MS}
- * on at once (`fastForward`: each timer that falls due fires once, and the
- * ride's tick reads the clock, so the ride is that far on). Waiting them out
- * cost about 20 s a viewport, six loads; `runFor`, which fires every frame on
- * the way, about 10 s; this, about 2 s, the loads themselves. The poll after it
- * is short and says what it waited for, so a fixture with no pacer fails here,
- * by name, and not at the test's timeout.
+ * on at once (`pauseAt` jumps as `fastForward` does: each timer that falls due
+ * fires once, and the ride's tick reads the clock, so the ride is that far
+ * on). Waiting them out cost about 20 s a viewport, six loads; `runFor` over
+ * all of it, which fires every frame on the way, about 10 s; this, about 2 s,
+ * the loads themselves.
+ *
+ * ⚠️ **And the jump STOPS the page's clock, which stays stopped — #2262.**
+ * Until #2262 the jump was made on a running clock, which then ran on with the
+ * runner's, and the case waited up to 5 s of wall clock for the readings to
+ * settle on their own. That was a wait on live values twice over:
+ *
+ * - The jump could be spent on nothing. The simulation's first `advanceTo`
+ *   only sets its origin (`simulation.ts`), and a load can be ready before
+ *   the ride's loop has ticked once (both readings "—", the rider at rest), so
+ *   a jump that fired that first tick rode no road at all. Measured here: 1
+ *   load in 72 and 3 in 240, each of which then needed 3¼ s more riding.
+ * - What came after was the runner's: on a busy CI runner the pacer still
+ *   read "Level" when the 5 s ran out, at 1024×768 and 1280×800 (#2242, #2228
+ *   and #2243 were each dropped from the merge queue on it).
+ *
+ * So the jump is a `pauseAt`, which stops the clock where it lands; and if the
+ * readings have not settled there, the ride is run on in
+ * {@link GAPS_SETTLE_STEP_MS} steps (`runFor`, every frame fired), with a look
+ * after each. Nothing on the page moves unless this moves it, so the bound,
+ * {@link GAPS_SETTLE_MOST_MS}, is of the page's clock and not of waiting, and
+ * the failure says what the two fields read. Both of a load's measurements are
+ * then taken on a stopped clock, so no reading moves between them either;
+ * {@link openSettledRide} starts the clock again for the next load, whose
+ * harness waits on animation frames.
  */
 async function untilTheGapsSettle(page: Page): Promise<void> {
-  await page.clock.fastForward(GAPS_SETTLE_AFTER_MS);
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const gaps = [
-            ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
-          ].filter((field) =>
-            /^(Pacer|Your best)$/.test(field.querySelector('dt')?.textContent ?? ''),
-          );
-          return gaps.map((field) => field.querySelector('.oyl-hud__detail') !== null);
-        }),
-      {
-        message:
-          'the ride’s gap readings, Pacer and Your best, never both showed their second line',
-        timeout: 5_000,
-      },
-    )
-    .toEqual([true, true]);
+  const pageNow = await page.evaluate(() => Date.now());
+  try {
+    await page.clock.pauseAt(pageNow + GAPS_SETTLE_AFTER_MS);
+  } catch (error) {
+    // The page's clock ran past the mark between reading it and stopping it
+    // (seen once in 240 loads with a mark 1 s on, 12 workers on 12 cores).
+    // `pauseAt` stops the clock before it jumps, so it is stopped where it
+    // was, which is further on than the mark, and the look below reads that.
+    if (!String(error).includes('Cannot fast-forward to the past')) throw error;
+  }
+  const gapLines = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field')]
+        .filter((field) => /^(Pacer|Your best)$/.test(field.querySelector('dt')?.textContent ?? ''))
+        .map((field) => ({
+          reads: `${field.querySelector('dt')?.textContent ?? ''}: ${(field.querySelector('dd')?.textContent ?? '').trim()}`,
+          second: field.querySelector('.oyl-hud__detail') !== null,
+        })),
+    );
+  let ridden = GAPS_SETTLE_AFTER_MS;
+  let gaps = await gapLines();
+  while (!(gaps.length === 2 && gaps.every((gap) => gap.second))) {
+    if (ridden >= GAPS_SETTLE_MOST_MS) {
+      throw new Error(
+        `the ride’s gap readings, Pacer and Your best, never both showed their second line in ${String(ridden / 1000)} s of the page’s clock — ${JSON.stringify(gaps.map((gap) => gap.reads))}`,
+      );
+    }
+    await page.clock.runFor(GAPS_SETTLE_STEP_MS);
+    ridden += GAPS_SETTLE_STEP_MS;
+    gaps = await gapLines();
+  }
+}
+
+/**
+ * {@link openRide} on a running clock, then {@link untilTheGapsSettle}, which
+ * stops it.
+ */
+async function openSettledRide(page: Page, viewport: Viewport, query: string): Promise<void> {
+  await page.clock.resume();
+  await openRide(page, viewport, query);
+  await untilTheGapsSettle(page);
 }
 
 /** Past the "about 3 s" {@link untilTheGapsSettle} measured, with a second to spare. */
 const GAPS_SETTLE_AFTER_MS = 4_000;
+
+/** How far the ride is run on between two looks, when the jump was not enough. */
+const GAPS_SETTLE_STEP_MS = 250;
+
+/**
+ * The most of the page's clock {@link untilTheGapsSettle} spends before it says
+ * what it saw: the 9 s the jump and the old 5 s poll came to, so no bound is
+ * wider than it was. A load whose jump fired the ride's first tick settles at
+ * about 7¼ s.
+ */
+const GAPS_SETTLE_MOST_MS = 9_000;
 
 const GRAPH_VIEWPORTS: readonly (Viewport & {
   readonly riderClear: boolean;
@@ -278,29 +339,29 @@ const STRIP_FIXTURES = [
   },
   {
     // Paused: the trainer was eased to its 50 W minimum. The line says THAT.
-    // #1313 (the owner's ruling): no target or trace line is drawn through a
-    // pause, so the lane is empty, and the name says nothing a line would.
+    // #1313 (the owner's ruling of 2026-11-05): through a pause the stale
+    // dashed target is not drawn, and the power already ridden is.
     graph: 'paused',
     paused: true,
     lane: 'power',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
     asked: undefined,
-    doing: undefined,
-    absent: /target|power|range|heart-rate/,
+    doing: 'oyl-workout-strip__power',
+    absent: /target|range|heart-rate/,
   },
   {
     // #1313: the same in a heart-rate hold. The lane is the heart-rate one
-    // (the newest sample still carries the range and a heart rate) and draws
-    // neither; the name gives neither.
+    // (the newest sample still carries the range and a heart rate): no
+    // dashed range, and the heart rate ridden; the name gives no range.
     graph: 'paused-hold',
     paused: true,
     lane: 'heart-rate',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
     asked: undefined,
-    doing: undefined,
-    absent: /target|power|range|heart-rate/,
+    doing: 'oyl-workout-strip__heart-rate',
+    absent: /target|power|range/,
   },
 ] as const;
 
@@ -336,9 +397,15 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   if (fixture.doing !== undefined) {
     expect(mark(fixture.doing).paint).toBe(HUD_INK);
   }
-  // By what the fixture IS, not by its name (#1331's review).
+  // By what the fixture IS, not by its name (#1331's review). #1313: the
+  // name says the lane's reading now, as it does running, and no range, as
+  // the strip draws none. (The paused hold's strap has no reading now: "No
+  // heart rate.", which the Ride screen's graph says of it too.)
   if (fixture.paused) {
-    expect(graph.name).not.toMatch(/Your power|Heart rate|chosen range/);
+    expect(graph.name).not.toContain('chosen range');
+    expect(graph.name).toMatch(
+      fixture.lane === 'power' ? /Your power: \d+ W\./ : /(Heart rate: \d+ bpm|No heart rate)\./,
+    );
   }
   for (const name of [
     ...(fixture.asked === undefined ? [] : [fixture.asked]),
@@ -391,19 +458,17 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
       page,
     }) => {
       // The page's timers are Playwright's from here on, for every load in
-      // this case, so `untilTheGapsSettle` can run them ahead.
+      // this case, so `untilTheGapsSettle` can run them ahead and stop them.
       await page.clock.install();
       // The control: the same ride with the route plan, and no strip.
-      await openRide(page, viewport, '?trainer=workout');
-      await untilTheGapsSettle(page);
+      await openSettledRide(page, viewport, '?trainer=workout');
       expect(await graphOnTheHud(page)).toBeUndefined();
       const plan = await planBox(page);
       const before = await bothWays(page);
       expect(plan?.height ?? 0).toBeGreaterThan(64);
 
       for (const fixture of STRIP_FIXTURES) {
-        await openRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
-        await untilTheGapsSettle(page);
+        await openSettledRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
         const graph = await graphOnTheHud(page);
         if (graph === undefined || plan === undefined) {
           throw new Error('no workout strip on the HUD');
@@ -960,7 +1025,7 @@ test.describe('a ride on a loop — #1312', () => {
           // these seconds the strip and the plan view are not laid out — and
           // on a tablet, where the notice has a cell of its own, they are.
           const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-          const routePanel = ['the elevation strip', 'the plan view'];
+          const routePanel = ['the elevation strip', 'the road ahead', 'the plan view'];
           const lost = seen.items
             .filter((each) => !inside(each.box, viewport) || !each.onTop)
             .map((each) => each.name);
@@ -1070,6 +1135,252 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
             expect(over.map(describeItem)).toEqual([]);
           }
         });
+      }
+    });
+  }
+});
+
+/**
+ * #2271 — the actions row at a short laptop window, in a workout with a
+ * trainer (`?trainer=workout&graph=plain`): *Pause*, *End ride*, the lock and
+ * *Trainer notice*, the row's four.
+ *
+ * At 1024×600 on `main` the four shared one line at 77 px each, because a
+ * line is chosen by the controls' 72 px floors and not by their words: *End
+ * ride*'s words ran out of its box under the lock, and *Trainer notice* ran
+ * off the panel's edge. Every box was inside the viewport and over no other
+ * box, so a check of boxes alone passed it. So what is held here is the WORDS
+ * as well as the box, for each control in the row:
+ *
+ * - its box at least #669's 48 px (`RIDE_TIME_TARGET_PIXELS`) both ways;
+ * - its visible words inside its own box (`theme.css` §"#2271");
+ * - its box inside the actions panel and over no other control's box, and
+ *   inside the viewport — every control on a corners layout, and the
+ *   ride-time ones (`design/ride-time-controls.ts`) on the stacked layout,
+ *   whose stage scrolls (#419): at 320×256 *Trainer notice* is partly under
+ *   the fold there (its box ends at 271 px on a Mac) and reached by
+ *   scrolling, as it was before #2271. The topmost-thing checks below still
+ *   hold its centre, which is inside the viewport;
+ * - the topmost thing at its centre and at the four corners of its words, so
+ *   a control drawn over another's label is a red case;
+ * - and Pause, End ride and the lock on one line in that order, which this
+ *   change must not move (the issue's lane scope), with *Trainer notice* on a
+ *   line below them on a landscape corners layout (736 px and wider).
+ *
+ * The viewports are the short laptop windows, down to the corners layout's
+ * smallest and the stacked layout's two landscape ones under it: 1024×600 is
+ * the issue's, 1280×720 and 1366×657 (a 1366×768 laptop under its browser's
+ * chrome) are #875's, 960×540 a 16:9 window, 802×600 the middle corners
+ * layout, 736×480 and 736×360 the short corners layout's edges, and 640×360
+ * and 320×256 the stacked layout's (SC 1.4.10's viewport is the app's least).
+ *
+ * Not the upright tablet (800×1280), which `theme.css` §"#2271" leaves with
+ * the 77 px row and says why.
+ *
+ * The control: `theme.css` §"#2271" deleted, which puts the four back on one
+ * line in the 20 rem panel and turns 1024×600, 1280×720, 1366×657 and 960×540
+ * red on *End ride*'s and *Trainer notice*'s words.
+ */
+const SHORT_LAPTOPS: readonly (Viewport & { readonly scrolls?: true })[] = [
+  { name: 'the narrowest wide screen — 1024×600', width: 1024, height: 600, unstagedFails: true },
+  { name: 'a laptop — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  {
+    name: 'a 1366×768 laptop under its browser’s chrome — 1366×657',
+    width: 1366,
+    height: 657,
+    unstagedFails: true,
+  },
+  { name: 'a 16:9 window — 960×540', width: 960, height: 540, unstagedFails: true },
+  { name: 'the middle corners layout — 802×600', width: 802, height: 600, unstagedFails: true },
+  {
+    name: 'the tallest short corners layout — 736×480',
+    width: 736,
+    height: 480,
+    unstagedFails: true,
+  },
+  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
+  {
+    name: 'a small window on its side — 640×360',
+    width: 640,
+    height: 360,
+    unstagedFails: true,
+    scrolls: true,
+  },
+  { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true, scrolls: true },
+];
+
+/** `theme.css` §"#2271"'s `min-width: 46rem`, in px: the corners layout begins here. */
+const CORNERS_LAYOUT_MIN_WIDTH = 736;
+
+/** The row's controls, in document order, as `HudCore.tsx` renders them. */
+const ACTIONS_ROW = ['Pause', 'End ride', 'Lock', 'Trainer notice'] as const;
+
+interface RowControl {
+  /** The visible words, whitespace collapsed. */
+  readonly words: string;
+  readonly box: Box;
+  /** The visible words' own box: every text node not visually hidden. */
+  readonly ink: Box | undefined;
+  /** Whether the control is the topmost thing at its centre. */
+  readonly onTop: boolean;
+  /** The corners of its words, 1 px in, that something else is drawn over. */
+  readonly inkCovered: readonly string[];
+}
+
+async function actionsRow(
+  page: Page,
+): Promise<{ readonly panel: Box; readonly controls: readonly RowControl[] }> {
+  return page.evaluate(() => {
+    const boxOf = (rect: DOMRect): Box => ({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
+    const panel = document.querySelector('.oyl-hud__actions');
+    if (panel === null) throw new Error('no actions panel on the HUD');
+    const owns = (control: Element, x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return hit !== null && (hit === control || control.contains(hit));
+    };
+    const controls = [...panel.querySelectorAll('.oyl-hud__controls > button')].map((control) => {
+      const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
+      const rects: DOMRect[] = [];
+      const words: string[] = [];
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        if (node.parentElement?.closest('.oyl-visually-hidden') !== null) continue;
+        if ((node.textContent ?? '').trim() === '') continue;
+        words.push(node.textContent ?? '');
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...range.getClientRects());
+      }
+      const ink =
+        rects.length === 0
+          ? undefined
+          : boxOf(
+              new DOMRect(
+                Math.min(...rects.map((each) => each.left)),
+                Math.min(...rects.map((each) => each.top)),
+                Math.max(...rects.map((each) => each.right)) -
+                  Math.min(...rects.map((each) => each.left)),
+                Math.max(...rects.map((each) => each.bottom)) -
+                  Math.min(...rects.map((each) => each.top)),
+              ),
+            );
+      const box = boxOf(control.getBoundingClientRect());
+      const corners =
+        ink === undefined
+          ? []
+          : ([
+              ['top left', ink.left + 1, ink.top + 1],
+              ['top right', ink.right - 1, ink.top + 1],
+              ['bottom left', ink.left + 1, ink.bottom - 1],
+              ['bottom right', ink.right - 1, ink.bottom - 1],
+            ] as const);
+      return {
+        words: words.join(' ').replace(/\s+/g, ' ').trim(),
+        box,
+        ink,
+        onTop: owns(control, (box.left + box.right) / 2, (box.top + box.bottom) / 2),
+        inkCovered: corners.filter(([, x, y]) => !owns(control, x, y)).map(([where]) => where),
+      };
+    });
+    return { panel: boxOf(panel.getBoundingClientRect()), controls };
+  });
+}
+
+function within(inner: Box, outer: Box): boolean {
+  return (
+    inner.left >= outer.left - SUBPIXEL_TOLERANCE &&
+    inner.top >= outer.top - SUBPIXEL_TOLERANCE &&
+    inner.right <= outer.right + SUBPIXEL_TOLERANCE &&
+    inner.bottom <= outer.bottom + SUBPIXEL_TOLERANCE
+  );
+}
+
+/** Every way the row's controls fail #2271, as sentences; empty when none does. */
+function actionsRowFailures(
+  row: { readonly panel: Box; readonly controls: readonly RowControl[] },
+  viewport: (typeof SHORT_LAPTOPS)[number],
+): string[] {
+  const found: string[] = [];
+  const at = (box: Box) =>
+    `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
+  const minimum = RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE;
+  for (const control of row.controls) {
+    const { box, ink, words } = control;
+    if (box.width < minimum || box.height < minimum) {
+      found.push(`${words} ${at(box)} is under ${String(RIDE_TIME_TARGET_PIXELS)} px`);
+    }
+    if (ink === undefined) found.push(`${words} has no visible words`);
+    else if (!within(ink, box))
+      found.push(`${words}'s words ${at(ink)} run out of its box ${at(box)}`);
+    if (!within(box, row.panel))
+      found.push(`${words} ${at(box)} is outside its panel ${at(row.panel)}`);
+    const rideTime = RIDE_TIME_CONTROLS.some(
+      (entry) => entry.surface === 'game-hud' && namesControl(entry, words),
+    );
+    if ((rideTime || viewport.scrolls !== true) && !inside(box, viewport)) {
+      found.push(`${words} ${at(box)} is off the stage`);
+    }
+    if (!control.onTop) found.push(`${words} is covered at its centre`);
+    if (control.inkCovered.length > 0) {
+      found.push(`${words}'s words are covered at ${control.inkCovered.join(', ')}`);
+    }
+  }
+  for (const [index, a] of row.controls.entries()) {
+    for (const b of row.controls.slice(index + 1)) {
+      if (overlap(a.box, b.box))
+        found.push(`${a.words} ${at(a.box)} is over ${b.words} ${at(b.box)}`);
+    }
+  }
+  return found;
+}
+
+test.describe('the actions row at a short laptop window, in a workout with a trainer — #2271', () => {
+  for (const viewport of SHORT_LAPTOPS) {
+    test(`every control’s words in its box, on top, on the stage — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?trainer=workout&graph=plain');
+      const row = await actionsRow(page);
+      console.log(
+        `#2271 the actions row — ${viewport.name}: panel ${row.panel.width.toFixed(0)} × ` +
+          `${row.panel.height.toFixed(0)} px; ` +
+          row.controls
+            .map(
+              (each) =>
+                `${each.words} ${each.box.width.toFixed(0)} × ${each.box.height.toFixed(0)}` +
+                ` (words ${(each.ink?.width ?? 0).toFixed(0)})`,
+            )
+            .join(', '),
+      );
+
+      // All four are in the row, in their order: the fixture is the one the
+      // issue was found on, and a row missing *Trainer notice* proves nothing.
+      expect(row.controls.map((each) => each.words)).toEqual([...ACTIONS_ROW]);
+      expect(actionsRowFailures(row, viewport)).toEqual([]);
+
+      // Pause, End ride and the lock keep their places: one line, in order.
+      const [pause, end, lock] = row.controls;
+      if (pause === undefined || end === undefined || lock === undefined) {
+        throw new Error('the row lost a control');
+      }
+      expect(end.box.left).toBeGreaterThanOrEqual(pause.box.right);
+      expect(lock.box.left).toBeGreaterThanOrEqual(end.box.right);
+      expect(end.box.top).toBeLessThan(pause.box.bottom);
+      expect(lock.box.top).toBeLessThan(pause.box.bottom);
+
+      // The notice has the line of its own the rule gives it: below the three,
+      // not before them, which `order: -1` would draw while the three stayed
+      // in order one line lower.
+      const notice = row.controls[3];
+      if (notice === undefined) throw new Error('the row lost Trainer notice');
+      if (viewport.width >= CORNERS_LAYOUT_MIN_WIDTH) {
+        expect(notice.box.top).toBeGreaterThanOrEqual(pause.box.bottom - SUBPIXEL_TOLERANCE);
       }
     });
   }

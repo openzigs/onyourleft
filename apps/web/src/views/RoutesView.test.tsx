@@ -91,7 +91,7 @@ function route(overrides: Partial<RouteRecord> = {}): RouteRecord {
   return {
     id: stubRouteId('route-1'),
     createdBy: ATHLETE,
-    name: 'Box Hill loop',
+    name: 'Old mill loop',
     profile: routeProfile(northPoints(3000, 2000)),
     visibility: 'private',
     createdAt: unixSeconds(1_700_000_000),
@@ -154,7 +154,7 @@ describe('the saved list', () => {
     // is a word in its own cell.
     return render(routeStub(ATHLETE, [route()]), 'route-1').then((view) => {
       const text = view.container.textContent ?? '';
-      expect(text).toContain('Box Hill loop');
+      expect(text).toContain('Old mill loop');
       expect(text).toContain('private');
       expect(text).toContain('Point to point');
     });
@@ -207,7 +207,7 @@ describe('deleting — #73 criterion 3', () => {
     await settle();
     const text = document.body.textContent ?? '';
     expect(text).toContain('Delete this route?');
-    expect(text).toContain('Box Hill loop');
+    expect(text).toContain('Old mill loop');
     expect(text).toContain('cannot be undone');
     // And nothing has gone yet.
     expect(stub.rows()).toHaveLength(1);
@@ -220,7 +220,7 @@ describe('deleting — #73 criterion 3', () => {
     await settle();
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
     const keep = buttonSaying(document.body, 'Keep it') as HTMLElement;
-    const remove = buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement;
+    const remove = buttonSaying(document.body, 'Delete “Old mill loop”') as HTMLElement;
     expect(document.activeElement).toBe(keep);
     expect(keep.className).toBe('oyl-button');
     expect(remove.className).toContain('oyl-button--danger');
@@ -242,11 +242,11 @@ describe('deleting — #73 criterion 3', () => {
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(
-      buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement,
+      buttonSaying(document.body, 'Delete “Old mill loop”') as HTMLElement,
     );
     await settle();
     expect(stub.rows()).toHaveLength(0);
-    expect(view.container.textContent).toContain('Deleted “Box Hill loop”');
+    expect(view.container.textContent).toContain('Deleted “Old mill loop”');
   });
 });
 
@@ -255,11 +255,11 @@ describe('editing', () => {
     const stub = routeStub(ATHLETE, [route()]);
     const view = await render(stub, 'route-1');
     const field = view.container.querySelector<HTMLInputElement>('#name-route-1');
-    await typeInto(field as HTMLInputElement, 'Ranmore');
+    await typeInto(field as HTMLInputElement, 'Fordside');
     await activateWithKeyboard(buttonSaying(view.container, 'Save changes') as HTMLElement);
     await settle();
     expect(stub.rows()).toHaveLength(1);
-    expect(stub.rows()[0]?.name).toBe('Ranmore');
+    expect(stub.rows()[0]?.name).toBe('Fordside');
     expect(stub.rows()[0]?.id).toBe('route-1');
   });
 
@@ -336,8 +336,8 @@ describe('sending a route to a head unit (#74)', () => {
     // The format is in the label rather than in an icon: #48's audit counts an
     // unnamed control as a violation, and "which file am I getting" is the
     // whole question the control answers.
-    expect(buttonSaying(root.container, 'Download GPX — Box Hill loop')).toBeDefined();
-    expect(buttonSaying(root.container, 'Download TCX — Box Hill loop')).toBeDefined();
+    expect(buttonSaying(root.container, 'Download GPX — Old mill loop')).toBeDefined();
+    expect(buttonSaying(root.container, 'Download TCX — Old mill loop')).toBeDefined();
   });
 
   it('hands the rider a named file when they press it', async () => {
@@ -345,7 +345,7 @@ describe('sending a route to a head unit (#74)', () => {
     buttonSaying(root.container, 'Download GPX')?.click();
     await settle();
     expect(saved).toHaveLength(1);
-    expect(saved[0]?.fileName).toBe('Box Hill loop.gpx');
+    expect(saved[0]?.fileName).toBe('Old mill loop.gpx');
     expect(saved[0]?.mediaType).toBe('application/gpx+xml');
     expect(new TextDecoder().decode(saved[0]?.bytes)).toContain('<trkpt');
   });
@@ -355,7 +355,7 @@ describe('sending a route to a head unit (#74)', () => {
     buttonSaying(root.container, 'Download TCX')?.click();
     await settle();
     const text = root.container.textContent ?? '';
-    expect(text).toContain('Box Hill loop.tcx is ready');
+    expect(text).toContain('Old mill loop.tcx is ready');
     expect(text).toContain('Gradient is not written');
     expect(text).toContain('course time of zero');
   });
@@ -550,7 +550,7 @@ describe('#670 — a selected route', () => {
     await settle();
     expect(asked).toEqual(['route-1']);
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
-      'Box Hill loop',
+      'Old mill loop',
     );
   });
 
@@ -581,7 +581,7 @@ describe('#670 — a selected route', () => {
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Route not found',
     );
-    expect(view.container.textContent).not.toContain('Box Hill loop');
+    expect(view.container.textContent).not.toContain('Old mill loop');
   });
 
   it('puts Import route first in the detail pane (#668), and drawing one at the head of the list', async () => {
@@ -608,7 +608,7 @@ describe('#670 — a selected route', () => {
     const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
     const detail = view.container.querySelector('[data-oyl-pane="detail"]') as Element;
     expect(queryAll(detail, 'h2').map((heading) => heading.textContent)).toEqual([
-      'Box Hill loop',
+      'Old mill loop',
       'Before you share a route',
     ]);
     expect(detail.querySelector('#route-file')).toBeNull();
@@ -634,13 +634,13 @@ describe('each message is said once, in one live region', () => {
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(
-      buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement,
+      buttonSaying(document.body, 'Delete “Old mill loop”') as HTMLElement,
     );
     await settle();
     // What the shell does when the delete moves the hash back to the list.
     await view.rerender(<RoutesView port={stub} now={() => 1_700_000_500} />);
     await settle();
-    saidOnce(view.container, 'Deleted “Box Hill loop”.');
+    saidOnce(view.container, 'Deleted “Old mill loop”.');
   });
 
   it('after a refused import', async () => {
@@ -653,10 +653,10 @@ describe('each message is said once, in one live region', () => {
   it('after a save', async () => {
     const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
     const field = view.container.querySelector<HTMLInputElement>('#name-route-1');
-    await typeInto(field as HTMLInputElement, 'Ranmore');
+    await typeInto(field as HTMLInputElement, 'Fordside');
     await activateWithKeyboard(buttonSaying(view.container, 'Save changes') as HTMLElement);
     await settle();
-    saidOnce(view.container, 'Saved “Ranmore”.');
+    saidOnce(view.container, 'Saved “Fordside”.');
   });
 
   it('and a list that cannot be read says so once, not live, in the list', async () => {
@@ -769,7 +769,7 @@ describe('#2003 — a chosen route on the map', () => {
     const loader = loaderFor(engine);
     const other = route({
       id: stubRouteId('route-2'),
-      name: 'Ditchling Beacon',
+      name: 'The beacon climb',
       profile: routeProfile(northPoints(1500, 9000)),
     });
     const stub = routeStub(ATHLETE, [route(), other]);

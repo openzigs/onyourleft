@@ -38,15 +38,17 @@
  * ## Stop takes two presses and that is the point
  *
  * #49: *"Stop is confirmed before it destroys a session; a test asserts a single
- * click cannot discard a ride."* The first press arms; the second, in a
- * different control with a different label, stops. The controller refuses
- * `confirmStop` unless the arm happened, so the guarantee does not rest on this
- * component rendering the two buttons in the right order.
+ * click cannot discard a ride."* The first press opens the end-of-ride
+ * question (#2349, `ride/EndRideQuestion.tsx`): *Keep riding*, *Save ride* or
+ * *Discard ride*, and a discard is asked once more. The controller refuses
+ * `confirmStop` unless the question was opened and `confirmDiscard` unless the
+ * discard was asked, so the guarantee does not rest on this component
+ * rendering the buttons in the right order.
  */
 
-import { useEffect, useId, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 
-import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
+import type { Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -65,6 +67,9 @@ import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
+import { useOwnThresholds } from '../analysis/own-thresholds';
+import { LOCAL_ATHLETE } from '../local-athlete';
+import { builtInRideFromQuery, offeredWorkout } from '../workouts/built-in-ride';
 import type { RecoverableRide } from '../recording/recovery';
 import type { RecordingSessionId } from '@onyourleft/store';
 import {
@@ -76,14 +81,18 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { EndRideQuestion } from '../ride/EndRideQuestion';
+import { useRideBack } from '../shell/ride-back';
 import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
+import { ThresholdOffer } from '../ride/ThresholdOffer';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
 import { manualLapSummary } from '../ride/manual-lap-text';
 import { useUnits } from '../units/context';
+import { formatDistance, measurementText } from '../units/format';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { hrefFor, routeById } from '../shell/routes';
@@ -132,6 +141,12 @@ export interface RideViewProps {
    * shell, which is what pins `AppShell`'s half.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The address's query — #2306: a tailored built-in to ride, put there by
+   * *Ride it* on the Workouts screen (`workouts/built-in-ride.ts`). Offered
+   * beside the saved workouts, never saved.
+   */
+  readonly query?: string | undefined;
 }
 
 export function RideView({
@@ -139,6 +154,7 @@ export function RideView({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: RideViewProps): JSX.Element {
   if (controller === undefined) {
     return (
@@ -158,6 +174,7 @@ export function RideView({
       workouts={workouts}
       analysis={analysis}
       sidePairing={sidePairing}
+      query={query}
     />
   );
 }
@@ -170,15 +187,39 @@ function LiveRide({
   workouts,
   analysis,
   sidePairing,
+  query,
 }: {
   readonly controller: RideController;
   readonly workouts: WorkoutPort | undefined;
   readonly analysis: AnalysisPort | undefined;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly query: string | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  const own = useOwnThresholds(analysis);
+  // #2307: read again once the rider accepts a test's estimate.
+  const [thresholdVersion, setThresholdVersion] = useState(0);
+  const own = useOwnThresholds(analysis, thresholdVersion);
   const thresholdPower = own.power;
+  /*
+   * #2306: the tailored built-in the address asks for, made again here from
+   * the template and the rider's choices — with the rider's own threshold
+   * heart rate, as the tailor pane made it — as a record held in memory. It
+   * is offered beside the saved workouts and started through the same
+   * `onStart` below; nothing writes it to the workouts store.
+   */
+  const ride = useMemo(() => builtInRideFromQuery(query), [query]);
+  const offered = useMemo(
+    () =>
+      ride === undefined
+        ? undefined
+        : offeredWorkout(
+            ride,
+            workouts?.athleteId ?? analysis?.athleteId ?? LOCAL_ATHLETE,
+            own.heartRate,
+            Date.now() / 1000,
+          ),
+    [ride, workouts, analysis, own.heartRate],
+  );
   const sideCamera = useSideCamera(sidePairing);
   // #655: which of two voices answers a held *Set* — the ERG form's, or the
   // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
@@ -294,6 +335,20 @@ function LiveRide({
           notice before them since #647.
         */}
         <RideControls
+          // #2307: a threshold test's estimate, under the result card.
+          thresholdOffer={
+            snapshot.savedRide?.thresholdTest === undefined ? undefined : (
+              <ThresholdOffer
+                key={snapshot.savedRide.activityId}
+                offer={snapshot.savedRide.thresholdTest}
+                current={thresholdPower}
+                analysis={analysis}
+                onAccepted={() => {
+                  setThresholdVersion((version) => version + 1);
+                }}
+              />
+            )
+          }
           controller={controller}
           snapshot={snapshot}
           zoom={zoom}
@@ -380,6 +435,8 @@ function LiveRide({
           power={livePower(snapshot)}
           port={workouts}
           thresholdPower={thresholdPower}
+          // #2306: a tailored built-in from the Workouts screen, or its refusal.
+          offered={offered}
           // #551: the ride's one region says the side camera's link going.
           sideCamera={sideCamera.state}
           // #647: …and, once, that the ride may stop if the screen goes off.
@@ -468,54 +525,6 @@ function LiveRide({
       {snapshot.sensors.length === 0 && snapshot.phase === 'idle' ? <OtherRides /> : null}
     </div>
   );
-}
-
-/** The rider's own thresholds, each `undefined` when they have not set it. */
-interface OwnThresholds {
-  readonly power: Watts | undefined;
-  readonly heartRate: BeatsPerMinute | undefined;
-}
-
-const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
-
-/**
- * Read the athlete's thresholds once, for the workout panel — threshold
- * heart rate too since #1240, which a heart-rate hold needs.
- *
- * `undefined` while it is being read and `undefined` when it is not set, and
- * the two are deliberately the same value: the panel's answer to both is the
- * same sentence, and a screen that distinguished "loading" from "not set" would
- * be offering a rider a state they cannot act on.
- */
-function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
-  const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
-  useEffect(() => {
-    if (analysis === undefined) {
-      return;
-    }
-    let live = true;
-    void analysis.store
-      .getAthlete(analysis.athleteId)
-      .then((athlete) => {
-        if (live) {
-          // The rider's own, and nothing substituted: `analysis/thresholds.ts`
-          // is the one place a default is, and it is not for this screen.
-          setThreshold({
-            power: athlete?.thresholdPower,
-            heartRate: athlete?.thresholdHeartRate,
-          });
-        }
-      })
-      .catch(() => {
-        // A store that cannot be read leaves the threshold absent, which the
-        // panel already explains. There is nothing else this screen can say
-        // that a rider could act on.
-      });
-    return () => {
-      live = false;
-    };
-  }, [analysis]);
-  return threshold;
 }
 
 /**
@@ -729,9 +738,15 @@ function RideControls({
   snapshot,
   zoom,
   touchLockHelp,
+  thresholdOffer,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
+  /**
+   * #2307: a threshold test's estimate and its two answers, drawn under the
+   * result card, which it belongs to and goes with.
+   */
+  readonly thresholdOffer?: JSX.Element | undefined;
   /**
    * #1433: the zoom, set at the END of the row the ride's own controls stand
    * in — beside them where the row has room, which on a landscape tablet it
@@ -771,23 +786,40 @@ function RideControls({
       startRecording.current?.focus();
     }
   }, [snapshot.phase]);
-  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the confirmation replace each other,
+  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the question replace each other,
   // so each press unmounts the control it was made on. Focus goes to the
-  // control that replaced it: *Keep riding* after *Stop* — the step that does
-  // NOT end the ride, so a key held down or pressed twice cannot carry a
-  // keyboard rider through the confirmation — and *Stop* again after *Keep
-  // riding*. Only after a press on this screen: a screen mounted with a stop
-  // already armed leaves focus where it is.
-  const keepRiding = useRef<HTMLButtonElement>(null);
+  // control that replaced it: *Keep riding* after *Stop* — the answer that
+  // does NOT end the ride, so a key held down or pressed twice cannot carry a
+  // keyboard rider through the question (`EndRideQuestion`'s `focusOnOpen`) —
+  // and *Stop* again after *Keep riding*. Only after a press on this screen: a
+  // screen mounted with the question already open leaves focus where it is.
   const stopButton = useRef<HTMLButtonElement>(null);
   const focusAfterStopChange = useRef(false);
+  const [askedHere, setAskedHere] = useState(false);
   useEffect(() => {
     if (!focusAfterStopChange.current) {
       return;
     }
     focusAfterStopChange.current = false;
-    (snapshot.stopArmed ? keepRiding : stopButton).current?.focus();
+    if (!snapshot.stopArmed) {
+      stopButton.current?.focus();
+    }
   }, [snapshot.stopArmed]);
+  const keepRiding = (): void => {
+    focusAfterStopChange.current = true;
+    setAskedHere(false);
+    controller.cancelStop();
+  };
+  // #2349: Android's back, on this screen while a ride is on, is the
+  // question's own key — it opens it, and is Keep riding once it is open.
+  useRideBack(rideInProgress(snapshot.phase), () => {
+    if (snapshot.stopArmed) {
+      keepRiding();
+    } else {
+      setAskedHere(true);
+      controller.armStop();
+    }
+  });
 
   if (snapshot.phase === 'idle') {
     return (
@@ -850,6 +882,7 @@ function RideControls({
             }}
           />
         )}
+        {result === undefined ? null : thresholdOffer}
         {canStartNewRide(snapshot) ? (
           <Button
             ref={startNewRide}
@@ -949,7 +982,7 @@ function RideControls({
               size="ride"
               ref={stopButton}
               onClick={() => {
-                focusAfterStopChange.current = true;
+                setAskedHere(true);
                 controller.armStop();
               }}
             >
@@ -979,36 +1012,40 @@ function RideControls({
       </div>
 
       {snapshot.stopArmed ? (
-        <>
-          <StatusMessage tone="warning" label="Confirm" live>
-            Stopping ends this ride. It stays on this device either way.
-          </StatusMessage>
-          <div className="oyl-ride__actions">
-            <Button
-              size="ride"
-              onClick={() => {
-                void controller.confirmStop();
-              }}
-            >
-              Yes, stop the ride
-            </Button>
-            <Button
-              variant="secondary"
-              size="ride"
-              ref={keepRiding}
-              onClick={() => {
-                focusAfterStopChange.current = true;
-                controller.cancelStop();
-              }}
-            >
-              Keep riding
-            </Button>
-          </div>
-        </>
+        // #2349: the one end-of-ride question, the game's too. Keep riding
+        // (and Escape, and back) closes it and changes nothing else.
+        <EndRideQuestion
+          className="oyl-end-ride oyl-end-ride--ride-screen"
+          step={snapshot.discardArmed ? 'discard' : 'ask'}
+          // `recording/finish.ts`: a recording with no samples is no ride.
+          canSave={snapshot.sampleCount > 0}
+          focusOnOpen={askedHere}
+          surface="ride-screen"
+          onSave={() => {
+            void controller.confirmStop();
+          }}
+          onDiscard={() => {
+            controller.armDiscard();
+          }}
+          onConfirmDiscard={() => {
+            // #2349's review: a discard that throws has failed closed, and the
+            // controller says so (`discarded`, with `leftover`): the screen
+            // shows "Not deleted" from the snapshot, so nothing is left here.
+            controller.confirmDiscard().catch(() => undefined);
+          }}
+          onKeepRiding={keepRiding}
+        />
       ) : null}
     </>
   );
 }
+
+/** #2349: what a discarded ride's screen says. ⚠️ Draft wording for the owner. */
+export const DISCARDED_TEXT = {
+  gone: 'The ride is stopped and discarded. It was deleted from this device, and nothing was saved.',
+  leftover:
+    'The ride is stopped and was not saved, but it could not be deleted from this device. It is still here, and will be offered back so it can be discarded again.',
+} as const;
 
 /** What a stopped ride ends on — where it got to, and whether the tab is safe to close. */
 function StoppedNotice({
@@ -1032,6 +1069,23 @@ function StoppedNotice({
   // is saved … Closing the tab is safe now" directly above `StorageNotice`
   // saying the device had no room left. The rider believes the reassuring one
   // and closes the tab.
+  if (snapshot.saveState === 'discarded') {
+    // #2349: the rider answered Discard ride twice. FIRST, before the storage
+    // check below: a discarded ride's last seconds are not being kept, and a
+    // delete that failed is what sets `storage` here, so that warning would
+    // tell the rider to keep a tab open for a ride they asked to delete. ⚠️ A delete that did not
+    // go through is said, never hidden: the ride is still on this device and
+    // is offered back, which a rider who was told "deleted" would not expect.
+    return snapshot.leftover ? (
+      <StatusMessage tone="warning" label="Not deleted" live>
+        {DISCARDED_TEXT.leftover}
+      </StatusMessage>
+    ) : (
+      <StatusMessage tone="info" label="Discarded" live>
+        {DISCARDED_TEXT.gone}
+      </StatusMessage>
+    );
+  }
   if (snapshot.storage !== 'ok') {
     return (
       <StatusMessage tone="warning" label="Stopped" live>
@@ -1203,6 +1257,7 @@ function NoSensorsBanner(): JSX.Element {
  */
 function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
   const timeOfDay = useTimeOfDay();
+  const units = useUnits();
   return (
     <dl className="oyl-ride__clock">
       <div className="oyl-ride__time">
@@ -1223,6 +1278,22 @@ function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Eleme
         type, as the seconds recorded are: on a landscape tablet it is a
         column of its own beside them and costs the Live group no height.
       */}
+      {/*
+        #2076: how far the ride has gone — the recorder's figure
+        (`RideSnapshot.totals`, `recording/totals.ts` §`rideDistance`), the one
+        the saved ride states. In the clock row rather than as a fifth card in
+        the metric grid: on a landscape tablet a fifth card is a second row of
+        the grid, and that row put a running workout's graph under the fold
+        (`rideview.browser.spec.ts` §"#1307"). Here it is a column of its own
+        beside the two times, as the time of day is, and costs the Live group
+        no height. Not drawn with nothing recorded.
+      */}
+      {snapshot.totals === undefined ? null : (
+        <div className="oyl-ride__time oyl-ride__time--small oyl-ride__time--distance">
+          <dt>Distance</dt>
+          <dd>{measurementText(formatDistance(snapshot.totals.distance, units))}</dd>
+        </div>
+      )}
       <div className="oyl-ride__time oyl-ride__time--small">
         <dt>Clock</dt>
         <dd>{formatTimeOfDay(timeOfDay)}</dd>

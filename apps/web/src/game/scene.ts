@@ -346,6 +346,21 @@ export interface SceneInput {
    */
   readonly steeredLateral?: number | undefined;
   /**
+   * Where the chase camera's EYE stands across the road, in metres right of
+   * the centre line, where it is not behind the rider — #2396,
+   * `delivery/camera-clear.ts` §`eyeLateralBesideParkedCars`: a Delivery
+   * round moves it off a parked car it is alongside, so the camera never
+   * passes through one. The camera still looks at the road on the rider's
+   * line ({@link cameraPose}). Absent, the eye is behind the rider, as on
+   * every ride before #2396.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a Delivery ride that forgot it drives the camera into a parked
+   * car. `delivery-wiring.test.tsx` reads it back off the input every frame
+   * of a round was built from.
+   */
+  readonly cameraLateral?: number | undefined;
+  /**
    * A lap race's bots, where to draw them — #1902: each a `bot` marker, an
    * instance in the riders' own meshes (#368), so seven of them cost the
    * frame no draw call. Only those on the corridor this frame built are
@@ -443,7 +458,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.mappedTown?.urban,
     junctions,
   );
-  const camera = cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral);
+  const camera = cameraPose(
+    corridor,
+    riderDistance,
+    (riders[0] as PlacedRider).lateral,
+    // #2396: the eye moved off a parked car, where a Delivery round says so.
+    input.cameraLateral,
+  );
   // #458. Built from the corridor just built, so the ground's innermost
   // column is the road's outermost one — `landform.ts` says why that is the
   // whole of the no-crack guarantee. Every band, whatever the rung: the
@@ -718,16 +739,28 @@ const RIDER_OFF_AXIS_RADIANS = (20 * Math.PI) / 180;
  *
  * Undamped: this is a function of one frame, and `GameView` damps the heading
  * across frames (`camera.ts` §`dampedHeading`, §`turnedPose`).
+ *
+ * `eyeLateralMetres`, since #2396, stands the eye that far across the road
+ * instead of behind the rider: a Delivery round moves it off a parked car it
+ * is alongside (`delivery/camera-clear.ts`). The target is still on the
+ * rider's line. Absent, it is `lateralMetres`, and the pose is the one every
+ * ride drew before.
  */
 export function cameraPose(
   corridor: RoadCorridor,
   atDistance: number,
   lateralMetres: number,
+  eyeLateralMetres: number = lateralMetres,
 ): CameraPose {
   const rider = chaseRider(corridor, atDistance, lateralMetres);
   const { tangent } = rider;
-  const eyeX = rider.x - tangent.headingX * CAMERA_BEHIND_METRES;
-  const eyeZ = rider.z - tangent.headingZ * CAMERA_BEHIND_METRES;
+  // #2396: the eye stands behind the rider, or across the road from there
+  // where a Delivery round moves it off a parked car (`SceneInput.cameraLateral`).
+  // The target below stays on the rider's line either way.
+  const behind =
+    eyeLateralMetres === lateralMetres ? rider : chaseRider(corridor, atDistance, eyeLateralMetres);
+  const eyeX = behind.x - tangent.headingX * CAMERA_BEHIND_METRES;
+  const eyeZ = behind.z - tangent.headingZ * CAMERA_BEHIND_METRES;
   const target = roadTarget(corridor, atDistance, lateralMetres, tangent, eyeX, eyeZ);
   const dx = target.x - eyeX;
   const dz = target.z - eyeZ;

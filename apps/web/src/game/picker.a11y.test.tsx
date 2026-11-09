@@ -63,7 +63,7 @@ function ridableRoute(id: string, name: string, attempts: number): RidableRoute 
 
 const PORT: GamePort = {
   listRoutes: () =>
-    Promise.resolve([ridableRoute('a', 'Box Hill', 0), ridableRoute('b', 'Ditchling', 4)]),
+    Promise.resolve([ridableRoute('a', 'Quarry climb', 0), ridableRoute('b', 'Reservoir road', 4)]),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
     rider: { power: watts(0), live: false, paired: false },
@@ -110,10 +110,12 @@ describe('the route picker', () => {
     mounted = await mountPicker();
 
     // Every control the rule above audits is present — if one disappeared the
-    // rule would have nothing to audit and would pass. Four number boxes: the
-    // pacer's intensity, #326's wind speed and direction, and the power of
-    // PR #2113's *Preview without a trainer*.
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(4);
+    // rule would have nothing to audit and would pass. One number box: the
+    // power of PR #2113's *Preview without a trainer*. #326's wind speed and
+    // direction are on the screen only while a wind is asked for (#2330), so
+    // the wind block below audits them; the pacer's intensity shows only with
+    // the pacer on since #2338, and the test below audits it there.
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(1);
     for (const words of ['pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
@@ -200,12 +202,46 @@ describe('the pacer refusal reaches the rider it stops (#255)', () => {
     expect(describedText(intensity as HTMLInputElement)).toContain('70');
   });
 
-  it('says nothing about validity while the number is one the rule accepts', async () => {
-    mounted = await mountPicker();
+  /** The pacer's switch, pressed, so the intensity box is on the screen (#2338). */
+  async function pacerOn(): Promise<Mounted> {
+    const tree = await mountPicker();
+    const box = queryAll<HTMLInputElement>(tree.container, 'input[type="checkbox"]').find((input) =>
+      (input.closest('label')?.textContent ?? '').includes('pacer'),
+    );
+    expect(box).toBeDefined();
+    await activateWithKeyboard(box as HTMLInputElement);
+    await settle();
+    return tree;
+  }
 
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+  /** The intensity box, found by its label rather than by its position. */
+  function intensityBox(root: ParentNode): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(root, 'input[type="number"]').find((input) =>
+      (input.labels?.[0]?.textContent ?? '').includes('Pacer intensity'),
+    );
+  }
+
+  it('says nothing about validity while the number is one the rule accepts', async () => {
+    // ⚠️ With the pacer on: since #2338 the box is not rendered with it off,
+    // and an absent box would read `null` for both attributes and pass.
+    mounted = await pacerOn();
+
+    const intensity = intensityBox(mounted.container);
+    expect(intensity).toBeDefined();
     expect(intensity?.getAttribute('aria-invalid')).toBeNull();
     expect(intensity?.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('with the pacer on, the intensity box is reachable and the tree audits clean (#2338)', async () => {
+    // The picker's own audit runs with the pacer off, so it no longer sees
+    // this box; this one does.
+    mounted = await pacerOn();
+
+    const intensity = intensityBox(mounted.container);
+    expect(intensity).toBeDefined();
+    expect(keyboardReachableElements(document)).toContain(intensity);
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
   });
 
   it('leaves every blocked ride control in the tab order, not behind it', async () => {
@@ -332,9 +368,10 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
   it('says nothing about validity while the rider has not asked for a wind', async () => {
     mounted = await mountPicker();
 
-    const box = boxLabelled(mounted.container, 'Wind speed');
-    expect(box?.getAttribute('aria-invalid')).toBeNull();
-    expect(box?.getAttribute('aria-describedby')).toBeNull();
+    // #2330: with no wind asked for there is no speed box to mark at all, and
+    // no refusal for anything on the screen to point at.
+    expect(boxLabelled(mounted.container, 'Wind speed')).toBeUndefined();
+    expect(document.getElementById('oyl-game-wind-problem')).toBeNull();
   });
 
   it('blocks every ride control and tells it why, without taking its tab stop', async () => {
@@ -373,6 +410,30 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
   });
+
+  it('names, audits and reaches both wind boxes once a usable wind is asked for', async () => {
+    // #2330 took the two boxes off the screen while the switch is off, so the
+    // picker's own audit above no longer sees them. This is the tree they are
+    // in when nothing is wrong.
+    mounted = await windRefused();
+    const speed = boxLabelled(mounted.container, 'Wind speed');
+    expect(speed).toBeDefined();
+    await typeInto(speed as HTMLInputElement, '12');
+    await settle();
+
+    // Three boxes: the two wind boxes and the trainer-free preview's power.
+    // The pacer is off here, so its intensity box is not on the screen (#2338).
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
+    const reachable = keyboardReachableElements(document);
+    for (const words of ['Wind speed', 'Wind direction']) {
+      const box = boxLabelled(mounted.container, words);
+      expect(box, words).toBeDefined();
+      expect(reachable).toContain(box);
+    }
+    expect(document.getElementById('oyl-game-wind-problem')).toBeNull();
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
 });
 
 describe('opened from Home’s next up — #1010', () => {
@@ -386,17 +447,17 @@ describe('opened from Home’s next up — #1010', () => {
   it('opens on the route the link names', async () => {
     globalThis.location.hash = '#/game?route=b';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Ditchling');
+    expect(rideLabel()).toBe('Ride Reservoir road');
   });
 
   it('opens on the first route with no route named, or one it does not hold', async () => {
     globalThis.location.hash = '#/game';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Box Hill');
+    expect(rideLabel()).toBe('Ride Quarry climb');
     mounted.unmount();
     globalThis.location.hash = '#/game?route=gone';
     mounted = await mountPicker();
-    expect(rideLabel()).toBe('Ride Box Hill');
+    expect(rideLabel()).toBe('Ride Quarry climb');
   });
 });
 

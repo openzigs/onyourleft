@@ -229,6 +229,121 @@ function stepOf(plan: FootprintPlan): FrontStep | undefined {
 }
 
 /**
+ * Every house a round from `riderDistance` could take before the drawn
+ * check, in route order, ties broken by index so the same input orders the
+ * same way every time: a front step in a parcel's reach of the drawn road,
+ * whose window opens no earlier than the start of the chunk after the
+ * rider's and closes by the route's end (or a lap on from the rider, on a
+ * loop).
+ */
+function candidatesOf(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  riderDistance: number,
+): Candidate[] {
+  const total = profile.totalDistance;
+  /** The earliest a window may open: the start of the chunk after the rider's. */
+  const firstOpen = (mappedChunk(riderDistance) + 1) * MAPPED_CHUNK_METRES;
+  /** The latest a window may close: the route's end, or a lap on from the rider. */
+  const lastClose = profile.loop ? riderDistance + total : total;
+  const half = TARGET_WINDOW_HALF_METRES;
+
+  const candidates: Candidate[] = [];
+  buildings.plans.forEach((plan, index) => {
+    const step = stepOf(plan);
+    if (step === undefined) return;
+    const near = nearestOnDrawnRoad(profile, origin, step.x, step.z, TARGET_MOST_FROM_ROAD_METRES);
+    if (near === undefined) return;
+    const laps =
+      profile.loop && total > 0
+        ? Math.max(0, Math.ceil((firstOpen + half - near.along) / total))
+        : 0;
+    const distance = near.along + laps * total;
+    if (distance - half < firstOpen || distance + half > lastClose) return;
+    candidates.push({ index, distance, step, lateral: near.lateral, fromRoad: near.distance });
+  });
+  candidates.sort((a, b) => a.distance - b.distance || a.index - b.index);
+  return candidates;
+}
+
+/**
+ * Whether a candidate is drawn throughout its throw window: at the start of
+ * every refill chunk the window touches, and at every whole metre of it (the
+ * header). The selections are kept for the one pick, or the one count.
+ */
+function drawnThroughoutOf(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  triangleBudget: number,
+): (candidate: Candidate) => boolean {
+  const half = TARGET_WINDOW_HALF_METRES;
+  const selection = new MappedSelection();
+  /** The plans drawn at each sampled rider distance. */
+  const drawnAt = new Map<number, ReadonlySet<number>>();
+  const drawnSet = (at: number): ReadonlySet<number> => {
+    const known = drawnAt.get(at);
+    if (known !== undefined) return known;
+    const here = drawnRoadPosition(profile, origin, at);
+    selectMappedBuildings(buildings, here.x, here.z, triangleBudget, selection);
+    const found = new Set(selection.plans.subarray(0, selection.count));
+    drawnAt.set(at, found);
+    return found;
+  };
+  return (candidate) => {
+    const from = candidate.distance - half;
+    const to = candidate.distance + half;
+    for (let chunk = mappedChunk(from); chunk <= mappedChunk(to); chunk += 1) {
+      if (!drawnSet(chunk * MAPPED_CHUNK_METRES).has(candidate.index)) return false;
+    }
+    for (let at = Math.ceil(from); at <= to; at += 1) {
+      if (!drawnSet(at).has(candidate.index)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * The most houses a round started on the start line can hold, capped at
+ * `round.ts` §`MOST_HOUSES` — #2294's course picker, which says before the
+ * rider chooses which of their routes can hold a round.
+ *
+ * The candidates and the drawn check are {@link pickRoundTargets}' own, at
+ * the same triangle budget, and no seed: the houses are taken in route
+ * order, each one drawn throughout its window and at least
+ * {@link TARGET_SPACING_METRES} past the last one taken. Every window is the
+ * same length, so taking the earliest house that fits is the most houses
+ * any spacing of them allows (the interval-scheduling argument), and **no
+ * pick is longer than this, whatever its seed**. "Fewer than a round needs"
+ * is therefore certain; "this many" is a ceiling, because a seeded pick can
+ * take a house that rules out two and find fewer, which the press still
+ * decides (`ride-round.ts` §`startDeliveryRide`).
+ *
+ * It returns one number: no seed, target or position leaves it.
+ * `triangleBudget` is the pick's {@link TargetPickInput.triangleBudget}, and
+ * the press asks the pick at the default, as this does.
+ */
+export function countRoundHouses(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  triangleBudget: number = MAPPED_BUILDING_TRIANGLES,
+): number {
+  const candidates = candidatesOf(buildings, profile, origin, 0);
+  const drawnThroughout = drawnThroughoutOf(buildings, profile, origin, triangleBudget);
+  let count = 0;
+  let last = -Infinity;
+  for (const candidate of candidates) {
+    if (count === MOST_HOUSES) break;
+    if (candidate.distance - last < TARGET_SPACING_METRES || !drawnThroughout(candidate)) continue;
+    count += 1;
+    last = candidate.distance;
+  }
+  return count;
+}
+
+/**
  * Pick a round of `input.houses` targets ahead of the rider, in route order,
  * no two closer than {@link TARGET_SPACING_METRES}, from the houses drawn
  * throughout their throw windows. @see the header
@@ -254,53 +369,8 @@ export function pickRoundTargets(
   }
   if (!(triangleBudget >= 0)) refuse('the triangle budget is a number, not below zero');
 
-  const total = profile.totalDistance;
-  /** The earliest a window may open: the start of the chunk after the rider's. */
-  const firstOpen = (mappedChunk(riderDistance) + 1) * MAPPED_CHUNK_METRES;
-  /** The latest a window may close: the route's end, or a lap on from the rider. */
-  const lastClose = profile.loop ? riderDistance + total : total;
-  const half = TARGET_WINDOW_HALF_METRES;
-
-  const candidates: Candidate[] = [];
-  buildings.plans.forEach((plan, index) => {
-    const step = stepOf(plan);
-    if (step === undefined) return;
-    const near = nearestOnDrawnRoad(profile, origin, step.x, step.z, TARGET_MOST_FROM_ROAD_METRES);
-    if (near === undefined) return;
-    const laps =
-      profile.loop && total > 0
-        ? Math.max(0, Math.ceil((firstOpen + half - near.along) / total))
-        : 0;
-    const distance = near.along + laps * total;
-    if (distance - half < firstOpen || distance + half > lastClose) return;
-    candidates.push({ index, distance, step, lateral: near.lateral, fromRoad: near.distance });
-  });
-  // Ties broken by index, so the same input orders the same way every time.
-  candidates.sort((a, b) => a.distance - b.distance || a.index - b.index);
-
-  const selection = new MappedSelection();
-  /** The plans drawn at each sampled rider distance, kept for the one pick. */
-  const drawnAt = new Map<number, ReadonlySet<number>>();
-  const drawnSet = (at: number): ReadonlySet<number> => {
-    const known = drawnAt.get(at);
-    if (known !== undefined) return known;
-    const here = drawnRoadPosition(profile, origin, at);
-    selectMappedBuildings(buildings, here.x, here.z, triangleBudget, selection);
-    const found = new Set(selection.plans.subarray(0, selection.count));
-    drawnAt.set(at, found);
-    return found;
-  };
-  const drawnThroughout = (candidate: Candidate): boolean => {
-    const from = candidate.distance - half;
-    const to = candidate.distance + half;
-    for (let chunk = mappedChunk(from); chunk <= mappedChunk(to); chunk += 1) {
-      if (!drawnSet(chunk * MAPPED_CHUNK_METRES).has(candidate.index)) return false;
-    }
-    for (let at = Math.ceil(from); at <= to; at += 1) {
-      if (!drawnSet(at).has(candidate.index)) return false;
-    }
-    return true;
-  };
+  const candidates = candidatesOf(buildings, profile, origin, riderDistance);
+  const drawnThroughout = drawnThroughoutOf(buildings, profile, origin, triangleBudget);
 
   const base = fmix32(seed);
   const taken: Candidate[] = [];

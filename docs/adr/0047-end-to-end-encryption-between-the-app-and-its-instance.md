@@ -1566,3 +1566,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `DELETE /v1/blocks/handles/{handle}` list and undo the caller's own blocks by an opaque handle,
   because the app never holds another rider's athlete id. Both are marked `only` from the first and
   are listed in `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#1529)
+- **2026-11-05** — **D-7's phase-2 list gains a row of its own: published segments, the efforts
+  riders share on them, and their leaderboards** (#68). `POST /v1/segments`, `GET /v1/segments`,
+  `GET` and `DELETE /v1/segments/{segmentId}`, `POST /v1/segments/{segmentId}/efforts/{content}`
+  and `GET /v1/segments/{segmentId}/leaderboard` are marked `only` from the first: a segment's path
+  is a stretch of the rider's own ride, and a board names riders. They never existed in plaintext,
+  and they are listed in `apps/instance/src/sealed/phase-two.ts`. `POST
+  /v1/sync/records/{content}/visibility`, the ride's visibility a shared board reads, is a sync
+  route and so in D-7's "the synced history" row already; it is listed in
+  `apps/instance/src/sealed/phase-one.ts` with the rest of that row. The body above is not edited.
+  (#68)
+- **2026-11-05** — **The row #68 added gains two routes, and the moderators' reads one** (#69).
+  `POST /v1/segments/{segmentId}/efforts/{effortId}/flag` and `POST
+  /v1/segments/{segmentId}/hazard` (a rider's flag on another rider's effort, and on a segment as
+  hazardous) join the published-segments row; `GET /v1/moderation/segment-log`, the leaderboard
+  integrity log, is a moderator read and so in D-7's "every moderator read" row already. All three
+  are marked `only` from the first and listed in `apps/instance/src/sealed/phase-two.ts` and
+  `phase-one.ts`. The body above is not edited. (#69)

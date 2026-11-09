@@ -34,9 +34,9 @@ run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting t
 decision — §8's "read the issue's revision block first" applies.
 
 **The split that does hold is by capability, not by folder.** Computation and UI in `apps/web`;
-only what genuinely cannot be web — `PowerManager.getThermalHeadroom()` (API 30+) and the
-foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
-`apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
+only what genuinely cannot be web — such as the foreground-service wake lock — behind ports in
+`apps/web` with Capacitor implementations in `apps/mobile`, exactly as #39's sensor interface
+relates to #40's Web Bluetooth transport.
 
 ⚠️ **`apps/mobile` had no importers at all until #85's wiring branch, and that sentence used to
 stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in
@@ -97,6 +97,13 @@ condition, measured and met, that the app can take control again. So `TrainerCon
 ride ending by button or by navigating away. What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
+⚠️ **Since [#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout writes the
+trainer's floor before its Stop.** A ramp test ended with the machine keeping its top target (373 W on
+the simulator) through the Stop, under a spent rider. So a workout's release hands `beginRelease` the
+machine's own minimum, written as a `0x05` immediately before the `0x08` on the client's one queue,
+unless the session knows the trainer is already at the floor with nothing on the wire. A step-down
+the trainer does not confirm is told as `workout/session.ts` §`STEP_DOWN_UNCONFIRMED` on *Not
+released*. *End ERG* and a game ride's release are unchanged.
 ⚠️ **Easing a rider DURING a workout is a different command**
 ([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
 Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
@@ -147,7 +154,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         it LOOKS AT THE ROAD through a bend (`scene.ts`
                         §`cameraPose`: up to 25 m up the route, nearer where
                         that would push the rider past 20° off the axis) from
-                        the eye it always had, so in a bend the pose's x/z are
+                        the eye it always had (but a Delivery round moves it off a parked car, #2396,
+                        `delivery/camera-clear.ts`), so in a bend the pose's x/z are
                         not the rider; `GameView` damps its heading
                         (`dampedHeading`, frame-rate independent, slower under
                         reduced motion); `chase-camera-bend.test.ts` rides it
@@ -776,7 +784,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and houses from `delivery-progress.ts` beside it, worded
                         "up to N houses" (#1878); it
                         cannot know the town's houses (no map in its graph),
-                        so the press decides and the HUD's *Houses* may be fewer. **The press**, in `GameView`:
+                        so the press decides and the HUD's *Houses* may be fewer.
+                        **The course picker** (#2294): with the round
+                        switched on, `GameView` counts every saved route
+                        through `courses.ts` (the same corridor port, planned
+                        as the press plans, counted by `targets.ts`
+                        §`countRoundHouses`, a ceiling on any seeded pick)
+                        and each card says "up to N houses", or is greyed
+                        with the reason in words; a greyed route is still
+                        choosable, for an ordinary ride, and the switch says
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
@@ -1000,7 +1021,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`browser/realistic/delivery.ts`), held by
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
-                        `realistic-budget-village.test.ts`
+                        `realistic-budget-village.test.ts`. ⚠️ **The three
+                        calls do not bound the triangles** (#2362): every
+                        obstacle instance submits the whole roster,
+                        `three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`
+                        (1 546, one car painted per instance), pinned by
+                        `delivery-belt.test.ts`; the 20-piece village frame
+                        is held to `realistic-budget.ts`
+                        §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
+                        measured 201 356) by the same nightly spec
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
@@ -1134,12 +1163,43 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a ramp: the music bus is 0 whenever music is not playing.
                         #2059: every short sound while music plays ramps the
                         duck to `MUSIC_DUCK_LEVEL` and back after it ends
-                        (`setTargetAtTime`, never a step; `music-duck.test.ts`)
+                        (`setTargetAtTime`, never a step; `music-duck.test.ts`).
+                        Since #2219 *Mute sounds* is pressed while the master
+                        mute (the header's, menu routes only) is on, and its
+                        unmuting press clears the master before `begin()`
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/hud-layout-preference.ts
+                        the panels a rider turns off and the HUD's text size
+                        (#2079), kept on the device and read as a ride starts;
+                        never the notices, the controls or the primary readings
+    src/game/hud/recent-trace.ts, RecentGraph.tsx
+                        the last ten minutes of power and heart rate (#2078):
+                        a fixed ring of 600 one-second slots, written from the
+                        frame loop only when the ride's clock crosses a whole
+                        second, a dropped reading a gap (`NaN`), never a
+                        zero; the SVG is memoised on the count written, so it
+                        is redrawn at most once a second
+    src/game/hud/lap-splits.ts, LapSplits.tsx
+                        a loop's lap splits (#2080): the lap in progress, the
+                        last lap and the best, from the laps `courseLine`
+                        returned and the recorder's lap time only, so they are
+                        the saved ride's rows; on a loop only, in a race's
+                        standings' place and swapped with them
+    src/game/hud/look-ahead.ts
+                        the next 2 km of road on the HUD (#2075, #2291): the
+                        road a line at a FIXED scale (200 m of height across the
+                        strip) over five grade bands of our own, each the
+                        strip's full height with its own fill pattern;
+                        the next climb is `climb-ahead.ts`'s own `slopeAhead`,
+                        so the strip and the voice name the same one, and
+                        `climbAhead` adds the climb under the rider and the top
+                        of either (#2291). The same bands shade the whole
+                        route's strip (`routeBands`) and colour the gradient's
+                        digits (`gradeBand`, `HudCore.tsx`)
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's
@@ -1160,8 +1220,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (with a hit coming under it, outlined dashed: a shape,
                         never a tint), last and absent on any other ride; the
                         standings in a room's panel (`RaceStandings.tsx`, W/kg,
-                        never watts, never a live region), with the leader
-                        always its first line (#1967). Its five sentences
+                        never watts, never a live region), every racer of a
+                        solo field on it (#2328: eight lines, where a room's
+                        window is seven) and past that the leader always
+                        its first line (#1967). Its five sentences
                         are rank 5h, OWED as Delivery's are, the place at most
                         once every 10 s. `GameView` feeds `HudInput.lapRace`
                         on a ride running a race (#1906);
@@ -1200,7 +1262,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         out-and-back's turn changes no hill in view; the other
                         pass's ground is sunk out of sight with the turning
                         point closed round the road's end (§`retracedRoles`),
-                        or drawn a metre under where it only lies alongside
+                        or drawn a metre under where it only lies alongside.
                         ⚠️ Since #2149 a sharp bend's inside, where the fold
                         stops the rows short of the bend's centre, is closed
                         on one point (`closeFans`): within the clear band

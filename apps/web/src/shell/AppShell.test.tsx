@@ -34,7 +34,6 @@ import { stubLibrary } from '../library/testing';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
-import type { ThermalPort } from '../game/thermal-port';
 import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -288,7 +287,7 @@ describe('the router', () => {
           {
             id: stubRouteId('route-1'),
             createdBy: owner,
-            name: 'Box Hill loop',
+            name: 'Old mill loop',
             profile: routeProfile(points),
             visibility: 'private',
             createdAt: unixSeconds(1),
@@ -347,12 +346,14 @@ describe('the header', () => {
     expect(document.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary');
   });
 
-  it('offers five destinations, each an icon and a word — #427, #428', async () => {
+  it('offers six destinations, each an icon and a word — #427, #428, #2292', async () => {
     await open('/');
     const primary = [...document.querySelectorAll('nav[aria-label="Primary"] a')];
     expect(primary.map((a) => a.getAttribute('href'))).toEqual([
       '#/',
       '#/ride',
+      // #2292: the Games tab, after Ride.
+      '#/games',
       '#/activities',
       '#/routes',
       // #1429: More opens its own menu page, not the first page under it.
@@ -361,6 +362,7 @@ describe('the header', () => {
     expect(primary.map((a) => a.textContent)).toEqual([
       'Home',
       'Ride',
+      'Games',
       'History',
       'Routes',
       'More',
@@ -379,6 +381,7 @@ describe('the header', () => {
     ).toEqual([
       'lucide-house',
       'lucide-bike',
+      'lucide-gamepad-2',
       'lucide-rotate-ccw-clock',
       'lucide-route',
       'lucide-ellipsis',
@@ -391,6 +394,20 @@ describe('the header', () => {
     expect(new Set(icons.map((svg) => svg?.getAttribute('stroke-width')))).toEqual(
       new Set(['1.8']),
     );
+  });
+
+  it('heads the navigation with the app’s mark, as decoration — #2066', async () => {
+    await open('/');
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    const marks = [...(nav?.querySelectorAll('img') ?? [])];
+    expect(marks).toHaveLength(1);
+    const [mark] = marks;
+    // Before the destinations, so a rail draws it at the top.
+    expect(nav?.firstElementChild).toBe(mark);
+    expect(mark?.getAttribute('src')).toBe(`${import.meta.env.BASE_URL}icon-192.png`);
+    // Named nowhere: the header's wordmark and label name the app once.
+    expect(mark?.getAttribute('alt')).toBe('');
+    expect(mark?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('lists the current group’s pages, and only that group’s', async () => {
@@ -499,8 +516,10 @@ describe('the line under the title, its help and its notes (#993)', () => {
     const route = routeById('workouts');
     await open(route.path);
     const main = document.querySelector('main');
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).toBe(route.summary);
-    const help = main?.querySelector(':scope > h1 + p + details.oyl-help');
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).toBe(
+      route.summary,
+    );
+    const help = main?.querySelector(':scope > .oyl-view-head > h1 + p + details.oyl-help');
     expect(help, 'the help disclosure is not straight after the line').not.toBeNull();
     expect(help?.hasAttribute('open')).toBe(false);
     const summary = help?.querySelector('summary');
@@ -515,7 +534,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
 
   it('opens from the keyboard', async () => {
     await open(routeById('segments').path);
-    const help = document.querySelector<HTMLDetailsElement>('main > details.oyl-help');
+    const help = document.querySelector<HTMLDetailsElement>(
+      'main > .oyl-view-head > details.oyl-help',
+    );
     const summary = help?.querySelector('summary');
     if (summary === null || summary === undefined) throw new Error('no help summary');
     await activateWithKeyboard(summary);
@@ -540,7 +561,9 @@ describe('the line under the title, its help and its notes (#993)', () => {
     expect(main?.lastElementChild).toBe(notes);
     expect(notes?.closest('details')).toBeNull();
     // And not in the line under the title any more.
-    expect(main?.querySelector(':scope > h1 + p')?.textContent).not.toContain(route.notes?.[0]);
+    expect(main?.querySelector(':scope > .oyl-view-head > h1 + p')?.textContent).not.toContain(
+      route.notes?.[0],
+    );
   });
 });
 
@@ -822,77 +845,6 @@ describe('the weight reaches the ride (#325)', () => {
     const heavy = await hudSpeedAt(kilograms(105));
 
     expect(light).not.toBe(heavy);
-  });
-});
-
-/**
- * …and the thermal forecast reaches the game's ladder (#247).
- *
- * The same hole the block above closes, one prop along: `thermal` is an
- * optional prop threaded through JSX, so deleting it from the shell's
- * `<GameView>` would be green in `check:wiring` and in `GameView.test.tsx`,
- * which supplies it itself. A ride started through the shell must ask the
- * port the shell was handed.
- */
-describe('the thermal forecast reaches the ride (#247)', () => {
-  it('asks the port it was handed once a ride starts', async () => {
-    const frames: FrameRequestCallback[] = [];
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    vi.stubGlobal('cancelAnimationFrame', () => undefined);
-    let asked = 0;
-    const thermal: ThermalPort = {
-      readThermalHeadroom: () => {
-        asked += 1;
-        return Promise.resolve(0.3);
-      },
-    };
-    const route: RidableRoute = {
-      id: 'route-1',
-      name: 'Flat',
-      profile: routeProfile(
-        [0, 1, 2].map((index) => ({
-          position: geographicPosition(
-            degreesLatitude(51.5 + (index * 500) / 111_320),
-            degreesLongitude(-0.12),
-          ),
-          elevation: altitudeMetres(0),
-        })),
-      ),
-      attempts: 0,
-    };
-    const game: GamePort = {
-      listRoutes: () => Promise.resolve([route]),
-      loadGhost: () => Promise.resolve(undefined),
-      readSensors: () => ({
-        rider: { power: watts(200), live: true, paired: true },
-        cadence: { value: 85, live: true, paired: true },
-        heartRate: { value: 140, live: true, paired: true },
-      }),
-    };
-
-    globalThis.location.hash = '#/game';
-    const shell = await mount(
-      <AppShell capabilities={NO_BLUETOOTH} game={game} thermal={thermal} />,
-    );
-    await settle();
-    // Nothing is asked before a ride: the picker has no ladder.
-    expect(asked).toBe(0);
-
-    const ride = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      (button.textContent ?? '').startsWith('Ride '),
-    );
-    await act(async () => {
-      ride?.click();
-      await Promise.resolve();
-    });
-    await settle();
-
-    expect(asked).toBeGreaterThan(0);
-    shell.unmount();
-    vi.unstubAllGlobals();
   });
 });
 

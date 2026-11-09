@@ -29,11 +29,13 @@
  * a battery level is not a coordinate (ADR 0004 decision D), so the number is
  * the diagnostic.
  *
- * ## Not yet on the transport boundary
+ * ## Not on the transport boundary — read beside it (#2047)
  *
  * This is a decoder, not a `GattProfile`: a battery level is not a
- * `MeasurementCapability`, so there is nothing on `SensorTransport` to carry it
- * yet. The first screen that reads it (#2047) decides how it arrives.
+ * `MeasurementCapability`, so `SensorTransport` does not carry it. Its first
+ * consumer, Home's sensors module (#2047), reads it through the Web Bluetooth
+ * transport's own `readBatteryLevel`, one read at a time, as
+ * `openFitnessMachine` is that transport's own seam for FTMS.
  */
 
 import { percent, type Percent } from '@onyourleft/domain';

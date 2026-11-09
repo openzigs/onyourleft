@@ -28,12 +28,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   GameView,
+  RIDE_ENDED_LABEL,
+  RIDE_ENDED_TEXT,
   RIDER_GHOST_REFUSAL_TEXT,
   type GamePort,
   type RidableRoute,
   type RiderGhostLoad,
 } from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
+import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
+import { rideBack, RideBackContext, type RideBack } from '../shell/ride-back';
 import type { GameRenderer, SceneFrame } from './port';
 import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
 import type { CalendarDay, Season } from './season';
@@ -47,13 +51,13 @@ import {
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
 import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
+import { HUD_LAYOUT_STORAGE_KEY, writeHudLayout } from './hud/hud-layout-preference';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { tap } from '../design/touch-lock-testing';
 import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { CameraThrottle } from '../camera/session';
-import type { ThermalPort } from './thermal-port';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -72,6 +76,7 @@ import type { KitColour } from '@onyourleft/store';
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
 import { START_WORD, toGoText } from './gantry-wording';
+import { endRideAnswer } from './end-ride-testing';
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(samples = 200): RidableRoute {
@@ -280,8 +285,6 @@ async function startRiding(options: {
   readonly cadence?: () => SensorReading;
   /** The camera the ladder throttles — #514. @see recordingCamera */
   readonly camera?: CameraThrottle;
-  /** The platform's thermal forecast — #247. */
-  readonly thermal?: ThermalPort;
   /** The rider's local day — #1622. @see GameViewProps.today */
   readonly today?: () => CalendarDay;
 }): Promise<SceneFrame[]> {
@@ -297,7 +300,6 @@ async function startRiding(options: {
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
       camera={options.camera}
-      thermal={options.thermal}
       today={options.today}
     />,
   );
@@ -367,6 +369,17 @@ function endRideButton(): HTMLButtonElement | undefined {
   return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
     (button) => button.textContent === 'End ride',
   );
+}
+
+/**
+ * #2349, #2381: *End ride*, then the question's *End ride* — how a game ride with nothing
+ * recorded under it ends now that *End ride* asks first.
+ */
+async function endTheRide(
+  press: (element: HTMLElement | undefined) => Promise<void> = clickThrough,
+): Promise<void> {
+  await press(endRideButton());
+  await press(endRideAnswer(document, 'End ride'));
 }
 
 /** The value a HUD field is showing, found by its label. */
@@ -518,7 +531,7 @@ describe('racing another rider’s ghost (#331)', () => {
     );
     await pump(60);
     expect(hudField('Bea')).toBe('Beaten by you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     // A comparison with another rider is never a result about the rider's own best.
     expect(handed).toEqual([undefined]);
@@ -788,7 +801,7 @@ describe('your own best crossing the line (#259)', () => {
     await pump(60);
     expect(hudField('Your best')).toBe('Beaten by you');
 
-    await clickThrough(endRideButton());
+    await endTheRide();
     // ⚠️ `cancelAnimationFrame` is stubbed to do nothing, so the frame the
     // ended ride had already requested is still in the queue and would advance
     // the *new* simulation under the *old* loop's closure. A rider's browser
@@ -847,7 +860,7 @@ describe('your own best crossing the line (#259)', () => {
     await clickThrough(rideButton());
     await pump(60);
     expect(hudField('Your best')).toBe('Beaten by you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     expect(handed).toEqual(['beaten']);
 
@@ -855,7 +868,7 @@ describe('your own best crossing the line (#259)', () => {
     await pump(20);
     await pump(40);
     expect(hudField('Your best')).toBe('Finished ahead of you');
-    await clickThrough(endRideButton());
+    await endTheRide();
     pending = [];
     expect(handed).toEqual(['beaten', 'not-beaten']);
 
@@ -907,6 +920,107 @@ describe('the ride’s moving time on the HUD — #1111', () => {
     await pump(2);
     expect(hudField('Moving')).toBe(NO_READING);
   });
+});
+
+describe('the ride clock from the first second — #2382', () => {
+  /** Whole seconds of an `h:mm:ss` the HUD shows. */
+  function inSeconds(shown: string): number {
+    const [hours = 0, minutes = 0, secs = 0] = shown.split(':').map(Number);
+    return hours * 3600 + minutes * 60 + secs;
+  }
+
+  /** Every label the HUD shows, so a field's absence can be asserted. */
+  function hudLabels(): (string | null)[] {
+    return queryAll(mounted?.container ?? document, '.oyl-hud__field dt').map(
+      (each) => each.textContent,
+    );
+  }
+
+  it('runs the ride’s own clock, labelled Ride, on a ride that records nothing', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    // The ride's first frames: a time, not a dash, before a second has passed.
+    await pump(2);
+    expect(hudField('Ride')).toMatch(/^0:00:0\d$/);
+    expect(hudLabels()).not.toContain('Elapsed');
+    // And it runs: a second and a half of frames later it reads later.
+    const first = inSeconds(hudField('Ride'));
+    await pump(90);
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThan(first);
+    // The moving time is still the recorder's, and there is none.
+    expect(hudField('Moving')).toBe(NO_READING);
+  });
+
+  it('shows the recorder’s elapsed time, labelled Elapsed, whenever a recording runs', async () => {
+    let recorded: number | undefined = 125;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => (recorded === undefined ? undefined : 65),
+      rideElapsedSeconds: () => recorded,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Elapsed')).toBe('0:02:05');
+    expect(hudLabels()).not.toContain('Ride');
+
+    // Ten seconds of frames: the simulation's clock runs, the recorder's
+    // figure (paused, say) does not, and the HUD shows the recorder's.
+    await pump(600);
+    expect(hudField('Elapsed')).toBe('0:02:05');
+
+    // The recording gone: the ride's own clock, under its own label, which
+    // has been running since the first frame — never the recorder's figure.
+    recorded = undefined;
+    await pump(2);
+    expect(hudLabels()).not.toContain('Elapsed');
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThanOrEqual(10);
+  });
+
+  it('freezes while the game is paused and then jumps by the whole pause: it is the wall clock', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    const before = inSeconds(hudField('Ride'));
+
+    const pause = queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+      (button) => button.textContent === 'Pause',
+    );
+    await clickThrough(pause);
+    // What a browser's `cancelAnimationFrame` does: no frame comes while paused.
+    pending.length = 0;
+    nowMs += 5 * 60 * 1000;
+    await pump(5);
+    expect(inSeconds(hudField('Ride'))).toBe(before);
+
+    // Resumed, the simulation credits every step owed since the origin
+    // (`simulation.ts` §`advanceTo`, "wall clock, stall included"), so the
+    // clock reads the pause too. A change that stops it counting the pause is
+    // the owner's to choose (#2404's review), and this test is what says so.
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+        (button) => button.textContent === 'Resume',
+      ),
+    );
+    await pump(2);
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThanOrEqual(before + 5 * 60);
+  });
+
+  function rideButton(): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
 });
 
 describe('the ride’s moving time while the GAME is paused — #1111’s review', () => {
@@ -972,14 +1086,79 @@ describe('the ride’s moving time while the GAME is paused — #1111’s review
 });
 
 describe('the choice itself', () => {
+  /** The pacer's switch, found by the words beside it. */
+  function pacerSwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(
+      mounted?.container ?? document,
+      'input[type="checkbox"]',
+    ).find((input) => (input.closest('label')?.textContent ?? '').includes('pacer'));
+  }
+
+  /** The intensity box, found by its label rather than by its position. */
+  function intensityBox(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="number"]').find(
+      (input) => (input.labels?.[0]?.textContent ?? '').includes('Pacer intensity'),
+    );
+  }
+
+  function rideButton(): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
+
   it('offers the pacer the way the ghost is offered, with a default already in the box', async () => {
     mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
     await settle();
 
     const text = mounted.container.textContent ?? '';
     expect(text).toContain('pacer');
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
-    expect(intensity?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe(String(DEFAULT_PACER_INTENSITY));
+  });
+
+  it('shows the intensity box only while the pacer is on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    const toggle = pacerSwitch();
+    expect(toggle?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+
+    await clickThrough(toggle);
+    expect(intensityBox()).toBeDefined();
+
+    await clickThrough(pacerSwitch());
+    expect(pacerSwitch()?.checked).toBe(false);
+    expect(intensityBox()).toBeUndefined();
+  });
+
+  it('keeps a typed intensity for when the pacer is switched back on (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('1.8');
+    expect(intensityBox()?.value).toBe('1.8');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()?.value).toBe('1.8');
+  });
+
+  it('does not let a refused intensity in the hidden box block the ride (#2338)', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(pacerSwitch());
+    await typeIntensity('70');
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+
+    await clickThrough(pacerSwitch());
+    expect(intensityBox()).toBeUndefined();
+    expect(rideButton()?.getAttribute('aria-disabled')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-game__problem')).toBeNull();
   });
 
   it('refuses to start on an intensity the rule would reject, and says why', async () => {
@@ -1328,7 +1507,7 @@ describe('the ride’s season is the rider’s day at ride start (#1622)', () =>
     let day: CalendarDay = { year: 2026, month: 11, day: 1 };
     await startRiding({ pacer: false, today: () => day });
     await pump(5);
-    await clickThrough(endRideButton());
+    await endTheRide();
     day = { year: 2026, month: 12, day: 1 };
     await clickThrough(rideButton());
     await pump(2, 1000 / 30);
@@ -1383,9 +1562,7 @@ describe('the ride’s season is the rider’s day at ride start (#1622)', () =>
  *
  * The frames are long on purpose: {@link FRAME_PERIOD_MS} is already well past
  * `FRAME_MS_REDUCE_ABOVE`, so a phone this slow is a sustained hot measurement
- * and nothing has to reach for the thermal API — which, per
- * `docs/validation/0002-android-shell-and-game.md` Part E, is `undefined` in
- * the shipped app in any case.
+ * — and since #2289 frame time is the ladder's only input.
  */
 describe('GameView — a hot phone sheds scenery before frame rate (#245)', () => {
   it('tells the renderer a leaner rung, and stops placing what it stops drawing', async () => {
@@ -1450,9 +1627,9 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     // own scope — and React invokes an updater during the *next* render, by
     // which time the loop had already moved it to `at`. So the ladder was fed
     // `frameMs: 0` on every frame of every ride: permanently "cool", never
-    // once hot. With `thermalHeadroom` `undefined` in the shipped app
-    // (validation 0002 Part E) that was the only live input to the policy, so
-    // #91's whole reduction path was unreachable — and every test of it passed,
+    // once hot. Frame time was the only live input to the policy then (the
+    // thermal forecast was `undefined` in the shipped app, and since #2289 it
+    // is not read at all), so #91's whole reduction path was unreachable — and every test of it passed,
     // because `quality.ts` is pure and was being asked the right question by
     // nobody.
     //
@@ -1867,126 +2044,6 @@ describe('GameView — leaving the game hands the camera back (#514)', () => {
 });
 
 /**
- * The thermal forecast reaches the ladder — #247.
- *
- * Until #247 `quality.ts`'s headroom half had no caller: the ladder was asked
- * `{ frameMs }` and nothing else, so `HEADROOM_REDUCE_ABOVE` could not fire on
- * any device. These drive the real loop at comfortable frame times, so frame
- * time alone would never step down, and read the rung the renderer was told.
- */
-describe('GameView — a hot forecast steps the world down (#247)', () => {
-  /** A port that always answers the same forecast. */
-  const forecasting = (headroom: number | undefined): ThermalPort => ({
-    readThermalHeadroom: () => Promise.resolve(headroom),
-  });
-  const COMFORTABLE_MS = 1000 / 60;
-
-  it('steps down on a hot forecast even though every frame is comfortable', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(0.95) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
-  });
-
-  /**
-   * The review finding on #523. The forecast is read every ten seconds and the
-   * ladder counts pressure per FRAME, so one reading handed to every frame
-   * until the next was hundreds of samples: one hot reading walked the ride to
-   * the floor, and one cool one climbed it straight back. A reading may now
-   * move the ladder one rung at most.
-   */
-  describe('one reading moves the ladder one rung at most', () => {
-    /** The poll `GameView` starts, run by the test. @see thermal.ts §everyInterval */
-    let polls: (() => void)[] = [];
-    beforeEach(() => {
-      polls = [];
-      vi.stubGlobal('setInterval', (task: () => void) => {
-        polls.push(task);
-        return polls.length;
-      });
-      vi.stubGlobal('clearInterval', () => undefined);
-    });
-
-    /** A port answering whatever the test last set. */
-    function settable(first: number): ThermalPort & { set: (next: number) => void } {
-      let headroom = first;
-      return {
-        readThermalHeadroom: () => Promise.resolve(headroom),
-        set: (next) => {
-          headroom = next;
-        },
-      };
-    }
-
-    /** Take the next reading, as the ten-second poll would. */
-    async function poll(): Promise<void> {
-      await act(async () => {
-        for (const task of polls) {
-          task();
-        }
-        await Promise.resolve();
-      });
-    }
-
-    /**
-     * Long enough for a reading that was NOT spent to take three more steps,
-     * which is what these tests catch. ⚠️ It was twenty times the sample count
-     * until CI's coverage run timed two of these out at Vitest's 5 s default.
-     */
-    const LONG_AFTER = 4 * SUSTAINED_SAMPLES;
-
-    it('steps down one rung on one hot reading, however many frames it is held for', async () => {
-      await startRiding({ pacer: false, thermal: settable(0.95) });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1]]);
-    });
-
-    it('steps down one more rung on the next hot reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
-    });
-
-    // ⚠️ **10 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
-    // for this case: under coverage on CI it took 1.1 s to 3.0 s over thirteen green `main` runs on
-    // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
-    // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
-    // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
-    // that never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
-    it('climbs one rung, not all of them, on one cool reading', async () => {
-      const port = settable(0.95);
-      await startRiding({ pacer: false, thermal: port });
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      port.set(0.2);
-      await poll();
-      await pump(LONG_AFTER, COMFORTABLE_MS);
-      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
-    }, 10_000);
-  });
-
-  it('stays on the top rung under a cool forecast', async () => {
-    // The control: the same ride, the same frames, a forecast well clear.
-    await startRiding({ pacer: false, thermal: forecasting(0.2) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
-  });
-
-  it('reads a NaN forecast as no opinion, so comfortable frames keep the top rung', async () => {
-    await startRiding({ pacer: false, thermal: forecasting(Number.NaN) });
-    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
-    // The renderer is told a rung only when it changes, so "no rung at all" is
-    // "never left the top one" — the same reading the threshold test above makes.
-    expect(rungs).toEqual([]);
-  });
-});
-
-/**
  * #1482 — the HUD's touch lock, through the real game: what a tap on the
  * HUD's *Pause* or *End ride* does to the ride while it is on, read off the
  * HUD and the trainer port as a rider and the Ride screen would see them.
@@ -2054,7 +2111,7 @@ describe('the touch lock on the HUD — #1482', () => {
     await pump(4);
     await tapThrough(hudButton(TOUCH_LOCK_NAME));
 
-    await tapThrough(endRideButton());
+    await endTheRide(tapThrough);
     pending = [];
 
     expect(ended.count).toBe(1);
@@ -2063,6 +2120,301 @@ describe('the touch lock on the HUD — #1482', () => {
 
     await clickThrough(rideButton());
     expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+/**
+ * #2349 — *End ride* asks first: *Keep riding*, *Save ride* or *Discard ride*,
+ * and a discard is asked once more. Read off the HUD and the trainer port, as
+ * the rider and the ride controller see them.
+ */
+describe('ending a game ride asks first — #2349', () => {
+  interface Seen {
+    ended: number;
+    saved: number;
+    discarded: number;
+    /** What happened, in order: `ended` is `gameRideEnded`, then the recording's. */
+    readonly order: string[];
+  }
+
+  function recordingTrainer(
+    seen: Seen,
+    recording: { readonly savable: boolean } | undefined,
+    gone = true,
+  ): GameTrainerPort {
+    return {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => {
+        seen.ended += 1;
+        seen.order.push('ended');
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+      rideRecording: () => recording,
+      saveRideRecording: () => {
+        seen.saved += 1;
+        seen.order.push('saved');
+        return Promise.resolve();
+      },
+      discardRideRecording: () => {
+        seen.discarded += 1;
+        seen.order.push('discarded');
+        return Promise.resolve(gone);
+      },
+    };
+  }
+
+  const fresh = (): Seen => ({ ended: 0, saved: 0, discarded: 0, order: [] });
+  const answers = (): string[] =>
+    queryAll<HTMLButtonElement>(document, '[data-oyl-end-ride] button').map((button) =>
+      (button.textContent ?? '').trim(),
+    );
+  const hudRegion = (): string =>
+    document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+  const picker = (): string => mounted?.container.textContent ?? '';
+
+  async function onTheStage(trainer: GameTrainerPort, back?: RideBack): Promise<void> {
+    const view = <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />;
+    mounted = await mount(
+      back === undefined ? view : <RideBackContext value={back}>{view}</RideBackContext>,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+  }
+
+  it('opens the question on End ride and ends nothing: the stage stays, Pause and End ride give way, the one region says it', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(document.activeElement?.textContent).toBe('Keep riding');
+    expect(endRideButton()).toBeUndefined();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
+    // The HUD keeps its one region (#445): the question is no second one.
+    expect(queryAll(document, '.oyl-game [role="status"], .oyl-game [aria-live]').length).toBe(1);
+    expect(seen).toEqual(fresh());
+  });
+
+  it('keeps riding on Keep riding: nothing ends, and focus goes back to End ride', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Keep riding'));
+
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(document.activeElement).toBe(endRideButton());
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('keeps riding on Escape, from the discard step too', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('asks once, End ride or Keep riding, with nothing recorded under the ride, and ends it deleting nothing (#2381)', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, undefined));
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'End ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.askNotRecorded}`);
+    const asked = document.querySelector('[data-oyl-end-ride]')?.textContent ?? '';
+    expect(asked).toContain(END_RIDE_TEXT.askNotRecorded);
+    expect(asked).not.toContain('deleted from this device');
+
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    await settle();
+    // Ended on the one press: back on the picker, nothing saved or deleted.
+    expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+    expect(seen.saved).toBe(0);
+    expect(seen.discarded).toBe(0);
+  });
+
+  it('never discards on the one-step End ride: a recording that turned up since is asked about afresh, with the warning (#2381, round 3)', async () => {
+    const seen = fresh();
+    const under: { recording?: { readonly savable: boolean } } = {};
+    await onTheStage({
+      ...recordingTrainer(seen, undefined),
+      rideRecording: () => under.recording,
+    });
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'End ride']);
+    // A room reaching `joined` starts one while the question stands.
+    under.recording = { savable: true };
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // Nothing ended and nothing was deleted: the ride is asked about again.
+    expect(seen).toEqual(fresh());
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
+    // And discarding it now takes the two steps and the owner's warning.
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(seen.discarded).toBe(0);
+  });
+
+  it('keeps both steps and the deletion warning for a ride with a recording under it, even one with nothing in it yet (#2381)', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: false }));
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'Discard ride']);
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(document.querySelector('[data-oyl-end-ride]')?.textContent ?? '').toContain(
+      END_RIDE_TEXT.discardWarning,
+    );
+  });
+
+  it('offers no Save ride for a recording with nothing in it', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: false }));
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'Discard ride']);
+  });
+
+  it('saves on Save ride: the game ride ends first, then the recording is saved, and the picker says where its result is', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Save ride'));
+    pending = [];
+
+    expect(seen.order).toEqual(['ended', 'saved']);
+    expect(seen.discarded).toBe(0);
+    expect(rideButton()).toBeDefined();
+    expect(picker()).toContain(RIDE_ENDED_TEXT.saved);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
+  });
+
+  it('asks once more on Discard ride, and discards only on the second', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+
+    expect(answers()).toEqual(['Discard ride', 'Keep riding']);
+    expect(document.activeElement?.textContent).toBe('Keep riding');
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(seen).toEqual(fresh());
+
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(seen.order).toEqual(['ended', 'discarded']);
+    expect(seen.saved).toBe(0);
+    expect(picker()).toContain(RIDE_ENDED_TEXT.discarded);
+    // #2349's review (nit): labelled as the Ride screen labels it.
+    expect(RIDE_ENDED_LABEL.discarded).toBe('Discarded');
+    expect(picker()).toContain('Discarded:');
+    expect(picker()).not.toContain('Ride ended:');
+  });
+
+  it('says “Not deleted”, with the way to the ride, when the discard throws (#2349’s review)', async () => {
+    const trainer = recordingTrainer(fresh(), { savable: true });
+    await onTheStage({
+      ...trainer,
+      discardRideRecording: () => Promise.reject(new Error('the device is unwell')),
+    });
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(picker()).toContain('Not deleted:');
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-deleted']);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
+  });
+
+  it('says the ride was not saved, and where it still is, when the save throws (#2349’s review)', async () => {
+    const trainer = recordingTrainer(fresh(), { savable: true });
+    await onTheStage({
+      ...trainer,
+      saveRideRecording: () => Promise.reject(new Error('the device is unwell')),
+    });
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Save ride'));
+    pending = [];
+    expect(picker()).toContain('Not saved:');
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-saved']);
+    expect(picker()).not.toContain(RIDE_ENDED_TEXT.saved);
+    expect(
+      queryAll<HTMLAnchorElement>(document, 'a').some(
+        (link) => link.getAttribute('href') === '#/ride',
+      ),
+    ).toBe(true);
+  });
+
+  it('says so when the delete did not go through, and where the ride still is', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: true }, false));
+    await clickThrough(endRideButton());
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    pending = [];
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-deleted']);
+    expect(picker()).not.toContain(RIDE_ENDED_TEXT.discarded);
+  });
+
+  it('ends a ride with nothing recorded on End ride, asked once, touching no recording (#2381)', async () => {
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, undefined));
+    await endTheRide();
+    pending = [];
+    expect(seen.order).toEqual(['ended']);
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+  });
+
+  it('takes Android’s back on the stage: it opens the question, then is Keep riding', async () => {
+    const back = rideBack();
+    const seen = fresh();
+    await onTheStage(recordingTrainer(seen, { savable: true }), back);
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(answers()).toEqual([]);
+    expect(endRideButton()).toBeDefined();
+    expect(seen).toEqual(fresh());
+  });
+
+  it('says nothing of the last ride once the next begins', async () => {
+    await onTheStage(recordingTrainer(fresh(), undefined));
+    await endTheRide();
+    pending = [];
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+    await clickThrough(rideButton());
+    await pump(2);
+    await endTheRide();
+    pending = [];
+    expect(picker().split(RIDE_ENDED_TEXT['not-recorded']).length).toBe(2);
   });
 });
 
@@ -2147,5 +2499,206 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     expect(largest).toBeLessThanOrEqual(
       REDUCED_MOTION_MAXIMUM_YAW_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6,
     );
+  });
+});
+
+/**
+ * #2077 — the rider's W/kg and zone, wired: the weight the shell hands the
+ * game (the weight the physics rides) and the rider's own threshold, read
+ * through the game's port. `fields.test.ts` holds the arithmetic.
+ */
+describe('the rider’s W/kg and zone on the HUD — #2077', () => {
+  async function rideWith(port: GamePort, riderMass?: Kilograms): Promise<void> {
+    mounted = await mount(<GameView port={port} riderMass={riderMass} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(10);
+  }
+
+  it('draws the zone of the rider’s own threshold, and W/kg over their own weight', async () => {
+    await rideWith(
+      { ...pedallingPort(testRoute()), ownThresholdPower: () => Promise.resolve(watts(200)) },
+      kilograms(80),
+    );
+    // 220 W over a 200 W threshold is 1.10 of it: zone 5.
+    expect(hudField('Zone')).toMatch(/^5\s*VO₂/);
+    // 220 W over 80 kg.
+    expect(hudField('W/kg')).toBe('2.8');
+  });
+
+  it('draws no zone with no threshold set, and a dash for W/kg with no weight', async () => {
+    await rideWith(pedallingPort(testRoute()));
+    expect(
+      queryAll(mounted?.container ?? document, '.oyl-hud__field dt').map((dt) => dt.textContent),
+    ).not.toContain('Zone');
+    expect(hudField('W/kg')).toBe(NO_READING);
+  });
+});
+
+/**
+ * #2078 — the recent graph, wired: written from the frame loop once a second
+ * of the ride's clock, from the readings the HUD shows, and drawn in the
+ * route panel. `recent-trace.test.ts` holds the ring; `RecentGraph.test.tsx`
+ * the drawing.
+ */
+describe('the last ten minutes on the HUD — #2078', () => {
+  it('writes one second of power and heart rate per second ridden, however many frames', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    // 40 frames at 250 ms: ten seconds of ride, and 40 frames that could each
+    // have drawn the graph.
+    await pump(40);
+    const graph = mounted.container.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]');
+    expect(graph).not.toBeNull();
+    const written = Number(graph?.getAttribute('data-oyl-graph-written'));
+    expect(written).toBeGreaterThanOrEqual(8);
+    expect(written).toBeLessThanOrEqual(11);
+    // The port's live 220 W and 142 bpm, as one unbroken run each.
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-power')).toHaveLength(1);
+    expect(queryAll(graph ?? document, '.oyl-hud__recent-heart')).toHaveLength(1);
+  });
+
+  /**
+   * PR #2231's review: the frame loop is what decides a reading "dropped",
+   * and it is the ring's only production writer. Each sensor goes quiet for
+   * three seconds of the ride, as `sensors.ts` §`gameSensors` reports a
+   * paired sensor that stopped — power `0` and not live, heart rate no value
+   * and not live — and the drawn line is read back: two runs with a gap
+   * between them, and no point on the zero line (`y` 100 in the drawing's
+   * units; heart rate's floor clamps a zero there too).
+   */
+  for (const dropped of ['power', 'heart rate'] as const) {
+    it(`draws a gap where ${dropped} dropped mid-ride, never a zero`, async () => {
+      let quiet = false;
+      const port: GamePort = {
+        ...pedallingPort(testRoute()),
+        readSensors: () => ({
+          rider:
+            quiet && dropped === 'power'
+              ? { power: watts(0), live: false, paired: true }
+              : { power: watts(220), live: true, paired: true },
+          cadence: LIVE_CADENCE,
+          heartRate:
+            quiet && dropped === 'heart rate'
+              ? { value: undefined, live: false, paired: true }
+              : { value: 142, live: true, paired: true },
+        }),
+      };
+      mounted = await mount(<GameView port={port} now={() => nowMs} />);
+      await settle();
+      const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      );
+      await clickThrough(ride);
+      // Three seconds live, three dropped, three live again, at 250 ms a frame.
+      await pump(12);
+      quiet = true;
+      await pump(12);
+      quiet = false;
+      await pump(12);
+      const graph = mounted.container.querySelector(
+        '.oyl-hud__route [data-testid="oyl-hud-recent"]',
+      );
+      const line = dropped === 'power' ? '.oyl-hud__recent-power' : '.oyl-hud__recent-heart';
+      const other = dropped === 'power' ? '.oyl-hud__recent-heart' : '.oyl-hud__recent-power';
+      const runs = queryAll(graph ?? document, line).map((path) => path.getAttribute('d') ?? '');
+      expect(runs).toHaveLength(2);
+      for (const run of runs) expect(run).not.toMatch(/ 100\.00(?: |$)/);
+      // The other sensor never dropped: one unbroken run.
+      expect(queryAll(graph ?? document, other)).toHaveLength(1);
+    });
+  }
+});
+
+/**
+ * #2079 — the rider's panels and text size, read from this device as the ride
+ * starts: the choice Settings keeps (`SettingsView.hud-layout.test.tsx`) is
+ * the one the next ride draws.
+ */
+describe('the HUD the rider chose — #2079', () => {
+  afterEach(() => {
+    localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  });
+
+  async function rideOnce(): Promise<HTMLElement> {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(6);
+    const hud = mounted.container.querySelector<HTMLElement>('.oyl-hud');
+    if (hud === null) throw new Error('the ride did not start');
+    return hud;
+  }
+
+  it('draws every panel at the normal size with nothing chosen', async () => {
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('normal');
+    expect(hud.querySelector('.oyl-hud__route')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hudField('Speed')).not.toBe('');
+  });
+
+  it('draws what the device says the rider chose', async () => {
+    writeHudLayout(localStorage, { hidden: ['route', 'graph', 'readings'], textSize: 'large' });
+    const hud = await rideOnce();
+    expect(hud.getAttribute('data-oyl-hud-text')).toBe('large');
+    expect(hud.classList).toContain('oyl-hud--text-large');
+    // The route panel and the graph are gone…
+    expect(hud.querySelector('.oyl-hud__route')).toBeNull();
+    // …and the secondary readings but the ride's times…
+    expect(queryAll(hud, '.oyl-hud__fields--secondary dt').map((dt) => dt.textContent)).toEqual([
+      'Moving',
+      // #2382: this ride records nothing, so the ride's own clock.
+      'Ride',
+      'Clock',
+    ]);
+    // …while power, the controls and the notices' cell are the HUD's still.
+    expect(hudField('Power')).not.toBe('');
+    expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
+  });
+
+  // #2383: the focus arrangement, as Settings writes it, read as the ride starts.
+  it('draws the focus readout when the device says the rider chose it — #2383', async () => {
+    writeHudLayout(localStorage, { hidden: [], textSize: 'normal', arrangement: 'focus' });
+    const hud = await rideOnce();
+    expect(hud.classList).toContain('oyl-hud--focus');
+    expect(hud.querySelector('.oyl-hud__fields--primary')).toBeNull();
+    expect(queryAll(hud, '.oyl-hud__focus dt').map((dt) => dt.textContent)).toEqual([
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      // #2382: this ride records nothing, so the ride's own clock.
+      'Ride',
+    ]);
+    // The ride's clock runs from the first second, and power is live.
+    expect(hudField('Ride')).toMatch(/^0:00:\d\d$/);
+    expect(hudField('Power')).not.toMatch(/^—/);
+    // The controls are the HUD's still.
+    expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
+  });
+
+  it('keeps the graph when only the route is turned off, and the route when only the graph is', async () => {
+    writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal' });
+    let hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-recent"]')).not.toBeNull();
+    expect(hud.querySelector('.oyl-hud__profile-svg')).toBeNull();
+    mounted?.unmount();
+    writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'normal' });
+    hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route .oyl-hud__profile-svg')).not.toBeNull();
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).toBeNull();
   });
 });

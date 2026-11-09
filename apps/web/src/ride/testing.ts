@@ -58,6 +58,9 @@ export interface RecordedCalls {
   resume: number;
   armStop: number;
   cancelStop: number;
+  /** #2349 — *Discard ride*, the first press and the confirmed one. */
+  armDiscard: number;
+  confirmDiscard: number;
   /** #1432 — the touch lock. */
   lockTouch: number;
   unlockTouch: number;
@@ -96,12 +99,15 @@ export function idleSnapshot(): RideSnapshot {
   return {
     phase: 'idle',
     stopArmed: false,
+    discardArmed: false,
     touchLocked: false,
+    startedAt: undefined,
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
+    totals: undefined,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
     workout: undefined,
@@ -118,6 +124,7 @@ export function idleSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      easedOffTo: undefined,
       ergRescue: undefined,
       ergHeld: undefined,
     },
@@ -182,6 +189,7 @@ export function ridingSnapshot(): RideSnapshot {
       lost: undefined,
       refusal: undefined,
       releaseFault: undefined,
+      easedOffTo: undefined,
       ergRescue: undefined,
       ergHeld: undefined,
     },
@@ -210,6 +218,8 @@ export function stubRideController(
     resume: 0,
     armStop: 0,
     cancelStop: 0,
+    armDiscard: 0,
+    confirmDiscard: 0,
     lockTouch: 0,
     unlockTouch: 0,
     confirmStop: 0,
@@ -236,6 +246,8 @@ export function stubRideController(
 
   const controller: RideController = {
     getSnapshot: () => snapshot,
+    // #2077: a stub records nothing, so it has no time in any zone.
+    powerZoneTime: () => undefined,
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -283,6 +295,13 @@ export function stubRideController(
     },
     cancelStop: () => {
       calls.cancelStop += 1;
+    },
+    armDiscard: () => {
+      calls.armDiscard += 1;
+    },
+    confirmDiscard: async () => {
+      calls.confirmDiscard += 1;
+      return Promise.resolve(true);
     },
     lockTouch: () => {
       calls.lockTouch += 1;

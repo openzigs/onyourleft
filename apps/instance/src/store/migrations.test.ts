@@ -124,6 +124,12 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
   notice_erasure: `INSERT INTO notice_erasure VALUES (1, 0, 0, 32)`,
   hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
+  // #68: after `activity_record`, which an effort's ride is a foreign key to.
+  segment: `INSERT INTO segment VALUES ('${'a'.repeat(32)}', 'a', 'S', 'ride', 555.5, '{}', 33)`,
+  // The columns named, so migration 0039's `excluded_reason` is NULL (#69).
+  segment_effort: `INSERT INTO segment_effort (id, athlete_id, segment_id, content_sha256, started_at, elapsed_seconds, visibility, received_at) VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
+  segment_flag: `INSERT INTO segment_flag VALUES (1, 'a', '${'a'.repeat(32)}', 'effort-a', 'a', 'sha-a', 'vehicle', 36)`,
+  segment_integrity_log: `INSERT INTO segment_integrity_log VALUES (1, 37, 'flagged_effort', 'a', 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle')`,
 };
 
 /**
@@ -140,6 +146,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0029-notice-steps': 'notice_step',
   '0030-hidden-items': 'hidden_item',
   '0036-notice-erasure': 'notice_erasure',
+  '0039-leaderboard-integrity': 'segment_integrity_log',
 };
 
 interface Snapshot {
@@ -404,6 +411,75 @@ describe('the migrations (#769)', () => {
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0007-moderation');
     });
+  });
+
+  it('refuses to undo 0039 while the leaderboard integrity log holds an entry, and changes nothing (#69)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0039-leaderboard-integrity') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const before = snapshot(path);
+    expect(before.rows.segment_integrity_log).toBe(1);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /integrity log holds entries/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    // And the log is append-only in the schema: no UPDATE, no DELETE.
+    const database = openDatabase(path);
+    try {
+      expect(() => database.exec('UPDATE segment_integrity_log SET reason = 1')).toThrow(
+        /append-only/,
+      );
+      expect(() => database.exec('DELETE FROM segment_integrity_log')).toThrow(/append-only/);
+      // Erasure's updates (#69, the owner's rulings of 2026-11-06): an erased
+      // athlete's id emptied from the actor and the subject, nothing else, and
+      // only once no athlete holds it.
+      const row = () =>
+        database
+          .prepare(
+            'SELECT id, at, action, actor_athlete_id AS actor, subject_athlete_id AS subject, segment_id AS segment, effort_id AS effort, reason FROM segment_integrity_log',
+          )
+          .get() as Record<string, unknown>;
+      const seeded = row();
+      expect(seeded).toMatchObject({ actor: 'a', subject: 'a' });
+      const refused = (set: string) => {
+        expect(() => database.exec(`UPDATE segment_integrity_log SET ${set}`), set).toThrow(
+          /append-only/,
+        );
+      };
+      // Athlete `a` is seeded: while it exists, its id stays, as actor and as subject.
+      refused('actor_athlete_id = NULL');
+      refused('subject_athlete_id = NULL');
+      // Erased (the seed's other rows still point at it, so without their keys checked).
+      database.exec('PRAGMA foreign_keys = OFF');
+      database.exec("DELETE FROM athlete WHERE id = 'a'");
+      // Each other column, changed beside an allowed emptying, is refused —
+      // one probe per condition the trigger holds.
+      for (const emptied of ['actor_athlete_id = NULL', 'subject_athlete_id = NULL']) {
+        refused(`${emptied}, id = id + 1`);
+        refused(`${emptied}, at = at + 1`);
+        refused(`${emptied}, action = 'excluded'`);
+        refused(`${emptied}, segment_id = '${'b'.repeat(32)}'`);
+        refused(`${emptied}, effort_id = NULL`);
+        refused(`${emptied}, effort_id = 'effort-b'`);
+        refused(`${emptied}, reason = 'other'`);
+      }
+      // An id is emptied, never replaced by another.
+      refused("actor_athlete_id = 'b'");
+      refused("subject_athlete_id = 'b'");
+      refused("actor_athlete_id = NULL, subject_athlete_id = 'b'");
+      refused("subject_athlete_id = NULL, actor_athlete_id = 'b'");
+      expect(row()).toEqual(seeded);
+      database.exec('UPDATE segment_integrity_log SET actor_athlete_id = NULL');
+      database.exec('UPDATE segment_integrity_log SET subject_athlete_id = NULL');
+      expect(row()).toEqual({ ...seeded, actor: null, subject: null });
+    } finally {
+      database.close();
+    }
   });
 
   it('refuses to undo 0026 while a notice has been received, and changes nothing (#907)', async () => {

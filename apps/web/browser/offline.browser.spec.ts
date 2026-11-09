@@ -79,6 +79,8 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
 
+import { BUILT_IN_WORKOUTS } from '@onyourleft/domain';
+
 import { HARNESS_ORIGIN, LAUNCH_ARGS, PRODUCT_ORIGIN } from '../playwright.config';
 
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
@@ -475,6 +477,44 @@ test.describe('a cold start with the network off', () => {
     }
   });
 
+  test('lists every built-in workout on Workouts, with no instance and nothing saved — #2304', async () => {
+    // The built-in library is a constant in the bundle (`workouts/built-in.ts`),
+    // so a rider who has never saved a workout and has no instance still finds
+    // every one of them in a basement. The profile is the primed one: no
+    // instance was ever set up in it and nothing was saved.
+    const second = await session(profile);
+    await second.context.setOffline(true);
+    try {
+      await second.page.goto(`${PRODUCT_ORIGIN}/#/workouts`);
+      await expect(second.page.locator('h1')).toHaveText('Workouts');
+      // Nothing of the rider's own: their list is the empty state.
+      await expect(second.page.locator('main [data-oyl-list="saved"]')).toContainText(
+        'No workouts saved on this device yet',
+      );
+      await second.page
+        .getByRole('navigation', { name: 'Which workouts' })
+        .getByRole('link', { name: 'Built-in workouts' })
+        .click();
+      const cards = second.page.locator('main [data-oyl-built-in]');
+      await expect(cards).toHaveCount(BUILT_IN_WORKOUTS.length);
+      expect(await cards.locator('a').allTextContents()).toEqual(
+        BUILT_IN_WORKOUTS.map((template) => template.name),
+      );
+      // The control: the network really is off in this session.
+      const control = await second.page.evaluate(async (path: string) => {
+        try {
+          await fetch(path);
+          return 'succeeded';
+        } catch {
+          return 'failed';
+        }
+      }, CONTROL_PATH);
+      expect(control, 'the browser was not offline').toBe('failed');
+    } finally {
+      await second.close();
+    }
+  });
+
   test('serves the renderer and every scenery model from the cache', async () => {
     // #406's third criterion and #391 finding 4's actual demand: the rider in a
     // basement opened the app, and the *game* is why they opened it.
@@ -641,11 +681,12 @@ test.describe('a cold start with the network off', () => {
         await expect(second.page.locator('h1')).toHaveText(title);
         await expect(second.page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
         await expect(second.page.locator('main')).not.toContainText('Could not load this page');
-        // More than the shell's own heading and summary: the view itself.
+        // More than the shell's own title block (#2065: the heading, its
+        // summary and its help in one box): the view itself.
         expect(
-          await second.page.locator('main > *').count(),
+          await second.page.locator('main > :not(.oyl-view-head)').count(),
           `${group}: main holds only the shell's heading and summary`,
-        ).toBeGreaterThan(2);
+        ).toBeGreaterThan(0);
         // ⚠️ Fetched at SOME point in the session rather than on this
         // navigation: `main.tsx` preloads every group once Home is idle, so
         // the chunk may already have arrived. Each group chunk is named for
@@ -712,7 +753,7 @@ test.describe('a cold start with the network off', () => {
       await expect(page.locator('h1')).toHaveText('Settings');
       await expect(page.locator('main')).not.toContainText('Could not load this page');
       await expect(page.locator('main [data-oyl-view-loading]')).toHaveCount(0);
-      expect(await page.locator('main > *').count()).toBeGreaterThan(2);
+      expect(await page.locator('main > :not(.oyl-view-head)').count()).toBeGreaterThan(1);
     } finally {
       await context.close();
       rmSync(blocked, { recursive: true, force: true });

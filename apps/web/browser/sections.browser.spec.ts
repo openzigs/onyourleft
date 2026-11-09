@@ -20,11 +20,13 @@
  *   sections lie in at least two columns, and Devices' garage (#942) holds at
  *   least three cards in a row — two was all the measure left it.
  * - **Upright, two columns where content allows.** Every `sections` route but
- *   two: Settings, whose broad cards keep one column there so a segmented
- *   choice keeps its one row (`theme.css` §"Broad sections"), and Devices,
- *   whose garage was already two cards wide upright.
+ *   these: Settings, whose broad cards keep one column there so a segmented
+ *   choice keeps its one row (`theme.css` §"Broad sections"), Devices,
+ *   whose garage was already two cards wide upright, and the screens #2190
+ *   made a pair ({@link PAIRED_BY_2190}), one column upright by design.
  * - **The line under the title keeps the reading measure** wherever `main`
- *   dropped it.
+ *   dropped it, and in landscape so does every paragraph and notice outside
+ *   the sections (#2335: a Games course picker's ran 1160 px wide).
  * - **A phone is unchanged**: one column on every one of these routes.
  * - **The detail panes**: Routes with nothing chosen and with a route chosen,
  *   and Workouts with nothing chosen, in two columns both ways up.
@@ -36,6 +38,13 @@
  *   1500 px down one column and back up for the second, which is what CSS
  *   columns did (Files 2287 px tall at 1280×800). Each route's height is
  *   published under the grid and under the columns it replaced.
+ *
+ * - **The Games tab's three screens** (#2292, held since #2335): the Games
+ *   page's two cards in `--halves`' two tracks, and each course picker's
+ *   courses — two in the fixture — in columns from the pane's 40rem. The
+ *   Delivery picker is opened with the realistic world chosen
+ *   ({@link REALISTIC_WORLD_FOR}), because in the standard world it lists no
+ *   course at all: it says a round needs the realistic world.
  *
  * - **No section dwarfs its row** (#1026). On Settings and Files in landscape,
  *   in every row of two or more sections, the tallest is at most
@@ -69,7 +78,15 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { ALL_ROUTES, type RouteDefinition } from '../src/shell/routes';
+import { writeRealisticWorldChoice } from '../src/game/world-preference';
+import { RIDE_ROUTE_IDS } from '../src/shell/route-motion';
+import {
+  ALL_ROUTES,
+  DELIVERY_COURSES_ROUTE,
+  hrefFor,
+  type RouteDefinition,
+  type RouteId,
+} from '../src/shell/routes';
 
 import {
   applyInsets,
@@ -104,8 +121,23 @@ const PHONE: Viewport = { name: 'phone 390×844', width: 390, height: 844, inset
 
 const SECTIONS = ALL_ROUTES.filter((route) => route.layout === 'sections');
 
+/**
+ * The screens #2190 made a pair (`.oyl-sections--pair`, `theme.css`), which
+ * are one column upright by design: `RouteBuilderView` and, unembedded,
+ * `ActivityDetailView` are the only views that render the class. The upright
+ * case below checks the page against this list both ways.
+ */
+const PAIRED_BY_2190: readonly string[] = ['route-builder', 'activity-detail'];
+
+/**
+ * The screens in `.oyl-sections--halves` (#2197): two tracks and never three.
+ * Analysis and Segments choose it by what they hold; the Games page (#2292)
+ * always, for its two cards.
+ */
+const HALVES: readonly string[] = ['analysis', 'games', 'segments'];
+
 /** Upright, these keep one column of sections — and why is in the file header. */
-const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices'];
+const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices', ...PAIRED_BY_2190];
 
 /** Within this of the viewport's right edge counts as reaching it: `main`'s own padding. */
 const EDGE_SLACK_PIXELS = 32;
@@ -134,6 +166,8 @@ interface SectionsLayout {
   readonly h1: string | null;
   /** Distinct left edges of the children of `.oyl-sections` that span no columns. */
   readonly columns: number;
+  /** #2197: the tracks of `.oyl-sections`' grid that take width, or 0 where it is no grid. */
+  readonly tracks: number;
   /** How many children were counted — a page that rendered none has no columns either. */
   readonly counted: number;
   /** The most of Devices' garage cards that share one row, or `null` with no garage. */
@@ -144,6 +178,12 @@ interface SectionsLayout {
   /** The line under the title: its width, and the `max-width` it is held to. */
   readonly summaryWidth: number | null;
   readonly summaryMaxWidth: string | null;
+  /**
+   * #2335: the paragraphs and notices in `main` outside its sections that are
+   * wider than the line under the title is held to, in words. The measure is
+   * dropped for `main`, never for its prose.
+   */
+  readonly wideProse: readonly string[];
   /** Every child with a box, in DOM order. */
   readonly boxes: readonly SectionBox[];
   /** `.oyl-sections`' row gap in pixels; 0 where it is `normal` (columns). */
@@ -153,12 +193,17 @@ interface SectionsLayout {
   readonly pageHeight: number;
 }
 
-async function open(page: Page, viewport: Viewport, control = ''): Promise<void> {
+async function open(
+  page: Page,
+  viewport: Viewport,
+  control = '',
+  data: 'populated' | 'empty' = 'populated',
+): Promise<void> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   await applyInsets(page, viewport.insets);
   // `bluetooth=available` so Devices renders its garage (#699's review, N4);
   // no other route reads it.
-  const response = await page.goto(`/reflow.html?data=populated&bluetooth=available${control}`);
+  const response = await page.goto(`/reflow.html?data=${data}&bluetooth=available${control}`);
   expect(
     response?.status(),
     'reflow.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
@@ -169,9 +214,52 @@ async function open(page: Page, viewport: Viewport, control = ''): Promise<void>
   expect(await resolvedInsets(page)).toEqual(viewport.insets);
 }
 
-/** Opens `hash` and reads the sections inside `root` (a selector) back from the engine. */
-async function layoutAt(page: Page, hash: string, root: string): Promise<SectionsLayout> {
+/**
+ * The page that is opened with the realistic world chosen — #2335. In the
+ * standard world, which the harness chooses, the Delivery picker lists no
+ * course (DL6) and says so, so there would be no sections to measure. The
+ * choice is stored as the Settings switch stores it, and taken away again once
+ * the page has read it as it opened, so no other route sees it.
+ */
+const REALISTIC_WORLD_FOR = hrefFor(DELIVERY_COURSES_ROUTE);
+
+/** The entry {@link writeRealisticWorldChoice} stores for "chosen", as a key and a value. */
+const REALISTIC_WORLD_CHOSEN = ((): readonly [string, string] => {
+  let stored: readonly [string, string] | undefined;
+  writeRealisticWorldChoice(
+    {
+      getItem: () => null,
+      setItem: (key, value) => {
+        stored = [key, value];
+      },
+    },
+    true,
+  );
+  if (stored === undefined) throw new Error('the realistic world choice stored nothing');
+  return stored;
+})();
+
+/**
+ * Opens `hash` and reads the sections inside `root` (a selector) back from the
+ * engine — with the realistic world chosen as the page opens where `world` says.
+ */
+async function layoutAt(
+  page: Page,
+  hash: string,
+  root: string,
+  world = hash === REALISTIC_WORLD_FOR,
+): Promise<SectionsLayout> {
+  if (world) {
+    await page.evaluate(([key, value]) => {
+      localStorage.setItem(key, value);
+    }, REALISTIC_WORLD_CHOSEN);
+  }
   const seen = await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
+  if (world) {
+    await page.evaluate(([key]) => {
+      localStorage.removeItem(key);
+    }, REALISTIC_WORLD_CHOSEN);
+  }
   expect(seen?.settledWithinPatience, `${hash} did not settle`).toBe(true);
   expect(seen?.errors, `${hash} raised an error`).toEqual([]);
   return readLayout(page, root);
@@ -207,6 +295,15 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       }
     }
     const rowGap = grid === null ? 0 : Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
+    // The engine resolves the template to one length a track ("371px 371px").
+    // A track `auto-fit` folded away is "0px" (#2335: the Games course list,
+    // "572px 572px 0px"): it takes no width, so it is no empty column.
+    const tracks =
+      grid === null || getComputedStyle(grid).display !== 'grid'
+        ? 0
+        : getComputedStyle(grid)
+            .gridTemplateColumns.split(' ')
+            .filter((track) => track !== '' && Number.parseFloat(track) > 0).length;
     let garageRow: number | null = null;
     const cards = [...document.querySelectorAll('main .oyl-pairing > li')];
     if (cards.length > 0) {
@@ -217,16 +314,31 @@ async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
       }
       garageRow = Math.max(...rows.values());
     }
-    const summary = document.querySelector('main > h1 + p');
+    const summary = document.querySelector('main > .oyl-view-head > h1 + p');
+    const measure =
+      summary === null
+        ? Number.POSITIVE_INFINITY
+        : Number.parseFloat(getComputedStyle(summary).maxWidth);
+    // A pixel for the engine's rounding of the measure's `ch`, as below.
+    const wideProse = [...(main?.querySelectorAll('p, .oyl-status') ?? [])]
+      .filter((each) => each.closest('.oyl-sections') === null)
+      .filter((each) => each.getBoundingClientRect().width > measure + 1)
+      .map(
+        (each) =>
+          `${String(Math.round(each.getBoundingClientRect().width))} px: ` +
+          `"${(each.textContent ?? '').trim().slice(0, 40)}"`,
+      );
     return {
-      h1: document.querySelector('main > h1')?.textContent ?? null,
+      h1: document.querySelector('main > .oyl-view-head > h1')?.textContent ?? null,
       columns: lefts.size,
+      tracks,
       counted,
       garageRow,
       mainRight: main?.getBoundingClientRect().right ?? 0,
       viewportWidth: window.innerWidth,
       summaryWidth: summary?.getBoundingClientRect().width ?? null,
       summaryMaxWidth: summary === null ? null : getComputedStyle(summary).maxWidth,
+      wideProse,
       boxes,
       rowGap,
       sectionsHeight: grid?.getBoundingClientRect().height ?? 0,
@@ -318,8 +430,45 @@ function expectSomethingToCount(seen: SectionsLayout, label: string): void {
   }
 }
 
-function hashOf(route: RouteDefinition): string {
-  return `#${route.path}`;
+/**
+ * #2197: every track of the grid holds a section. Analysis laid out its two
+ * column sections in three tracks at 1280×800 and left the third empty on
+ * every row; a grid with more tracks than the tracks that hold a section is
+ * that page. `columns` is the distinct left edges of the sections that do not
+ * span, which is the tracks holding one. It does not catch a partial last row.
+ */
+function emptyTrackFault(seen: SectionsLayout): string | undefined {
+  return seen.tracks > Math.max(seen.columns, 1)
+    ? `${String(seen.tracks)} tracks, ${String(seen.columns)} holding a section`
+    : undefined;
+}
+
+/**
+ * #2197's review: the tracks can all hold a section and the last row still be
+ * short, as three sections in two tracks leave one alone in row 2 beside an
+ * empty cell. Held only where a screen has no section spanning between its
+ * column sections, which is the first-run fixture of the two screens that
+ * choose their tracks.
+ */
+function shortLastRowFault(seen: SectionsLayout): string | undefined {
+  return seen.tracks > 0 && seen.counted % seen.tracks !== 0
+    ? `${String(seen.counted)} sections in ${String(seen.tracks)} tracks leave a row short`
+    : undefined;
+}
+
+/**
+ * A route's address on the harness. Since #2067 a `sections` route can take a
+ * parameter (a ride's own page), which only the harness's fixtures can name.
+ */
+async function hashOf(page: Page, route: RouteDefinition): Promise<string> {
+  if (!route.path.split('/').some((segment) => segment.startsWith(':'))) {
+    return hrefFor(route);
+  }
+  const parameter = await page.evaluate((id) => window.__oylReflow?.parameters[id], route.id);
+  if (parameter === undefined) {
+    throw new Error(`${route.id}: parameterised and the harness has no fixture id`);
+  }
+  return hrefFor(route, parameter);
 }
 
 /*
@@ -345,12 +494,20 @@ async function fitsColumnOverflow(page: Page): Promise<string[]> {
  * and on a phone (`reflow`).
  */
 test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: NIGHTLY }, () => {
-  test('the walk finds the screens #1014 names', () => {
+  test('the walk finds the screens #1014 names, and those #2067 and #2292 added', () => {
     expect(SECTIONS.map((route) => route.id).sort()).toEqual([
       'about',
+      'activity-detail',
       'analysis',
       'camera',
+      'credits',
+      'delivery-courses',
       'devices',
+      'games',
+      'instance',
+      'lap-race-courses',
+      'more',
+      'route-builder',
       'segments',
       'settings',
       'transfer',
@@ -363,7 +520,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     await open(page, TABLET_IN_THE_SHELL);
     const report: string[] = [];
     for (const route of SECTIONS) {
-      const seen = await layoutAt(page, hashOf(route), 'main');
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
       expect(
         await fitsColumnOverflow(page),
@@ -371,9 +528,11 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
+          ` in ${String(seen.tracks)} tracks` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}` +
           `, main ends ${String(Math.round(seen.viewportWidth - seen.mainRight))} px from the edge`,
       );
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
       expect(
         seen.viewportWidth - seen.mainRight,
         `${route.id}: main stops short of the viewport's edge`,
@@ -396,6 +555,9 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       expect(seen.summaryWidth ?? 0).toBeLessThanOrEqual(
         Number.parseFloat(seen.summaryMaxWidth ?? '0') + 1,
       );
+      expect(seen.wideProse, `${route.id}: prose outside the sections left the measure`).toEqual(
+        [],
+      );
     }
     console.log(`[#1014] ${TABLET_IN_THE_SHELL.name}\n${report.join('\n')}`);
   });
@@ -404,7 +566,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     await open(page, TABLET_UPRIGHT);
     const report: string[] = [];
     for (const route of SECTIONS) {
-      const seen = await layoutAt(page, hashOf(route), 'main');
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
       expect(
         await fitsColumnOverflow(page),
@@ -412,8 +574,10 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
       ).toEqual([]);
       report.push(
         `  ${route.id}: ${String(seen.columns)} columns of ${String(seen.counted)} sections` +
+          ` in ${String(seen.tracks)} tracks` +
           `${seen.garageRow === null ? '' : `, garage ${String(seen.garageRow)} a row`}`,
       );
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
       if (ONE_COLUMN_UPRIGHT.includes(route.id)) {
         expect(seen.columns, `${route.id}: expected one column upright`).toBeLessThanOrEqual(1);
       } else {
@@ -421,6 +585,12 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
           2,
         );
       }
+      // The exemption is a pair only where the page is one, so it cannot hide a
+      // route that collapsed for another reason.
+      expect(
+        (await page.locator('main .oyl-sections--pair').count()) > 0,
+        `${route.id}: a pair on the page and in PAIRED_BY_2190 disagree`,
+      ).toBe(PAIRED_BY_2190.includes(route.id));
     }
     console.log(`[#1014] ${TABLET_UPRIGHT.name}\n${report.join('\n')}`);
   });
@@ -428,17 +598,58 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
   test(`a phone is unchanged — ${PHONE.name}: one column`, async ({ page }) => {
     await open(page, PHONE);
     for (const route of SECTIONS) {
-      const seen = await layoutAt(page, hashOf(route), 'main');
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
       expectSomethingToCount(seen, route.id);
       expect(seen.columns, `${route.id}: columns on a phone`).toBeLessThanOrEqual(1);
     }
   });
 
+  test('the control — a two-section screen in three tracks fails in landscape (#2197)', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, '&sections=tracks');
+    const failed: string[] = [];
+    for (const route of SECTIONS) {
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
+      expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
+      if (emptyTrackFault(seen) !== undefined) failed.push(route.id);
+    }
+    // The screens #2197 gave two tracks, and the Games page that took its
+    // `--halves` (#2292), and only they, have an empty one again.
+    expect(failed.sort()).toEqual(HALVES.toSorted());
+  });
+
+  test('first run (no data) — the screens in halves hold no empty track (#2197)', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, '', 'empty');
+    for (const route of SECTIONS.filter((r) => HALVES.includes(r.id))) {
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
+      expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
+      expect(emptyTrackFault(seen), `${route.id}: a track holds no section`).toBeUndefined();
+      expect(shortLastRowFault(seen), `${route.id}: a row is short`).toBeUndefined();
+    }
+  });
+
+  test('the Delivery picker in the standard world: its notice keeps the measure (#2335)', async ({
+    page,
+  }) => {
+    // The state the walk above does not open: no realistic world, so no
+    // course, and the page says why with a way to Settings.
+    await open(page, TABLET_IN_THE_SHELL);
+    const seen = await layoutAt(page, REALISTIC_WORLD_FOR, 'main', false);
+    expect(seen.h1).toBe(DELIVERY_COURSES_ROUTE.title);
+    expect(seen.counted, 'the standard world listed a course').toBe(0);
+    expect(seen.wideProse, 'the notice left the measure').toEqual([]);
+  });
+
   test('the control — switched back to prose, every route fails in landscape', async ({ page }) => {
     await open(page, TABLET_IN_THE_SHELL, '&sections=prose');
     for (const route of SECTIONS) {
-      const seen = await layoutAt(page, hashOf(route), 'main');
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
       expectSomethingToCount(seen, route.id);
       expect(
@@ -465,12 +676,17 @@ test.describe('#1014 — the sections are read across, in rows', { tag: NIGHTLY 
       await open(columns, viewport, '&sections=columns');
       const report: string[] = [];
       for (const route of SECTIONS) {
-        const now = await layoutAt(grid, hashOf(route), 'main');
-        const before = await layoutAt(columns, hashOf(route), 'main');
+        const now = await layoutAt(grid, await hashOf(grid, route), 'main');
+        const before = await layoutAt(columns, await hashOf(columns, route), 'main');
         expect(now.h1, `${route.id} did not render its own page`).toBe(route.title);
         expect(before.h1, `${route.id} did not render its own page (control)`).toBe(route.title);
         expectSomethingToCount(now, route.id);
-        expectSomethingToCount(before, `${route.id} (control)`);
+        // #2067's screens were never laid out by #1014's first cut — they were
+        // prose — so the cut's columns are no "before" for them: the route
+        // builder's two groups come out as one fragmented box under it.
+        if (!WIDENED_BY_2067.includes(route.id)) {
+          expectSomethingToCount(before, `${route.id} (control)`);
+        }
         const beforeFaults = rowMajorFaults(before);
         report.push(
           `  ${route.id}: page ${String(Math.round(before.pageHeight))} → ` +
@@ -557,7 +773,7 @@ test.describe('#1026 — no section dwarfs its row', () => {
       await open(page, viewport);
       const report: string[] = [];
       for (const route of SECTIONS) {
-        const seen = await layoutAt(page, hashOf(route), 'main');
+        const seen = await layoutAt(page, await hashOf(page, route), 'main');
         expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
         const balances = rowBalances(seen);
         report.push(
@@ -600,5 +816,253 @@ test.describe('#1026 — no section dwarfs its row', () => {
       worst,
       'the balance check passed with the erase list back in its section',
     ).toBeGreaterThan(ROW_BALANCE_LIMIT);
+  });
+});
+
+/**
+ * #2067 — the single-column screens use a tablet's width.
+ *
+ * Many screens were one column a reading measure wide (685 px of `main` at
+ * 1280 px), leaving the other half of a landscape tablet empty. On the owner's
+ * tablet this walks every route that is not a ride route (`route-motion.ts`
+ * §`RIDE_ROUTE_IDS`) and not list–detail, and reads how far across the width
+ * the shell gives `main` its content reaches — the right edge of the furthest
+ * section of a screen of sections, or else of `main`'s own children, the title
+ * block apart. Every route must reach
+ * {@link SPAN_FLOOR} of it, except those {@link KEEPS_THE_MEASURE} names, and
+ * that list is held exactly: a route that starts to use the width is taken
+ * off it, and one that stops is a failure. Each route's figure is printed.
+ *
+ * On the routes #2067 turned into screens of sections, the sections are in the
+ * order they are read — row by row, left to right — and on a phone they are
+ * one column that does not scroll sideways at 320 px.
+ *
+ * ⚠️ **The control** puts those routes back on the reading measure
+ * (`?sections=prose`), and every one of them must then fall short. "Today's
+ * Settings fails", the issue's own control, does not: Settings has used the
+ * width since #1014 (it reaches 100 % here), so the control is the routes
+ * this issue changed.
+ */
+const SPAN_FLOOR = 0.75;
+
+/** Not ride routes and not list–detail: what #2067 walks. */
+const WALKED = ALL_ROUTES.filter(
+  (route) => !RIDE_ROUTE_IDS.has(route.id) && route.layout !== 'list-detail',
+);
+
+/** The routes #2067 laid out in columns — prose until then. */
+const WIDENED_BY_2067: readonly RouteId[] = [
+  'more',
+  'credits',
+  'instance',
+  'route-builder',
+  'activity-detail',
+];
+
+/** The routes that keep the reading measure on a tablet, and why — held exactly. */
+const KEEPS_THE_MEASURE: Partial<Record<RouteId, string>> = {
+  'side-camera':
+    'a phone’s screen — the phone is the side camera — whose consent is read before its first ' +
+    'control (ADR 0029 D-5, ADR 0033), so the control may not stand beside the text',
+  moderation:
+    'in the walk’s fixture this device is not a moderator: one notice and one link to the ' +
+    'Instance screen',
+  'segment-detail':
+    'one table and its compare: in two columns the table scrolled in half the width beside an ' +
+    'almost empty column, which #2067 tried and put back',
+  'not-found': 'two sentences and two links',
+  'route-editor':
+    '#2007’s editor, one column read in order — the change to a part, its map, the whole-route ' +
+    'changes, the save — built beside #2067 rather than after it; whether it becomes a pair as ' +
+    'the route builder did is the owner’s to rule',
+};
+
+interface Span {
+  /** How far across the width the shell gives `main` its content reaches, 0–1. */
+  readonly share: number;
+  readonly content: number;
+  readonly available: number;
+}
+
+async function spanOf(page: Page): Promise<Span> {
+  return page.evaluate(() => {
+    const main = document.querySelector('main');
+    const shell = main?.parentElement;
+    if (main === null || shell === null || shell === undefined) throw new Error('no main');
+    const mainStyle = getComputedStyle(main);
+    const shellStyle = getComputedStyle(shell);
+    const left = main.getBoundingClientRect().left + Number.parseFloat(mainStyle.paddingLeft);
+    // The width `main` would have with no measure: the shell's, less `main`'s padding.
+    const available =
+      shell.getBoundingClientRect().right -
+      Number.parseFloat(shellStyle.paddingRight) -
+      Number.parseFloat(mainStyle.paddingRight) -
+      left;
+    // What is laid out across the width: a screen of sections' sections, or
+    // else `main`'s own children, the title block apart. Their boxes, not
+    // what is inside them: a table scrolled inside its region would claim
+    // width nobody sees used.
+    const grid = main.querySelector('.oyl-sections');
+    const laidOut =
+      grid === null
+        ? [...main.children].filter((child) => !child.classList.contains('oyl-view-head'))
+        : [...grid.children];
+    let right = left;
+    for (const element of laidOut) {
+      const box = element.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0 && element.checkVisibility()) {
+        right = Math.max(right, Math.min(box.right, left + available));
+      }
+    }
+    return { share: (right - left) / available, content: right - left, available };
+  });
+}
+
+/** Where each child of `main`'s `.oyl-sections` is drawn, in DOM order. */
+async function sectionPlaces(page: Page): Promise<{ top: number; left: number }[]> {
+  return page.evaluate(() =>
+    [...(document.querySelector('main .oyl-sections')?.children ?? [])]
+      .map((child) => child.getBoundingClientRect())
+      .filter((box) => box.width > 0 && box.height > 0)
+      .map((box) => ({ top: box.top, left: box.left })),
+  );
+}
+
+/** Pairs of neighbours, in DOM order, that are not row by row, left to right. */
+function outOfOrder(places: readonly { top: number; left: number }[]): string[] {
+  const faults: string[] = [];
+  for (let index = 1; index < places.length; index += 1) {
+    const before = places[index - 1];
+    const after = places[index];
+    if (before === undefined || after === undefined) continue;
+    const sameRow = Math.abs(after.top - before.top) <= 1;
+    if (sameRow ? after.left <= before.left : after.top < before.top) {
+      faults.push(
+        `section ${String(index + 1)} at (${after.left.toFixed(0)}, ${after.top.toFixed(0)}) ` +
+          `before section ${String(index)} at (${before.left.toFixed(0)}, ${before.top.toFixed(0)})`,
+      );
+    }
+  }
+  return faults;
+}
+
+function widened(id: RouteId): RouteDefinition {
+  const route = ALL_ROUTES.find((each) => each.id === id);
+  if (route === undefined) throw new Error(`${id} is not a route`);
+  return route;
+}
+
+test.describe('#2067 — the single-column screens use a tablet’s width', () => {
+  test(`every route not a ride route or list–detail, at ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await open(page, TABLET_IN_THE_SHELL);
+    const report: string[] = [];
+    const short: string[] = [];
+    for (const route of WALKED) {
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
+      expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      const span = await spanOf(page);
+      const kept = KEEPS_THE_MEASURE[route.id] === undefined ? '' : ', keeps the measure';
+      report.push(
+        `  ${route.id}: ${(span.share * 100).toFixed(0)} % (${span.content.toFixed(0)} of ` +
+          `${span.available.toFixed(0)} px)${kept}`,
+      );
+      if (span.share < SPAN_FLOOR) short.push(route.id);
+    }
+    console.log(`[#2067] ${TABLET_IN_THE_SHELL.name}\n${report.join('\n')}`);
+    // Equal, not only within: both directions are a decision.
+    expect(short.sort()).toEqual(Object.keys(KEEPS_THE_MEASURE).sort());
+  });
+
+  test(`the sections are in reading order, at ${TABLET_IN_THE_SHELL.name}`, async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    for (const id of WIDENED_BY_2067) {
+      await layoutAt(page, await hashOf(page, widened(id)), 'main');
+      const places = await sectionPlaces(page);
+      // The apparatus: a page of one section is in order by having one.
+      expect(places.length, `${id}: fewer than two sections to order`).toBeGreaterThanOrEqual(2);
+      expect(
+        new Set(places.map((place) => Math.round(place.left))).size,
+        `${id}: its sections are not side by side`,
+      ).toBeGreaterThanOrEqual(2);
+      expect(outOfOrder(places), id).toEqual([]);
+    }
+  });
+
+  for (const viewport of [PHONE, { ...PHONE, name: 'phone 320×640', width: 320, height: 640 }]) {
+    test(`one column, and no sideways scroll — ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport);
+      for (const id of WIDENED_BY_2067) {
+        await layoutAt(page, await hashOf(page, widened(id)), 'main');
+        const places = await sectionPlaces(page);
+        expect(places.length, `${id}: no sections`).toBeGreaterThanOrEqual(2);
+        expect(new Set(places.map((place) => Math.round(place.left))).size, id).toBe(1);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+          `${id} scrolls sideways`,
+        ).toBeLessThanOrEqual(0);
+      }
+    });
+  }
+
+  // The span above reads the right edges of grid cells, so a grid of empty
+  // columns scores 100 %: the height is what shows the empty space (#2190's
+  // review: Credits was 15220 px against 12240 on the measure).
+  test(`no widened route is taller than on the reading measure, at ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const heights = async (extra: string): Promise<Map<RouteId, number>> => {
+      await open(page, TABLET_IN_THE_SHELL, extra);
+      const seen = new Map<RouteId, number>();
+      for (const id of WIDENED_BY_2067) {
+        const layout = await layoutAt(page, await hashOf(page, widened(id)), 'main');
+        seen.set(id, layout.pageHeight);
+      }
+      return seen;
+    };
+    const columns = await heights('');
+    const prose = await heights('&sections=prose');
+    for (const id of WIDENED_BY_2067) {
+      const wide = columns.get(id) ?? 0;
+      const narrow = prose.get(id) ?? 0;
+      console.log(
+        `[#2067] height ${id}: ${wide.toFixed(0)} px, on the measure ${narrow.toFixed(0)} px`,
+      );
+      expect(wide, `${id} is taller in columns than on the reading measure`).toBeLessThanOrEqual(
+        narrow,
+      );
+    }
+  });
+
+  test(`a pair stays one column upright, at ${TABLET_UPRIGHT.name}`, async ({ page }) => {
+    await open(page, TABLET_UPRIGHT);
+    for (const id of ['route-builder', 'activity-detail'] as const) {
+      await layoutAt(page, await hashOf(page, widened(id)), 'main');
+      const places = await sectionPlaces(page);
+      expect(places.length, `${id}: no sections`).toBeGreaterThanOrEqual(2);
+      expect(
+        new Set(places.map((place) => Math.round(place.left))).size,
+        `${id}: two columns in a main narrower than the list–detail breakpoint`,
+      ).toBe(1);
+    }
+  });
+
+  test('the control — on the reading measure again, every route #2067 widened falls short', async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL, '&sections=prose');
+    for (const id of WIDENED_BY_2067) {
+      const route = widened(id);
+      const seen = await layoutAt(page, await hashOf(page, route), 'main');
+      expect(seen.h1, `${id} did not render its own page`).toBe(route.title);
+      const span = await spanOf(page);
+      console.log(`[#2067] control ${id}: ${(span.share * 100).toFixed(0)} %`);
+      expect(span.share, `${id} reached the width on the measure`).toBeLessThan(SPAN_FLOOR);
+    }
   });
 });

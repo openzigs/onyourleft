@@ -60,11 +60,15 @@ import {
   holdEligible,
   type HeartRateHoldContext,
   type WorkoutTimeline,
+  powerZones,
   seconds,
+  timeInZones,
   unixSeconds,
   type PlayerStatus,
   type ReplanRecord,
   type Seconds,
+  type ThresholdTest,
+  type TimeInZones,
   type UnixSeconds,
   type Watts,
   type WorkoutBlock,
@@ -110,6 +114,7 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
+import { rideTotals, type RideTotals } from '../recording/totals';
 import {
   recoverableRides,
   unreadableRecordings,
@@ -152,11 +157,18 @@ import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import type { TrainerTargetMemory } from './trainer-target-memory';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
-import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
+import {
+  createWorkoutSession,
+  RELEASE_INCOMPLETE,
+  STEP_DOWN_UNCONFIRMED,
+  type WorkoutRelease,
+  type WorkoutSession,
+} from '../workout/session';
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
 import { blockText } from '../workouts/library';
+import { estimateFromRide, thresholdTestOf } from '../workouts/threshold-test-result';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
 import { createReplanSession, type ReplanSession } from '../workout/replan-session';
@@ -214,6 +226,22 @@ export interface PairedSensor {
   readonly role: PairingRole;
   readonly capabilities: readonly MeasurementCapability[];
   readonly state: ConnectionState;
+  /**
+   * What THIS device last read on each channel it supplies, in
+   * {@link RIDE_METRIC_IDS} order — #2045, for Home's sensor module.
+   *
+   * ⚠️ **Not {@link RideSnapshot.metrics}.** That is one reading per channel
+   * from whichever device sent it last, so a trainer and a power meter both
+   * sending power share one number, and a module that named a device beside
+   * it could name the wrong one. These are kept per device, from the same
+   * `onMeasurement` call that feeds the recorder, and go stale on the same
+   * clock and threshold. A device that is not connected reads `unpaired` on
+   * every channel, as a channel nobody supplies does.
+   *
+   * Optional for the stub snapshots in `testing.ts`, which predate it;
+   * `createRideController` always sets it.
+   */
+  readonly readings?: readonly RideMetric[];
 }
 
 /** Everything the screen may say about the trainer. */
@@ -281,6 +309,16 @@ export interface TrainerSnapshot {
    * next confirmed release and by taking control again.
    */
   readonly releaseFault: string | undefined;
+  /**
+   * The floor the end of a workout eased the trainer off to, when the trainer
+   * confirmed that step-down AND the Stop after it — #2348, the owner's
+   * ruling of 2026-11-07. The panel then says the trainer was eased off to its
+   * lowest setting and released, instead of "may still be holding N W". ⚠️
+   * `undefined` after every other release (End ERG, a game ride, a workout
+   * that needed no step-down, an unconfirmed step-down or Stop), and cleared
+   * by the next target, gradient, workout or grant of control.
+   */
+  readonly easedOffTo: Watts | undefined;
   /** Why the last setpoint was refused, for a screen that says more than "failed". */
   readonly refusal: string | undefined;
   /**
@@ -504,8 +542,21 @@ export const RIDE_REPLAN_RECORDS_LIMIT = 200;
 /** Everything the view renders, and nothing it has to derive. */
 export interface RideSnapshot {
   readonly phase: RidePhase;
-  /** Whether the rider has pressed Stop once. A second press is what stops. */
+  /**
+   * Whether the end-of-ride question is open — #49, #2349: the rider pressed
+   * *Stop* (or *End ride* in the game) and has not yet answered *Save ride*,
+   * *Discard ride* or *Keep riding*. Opening it changes nothing else: the ride
+   * records on, and nothing is written to the trainer.
+   */
   readonly stopArmed: boolean;
+  /**
+   * Whether the rider answered *Discard ride* and is being asked once more —
+   * #2349. Only ever `true` while {@link stopArmed} is: discarding is the one
+   * answer that deletes the device copy (ADR 0036 D-3), so it takes a second
+   * press of its own, and {@link RideController.confirmDiscard} refuses
+   * without it.
+   */
+  readonly discardArmed: boolean;
   /**
    * Whether the ride screen's touch lock is on — #1432. Held HERE, above the
    * router, rather than in the screen, so a rider who taps away from the Ride
@@ -515,6 +566,13 @@ export interface RideSnapshot {
    * `design/touch-lock.ts` is what it means on the screen.
    */
   readonly touchLocked: boolean;
+  /**
+   * When the recording under way started — the session's own `startedAt`, so
+   * a ride recovered after a crash says where it began, not where this tab
+   * first saw it (#2356: `camera/kept-frame-discard.ts` opens its window
+   * here). `undefined` with no recorder.
+   */
+  readonly startedAt: UnixSeconds | undefined;
   readonly elapsedSeconds: number;
   readonly movingSeconds: number;
   /**
@@ -538,6 +596,14 @@ export interface RideSnapshot {
     readonly last: { readonly number: number; readonly lap: LapFigures } | undefined;
   };
   readonly sampleCount: number;
+  /**
+   * The ride so far — how far, how much climbing and what average power —
+   * #2076. `recording/totals.ts` §`rideTotals` over the recorder's own series
+   * and laps, the function and the source the saved ride's totals are written
+   * from, so the HUD's figures and the saved ride's are one answer.
+   * `undefined` with no recorder.
+   */
+  readonly totals: RideTotals | undefined;
   readonly metrics: readonly RideMetric[];
   readonly sensors: readonly PairedSensor[];
   readonly trainer: TrainerSnapshot;
@@ -648,6 +714,9 @@ export interface RideSnapshot {
  * save beginning, the phase says `stopped` while `saveState` can still say
  * the previous ride's `unavailable` — see {@link RideSnapshot.stopping}.
  *
+ * ⚠️ **A discarded ride (#2349) is allowed whatever its storage says**: the
+ * rider asked twice for it to go, so nothing in this tab is being protected.
+ *
  * One rule, read by the controller that enforces it and by the screen that
  * decides whether to offer the control. Every input it reads is on the
  * snapshot — `stopping` included, which until #565's review was a flag only
@@ -660,10 +729,15 @@ export function canStartNewRide(
   return (
     state.phase === 'stopped' &&
     !state.stopping &&
-    state.storage === 'ok' &&
-    (state.saveState === 'saved' ||
-      state.saveState === 'empty' ||
-      state.saveState === 'unavailable')
+    // #2349: a ride the rider DISCARDED leaves nothing in this tab to protect,
+    // whatever the storage says — they asked twice for it to go. Its recording
+    // is deleted, or (a leftover, whose failed delete is what set `storage`)
+    // still on the device and offered back.
+    (state.saveState === 'discarded' ||
+      (state.storage === 'ok' &&
+        (state.saveState === 'saved' ||
+          state.saveState === 'empty' ||
+          state.saveState === 'unavailable')))
   );
 }
 
@@ -949,7 +1023,14 @@ export type RideSaveState =
   | 'saved'
   /** Stopped with no samples. Not a failure — see `finish.ts`. */
   | 'empty'
-  | 'failed';
+  | 'failed'
+  /**
+   * #2349: the rider ended the ride with *Discard ride*, confirmed it, and its
+   * recording was deleted from this device. Nothing was saved. With
+   * {@link RideSnapshot.leftover} set the delete did not go through and the
+   * recording is still on the device, offered back like any other.
+   */
+  | 'discarded';
 
 export interface RideControllerOptions {
   readonly transport: SensorTransport;
@@ -1034,6 +1115,15 @@ export interface RideController {
   /** Stable between changes, so `useSyncExternalStore` does not loop. */
   getSnapshot(): RideSnapshot;
   subscribe(listener: () => void): Unsubscribe;
+  /**
+   * How long the ride being recorded has spent in each power zone of
+   * `threshold` — #2077's time-in-zone bar. `@onyourleft/domain`
+   * §`timeInZones` over the recorder's own power channel, the function and
+   * the samples the Analysis screen's zone chart reads a saved ride by.
+   * `undefined` with no recorder. The same object until the recording moves
+   * on or the threshold changes, as `useSyncExternalStore` requires.
+   */
+  powerZoneTime(threshold: Watts): TimeInZones | undefined;
 
   /**
    * Pair one device. **Must be called from a user gesture** — one per device.
@@ -1067,9 +1157,33 @@ export interface RideController {
   start(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
-  /** First press of Stop. Arms the confirmation; changes nothing else. */
+  /**
+   * First press of Stop, or of the game's *End ride*: opens the end-of-ride
+   * question (#2349) — *Save ride*, *Discard ride* or *Keep riding*. Changes
+   * nothing else: the ride records on and the trainer is sent nothing.
+   */
   armStop(): void;
+  /** *Keep riding*: closes the question, the discard step too. Changes nothing else. */
   cancelStop(): void;
+  /**
+   * *Discard ride*, the first time — #2349. Asks once more, and changes
+   * nothing else. Refused unless the question is open on a ride in progress.
+   */
+  armDiscard(): void;
+  /**
+   * *Discard ride*, confirmed — #2349. Ends the ride exactly as
+   * {@link confirmStop} does up to the save — the workout ended, the trainer
+   * released through the same `stopTrainer`, the recording stopped — and then
+   * deletes its recording from this device instead of saving it.
+   *
+   * ⚠️ **Refused unless {@link armDiscard} happened**, for {@link confirmStop}'s
+   * reason: a single press can never lose the device copy.
+   *
+   * @returns whether the recording is gone. `false` when it was refused, or
+   * when the delete did not go through — then the ride is still on this device
+   * ({@link RideSnapshot.leftover}) and is offered back, never lost silently.
+   */
+  confirmDiscard(): Promise<boolean>;
   /** #1432: turn the touch lock on. Refused unless a ride is in progress. */
   lockTouch(): void;
   /**
@@ -1077,7 +1191,10 @@ export interface RideController {
    * (`design/TouchLockButton.tsx`).
    */
   unlockTouch(): void;
-  /** Second press. Stops the recording and checkpoints it. */
+  /**
+   * *Save ride* — the second press. Stops the recording, checkpoints it and
+   * saves it to the rider's activities (`recording/finish.ts`).
+   */
   confirmStop(): Promise<void>;
   /**
    * A trainer-game ride ended while this recording was running, and this is
@@ -1379,6 +1496,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   /** How many entries {@link attach} has listed this session. @see SensorEntry.pairing */
   let pairingsMade = 0;
   const latest = new Map<MeasurementCapability, LatestReading>();
+  /** The same readings, kept per device — #2045. @see PairedSensor.readings */
+  const latestByDevice = new Map<DeviceId, Map<MeasurementCapability, LatestReading>>();
 
   let recorder: Recorder | undefined;
   let saveState: RideSaveState = 'unavailable';
@@ -1425,6 +1544,13 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   let workoutFinishedInRide = false;
   /**
+   * The threshold test ridden during this recording, if one was — #2307: the
+   * test, and its workout, whose blocks among the ride's say where its effort
+   * was. Latched when it starts, for {@link workoutFinishedInRide}'s reason,
+   * and cleared with it. The latest test wins: a ride holds one result card.
+   */
+  let testInRide: { readonly test: ThresholdTest; readonly workout: WorkoutInProgress } | undefined;
+  /**
    * Every re-plan decision made during this recording — #1244, ADR 0048 P9.
    * Collected when a workout's session ends ({@link endWorkoutSession}), for
    * {@link workoutFinishedInRide}'s reason, and cleared with it.
@@ -1448,6 +1574,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let unreadable: readonly RecordingSessionId[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
+  /** @see RideSnapshot.discardArmed */
+  let discardArmed = false;
   /** @see RideSnapshot.touchLocked */
   let touchLocked = false;
   /**
@@ -1465,6 +1593,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let releaseFault: string | undefined;
+  /** @see TrainerSnapshot.easedOffTo */
+  let easedOffTo: Watts | undefined;
   /** The last *Set* the rescue deferred, and how many it has deferred. @see TrainerSnapshot.ergHeld */
   let held: { readonly target: Watts; readonly press: number } | undefined;
   let heldPresses = 0;
@@ -2132,24 +2262,71 @@ export function createRideController(options: RideControllerOptions): RideContro
    * listener in `wire` — which shows "Control lost" and pauses a workout — is
    * never reached from a path that meant to let go. Nothing re-requests
    * control after this either: rule 2 at the top of the file.
+   *
+   * ⚠️ **`stepDown` is the end of a workout's, and it is written FIRST**
+   * (#2348). A Stop leaves the last ERG target applied on the trainer
+   * measured, and a ramp test's last target is the hardest of the ride. So a
+   * workout hands in its trainer's floor, and it is written as a `0x05`
+   * immediately before the Stop: both are put on the control client's one
+   * queue in this call, in that order, behind whatever target is already on
+   * it, so nothing can land between them. It goes through
+   * {@link gatedTargets} like every ERG target (an ease to the floor always
+   * passes the forget rule), so the device's memory of what the trainer
+   * holds is the floor afterwards. A release already on the wire is joined
+   * and NOT stepped down: a `0x05` after its Stop would take the machine
+   * back into ERG. A step-down the trainer did not confirm is
+   * {@link STEP_DOWN_UNCONFIRMED} on {@link TrainerSnapshot.releaseFault},
+   * ahead of anything the Stop said.
    */
-  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> => {
+  const beginRelease = (
+    client: TrainerControl,
+    stepDown?: { readonly to: Watts; readonly floor: Watts },
+  ): {
+    readonly stop: Promise<TrainerRelease>;
+    /** Whether the trainer confirmed the step-down; `undefined` when none was written. */
+    readonly steppedDown: Promise<boolean | undefined>;
+  } => {
     // A release ends a hand-set target too, and its rescue with it (#567): a
     // stall rescue writing a 0x05 after the Stop would be taking the machine
     // back into ERG after the rider was told it had been let go.
     endManualErg();
     if (releasing !== undefined) {
-      return releasing;
+      return { stop: releasing, steppedDown: Promise.resolve(undefined) };
     }
+    // ⚠️ Called before `letGo` below, in the same synchronous run: the order
+    // of the two calls is the order on the wire.
+    const steppedDown: Promise<boolean | undefined> =
+      stepDown === undefined
+        ? Promise.resolve(undefined)
+        : gatedTargets(client, stepDown.floor)
+            .setTargetPower(stepDown.to)
+            .then(
+              () => true,
+              () => false,
+            );
     const attempt = client.letGo().then(
-      (outcome) => {
-        releaseFault = outcome.kind === 'stopped' ? undefined : RELEASE_INCOMPLETE;
+      async (outcome) => {
+        // Settled already: it was ahead of the Stop on the one queue.
+        const eased = await steppedDown;
+        releaseFault =
+          eased === false
+            ? STEP_DOWN_UNCONFIRMED
+            : outcome.kind === 'stopped'
+              ? undefined
+              : RELEASE_INCOMPLETE;
+        // #2348, the owner's ruling of 2026-11-07: only when both the
+        // step-down and the Stop were confirmed may the panel say so.
+        easedOffTo =
+          eased === true && outcome.kind === 'stopped' && stepDown !== undefined
+            ? stepDown.to
+            : undefined;
         // A setpoint the rider asked for can no longer be answered.
         requested = undefined;
         return outcome;
       },
       (error: unknown) => {
         releaseFault = `${RELEASE_INCOMPLETE} (${describe(error)})`;
+        easedOffTo = undefined;
         throw error;
       },
     );
@@ -2160,8 +2337,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         changed();
       })
       .catch(() => undefined);
-    return attempt;
+    return { stop: attempt, steppedDown };
   };
+  /** {@link beginRelease} with no step-down: every release but a workout's. */
+  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> =>
+    beginRelease(client).stop;
 
   /** Whether any **connected** sensor supplies this channel. */
   const isPaired = (capability: MeasurementCapability): boolean =>
@@ -2307,6 +2487,75 @@ export function createRideController(options: RideControllerOptions): RideContro
     return true;
   };
 
+  /**
+   * #2076: the ride's totals, worked out again only when the recording has
+   * moved on — a new sample, or a lap kept or advanced. A snapshot is built
+   * for every reading and every tick, and the series is the whole ride.
+   */
+  let totalsMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly laps: readonly RecordedCourseLap[];
+        readonly open: RecordedCourseLap | undefined;
+        readonly totals: RideTotals;
+      }
+    | undefined;
+  const totalsOf = (current: Recorder | undefined): RideTotals | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    const laps = current.courseLaps;
+    const open = current.openCourseLap;
+    if (
+      totalsMemo?.recorder !== current ||
+      totalsMemo.samples !== samples ||
+      totalsMemo.laps !== laps ||
+      totalsMemo.open !== open
+    ) {
+      const ridden = open === undefined ? laps : [...laps, open];
+      totalsMemo = {
+        recorder: current,
+        samples,
+        laps,
+        open,
+        totals: rideTotals(current.session.series(), ridden),
+      };
+    }
+    return totalsMemo.totals;
+  };
+
+  /** #2077: `powerZoneTime`, worked out again only when the recording or the threshold moves on. */
+  let zoneTimeMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly samples: number;
+        readonly threshold: Watts;
+        readonly time: TimeInZones;
+      }
+    | undefined;
+  const zoneTimeOf = (current: Recorder | undefined, threshold: Watts): TimeInZones | undefined => {
+    if (current === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    if (
+      zoneTimeMemo?.recorder !== current ||
+      zoneTimeMemo.samples !== samples ||
+      zoneTimeMemo.threshold !== threshold
+    ) {
+      const series = current.session.series();
+      zoneTimeMemo = {
+        recorder: current,
+        samples,
+        threshold,
+        time: timeInZones(
+          powerZones(threshold),
+          series.channels.power ?? [],
+          series.sampleInterval,
+        ),
+      };
+    }
+    return zoneTimeMemo.time;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -2315,7 +2564,9 @@ export function createRideController(options: RideControllerOptions): RideContro
     return {
       phase,
       stopArmed,
+      discardArmed,
       touchLocked,
+      startedAt: session?.startedAt,
       elapsedSeconds: session?.elapsedTime ?? 0,
       movingSeconds: session?.movingTime ?? 0,
       courseLapSeconds:
@@ -2327,6 +2578,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         last: lastManualLap,
       },
       sampleCount: session?.sampleCount ?? 0,
+      totals: totalsOf(recorder),
       metrics: RIDE_METRIC_IDS.map((id) => ({
         id,
         state: metricStateFor(
@@ -2349,6 +2601,17 @@ export function createRideController(options: RideControllerOptions): RideContro
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',
         ),
         state: entry.state,
+        readings: RIDE_METRIC_IDS.filter((metric) =>
+          entry.device.capabilities.has(METRIC_CAPABILITY[metric]),
+        ).map((metric) => ({
+          id: metric,
+          state: metricStateFor(
+            latestByDevice.get(entry.device.identity.id)?.get(METRIC_CAPABILITY[metric]),
+            entry.state === 'connected',
+            clock,
+            staleAfterSeconds,
+          ),
+        })),
       })),
       workout: workoutSnapshot(),
       trainer: {
@@ -2364,6 +2627,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         lost: controlLost,
         refusal,
         releaseFault,
+        easedOffTo,
         ergRescue: manual?.erg.rescue(),
         // #655: only while that press is still what the rescue is holding.
         ergHeld:
@@ -2423,10 +2687,13 @@ export function createRideController(options: RideControllerOptions): RideContro
   // --- Measurements ---------------------------------------------------------
 
   const onMeasurement = (measurement: SensorMeasurement): void => {
-    latest.set(measurement.capability, {
-      value: valueOf(measurement),
-      at: measurement.at,
-    });
+    const reading: LatestReading = { value: valueOf(measurement), at: measurement.at };
+    latest.set(measurement.capability, reading);
+    // #2045: and against the device that sent it, for Home's sensor module.
+    const source = measurement.device.id;
+    const mine = latestByDevice.get(source) ?? new Map<MeasurementCapability, LatestReading>();
+    mine.set(measurement.capability, reading);
+    latestByDevice.set(source, mine);
     // Into the recorder as well as onto the screen, and through the same call:
     // a screen that showed a reading the recorder never saw would be the
     // "wrong layer" defect in its most visible form.
@@ -2479,6 +2746,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       controlChoice: NO_TRAINER_CONTROL,
       pairing: (pairingsMade += 1),
     };
+    // #2045: a new pairing starts with no reading of its own, so a device
+    // forgotten and paired again never shows what it read the last time.
+    latestByDevice.delete(id);
     sensors.set(id, entry);
     try {
       await wire(entry);
@@ -2833,6 +3103,18 @@ export function createRideController(options: RideControllerOptions): RideContro
             // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
             averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
             gameOutcome: outcomeInGame,
+            // #2307: a test's estimate, from the blocks and power this save wrote.
+            ...(testInRide === undefined
+              ? {}
+              : {
+                  thresholdTest: estimateFromRide(testInRide.test, {
+                    blocks: finished.activity.rideFacts?.workoutBlocks,
+                    firstBlock: testInRide.workout.blocksAfter ?? 0,
+                    startedAt: finished.streams.startedAt,
+                    sampleInterval: finished.streams.sampleInterval,
+                    power: finished.streams.channels.power,
+                  }),
+                }),
           }
         : undefined;
     if (outcome.status === 'saved' || outcome.status === 'empty') {
@@ -3413,6 +3695,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       return snapshot;
     },
 
+    powerZoneTime(threshold: Watts): TimeInZones | undefined {
+      return zoneTimeOf(recorder, threshold);
+    },
+
     subscribe(listener): Unsubscribe {
       listeners.add(listener);
       return () => {
@@ -3799,7 +4085,69 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     cancelStop(): void {
       stopArmed = false;
+      discardArmed = false;
       changed();
+    },
+
+    armDiscard(): void {
+      if (!stopArmed || (phase !== 'recording' && phase !== 'paused')) {
+        return;
+      }
+      discardArmed = true;
+      changed();
+    },
+
+    async confirmDiscard(): Promise<boolean> {
+      if (!discardArmed || (phase !== 'recording' && phase !== 'paused')) {
+        // ⚠️ The guard, for `confirmStop`'s reason: one press never deletes.
+        return false;
+      }
+      stopArmed = false;
+      discardArmed = false;
+      touchLocked = false;
+      phase = 'stopped';
+      const at = now();
+      finishing = true;
+      changed();
+      let gone: boolean;
+      try {
+        // The same order as `confirmStop`, and the same release: the workout,
+        // then the trainer, then the recording. A discard is still a ride
+        // ending under somebody who may be pedalling.
+        endWorkoutSession();
+        await stopTrainer();
+        const current = recording();
+        await current.stop(at);
+        // Nothing is saved, so there is no activity to wait for: the
+        // recording is the ride's only copy, and the rider asked twice for it
+        // to go. Snapshots and side-camera reports held for this ride are
+        // never written (`camera/snapshot-keeper.ts`, `side-report-keeper.ts`
+        // read `discarded`).
+        gone = await current.discard();
+        saveState = 'discarded';
+        saveError = undefined;
+        savedActivityId = undefined;
+        savedRide = undefined;
+        // A delete that did not go through leaves the ride on this device,
+        // offered back by `startNewRide` like a save's leftover.
+        leftover = !gone;
+      } catch (error: unknown) {
+        // Fail closed, as `confirmStop` does: whatever threw, the checkpoint
+        // is where it was and is offered back. ⚠️ Said as a discard that did
+        // not go through (#2349's review), never as a failed SAVE: the rider
+        // asked for this ride to be deleted, and "not saved" would answer a
+        // question they did not ask.
+        saveState = 'discarded';
+        saveError = undefined;
+        savedActivityId = undefined;
+        savedRide = undefined;
+        leftover = true;
+        throw error;
+      } finally {
+        finishing = false;
+        changed();
+      }
+      return gone;
     },
 
     lockTouch(): void {
@@ -3827,6 +4175,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       stopArmed = false;
+      discardArmed = false;
       // #1432: the lock is for riding. A stopped ride's screen is the result
       // card and *Start a new ride*, which a rider presses off the bike.
       touchLocked = false;
@@ -3901,6 +4250,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       recorder = undefined;
       phase = 'idle';
       stopArmed = false;
+      discardArmed = false;
       saveState = 'unavailable';
       saveError = undefined;
       savedActivityId = undefined;
@@ -3924,6 +4274,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       lastManualLap = undefined;
       // #947: the same place, for the same reason.
       workoutFinishedInRide = false;
+      // #2307: and the threshold test ridden on that ride.
+      testInRide = undefined;
       // #1244: and the re-plan decisions that went with that ride.
       replanRecords = [];
       // ⚠️ But not `replanLastAskedAt` (#1329): the three minutes outlive the ride.
@@ -4088,6 +4440,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       endWorkoutSession('replace');
+      // #2348: the last workout's "eased off and released" is about to stop being true.
+      easedOffTo = undefined;
       // #567: the workout owns the target from here. A hand-set target's rescue
       // left running would be a second writer on one control point.
       endManualErg();
@@ -4102,7 +4456,17 @@ export function createRideController(options: RideControllerOptions): RideContro
           // `stop` and `letGo` are not: a release is never held back.
           setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
           stop: () => client.stop(),
-          letGo: () => releaseTrainer(client),
+          // #2348: the step-down, when the session asks for one, is written
+          // by the same release, immediately before its Stop.
+          letGo: async (stepDownTo): Promise<WorkoutRelease> => {
+            const release = beginRelease(
+              client,
+              stepDownTo === undefined
+                ? undefined
+                : { to: stepDownTo, floor: connection.powerRange.minimum },
+            );
+            return { stop: await release.stop, steppedDown: await release.steppedDown };
+          },
           // #1305: a read. What the client believes the trainer holds, a
           // hand-set target from before this workout included, and what
           // this app last had acknowledged where the client has forgotten.
@@ -4133,6 +4497,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         blockPower: undefined,
       };
       workout = started;
+      // #2307: a threshold test, to estimate from once the ride is saved.
+      const test = thresholdTestOf(record.id);
+      if (test !== undefined) {
+        testInRide = { test, workout: started };
+      }
       // #1244, P7: only when the rider switched re-plans on for THIS workout,
       // and only with their own two thresholds (H1): `heartRateHold` is absent
       // without them. Off, the port is not asked for anything.
@@ -4222,6 +4591,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         // Control is the rider's again; a notice about the last release would
         // now be describing a machine this client is driving.
         releaseFault = undefined;
+        easedOffTo = undefined;
       } catch (error) {
         // #1435: a refusal a rider can act on, chosen by its code.
         refusal = controlRefusalWords(error);
@@ -4255,6 +4625,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       requested = target;
       refusal = undefined;
+      // #2348: a hand-set target replaces "eased off and released".
+      easedOffTo = undefined;
       changed();
       try {
         // #567: through the hand-set target's own ERG writer, so its stall
@@ -4325,6 +4697,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           // #567: a gradient takes the machine out of ERG, so a hand-set
           // target's rescue writing a 0x05 under a game ride would put it back.
           endManualErg();
+          // #2348: a gradient replaces "eased off and released".
+          easedOffTo = undefined;
           return client.setSimulationParameters(parameters);
         },
         letGo: () => releaseTrainer(client),

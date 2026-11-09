@@ -24,7 +24,7 @@
  * `HudPanel` renders it.
  */
 
-import { useRef, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import type { UnitSystem } from '@onyourleft/store';
 
@@ -41,6 +41,8 @@ import {
   givesWayToTheRoom,
   hudReadings,
   isDeliveryReading,
+  isEffortReading,
+  isRideTotalReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -52,9 +54,26 @@ import {
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
 import { isLapRaceReading, riderHolds } from './lap-race-hud';
+import {
+  GRADE_BANDS,
+  LOOK_AHEAD_METRES,
+  LOOK_AHEAD_RISE_METRES,
+  LOOK_AHEAD_WORDS,
+  gradeBand,
+  lookAhead,
+  nextClimbLabel,
+  nextClimbText,
+  routeBands,
+  type GradeBand,
+  type GradeBandKey,
+  type LookAhead,
+} from './look-ahead';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
+import { RecentGraph } from './RecentGraph';
+import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
+import { DEFAULT_HUD_LAYOUT, focusArrangement, panelShown } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -106,8 +125,12 @@ export interface HudCoreProps extends SharedProps {
    * plan (`PlanTrace`), or a workout's strip in its place (#1307).
    */
   readonly routeFigure: ReactNode;
-  /** The actions panel's rows under *Pause* and *End ride*, in their order. */
-  readonly moreActions?: ReactNode;
+  /**
+   * The actions panel's rows under *Pause* and *End ride*, in their order —
+   * or a function of whether the focus readout (#2383) is drawn, for a row
+   * that says something only the full HUD's fields make true.
+   */
+  readonly moreActions?: ReactNode | ((focus: boolean) => ReactNode);
   /** After the actions panel in the document: a race's standings (#1347). */
   readonly afterActions?: ReactNode;
   /**
@@ -131,6 +154,12 @@ export interface HudCoreProps extends SharedProps {
    * rider's ride keeps it.
    */
   readonly withoutElapsed?: boolean;
+  /**
+   * Leaves out *Distance*, *Climbed* and *Avg power* (#2076). The demo's: it
+   * records nothing, so the three would be dashes for as long as it plays.
+   * A rider's ride keeps them.
+   */
+  readonly withoutTotals?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -147,13 +176,69 @@ export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
   secondary: 'Ride readings',
 };
 
+/**
+ * The focus readout's two lists' accessible names — #2383, as
+ * {@link PANEL_NAMES} names each tier.
+ */
+export const FOCUS_NAMES = {
+  main: 'Power, cadence and heart rate',
+  more: 'Speed, average power, distance and ride time',
+} as const;
+
+/**
+ * Whether a reading is a mode's own — a room's, a Delivery round's, a lap
+ * race's — which is the ride itself rather than a reading of it.
+ *
+ * #2383: **a ride with any keeps the full arrangement**, whatever the rider
+ * chose. Every one of those layouts — a race's standings, the room's row, a
+ * round's houses and its map credit — is fitted around the two tiers' own
+ * heights at each viewport, and the focus readout in their place put a panel
+ * over the leaning rider on an upright phone and the standings over the
+ * controls on the 4:3 tablet (`ride-hud-layout.browser.spec.ts` §"#2383",
+ * measured). A mode is chosen before the ride and held for it, so the
+ * arrangement never changes under a rider mid-ride.
+ */
+function isModeReading(reading: HudReading): boolean {
+  return isRoomReading(reading) || isDeliveryReading(reading) || isLapRaceReading(reading);
+}
+
+/**
+ * What stays of the secondary tier when a rider turns its readings off —
+ * #2079: the ride's three times (drawn beside the controls and in the primary
+ * panel's clock row on most layouts) and whatever the ride's mode is about —
+ * a room's, a Delivery round's, a lap race's — which are the ride itself
+ * rather than a reading of it.
+ */
+function keptWithReadingsHidden(reading: HudReading): boolean {
+  return (
+    reading.key === MOVING_TIME_KEY ||
+    reading.key === ELAPSED_TIME_KEY ||
+    reading.key === CLOCK_KEY ||
+    isModeReading(reading)
+  );
+}
+
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
+  // #2079: the rider's own choice of panels and text size, as the ride began.
+  const layout = props.layout ?? DEFAULT_HUD_LAYOUT;
+  // #2383: the focus readout in place of the two tiers, on a ride with no
+  // mode of its own. @see isModeReading
+  const focus = focusArrangement(layout) && !all.some(isModeReading);
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
-      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY),
+      !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
+      !(props.withoutTotals === true && isRideTotalReading(reading)) &&
+      !(
+        !panelShown(layout, 'readings') &&
+        readingTier(reading) === 'secondary' &&
+        !keptWithReadingsHidden(reading) &&
+        // The focus readout names its own readings (speed, average power,
+        // distance): turning "Ride readings" off must not empty it silently.
+        !(focus && (FOCUS_MORE_KEYS as readonly string[]).includes(reading.key))
+      ),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
@@ -169,9 +254,31 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const hud = useRef<HTMLElement>(null);
   const [touchLocked, setTouchLocked] = useState(false);
   useTouchLock(hud, touchLocked);
+  // #2349: while the end-of-ride question is open it stands where Pause and
+  // End ride do, and when it closes with the ride still on (Keep riding),
+  // focus goes back to End ride — the control that opened it (SC 2.4.3).
+  const asking = props.endQuestion !== undefined;
+  const endButton = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !asking) {
+      endButton.current?.focus();
+    }
+    wasAsking.current = asking;
+  }, [asking]);
 
   return (
-    <section ref={hud} className="oyl-hud" aria-label="Ride metrics">
+    <section
+      ref={hud}
+      className={[
+        'oyl-hud',
+        ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
+        ...(focus ? ['oyl-hud--focus'] : []),
+      ].join(' ')}
+      aria-label="Ride metrics"
+      data-oyl-hud-text={layout.textSize}
+      data-oyl-hud-arrangement={focus ? 'focus' : 'full'}
+    >
       {/*
         A description list, because that is what these are: a label and its
         value, seven times. It was an `ol` of `span`s first, which needed
@@ -187,14 +294,46 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         order, and a sighted rider finds each where `fields.ts` §`ReadingTier`
         says it is.
       */}
-      <FieldList tier="primary" readings={readings} />
-      <FieldList tier="secondary" readings={readings} />
+      {focus ? (
+        // #2383: one compact readout in place of the two tiers.
+        <FocusReadout readings={readings} />
+      ) : (
+        <>
+          <FieldList tier="primary" readings={readings} />
+          <FieldList tier="secondary" readings={readings} />
+        </>
+      )}
 
-      <div className="oyl-hud__panel oyl-hud__route">
-        <ElevationStrip reading={elevation} profile={props.profile} />
+      {/*
+        #2079: the route panel holds the strip and the plan, and the recent
+        graph; each may be turned off, and with both off there is no panel.
+      */}
+      {!panelShown(layout, 'route') &&
+      (props.recent === undefined || !panelShown(layout, 'graph')) ? null : (
+        <div className="oyl-hud__panel oyl-hud__route">
+          {panelShown(layout, 'route') ? (
+            <>
+              <ElevationStrip
+                reading={elevation}
+                profile={props.profile}
+                distance={props.state.ride.distance}
+                units={props.units}
+              />
 
-        {props.routeFigure}
-      </div>
+              {props.routeFigure}
+            </>
+          ) : null}
+
+          {/* #2078: the last ten minutes of power and heart rate. */}
+          {props.recent === undefined || !panelShown(layout, 'graph') ? null : (
+            <RecentGraph
+              samples={props.recent.samples}
+              written={props.recent.written}
+              threshold={props.thresholdPower}
+            />
+          )}
+        </div>
+      )}
 
       <div className="oyl-hud__panel oyl-hud__actions">
         {/*
@@ -222,69 +361,73 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
         )}
 
-        <div className="oyl-hud__controls">
-          <button
-            type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-            onClick={props.onPause}
-            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-          >
-            {props.paused ? props.labels.resume : 'Pause'}
-          </button>
-          {props.withoutEnd === true ? null : (
+        {props.endQuestion === undefined ? null : props.endQuestion}
+        {props.endQuestion !== undefined ? null : (
+          <div className="oyl-hud__controls">
             <button
               type="button"
               className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-              onClick={props.onEnd}
+              onClick={props.onPause}
               style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-              // #1482: never stopped by the touch lock. It ends the game's
-              // gradient session — what the app asks of the trainer — and a
-              // rider who wants that gone must not first have to unlock, the
-              // rule `End ERG` and `End workout` follow on the Ride screen. It
-              // does not end the recording (`GameView.tsx` §`teardown`).
-              {...{ [TOUCH_LOCK_EXEMPT]: '' }}
             >
-              {props.labels.end}
+              {props.paused ? props.labels.resume : 'Pause'}
             </button>
-          )}
-          {props.touchLock ? (
-            <TouchLockButton
-              locked={touchLocked}
-              onLock={() => {
-                setTouchLocked(true);
-              }}
-              onUnlock={() => {
-                setTouchLocked(false);
-              }}
-              className="oyl-hud__lock"
-            />
-          ) : null}
-          {/*
+            {props.withoutEnd === true ? null : (
+              <button
+                ref={endButton}
+                type="button"
+                className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+                onClick={props.onEnd}
+                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+                // #1482: never stopped by the touch lock. It ends the game's
+                // gradient session — what the app asks of the trainer — and a
+                // rider who wants that gone must not first have to unlock, the
+                // rule `End ERG` and `End workout` follow on the Ride screen. It
+                // does not end the recording (`GameView.tsx` §`teardown`).
+                {...{ [TOUCH_LOCK_EXEMPT]: '' }}
+              >
+                {props.labels.end}
+              </button>
+            )}
+            {props.touchLock ? (
+              <TouchLockButton
+                locked={touchLocked}
+                onLock={() => {
+                  setTouchLocked(true);
+                }}
+                onUnlock={() => {
+                  setTouchLocked(false);
+                }}
+                className="oyl-hud__lock"
+              />
+            ) : null}
+            {/*
             #437. A constant name and `aria-expanded`, rather than a label that
             flips between "Show" and "Hide": a screen reader then says what the
             control is and which way it stands, and a speech-control user has
             one thing to say. Last, so Pause and End ride keep their places.
           */}
-          {props.standingNotice === undefined ? null : (
-            <button
-              type="button"
-              className="oyl-hud__control oyl-hud__notice-toggle"
-              aria-expanded={props.standingNotice.expanded}
-              aria-controls={STANDING_NOTICE_ID}
-              onClick={props.standingNotice.onToggle}
-              style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-            >
-              Trainer notice
-            </button>
-          )}
-        </div>
+            {props.standingNotice === undefined ? null : (
+              <button
+                type="button"
+                className="oyl-hud__control oyl-hud__notice-toggle"
+                aria-expanded={props.standingNotice.expanded}
+                aria-controls={STANDING_NOTICE_ID}
+                onClick={props.standingNotice.onToggle}
+                style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+              >
+                Trainer notice
+              </button>
+            )}
+          </div>
+        )}
         {/*
           #1810: a Delivery round's throws, under the controls a rider presses
           every ride so those keep their places. Inside this region, so the
           touch lock refuses a tap on them as on Pause: none is exempt
           (ADR 0059 D-5). What the lock does to them is why it is handed in.
         */}
-        {props.throwing === undefined ? null : (
+        {props.throwing === undefined || asking ? null : (
           <ThrowControl port={props.throwing} touchLocked={touchLocked} />
         )}
         {/*
@@ -292,7 +435,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           Inside this region, so the lock refuses a tap on it as on Pause: it
           is not exempt (ADR 0060 D-13), and a key or a pad still uses the item.
         */}
-        {props.items === undefined ? null : (
+        {props.items === undefined || asking ? null : (
           <ItemControl
             port={props.items}
             touchLocked={touchLocked}
@@ -319,7 +462,11 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             lanes={props.lanes}
           />
         )}
-        {props.moreActions}
+        {asking
+          ? null
+          : typeof props.moreActions === 'function'
+            ? props.moreActions(focus)
+            : props.moreActions}
       </div>
 
       {props.afterActions}
@@ -427,6 +574,9 @@ function fieldClass(reading: HudReading): string {
     // primary track draws in the secondary panel (`theme.css`
     // §"THE GRADIENT, PRIMARY").
     ...(reading.key === GRADIENT_KEY ? ['oyl-hud__field--gradient'] : []),
+    // #2291: the gradient's digits and glyph in its band's colour (`theme.css`
+    // §"THE GRADIENT IN ITS BAND'S COLOUR").
+    ...(reading.grade === undefined ? [] : [`oyl-hud__field--grade-${bandOf(reading)}`]),
     // #2072: the clock row's two (`theme.css` §"THE CLOCK ROW").
     ...(reading.key === ELAPSED_TIME_KEY ? ['oyl-hud__field--elapsed'] : []),
     ...(reading.key === CLOCK_KEY ? ['oyl-hud__field--clock'] : []),
@@ -439,7 +589,81 @@ function fieldClass(reading: HudReading): string {
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
+    // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
+    ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
+    // #2077: and the rider's own effort, drawn where the ride so far is.
+    ...(isEffortReading(reading) ? ['oyl-hud__field--effort'] : []),
+    // #2213 with #2076: the 4:3 tablet sets *Avg power* in its narrowest
+    // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
+    ...(reading.key === 'averagePower' ? ['oyl-hud__field--average-power'] : []),
+    // And the distance and the climb by name, which it sets in the second
+    // row's wide tracks there (the same section).
+    ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
+    ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
+    // #2080: a room's draft by name, which gives way to a race's standings
+    // with the swap in them at large text (`theme.css` §"A LOOP'S LAP SPLITS").
+    ...(reading.key === 'room-draft' ? ['oyl-hud__field--draft'] : []),
   ].join(' ');
+}
+
+/**
+ * One reading: its label and its value, as the description list `HudPanel`
+ * explains. Shared by the two tiers and by #2383's focus readout, so a reading
+ * is drawn the same way wherever it is.
+ */
+function Field(props: { readonly reading: HudReading }): JSX.Element {
+  const { reading } = props;
+  return (
+    <div
+      className={fieldClass(reading)}
+      data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
+    >
+      <dt className="oyl-hud__label">{reading.label}</dt>
+      <dd
+        className={
+          // #259. A word does not fit the slot a number fits — the class
+          // is what sets it smaller, and `fields.ts` §`HudReading.word`
+          // is the measurement behind it.
+          reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
+        }
+      >
+        <Value reading={reading} />
+        {reading.unit === '' ? null : (
+          <span className="oyl-hud__unit">
+            {' '}
+            {reading.unit}
+            {reading.slope === undefined ? null : (
+              <SlopeGlyph
+                slope={reading.slope}
+                band={reading.grade === undefined ? undefined : bandOf(reading)}
+              />
+            )}
+          </span>
+        )}
+        {reading.detail === undefined ? null : (
+          // ⚠️ Inside the `dd`, not beside it. A screen reader announces
+          // one definition per term, so a phrase in a sibling element
+          // would be read as loose text after the reading rather than as
+          // part of it — and #255's first defect is precisely that the
+          // number and the words describing it were heard as one thing
+          // while meaning another. `fields.ts` §`HudReading.detail` says
+          // why the phrase is not folded into the value instead.
+          <span className="oyl-hud__detail"> {reading.detail}</span>
+        )}
+        {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
+        {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
+        {reading.stale ? (
+          // ⚠️ Words, not only a tint. #94's second criterion is that a
+          // dropped sensor be distinguishable from a zero — and a rider
+          // who cannot see the tint, or is looking at a screen washed out
+          // by sunlight, gets the distinction from this line and from the
+          // dash beside it. The colour is the third signal, not the only
+          // one.
+          <span className="oyl-hud__stale"> Sensor lost</span>
+        ) : null}
+      </dd>
+    </div>
+  );
 }
 
 /** One tier's readings, as the description list `HudPanel` explains. */
@@ -454,48 +678,71 @@ function FieldList(props: {
       aria-label={PANEL_NAMES[props.tier]}
     >
       {mine.map((reading) => (
-        <div key={reading.key} className={fieldClass(reading)}>
-          <dt className="oyl-hud__label">{reading.label}</dt>
-          <dd
-            className={
-              // #259. A word does not fit the slot a number fits — the class
-              // is what sets it smaller, and `fields.ts` §`HudReading.word`
-              // is the measurement behind it.
-              reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
-            }
-          >
-            <Value reading={reading} />
-            {reading.unit === '' ? null : (
-              <span className="oyl-hud__unit">
-                {' '}
-                {reading.unit}
-                {reading.slope === undefined ? null : <SlopeGlyph slope={reading.slope} />}
-              </span>
-            )}
-            {reading.detail === undefined ? null : (
-              // ⚠️ Inside the `dd`, not beside it. A screen reader announces
-              // one definition per term, so a phrase in a sibling element
-              // would be read as loose text after the reading rather than as
-              // part of it — and #255's first defect is precisely that the
-              // number and the words describing it were heard as one thing
-              // while meaning another. `fields.ts` §`HudReading.detail` says
-              // why the phrase is not folded into the value instead.
-              <span className="oyl-hud__detail"> {reading.detail}</span>
-            )}
-            {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
-            {reading.stale ? (
-              // ⚠️ Words, not only a tint. #94's second criterion is that a
-              // dropped sensor be distinguishable from a zero — and a rider
-              // who cannot see the tint, or is looking at a screen washed out
-              // by sunlight, gets the distinction from this line and from the
-              // dash beside it. The colour is the third signal, not the only
-              // one.
-              <span className="oyl-hud__stale"> Sensor lost</span>
-            ) : null}
-          </dd>
-        </div>
+        <Field key={reading.key} reading={reading} />
       ))}
     </dl>
+  );
+}
+
+/**
+ * #2383's focus readout: one panel, two description lists — the three large
+ * readings, and the four smaller ones under them (`focus-readout.ts`). Two
+ * lists rather than one so each row is named, as each tier is, and a screen
+ * reader meets them in the order a sighted rider reads them.
+ */
+function FocusReadout(props: { readonly readings: readonly HudReading[] }): JSX.Element {
+  const { main, more } = focusReadings(props.readings);
+  return (
+    <div className="oyl-hud__panel oyl-hud__focus">
+      <dl className="oyl-hud__fields oyl-hud__focus-main" aria-label={FOCUS_NAMES.main}>
+        {main.map((reading) => (
+          <Field key={reading.key} reading={reading} />
+        ))}
+      </dl>
+      <dl className="oyl-hud__fields oyl-hud__focus-more" aria-label={FOCUS_NAMES.more}>
+        {more.map((reading) => (
+          <Field key={reading.key} reading={reading} />
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * This ride's time in each power zone — #2077: one thin bar, each zone's share
+ * a segment in its colour, in zone order. `aria-hidden`, and never the only
+ * carrier: the zone indicator's number and name say where the rider is now,
+ * and the Analysis screen's zone chart says the whole ride in words. Its
+ * outline alone with nothing recorded.
+ */
+function ZoneBar(props: { readonly shares: readonly number[] }): JSX.Element {
+  let from = 0;
+  return (
+    <svg
+      className="oyl-hud__zone-bar"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-zone-shares={props.shares.map((share) => share.toFixed(3)).join(',')}
+    >
+      {props.shares.map((share, index) => {
+        const width = share * 100;
+        const x = from;
+        from += width;
+        return width > 0 ? (
+          <rect
+            key={index}
+            className={`oyl-hud__zone-bar-part oyl-hud__zone-bar-part--${String(index + 1)}`}
+            x={x}
+            y={0}
+            width={width}
+            height={10}
+          />
+        ) : null;
+      })}
+      <rect className="oyl-hud__zone-bar-scale" x="0" y="0" width="100" height="10" />
+    </svg>
   );
 }
 
@@ -505,17 +752,48 @@ function FieldList(props: {
  * smaller than the digits, which is what lets `+12.5` fit a primary track on
  * a phone on its side. The text is the value's own, so a reader of the `dd`
  * reads `+4.5` exactly as `fields.ts` formatted it.
+ *
+ * #2291: the gradient's DIGITS are a span of their own too, which `theme.css`
+ * colours by the band, and the sign is not in it. The digits are never under
+ * 24 px, so a band's colour is a large-text pair (3:1, declared in
+ * `tokens.ts`); the sign is half their size, small text, and keeps the ink.
  */
 function Value(props: { readonly reading: HudReading }): JSX.Element {
-  const { value, slope } = props.reading;
+  const { value, slope, grade, zone } = props.reading;
+  // #2077: the zone's number beside a swatch of the zone's own colour. The
+  // swatch is `aria-hidden`: the number IS the reading, and the name under it
+  // says the same in words, so the colour is never the only carrier.
+  if (zone?.current !== undefined) {
+    return (
+      <>
+        <svg
+          className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect x="0" y="0" width="10" height="10" rx="2" />
+        </svg>
+        {value}
+      </>
+    );
+  }
   const sign = value.charAt(0);
-  if (slope === undefined || (sign !== '+' && sign !== '-')) return <>{value}</>;
+  const signed = slope !== undefined && (sign === '+' || sign === '-');
+  const digits = signed ? value.slice(1) : value;
+  const drawn = grade === undefined ? digits : <span className="oyl-hud__digits">{digits}</span>;
+  if (!signed) return <>{drawn}</>;
   return (
     <>
       <span className="oyl-hud__sign">{sign}</span>
-      {value.slice(1)}
+      {drawn}
     </>
   );
+}
+
+/** The band of the grade a reading shows — #2291. @see HudReading.grade */
+function bandOf(reading: HudReading): GradeBandKey {
+  return gradeBand(reading.grade ?? 0).key;
 }
 
 /**
@@ -523,9 +801,19 @@ function Value(props: { readonly reading: HudReading }): JSX.Element {
  * for a climb, falling for a descent, flat for level road, so the sign is
  * read as a shape as well as a character (`fields.ts`
  * §`HudReading.slope`). ⚠️ `aria-hidden`: the signed value says it in text.
+ *
+ * #2291: STEEPER for a steeper band ({@link SLOPE_RISE}), and in the band's
+ * colour, so the band the digits are coloured by is a shape as well — colour
+ * is never the only thing that says it.
  */
-function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Element {
-  const [from, to] = SLOPE_ENDS[props.slope];
+function SlopeGlyph(props: {
+  readonly slope: 'up' | 'down' | 'level';
+  readonly band: GradeBandKey | undefined;
+}): JSX.Element {
+  const rise = props.slope === 'level' ? 0 : SLOPE_RISE[props.band ?? 'wall'];
+  const half = rise / 2;
+  // Top-down in its 16 × 12 box: a rising stroke ends higher than it starts.
+  const [from, to] = props.slope === 'up' ? [6 + half, 6 - half] : [6 - half, 6 + half];
   return (
     <svg
       className="oyl-hud__slope"
@@ -539,11 +827,18 @@ function SlopeGlyph(props: { readonly slope: 'up' | 'down' | 'level' }): JSX.Ele
   );
 }
 
-/** Where the slope glyph's stroke starts and ends, top-down, in its 16 × 12 box. */
-const SLOPE_ENDS: Readonly<Record<'up' | 'down' | 'level', readonly [number, number]>> = {
-  up: [11, 1],
-  down: [1, 11],
-  level: [6, 6],
+/**
+ * How far the slope glyph's stroke climbs or falls across its box, by band —
+ * #2291. A flat stretch that is not level is a slight tilt, and each band up
+ * is a steeper one; a descent (every grade at or below −3 %) falls as a steep
+ * climb rises. 10 is the box's whole usable height, #2071's one angle.
+ */
+const SLOPE_RISE: Readonly<Record<GradeBandKey, number>> = {
+  descent: 8,
+  flat: 3,
+  climb: 6,
+  steep: 8,
+  wall: 10,
 };
 
 /**
@@ -574,7 +869,7 @@ function Gauge(props: { readonly fraction: number }): JSX.Element {
 }
 
 /**
- * The elevation profile with "you are here".
+ * The elevation profile with "you are here", and the road ahead beside it.
  *
  * #94 calls this *"the single most motivating element — it shows what is coming
  * and what is done"*. It is an SVG rather than a canvas for the same reason the
@@ -593,47 +888,283 @@ function Gauge(props: { readonly fraction: number }): JSX.Element {
  * elevation profile genuinely ends, so there is no more road to draw; what a
  * second lap changes is where the marker is on it, which now sweeps the strip
  * again rather than sitting on the right-hand edge for the rest of the ride.
+ *
+ * ## Filled, and the road ahead beside it — #2075
+ *
+ * The whole route is a FILLED shape since #2075 (in `hudBorder` until
+ * #2291), with the marker in `hudInk` over a wider stroke of the panel's
+ * surface, so it reads against the fill and the empty sky alike. Beside it,
+ * {@link LookAheadStrip} draws the road ahead (2 km since #2291) at a fixed
+ * scale, and the next climb is written under it.
+ *
+ * ## Shaded by steepness — #2291
+ *
+ * The whole route's fill is its grade bands since #2291 ({@link routeBands}),
+ * where it was one grey: each band's run a column of its colour and pattern,
+ * as on the road ahead, CLIPPED to the route's filled shape so the shape is
+ * the route's and the shading says how steep each part of it is. The patterns
+ * are the road ahead's, sized for this strip's 100 × 24 box ({@link
+ * ROUTE_PATTERN}), so a band is not told by colour alone here either. The
+ * marker is drawn over the bands as before, its surface-coloured edge what
+ * separates it from each band's colour (each a declared 3:1 on the surface).
  */
 function ElevationStrip(props: {
   readonly reading: ProfileReading;
   readonly profile: HudInput['profile'];
+  readonly distance: number;
+  readonly units: UnitSystem;
 }): JSX.Element {
-  const elevations = props.profile.elevations;
-  const points = strip(elevations);
+  // React's ids carry punctuation a `url(#…)` reference need not survive.
+  const id = `oyl-route-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const { profile } = props;
+  // Once per route: the HUD renders many times a second, the route never changes.
+  const fill = useMemo(() => {
+    const points = strip(profile.elevations);
+    if (points === '') return null;
+    return (
+      <>
+        <defs>
+          <clipPath id={`${id}-shape`}>
+            <polygon className="oyl-hud__profile-shape" points={`0,24 ${points} 100,24`} />
+          </clipPath>
+          {GRADE_BANDS.map((band) => (
+            <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...ROUTE_PATTERN} />
+          ))}
+        </defs>
+        <g className="oyl-hud__profile-fill" clipPath={`url(#${id}-shape)`}>
+          {routeBands(profile).map((run) => (
+            <rect
+              key={`${run.band}-${String(run.from)}`}
+              className={`oyl-hud__profile-run oyl-hud__profile-run--${run.band}`}
+              x={run.from * 100}
+              y={0}
+              width={(run.to - run.from) * 100}
+              height={24}
+              fill={`url(#${id}-${run.band})`}
+              data-band={run.band}
+            />
+          ))}
+        </g>
+      </>
+    );
+  }, [id, profile]);
   const percent = props.reading.position * 100;
+  const ahead = lookAhead(profile, props.distance);
+  const climb = nextClimbText(ahead.climb, props.units);
   return (
     <div className="oyl-hud__profile">
-      <svg
-        className="oyl-hud__profile-svg"
-        viewBox="0 0 100 24"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={props.reading.label}
-      >
-        <polyline className="oyl-hud__profile-line" points={points} />
-        <line
-          className="oyl-hud__profile-here"
-          x1={percent}
-          y1={0}
-          x2={percent}
-          y2={24}
-          data-testid="oyl-hud-position"
-          // ⚠️ **The contract this attribute carries changed in #287**: it is
-          // the fraction along the profile, WRAPPED on a `loop: true` route and
-          // clamped on any other, rather than always clamped. It is the same
-          // number the marker's `x` is drawn from and the same one the sentence
-          // below is rounded from, so a test reading it is reading what the
-          // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
-          data-position={String(props.reading.position)}
-        />
-      </svg>
+      <div className="oyl-hud__strips">
+        <svg
+          className="oyl-hud__profile-svg"
+          viewBox="0 0 100 24"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={props.reading.label}
+        >
+          {fill}
+          <line className="oyl-hud__profile-here-edge" x1={percent} y1={0} x2={percent} y2={24} />
+          <line
+            className="oyl-hud__profile-here"
+            x1={percent}
+            y1={0}
+            x2={percent}
+            y2={24}
+            data-testid="oyl-hud-position"
+            // ⚠️ **The contract this attribute carries changed in #287**: it is
+            // the fraction along the profile, WRAPPED on a `loop: true` route and
+            // clamped on any other, rather than always clamped. It is the same
+            // number the marker's `x` is drawn from and the same one the sentence
+            // below is rounded from, so a test reading it is reading what the
+            // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
+            data-position={String(props.reading.position)}
+          />
+        </svg>
+        <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.climb, props.units)} />
+      </div>
       {/*
         The non-visual equivalent, which the rest of this app provides for every
         chart (#77's, #50's). A profile is a picture of a number, and the number
-        is available.
+        is available. The next climb is its own line beside it (#2075), so a
+        sentence other features read whole stays the sentence it was; since
+        #2291 it names the top of the climb the rider is on.
       */}
-      <p className="oyl-hud__profile-text">{props.reading.text}</p>
+      <div className="oyl-hud__profile-captions">
+        <p className="oyl-hud__profile-text">{props.reading.text}</p>
+        {climb === undefined ? null : (
+          <p className="oyl-hud__ahead-text" data-testid="oyl-hud-next-climb">
+            {climb}
+          </p>
+        )}
+      </div>
     </div>
+  );
+}
+
+/**
+ * The road ahead — #2075, `look-ahead.ts`; 2 km of it since #2291.
+ *
+ * The viewBox is the window itself: {@link LOOK_AHEAD_METRES} across and
+ * {@link LOOK_AHEAD_RISE_METRES} of height up, so a metre of climb is the same
+ * height on every route and a steeper road is a steeper line. The rider is the
+ * left edge. Each run of one grade band is a column of the strip's full
+ * height filled with its band's PATTERN — the band's colour under hatching or
+ * dots in the panel's own surface — so a band is never told by colour alone
+ * (SC 1.4.1), and a descent is as tall as a climb (the owner's review of
+ * 2026-11-05). The road is a line over the bands; the caption under the
+ * strips says the next climb in words.
+ *
+ * `role="img"` with the next climb as its name, as the whole route's strip is
+ * named by its sentence.
+ *
+ * #2291: the top of the climb the rider is on, or of the next one, is a
+ * dashed ink line across the strip where the climb ends, when the window
+ * reaches it — a SHAPE, unlike the rider's solid edge. On a climb the caption
+ * says how far it is; before one, the strip's name does, and the caption
+ * keeps #2075's phrase (`look-ahead.ts` §`nextClimbText` says why).
+ */
+function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: string }): JSX.Element {
+  // React's ids carry punctuation a `url(#…)` reference need not survive.
+  const id = `oyl-ahead-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const { ahead } = props;
+  const yOf = (height: number): number =>
+    LOOK_AHEAD_RISE_METRES - Math.min(LOOK_AHEAD_RISE_METRES, Math.max(0, height));
+  const road = ahead.points
+    .map((point) => `${String(point.ahead)},${String(yOf(point.height))}`)
+    .join(' ');
+  // The climb's top, where the window reaches it.
+  const top =
+    ahead.climb !== undefined && ahead.climb.topIn <= ahead.length ? ahead.climb.topIn : undefined;
+  return (
+    <svg
+      className="oyl-hud__ahead-svg"
+      viewBox={`0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={`The ${LOOK_AHEAD_WORDS}: ${props.label}`}
+      data-testid="oyl-hud-look-ahead"
+    >
+      <defs>
+        {GRADE_BANDS.map((band) => (
+          <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...AHEAD_PATTERN} />
+        ))}
+      </defs>
+      {ahead.runs.map((run) => (
+        // The owner's review of 2026-11-05: each band at the strip's FULL
+        // height, not under the road's line. At the fixed scale a descent or
+        // a flat ends at the window's floor and was a sliver a pixel or two
+        // tall; a band's height now says nothing, so every band is as
+        // readable as a climb's, and the road's shape is the line below.
+        <rect
+          key={`${run.band}-${String(run.start)}`}
+          className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
+          x={run.start}
+          y={0}
+          width={run.end - run.start}
+          height={LOOK_AHEAD_RISE_METRES}
+          fill={`url(#${id}-${run.band})`}
+          data-band={run.band}
+          data-start={String(run.start)}
+          data-end={String(run.end)}
+        />
+      ))}
+      {/*
+        The road itself, at the fixed scale, over the bands: the ink line on a
+        wider stroke of the panel's surface, as the whole route's marker is
+        drawn, so it reads on every band's colour and pattern alike.
+      */}
+      <polyline className="oyl-hud__ahead-road-edge" points={road} />
+      <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
+      {top === undefined ? null : (
+        <>
+          <line
+            className="oyl-hud__ahead-top-edge"
+            x1={top}
+            y1={0}
+            x2={top}
+            y2={LOOK_AHEAD_RISE_METRES}
+          />
+          <line
+            className="oyl-hud__ahead-top"
+            x1={top}
+            y1={0}
+            x2={top}
+            y2={LOOK_AHEAD_RISE_METRES}
+            data-testid="oyl-hud-climb-top"
+            data-ahead={String(top)}
+          />
+        </>
+      )}
+      <line
+        className="oyl-hud__ahead-here"
+        x1={0}
+        y1={0}
+        x2={0}
+        y2={LOOK_AHEAD_RISE_METRES}
+        data-height={String(ahead.riderHeight)}
+      />
+    </svg>
+  );
+}
+
+/**
+ * One pattern cell, in its strip's own units — #2291, so the road ahead and
+ * the whole route draw the same patterns at about the same size on screen.
+ */
+interface PatternCell {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The road ahead's cell, in metres across and metres up: about 11 by 10 px on
+ * a 270 px strip 3.5 rem tall, as it was at 1 km (40 by 20 then).
+ */
+const AHEAD_PATTERN: PatternCell = {
+  width: LOOK_AHEAD_METRES / 25,
+  height: LOOK_AHEAD_RISE_METRES / 5,
+};
+
+/** The whole route's, in its 100 × 24 box: about 11 by 10 px on a 270 px strip 2.5 rem tall. */
+const ROUTE_PATTERN: PatternCell = { width: 4, height: 6 };
+
+/** One band's fill: its colour, and the marks that tell it apart without colour. */
+function BandPattern(
+  props: { readonly id: string; readonly band: GradeBand } & PatternCell,
+): JSX.Element {
+  const { width, height } = props;
+  const { pattern } = props.band;
+  return (
+    <pattern
+      id={props.id}
+      className={`oyl-hud__band oyl-hud__band--${props.band.key}`}
+      patternUnits="userSpaceOnUse"
+      width={width}
+      height={height}
+      data-pattern={pattern}
+    >
+      <rect className="oyl-hud__band-fill" x={0} y={0} width={width} height={height} />
+      {pattern === 'dots' ? (
+        <ellipse
+          className="oyl-hud__band-dot"
+          cx={width / 2}
+          cy={height / 2}
+          rx={width * 0.15}
+          ry={height * 0.15}
+        />
+      ) : null}
+      {pattern === 'hatch' || pattern === 'dense-hatch' || pattern === 'cross-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={0} y1={height} x2={width} y2={0} />
+      ) : null}
+      {pattern === 'dense-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={-width / 2} y1={height} x2={width / 2} y2={0} />
+      ) : null}
+      {pattern === 'dense-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={width / 2} y1={height} x2={width * 1.5} y2={0} />
+      ) : null}
+      {pattern === 'cross-hatch' ? (
+        <line className="oyl-hud__band-mark" x1={0} y1={0} x2={width} y2={height} />
+      ) : null}
+    </pattern>
   );
 }
 

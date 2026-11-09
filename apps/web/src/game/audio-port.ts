@@ -92,6 +92,18 @@ export interface CueOutput {
    * which is why a workout still running is never suspended under.
    */
   suspend(): void;
+  /**
+   * Whether our own context may be holding the platform's output stream open
+   * — #2253: `undefined` while it may be (running, a resume asked for, or a
+   * suspend asked for that has not landed), and otherwise how many times it
+   * has been made or woken, a number that moves whenever it may have opened
+   * again. Android's `isMusicActive()` counts that stream as music playing,
+   * even with every sound stopped (measured on the tablet, #2357), so a
+   * reading of the rider's player is believed only when this was a number at
+   * the ask and the SAME number at the answer (`shell/other-player.ts`).
+   * ⚠️ A question: it never creates, resumes or suspends anything.
+   */
+  quietToken(): number | undefined;
   /** Start the one continuous tone. A second call while one sounds moves it rather than adding one. */
   startTone(frequencyHz: number, gain: number): void;
   /** Move the tone that is sounding. */

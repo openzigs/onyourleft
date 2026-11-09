@@ -179,7 +179,7 @@ export interface StandingsLine {
 
 /** A race's standings on the HUD. */
 export interface RaceStandingsView {
-  /** At most {@link STANDINGS_LINES}, around the rider's own (a lap race's keeps the leader too). */
+  /** At most {@link STANDINGS_LINES} around the rider's own; a solo lap race's whole field of eight (#2328). */
   readonly lines: readonly StandingsLine[];
   /** The rider's own place, and how many are in the race — "4th of 12". */
   readonly place: number | undefined;
@@ -259,26 +259,29 @@ export function raceStandings(room: RoomConnection): RaceStandingsView | undefin
  * With `keepLeader` (a solo lap race's, #1967, the owner's ruling of
  * 2026-10-31: "Always show the leader"), a window that would not start at the
  * front gives its first line to the leader instead, and the rest stay around
- * the rider's own: three ahead and two behind, or as many as there are. The
- * list is never longer than {@link STANDINGS_LINES}, and a room's race is
- * windowed as ADR 0051 D-7 has it.
+ * the rider's own: with seven lines, three ahead and two behind, or as many
+ * as there are. A solo race passes `lines` for its whole field (#2328), so
+ * only a field longer than that is windowed. The list is never longer than
+ * `lines` ({@link STANDINGS_LINES} unless given),
+ * and a room's race is windowed as ADR 0051 D-7 has it.
  */
 export function windowedStandings(
   all: readonly StandingsLine[],
-  options: { readonly keepLeader?: boolean } = {},
+  options: { readonly keepLeader?: boolean; readonly lines?: number } = {},
 ): RaceStandingsView {
+  const most = options.lines ?? STANDINGS_LINES;
   const own = all.findIndex((line) => line.you);
   const centre = own === -1 ? 0 : own;
-  const half = Math.floor(STANDINGS_LINES / 2);
-  const first = Math.max(0, Math.min(centre - half, all.length - STANDINGS_LINES));
+  const half = Math.floor(most / 2);
+  const first = Math.max(0, Math.min(centre - half, all.length - most));
   const place = own === -1 ? undefined : own + 1;
   if (options.keepLeader === true && first > 0) {
-    const rest = STANDINGS_LINES - 1;
+    const rest = most - 1;
     // `first > 0` puts both terms past the leader, so it is never shown twice.
     const from = Math.min(centre - half, all.length - rest);
     return { lines: [...all.slice(0, 1), ...all.slice(from, from + rest)], place, of: all.length };
   }
-  return { lines: all.slice(first, first + STANDINGS_LINES), place, of: all.length };
+  return { lines: all.slice(first, first + most), place, of: all.length };
 }
 
 /** A room ride's memory between frames. */

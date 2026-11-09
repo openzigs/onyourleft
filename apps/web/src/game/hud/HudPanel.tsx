@@ -55,7 +55,7 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import { Fragment, type JSX, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
@@ -67,8 +67,16 @@ import { NO_READING, type HudInput, type TrainerLine } from './fields';
 import type { ControllerPort } from '../delivery/controller-port';
 import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
+import { SIMULATED_MOVING_SENTENCE } from '../simulated-rider';
 import { PlanTrace } from './PlanTrace';
+import type { TraceSample } from './recent-trace';
+import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
+import { StreetMap } from './StreetMap';
 import { RaceStandings } from './RaceStandings';
+import { LapSplits } from './LapSplits';
+import { LAP_SPLITS_TEXT, lapSplits } from './lap-splits';
+import { planLap } from './plan';
+import type { LapFigures } from '../../recording/laps';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
@@ -77,6 +85,7 @@ import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
+import type { WorldCorridor } from '../world-data/corridor';
 
 /**
  * What the HUD needs beyond its readings.
@@ -90,10 +99,42 @@ import type { WorkoutGraphInput } from '../../workout/workout-graph';
  * same reason (#2072): this component reads the device's clock itself.
  */
 export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
+  /**
+   * Which panels the rider turned off and how large the numbers are — #2079,
+   * `hud-layout-preference.ts`, read from this device as the ride began.
+   * Absent, every panel at the normal size.
+   */
+  readonly layout?: HudLayoutPreference | undefined;
+  /**
+   * Every lap the recording has stated so far, in order — #2080, the last
+   * answer of `GameTrainerPort.courseLine` as `GameView` kept it. On a loop
+   * they are the lap splits panel's (`lap-splits.ts`); absent, no panel (the
+   * demo renders `HudCore` alone and has none).
+   */
+  readonly laps?: readonly LapFigures[] | undefined;
+  /**
+   * The last ten minutes of power and heart rate — #2078, `recent-trace.ts`'s
+   * ring as `GameView` last read it, written once a second. Absent, no graph
+   * (the demo, and a ride before its first second).
+   */
+  readonly recent?:
+    { readonly samples: readonly TraceSample[]; readonly written: number } | undefined;
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
-  /** Ends it. Same. */
+  /**
+   * *End ride*. Same size. Since #2349 it ASKS rather than ends: `GameView`
+   * opens the end-of-ride question, handed in as {@link endQuestion}.
+   */
   readonly onEnd: () => void;
+  /**
+   * The end-of-ride question while it is open — #2349, `ride/EndRideQuestion`
+   * as `GameView` builds it — or `undefined`. While it is open it stands in
+   * the actions panel IN PLACE of *Pause*, *End ride* and the rows under
+   * them, so the panel holds the trainer line and the question and nothing
+   * else: no answer can be missed among other controls, and the panel is no
+   * taller than it must be. Closed, focus goes back to *End ride*.
+   */
+  readonly endQuestion?: ReactNode;
   /** Whether the ride is currently paused, so the control says which it does. */
   readonly paused: boolean;
   /**
@@ -286,6 +327,16 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    */
   readonly attribution?: string | undefined;
   /**
+   * The corridor of map data this ride's world was given at the press —
+   * #2290. With it the plan view is a street map around the rider
+   * (`StreetMap.tsx`), drawn from this and never from a request; `undefined`
+   * on every ride with no corridor, which draws the route's outline as before.
+   * A workout's strip still takes the panel while one runs. `GameView` hands
+   * it exactly when it hands {@link attribution}, so the map is never drawn
+   * without its credit.
+   */
+  readonly corridor?: WorldCorridor | undefined;
+  /**
    * A Delivery round's throws — #1810, ADR 0059 D-5: where a press on the
    * HUD's throw control, or a key, hands the throw the rider asked for. With
    * it the HUD shows `ThrowControl` in its actions panel, inside the touch
@@ -343,8 +394,45 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     keepPlan,
     onReplansOff,
     standings,
+    laps,
+    corridor,
     ...shared
   } = props;
+  // #2080: a loop's lap splits, where a race's standings are; in a race the
+  // two share that place and the rider swaps them, standings first.
+  const [racePanel, setRacePanel] = useState<'standings' | 'laps'>('standings');
+  const swapRef = useRef<HTMLButtonElement>(null);
+  const swapped = useRef(false);
+  useEffect(() => {
+    // The press unmounts the panel it was in, so focus follows it to the
+    // control in the panel that took its place rather than falling to the page.
+    if (swapped.current) {
+      swapped.current = false;
+      swapRef.current?.focus();
+    }
+  }, [racePanel]);
+  const standingsShown =
+    standings !== undefined && panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings');
+  const splitsShown =
+    laps !== undefined && planLap(props.profile, props.state.ride.distance) !== undefined;
+  const swap = (to: 'standings' | 'laps'): ReactNode =>
+    standingsShown && splitsShown ? (
+      <button
+        ref={swapRef}
+        type="button"
+        className={`oyl-hud__control oyl-hud__swap ${RIDE_SIZE_CLASS}`}
+        onClick={() => {
+          swapped.current = true;
+          setRacePanel(to);
+        }}
+      >
+        {to === 'laps' ? LAP_SPLITS_TEXT.showLaps : LAP_SPLITS_TEXT.showStandings}
+      </button>
+    ) : undefined;
+  const splits =
+    laps === undefined || !splitsShown ? null : (
+      <LapSplits splits={lapSplits(laps, props.lapSeconds)} swap={swap('standings')} />
+    );
   return (
     <HudCore
       {...shared}
@@ -366,7 +454,17 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           this comment recorded why the plan view could not read its number.
         */
         workout === undefined ? (
-          <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+          corridor === undefined ? (
+            <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+          ) : (
+            // #2290: the map data this ride holds, around the rider, in the
+            // plan view's box. The same odometer, for the same reason.
+            <StreetMap
+              corridor={corridor}
+              profile={props.profile}
+              distance={props.state.ride.distance}
+            />
+          )
         ) : (
           // #1307: while a workout runs, its strip takes the route plan's
           // place and its size — `oyl-hud__plan-svg` sizes both — so this
@@ -378,11 +476,19 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           <WorkoutStrip workout={workout} />
         )
       }
-      moreActions={
+      moreActions={(focus) => (
         <>
           {simulated === undefined ? null : (
             <p className="oyl-hud__simulated">
-              {simulated.map((sentence, index) => (
+              {/*
+                The focus readout has no *Moving* field, so the sentence that
+                explains its dash goes while that readout is drawn (owner
+                ruling of 2026-11-09 on PR #2406).
+              */}
+              {(focus
+                ? simulated.filter((sentence) => sentence !== SIMULATED_MOVING_SENTENCE)
+                : simulated
+              ).map((sentence, index) => (
                 <Fragment key={sentence}>
                   {index === 0 ? null : ' '}
                   <span>{sentence}</span>
@@ -505,7 +611,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           )}
           {sound}
         </>
-      }
+      )}
       afterActions={
         /*
         #1347: a race's standings, a panel of their own — on a tablet at the
@@ -514,7 +620,15 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         document, so a screen reader meets Pause and End ride first, and
         never a live region (`RaceStandings.tsx` says why).
         */
-        standings === undefined ? null : <RaceStandings standings={standings} />
+        // #2079: and not at all when the rider turned the standings off.
+        // #2080: and a loop's lap splits in their place, swapped by the rider.
+        standings === undefined || !standingsShown ? (
+          splits
+        ) : splits !== null && racePanel === 'laps' ? (
+          splits
+        ) : (
+          <RaceStandings standings={standings} swap={swap('laps')} />
+        )
       }
     />
   );

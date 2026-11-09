@@ -721,7 +721,12 @@ export function terrainCorridor(
   closeFans(centre, normals2d, reach, lent.folds, vertices, fields);
 
   // #1996: and the other pass's points, sunk out of sight, and the ground
-  // round the turning point.
+  // round the turning point. ⚠️ **Last, after `closeFans`** (#2205): it is
+  // the one writer of a row another pass takes, and writes the whole row.
+  // The two touch no row in common today only because no quad within
+  // `UNFOLDED_NEAR_TURN_ROWS` of a taken row folds, so no fan reaches one;
+  // `landform-passes.test.ts` §"the passes' order" holds the order itself,
+  // which no drawn ground can tell apart while that holds.
   if (roles !== undefined) {
     retracedGround(profile, origin, seed, land, centre, normals2d, roles, lent);
   }
@@ -1399,9 +1404,10 @@ export function standingOnGround<
 >(items: readonly T[], mesh: TerrainMesh): readonly T[] {
   const across = rowCrossings(mesh);
   const fanned = fannedPairs(mesh);
+  const bounds = blockBounds(mesh);
   const kept: T[] = [];
   for (const item of items) {
-    const y = groundTop(mesh, across, fanned, item.x, item.z);
+    const y = groundTop(mesh, across, fanned, bounds, item.x, item.z);
     if (Number.isNaN(y)) continue;
     kept.push(y === item.y ? item : { ...item, y });
   }
@@ -1448,6 +1454,10 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
  * Which pairs of rows have a triangle {@link closeFan} drew, by the pair's
  * first row: 1 if so. Lent, like {@link crossings}.
  *
+ * Exported for `landform-passes.test.ts` §"fannedPairs", which holds that it
+ * flags a fan and nothing at a turning point (#2205); the product's one
+ * caller is {@link standingOnGround}, in this module.
+ *
  * ⚠️ **A fan's triangles lie off the cross-sections of their rows** — #2149:
  * its point is not between the cross-sections of every pair it closes on, so
  * asking only the pairs a point lies between never reaches them, and scenery
@@ -1456,10 +1466,19 @@ function rowCrossings(mesh: TerrainMesh): Float64Array {
  * neighbour, which a fold alone never does: it collapses a row's columns onto
  * that row's own end. The pair before a fan's first row and the one after
  * its last are its, too: their quads end on the point.
+ *
+ * ⚠️ **And only while the side's column 0 is NOT one point too** — #2205. A
+ * row turned round a turning point carries its anchor's left side whole
+ * (@see retracedGround), and a sunk row is one point, so neighbouring rows
+ * of either share every column of a side, the outermost included: on
+ * `outAndBackRoute` seven pairs a frame near the turn were flagged, asked of
+ * every item and placing none differently. A fan never moves column 0, the
+ * road's edge ({@link closeFan} moves from column 3 out), so two rows whose
+ * road edges are one point are not a fan's.
  */
 let fannedRows = new Uint8Array(0);
 
-function fannedPairs(mesh: TerrainMesh): Uint8Array {
+export function fannedPairs(mesh: TerrainMesh): Uint8Array {
   const { vertices, rows } = mesh;
   if (fannedRows.length !== rows) fannedRows = new Uint8Array(rows);
   fannedRows.fill(0);
@@ -1468,6 +1487,10 @@ function fannedPairs(mesh: TerrainMesh): Uint8Array {
       const a = ((row * 2 + side) * COLUMNS + COLUMNS - 1) * 3;
       const b = a + COLUMNS * 2 * 3;
       if (vertices[a] !== vertices[b] || vertices[a + 2] !== vertices[b + 2]) continue;
+      // #2205: a side copied whole, or sunk to a point, is no fan.
+      const edge = (row * 2 + side) * COLUMNS * 3;
+      const next = edge + COLUMNS * 2 * 3;
+      if (vertices[edge] === vertices[next] && vertices[edge + 2] === vertices[next + 2]) continue;
       // Rows `row` and `row + 1` share the point: the pair between them, the
       // one before `row` and the one after `row + 1` are the fan's.
       fannedRows[row] = 1;
@@ -1485,25 +1508,110 @@ function fannedPairs(mesh: TerrainMesh): Uint8Array {
  */
 const CROSSING_SLACK_METRES = 1e-2;
 
+/**
+ * Row pairs one box of {@link blockBounds} holds: **8** — #1688. Any number
+ * gives the same answer; this one decides how many boxes an item is tested
+ * against before it is tested against their rows.
+ */
+const BLOCK_PAIRS = 8;
+
+/**
+ * How far outside a box of {@link blockBounds} an item may lie and its rows
+ * still be asked, in metres: **1** — #1688. {@link heightIn} takes a point up
+ * to a millionth of a triangle's own size outside it, so a metre is a
+ * triangle hundreds of kilometres across, which no corridor draws.
+ */
+const BLOCK_SLACK_METRES = 1;
+
+/**
+ * Each run of {@link BLOCK_PAIRS} row pairs' box in plan, four numbers a box:
+ * the least and most `x`, and the least and most `z`, of every vertex of
+ * their rows — both sides, every column — widened by
+ * {@link BLOCK_SLACK_METRES}. Lent, like {@link crossings}.
+ *
+ * ⚠️ **What lets {@link groundTop} skip a run of pairs without changing its
+ * answer** (#1688): an item outside a box is in none of its pairs'
+ * triangles, so {@link topOfRowPair} would hand back the height it was given.
+ * A coordinate that is not a number is left out of a box, as
+ * {@link heightIn} leaves out every triangle with one (its area is not a
+ * number); an infinite one makes the box infinite, and its pairs are asked.
+ * Before the boxes every item was measured against every row of the frame,
+ * which under the nightly coverage run was the largest share of every test
+ * that draws frames (`people.test.ts`, `simulated-rider-wiring.test.tsx`,
+ * `corridor-wiring.test.tsx`), past their 5 s timeout on the slower runners.
+ */
+let blocks = new Float64Array(0);
+
+function blockBounds(mesh: TerrainMesh): Float64Array {
+  const { vertices, rows } = mesh;
+  const count = Math.ceil(Math.max(0, rows - 1) / BLOCK_PAIRS);
+  if (blocks.length !== count * 4) {
+    blocks = new Float64Array(count * 4);
+  }
+  const perRow = COLUMNS * 2 * 3;
+  for (let block = 0; block < count; block += 1) {
+    let leastX = Number.POSITIVE_INFINITY;
+    let mostX = Number.NEGATIVE_INFINITY;
+    let leastZ = Number.POSITIVE_INFINITY;
+    let mostZ = Number.NEGATIVE_INFINITY;
+    // Rows `block · 8` to `block · 8 + 8`: the last pair's second row too.
+    const end = (Math.min(rows - 1, (block + 1) * BLOCK_PAIRS) + 1) * perRow;
+    for (let at = block * BLOCK_PAIRS * perRow; at < end; at += 3) {
+      const x = vertices[at] as number;
+      const z = vertices[at + 2] as number;
+      if (x < leastX) leastX = x;
+      if (x > mostX) mostX = x;
+      if (z < leastZ) leastZ = z;
+      if (z > mostZ) mostZ = z;
+    }
+    blocks[block * 4] = leastX - BLOCK_SLACK_METRES;
+    blocks[block * 4 + 1] = mostX + BLOCK_SLACK_METRES;
+    blocks[block * 4 + 2] = leastZ - BLOCK_SLACK_METRES;
+    blocks[block * 4 + 3] = mostZ + BLOCK_SLACK_METRES;
+  }
+  return blocks;
+}
+
 /** The highest ground triangle's height over a point in plan, or `NaN` where there is none. */
 function groundTop(
   mesh: TerrainMesh,
   across: Float64Array,
   fanned: Uint8Array,
+  bounds: Float64Array,
   x: number,
   z: number,
 ): number {
-  const along = (row: number): number =>
-    (x - (across[row * 4] as number)) * (across[row * 4 + 2] as number) +
-    (z - (across[row * 4 + 1] as number)) * (across[row * 4 + 3] as number);
   let top = Number.NaN;
-  let behind = along(0);
-  for (let row = 0; row + 1 < mesh.rows; row += 1) {
-    const ahead = along(row + 1);
-    if ((behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) || fanned[row] === 1) {
-      top = topOfRowPair(mesh.vertices, row, x, z, top);
+  const pairs = mesh.rows - 1;
+  for (let first = 0; first < pairs; first += BLOCK_PAIRS) {
+    const box = (first / BLOCK_PAIRS) * 4;
+    if (
+      x < (bounds[box] as number) ||
+      x > (bounds[box + 1] as number) ||
+      z < (bounds[box + 2] as number) ||
+      z > (bounds[box + 3] as number)
+    ) {
+      continue;
     }
-    behind = ahead;
+    const last = Math.min(pairs, first + BLOCK_PAIRS);
+    // How far past a row's cross-section the point is along the road,
+    // written out rather than a function called for each row (#1688).
+    let behind =
+      (x - (across[first * 4] as number)) * (across[first * 4 + 2] as number) +
+      (z - (across[first * 4 + 1] as number)) * (across[first * 4 + 3] as number);
+    for (let row = first; row < last; row += 1) {
+      const next = (row + 1) * 4;
+      const ahead =
+        (x - (across[next] as number)) * (across[next + 2] as number) +
+        (z - (across[next + 1] as number)) * (across[next + 3] as number);
+      if (
+        (behind >= -CROSSING_SLACK_METRES && ahead <= CROSSING_SLACK_METRES) ||
+        fanned[row] === 1
+      ) {
+        top = topOfRowPair(mesh.vertices, row, x, z, top);
+      }
+      behind = ahead;
+    }
   }
   return top;
 }
@@ -2592,8 +2700,16 @@ const clearListPool: number[][] = [];
  *
  * About 60 000 point-to-segment distances a frame at the corridor's usual 47
  * rows, and none once every column is clear, which is almost every row.
+ *
+ * Exported for `landform-passes.test.ts` §"clearReach", which holds its
+ * contract on a taken pass directly (#2205). Through {@link terrainCorridor} nothing can: a pass
+ * is taken only within `terrain.ts` §`RETRACE_OVERLAP_METRES` (3.5 m) of the
+ * road, and the first column probed is 8 m out, 4.5 m from it and past the
+ * 4.1 m clearance, so the taken road never stops a kept side, and a taken
+ * row's own reach is overwritten by `retracedGround`. The product's one
+ * caller is {@link terrainCorridor}.
  */
-function clearReach(
+export function clearReach(
   centre: readonly CorridorPoint[],
   normals: Float64Array,
   reach: Float64Array,

@@ -17,6 +17,8 @@ import {
   SUBPIXEL_TOLERANCE,
   type Viewport,
   OVERLAY_VIEWPORTS,
+  RIDE_TOTAL_READINGS,
+  roomGivesWay,
   openRide,
   sharedRide,
   measure,
@@ -371,7 +373,7 @@ test.describe('a room ride’s HUD — #1356', () => {
         }
       });
 
-      test(`the room’s readings are on the stage${tablet ? ', and so is every other' : ', and the pacer, the ghost and the wind give way'}`, async ({
+      test(`the room’s readings are on the stage, and the pacer, the ghost and the wind ${roomGivesWay(viewport) ? 'give way' : 'stay'}${tablet ? ', and the rider’s own stay' : ''}`, async ({
         browser,
       }) => {
         const page = await sharedRide(browser, viewport, FOLLOWING);
@@ -381,15 +383,36 @@ test.describe('a room ride’s HUD — #1356', () => {
             expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
             expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
           }
+          // The owner's rulings of 2026-11-06 (#2034): in a room the pacer,
+          // the ghost and the wind give way FIRST where space runs out, and
+          // stay where they fit (1280×800).
           for (const name of ROOM_GIVES_WAY) {
             const reading = named(seen.items, name);
-            if (tablet) {
-              expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
-              expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
-            } else {
+            if (roomGivesWay(viewport)) {
               expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
                 1,
               );
+            } else {
+              expect(
+                inside(reading.box, viewport) && reading.onTop,
+                `${how}: ${describeItem(reading)}`,
+              ).toBe(true);
+            }
+          }
+          // …and the rider's own readings stay on a tablet — but the ride so
+          // far on the 4:3 one, where it gives way next (ruling 3).
+          if (tablet) {
+            const fourByThree = viewport.height < 800;
+            const rideSoFar = ['reading: Distance', 'reading: Climbed', 'reading: Avg power'];
+            for (const name of RIDE_TOTAL_READINGS) {
+              if (fourByThree && rideSoFar.includes(name)) {
+                expect(seen.givenWay, how).toContain(name);
+              } else {
+                const reading = named(seen.items, name);
+                expect(inside(reading.box, viewport) && reading.onTop, `${how}: ${name}`).toBe(
+                  true,
+                );
+              }
             }
           }
           // Laid out at no size, and still in the list a screen reader reads.
@@ -400,6 +423,13 @@ test.describe('a room ride’s HUD — #1356', () => {
             // #2072: in the primary panel's clock row on the stage.
             'Elapsed',
             'Clock',
+            // #2076: the ride so far, given way on a phone's overlay.
+            'Distance',
+            'Climbed',
+            'Avg power',
+            // #2077: the rider's effort.
+            'W/kg',
+            'Zone',
             'Pacer',
             'Your best',
             'Wilhelmina Vandersteen-Oduya Mbe',
@@ -474,9 +504,9 @@ function onItsSide(viewport: Viewport): boolean {
 }
 
 function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] {
-  const phone = !TABLET_VIEWPORTS.includes(viewport);
   const givesWay = [
-    ...(phone ? ROOM_GIVES_WAY : []),
+    // The owner's rulings of 2026-11-06 (#2034): where space runs out.
+    ...(roomGivesWay(viewport) ? ROOM_GIVES_WAY : []),
     ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
   ] as readonly string[];
   return seen.items
@@ -750,7 +780,7 @@ const VOLUME = 'sound: Sound volume';
 /** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
 const REPORT_REASONS_TIMEOUT_MS = 15_000;
 
-const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
+const ROUTE_READINGS = ['the elevation strip', 'the road ahead', 'the plan view'] as const;
 
 /** What `theme.css` records as giving way in this state at this viewport. */
 function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
@@ -1351,8 +1381,13 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
     }
   }
 
+  // ⚠️ Not on a tablet since #2130's owner review (2026-11-05): with every
+  // unit on its number's line the 4:3 tablet's secondary panel is 41 px
+  // shorter, and with §"#1409" taken out its standings still clear the
+  // actions panel (by 12 px), as they do at 1280×800 and 800×1280. The case
+  // above still holds the tablets; a control there would measure nothing.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
-    ['1024×768', '736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+    ['736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
   )) {
     test(`the control — with §"#1409" taken out, the same measurement fails — ${viewport.name}`, async ({
       page,

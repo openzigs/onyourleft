@@ -30,8 +30,9 @@
  *
  * - **Battery level** — the `Percent` it needed exists since #2046, and
  *   `protocol/battery.ts` decodes the Battery Level characteristic into one.
- *   It is still not a measurement here: carrying it across this boundary is
- *   the job of its first consumer, #2047.
+ *   It is still not a measurement here: its first consumer, #2047, reads it
+ *   once at a time through `WebBluetoothTransport.readBatteryLevel` rather
+ *   than as a stream on this boundary.
  * - **FTMS resistance level and inclination** — need a `Percent` and a signed
  *   grade type.
  * - **FTMS total energy** — needs a `Kilojoules` (the characteristic reports

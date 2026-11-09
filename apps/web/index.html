@@ -38,6 +38,16 @@
     />
   </head>
   <body>
+    <!-- #2053. The first frame is the Android splash's picture: the mark at
+         its size and place on the canvas (`design/theme.css` §"THE
+         FIRST-PAINT INTRO"). `src/shell/intro.ts` animates it out once the
+         first route has painted, or removes it at once on a ride route and
+         for a rider who asked for less motion. Outside `#root`, so React
+         never draws over it; hidden from assistive technology and from the
+         pointer, because it is a picture of the splash and nothing else. -->
+    <div id="oyl-intro" class="oyl-intro" aria-hidden="true">
+      <img class="oyl-intro__mark" src="/src/brand/splash-mark.webp" alt="" />
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

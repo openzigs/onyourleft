@@ -891,17 +891,33 @@ describe('a rider faces the way the line takes them, not the way the road runs ‚
     expect(steepestMotion).toBeGreaterThan(1.5 * FACING_TURN_LIMIT_RADIANS);
   });
 
-  it.each([8, 12, 20])(
-    'turns by a hair, never a step, from one frame to the next through a radius-%i m hairpin',
-    (radius) => {
+  it.each([
+    [8, 'up to the apex'],
+    [8, 'from the apex'],
+    [12, 'up to the apex'],
+    [12, 'from the apex'],
+    [20, 'up to the apex'],
+    [20, 'from the apex'],
+  ] as const)(
+    'turns by a hair, never a step, from one frame to the next through a radius-%i m hairpin, %s',
+    (radius, half) => {
       // #1995's review: the line's derivative was nought where the line is held
       // at the road's edge and the full slope just outside, so the facing
       // jumped by up to 9¬∞ in a frame at a hairpin's entry and exit. Walked in
       // 2 cm steps, about a frame's riding at 4 km/h, from the approach to well
       // past the exit, the rider's heading never changes by more than half a
       // degree.
+      //
+      // ‚ö†Ô∏è In two halves since #1688, each its own case, meeting at the step
+      // nearest the apex: every step is still walked, once. Whole, a walk of
+      // up to 7 000 corridors passed the 5 s timeout under the nightly
+      // coverage run on the slower runners.
       const route = hairpinRoute(radius);
       const exit = 400 + Math.PI * radius + 40;
+      const STEP = 0.02;
+      const steps = Math.floor((exit - 360) / STEP + 1e-9);
+      const apex = Math.round((400 + (Math.PI * radius) / 2 - 360) / STEP);
+      const [first, last] = half === 'up to the apex' ? [0, apex] : [apex, steps];
       // The corridor built around where the rider is drawn at each step, as
       // `sceneFrame` builds a frame's, and the riders placed on it without the scenery
       // (#588), which a marker does not read.
@@ -912,15 +928,16 @@ describe('a rider faces the way the line takes them, not the way the road runs ‚
         if (rider === undefined) throw new Error('no rider placed');
         return Math.atan2(rider.marker.headingX, rider.marker.headingZ);
       };
-      let previous = headingOf(360);
+      let previous = headingOf(360 + first * STEP);
       let largest = 0;
-      for (let at = 360.02; at <= exit; at += 0.02) {
-        const heading = headingOf(at);
+      for (let step = first + 1; step <= last; step += 1) {
+        const heading = headingOf(360 + step * STEP);
         let change = Math.abs(heading - previous);
         if (change > Math.PI) change = 2 * Math.PI - change;
         largest = Math.max(largest, change);
         previous = heading;
       }
+      expect(last - first).toBeGreaterThan(1_000);
       expect(largest).toBeLessThan((0.5 * Math.PI) / 180);
     },
   );

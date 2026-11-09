@@ -77,12 +77,27 @@
  *    in one. A Vitest project added to the workspace lands in whichever part
  *    its name matches — `!web` is every project but `web` — and in none is a
  *    red run here rather than a file CI never runs.
+ * 6. Since #2285 the nightly coverage run is divided between jobs too, and
+ *    `test:coverage:merge` merges what each wrote into one report. Each
+ *    `test:coverage:shard-<n>` script is one half: `pnpm run test:coverage`
+ *    followed only by path filters and `--exclude <glob>` pairs, at least one,
+ *    and then the blob reporter writing `coverage-blobs/coverage-<n>.json` —
+ *    its own number, so two halves cannot write one file and lose one when
+ *    the merge job downloads them side by side. **Not `--project`**: with a
+ *    project filter Vitest's v8 provider keeps only the selected projects'
+ *    roots in the report (measured: `--project store --project domain` drops
+ *    the domain lines the store tests run, 109 of 6 009 covered lines, where
+ *    the same two packages selected by path keep them, and the merged halves
+ *    equal the whole run file for file). The numbering rules are rule 5's; each
+ *    half selects at least one file, no file is in two, and every file the
+ *    coverage run selects is in one, so the merged report is of the run.
  *
  * ## The seam its own suite uses
  *
  * `--lists <dir>` reads the selections from `all.txt`,
- * `required.txt`, `uninstrumented.txt`, `a11y.txt` and one
- * `required-shard-<n>.txt` per part in that directory instead of asking Vitest, so `check-test-split.test.sh` can drive every rule
+ * `required.txt`, `uninstrumented.txt`, `a11y.txt`, one
+ * `required-shard-<n>.txt` per part and one `coverage-shard-<n>.txt` per half
+ * in that directory instead of asking Vitest, so `check-test-split.test.sh` can drive every rule
  * in milliseconds. CI runs this with no arguments, against Vitest itself.
  *
  * Usage: node scripts/check-test-split.mjs [--root <dir>] [--lists <dir>]
@@ -267,23 +282,7 @@ const SHARD_LEAD = ['pnpm', 'run', 'test:required'];
  * one twice in a way the selections below would not show.
  */
 export function requiredShardsFrom(scripts) {
-  const shards = Object.entries(scripts ?? {})
-    .filter(([name]) => /^test:required:shard-\d+$/.test(name))
-    .map(([name, script]) => [Number(name.split('-').pop()), name, script])
-    .sort(([a], [b]) => a - b);
-  if (shards.length < 2) {
-    throw new Error(
-      `package.json has ${String(shards.length)} \`test:required:shard-<n>\` scripts where the ` +
-        'required run is divided between at least two CI jobs (#2154).',
-    );
-  }
-  return shards.map(([number, name, script], index) => {
-    if (number !== index + 1) {
-      throw new Error(
-        `\`${name}\` follows \`test:required:shard-${String(index)}\`: the parts are numbered ` +
-          'from 1 with none missing, so a job cannot be left running a part that is not there.',
-      );
-    }
+  return numberedParts(scripts, 'test:required', 'required run', '#2154').map(([name, script]) => {
     const tokens = shellWords(name, script);
     const rest = tokens.slice(SHARD_LEAD.length);
     const shape =
@@ -299,6 +298,93 @@ export function requiredShardsFrom(scripts) {
     }
     return [name, rest];
   });
+}
+
+/**
+ * The `<family>:shard-<n>` scripts, as `[name, script]` in order of `<n>`.
+ * Throws on fewer than two and on a gap in the numbering (rules 5 and 6).
+ */
+function numberedParts(scripts, family, run, issue) {
+  const parts = Object.entries(scripts ?? {})
+    .filter(([name]) => name.startsWith(`${family}:shard-`) && /^\d+$/.test(name.split('-').pop()))
+    .map(([name, script]) => [Number(name.split('-').pop()), name, script])
+    .sort(([a], [b]) => a - b);
+  if (parts.length < 2) {
+    throw new Error(
+      `package.json has ${String(parts.length)} \`${family}:shard-<n>\` scripts where the ` +
+        `${run} is divided between at least two CI jobs (${issue}).`,
+    );
+  }
+  parts.forEach(([number, name], index) => {
+    if (number !== index + 1) {
+      throw new Error(
+        `\`${name}\` follows \`${family}:shard-${String(index)}\`: the parts are numbered ` +
+          'from 1 with none missing, so a job cannot be left running a part that is not there.',
+      );
+    }
+  });
+  return parts.map(([, name, script]) => [name, script]);
+}
+
+/** What a half of the nightly coverage run must be, after its script name — #2285. */
+const COVERAGE_SHARD_LEAD = ['pnpm', 'run', 'test:coverage'];
+
+/**
+ * The words a half ends with: Vitest's blob of it, at the path of its own
+ * number in the directory `test:coverage:merge` reads.
+ */
+const blobTail = (number) => [
+  '--reporter=default',
+  '--reporter=blob',
+  `--outputFile.blob=coverage-blobs/coverage-${String(number)}.json`,
+];
+
+/**
+ * The halves the nightly coverage run is divided into between jobs — #2285:
+ * each `test:coverage:shard-<n>` script's name and the filters and
+ * `--exclude` pairs it adds to `test:coverage`, in order of `<n>`. Throws on
+ * any other shape, and on `--project` (rule 6 says why).
+ */
+export function coverageShardsFrom(scripts) {
+  return numberedParts(scripts, 'test:coverage', 'nightly coverage run', '#2285').map(
+    ([name, script], index) => {
+      const tokens = shellWords(name, script);
+      const tail = blobTail(index + 1);
+      const shape =
+        `\`${COVERAGE_SHARD_LEAD.join(' ')}\` followed only by path filters and ` +
+        `\`--exclude <glob>\` pairs, at least one, and then \`${tail.join(' ')}\`. Change this ` +
+        'script and check-test-split.mjs together.';
+      const rest = tokens.slice(COVERAGE_SHARD_LEAD.length, tokens.length - tail.length);
+      if (rest.includes('--project')) {
+        throw new Error(
+          `\`${name}\` is \`${script}\`: a \`--project\` filter narrows the coverage report to ` +
+            "that project's own files (Vitest's v8 provider keeps only the selected projects' " +
+            'roots), so what its tests run in any other package would be missing from the ' +
+            'merged report. Divide the run with path filters and `--exclude` instead.',
+        );
+      }
+      const shaped =
+        COVERAGE_SHARD_LEAD.every((word, i) => tokens[i] === word) &&
+        tail.every((word, i) => tokens[tokens.length - tail.length + i] === word) &&
+        rest.length > 0;
+      let at = 0;
+      let wellFormed = shaped;
+      while (wellFormed && at < rest.length) {
+        if (rest[at] === '--exclude') {
+          const glob = rest[at + 1];
+          wellFormed = glob !== undefined && !glob.startsWith('-');
+          at += 2;
+        } else {
+          wellFormed = !rest[at].startsWith('-');
+          at += 1;
+        }
+      }
+      if (!wellFormed) {
+        throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
+      }
+      return [name, rest];
+    },
+  );
 }
 
 /** `[project] path` per line, as `vitest list --filesOnly` prints it. */
@@ -318,7 +404,15 @@ export function parseSelection(output) {
  * What is wrong, in the terms a fixer needs. Empty means the three runs are
  * exactly the whole suite, once each.
  */
-export function problems({ all, required, uninstrumented, a11y, filters, shards = [] }) {
+export function problems({
+  all,
+  required,
+  uninstrumented,
+  a11y,
+  filters,
+  shards = [],
+  coverageShards = [],
+}) {
   const found = [];
   const runs = [
     ['`test:required`', new Set(required)],
@@ -368,31 +462,44 @@ export function problems({ all, required, uninstrumented, a11y, filters, shards 
     }
   }
   // Rule 5 (#2154): the required run's parts, one per CI job.
-  for (const [name, selection] of shards) {
+  partFindings(found, required, shards, {
+    empty: 'Its `--project` pattern names no project the required run selects.',
+    twice: 'more than one part of the required run. Their `--project` patterns overlap.',
+    none: (path) =>
+      `${path} is in \`test:required\` and in NONE of its parts, so no CI job runs it. ` +
+      'Its project matches no `test:required:shard-<n>` pattern.',
+  });
+  // Rule 6 (#2285): the coverage run's halves. Its files are the required
+  // run's, which the drift check above holds.
+  partFindings(found, required, coverageShards, {
+    empty: 'Its filters and excludes select no file the coverage run does.',
+    twice:
+      'more than one half of the coverage run, so it runs twice a night. Their filters ' +
+      'and excludes overlap.',
+    none: (path) =>
+      `${path} is in \`test:coverage\` and in NONE of its halves, so the merged report ` +
+      'never counts what it runs. No `test:coverage:shard-<n>` selects it.',
+  });
+  return found;
+}
+
+/** Each file of `whole` in exactly one of `parts`, and no part empty (rules 5 and 6). */
+function partFindings(found, whole, parts, say) {
+  for (const [name, selection] of parts) {
     if (selection.length === 0) {
       found.push(
-        `\`${name}\` selects no files at all, so its job is green over nothing. Its ` +
-          '`--project` pattern names no project the required run selects.',
+        `\`${name}\` selects no files at all, so its job is green over nothing. ${say.empty}`,
       );
     }
   }
-  const shardsHolding = (path) =>
-    shards.filter(([, selection]) => selection.includes(path)).map(([name]) => `\`${name}\``);
-  for (const path of required) {
-    const holding = shardsHolding(path);
-    if (holding.length > 1) {
-      found.push(
-        `${path} runs in ${holding.join(' and ')} — more than one part of the required ` +
-          'run. Their `--project` patterns overlap.',
-      );
-    } else if (holding.length === 0) {
-      found.push(
-        `${path} is in \`test:required\` and in NONE of its parts, so no CI job runs it. ` +
-          'Its project matches no `test:required:shard-<n>` pattern.',
-      );
-    }
+  if (parts.length === 0) return;
+  const holding = (path) =>
+    parts.filter(([, selection]) => selection.includes(path)).map(([name]) => `\`${name}\``);
+  for (const path of whole) {
+    const names = holding(path);
+    if (names.length > 1) found.push(`${path} runs in ${names.join(' and ')} — ${say.twice}`);
+    else if (names.length === 0) found.push(say.none(path));
   }
-  return found;
 }
 
 /** Ask Vitest which files a selection picks. */
@@ -433,10 +540,12 @@ if (isEntryPoint) {
   let selections;
   let filters;
   let shards;
+  let coverageShards;
   try {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const excludes = requiredExcludesFrom(manifest.scripts?.['test:required']);
-    const drift = reportDrift(excludes, excludesFrom(manifest.scripts?.['test:coverage']));
+    const coverageExcludes = excludesFrom(manifest.scripts?.['test:coverage']);
+    const drift = reportDrift(excludes, coverageExcludes);
     if (drift !== undefined) throw new Error(drift);
     filters = filtersFrom(manifest.scripts?.['test:uninstrumented']);
     const a11yArguments = a11yArgumentsFrom(manifest.scripts?.['test:a11y']);
@@ -448,6 +557,13 @@ if (isEntryPoint) {
       lists === undefined
         ? selectionOrEmpty(root, [...requiredArguments, ...projects])
         : read(`required-shard-${name.split('-').pop()}.txt`),
+    ]);
+    const coverageArguments = coverageExcludes.flatMap((glob) => ['--exclude', glob]);
+    coverageShards = coverageShardsFrom(manifest.scripts).map(([name, words]) => [
+      name,
+      lists === undefined
+        ? selectionOrEmpty(root, [...coverageArguments, ...words])
+        : read(`coverage-shard-${name.split('-').pop()}.txt`),
     ]);
     selections =
       lists === undefined
@@ -474,7 +590,7 @@ if (isEntryPoint) {
     );
     process.exit(1);
   }
-  const found = problems({ ...selections, filters, shards });
+  const found = problems({ ...selections, filters, shards, coverageShards });
   if (found.length > 0) {
     console.error('check-test-split: the three Vitest runs are not the whole suite, once each.\n');
     for (const problem of found) console.error(`  - ${problem}`);
@@ -488,6 +604,10 @@ if (isEntryPoint) {
       `${String(selections.a11y.length)} in the Accessibility step; the required run's ` +
       `${String(selections.required.length)} are ` +
       shards.map(([name, selection]) => `${String(selection.length)} in \`${name}\``).join(', ') +
+      `; the coverage run's ${String(selections.required.length)} are ` +
+      coverageShards
+        .map(([name, selection]) => `${String(selection.length)} in \`${name}\``)
+        .join(', ') +
       '.',
   );
 }

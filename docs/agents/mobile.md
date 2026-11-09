@@ -52,6 +52,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         since #1825 an OpenBikeControl steering controller's
                         client, every plugin call bounded, beside the transport
     src/permission/     what a rider is told when Bluetooth will not work (#87)
+    src/autoplay/       whether the WebView lets media start with no press
+                        (#2357), read back from its own setting by
+                        `AutoplayPlugin.java`: the one flag that lets the
+                        menus' music start with no tap in the app
     src/http/           the ONE native HTTP request the shell makes (#553): a
                         picture to the rider's own computer, outside the
                         WebView that blocks it as mixed content. What limits

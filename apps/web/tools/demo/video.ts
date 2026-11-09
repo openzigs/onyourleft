@@ -15,8 +15,9 @@
 
 /**
  * A baked route's id: `route-bundle.ts` §`ROUTE_ID`, written out because that
- * module's imports reach `packages/map-features`, which `node` cannot strip
- * (#1931). `video.test.ts` holds the two equal.
+ * module's imports reach `packages/map-features`, which `node` could not strip
+ * until #1931 (and which this file, importing nothing, need not load).
+ * `video.test.ts` holds the two equal.
  */
 export const VIDEO_ROUTE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 

@@ -57,7 +57,7 @@
  */
 
 import { Check, Info } from 'lucide-react';
-import { useId, useRef, useState, type JSX, type RefObject } from 'react';
+import { useId, useState, type JSX } from 'react';
 
 import {
   BOT_TIER_WATTS_PER_KILOGRAM,
@@ -79,9 +79,10 @@ import { StatusMessage } from '../design/StatusMessage';
 import { Stepper } from '../design/Stepper';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { isNativeShell, platformCapacitor } from '../support/capacitor';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 import type { PacerChoice } from './pacer-choice';
-import { realisticWorldChosenText } from './realistic-assets';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
@@ -114,6 +115,12 @@ export interface RidableRoute {
    * is the read budget every other screen in this app is careful about.
    */
   readonly attempts: number;
+  /**
+   * The moving time, in seconds, of the rider's fastest attempt: the figure
+   * the Games tab reads as "your best" (#2292). Each attempt's summary already
+   * carries it, so it costs no stream decode. Absent: no attempt yet.
+   */
+  readonly bestSeconds?: number | undefined;
 }
 
 /**
@@ -155,25 +162,26 @@ const WIND_SPEED_ID = 'oyl-game-wind-speed';
 const WIND_BEARING_ID = 'oyl-game-wind-bearing';
 
 /**
- * What the chooser says under *Ride* about the ride being saved — #1221.
+ * What the chooser says under *Ride* about the ride being saved — #1221, #2381.
  *
  * ⚠️ **A game ride is saved only if the Ride screen's recording is running
  * under it** (`trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`): the game
- * draws a ride and records none of its own. A rider who rode the game with no
- * recording running ended with no activity and only the HUD's dashed *Moving*
- * to say why. So with none running the chooser says, in words, before the
- * press, that this ride will not be saved, and offers the one control that
- * records it.
+ * draws a ride and records none of its own. Since #2381 (the owner's ruling of
+ * 2026-11-08) the press of *Ride* starts that recording wherever a ride
+ * controller can (`GameTrainerPort.recordGameRide`), and *End ride* asks
+ * whether to save or discard it (#2349). So the chooser says, in words,
+ * before the press, that the press records — or, where nothing can record,
+ * that this ride will not be saved.
  */
 export interface RecordingOffer {
   /** Whether a ride is in progress — recording or paused — under the game. */
   readonly recorded: boolean;
   /**
-   * Start a recording under the game: `GameTrainerPort.recordGameRide`.
-   * Answers whether one is now running. `undefined` where nothing can record
-   * (no ride controller), and the line then says so instead of offering it.
+   * Whether pressing *Ride* starts a recording: the port has
+   * `GameTrainerPort.recordGameRide`. `false` where nothing can record (no
+   * ride controller: Safari, Firefox, plain HTTP), and the line says so.
    */
-  readonly onRecord: (() => Promise<boolean>) | undefined;
+  readonly records: boolean;
 }
 
 /**
@@ -189,6 +197,12 @@ export interface RecordingOffer {
  * a shorter one, and one with fewer than `FEWEST_DELIVERY_HOUSES`, or with no
  * houses read, is an ordinary ride the HUD says is one
  * (`hud/delivery-announce.ts` §`oweNoRound`).
+ *
+ * Since #2294 it is TOLD what each route holds: `GameView` counts every saved
+ * route's houses through `delivery/courses.ts` once the round is switched on
+ * and hands the counts in as {@link DeliveryOffer.courses}, so this file still
+ * imports no planner. A route counted short of a round cannot hold one; a
+ * route counted enough is "up to" its count, and the press still decides.
  */
 export interface DeliveryOffer {
   /** Whether the rider switched the round on. */
@@ -199,7 +213,25 @@ export interface DeliveryOffer {
    * and how many houses are on today's round. Counts only (DL11).
    */
   readonly week: Pick<WeekProgress, 'day' | 'houses'>;
+  /**
+   * Each saved route's houses for a round, by route id — #2294, counted by
+   * `GameView` through `delivery/courses.ts` once the round is switched on.
+   * A route not in it is still being counted. `undefined` says nothing on
+   * the cards: no corridor port, or the round not chosen.
+   */
+  readonly courses?: ReadonlyMap<string, DeliveryCourse> | undefined;
 }
+
+/**
+ * What one route's count came to, as the chooser shows it — #2294,
+ * `delivery/courses.ts` §`CourseCount`, restated here so this file imports no
+ * planner (`stage-chooser-imports.test.ts`). `houses` is the most a round
+ * from the start line could take there, a ceiling on the round itself.
+ */
+export type DeliveryCourse =
+  | { readonly kind: 'counted'; readonly houses: number }
+  | { readonly kind: 'unread'; readonly state: Exclude<CorridorState, { kind: 'ready' }> }
+  | { readonly kind: 'failed' };
 
 /**
  * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
@@ -221,6 +253,68 @@ export interface LapRaceOffer {
    */
   readonly assisted: boolean;
 }
+
+/**
+ * The app's built-in lap-race circuits, as the chooser offers them — #2293,
+ * ADR 0064. Each is a loop ridden **only as a solo lap race against bots**
+ * (D-8.1): chosen, its loadout is the race's and nothing else (no ghost, no
+ * pacer, no round, no preview), and *Ride* always starts a race. Offered only
+ * beside a {@link LapRaceOffer}: a chooser with no race offers no circuit.
+ */
+export interface CircuitsOffer {
+  /** Each circuit, its id in the `circuit:` namespace (`@onyourleft/store` §`circuitRouteId`). */
+  readonly circuits: readonly RidableRoute[];
+  /**
+   * `map/basemap.ts` §`OSM_ATTRIBUTION`, handed in rather than imported,
+   * because this file imports no map (`stage-chooser-imports.test.ts`).
+   * Shown beside the circuits (D-5.1).
+   */
+  readonly credit: string;
+}
+
+/**
+ * The built-in Delivery level the setup was opened on — #2362, ADR 0065:
+ * its card is among {@link RoutePickerProps.routes}, first, and this says
+ * which one it is. It is never one of the rider's own routes, so the cards'
+ * summary does not count it; the OpenStreetMap credit and the way to the
+ * licence stand beside its card (D-6.5); and it rides in the realistic world
+ * whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378).
+ */
+export interface LevelOffer {
+  /** The level's card's route id, in the `level:` namespace. */
+  readonly routeId: string;
+  /** `map/basemap.ts` §`OSM_ATTRIBUTION`, handed in for {@link CircuitsOffer.credit}'s reason. */
+  readonly credit: string;
+  /**
+   * The houses on the level's round, which its card says it holds once the
+   * round is chosen, in either world: the level's own count, from its file,
+   * never one of the rider's routes' counts (review of PR #2378, round 3).
+   */
+  readonly houses: number;
+}
+
+/**
+ * The rider-facing words of a built-in level in the setup — #2362, round 2,
+ * for the owner's approval: the project's own, naming no place.
+ */
+export const LEVEL_SETUP_TEXT = {
+  /** The notice's label, before its sentence. */
+  worldLabel: 'Realistic world',
+  /**
+   * With the standard world chosen. In a browser the realistic set is not
+   * precached (ADR 0026 D-7), so the press downloads it, as Settings warns;
+   * inside the Android shell it ships in the app and nothing is downloaded.
+   */
+  world: (inShell: boolean): string =>
+    inShell
+      ? 'This round rides in the realistic world. Your choice in Settings stays as it is.'
+      : 'This round rides in the realistic world. This browser downloads it when the ride starts, ' +
+        `${REALISTIC_DOWNLOAD_SIZE_TEXT}, and does not keep it on this device for use offline. ` +
+        'Your choice in Settings stays as it is.',
+} as const;
+
+/** The level's world notice — #2362. One chooser a page, so a fixed id. */
+export const LEVEL_WORLD_ID = 'oyl-chooser-level-world';
 
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
@@ -300,11 +394,19 @@ interface RoutePickerProps {
   readonly corridor?: CorridorState | undefined;
   /**
    * A Delivery round to offer — #1818. Drawn only where {@link worldChosen}
-   * (DL6); `undefined` draws nothing. @see DeliveryOffer
+   * (DL6), or on a built-in level, which rides in the realistic world
+   * whatever Settings chose (#2362); `undefined` draws nothing. @see DeliveryOffer
    */
   readonly delivery?: DeliveryOffer | undefined;
   /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
   readonly lapRace?: LapRaceOffer | undefined;
+  /**
+   * The built-in circuits — #2293. Drawn only beside {@link lapRace};
+   * `undefined`, or none, draws nothing. @see CircuitsOffer
+   */
+  readonly circuits?: CircuitsOffer | undefined;
+  /** The built-in level among {@link routes} — #2362. `undefined`, none is. @see LevelOffer */
+  readonly level?: LevelOffer | undefined;
   /**
    * *Preview without a trainer* — #1992, the owner's ruling on PR #2113: the
    * chosen route ridden by the simulated rider. `undefined` draws nothing.
@@ -370,12 +472,25 @@ export function routeFacts(profile: RouteProfile, units: UnitSystem): string {
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */
 export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const ids = useId();
-  // #1221: where focus goes when *Record this ride* is pressed and goes away.
-  const rideRef = useRef<HTMLButtonElement>(null);
   if (props.routes === undefined) {
     return <p>Loading your routes…</p>;
   }
-  const first = props.routes[0];
+  // #2293: the circuits are a lap race's courses, so they come with one or not at all.
+  // #2362: and none while a built-in level's card is chosen, which is
+  // Delivery's; a saved route chosen on the same setup offers them as any
+  // setup does (review of PR #2378, rounds 3 and 4).
+  const levelChosen =
+    props.level !== undefined &&
+    (props.picked === undefined ||
+      props.picked === props.level.routeId ||
+      ![...props.routes, ...(props.circuits?.circuits ?? [])].some(
+        (route) => route.id === props.picked,
+      ));
+  const circuits =
+    props.lapRace === undefined || props.circuits === undefined || levelChosen
+      ? []
+      : props.circuits.circuits;
+  const first = props.routes[0] ?? circuits[0];
   if (first === undefined) {
     // ⚠️ #232's second criterion: an empty picker says **how a route gets
     // here**, not only that there are none. The sentence it used to carry named
@@ -426,17 +541,47 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   // ride in still air after the rider had asked for a gale — #237's defect
   // arriving from the side the rider can see, which is what the pacer control
   // already refuses for its own box.
-  const pacerRefused = props.choice.problem !== undefined;
+  const chosen = [...props.routes, ...circuits].find((route) => route.id === props.picked) ?? first;
+  // #2293: a built-in circuit is raced, and only raced (ADR 0064 D-8.1).
+  const onCircuit = circuits.includes(chosen);
+  // A circuit's loadout has no pacer, so the pacer's box cannot refuse its ride.
+  const pacerRefused = !onCircuit && props.choice.problem !== undefined;
   const windRefused = props.air.problem !== undefined;
   const refused = pacerRefused || windRefused;
   const describedBy =
     [pacerRefused ? PACER_PROBLEM_ID : undefined, windRefused ? WIND_PROBLEM_ID : undefined]
       .filter((id) => id !== undefined)
       .join(' ') || undefined;
-  const chosen = props.routes.find((route) => route.id === props.picked) ?? first;
   const headingId = `${ids}-heading`;
-  // #1818: offered with the realistic world only (DL6), so asked for only then.
-  const deliveryOffer = props.worldChosen ? props.delivery : undefined;
+  // #2362: a built-in level is chosen, which rides in the realistic world
+  // whatever Settings chose; and the rider's own routes, without it.
+  const levelId = props.level?.routeId;
+  const onLevel = levelId !== undefined && chosen.id === levelId;
+  const ownRoutes = props.routes.filter((route) => route.id !== levelId);
+  // #1818: offered with the realistic world only (DL6), so asked for only
+  // then, or on a built-in level, which rides in it for that ride (#2362).
+  const deliveryOffer = props.worldChosen || onLevel ? props.delivery : undefined;
+  // #2294: every card says what its route holds for a round, once one is chosen.
+  const courses =
+    deliveryOffer?.chosen === true && deliveryOffer.courses !== undefined
+      ? { courses: deliveryOffer.courses, week: deliveryOffer.week }
+      : undefined;
+  // #2362: and a level's card its own round's houses, in either world, from
+  // the level's own count and never the saved routes' counting.
+  const levelCourse: DeliveryCourse | undefined =
+    deliveryOffer?.chosen === true && props.level !== undefined
+      ? { kind: 'counted', houses: props.level.houses }
+      : undefined;
+  const courseOf = (route: RidableRoute): CourseLine | undefined => {
+    if (route.id === levelId) {
+      return levelCourse === undefined || deliveryOffer === undefined
+        ? undefined
+        : deliveryCourseLine(levelCourse, deliveryOffer.week);
+    }
+    return courses === undefined
+      ? undefined
+      : deliveryCourseLine(courses.courses.get(route.id), courses.week);
+  };
   const notices = [
     props.worldChosen ? (
       // #475, and since #1011 ONE compact line rather than a box: which world,
@@ -445,6 +590,18 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       // and #503's promise has to be the last thing before Ride.
       // @see RealisticWorldLine
       <RealisticWorldLine key="world" />
+    ) : onLevel ? (
+      // #2362: the level's world, for this ride only, and Settings untouched.
+      // The app's own info notice (round 3 of PR #2378's review), not the
+      // realistic world's compact line, which is about a Settings choice.
+      <StatusMessage
+        key="world"
+        id={LEVEL_WORLD_ID}
+        tone="info"
+        label={LEVEL_SETUP_TEXT.worldLabel}
+      >
+        {LEVEL_SETUP_TEXT.world(isNativeShell(platformCapacitor()))}
+      </StatusMessage>
     ) : undefined,
     props.corridor === undefined ? undefined : (
       // #1539: towns from map data, in one line that names no place — beside
@@ -489,9 +646,10 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       </StatusMessage>
     ),
   ].filter((each) => each !== undefined);
+  // #2362: a press on a built-in level is always a Delivery round, so no race is offered on one.
   const lapRace =
-    props.lapRace === undefined ? undefined : (
-      <LapRaceControl offer={props.lapRace} route={chosen} idPrefix={ids} />
+    props.lapRace === undefined || onLevel ? undefined : (
+      <LapRaceControl offer={props.lapRace} route={chosen} builtIn={onCircuit} idPrefix={ids} />
     );
   return (
     <div className="oyl-game__picker oyl-chooser">
@@ -528,7 +686,6 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           */}
           <Button
             size="ride"
-            ref={rideRef}
             // #509: unavailable while the trainer is being asked, as well
             // as while a box refuses. The click is not guarded on `asking`
             // here — `GameView` §`startingRef` refuses it, so the refusal
@@ -537,6 +694,24 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             describedBy={describedBy}
             onClick={() => {
               if (refused) {
+                return;
+              }
+              if (onCircuit) {
+                // #2293, ADR 0064 D-8.1: a built-in circuit is a solo race
+                // against bots and nothing else — no ghost (it has no
+                // attempts and is never one of the rider's routes), no pacer
+                // (the race's bots are the field), no round, and the race
+                // whether or not its switch was ever shown.
+                void props.onStart(
+                  chosen,
+                  false,
+                  undefined,
+                  props.air.wind,
+                  props.position,
+                  false,
+                  false,
+                  props.lapRace?.choice,
+                );
                 return;
               }
               // #331: another rider's ghost REPLACES the rider's own — one
@@ -577,18 +752,37 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           has, and a rider with no recording running — most riders, at this
           screen — would otherwise have one more above it on every phone.
         */}
-        {props.recording === undefined ? undefined : (
-          <RecordingLine offer={props.recording} rideRef={rideRef} />
-        )}
+        {props.recording === undefined ? undefined : <RecordingLine offer={props.recording} />}
       </div>
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
+        summary={
+          // #2362: the rider's own routes only; a built-in level is not one of them.
+          courses === undefined || ownRoutes.length === 0 ? undefined : (
+            <CoursesLine routes={ownRoutes} courses={courses.courses} week={courses.week} />
+          )
+        }
         routes={props.routes}
         chosen={chosen}
         onPick={props.onPick}
         units={props.units}
         labelledBy={headingId}
         idPrefix={ids}
+        level={props.level}
+        course={courseOf}
+        circuits={
+          circuits.length === 0 || props.circuits === undefined ? undefined : (
+            <CircuitCards
+              circuits={circuits}
+              credit={props.circuits.credit}
+              noRoutes={props.routes.length === 0}
+              chosen={chosen}
+              onPick={props.onPick}
+              units={props.units}
+              idPrefix={ids}
+            />
+          )
+        }
       />
       <div className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card">
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
@@ -602,21 +796,30 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           every control a rider can use.
         */}
         {lapRace === undefined || !chosen.profile.loop ? null : lapRace}
-        <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
-        {props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
+        {/*
+          #2293: a built-in circuit's loadout is the race's, the position and
+          the wind. No ghost (a circuit has no attempts), no other rider's
+          ghost, no pacer and no round (ADR 0064 D-8.1).
+        */}
+        {onCircuit ? null : (
+          <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
+        )}
+        {!onCircuit && props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
           <RiderGhostControl
             withRiderGhost={props.withRiderGhost === true}
             onRiderGhost={props.onRiderGhost}
             problem={props.riderGhostProblem}
           />
         ) : null}
-        <PacerControls
-          withPacer={props.withPacer}
-          onPacer={props.onPacer}
-          intensity={props.intensity}
-          onIntensity={props.onIntensity}
-          problem={props.choice.problem}
-        />
+        {onCircuit ? null : (
+          <PacerControls
+            withPacer={props.withPacer}
+            onPacer={props.onPacer}
+            intensity={props.intensity}
+            onIntensity={props.onIntensity}
+            problem={props.choice.problem}
+          />
+        )}
         <PositionControl position={props.position} onPosition={props.onPosition} />
         <WindControls
           withWind={props.withWind}
@@ -629,10 +832,17 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           problem={props.air.problem}
           field={props.air.field}
         />
-        {deliveryOffer === undefined ? null : <DeliveryControl offer={deliveryOffer} />}
+        {deliveryOffer === undefined || onCircuit ? null : (
+          <DeliveryControl
+            offer={deliveryOffer}
+            onLevel={onLevel}
+            // #2294: said beside the switch too, for the route chosen.
+            chosenCourse={courseOf(chosen)}
+          />
+        )}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
-      {props.onPreview === undefined ? null : (
+      {props.onPreview === undefined || onCircuit ? null : (
         <PreviewControl
           route={chosen}
           asking={props.asking}
@@ -767,6 +977,14 @@ function PreviewControl(props: {
  * by. ⚠️ The drawing is `aria-hidden` and says nothing the words do not
  * (epic #935, principle 1): it is RELATIVE, highest point near the top whatever
  * the metres (`ProfileShape`), so the climb in metres is only in the text.
+ *
+ * Since #2294, with a Delivery round chosen, each card carries a second band
+ * saying what its route holds for a round, and the radio is described by it
+ * too. A route that cannot hold one is GREYED: its drawing is faded, and its
+ * band says why in words, at the band's full contrast, because the fade alone
+ * would be colour carrying the meaning. It is still a route the rider may
+ * choose, for an ordinary ride; the cards keep their order while the counts
+ * arrive, so nothing moves under a rider's finger or focus.
  */
 function RouteCards(props: {
   readonly routes: readonly RidableRoute[];
@@ -775,71 +993,212 @@ function RouteCards(props: {
   readonly units: UnitSystem;
   readonly labelledBy: string;
   readonly idPrefix: string;
+  /** #2294: each route's line about a Delivery round; `undefined` draws none. */
+  readonly course?: ((route: RidableRoute) => CourseLine | undefined) | undefined;
+  /** #2294: the line over the cards saying how many hold a round. Inside the group, in its grid area. */
+  readonly summary?: JSX.Element | undefined;
+  /**
+   * #2293: the built-in circuits' cards, after the rider's own, INSIDE the
+   * same fieldset and radio group: a route and a circuit are one choice.
+   */
+  readonly circuits?: JSX.Element | undefined;
+  /** #2362: which of {@link routes} is a built-in level, its credit drawn beside its card. */
+  readonly level?: LevelOffer | undefined;
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
+  const card = (route: RidableRoute, index: number): JSX.Element => (
+    <RouteCard
+      key={route.id}
+      route={route}
+      radioId={`${group}-${String(index)}`}
+      group={group}
+      chosen={route.id === props.chosen.id}
+      onPick={props.onPick}
+      units={props.units}
+      course={props.course?.(route)}
+    />
+  );
+  const levelAt = props.routes.findIndex((route) => route.id === props.level?.routeId);
+  const level = levelAt < 0 ? undefined : props.routes[levelAt];
+  const own = props.routes
+    .map((route, index) => ({ route, index }))
+    .filter(({ index }) => index !== levelAt);
   return (
     <fieldset
       className="oyl-chooser__routes tw:mt-0 tw:mx-0 tw:mb-md tw:p-0 tw:border-0 tw:min-w-0"
       aria-labelledby={props.labelledBy}
     >
-      <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
-        {props.routes.map((route, index) => {
-          const radioId = `${group}-${String(index)}`;
-          const factsId = `${radioId}-facts`;
-          const chosen = route.id === props.chosen.id;
-          return (
-            <li
-              key={route.id}
-              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card"
-            >
-              <input
-                className="oyl-chooser__radio tw:my-sm tw:ml-md tw:mr-0"
-                type="radio"
-                id={radioId}
-                name={group}
-                value={route.id}
-                checked={chosen}
-                aria-describedby={factsId}
-                onChange={() => {
-                  props.onPick(route.id);
-                }}
-              />
-              <h3 className="oyl-chooser__name tw:my-sm tw:mx-0 tw:text-md tw:wrap-anywhere">
-                <label htmlFor={radioId} className="tw:cursor-pointer">
-                  {route.name}
-                </label>
-              </h3>
-              {/*
-                ⚠️ #1011: the chosen tile is told by more than colour — the
-                radio's dot, the doubled border, and THIS: a tick and a word.
-                Hidden from assistive technology, because the radio already
-                says "checked"; it is for the eye, and it survives a forced
-                palette, which flattens the border's colour.
-              */}
-              {chosen ? (
-                <span
-                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent-text"
-                  aria-hidden="true"
-                >
-                  <Check focusable="false" />
-                  Chosen
-                </span>
-              ) : undefined}
-              <ProfileShape
-                className="oyl-chooser__shape tw:col-span-full tw:block tw:w-full"
-                profile={route.profile}
-              />
-              <p
-                className="oyl-chooser__facts tw:col-span-full tw:m-0 tw:py-sm tw:px-md tw:bg-surface-overlay tw:text-ink"
-                id={factsId}
-              >
-                {routeFacts(route.profile, props.units)}
-              </p>
-            </li>
-          );
-        })}
-      </ul>
+      {level === undefined || props.level === undefined ? null : (
+        // #2362, ADR 0065 D-6.5: the level's card, and beside it the
+        // OpenStreetMap credit and the way to the licence its file is under.
+        <>
+          <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
+            {card(level, levelAt)}
+          </ul>
+          <p className="oyl-chooser__circuits-credit" data-credit="level">
+            {props.level.credit} ·{' '}
+            <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+          </p>
+        </>
+      )}
+      {/* #2362: the summary counts the rider's own routes, so it heads their cards, after the level's. */}
+      {props.summary}
+      {own.length === 0 ? null : (
+        <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
+          {own.map(({ route, index }) => card(route, index))}
+        </ul>
+      )}
+      {props.circuits}
     </fieldset>
+  );
+}
+
+/** One tile: its radio, its name, its shape and its facts. */
+function RouteCard(props: {
+  readonly route: RidableRoute;
+  readonly radioId: string;
+  /** The radio group's name: every tile in the chooser shares one. */
+  readonly group: string;
+  readonly chosen: boolean;
+  readonly onPick: (routeId: string) => void;
+  readonly units: UnitSystem;
+  readonly course?: CourseLine | undefined;
+}): JSX.Element {
+  const { route, radioId, course } = props;
+  const factsId = `${radioId}-facts`;
+  const courseId = `${radioId}-course`;
+  return (
+    <li
+      className={`oyl-chooser__card${course?.holds === false ? ' oyl-chooser__card--no-round' : ''} tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card`}
+    >
+      <input
+        className="oyl-chooser__radio tw:my-sm tw:ml-md tw:mr-0"
+        type="radio"
+        id={radioId}
+        name={props.group}
+        value={route.id}
+        checked={props.chosen}
+        aria-describedby={course === undefined ? factsId : `${factsId} ${courseId}`}
+        onChange={() => {
+          props.onPick(route.id);
+        }}
+      />
+      <h3 className="oyl-chooser__name tw:my-sm tw:mx-0 tw:text-md tw:wrap-anywhere">
+        <label htmlFor={radioId} className="tw:cursor-pointer">
+          {route.name}
+        </label>
+      </h3>
+      {/*
+        ⚠️ #1011: the chosen tile is told by more than colour — the
+        radio's dot, the doubled border, and THIS: a tick and a word.
+        Hidden from assistive technology, because the radio already
+        says "checked"; it is for the eye, and it survives a forced
+        palette, which flattens the border's colour.
+      */}
+      {props.chosen ? (
+        <span
+          className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent-text"
+          aria-hidden="true"
+        >
+          <Check focusable="false" />
+          Chosen
+        </span>
+      ) : undefined}
+      <ProfileShape
+        className="oyl-chooser__shape tw:col-span-full tw:block tw:w-full"
+        profile={route.profile}
+      />
+      <p
+        className="oyl-chooser__facts tw:col-span-full tw:m-0 tw:py-sm tw:px-md tw:bg-surface-overlay tw:text-ink"
+        id={factsId}
+      >
+        {routeFacts(route.profile, props.units)}
+      </p>
+      {course === undefined ? null : (
+        <p
+          className="oyl-chooser__course tw:col-span-full tw:m-0 tw:pb-sm tw:px-md tw:bg-surface-overlay tw:text-ink"
+          id={courseId}
+        >
+          {course.text}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The rider-facing words of #2293's circuits, for the owner's approval: the
+ * project's own, naming no other game and no place (ADR 0064 D-9.2).
+ */
+export const BUILT_IN_CIRCUITS_TEXT = {
+  heading: 'Built-in circuits',
+  lead:
+    'Short loops on real roads, each one a lap race against bots. They are in the app, so ' +
+    'they need no account and no connection.',
+  noRoutes: 'You have no routes of your own yet. Import a GPX file on the Routes screen.',
+  licence: 'Map data licence',
+} as const;
+
+/**
+ * #2293: the built-in circuits, after the rider's own routes inside the
+ * chooser's one radio group, with the OpenStreetMap credit beside them and
+ * the way to the licence they are offered under (ADR 0064 D-5.1): the Credits
+ * screen, whose *Map data* entry reads the notice in place.
+ *
+ * ⚠️ **A disclosure, closed for a rider who has routes of their own** and has
+ * not chosen a circuit. The chooser is one column of cards and then the
+ * loadout, and #1970 keeps a loop's race switch on a 1280×800 tablet's first
+ * screen under *Ride*: four more cards between the rider's routes and the
+ * loadout would push it under the fold for every rider. Closed, the circuits
+ * cost one line there. Open from the start for a rider with no routes (they
+ * are all there is to ride) and when a circuit is the chosen card (the Games
+ * tab's link chooses one by the address).
+ */
+function CircuitCards(props: {
+  readonly circuits: readonly RidableRoute[];
+  readonly credit: string;
+  /** Whether the rider has no routes of their own, so the chooser says how one gets here. */
+  readonly noRoutes: boolean;
+  readonly chosen: RidableRoute;
+  readonly onPick: (routeId: string) => void;
+  readonly units: UnitSystem;
+  readonly idPrefix: string;
+}): JSX.Element {
+  const group = `${props.idPrefix}-route`;
+  const [open, setOpen] = useState(() => props.noRoutes || props.circuits.includes(props.chosen));
+  return (
+    <details
+      className="oyl-details oyl-chooser__circuits tw:mt-md"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary>{BUILT_IN_CIRCUITS_TEXT.heading}</summary>
+      <p>{BUILT_IN_CIRCUITS_TEXT.lead}</p>
+      {props.noRoutes ? (
+        <p>
+          <a href={hrefFor(routeById('routes'))}>{BUILT_IN_CIRCUITS_TEXT.noRoutes}</a>
+        </p>
+      ) : null}
+      <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
+        {props.circuits.map((circuit, index) => (
+          <RouteCard
+            key={circuit.id}
+            route={circuit}
+            radioId={`${group}-circuit-${String(index)}`}
+            group={group}
+            chosen={circuit.id === props.chosen.id}
+            onPick={props.onPick}
+            units={props.units}
+          />
+        ))}
+      </ul>
+      <p className="oyl-chooser__circuits-credit" data-credit="circuits">
+        {props.credit} ·{' '}
+        <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+      </p>
+    </details>
   );
 }
 
@@ -850,67 +1209,47 @@ export const NOT_RECORDING_TEXT =
 /** ...and where nothing CAN record: no ride controller in this browser — #1221. */
 export const CANNOT_RECORD_TEXT = 'This browser cannot record a ride.';
 
-/** What it says once *Record this ride* has started a recording — #1221. */
-export const RECORDING_STARTED_TEXT =
-  'This ride is being recorded. Stop and save it on the Ride screen when you finish.';
+/**
+ * What it says where the press of *Ride* records the ride — #2381. It names
+ * the end-of-ride question's two answers (`ride/EndRideQuestion.tsx`), so the
+ * rider knows before the press that an unwanted ride is theirs to discard.
+ */
+/** The label before it — the owner's ruling of 2026-11-08 on #2381 (it replaced "Recorded"). */
+export const RECORDING_ON_LABEL = 'Recording on';
 
-/** What it says when the press could not start one — #1221. */
-export const RECORDING_REFUSED_TEXT = 'A recording could not be started. The Ride screen says why.';
+export const RECORDS_ON_RIDE_TEXT =
+  'Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.';
 
 /**
- * The line under *Ride* about the ride being saved — #1221. @see RecordingOffer
+ * The line under *Ride* about the ride being saved — #1221, #2381. @see RecordingOffer
  *
- * Nothing at all while a ride is recording that this line did not start: the
- * HUD's *Moving* time is the recording's, and the rider started it on the Ride
- * screen, where they will stop it. Once *Record this ride* has started one,
- * the line says where it is saved, `live`, because it is a change the rider
- * caused — and focus goes to *Ride*, since the control pressed is gone (WCAG
- * 2.2 SC 2.4.3).
+ * Nothing at all while a ride is already recording or paused: the HUD's
+ * *Moving* time is the recording's, the press carries it on, and the rider
+ * started it on the Ride screen. Otherwise one sentence, before the press:
+ * that the press records the ride, or — where nothing can — that it will not
+ * be saved. #1221's *Record this ride* is gone: with the press recording, an
+ * unwanted ride is discarded at its end rather than declined at its start.
  */
-function RecordingLine(props: {
-  readonly offer: RecordingOffer;
-  readonly rideRef: RefObject<HTMLButtonElement | null>;
-}): JSX.Element | null {
-  const id = useId();
-  const [answer, setAnswer] = useState<'started' | 'refused' | undefined>(undefined);
-  const { recorded, onRecord } = props.offer;
+function RecordingLine(props: { readonly offer: RecordingOffer }): JSX.Element | null {
+  const { recorded, records } = props.offer;
   if (recorded) {
-    return answer === 'started' ? (
-      <StatusMessage tone="success" label="Recording" live>
-        {RECORDING_STARTED_TEXT}
-      </StatusMessage>
-    ) : null;
+    return null;
   }
   return (
     <div className="oyl-chooser__recording">
-      <p className="tw:m-0" id={id}>
-        <span className="oyl-chooser__recording-label">Not recording</span>
-        {' · '}
-        {NOT_RECORDING_TEXT}
-        {onRecord === undefined ? ` ${CANNOT_RECORD_TEXT}` : undefined}
-      </p>
-      {onRecord === undefined ? undefined : (
-        <Button
-          variant="secondary"
-          describedBy={id}
-          onClick={() => {
-            void onRecord().then((started) => {
-              setAnswer(started ? 'started' : 'refused');
-              if (started) {
-                props.rideRef.current?.focus();
-              }
-            });
-          }}
-        >
-          Record this ride
-        </Button>
-      )}
-      {answer === 'refused' ? (
-        // Polite, not an alert: nothing here pre-empts (#394).
-        <p className="tw:m-0" role="status">
-          {RECORDING_REFUSED_TEXT}
+      {records ? (
+        <p className="tw:m-0">
+          <span className="oyl-chooser__recording-label">{RECORDING_ON_LABEL}</span>
+          {' · '}
+          {RECORDS_ON_RIDE_TEXT}
         </p>
-      ) : undefined}
+      ) : (
+        <p className="tw:m-0">
+          <span className="oyl-chooser__recording-label">Not recording</span>
+          {' · '}
+          {NOT_RECORDING_TEXT} {CANNOT_RECORD_TEXT}
+        </p>
+      )}
     </div>
   );
 }
@@ -1112,6 +1451,13 @@ export const DELIVERY_CHOICE_TEXT = {
     'Nothing in the round changes what your trainer is sent. A route with fewer mapped houses ' +
     `than the round rides a shorter one, and one with fewer than ${String(FEWEST_DELIVERY_HOUSES)} ` +
     'is an ordinary ride.',
+  /**
+   * #2362, round 3, for the owner's approval: on a built-in level, whose
+   * round is its own houses, so the sentence about a short route does not hold.
+   */
+  levelHint:
+    'Throw parcels to the doorsteps of the houses on the round as you ride through the town. ' +
+    'Nothing in the round changes what your trainer is sent.',
 } as const;
 
 /**
@@ -1131,16 +1477,165 @@ export function deliveryWeekText(week: Pick<WeekProgress, 'day' | 'houses'>): st
   return `Day ${String(week.day)} of ${String(DAYS_IN_WEEK)} · up to ${houses} on the round`;
 }
 
+/** One route's line about a Delivery round — #2294: its words, and whether it holds one. */
+interface CourseLine {
+  readonly text: string;
+  /** `false` greys the card; `undefined` while it is still being counted. */
+  readonly holds: boolean | undefined;
+}
+
+/**
+ * The words of #2294's course lines, for the owner's approval: the project's
+ * own, naming no other game and no place. Each reason says what the rider can
+ * change where there is something to change (Settings, a network).
+ */
+export const DELIVERY_COURSE_TEXT = {
+  counting: 'Delivery: counting the mapped houses…',
+  noRound: 'No Delivery round on this route',
+  noHouse: 'no mapped house is in reach of the road',
+  failed: 'its houses could not be counted',
+  allCounting: 'Counting the mapped houses on your routes for a Delivery round…',
+  chosenNoRound: 'Ridden with the round on, it is an ordinary ride.',
+} as const;
+
+/** Why a route's corridor gave no houses to count, in words. */
+function unreadReason(state: Exclude<CorridorState, { kind: 'ready' }>): string | undefined {
+  switch (state.kind) {
+    case 'reading':
+      return undefined;
+    case 'unavailable':
+      switch (state.why) {
+        case 'offline':
+          return 'its map cannot be read while this device is offline';
+        case 'outside-coverage':
+          return 'there is no map data for it';
+        case 'refused':
+          return 'its map could not be read';
+      }
+      break;
+    case 'off':
+      switch (state.why) {
+        case 'map-tiles-off':
+          return 'map tiles are off in Settings';
+        case 'stylised-world':
+          return 'the stylised world is chosen';
+        case 'no-archive':
+          return 'this build has no map archive';
+        case 'wrong-schema':
+          return 'this build’s map archive is not one this reads';
+      }
+  }
+}
+
+/** `n` houses, in words. */
+function housesText(n: number): string {
+  return n === 1 ? '1 house' : `${String(n)} houses`;
+}
+
+/**
+ * What a route holds for today's round — #2294. A round is ridden where the
+ * pick finds the day's whole count, or at least `FEWEST_DELIVERY_HOUSES`
+ * (`ride-round.ts` §`startDeliveryRide`), so a route holds one where its
+ * count reaches the smaller of the two; the round is never longer than the
+ * day's count or the route's, so the line says "up to" the smaller (#1878).
+ * `undefined` is a route still being counted.
+ */
+export function deliveryCourseLine(
+  course: DeliveryCourse | undefined,
+  week: Pick<WeekProgress, 'houses'>,
+): CourseLine {
+  const counting = { text: DELIVERY_COURSE_TEXT.counting, holds: undefined };
+  if (course === undefined) return counting;
+  const no = (reason: string): CourseLine => ({
+    text: `${DELIVERY_COURSE_TEXT.noRound}: ${reason}`,
+    holds: false,
+  });
+  switch (course.kind) {
+    case 'failed':
+      return no(DELIVERY_COURSE_TEXT.failed);
+    case 'unread': {
+      const reason = unreadReason(course.state);
+      return reason === undefined ? counting : no(reason);
+    }
+    case 'counted': {
+      const needs = Math.min(week.houses, FEWEST_DELIVERY_HOUSES);
+      if (course.houses >= needs) {
+        const most = Math.min(course.houses, week.houses);
+        return { text: `Delivery: up to ${housesText(most)} on the round`, holds: true };
+      }
+      if (course.houses === 0) return no(DELIVERY_COURSE_TEXT.noHouse);
+      const mapped =
+        course.houses === 1 ? '1 mapped house' : `${String(course.houses)} mapped houses`;
+      return no(`${mapped} in reach, and a round needs ${String(needs)}`);
+    }
+  }
+}
+
+/**
+ * The cards' summary, under *Choose a route* — #2294: how many of the
+ * rider's routes can hold today's round, once every one is counted.
+ */
+export function deliveryCoursesText(
+  routes: readonly RidableRoute[],
+  courses: ReadonlyMap<string, DeliveryCourse>,
+  week: Pick<WeekProgress, 'houses'>,
+): string {
+  const lines = routes.map((route) => deliveryCourseLine(courses.get(route.id), week));
+  if (lines.some((line) => line.holds === undefined)) return DELIVERY_COURSE_TEXT.allCounting;
+  const holding = lines.filter((line) => line.holds === true).length;
+  if (routes.length === 1) {
+    return holding === 1
+      ? 'Your route can hold today’s Delivery round.'
+      : 'Your route cannot hold today’s Delivery round: its card says why.';
+  }
+  return holding === 0
+    ? 'None of your routes can hold today’s Delivery round: each card says why.'
+    : `${String(holding)} of your ${String(routes.length)} routes can hold today’s Delivery round.`;
+}
+
+/**
+ * The summary line — #2294. ⚠️ Announced politely, once, when every route is
+ * counted (`CorridorLine`'s pattern): the counting words are drawn for the
+ * eye and hidden from assistive technology, so a screen reader is not read
+ * a line that changes with every route.
+ */
+function CoursesLine(props: {
+  readonly routes: readonly RidableRoute[];
+  readonly courses: ReadonlyMap<string, DeliveryCourse>;
+  readonly week: Pick<WeekProgress, 'houses'>;
+}): JSX.Element {
+  const text = deliveryCoursesText(props.routes, props.courses, props.week);
+  const settled = text !== DELIVERY_COURSE_TEXT.allCounting;
+  return (
+    <p className="oyl-chooser__courses tw:mt-0">
+      <span role="status">{settled ? text : ''}</span>
+      <span aria-hidden="true">{settled ? '' : text}</span>
+    </p>
+  );
+}
+
 const DELIVERY_WEEK_ID = 'oyl-game-delivery-week';
 const DELIVERY_HINT_ID = 'oyl-game-delivery-hint';
+const DELIVERY_COURSE_ID = 'oyl-game-delivery-course';
 
 /**
  * Whether this ride runs a Delivery round — #1818. A switch, as the ghost,
  * the pacer and the wind beside it are, described by the week's progress and
  * by what a round is. Last in the loadout: it is the one choice that is about
  * the game rather than the ride's company or its air.
+ *
+ * Since #2294, where the chosen route cannot hold today's round, the switch
+ * says so beside it, before the press: the rider who has just switched the
+ * round on is told here, not only on the card above.
  */
-function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element {
+function DeliveryControl(props: {
+  readonly offer: DeliveryOffer;
+  /** #2294: the chosen route's line, with the round chosen and counted. */
+  readonly chosenCourse?: CourseLine | undefined;
+  /** #2362: the chosen card is a built-in level, whose round is its own houses. */
+  readonly onLevel?: boolean;
+}): JSX.Element {
+  const noRound = props.chosenCourse?.holds === false ? props.chosenCourse : undefined;
   return (
     <div className="oyl-game__delivery tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
       <label>
@@ -1148,18 +1643,27 @@ function DeliveryControl(props: { readonly offer: DeliveryOffer }): JSX.Element 
           type="checkbox"
           role="switch"
           checked={props.offer.chosen}
-          aria-describedby={`${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`}
+          aria-describedby={
+            noRound === undefined
+              ? `${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`
+              : `${DELIVERY_COURSE_ID} ${DELIVERY_WEEK_ID} ${DELIVERY_HINT_ID}`
+          }
           onChange={(event) => {
             props.offer.onChoose(event.target.checked);
           }}
         />
         {DELIVERY_CHOICE_TEXT.label}
       </label>
+      {noRound === undefined ? null : (
+        <p id={DELIVERY_COURSE_ID} className="oyl-game__problem tw:m-0">
+          {`${noRound.text}. ${DELIVERY_COURSE_TEXT.chosenNoRound}`}
+        </p>
+      )}
       <p id={DELIVERY_WEEK_ID} className="tw:m-0">
         {deliveryWeekText(props.offer.week)}
       </p>
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
-        {DELIVERY_CHOICE_TEXT.hint}
+        {props.onLevel === true ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}
       </p>
     </div>
   );
@@ -1177,13 +1681,25 @@ export const LAP_RACE_CHOICE_TEXT = {
     'Nothing in the race changes what your trainer is sent.',
   notALoop:
     'No lap race on this route: a lap race needs a loop, a route that ends where it starts.',
+  onCircuit:
+    'A built-in circuit is always a lap race against bots, picking up items round the lap. ' +
+    'Nothing in the race changes what your trainer is sent.',
   laps: 'Laps',
   bots: 'Bots',
   tier: 'How fast the bots ride',
   tierHint: (): string =>
     `${BOT_TIERS.map(
       (tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`,
-    ).join(', ')} watts per kilogram.`,
+    ).join(', ')} watts per kilogram, on average over a race.`,
+  /**
+   * Why a bot's figure in the race is not its tier's (#2329): the race plan
+   * (#1960, ADR 0061) saves on the flat and downhill and spends on climbs and
+   * in the sprint, and the standings show the tick's figure.
+   * `lap-race/bot-figure.test.ts` holds each clause to what the HUD shows.
+   */
+  tierLive:
+    'The figure beside a bot in the race moves around that: a bot saves a little on the flat ' +
+    'and more downhill, then spends it on climbs and in the final sprint.',
   items: 'Race with items',
   assistedOn: 'Your assisted race setting is on.',
   assistedOff: 'An assisted race setting can make a race easier.',
@@ -1202,6 +1718,11 @@ export const LAP_RACE_CHOICE_TEXT = {
 function LapRaceControl(props: {
   readonly offer: LapRaceOffer;
   readonly route: RidableRoute;
+  /**
+   * #2293: the route is a built-in circuit, which is always raced (ADR 0064
+   * D-8.1): no switch, the reason in words, and the race's choices shown.
+   */
+  readonly builtIn: boolean;
   readonly idPrefix: string;
 }): JSX.Element {
   const { offer } = props;
@@ -1219,22 +1740,30 @@ function LapRaceControl(props: {
   const counts = (most: number): number[] => Array.from({ length: most }, (_, index) => index + 1);
   return (
     <div className="oyl-game__lap-race tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
-      <label>
-        <input
-          type="checkbox"
-          role="switch"
-          checked={offer.chosen}
-          aria-describedby={id('hint')}
-          onChange={(event) => {
-            offer.onChoose(event.target.checked);
-          }}
-        />
-        {LAP_RACE_CHOICE_TEXT.label}
-      </label>
-      <p id={id('hint')} className="tw:m-0">
-        {LAP_RACE_CHOICE_TEXT.hint}
-      </p>
-      {offer.chosen ? (
+      {props.builtIn ? (
+        <p id={id('hint')} className="tw:m-0">
+          {LAP_RACE_CHOICE_TEXT.onCircuit}
+        </p>
+      ) : (
+        <>
+          <label>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={offer.chosen}
+              aria-describedby={id('hint')}
+              onChange={(event) => {
+                offer.onChoose(event.target.checked);
+              }}
+            />
+            {LAP_RACE_CHOICE_TEXT.label}
+          </label>
+          <p id={id('hint')} className="tw:m-0">
+            {LAP_RACE_CHOICE_TEXT.hint}
+          </p>
+        </>
+      )}
+      {offer.chosen || props.builtIn ? (
         <>
           <label htmlFor={id('laps')}>{LAP_RACE_CHOICE_TEXT.laps}</label>
           <select
@@ -1290,6 +1819,7 @@ function LapRaceControl(props: {
           <p id={id('tiers')} className="tw:m-0">
             {LAP_RACE_CHOICE_TEXT.tierHint()}
           </p>
+          <p className="tw:m-0">{LAP_RACE_CHOICE_TEXT.tierLive}</p>
           <label>
             <input
               type="checkbox"
@@ -1338,41 +1868,49 @@ function PacerControls(props: {
         />
         Ride against a pacer
       </label>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={PACER_INTENSITY_ID}>Pacer intensity, watts per kilogram</label>
-        <Stepper
-          name="pacer intensity"
-          step={0.1}
-          min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-          max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-        >
-          <input
-            id={PACER_INTENSITY_ID}
-            className="oyl-input"
-            type="number"
-            // `inputMode` rather than only `type`, because this is read and typed
-            // on a phone clamped to a handlebar: a decimal keypad is the
-            // difference between 2.5 and 25 at the moment a rider is setting up.
-            inputMode="decimal"
+      {/*
+        #2338: the box shows only while the pacer is on, the rule #2330 sets
+        for the wind boxes. `pacerChoice` never reads it with the switch off,
+        and what was typed survives off and on again because the value is
+        `GameView` state, not the input's own.
+      */}
+      {props.withPacer ? (
+        <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+          <label htmlFor={PACER_INTENSITY_ID}>Pacer intensity, watts per kilogram</label>
+          <Stepper
+            name="pacer intensity"
+            step={0.1}
             min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
             max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-            step={0.1}
-            value={props.intensity}
-            // ⚠️ **The two attributes that make the refusal part of the control
-            // rather than text near it — #255.** A `role="alert"` is announced
-            // once, when it appears. A rider who tabs *back* to this box
-            // afterwards heard "Pacer intensity, watts per kilogram, 70" and
-            // nothing about why nothing worked; `aria-describedby` is what makes
-            // the reason travel with the field, every time it is reached, and
-            // `aria-invalid` is what says the value in it is the problem.
-            aria-invalid={props.problem === undefined ? undefined : true}
-            aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
-            onChange={(event) => {
-              props.onIntensity(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
+          >
+            <input
+              id={PACER_INTENSITY_ID}
+              className="oyl-input"
+              type="number"
+              // `inputMode` rather than only `type`, because this is read and typed
+              // on a phone clamped to a handlebar: a decimal keypad is the
+              // difference between 2.5 and 25 at the moment a rider is setting up.
+              inputMode="decimal"
+              min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+              max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+              step={0.1}
+              value={props.intensity}
+              // ⚠️ **The two attributes that make the refusal part of the control
+              // rather than text near it — #255.** A `role="alert"` is announced
+              // once, when it appears. A rider who tabs *back* to this box
+              // afterwards heard "Pacer intensity, watts per kilogram, 70" and
+              // nothing about why nothing worked; `aria-describedby` is what makes
+              // the reason travel with the field, every time it is reached, and
+              // `aria-invalid` is what says the value in it is the problem.
+              aria-invalid={props.problem === undefined ? undefined : true}
+              aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
+              onChange={(event) => {
+                props.onIntensity(event.target.value);
+              }}
+            />
+          </Stepper>
+        </div>
+      ) : null}
       {/*
         ⚠️ `min`/`max` above are a hint to the browser and nothing more — they
         are trivially bypassed by typing, and they do not exist at all for the
@@ -1503,43 +2041,54 @@ function WindControls(props: {
         />
         Ride in a wind
       </label>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={WIND_SPEED_ID}>{`Wind speed, ${props.speedUnit}`}</label>
-        <Stepper name="wind speed" step={1} min={0}>
-          <input
-            id={WIND_SPEED_ID}
-            className="oyl-input"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step={0.1}
-            value={props.speed}
-            {...markedFor('speed')}
-            onChange={(event) => {
-              props.onSpeed(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
-      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        <label htmlFor={WIND_BEARING_ID}>Wind direction, degrees it blows from</label>
-        <Stepper name="wind direction" step={15} min={0} max={MAXIMUM_BEARING_DEGREES}>
-          <input
-            id={WIND_BEARING_ID}
-            className="oyl-input"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={MAXIMUM_BEARING_DEGREES}
-            step={1}
-            value={props.fromBearing}
-            {...markedFor('fromBearing')}
-            onChange={(event) => {
-              props.onFromBearing(event.target.value);
-            }}
-          />
-        </Stepper>
-      </div>
+      {/*
+        #2330: the two boxes are shown only while the switch is on. Off, the
+        speed box sat empty under it and read as a value the rider still owed;
+        `windChoice` reads neither box while no wind is asked for, so there is
+        nothing to show. What was typed survives a switch off and on again,
+        because the values live in `GameView`, not in these inputs.
+      */}
+      {props.withWind ? (
+        <>
+          <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+            <label htmlFor={WIND_SPEED_ID}>{`Wind speed, ${props.speedUnit}`}</label>
+            <Stepper name="wind speed" step={1} min={0}>
+              <input
+                id={WIND_SPEED_ID}
+                className="oyl-input"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.1}
+                value={props.speed}
+                {...markedFor('speed')}
+                onChange={(event) => {
+                  props.onSpeed(event.target.value);
+                }}
+              />
+            </Stepper>
+          </div>
+          <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+            <label htmlFor={WIND_BEARING_ID}>Wind direction, degrees it blows from</label>
+            <Stepper name="wind direction" step={15} min={0} max={MAXIMUM_BEARING_DEGREES}>
+              <input
+                id={WIND_BEARING_ID}
+                className="oyl-input"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={MAXIMUM_BEARING_DEGREES}
+                step={1}
+                value={props.fromBearing}
+                {...markedFor('fromBearing')}
+                onChange={(event) => {
+                  props.onFromBearing(event.target.value);
+                }}
+              />
+            </Stepper>
+          </div>
+        </>
+      ) : null}
       {/*
         Rendered only when there is a problem, which is what keeps every
         `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on

@@ -6,7 +6,9 @@
  *
  * `GameView` holds one {@link DeliveryRide} for a ride with Delivery on, and
  * this module is the whole of what it does with one: {@link startDeliveryRide}
- * at the press, {@link stepDeliveryRide} on every simulation step that ran,
+ * at the press — on a realistic ride, once its world has loaded or failed to (or the arrival window has lapsed),
+ * from where the rider is then (#2392, `GameView.tsx` §`deliveryWaitingRef`)
+ * — {@link stepDeliveryRide} on every simulation step that ran,
  * and {@link endDeliveryRide} when the round is over or the ride ends. It
  * composes the round (`round.ts`), the target pick (`targets.ts`), the throw
  * (`throw.ts`), the obstacles (`obstacles.ts`) and the lane steering
@@ -44,8 +46,13 @@
  * ran steps it ({@link stepDeliveryRide}) BEFORE the obstacles, and hands them
  * its offset as the rider's lateral. The same offset is what `scene.ts`
  * §`lateralOf` draws the rider at, exactly, so a crash is drawn as one
- * (#1853). It is held in memory for the round, as the rest is, and never
- * stored: a stored ride has no lateral field.
+ * (#1853). Since #2362 a parked car the rider hits moves them to its road
+ * side, so a crash into one is drawn as a crash and not as a ride through it
+ * (`obstacles.ts` §`clearOfParkedCars`): the steering's drawn offset only,
+ * never their lane, distance or speed. While they are held clear, the
+ * obstacles meet them in the lane they steer to, so the move scores no crash
+ * of its own. It is held in memory for the round, as the
+ * rest is, and never stored: a stored ride has no lateral field.
  *
  * ## A house is missed when its window has closed behind the rider
  *
@@ -91,6 +98,19 @@
  * ordinary one. With no round nothing is kept, so the week is as it was.
  * What the rider is told is `hud/delivery-announce.ts` §`TOO_FEW_HOUSES_TEXT`.
  *
+ * ## A round on a built-in level (#2362, ADR 0065)
+ *
+ * {@link DeliveryRideStart.level} is the level's round: its `houses` are the
+ * round's, in place of the week's, and its static hazards set the obstacles
+ * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
+ * standing. The assist still places fewer or none. A level round is kept
+ * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
+ * is never written to `delivery-progress.ts`. The level's throw window is not
+ * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
+ * may (`level-file.ts`), and the later levels that tighten it read it
+ * (#2367, which draws them). Its mailbox and no-delivery shares, weather and light are
+ * #2365's and #2366's.
+ *
  * ## Nothing here leaves the ride (DL11)
  *
  * The seed is drawn once at the press, handed to the pick and the
@@ -107,7 +127,10 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import type { LevelRound } from './levels/level-file';
 import {
+  clearOfParkedCars,
+  levelObstacleMix,
   placeObstacles,
   roundScore,
   startObstacles,
@@ -126,7 +149,7 @@ import {
   type RoundOutcome,
   type WeekProgress,
 } from './round';
-import { startSteer, stepSteer, type SteerState } from './steer';
+import { LANE_OFFSETS_METRES, startSteer, stepSteer, type SteerState } from './steer';
 import {
   drawRoundSeed,
   pickRoundTargets,
@@ -170,6 +193,8 @@ export interface DeliveryRide {
   readonly along: number;
   /** The round's end, once every house is settled or the ride has ended it. */
   readonly outcome: RoundOutcome | undefined;
+  /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
+  readonly onLevel: boolean;
 }
 
 /** What a round needs at the press. */
@@ -191,6 +216,17 @@ export interface DeliveryRideStart {
    * nothing outside Delivery's own modules reads the setting (#1813's test).
    */
   readonly storage: PreferenceStorage | undefined;
+  /**
+   * A built-in level's round (#2362, ADR 0065 D-4.1): its houses, its
+   * hazards for the obstacles, and the level's own stated length, which the
+   * obstacles' most is read off (`obstacles.ts` §`levelObstacleMix`): the
+   * file's `lengthMetres`, never the road as measured, so one length is used
+   * everywhere (review of PR #2378, round 6). Absent, the week's round on a
+   * rider's route.
+   */
+  readonly level?:
+    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & { readonly lengthMetres: number })
+    | undefined;
 }
 
 /**
@@ -210,7 +246,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       profile: input.profile,
       origin: input.origin,
       riderDistance: input.riderDistance,
-      houses: week.houses,
+      houses: input.level?.houses ?? week.houses,
     },
     seed,
   );
@@ -224,6 +260,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
     true,
+    input.level === undefined ? undefined : levelObstacleMix(input.level, input.level.lengthMetres),
   );
   return {
     week,
@@ -234,7 +271,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       side: target.side === 1 ? 'right' : 'left',
       clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
     })),
-    round: startRound(pick.targets.length, { assisted: assist.noFail, dayHouses: week.houses }),
+    round: startRound(pick.targets.length, {
+      assisted: assist.noFail,
+      dayHouses: input.level?.houses ?? week.houses,
+    }),
     throws: NO_PARCELS,
     obstacles,
     obstacleState: startObstacles(obstacles),
@@ -244,6 +284,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     steer: startSteer(input.lineOffset),
     along: input.riderDistance,
     outcome: undefined,
+    onLevel: input.level !== undefined,
   };
 }
 
@@ -330,11 +371,31 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
     steer = stepSteer(steer, DELIVERY_TICK_SECONDS);
+    // #2362: while held clear of a parked car already hit, the obstacles meet
+    // the rider in the lane they steer to, never at the move-aside's offset,
+    // so the move scores no crash of its own (review of PR #2378, round 3).
+    // ⚠️ Two couplings, each held by a test (round 4):
+    // - `held` is read AFTER the steering's step, so it is true only because
+    //   one tick's sideways step carries the rider from the moved offset back
+    //   past `PARKED_CAR_CLEARANCE_METRES` into the car's width. A clearance
+    //   larger than that step would make `held` flicker false
+    //   (`ride-round.test.ts` §"one tick's lane step").
+    // - While held, the rider is scored in their lane and drawn beside the car,
+    //   so an obstacle at the drawn place would pass through the drawn rider.
+    //   No generated round has one there: `placeObstacles` keeps neighbours at
+    //   least `OBSTACLE_SIGHT_METRES` (60 m) apart, and a hold lasts at most
+    //   the car's length and the bicycle's, about 6 m (`obstacles.test.ts`
+    //   §"no other obstacle within a parked car's hold").
+    const held =
+      clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) !== undefined;
+    const lateral = held ? (LANE_OFFSETS_METRES[steer.lane] as number) : steer.offset;
     const obstaclesNow = stepObstacles(obstacleState, {
-      rider: { along: at, lateral: steer.offset, speed: (at - before) / DELIVERY_TICK_SECONDS },
+      rider: { along: at, lateral, speed: (at - before) / DELIVERY_TICK_SECONDS },
       obstacles: ride.obstacles,
     });
     obstacleState = obstaclesNow.state;
+    // #2362: a parked car hit is drawn as a crash, the rider beside it, never through it.
+    steer = clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) ?? steer;
     before = at;
     if (outcome !== undefined) continue;
     for (const landing of thrownNow.landings) {
@@ -380,11 +441,15 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
 
 /**
  * Keep the week's counts for the next ride, from the round's end — counts
- * only (DL11, `delivery-progress.ts`). `false` when the device refused.
+ * only (DL11, `delivery-progress.ts`). `false` when the device refused, and
+ * when the round was a built-in level's, which keeps nothing of the week
+ * (#2362, ADR 0065 D-9.3).
  */
 export function keepDeliveryWeek(
   storage: PreferenceStorage | undefined,
   outcome: RoundOutcome,
+  ride?: Pick<DeliveryRide, 'onLevel'>,
 ): boolean {
+  if (ride?.onLevel === true) return false;
   return writeDeliveryProgress(storage, outcome.next);
 }

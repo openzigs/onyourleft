@@ -12,6 +12,7 @@ import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
+import type { Segments } from './segments/segments.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 import { SEALED_PATH } from '@onyourleft/domain';
@@ -150,6 +151,11 @@ export interface HandlerOptions {
    * answers `unavailable`.
    */
   readonly sidePose?: SidePose;
+  /**
+   * Published segments and their boards (#68). Absent, every route that needs
+   * them answers `unavailable`.
+   */
+  readonly segments?: Segments;
   /**
    * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
    * /v1/instance/keys` answers `unavailable`.
@@ -330,6 +336,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.sidePose === true && options.sidePose === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.segments === true && options.segments === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -373,6 +382,7 @@ export function createHandler(options: HandlerOptions): Handler {
       analysis: options.analysis,
       hostedSettings: options.hostedSettings,
       sidePose: options.sidePose,
+      segments: options.segments,
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,

@@ -506,6 +506,7 @@ describe('a private race — #785', () => {
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(3);
     await press('End ride');
+    await press('End ride');
     await settle();
     // Offered, and nothing asked: no list, no request.
     expect(document.body.textContent).toContain(RACE_LEFT_EARLY_TEXT);
@@ -549,6 +550,7 @@ describe('a private race — #785', () => {
     const { instance, sockets } = await inARace();
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(3);
+    await press('End ride');
     await press('End ride');
     await settle();
     // A restart interrupted the race: the instance says it is over, undecided.
@@ -603,6 +605,7 @@ describe('a private race — #785', () => {
     );
     expect(document.querySelector('ol')).toBeNull();
     await press('End ride');
+    await press('End ride');
     await settle();
     await settle();
     const rows = [...document.querySelectorAll('.oyl-race-result__rows li')].map(
@@ -642,6 +645,7 @@ describe('a private race — #785', () => {
     await sockets.say({ type: 'finish', order: [0, 2, 1] });
     await frame(2);
     expect(races).toEqual([]);
+    await press('End ride');
     await press('End ride');
     await settle();
     expect(races).toEqual([{ roomId: 'room-race', place: 3, finishers: 3 }]);

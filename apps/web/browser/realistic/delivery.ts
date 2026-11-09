@@ -35,7 +35,7 @@ export const DELIVERY_AHEAD_METRES = 10;
 export const DELIVERY_SPACING_METRES = 2;
 
 /** Every obstacle kind, in turn. `port.ts` §`DeliveryObstacleKind`. */
-const KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+const KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone', 'parked-car'];
 
 /** The centreline point nearest `along`, and the road's heading there. */
 function onRoad(

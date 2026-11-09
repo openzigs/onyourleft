@@ -19,10 +19,16 @@ import {
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  RIDE_CLOCK_LABEL,
+  RIDE_TOTAL_KEYS,
+  WATTS_PER_KILOGRAM_KEY,
+  ZONE_KEY,
   gapAgainst,
   givesWayToTheRoom,
   hudReadings,
   isDeliveryReading,
+  isEffortReading,
+  isRideTotalReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -40,6 +46,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilograms,
   metres,
   metresPerSecond,
   pacerGap,
@@ -667,6 +674,73 @@ describe('the gap to whatever the rider is chasing', () => {
   });
 });
 
+/** A straight road north, `kilometres` long, for a countdown past 100 — #2130. */
+function longInput(kilometres: number): HudInput {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= kilometres; index += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(10 + (index * 1000) / 111_320),
+        degreesLongitude(0),
+      ),
+      elevation: altitudeMetres(10),
+    });
+  }
+  const profile = routeProfile(points);
+  return {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 152, live: true },
+  };
+}
+
+/** `To go` with `left` metres still to ride on `input`'s route. */
+function toGoWith(input: HudInput, left: number, units: HudInput['units'] = 'metric') {
+  const total: number = input.profile.totalDistance;
+  return fieldNamed(
+    {
+      ...input,
+      units,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(0), distance: metres(total - left) },
+      },
+    },
+    'remaining',
+  );
+}
+
+describe('a long countdown drops to one decimal from 100 — #2130', () => {
+  // The owner's ruling of 2026-11-06: `139.82 km` filled its track on every
+  // tablet and `km` wrapped under it. From 100 km (or 100 mi) to go the
+  // countdown is one decimal, so it is never wider than `99.99`.
+  const long = longInput(340);
+
+  it('keeps two decimals at 99.99 km', () => {
+    expect(toGoWith(long, 99_990).value).toBe('99.99');
+  });
+
+  it('shows one decimal at 100.0 km', () => {
+    expect(toGoWith(long, 100_000).value).toBe('100.0');
+  });
+
+  it('shows one decimal at 199.9 km', () => {
+    expect(toGoWith(long, 199_900).value).toBe('199.9');
+  });
+
+  it('never shows 100.00: 99.996 km rounds into the one-decimal range', () => {
+    expect(toGoWith(long, 99_996).value).toBe('100.0');
+  });
+
+  it('is the same rule in miles: 99.99 mi, 100.0 mi and 199.9 mi', () => {
+    const mile = 1609.344;
+    expect(toGoWith(long, 99.99 * mile, 'imperial').value).toBe('99.99');
+    expect(toGoWith(long, 100 * mile, 'imperial').value).toBe('100.0');
+    expect(toGoWith(long, 199.9 * mile, 'imperial')).toMatchObject({ value: '199.9', unit: 'mi' });
+  });
+});
+
 describe('the HUD follows the rider\u2019s units (#238)', () => {
   // ⚠️ This is the screen the issue is named for. It converted and labelled
   // inline — `(state.ride.speed as number) * 3.6, 'km/h'` and
@@ -967,6 +1041,12 @@ describe('which readings are drawn large (#423)', () => {
       'movingTime',
       // #2072: and the elapsed time beside it (this ride has no clock).
       'elapsedTime',
+      // #2076: the ride so far, after the times and before every gap.
+      'distance',
+      'climbed',
+      'averagePower',
+      // #2077: the rider's W/kg (this ride has no threshold, so no zone).
+      'wattsPerKilogram',
       'gap-bot',
       'gap-ghost',
       'wind',
@@ -1201,14 +1281,44 @@ describe('the ride’s elapsed time and the time of day — #2072', () => {
     expect(field(input, ELAPSED_TIME_KEY)?.value).toBe('0:02:05');
   });
 
-  it('shows a dash with nothing recorded, and the word size past ten hours', () => {
-    for (const elapsedSeconds of [undefined, Number.NaN]) {
-      expect(field({ ...baseInput(), elapsedSeconds }, ELAPSED_TIME_KEY)?.value).toBe(NO_READING);
-    }
+  it('shows a dash for a figure that is not a number, and the word size past ten hours', () => {
+    expect(field({ ...baseInput(), elapsedSeconds: Number.NaN }, ELAPSED_TIME_KEY)?.value).toBe(
+      NO_READING,
+    );
     expect(field({ ...baseInput(), elapsedSeconds: 35_999 }, ELAPSED_TIME_KEY)?.word).toBe(
       undefined,
     );
     expect(field({ ...baseInput(), elapsedSeconds: 36_000 }, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  // #2382: where nothing records, the ride's own clock — never a dash, and
+  // never under the recorder's label.
+  it('shows the ride’s own clock, labelled Ride, where nothing is recorded — #2382', () => {
+    const base = baseInput();
+    const ride: HudInput = { ...base, state: { ...base.state, elapsed: seconds(1) } };
+    expect(field(ride, ELAPSED_TIME_KEY)).toEqual({
+      key: ELAPSED_TIME_KEY,
+      label: RIDE_CLOCK_LABEL,
+      value: '0:00:01',
+      unit: '',
+      stale: false,
+    });
+    expect(RIDE_CLOCK_LABEL).not.toBe('Elapsed');
+    // The moving time is never given the fallback: the recorder's, or a dash.
+    expect(field(ride, MOVING_TIME_KEY)?.value).toBe(NO_READING);
+    // Past ten hours, the word size, as the recorder's figure is.
+    const long: HudInput = { ...base, state: { ...base.state, elapsed: seconds(36_000) } };
+    expect(field(long, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  it('shows the recorder’s figure, labelled Elapsed, the moment a recording runs — #2382', () => {
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      elapsedSeconds: 0,
+    };
+    expect(field(input, ELAPSED_TIME_KEY)).toMatchObject({ label: 'Elapsed', value: '0:00:00' });
   });
 
   it('shows the time of day it is handed as HH:MM, labelled Clock, after the elapsed time', () => {
@@ -1276,12 +1386,18 @@ describe('the lap in progress — #1312', () => {
  * What a phone draws OUTSIDE the secondary grid: the moving time beside the
  * controls upright, or in the primary panel's clock row on its side (#1111),
  * and the elapsed time and the clock in that row (#2072, `theme.css`
- * §"THE CLOCK ROW").
+ * §"THE CLOCK ROW") — and, since #2076, what a phone does not draw at all:
+ * the ride so far, hidden by clip on a phone's overlay (`theme.css`
+ * §"THE RIDE SO FAR").
  */
 const LIFTED_ON_A_PHONE: ReadonlySet<string> = new Set([
   MOVING_TIME_KEY,
   ELAPSED_TIME_KEY,
   CLOCK_KEY,
+  ...RIDE_TOTAL_KEYS,
+  // #2077: and the rider's effort, given way where the ride so far is.
+  WATTS_PER_KILOGRAM_KEY,
+  ZONE_KEY,
 ]);
 
 describe('what gives way to a room’s readings on a phone — #1356', () => {
@@ -1452,6 +1568,7 @@ describe('the gradient, signed and primary — #2071', () => {
       unit: '%',
       stale: false,
       slope: 'up',
+      grade: 4.5,
     });
     expect(at(-2)).toMatchObject({ value: '-2.0', unit: '%', slope: 'down' });
     expect(at(12.46)?.value).toBe('+12.5');
@@ -1466,6 +1583,19 @@ describe('the gradient, signed and primary — #2071', () => {
     expect(at(-0.05)).toMatchObject({ value: '-0.1', slope: 'down' });
     expect(at(2.25)?.value).toBe('+2.3');
     expect(at(-2.25)?.value).toBe('-2.3');
+  });
+
+  /**
+   * #2291: the number `HudCore` bands the digits' colour by is the number the
+   * digits SHOW, so the colour never disagrees with what a rider reads: 2.96
+   * shows `+3.0`, a climb's first tenth, and is coloured as one.
+   */
+  it('carries the grade it shows, rounded as the digits are', () => {
+    expect(at(2.96)).toMatchObject({ value: '+3.0', grade: 3 });
+    expect(at(-2.96)).toMatchObject({ value: '-3.0', grade: -3 });
+    expect(at(12.46)?.grade).toBe(12.5);
+    // What shows as `0.0` is nought, not a negative zero.
+    expect(Object.is(at(-0.04)?.grade, 0)).toBe(true);
   });
 
   it('is the fourth primary reading, after heart rate and before speed', () => {
@@ -1488,5 +1618,165 @@ describe('the gradient, signed and primary — #2071', () => {
       state: { ...base.state, grade: gradePercent(3), input: { ...base.state.input, live: false } },
     };
     expect(hudReadings(dropped).find((reading) => reading.key === GRADIENT_KEY)?.stale).toBe(false);
+  });
+});
+
+/**
+ * #2076: *Distance*, *Climbed* and *Avg power* — formats of the recorder's
+ * figures and nothing else. That they ARE the recorder's, and equal the saved
+ * ride's, is `ride/controller.test.ts` §"#2076".
+ */
+describe('the ride so far — #2076', () => {
+  const totals = {
+    distance: metres(12_345),
+    climbed: metres(212.6),
+    averagePower: watts(187),
+  };
+  const shown = (input: Partial<HudInput>) =>
+    hudReadings({ ...baseInput(), ...input }).filter(isRideTotalReading);
+
+  it('shows the three after the times and before every gap, in this order', () => {
+    const keys = hudReadings({ ...baseInput(), rideTotals: totals }).map((each) => each.key);
+    const at = keys.indexOf('distance');
+    expect(keys.slice(at, at + 3)).toEqual(['distance', 'climbed', 'averagePower']);
+    expect(keys[at - 1]).toBe(ELAPSED_TIME_KEY);
+    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower']);
+    // Secondary, every one: a reading added here lands in the cheaper tier.
+    expect(shown({ rideTotals: totals }).map(readingTier)).toEqual([
+      'secondary',
+      'secondary',
+      'secondary',
+    ]);
+  });
+
+  it('formats the recorder’s figures in the rider’s units', () => {
+    expect(shown({ rideTotals: totals })).toEqual([
+      { key: 'distance', label: 'Distance', value: '12.3', unit: 'km', stale: false },
+      { key: 'climbed', label: 'Climbed', value: '213', unit: 'm', stale: false },
+      { key: 'averagePower', label: 'Avg power', value: '187', unit: 'W', stale: false },
+    ]);
+    expect(
+      shown({ rideTotals: totals, units: 'imperial' }).map((each) => [each.value, each.unit]),
+    ).toEqual([
+      ['7.7', 'mi'],
+      ['698', 'ft'],
+      ['187', 'W'],
+    ]);
+  });
+
+  it('shows a dash for each with nothing recorded, and never a zero', () => {
+    expect(shown({}).map((each) => [each.value, each.stale])).toEqual([
+      [NO_READING, false],
+      [NO_READING, false],
+      [NO_READING, false],
+    ]);
+  });
+
+  it('shows a dash for a climb nobody measured and a ride with no power, and the rest as they are', () => {
+    const indoor = { distance: metres(5_000), climbed: undefined, averagePower: undefined };
+    expect(shown({ rideTotals: indoor }).map((each) => each.value)).toEqual([
+      '5.0',
+      NO_READING,
+      NO_READING,
+    ]);
+  });
+
+  it('is never named a load metric', () => {
+    for (const reading of shown({ rideTotals: totals })) {
+      expect(reading.label).not.toMatch(/\b(NP|TSS|IF|CTL|ATL|TSB)\b/);
+    }
+  });
+});
+
+/**
+ * #2077: the rider's own W/kg and the zone indicator — formats of the weight
+ * the physics rides, the rider's own threshold and the recorder's time in
+ * zone. `GameView.test.tsx` §"#2077" holds the wiring.
+ */
+describe('the rider’s W/kg and power zone — #2077', () => {
+  const riding = (power: number, live = true) => {
+    const base = baseInput();
+    return { ...base, state: { ...base.state, input: { power: watts(power), live } } };
+  };
+  const effort = (input: HudInput) => hudReadings(input).filter(isEffortReading);
+  const zoneTime = {
+    perZone: [0, 600, 0, 300, 100, 0, 0].map((spent) => seconds(spent)),
+    covered: seconds(1000),
+  };
+
+  it('puts W/kg after the ride so far, then the zone, before every gap', () => {
+    const keys = hudReadings({
+      ...riding(300),
+      riderMass: kilograms(75),
+      thresholdPower: watts(250),
+    }).map((each) => each.key);
+    const at = keys.indexOf('averagePower');
+    expect(keys.slice(at + 1, at + 3)).toEqual([WATTS_PER_KILOGRAM_KEY, ZONE_KEY]);
+    expect(
+      effort({ ...riding(300), riderMass: kilograms(75), thresholdPower: watts(250) }).map(
+        readingTier,
+      ),
+    ).toEqual(['secondary', 'secondary']);
+  });
+
+  it('is the live power over the weight the physics rides, to one decimal', () => {
+    const [wkg] = effort({ ...riding(342), riderMass: kilograms(72) });
+    expect(wkg).toEqual({
+      key: WATTS_PER_KILOGRAM_KEY,
+      label: 'W/kg',
+      value: '4.8',
+      unit: '',
+      stale: false,
+    });
+  });
+
+  it('is a dash with no weight set — never a figure of the default weight', () => {
+    const [wkg] = effort(riding(342));
+    expect(wkg?.value).toBe(NO_READING);
+    expect(wkg?.stale).toBe(false);
+  });
+
+  it('is a dash, marked lost, when the power reading drops', () => {
+    const [wkg] = effort({ ...riding(342, false), riderMass: kilograms(72) });
+    expect([wkg?.value, wkg?.stale]).toEqual([NO_READING, true]);
+  });
+
+  it('draws no zone indicator at all with no threshold set', () => {
+    expect(effort({ ...riding(342), riderMass: kilograms(72) }).map((each) => each.key)).toEqual([
+      WATTS_PER_KILOGRAM_KEY,
+    ]);
+  });
+
+  it('names the zone of the rider’s own threshold by its number and its name', () => {
+    const zone = effort({
+      ...riding(342),
+      thresholdPower: watts(250),
+      powerZoneTime: zoneTime,
+    }).find((each) => each.key === ZONE_KEY);
+    // 342 W is 1.37 of 250 W: zone 6, from 1.21 to 1.51.
+    expect(zone).toMatchObject({ label: 'Zone', value: '6', detail: 'Anaerobic', stale: false });
+    expect(zone?.zone?.current).toBe(6);
+    // This ride's time in each zone, as shares of the time power was read.
+    expect(zone?.zone?.shares).toEqual([0, 0.6, 0, 0.3, 0.1, 0, 0]);
+  });
+
+  it('draws the zone at its edges as the Analysis screen classifies them', () => {
+    const at = (power: number) =>
+      effort({ ...riding(power), thresholdPower: watts(200) }).find((each) => each.key === ZONE_KEY)
+        ?.value;
+    // Zone 4 from 0.91 of threshold, inclusive; zone 5 from 1.06.
+    expect(at(181)).toBe('3');
+    expect(at(182)).toBe('4');
+    expect(at(212)).toBe('5');
+    expect(at(0)).toBe('1');
+  });
+
+  it('shows a dash and no name with the power reading lost, and an empty bar with nothing recorded', () => {
+    const zone = effort({ ...riding(342, false), thresholdPower: watts(250) }).find(
+      (each) => each.key === ZONE_KEY,
+    );
+    expect(zone?.value).toBe(NO_READING);
+    expect(zone?.detail).toBeUndefined();
+    expect(zone?.zone).toEqual({ current: undefined, shares: [] });
   });
 });
