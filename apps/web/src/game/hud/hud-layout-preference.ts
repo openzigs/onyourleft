@@ -23,6 +23,16 @@
  * controls, which `theme.css` §"THE HUD'S TEXT SIZE" applies where the layout
  * has room for it.
  *
+ * ## The arrangement — #2383
+ *
+ * Full or focus ({@link HUD_ARRANGEMENTS}). **Full** is every reading in its
+ * two tiers, as it always was, and is the default. **Focus** is one compact
+ * readout at the top: power, cadence and heart rate large, and the speed, the
+ * average power, the distance and the ride's time (#2382) smaller under them
+ * (`focus-readout.ts`). The route panel, the controls and the notices are the
+ * same in both; a room's, a Delivery round's or a lap race's own readings
+ * stay, beside it, because they are the ride itself.
+ *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
  */
@@ -41,14 +51,29 @@ export const HUD_TEXT_SIZES = ['normal', 'large', 'extra-large'] as const;
 /** One of {@link HUD_TEXT_SIZES}. */
 export type HudTextSize = (typeof HUD_TEXT_SIZES)[number];
 
+/** The arrangements, the default first — #2383. */
+export const HUD_ARRANGEMENTS = ['full', 'focus'] as const;
+
+/** One of {@link HUD_ARRANGEMENTS}. */
+export type HudArrangement = (typeof HUD_ARRANGEMENTS)[number];
+
 /** What the rider chose. */
 export interface HudLayoutPreference {
   /** The panels turned off. Empty by default: every panel is shown. */
   readonly hidden: readonly HudPanelId[];
   readonly textSize: HudTextSize;
+  /**
+   * Full or focus — #2383. Absent is `full`, so a preference kept before
+   * #2383 (which has no such field) reads as the HUD it always drew.
+   */
+  readonly arrangement?: HudArrangement;
 }
 
-export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = { hidden: [], textSize: 'normal' };
+export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
+  hidden: [],
+  textSize: 'normal',
+  arrangement: 'full',
+};
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
 export const HUD_LAYOUT_STORAGE_KEY = 'oyl.hudLayout.v1';
@@ -59,6 +84,10 @@ function isPanel(value: unknown): value is HudPanelId {
 
 function isTextSize(value: unknown): value is HudTextSize {
   return typeof value === 'string' && (HUD_TEXT_SIZES as readonly string[]).includes(value);
+}
+
+function isArrangement(value: unknown): value is HudArrangement {
+  return typeof value === 'string' && (HUD_ARRANGEMENTS as readonly string[]).includes(value);
 }
 
 /**
@@ -80,6 +109,7 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
   return {
     hidden,
     textSize: isTextSize(row['textSize']) ? row['textSize'] : DEFAULT_HUD_LAYOUT.textSize,
+    arrangement: isArrangement(row['arrangement']) ? row['arrangement'] : 'full',
   };
 }
 
@@ -103,4 +133,9 @@ export function writeHudLayout(
 /** Whether a panel is shown under this preference. */
 export function panelShown(preference: HudLayoutPreference, panel: HudPanelId): boolean {
   return !preference.hidden.includes(panel);
+}
+
+/** Whether the HUD draws #2383's focus readout under this preference. */
+export function focusArrangement(preference: HudLayoutPreference): boolean {
+  return preference.arrangement === 'focus';
 }

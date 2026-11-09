@@ -72,7 +72,8 @@ import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { RecentGraph } from './RecentGraph';
-import { DEFAULT_HUD_LAYOUT, panelShown } from './hud-layout-preference';
+import { focusReadings } from './focus-readout';
+import { DEFAULT_HUD_LAYOUT, focusArrangement, panelShown } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 
@@ -172,6 +173,32 @@ export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
 };
 
 /**
+ * The focus readout's two lists' accessible names — #2383, as
+ * {@link PANEL_NAMES} names each tier.
+ */
+export const FOCUS_NAMES = {
+  main: 'Power, cadence and heart rate',
+  more: 'Speed, average power, distance and ride time',
+} as const;
+
+/**
+ * Whether a reading is a mode's own — a room's, a Delivery round's, a lap
+ * race's — which is the ride itself rather than a reading of it.
+ *
+ * #2383: **a ride with any keeps the full arrangement**, whatever the rider
+ * chose. Every one of those layouts — a race's standings, the room's row, a
+ * round's houses and its map credit — is fitted around the two tiers' own
+ * heights at each viewport, and the focus readout in their place put a panel
+ * over the leaning rider on an upright phone and the standings over the
+ * controls on the 4:3 tablet (`ride-hud-layout.browser.spec.ts` §"#2383",
+ * measured). A mode is chosen before the ride and held for it, so the
+ * arrangement never changes under a rider mid-ride.
+ */
+function isModeReading(reading: HudReading): boolean {
+  return isRoomReading(reading) || isDeliveryReading(reading) || isLapRaceReading(reading);
+}
+
+/**
  * What stays of the secondary tier when a rider turns its readings off —
  * #2079: the ride's three times (drawn beside the controls and in the primary
  * panel's clock row on most layouts) and whatever the ride's mode is about —
@@ -183,9 +210,7 @@ function keptWithReadingsHidden(reading: HudReading): boolean {
     reading.key === MOVING_TIME_KEY ||
     reading.key === ELAPSED_TIME_KEY ||
     reading.key === CLOCK_KEY ||
-    isRoomReading(reading) ||
-    isDeliveryReading(reading) ||
-    isLapRaceReading(reading)
+    isModeReading(reading)
   );
 }
 
@@ -194,6 +219,9 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
   // #2079: the rider's own choice of panels and text size, as the ride began.
   const layout = props.layout ?? DEFAULT_HUD_LAYOUT;
+  // #2383: the focus readout in place of the two tiers, on a ride with no
+  // mode of its own. @see isModeReading
+  const focus = focusArrangement(layout) && !all.some(isModeReading);
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
@@ -235,11 +263,14 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   return (
     <section
       ref={hud}
-      className={
-        layout.textSize === 'normal' ? 'oyl-hud' : `oyl-hud oyl-hud--text-${layout.textSize}`
-      }
+      className={[
+        'oyl-hud',
+        ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
+        ...(focus ? ['oyl-hud--focus'] : []),
+      ].join(' ')}
       aria-label="Ride metrics"
       data-oyl-hud-text={layout.textSize}
+      data-oyl-hud-arrangement={focus ? 'focus' : 'full'}
     >
       {/*
         A description list, because that is what these are: a label and its
@@ -256,8 +287,15 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         order, and a sighted rider finds each where `fields.ts` §`ReadingTier`
         says it is.
       */}
-      <FieldList tier="primary" readings={readings} />
-      <FieldList tier="secondary" readings={readings} />
+      {focus ? (
+        // #2383: one compact readout in place of the two tiers.
+        <FocusReadout readings={readings} />
+      ) : (
+        <>
+          <FieldList tier="primary" readings={readings} />
+          <FieldList tier="secondary" readings={readings} />
+        </>
+      )}
 
       {/*
         #2079: the route panel holds the strip and the plan, and the recent
@@ -557,6 +595,66 @@ function fieldClass(reading: HudReading): string {
   ].join(' ');
 }
 
+/**
+ * One reading: its label and its value, as the description list `HudPanel`
+ * explains. Shared by the two tiers and by #2383's focus readout, so a reading
+ * is drawn the same way wherever it is.
+ */
+function Field(props: { readonly reading: HudReading }): JSX.Element {
+  const { reading } = props;
+  return (
+    <div
+      className={fieldClass(reading)}
+      data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
+    >
+      <dt className="oyl-hud__label">{reading.label}</dt>
+      <dd
+        className={
+          // #259. A word does not fit the slot a number fits — the class
+          // is what sets it smaller, and `fields.ts` §`HudReading.word`
+          // is the measurement behind it.
+          reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
+        }
+      >
+        <Value reading={reading} />
+        {reading.unit === '' ? null : (
+          <span className="oyl-hud__unit">
+            {' '}
+            {reading.unit}
+            {reading.slope === undefined ? null : (
+              <SlopeGlyph
+                slope={reading.slope}
+                band={reading.grade === undefined ? undefined : bandOf(reading)}
+              />
+            )}
+          </span>
+        )}
+        {reading.detail === undefined ? null : (
+          // ⚠️ Inside the `dd`, not beside it. A screen reader announces
+          // one definition per term, so a phrase in a sibling element
+          // would be read as loose text after the reading rather than as
+          // part of it — and #255's first defect is precisely that the
+          // number and the words describing it were heard as one thing
+          // while meaning another. `fields.ts` §`HudReading.detail` says
+          // why the phrase is not folded into the value instead.
+          <span className="oyl-hud__detail"> {reading.detail}</span>
+        )}
+        {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
+        {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
+        {reading.stale ? (
+          // ⚠️ Words, not only a tint. #94's second criterion is that a
+          // dropped sensor be distinguishable from a zero — and a rider
+          // who cannot see the tint, or is looking at a screen washed out
+          // by sunlight, gets the distinction from this line and from the
+          // dash beside it. The colour is the third signal, not the only
+          // one.
+          <span className="oyl-hud__stale"> Sensor lost</span>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
 /** One tier's readings, as the description list `HudPanel` explains. */
 function FieldList(props: {
   readonly tier: ReadingTier;
@@ -569,58 +667,33 @@ function FieldList(props: {
       aria-label={PANEL_NAMES[props.tier]}
     >
       {mine.map((reading) => (
-        <div
-          key={reading.key}
-          className={fieldClass(reading)}
-          data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
-        >
-          <dt className="oyl-hud__label">{reading.label}</dt>
-          <dd
-            className={
-              // #259. A word does not fit the slot a number fits — the class
-              // is what sets it smaller, and `fields.ts` §`HudReading.word`
-              // is the measurement behind it.
-              reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
-            }
-          >
-            <Value reading={reading} />
-            {reading.unit === '' ? null : (
-              <span className="oyl-hud__unit">
-                {' '}
-                {reading.unit}
-                {reading.slope === undefined ? null : (
-                  <SlopeGlyph
-                    slope={reading.slope}
-                    band={reading.grade === undefined ? undefined : bandOf(reading)}
-                  />
-                )}
-              </span>
-            )}
-            {reading.detail === undefined ? null : (
-              // ⚠️ Inside the `dd`, not beside it. A screen reader announces
-              // one definition per term, so a phrase in a sibling element
-              // would be read as loose text after the reading rather than as
-              // part of it — and #255's first defect is precisely that the
-              // number and the words describing it were heard as one thing
-              // while meaning another. `fields.ts` §`HudReading.detail` says
-              // why the phrase is not folded into the value instead.
-              <span className="oyl-hud__detail"> {reading.detail}</span>
-            )}
-            {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
-            {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
-            {reading.stale ? (
-              // ⚠️ Words, not only a tint. #94's second criterion is that a
-              // dropped sensor be distinguishable from a zero — and a rider
-              // who cannot see the tint, or is looking at a screen washed out
-              // by sunlight, gets the distinction from this line and from the
-              // dash beside it. The colour is the third signal, not the only
-              // one.
-              <span className="oyl-hud__stale"> Sensor lost</span>
-            ) : null}
-          </dd>
-        </div>
+        <Field key={reading.key} reading={reading} />
       ))}
     </dl>
+  );
+}
+
+/**
+ * #2383's focus readout: one panel, two description lists — the three large
+ * readings, and the four smaller ones under them (`focus-readout.ts`). Two
+ * lists rather than one so each row is named, as each tier is, and a screen
+ * reader meets them in the order a sighted rider reads them.
+ */
+function FocusReadout(props: { readonly readings: readonly HudReading[] }): JSX.Element {
+  const { main, more } = focusReadings(props.readings);
+  return (
+    <div className="oyl-hud__panel oyl-hud__focus">
+      <dl className="oyl-hud__fields oyl-hud__focus-main" aria-label={FOCUS_NAMES.main}>
+        {main.map((reading) => (
+          <Field key={reading.key} reading={reading} />
+        ))}
+      </dl>
+      <dl className="oyl-hud__fields oyl-hud__focus-more" aria-label={FOCUS_NAMES.more}>
+        {more.map((reading) => (
+          <Field key={reading.key} reading={reading} />
+        ))}
+      </dl>
+    </div>
   );
 }
 

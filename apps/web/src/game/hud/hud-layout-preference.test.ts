@@ -12,8 +12,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_HUD_LAYOUT,
+  HUD_ARRANGEMENTS,
   HUD_LAYOUT_STORAGE_KEY,
   HUD_PANELS,
+  focusArrangement,
   panelShown,
   readHudLayout,
   writeHudLayout,
@@ -34,7 +36,8 @@ describe('the HUD layout preference (#2079)', () => {
       true,
     );
     const read = readHudLayout(localStorage);
-    expect(read).toEqual({ hidden: ['route', 'graph'], textSize: 'large' });
+    // #2383: a choice written with no arrangement reads back as the full HUD.
+    expect(read).toEqual({ hidden: ['route', 'graph'], textSize: 'large', arrangement: 'full' });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
   });
@@ -66,5 +69,32 @@ describe('the HUD layout preference (#2079)', () => {
     };
     expect(writeHudLayout(full, DEFAULT_HUD_LAYOUT)).toBe(false);
     expect(writeHudLayout(undefined, DEFAULT_HUD_LAYOUT)).toBe(false);
+  });
+});
+
+describe('the focus arrangement (#2383)', () => {
+  it('is full until the rider chooses, and full is the default', () => {
+    expect(HUD_ARRANGEMENTS).toEqual(['full', 'focus']);
+    expect(readHudLayout(localStorage).arrangement).toBe('full');
+    expect(focusArrangement(DEFAULT_HUD_LAYOUT)).toBe(false);
+  });
+
+  it('keeps focus on the device and reads it back, beside the other choices', () => {
+    expect(
+      writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'large', arrangement: 'focus' }),
+    ).toBe(true);
+    const read = readHudLayout(localStorage);
+    expect(read).toEqual({ hidden: ['graph'], textSize: 'large', arrangement: 'focus' });
+    expect(focusArrangement(read)).toBe(true);
+  });
+
+  it('reads a preference kept before #2383, or an arrangement it does not know, as full', () => {
+    localStorage.setItem(
+      HUD_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ hidden: [], textSize: 'normal' }),
+    );
+    expect(readHudLayout(localStorage).arrangement).toBe('full');
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ arrangement: 'minimal' }));
+    expect(focusArrangement(readHudLayout(localStorage))).toBe(false);
   });
 });

@@ -13035,3 +13035,105 @@ select.oyl-input {
   inline-size: var(--oyl-pairing-code-span);
   margin-inline: calc((100% - var(--oyl-pairing-code-span)) / 2);
 }
+
+/* ==========================================================================
+ * THE FOCUS READOUT — #2383.
+ *
+ * The rider's other choice in Settings → Ride HUD (`hud-layout-preference.ts`
+ * §"The arrangement"): one panel in place of the two tiers, the three a rider
+ * steers by large in its first row and the speed, the average power, the
+ * distance and the ride's time (#2382) smaller in its second
+ * (`focus-readout.ts`). The same fields as the full HUD's, so a value, a unit,
+ * a dash and *Sensor lost* are drawn as they are there, at the two tiers'
+ * own sizes: a primary value over a secondary one, visibly larger (#423's
+ * 1.5 : 1, `ride-stage.ts` §`layoutFaults`).
+ *
+ * WHERE IT IS DRAWN. Centred across the top of the stage, where nothing else
+ * stands: the notices are the row under it, the route and the controls the
+ * bottom corners, and the leaning rider starts half-way down the frame
+ * (`camera.ts` §`riderFrameBox`). A ride with a mode of its own — a room, a
+ * Delivery round, a lap race — keeps the full arrangement (`HudCore.tsx`
+ * §`isModeReading` says why), so nothing else shares the top row with it.
+ * `ride-hud-layout.browser.spec.ts` §"#2383" lays it out at every overlay
+ * viewport, on a plain ride and in a workout, both ways (#1120).
+ * ========================================================================== */
+.oyl-hud__focus {
+  display: grid;
+  gap: var(--oyl-space-sm);
+}
+
+/* Two lists inside one panel: the panel is the margin and the padding. */
+.oyl-hud__focus > .oyl-hud__fields {
+  margin: 0;
+}
+
+.oyl-hud__focus-main {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.oyl-hud__focus-more {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.oyl-hud__focus-more .oyl-hud__value {
+  font-size: 1.5rem;
+}
+
+.oyl-hud__focus-more .oyl-hud__unit {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* A narrow phone: the large row's units go under their numbers, as the
+   primary tier's do (§"A narrow phone"), and the small row is two by two —
+   four 1.5 rem tracks in 360 px are 75 px, and `9:59:59` is wider. */
+@media (max-width: 24rem) {
+  .oyl-hud__focus-main .oyl-hud__unit {
+    display: block;
+  }
+
+  .oyl-hud__focus-more {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The corners layouts: the readout spans the top row and is centred on it. */
+@media (min-width: 46rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__focus {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    align-self: start;
+    justify-self: center;
+    width: min(100%, 30rem);
+  }
+}
+
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__focus {
+    grid-area: primary;
+  }
+}
+
+/* A tablet: the tiers' tablet sizes (§"#2130"), and room for them. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__focus-main .oyl-hud__value {
+    font-size: 3.815rem;
+  }
+
+  .oyl-game--riding .oyl-hud__focus-more .oyl-hud__value {
+    font-size: 2.45rem;
+  }
+
+  .oyl-game--riding .oyl-hud__focus {
+    width: min(100%, 44rem);
+  }
+
+  /* The rider's text size, on the large row only, as on the primary tier
+     (§"THE HUD'S TEXT SIZE"). */
+  .oyl-game--riding .oyl-hud--text-large .oyl-hud__focus-main .oyl-hud__value {
+    font-size: 4.375rem;
+  }
+
+  .oyl-game--riding .oyl-hud--text-extra-large .oyl-hud__focus-main .oyl-hud__value {
+    font-size: 5rem;
+  }
+}
