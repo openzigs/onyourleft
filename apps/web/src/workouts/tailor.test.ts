@@ -20,6 +20,7 @@ import {
   previewRow,
   previewRows,
   repeatsIn,
+  rideName,
   TAILOR_LENGTHS,
   tailorFromDraft,
   tailorOffer,
@@ -267,6 +268,24 @@ describe('the name a copy is saved under — #2305', () => {
     );
     expect(copyName(SWEET_SPOT, 3600, { ...EMPTY_TAILOR_DRAFT, intensity: '3' })).toBe(
       'Sweet spot, three by twelve (1 h, +3%)',
+    );
+  });
+});
+
+describe('the name a built-in is ridden under — #2306, #2351', () => {
+  it('is the template’s alone for a length with no intensity, so the length is said once', () => {
+    // The Ride screen says the length beside the name (the ruling of 2026-11-07 (a)).
+    expect(rideName(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, length: '45' })).toBe(
+      'Sweet spot, three by twelve',
+    );
+    expect(rideName(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, length: '45', intensity: '' })).toBe(
+      'Sweet spot, three by twelve',
+    );
+  });
+
+  it('carries any intensity, and still no length', () => {
+    expect(rideName(SWEET_SPOT, { ...EMPTY_TAILOR_DRAFT, length: '45', intensity: '3' })).toBe(
+      'Sweet spot, three by twelve (+3%)',
     );
   });
 });

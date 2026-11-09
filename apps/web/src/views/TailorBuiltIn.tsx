@@ -93,6 +93,14 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
     undefined,
   );
   const [saveFailed, setSaveFailed] = useState(false);
+  /*
+   * #2351: the rider has typed in the Repeats box since a length was last
+   * chosen. Until they do, an empty box shows the count the length chose;
+   * once they do, it holds what they typed, empty included, as every other
+   * number box does — so backspace then 4 is 4, not the chosen count with a 4
+   * after it.
+   */
+  const [repeatsTyped, setRepeatsTyped] = useState(false);
   // A press while a save is in flight must not write a second copy.
   const saving = useRef(false);
   const ids = {
@@ -126,6 +134,8 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
         ? { ...chosen, repeats: initial.repeats }
         : chosen;
     setDraft(next);
+    if (control === 'repeats') setRepeatsTyped(true);
+    if (control === 'length') setRepeatsTyped(false);
     setSaved(undefined);
     setSaveFailed(false);
     const outcome = tailorFromDraft(card.template, next, thresholds.heartRate);
@@ -164,10 +174,11 @@ export function TailorBuiltIn({ card, thresholds, onSaveCopy }: TailorBuiltInPro
   /*
    * A chosen length chose the repeats (`withChoice` emptied the box), so the
    * box shows the count the preview has: a value, never an empty box beside a
-   * workout that has one.
+   * workout that has one — until the rider types in it (#2351). An empty box
+   * they made is not refused: the length still chooses the workout.
    */
   const repeatsShown =
-    draft.repeats === '' && draft.length !== ''
+    draft.repeats === '' && draft.length !== '' && !repeatsTyped
       ? String(repeatsIn(card.template, valid.workout) ?? '')
       : draft.repeats;
 
