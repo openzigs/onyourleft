@@ -884,9 +884,11 @@ export const RIDE_CLOCK_LABEL = 'Ride';
  * clock, stall included — under the label
  * {@link RIDE_CLOCK_LABEL}, never `Elapsed`.
  *
- * ⚠️ **One figure or the other, never both, and the label says which.** The
- * recorder's figure counts the pauses and the ride's clock does not, so the
- * two would disagree after the first pause; a rider who reads `Elapsed` reads
+ * ⚠️ **One figure or the other, never both, and the label says which.** Both
+ * count a pause, but they are not the same clock: the recorder's starts when
+ * the recording does and moves only on the instants the recording is told
+ * about, while the ride's starts at the ride's first step and moves on the
+ * wall clock, so the two would disagree. A rider who reads `Elapsed` reads
  * what the saved activity will say, and `Ride` is only ever on a ride that
  * saves nothing to disagree with.
  *
