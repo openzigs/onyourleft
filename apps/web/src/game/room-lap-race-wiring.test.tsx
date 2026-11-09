@@ -328,8 +328,7 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
       await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo });
       for (let index = 0; index < FRAMES; index += 1) await pump();
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       mounted?.unmount();
       mounted = undefined;
 
@@ -525,8 +524,7 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
       });
       await pump();
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       mounted?.unmount();
       mounted = undefined;
     }
@@ -555,8 +553,7 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     });
     await pump();
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     expect(kept).toHaveLength(1);
     expect(kept[0]).toMatchObject({
       roomId: 'room-1',

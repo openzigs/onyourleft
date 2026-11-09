@@ -603,8 +603,7 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
     keptRiding: readDeliveryProgress(localStorage),
   };
   await clickThrough(buttonStarting('End ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
   const stored = JSON.parse(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? '{}') as object;
   const result: RideResult = {
     ...read,
@@ -791,8 +790,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     // No house passed, so none is delivered or missed, and a mis-pressed End
     // ride does not reset the week to a fresh one (`round.ts` §`endRound`).
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
@@ -821,8 +819,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(Number(houses?.value)).toBeGreaterThan(0);
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     // The week the device keeps differs from the one it held: the passed house is missed.
     expect(readDeliveryProgress(localStorage)).toEqual({
       day: WEEK.day + 1,
@@ -865,8 +862,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
       expect(said).not.toContain(text);
     }
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
   });
 
@@ -1284,8 +1280,7 @@ describe('a steering controller inside a game ride — #1827', () => {
         },
       });
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Non-vacuity: the whole script played, its burst included, and the
       // controller moved the rider off the shadow's lanes.
       expect(rig.controller.sent()).toHaveLength(47);
@@ -1336,8 +1331,7 @@ describe('a steering controller inside a game ride — #1827', () => {
     await rideARound([], handed);
     expect(listening).toBe(1);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     expect(listening).toBe(0);
   });
 });
@@ -1614,8 +1608,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
       // Every house passed with no throw, so each of the three missed, as the HUD says.
       expect(field('Houses')).toEqual({ value: '0', detail: '0\u00a0delivered, 3\u00a0missed' });
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Tomorrow: the day's eight less the three missed, not the round's three less three,
       // which would have left none and ended the week. Read back by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
@@ -1772,8 +1765,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
       expect(notices()).not.toContain(other);
       expect(said).not.toContain(other);
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // The week as it was, read back from the device by the real reader.
       expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     },
@@ -1801,8 +1793,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
         detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
       });
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // No fail: tomorrow's round keeps all three houses. Without the assist,
       // three misses of three would leave none, and end the week.
       expect(readDeliveryProgress(localStorage)).toEqual({

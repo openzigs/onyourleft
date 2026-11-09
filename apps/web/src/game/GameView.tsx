@@ -100,6 +100,7 @@ import {
   NO_GAME_TRAINER,
   trainerRoadNotice,
   trainerRoadPromise,
+  type GameNotRecordedReason,
   type GameTrainer,
   type GameTrainerPort,
 } from './trainer-port';
@@ -683,6 +684,43 @@ function roomRouteId(roomId: string): string {
  */
 export const STANDING_NOTICE_SECONDS = 15;
 
+/**
+ * What the ride's HUD says when the press of *Ride* could not start the
+ * recording under it — #2381, the owner's ruling of 2026-11-08 (item 3).
+ *
+ * `GameTrainerPort.recordGameRide` answers `false` whenever the ride
+ * controller's `canStartNewRide` refuses, and since round 3 (the review of
+ * 4f726fde) each cause is said as itself, from `whyNotRecording`
+ * (`trainer-port.ts` §`notRecordedReason`), in the Ride screen's own words for
+ * that state (`RideView.tsx` §`StoppedNotice`, §`StorageNotice`):
+ *
+ * - `still-saving` — the ride before is stopping or its save is running.
+ *   **Approved by the owner, 2026-11-08.**
+ * - `not-saved` — its save failed: the Ride screen's "could not be added to
+ *   your activities". ⚠️ Draft wording for the owner (round 3).
+ * - `device-full` — the Ride screen's *Device full*, "no room left".
+ *   ⚠️ Draft wording for the owner (round 3).
+ * - `checkpoint-failed` — the Ride screen's "the last checkpoint did not save,
+ *   so its final seconds are only in this tab". ⚠️ Draft (round 3).
+ * - `failed` — it threw, or refused with none of those causes: no reason is
+ *   claimed. **Approved by the owner, 2026-11-08.**
+ */
+export const RIDE_NOT_RECORDED_TEXT = {
+  label: 'Not recording',
+  'still-saving':
+    'This ride is not being recorded, because the ride before it is not finished saving.',
+  'not-saved':
+    'This ride is not being recorded, because the ride before it could not be added to your activities. It is still on this device, on the Ride screen.',
+  'device-full':
+    'This ride is not being recorded, because this device has no room left. Free some space; the ride before it is on the Ride screen.',
+  'checkpoint-failed':
+    'This ride is not being recorded, because the last seconds of the ride before it did not save. They are only in this tab: do not close it.',
+  failed: 'This ride is not being recorded: a recording could not be started on this device.',
+} as const;
+
+/** Why this ride's recording did not start, if it did not — #2381. @see RIDE_NOT_RECORDED_TEXT */
+type NotRecordedAs = GameNotRecordedReason | 'failed';
+
 /** How the last game ride was ended, as the picker says it — #2349. */
 type RideEndedAs = 'saved' | 'not-saved' | 'discarded' | 'not-deleted' | 'not-recorded';
 
@@ -773,13 +811,6 @@ const ONE_NOTICE_ONLY_QUERY = '(min-width: 22.5rem) and (width < 25rem) and (min
  * region says a waiting move's sentence (`replan-text.ts`).
  */
 const REPLANS_OFF_SAID = `${REPLAN_LABEL}: ${REPLANS_OFF}`;
-
-/** Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names. `false` with no `matchMedia`. */
-function oneNoticeOnly(): boolean {
-  return (
-    typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
-  );
-}
 
 /** What there is to watch with no trainer port: nothing, and nothing to stop. */
 function watchNothing(): () => void {
@@ -915,7 +946,7 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
 }
 
 /**
- * {@link oneNoticeOnly}, kept current — #693's re-review.
+ * Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names, kept current — #693's re-review.
  *
  * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
  * every frame, but a PAUSED one does not, so a rider who paused and turned a
@@ -924,12 +955,39 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
  * keep off the rider. The `change` event re-renders the HUD by itself.
  */
 function useOneNoticeOnly(): boolean {
-  const [matches, setMatches] = useState(oneNoticeOnly);
+  return useMediaMatch(ONE_NOTICE_ONLY_QUERY);
+}
+
+/**
+ * Whether this window is a phone's — #2381, the owner's ruling of 2026-11-08
+ * on PR #2390's round 3: *"the road notice gives way to Not recording only
+ * where space is short (phones). On a tablet both notices show."* A phone is
+ * a window whose shorter side is 30 rem (480 px) or less, the line the
+ * browser gate draws between its phone and tablet viewports
+ * (`ride-stage.ts` §`TABLET_VIEWPORTS`); both of a phone's layouts, corners
+ * on its side and column upright, have no free cell for a second notice
+ * (`theme.css` §"WHERE THERE IS NO FREE CELL").
+ */
+const SHORT_OF_SPACE_QUERY = '(max-width: 30rem), (max-height: 30rem)';
+
+/** {@link SHORT_OF_SPACE_QUERY}, kept current, for {@link useOneNoticeOnly}'s reason. */
+function useShortOfSpace(): boolean {
+  return useMediaMatch(SHORT_OF_SPACE_QUERY);
+}
+
+/**
+ * A media query's answer, subscribed rather than read during render — #693's
+ * re-review, for {@link useOneNoticeOnly}. `false` with no `matchMedia`.
+ */
+function useMediaMatch(query: string): boolean {
+  const [matches, setMatches] = useState(
+    () => typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
+  );
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
       return undefined;
     }
-    const list = window.matchMedia(ONE_NOTICE_ONLY_QUERY);
+    const list = window.matchMedia(query);
     const changed = (): void => {
       setMatches(list.matches);
     };
@@ -939,7 +997,7 @@ function useOneNoticeOnly(): boolean {
     return () => {
       list.removeEventListener('change', changed);
     };
-  }, []);
+  }, [query]);
   return matches;
 }
 
@@ -1457,8 +1515,24 @@ function GameScreen({
    * never said. It is offered on every frame until the core returns it.
    */
   const mayStopSaidRef = useRef(false);
+  /**
+   * Why this ride is not being recorded, where the press of *Ride* could not
+   * start its recording — #2381. Set in `begin`, cleared by the next ride.
+   * The HUD shows it for the ride's first {@link STANDING_NOTICE_SECONDS}, the
+   * road notice's time open (#437), and then gives the cell back: the dashed
+   * *Moving* stays for the rest of the ride.
+   */
+  const [notRecorded, setNotRecorded] = useState<NotRecordedAs | undefined>(undefined);
+  /**
+   * Its sentence, owed to the HUD's one region until said — #2381, on #647's
+   * rule (@see mayStopSaidRef): offered on every frame but the road notice's,
+   * until the core returns it, and then never again this ride.
+   */
+  const notRecordedOwedRef = useRef<string | undefined>(undefined);
   /** @see useOneNoticeOnly */
   const narrowUpright = useOneNoticeOnly();
+  /** #2381, round 4. @see SHORT_OF_SPACE_QUERY */
+  const shortOfSpace = useShortOfSpace();
   /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
@@ -2217,6 +2291,35 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
+      // #2381, the owner's ruling of 2026-11-08: a game ride is RECORDED by
+      // default, through the one way the game starts a recording
+      // (`trainer-port.ts` §`recordGameRide`, the ride controller's
+      // `recordForRoom`): a recording or paused ride carries on, an idle
+      // controller starts one. Nothing is lost by it — *End ride* asks whether
+      // to save or discard (#2349). Absent with no ride controller, and on a
+      // simulated ride or a preview, which are handed no trainer port
+      // (`useSimulatedRide`), so those still record nothing. A ride in a room
+      // records once the room lets the rider in (#785, N6), not here.
+      // Awaited BEFORE the course line below, so a course's first lap is the
+      // recording's. A start that fails or throws leaves the ride unrecorded,
+      // as one with no recording was before: the ride still starts.
+      // #2381 (the owner's ruling, item 3): a start that fails is SAID, on
+      // the HUD's notice cell and once through its one region.
+      let unrecorded: NotRecordedAs | undefined;
+      if (roomId === undefined && props.trainer?.recordGameRide !== undefined) {
+        try {
+          unrecorded = (await props.trainer.recordGameRide())
+            ? undefined
+            : (props.trainer.whyNotRecording?.() ?? 'failed');
+        } catch {
+          unrecorded = 'failed';
+        }
+        // #509: the rider may have left while the recording started. It runs
+        // on, as one started on the Ride screen does, which is where it is.
+        if (unmountedRef.current) {
+          return;
+        }
+      }
       // #2362, the owner's ruling of 2026-11-08 on PR #2378: a built-in level
       // rides in the realistic world for this ride only, whatever Settings
       // chose, and the choice is never written. Where that world cannot load,
@@ -2359,6 +2462,12 @@ function GameScreen({
       planDiscardedSaidRef.current = trainerPortRef.current?.workoutPlanDiscarded?.();
       replansOffOwedRef.current = false;
       mayStopSaidRef.current = false;
+      // #2381: this ride's own answer, and never the last ride's.
+      setNotRecorded(unrecorded);
+      notRecordedOwedRef.current =
+        unrecorded === undefined
+          ? undefined
+          : `${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT[unrecorded]}`;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -2966,6 +3075,11 @@ function GameScreen({
       } else if (!noticeThisFrame && !mayStopSaidRef.current) {
         events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
       }
+      // #2381: this ride is not being recorded — owed until said, once, and
+      // not on the road notice's frame, for the eased sentence's reason above.
+      if (!noticeThisFrame && notRecordedOwedRef.current !== undefined) {
+        events.push({ kind: 'not-recording', text: notRecordedOwedRef.current });
+      }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
       //
@@ -3150,6 +3264,9 @@ function GameScreen({
       }
       if (heard.kind === 'screen-off-risk') {
         mayStopSaidRef.current = true;
+      }
+      if (heard.kind === 'not-recording') {
+        notRecordedOwedRef.current = undefined;
       }
       if (heard.kind === 'lap-ended') {
         lapOwedRef.current = undefined;
@@ -3586,10 +3703,15 @@ function GameScreen({
    */
   const askToEnd = (): void => {
     setEndAsk('ask');
-    const savable = props.trainer?.rideRecording?.()?.savable === true;
-    setAnnouncement(
-      `${END_RIDE_TEXT.askLabel} ${savable ? END_RIDE_TEXT.ask : END_RIDE_TEXT.askNothingRecorded}`,
-    );
+    const under = props.trainer?.rideRecording?.();
+    // #2381: with no recording under the ride, nothing is saved or deleted.
+    const sentence =
+      under === undefined
+        ? END_RIDE_TEXT.askNotRecorded
+        : under.savable
+          ? END_RIDE_TEXT.ask
+          : END_RIDE_TEXT.askNothingRecorded;
+    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${sentence}`);
   };
   /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
   const keepRiding = (): void => {
@@ -3630,7 +3752,16 @@ function GameScreen({
    * its part lap reach the recording (`gameRideEnded`, `courseLine`) before it
    * is saved with them.
    */
-  const endRide = (answer: 'save' | 'discard'): void => {
+  const endRide = (answer: 'save' | 'discard' | 'end'): void => {
+    // #2381's review (round 3): *End ride*, the one-step answer for a ride
+    // with nothing recorded, NEVER discards. A recording that turned up
+    // since the question was drawn (a room reaching `joined` fires
+    // `recordRoomRide`) is asked about afresh — *Save ride*, or *Discard
+    // ride* with the owner's warning — and nothing ends on this press.
+    if (answer === 'end' && props.trainer?.rideRecording?.() !== undefined) {
+      askToEnd();
+      return;
+    }
     // #785: a race the room said is over has a result, shown on the
     // picker once the ride has ended — and only then. A race the rider
     // left while it ran has one too, kept for them: the picker offers
@@ -3903,8 +4034,33 @@ function GameScreen({
   // the ride, it is about the hills rather than about the ride being lost, and
   // it comes back the moment the recording service does. Everywhere else it
   // behaves exactly as it does without the refusal.
+  // #2381: this ride is not being recorded — for its first
+  // STANDING_NOTICE_SECONDS, the road notice's own time open (#437).
+  //
+  // ⚠️ Round 3 (the review of 4f726fde), measured: **in its tallest stack —
+  // the longest cause, the road notice and #647's *Keep the screen on* — the
+  // cell ran off a phone in landscape** (844×390, 736×360), pushing *Pause*
+  // and *End ride* below the stage, and upright at 360×752 it ended 34 px
+  // above the rider. So, #585's and #693's trade again:
+  // - while it stands ON A PHONE (@see SHORT_OF_SPACE_QUERY: the owner's
+  //   ruling on round 3, "only where space is short"), the road notice is not
+  //   on the HUD, its control included. That notice was said at the start of
+  //   the ride and is about the hills; this one is about the ride not being
+  //   kept. It comes back, in whatever state the rider's choice and the
+  //   ride's clock give it, once this one has gone. On a tablet both show:
+  //   measured, the stack clears everything there.
+  // - on the narrowest upright phones while the ride may stop with the screen
+  //   off (@see ONE_NOTICE_ONLY_QUERY), the cell holds that one sentence,
+  //   which is never put away, and this one is off the HUD. It is still SAID
+  //   once (`not-recording` is in `announce.ts` §`ALWAYS_SPOKEN`), and the
+  //   dashed *Moving* stays.
+  // `ride-notices.browser.spec.ts` §"#2381" measures both, both ways.
+  const notRecordedShown =
+    notRecorded !== undefined &&
+    (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS &&
+    !(mayStop && narrowUpright);
   const roadNotice =
-    eased === undefined && !(mayStop && narrowUpright)
+    eased === undefined && !(mayStop && narrowUpright) && !(notRecordedShown && shortOfSpace)
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
@@ -4187,6 +4343,9 @@ function GameScreen({
               className="oyl-end-ride oyl-end-ride--hud"
               step={endAsk}
               canSave={recordedUnder?.savable === true}
+              // #2381: with nothing recorded, one step: *End ride* or
+              // *Keep riding*, and no deletion to warn of.
+              recorded={recordedUnder !== undefined}
               // Opened by a press — *End ride*, or back — every time.
               focusOnOpen
               // The HUD's ONE region says it (#445): @see askToEnd
@@ -4200,6 +4359,10 @@ function GameScreen({
               }}
               onConfirmDiscard={() => {
                 endRide('discard');
+              }}
+              // #2381, round 3: its own answer, which never discards.
+              onEnd={() => {
+                endRide('end');
               }}
               onKeepRiding={keepRiding}
             />
@@ -4325,6 +4488,21 @@ function GameScreen({
           voiceLink?.place === 'notice' ? (
             <VoiceNotice key="voice" invite={voiceLink.invite} />
           ) : undefined,
+          // #2381: the press of *Ride* could not start this ride's recording
+          // — said, with the controller's reason where it gave one, rather
+          // than left to a dashed *Moving*. Before #647's, in `announce.ts`'s
+          // order (`not-recording` is rank 5a⁗). Not `live`: the HUD's one
+          // region says it, once. For STANDING_NOTICE_SECONDS of ride, the
+          // world notice's rule, so on a phone it gives the route panel's
+          // cell back (#437); and, since round 3, what it gives way to and
+          // what gives way to it: @see notRecordedShown.
+          // `ride-notices.browser.spec.ts` §"#2381" measures it at every
+          // overlay viewport, over no ride control, in its tallest stack.
+          !notRecordedShown || notRecorded === undefined ? undefined : (
+            <StatusMessage key="not-recorded" tone="warning" label={RIDE_NOT_RECORDED_TEXT.label}>
+              {RIDE_NOT_RECORDED_TEXT[notRecorded]}
+            </StatusMessage>
+          ),
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.
@@ -4404,13 +4582,14 @@ function startOf(
  * side camera* while there is something to stop. `undefined` with no pairing.
  */
 /**
- * What the chooser says about the ride being saved — #1221. @see RecordingOffer
+ * What the chooser says about the ride being saved — #1221, #2381. @see RecordingOffer
  *
  * `undefined` with no trainer port, which only a test or harness renders:
  * production always hands one over (`main.tsx` §`buildGameTrainerPort`), even
  * with no ride controller. A ride is recorded exactly when the recorder has a
  * moving time to give (`GameTrainerPort.rideMovingSeconds`: recording or
- * paused), which is the figure the HUD's *Moving* shows.
+ * paused), which is the figure the HUD's *Moving* shows; and since #2381 the
+ * press of *Ride* starts one wherever the port can (`begin`).
  */
 function recordingOfferOf(
   trainer: GameTrainerPort | undefined,
@@ -4421,12 +4600,7 @@ function recordingOfferOf(
   }
   return {
     recorded: movingSeconds !== undefined,
-    // ⚠️ A call, not a bound reference, so `WIRE003` sees the port's method
-    // called by production.
-    onRecord:
-      trainer.recordGameRide === undefined
-        ? undefined
-        : async () => (await trainer.recordGameRide?.()) ?? false,
+    records: trainer.recordGameRide !== undefined,
   };
 }
 

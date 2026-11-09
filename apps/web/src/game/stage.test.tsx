@@ -199,8 +199,7 @@ describe('the stage — #423', () => {
   it('goes when the ride ends', async () => {
     await ride();
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
 
     expect(stage()).toBeNull();
     expect(button('Ride ')).toBeDefined();
@@ -224,8 +223,7 @@ describe('the shell is told who has the screen — #423', () => {
     expect(heard).toEqual([true]);
 
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
     expect(heard).toEqual([true, false]);
   });
 
@@ -299,8 +297,7 @@ describe('a canvas that changes shape reaches the renderer — #423', () => {
     expect(live).toBeGreaterThan(0);
 
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
 
     expect(disconnected).toBe(live);
   });

@@ -306,13 +306,13 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
       // The credit, for the whole of the ride (D-6.5).
       expect(creditless).toBe(0);
 
-      // Ended and discarded: the week is as it was (D-9.3).
+      // Ended (nothing records here, so #2381's one-step question): the week is as it was (D-9.3).
       await click(
         queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find((button) =>
           (button.textContent ?? '').startsWith('End ride'),
         ),
       );
-      await click(endRideAnswer(document, 'Discard ride'));
+      await click(endRideAnswer(document, 'End ride'));
       expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     },
   );

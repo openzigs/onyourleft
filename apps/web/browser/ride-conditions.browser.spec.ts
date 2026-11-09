@@ -1072,6 +1072,8 @@ test('#2034 the folded road notice does not count — the ride so far comes back
 const END_STEPS = [
   ['the question', '?end=asked', ['Keep riding', 'Save ride', 'Discard ride']],
   ['its discard step', '?end=discard', ['Discard ride', 'Keep riding']],
+  // #2381: over a ride with nothing recorded, one step and no deletion.
+  ['its one step with nothing recorded', '?end=unrecorded', ['Keep riding', 'End ride']],
 ] as const;
 
 for (const [step, query, answers] of END_STEPS) {

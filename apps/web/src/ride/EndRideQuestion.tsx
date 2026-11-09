@@ -18,6 +18,12 @@
  *   one sample) is offered *Keep riding* and *Discard ride* only.
  * - **`discard`** — asked once more, because discarding is the one answer that
  *   deletes the device copy (ADR 0036 D-3): *Keep riding* and *Discard ride*.
+ * - **Nothing recorded under the ride at all** (`recorded` false, #2381: a
+ *   simulated ride, a preview, a ride whose recording could not start) —
+ *   *Keep riding* and *End ride*, ONE step. There is nothing to save and
+ *   nothing to delete, so neither answer is offered and nothing is asked
+ *   twice; the one question stays, so a stray press or back does not end the
+ *   ride.
  *
  * ## Keep riding is the default, and that is behaviour rather than a style
  *
@@ -89,12 +95,36 @@ export const END_RIDE_TEXT = {
   discardLabel: 'Discard this ride?',
   /** The `discard` step — the owner's sentence (#2349, item 2). */
   discardWarning: 'This ride will be deleted from this device. It can’t be undone.',
+  /**
+   * The `ask` step's sentence for a ride with NO recording under it (#2381,
+   * the owner's 2026-11-08 comment): a simulated ride, a preview, a ride whose
+   * recording could not start. Nothing is saved or deleted, so neither *Save
+   * ride* nor the deletion warning would be true. On both surfaces, after
+   * {@link END_RIDE_TEXT.askLabel}. ⚠️ Draft wording for the owner.
+   */
+  askNotRecorded: 'Nothing is being recorded, so nothing is saved or deleted.',
+  /** That step's one answer that ends the ride (#2381). */
+  end: 'End ride',
 } as const;
 
 export interface EndRideQuestionProps {
   readonly step: EndRideStep;
   /** Whether *Save ride* is offered: something is recorded to save. */
   readonly canSave: boolean;
+  /**
+   * Whether anything is recorded under the ride, so that *Discard ride*
+   * deletes something. False (#2381): the question is one step, *Keep
+   * riding* and *End ride*, which calls {@link onEnd} — there is no deletion
+   * to warn of or confirm. Absent is true, which is every Ride-screen use.
+   */
+  readonly recorded?: boolean;
+  /**
+   * The one-step *End ride* (#2381, round 3): ends a ride with nothing
+   * recorded under it. ⚠️ Never a discard — the surface re-checks at the
+   * press and asks afresh if a recording has turned up since. Required
+   * wherever {@link recorded} can be false; absent, *End ride* is not offered.
+   */
+  readonly onEnd?: () => void;
   readonly onSave: () => void;
   /** The `ask` step's *Discard ride*: asks once more. */
   readonly onDiscard: () => void;
@@ -145,17 +175,23 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
 
   const discarding = props.step === 'discard';
   const hud = props.surface === 'hud';
+  // #2381: nothing under the ride to save or delete — one step, see above.
+  const unrecorded = props.recorded === false && props.onEnd !== undefined;
   const label = discarding ? END_RIDE_TEXT.discardLabel : END_RIDE_TEXT.askLabel;
   const sentence = discarding
     ? END_RIDE_TEXT.discardWarning
-    : props.canSave
-      ? END_RIDE_TEXT.ask
-      : END_RIDE_TEXT.askNothingRecorded;
+    : unrecorded
+      ? END_RIDE_TEXT.askNotRecorded
+      : props.canSave
+        ? END_RIDE_TEXT.ask
+        : END_RIDE_TEXT.askNothingRecorded;
   const hudSentence = discarding
     ? END_RIDE_TEXT.discardWarning
-    : props.canSave
-      ? undefined
-      : END_RIDE_TEXT.hudNothingRecorded;
+    : unrecorded
+      ? END_RIDE_TEXT.askNotRecorded
+      : props.canSave
+        ? undefined
+        : END_RIDE_TEXT.hudNothingRecorded;
   return (
     <div className={props.className} role="group" aria-label={label} data-oyl-end-ride={props.step}>
       {props.surface === 'ride-screen' ? (
@@ -197,7 +233,11 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
         >
           {END_RIDE_TEXT.keep}
         </Button>
-        {discarding ? null : (
+        {discarding ? null : unrecorded ? (
+          <Button variant="secondary" size="ride" touchLockExempt={hud} onClick={props.onEnd}>
+            {END_RIDE_TEXT.end}
+          </Button>
+        ) : (
           <>
             {props.canSave ? (
               <Button variant="secondary" size="ride" touchLockExempt={hud} onClick={props.onSave}>

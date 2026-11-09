@@ -368,24 +368,36 @@ export interface GameTrainerPort {
    */
   recordRoomRide?(): Promise<boolean>;
   /**
-   * The rider pressed *Record this ride* on the game's chooser — #1221. A
-   * game ride is recorded only by the Ride screen's recording (`RideSession`,
-   * above the router), so a rider who rode the game with none running lost
-   * the ride with only a dash to show for it; the chooser now says so under
-   * *Ride* and offers this. The ride controller's own `recordForRoom` — the
-   * one way a game starts a recording, so the two cannot drift apart: a
-   * recording or paused ride carries on, an idle controller starts one, and a
-   * stopped ride whose save is done is put away first. Answers whether a
-   * recording is now running.
+   * The rider pressed *Ride* on the game's chooser, for a ride in no room —
+   * #2381, the owner's ruling of 2026-11-08: a game ride is recorded by
+   * default (#1221 offered *Record this ride* instead). A game ride is
+   * recorded only by the Ride screen's recording (`RideSession`, above the
+   * router), so a rider who rode the game with none running lost the ride
+   * with only a dash to show for it. The ride controller's own
+   * `recordForRoom` — the one way a game starts a recording, so the two
+   * cannot drift apart: a recording or paused ride carries on, an idle
+   * controller starts one, and a stopped ride whose save is done is put away
+   * first. Answers whether a recording is now running. *End ride* asks
+   * whether to save it or discard it (#2349).
    *
    * ⚠️ **Absent where there is no ride controller** (Safari, Firefox, plain
    * HTTP: `main.tsx` §`buildGameTrainerPort`), and that absence is what the
-   * chooser reads to say this browser cannot record rather than offer a
-   * control that would do nothing. Not about the trainer: on this port for
+   * chooser reads to say this browser cannot record. A simulated ride and a
+   * preview are handed no port at all (`GameView.tsx` §`useSimulatedRide`),
+   * so they never reach this. Not about the trainer: on this port for
    * {@link gameRideEnded}'s reason, and named so nothing else in production
    * calls a method of that name. Writes nothing to the trainer.
    */
   recordGameRide?(): Promise<boolean>;
+  /**
+   * Why {@link recordGameRide} answered `false`, read from the ride
+   * controller at that moment — #2381's review (round 3). The controller's
+   * `recordForRoom` refuses whenever `canStartNewRide` does, and that is more
+   * than one cause; the HUD says the true one (`GameView.tsx`
+   * §`RIDE_NOT_RECORDED_TEXT`). `undefined` where the controller states none
+   * of them, and the HUD then claims no reason. @see notRecordedReason
+   */
+  whyNotRecording?(): GameNotRecordedReason | undefined;
   /**
    * A ride in a private race ended, and this is what its room said of the
    * race — #785: kept with the recording and saved with the ride
@@ -590,6 +602,10 @@ interface GameTrainerSource {
     readonly courseLapSeconds?: number | undefined;
     /** #2076. @see GameTrainerPort.rideTotals */
     readonly totals?: RideTotals | undefined;
+    /** #2381, round 3. @see notRecordedReason. Optional for {@link keepAliveFailed}'s reason. */
+    readonly storage?: string;
+    readonly stopping?: boolean;
+    readonly saveState?: string;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -627,6 +643,44 @@ interface GameTrainerSource {
   confirmStop?(): Promise<void>;
   armDiscard?(): void;
   confirmDiscard?(): Promise<boolean>;
+}
+
+/**
+ * Why the ride controller refused to start a recording for a game ride — #2381,
+ * round 3. Each is a cause `canStartNewRide` refuses on (`ride/controller.ts`),
+ * and each has the Ride screen's own sentence for the same state
+ * (`views/RideView.tsx` §`StoppedNotice`, §`StorageNotice`).
+ */
+export type GameNotRecordedReason =
+  /** The ride before is stopping, or its save is still running. */
+  | 'still-saving'
+  /** The ride before could not be added to the activities (`saveState` `failed`). */
+  | 'not-saved'
+  /** The device has no room left (`storage` `quota-exceeded`). */
+  | 'device-full'
+  /** The ride before's last checkpoint did not save (`storage` `failed`). */
+  | 'checkpoint-failed';
+
+/**
+ * {@link GameNotRecordedReason} from a ride controller's snapshot — #2381,
+ * round 3. In the Ride screen's own order (`StoppedNotice`): the storage
+ * first, because a ride whose last seconds are only in this tab is the case a
+ * rider must not misread as "wait"; then a save still running; then a save
+ * that failed. `undefined` unless the ride before is stopped — nothing else
+ * makes `recordForRoom` refuse — or where the snapshot says none of these.
+ */
+export function notRecordedReason(snapshot: {
+  readonly phase?: RidePhase;
+  readonly storage?: string;
+  readonly stopping?: boolean;
+  readonly saveState?: string;
+}): GameNotRecordedReason | undefined {
+  if (snapshot.phase !== 'stopped') return undefined;
+  if (snapshot.storage === 'quota-exceeded') return 'device-full';
+  if (snapshot.storage !== undefined && snapshot.storage !== 'ok') return 'checkpoint-failed';
+  if (snapshot.stopping === true || snapshot.saveState === 'saving') return 'still-saving';
+  if (snapshot.saveState === 'failed') return 'not-saved';
+  return undefined;
 }
 
 /** Whether a source's workout says enough to draw — the ride controller's always does. */
@@ -722,8 +776,13 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       controller?.noteGameRideEnded(outcome);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
-    // #1221: offered only where something can record. @see GameTrainerPort.recordGameRide
+    // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide
     ...(recordFor === undefined ? {} : { recordGameRide: () => recordFor() }),
+    // #2381, round 3: why it refused, from the same controller.
+    whyNotRecording: () => {
+      const snapshot = controller?.getSnapshot();
+      return snapshot === undefined ? undefined : notRecordedReason(snapshot);
+    },
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
     },

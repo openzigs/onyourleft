@@ -496,8 +496,7 @@ async function rideOnce(race: LapRaceChoice | undefined): Promise<RideResult> {
   });
   const read = { said: [...said], inputs: seen, fields: raceFields(), standings: midRace };
   await clickThrough(buttonStarting('End ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
   mounted?.unmount();
   mounted = undefined;
   return { ...read, writes, drawn, reached: [...reached] };
@@ -656,8 +655,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       await rideTheTrace({ race: RACE, frames: 70 });
       expect(raceFields()[0]).toMatch(/Lap 2 of 2/u);
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       // Back on the picker: no race on the screen, and no frame asked for.
       expect(raceFields()).toEqual([]);
       expect(buttonStarting('Ride ')).toBeDefined();
@@ -673,8 +671,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       expect(fields).toHaveLength(2);
       expect(fields[0]).toMatch(/Lap 1 of 2/u);
       await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
       for (let index = 0; index < 5; index += 1) await settle();
       expect(rejected).toEqual([]);
     } finally {

@@ -57,7 +57,7 @@
  */
 
 import { Check, Info } from 'lucide-react';
-import { useId, useRef, useState, type JSX, type RefObject } from 'react';
+import { useId, useState, type JSX } from 'react';
 
 import {
   BOT_TIER_WATTS_PER_KILOGRAM,
@@ -162,25 +162,26 @@ const WIND_SPEED_ID = 'oyl-game-wind-speed';
 const WIND_BEARING_ID = 'oyl-game-wind-bearing';
 
 /**
- * What the chooser says under *Ride* about the ride being saved — #1221.
+ * What the chooser says under *Ride* about the ride being saved — #1221, #2381.
  *
  * ⚠️ **A game ride is saved only if the Ride screen's recording is running
  * under it** (`trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`): the game
- * draws a ride and records none of its own. A rider who rode the game with no
- * recording running ended with no activity and only the HUD's dashed *Moving*
- * to say why. So with none running the chooser says, in words, before the
- * press, that this ride will not be saved, and offers the one control that
- * records it.
+ * draws a ride and records none of its own. Since #2381 (the owner's ruling of
+ * 2026-11-08) the press of *Ride* starts that recording wherever a ride
+ * controller can (`GameTrainerPort.recordGameRide`), and *End ride* asks
+ * whether to save or discard it (#2349). So the chooser says, in words,
+ * before the press, that the press records — or, where nothing can record,
+ * that this ride will not be saved.
  */
 export interface RecordingOffer {
   /** Whether a ride is in progress — recording or paused — under the game. */
   readonly recorded: boolean;
   /**
-   * Start a recording under the game: `GameTrainerPort.recordGameRide`.
-   * Answers whether one is now running. `undefined` where nothing can record
-   * (no ride controller), and the line then says so instead of offering it.
+   * Whether pressing *Ride* starts a recording: the port has
+   * `GameTrainerPort.recordGameRide`. `false` where nothing can record (no
+   * ride controller: Safari, Firefox, plain HTTP), and the line says so.
    */
-  readonly onRecord: (() => Promise<boolean>) | undefined;
+  readonly records: boolean;
 }
 
 /**
@@ -471,8 +472,6 @@ export function routeFacts(profile: RouteProfile, units: UnitSystem): string {
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */
 export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const ids = useId();
-  // #1221: where focus goes when *Record this ride* is pressed and goes away.
-  const rideRef = useRef<HTMLButtonElement>(null);
   if (props.routes === undefined) {
     return <p>Loading your routes…</p>;
   }
@@ -687,7 +686,6 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           */}
           <Button
             size="ride"
-            ref={rideRef}
             // #509: unavailable while the trainer is being asked, as well
             // as while a box refuses. The click is not guarded on `asking`
             // here — `GameView` §`startingRef` refuses it, so the refusal
@@ -754,9 +752,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           has, and a rider with no recording running — most riders, at this
           screen — would otherwise have one more above it on every phone.
         */}
-        {props.recording === undefined ? undefined : (
-          <RecordingLine offer={props.recording} rideRef={rideRef} />
-        )}
+        {props.recording === undefined ? undefined : <RecordingLine offer={props.recording} />}
       </div>
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
@@ -1213,67 +1209,47 @@ export const NOT_RECORDING_TEXT =
 /** ...and where nothing CAN record: no ride controller in this browser — #1221. */
 export const CANNOT_RECORD_TEXT = 'This browser cannot record a ride.';
 
-/** What it says once *Record this ride* has started a recording — #1221. */
-export const RECORDING_STARTED_TEXT =
-  'This ride is being recorded. Stop and save it on the Ride screen when you finish.';
+/**
+ * What it says where the press of *Ride* records the ride — #2381. It names
+ * the end-of-ride question's two answers (`ride/EndRideQuestion.tsx`), so the
+ * rider knows before the press that an unwanted ride is theirs to discard.
+ */
+/** The label before it — the owner's ruling of 2026-11-08 on #2381 (it replaced "Recorded"). */
+export const RECORDING_ON_LABEL = 'Recording on';
 
-/** What it says when the press could not start one — #1221. */
-export const RECORDING_REFUSED_TEXT = 'A recording could not be started. The Ride screen says why.';
+export const RECORDS_ON_RIDE_TEXT =
+  'Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.';
 
 /**
- * The line under *Ride* about the ride being saved — #1221. @see RecordingOffer
+ * The line under *Ride* about the ride being saved — #1221, #2381. @see RecordingOffer
  *
- * Nothing at all while a ride is recording that this line did not start: the
- * HUD's *Moving* time is the recording's, and the rider started it on the Ride
- * screen, where they will stop it. Once *Record this ride* has started one,
- * the line says where it is saved, `live`, because it is a change the rider
- * caused — and focus goes to *Ride*, since the control pressed is gone (WCAG
- * 2.2 SC 2.4.3).
+ * Nothing at all while a ride is already recording or paused: the HUD's
+ * *Moving* time is the recording's, the press carries it on, and the rider
+ * started it on the Ride screen. Otherwise one sentence, before the press:
+ * that the press records the ride, or — where nothing can — that it will not
+ * be saved. #1221's *Record this ride* is gone: with the press recording, an
+ * unwanted ride is discarded at its end rather than declined at its start.
  */
-function RecordingLine(props: {
-  readonly offer: RecordingOffer;
-  readonly rideRef: RefObject<HTMLButtonElement | null>;
-}): JSX.Element | null {
-  const id = useId();
-  const [answer, setAnswer] = useState<'started' | 'refused' | undefined>(undefined);
-  const { recorded, onRecord } = props.offer;
+function RecordingLine(props: { readonly offer: RecordingOffer }): JSX.Element | null {
+  const { recorded, records } = props.offer;
   if (recorded) {
-    return answer === 'started' ? (
-      <StatusMessage tone="success" label="Recording" live>
-        {RECORDING_STARTED_TEXT}
-      </StatusMessage>
-    ) : null;
+    return null;
   }
   return (
     <div className="oyl-chooser__recording">
-      <p className="tw:m-0" id={id}>
-        <span className="oyl-chooser__recording-label">Not recording</span>
-        {' · '}
-        {NOT_RECORDING_TEXT}
-        {onRecord === undefined ? ` ${CANNOT_RECORD_TEXT}` : undefined}
-      </p>
-      {onRecord === undefined ? undefined : (
-        <Button
-          variant="secondary"
-          describedBy={id}
-          onClick={() => {
-            void onRecord().then((started) => {
-              setAnswer(started ? 'started' : 'refused');
-              if (started) {
-                props.rideRef.current?.focus();
-              }
-            });
-          }}
-        >
-          Record this ride
-        </Button>
-      )}
-      {answer === 'refused' ? (
-        // Polite, not an alert: nothing here pre-empts (#394).
-        <p className="tw:m-0" role="status">
-          {RECORDING_REFUSED_TEXT}
+      {records ? (
+        <p className="tw:m-0">
+          <span className="oyl-chooser__recording-label">{RECORDING_ON_LABEL}</span>
+          {' · '}
+          {RECORDS_ON_RIDE_TEXT}
         </p>
-      ) : undefined}
+      ) : (
+        <p className="tw:m-0">
+          <span className="oyl-chooser__recording-label">Not recording</span>
+          {' · '}
+          {NOT_RECORDING_TEXT} {CANNOT_RECORD_TEXT}
+        </p>
+      )}
     </div>
   );
 }

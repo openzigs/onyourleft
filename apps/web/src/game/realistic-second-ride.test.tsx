@@ -301,8 +301,7 @@ describe('two realistic rides in one mount — #475’s review', () => {
     expect(loadsOf(loaders)).toBe(1);
     expect(told[0]?.at(-1)).toEqual(REALISTIC_LADDER[0]);
     await press(button((text) => text === 'End ride'));
-    await press(endRideAnswer(document, 'Discard ride'));
-    await press(endRideAnswer(document, 'Discard ride'));
+    await press(endRideAnswer(document, 'End ride'));
 
     // The network is gone. The world is still in memory, and the rider was
     // told it would be used — so the second ride must not go looking for it.
