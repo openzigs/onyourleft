@@ -475,11 +475,17 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
     const kinds = new Set<string>();
     const carLanes = new Set<number>();
     for (const level of ROUNDS) {
-      const mix = levelObstacleMix(level.round);
+      const mix = levelObstacleMix(level.round, level.lengthMetres);
       const span = { from: 0, to: level.lengthMetres };
       for (const seed of SEEDS) {
         const placed = placeObstacles(span, seed, 'normal', true, mix);
-        expect(placed).toHaveLength(Math.floor(level.lengthMetres / (1000 / mix.perKilometre)));
+        // The density over the span, rounded up and held to the level's range (round 5).
+        expect(placed).toHaveLength(
+          Math.max(
+            mix.fewest,
+            Math.min(mix.most, Math.ceil((level.lengthMetres / 1000) * mix.perKilometre)),
+          ),
+        );
         // None in sight at the start, none past the end, none in sight of the one before.
         expect(placed[0]?.along).toBeGreaterThanOrEqual(span.from + OBSTACLE_SIGHT_METRES);
         placed.forEach((obstacle, index) => {
@@ -598,7 +604,7 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
           seed,
           'normal',
           true,
-          levelObstacleMix(level.round),
+          levelObstacleMix(level.round, level.lengthMetres),
         );
         for (const obstacle of placed) {
           if (obstacle.kind !== 'parked-car') continue;
@@ -625,7 +631,7 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
           seed,
           'normal',
           true,
-          levelObstacleMix(level.round),
+          levelObstacleMix(level.round, level.lengthMetres),
         );
         // Every distance a rider's bicycle can be at, exactly: which obstacles it
         // overlaps changes only where it starts or stops overlapping one, so
@@ -670,6 +676,8 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
         const placed = placeObstacles(span, (seed * 2_654_435_761) >>> 0, 'normal', true, {
           perKilometre,
           standingShare: 1,
+          fewest: 2,
+          most: 1000,
         });
         expect(placed.length).toBeGreaterThan(0);
         expect(placed[0]?.along).toBeGreaterThanOrEqual(span.from + OBSTACLE_SIGHT_METRES);
@@ -686,11 +694,16 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
 
   it('places none for a level with no static hazards, and none with the assist at none', () => {
     const span = { from: 0, to: 3000 };
-    expect(placeObstacles(span, 7, 'normal', true, { perKilometre: 0, standingShare: 1 })).toEqual(
-      [],
-    );
     expect(
-      placeObstacles(span, 7, 'none', true, levelObstacleMix((ROUNDS[0] as LevelFile).round)),
+      placeObstacles(span, 7, 'normal', true, {
+        perKilometre: 0,
+        standingShare: 1,
+        fewest: 2,
+        most: 3,
+      }),
+    ).toEqual([]);
+    expect(
+      placeObstacles(span, 7, 'none', true, levelObstacleMix((ROUNDS[0] as LevelFile).round, 3000)),
     ).toEqual([]);
   });
 });

@@ -252,7 +252,9 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
     true,
-    input.level === undefined ? undefined : levelObstacleMix(input.level),
+    input.level === undefined
+      ? undefined
+      : levelObstacleMix(input.level, input.profile.totalDistance),
   );
   return {
     week,

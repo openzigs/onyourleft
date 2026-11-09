@@ -11150,15 +11150,16 @@ function deliveryBox(
   return new BoxGeometry(width, height, length).translate(x, y, z);
 }
 
-/** A wheel of `radius`, `width` across, its axle across the road, its middle at `(x, y, z)`. */
+/** A wheel of `radius`, `width` across, its axle across the road, its middle at `(x, y, z)`, round in `segments`. */
 function deliveryWheel(
   radius: number,
   width: number,
   x: number,
   y: number,
   z: number,
+  segments = 8,
 ): BufferGeometry {
-  return new CylinderGeometry(radius, radius, width, 8, 1, false)
+  return new CylinderGeometry(radius, radius, width, segments, 1, false)
     .rotateZ(Math.PI / 2)
     .translate(x, y, z);
 }
@@ -11169,8 +11170,8 @@ function deliveryWheel(
  * diamond above it and a glowing ring on the step; a green wheelie bin, a red
  * hand trolley and an orange cone with a white band, each on black wheels or
  * a black foot; and, since #2362, a parked car in one of three body paints
- * ({@link PARKED_CAR_PAINTS}) with pale windows, pale lamps and red tail
- * lamps, on four black wheels. No sprite, colour scheme or shape is taken from another game.
+ * ({@link PARKED_CAR_PAINTS}) with dark windows, pale head lamps, red tail
+ * lamps, dark trim, pale number plates and black tyres on silver rims. No sprite, colour scheme or shape is taken from another game.
  */
 const DELIVERY_PAINT = {
   card: 0xa8794a,
@@ -11183,9 +11184,12 @@ const DELIVERY_PAINT = {
   trolleyPlate: 0x8c8c8c,
   coneBody: 0xe8661c,
   coneBand: 0xe6e6e6,
-  carGlass: 0x9db4c6,
-  carLamp: 0xece6cf,
-  carTail: 0xa8261e,
+  carGlass: 0x2c3a46,
+  carLamp: 0xf1ecd8,
+  carTail: 0xb3241c,
+  carRim: 0xb8bdc3,
+  carTrim: 0x2a2d31,
+  carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
 } as const;
 
@@ -11214,92 +11218,148 @@ function markerShape(): BufferGeometry {
   ]);
 }
 
-/**
- * A side profile, `(along, up)` points in metres, made solid `width` across
- * the road: its own `+z` along the road, `x` across it, centred on `x = 0`.
- */
-function deliveryProfile(
-  points: readonly (readonly [number, number])[],
-  width: number,
-): BufferGeometry {
-  const shape = new Shape(points.map(([along, up]) => new Vector2(along, up)));
-  // Extruded along its own z, then turned so that z is across the road.
-  return new ExtrudeGeometry(shape, { depth: width, bevelEnabled: false, curveSegments: 1 })
+/** Where a parked car's wheels stand along it, metres from its middle, and their radius. */
+const PARKED_CAR_WHEELS = { rear: -1.35, front: 1.38, radius: 0.33 } as const;
+
+/** A shape drawn in a car's side view, `(along, up)` metres, made solid `width` across with rounded edges. */
+function roundedProfile(shape: Shape, width: number, round: number): BufferGeometry {
+  // The bevel rounds every edge by `round`; the depth is what is left of the width.
+  return new ExtrudeGeometry(shape, {
+    depth: width - 2 * round,
+    bevelEnabled: true,
+    bevelThickness: round,
+    bevelSize: round,
+    bevelSegments: 2,
+    curveSegments: 5,
+  })
     .rotateY(-Math.PI / 2)
-    .translate(width / 2, 0, 0);
+    .translate(width / 2 - round, 0, 0);
 }
 
-/** Where a parked car's wheels stand along it, metres from its middle, and their radius. */
-const PARKED_CAR_WHEELS = { rear: -1.35, front: 1.38, radius: 0.31 } as const;
+/** A box turned `pitch` radians about the axis across the road, its middle at `(x, y, z)`. */
+function pitchedBox(
+  width: number,
+  height: number,
+  length: number,
+  pitch: number,
+  x: number,
+  y: number,
+  z: number,
+): BufferGeometry {
+  return new BoxGeometry(width, height, length).rotateX(pitch).translate(x, y, z);
+}
 
 /**
- * A parked car — #2362, the owner's ruling on PR #2378: a car's outline seen
- * from the side, its bonnet low at the front, a cabin of glass under a roof,
- * a boot at the back, and its four wheels showing in arches cut into the body.
- * Its footprint is `obstacles.ts`' 4.4 m by 1.8 m, its nose along `+z`; it
- * stands 1.45 m tall. `paint` is the body's.
+ * Every part of `parts` scaled and moved together so that their joint box is
+ * exactly `obstacles.ts`' footprint across and along, standing on the road:
+ * what the rider sees is what the rider hits.
+ */
+function fittedToFootprint(
+  parts: readonly (readonly [BufferGeometry, number])[],
+  halfWidth: number,
+  halfLength: number,
+): readonly (readonly [BufferGeometry, number])[] {
+  const box = new Box3();
+  for (const [made] of parts) {
+    made.computeBoundingBox();
+    if (made.boundingBox !== null) box.union(made.boundingBox);
+  }
+  const across = (2 * halfWidth) / (box.max.x - box.min.x);
+  const along = (2 * halfLength) / (box.max.z - box.min.z);
+  const middleX = (box.max.x + box.min.x) / 2;
+  const middleZ = (box.max.z + box.min.z) / 2;
+  for (const [made] of parts) {
+    made.translate(-middleX, -box.min.y, -middleZ).scale(across, 1, along);
+  }
+  return parts;
+}
+
+/**
+ * A parked car — #2362, the owner's rulings on PR #2378 (round 5: "a real
+ * car, not stacked boxes"), modelled here in code, this project's own: a body
+ * drawn as a car's side view with a rounded nose and tail, a sloping bonnet
+ * and a boot, its edges rounded, and wheel arches over four tyres on silver
+ * rims; a glasshouse of dark windows framed by the roof and pillars in the
+ * body's paint; head lamps, tail lamps, a grille, bumpers, number plates and
+ * door mirrors. Its nose is along `+z`; it stands about 1.45 m tall, and
+ * {@link fittedToFootprint} holds it to `obstacles.ts`' 4.4 m by 1.8 m.
+ * `paint` is the body's.
  */
 function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, number])[] {
   const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'];
   const { rear, front, radius } = PARKED_CAR_WHEELS;
-  const sill = 0.28;
-  const arch = radius + 0.09;
-  /** An arch over the wheel at `along`, from its back to its front, at the sill. */
-  const archOver = (along: number): (readonly [number, number])[] => {
-    const points: (readonly [number, number])[] = [];
-    const steps = 8;
-    const low = Math.asin((sill - radius) / arch);
-    for (let step = 0; step <= steps; step += 1) {
-      const angle = Math.PI - low - ((Math.PI - 2 * low) * step) / steps;
-      points.push([along + arch * Math.cos(angle), radius + arch * Math.sin(angle)]);
-    }
-    return points;
-  };
-  const body: (readonly [number, number])[] = [
-    [-halfLength, 0.38],
-    [-halfLength + 0.1, sill],
-    ...archOver(rear),
-    ...archOver(front),
-    [halfLength - 0.1, sill],
-    [halfLength, 0.38],
-    [halfLength, 0.72],
-    [halfLength - 0.15, 0.8],
-    [1.0, 0.9],
-    [-1.5, 0.92],
-    [-halfLength + 0.15, 0.9],
-    [-halfLength, 0.8],
-  ];
-  const cabin: (readonly [number, number])[] = [
-    [-1.5, 0.92],
-    [1.0, 0.9],
-    [0.25, 1.38],
-    [-1.05, 1.4],
-  ];
+  // The arch's own radius, before the body's rounding (0.07) narrows it to a hand's gap over the tyre.
+  const arch = radius + 0.15;
+  const sill = 0.3;
+  const body = new Shape();
+  body.moveTo(-halfLength, 0.34);
+  body.lineTo(rear - arch - 0.1, sill);
+  body.lineTo(rear - arch, radius);
+  body.absarc(rear, radius, arch, Math.PI, 0, true);
+  body.lineTo(front - arch, sill);
+  body.lineTo(front - arch, radius);
+  body.absarc(front, radius, arch, Math.PI, 0, true);
+  body.lineTo(front + arch + 0.12, sill);
+  // The nose: a rounded bumper, the lamps' face, then over onto the bonnet.
+  body.quadraticCurveTo(halfLength, sill, halfLength, 0.42);
+  body.lineTo(halfLength, 0.7);
+  body.quadraticCurveTo(halfLength - 0.02, 0.84, halfLength - 0.3, 0.86);
+  body.quadraticCurveTo(1.45, 0.92, 0.9, 0.95);
+  // The waist, under the glasshouse, then the boot and the rounded tail.
+  body.lineTo(-1.45, 0.98);
+  body.lineTo(-1.85, 0.97);
+  body.quadraticCurveTo(-halfLength + 0.02, 0.95, -halfLength, 0.8);
+  body.lineTo(-halfLength, 0.34);
+  const glasshouse = new Shape();
+  glasshouse.moveTo(-1.5, 0.96);
+  glasshouse.lineTo(0.92, 0.94);
+  glasshouse.quadraticCurveTo(0.5, 1.22, 0.12, 1.39);
+  glasshouse.quadraticCurveTo(-0.45, 1.46, -0.98, 1.39);
+  glasshouse.quadraticCurveTo(-1.3, 1.24, -1.5, 0.96);
+  const roof = new Shape();
+  roof.moveTo(0.14, 1.37);
+  roof.quadraticCurveTo(-0.45, 1.44, -1.0, 1.37);
+  roof.lineTo(-1.0, 1.43);
+  roof.quadraticCurveTo(-0.45, 1.5, 0.14, 1.43);
+  roof.lineTo(0.14, 1.37);
+  const bodyWidth = 2 * halfWidth - 0.12;
+  const glassWidth = bodyWidth - 0.22;
+  /** Where the body's rounded nose and tail end, its rounding (0.07) past the profile: the lamps' face. */
+  const nose = halfLength + 0.07;
   const parts: (readonly [BufferGeometry, number])[] = [
-    [deliveryProfile(body, 2 * halfWidth), paint],
-    [deliveryProfile(cabin, 2 * halfWidth - 0.2), DELIVERY_PAINT.carGlass],
-    // The roof, and the pillar between the side windows, in the body's paint.
-    [deliveryBox(2 * halfWidth - 0.18, 0.07, 1.36, 0, 1.415, -0.39), paint],
-    [deliveryBox(2 * halfWidth - 0.18, 0.48, 0.1, 0, 1.15, -0.38), paint],
+    [roundedProfile(body, bodyWidth, 0.07), paint],
+    [roundedProfile(glasshouse, glassWidth, 0.04), DELIVERY_PAINT.carGlass],
+    [roundedProfile(roof, glassWidth + 0.04, 0.02), paint],
+    // The pillars between the windows, in the body's paint: the windscreen's,
+    // the middle one and the rear window's, each on both sides.
+    [pitchedBox(glassWidth + 0.03, 0.5, 0.08, 0, 0, 1.17, -0.42), paint],
   ];
   for (const side of [-1, 1]) {
-    const lamp = side * (halfWidth - 0.25);
-    parts.push([
-      deliveryBox(0.3, 0.1, 0.02, lamp, 0.64, halfLength - 0.01),
-      DELIVERY_PAINT.carLamp,
-    ]);
-    parts.push([
-      deliveryBox(0.3, 0.1, 0.02, lamp, 0.72, -halfLength + 0.01),
-      DELIVERY_PAINT.carTail,
-    ]);
+    const edge = side * (glassWidth / 2 - 0.01);
+    parts.push([pitchedBox(0.06, 0.9, 0.07, -1.06, edge, 1.165, 0.52), paint]);
+    parts.push([pitchedBox(0.06, 0.66, 0.07, 0.88, edge, 1.175, -1.24), paint]);
+    // A door mirror at the windscreen's foot, its outside at the footprint's side.
+    parts.push([deliveryBox(0.12, 0.1, 0.16, side * (halfWidth - 0.06), 1.0, 0.72), paint]);
+    // Lamps: a head lamp each side of the grille, a tail lamp each side of the boot.
+    parts.push([deliveryBox(0.36, 0.12, 0.04, side * 0.55, 0.62, nose), DELIVERY_PAINT.carLamp]);
+    parts.push([deliveryBox(0.32, 0.14, 0.04, side * 0.58, 0.7, -nose), DELIVERY_PAINT.carTail]);
     for (const along of [rear, front]) {
-      parts.push([
-        deliveryWheel(radius, 0.2, side * (halfWidth - 0.12), radius, along),
-        DELIVERY_PAINT.black,
-      ]);
+      const x = side * (halfWidth - 0.14);
+      parts.push([deliveryWheel(radius, 0.22, x, radius, along, 12), DELIVERY_PAINT.black]);
+      parts.push([deliveryWheel(0.2, 0.23, x, radius, along, 8), DELIVERY_PAINT.carRim]);
     }
   }
-  return parts;
+  // The grille, the bumpers' dark strips and the number plates, front and back,
+  // each standing a hair proud of the body's rounded face.
+  const trim = (width: number, height: number, y: number, z: number, colour: number): void => {
+    parts.push([deliveryBox(width, height, 0.04, 0, y, z), colour]);
+  };
+  trim(0.6, 0.12, 0.62, nose, DELIVERY_PAINT.carTrim);
+  trim(bodyWidth - 0.16, 0.08, 0.36, nose - 0.02, DELIVERY_PAINT.carTrim);
+  trim(bodyWidth - 0.16, 0.08, 0.38, -nose + 0.02, DELIVERY_PAINT.carTrim);
+  trim(0.5, 0.11, 0.46, nose + 0.005, DELIVERY_PAINT.carPlate);
+  trim(0.5, 0.11, 0.5, -nose - 0.005, DELIVERY_PAINT.carPlate);
+  return fittedToFootprint(parts, halfWidth, halfLength);
 }
 
 /**

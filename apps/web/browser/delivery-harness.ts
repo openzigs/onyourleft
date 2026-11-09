@@ -35,7 +35,12 @@
 import { metres } from '@onyourleft/domain';
 
 import { deliveryInView } from '../src/game/delivery/in-view';
-import { startObstacles, type Obstacle, type ObstacleKind } from '../src/game/delivery/obstacles';
+import {
+  parkedCarStands,
+  startObstacles,
+  type Obstacle,
+  type ObstacleKind,
+} from '../src/game/delivery/obstacles';
 import { startRound } from '../src/game/delivery/round';
 import type { DeliveryTarget } from '../src/game/delivery/targets';
 import {
@@ -91,6 +96,7 @@ declare global {
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
+      carsShowcase(): void;
     };
   }
 }
@@ -336,8 +342,38 @@ function showcase(): void {
   });
 }
 
+/**
+ * #2362, round 5: the owner's photograph of the parked cars, three in a row
+ * at the right-hand kerb ahead of the rider, one of each paint, on a real
+ * frame of the stylised world.
+ */
+function carsShowcase(): void {
+  const shown = canvas(960, 540);
+  shown.id = 'delivery-cars';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(960, 540);
+  const frame = frameAt(RIDER);
+  const obstacles: Obstacle[] = [9, 15, 21].map((ahead) => ({
+    kind: 'parked-car',
+    along: RIDER + ahead,
+    stands: parkedCarStands('right'),
+  }));
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles,
+      obstacleState: startObstacles(obstacles),
+    }),
+  });
+}
+
 window.__oylDelivery = {
   ready: true,
+  carsShowcase,
   viewCalls,
   markerLeaves,
   probeCalls,

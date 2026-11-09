@@ -108,6 +108,15 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(reading?.after).toEqual({ markers: 1, first: false, second: true });
   });
 
+  test('photographs the parked cars for the owner — #2362, round 5', async ({ page }, testInfo) => {
+    await open(page);
+    await page.evaluate(() => window.__oylDelivery?.carsShowcase());
+    const shot = await page.locator('#delivery-cars').screenshot();
+    await testInfo.attach('delivery-cars', { body: shot, contentType: 'image/png' });
+    expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(shot.byteLength).toBeGreaterThan(5000);
+  });
+
   test('photographs a Delivery frame for the owner', async ({ page }, testInfo) => {
     await open(page);
     await page.evaluate(() => window.__oylDelivery?.showcase());

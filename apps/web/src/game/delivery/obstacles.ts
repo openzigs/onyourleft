@@ -82,9 +82,12 @@
  * hands {@link placeObstacles} its {@link ObstacleMix}: how many obstacles a
  * kilometre, from its `round.hazardsPerKilometre.static`, and what share of
  * them stand. Its standing obstacles are drawn from
- * {@link LEVEL_STANDING_KINDS}, a parked car or a bin. The one-in-each-stretch
- * rule is unchanged, with the stretch {@link OBSTACLE_SPACING_METRES} or
- * longer, so no distance has more than one lane blocked, a car's whole length
+ * {@link LEVEL_STANDING_KINDS}, a parked car or a bin. Since the owner's
+ * ruling of 2026-11-08 a level round's count is held to a range
+ * ({@link levelObstacleMix}: level 1 always 2 or 3), and its span is cut into
+ * that many equal stretches, none shorter than
+ * {@link LEVEL_SHORTEST_STRETCH_METRES}. The one-in-each-stretch rule is
+ * unchanged, so no distance has more than one lane blocked, a car's whole length
  * counted: an obstacle stands at least {@link OBSTACLE_SIGHT_METRES} into its
  * stretch, far more than any obstacle's half length. A ride with no mix — a
  * rider's own route — places exactly what it placed before.
@@ -357,24 +360,59 @@ export const STANDING_OBSTACLE_SHARE = 0.5;
 const OBSTACLE_STREAM = 0x0b57_ac1e;
 
 /**
- * A level's obstacles (#2362): how many a kilometre and how many of them
- * stand. A stretch is never shorter than {@link OBSTACLE_SPACING_METRES}, so
- * more than one in each 250 m is never placed whatever the level says (its
- * reader holds it to that, `level-file.ts` §`LEVEL_MOST_HAZARDS_PER_KILOMETRE`).
+ * The fewest obstacles a level round places on the normal setting — #2362,
+ * the owner's ruling of 2026-11-08 on PR #2378 ("Level 1 always has 2 to 3
+ * obstacles"): **2**. This project's own number.
+ */
+export const LEVEL_FEWEST_OBSTACLES = 2;
+
+/**
+ * The shortest stretch a level round's obstacle is placed in, metres — #2362:
+ * twice {@link OBSTACLE_SIGHT_METRES}, so each still stands at least that far
+ * into its stretch and from the one before. A span too short for
+ * {@link LEVEL_FEWEST_OBSTACLES} such stretches places fewer; no level round
+ * is that short (`obstacles.test.ts` sweeps the shipped levels' rounds).
+ */
+export const LEVEL_SHORTEST_STRETCH_METRES = 2 * OBSTACLE_SIGHT_METRES;
+
+/**
+ * A level's obstacles (#2362): how many a kilometre, how many of them stand,
+ * and the range the count is held to. A level round's count is its density
+ * over the round's own span, rounded up, held to {@link fewest} and
+ * {@link most}; the span is then cut into that many equal stretches, one
+ * obstacle in each, so the one-in-each-stretch rule and the sight distance
+ * hold as on a rider's own route.
  */
 export interface ObstacleMix {
   /** Obstacles a kilometre; nought or less places none. */
   readonly perKilometre: number;
   /** The share of them that stand in a lane, from none to all. */
   readonly standingShare: number;
+  /** The fewest a round places. */
+  readonly fewest: number;
+  /** The most a round places. */
+  readonly most: number;
 }
 
 /**
  * A level round's mix (#2362): its static hazards a kilometre, every one of
- * them standing. Its moving hazards are #2364's, and place nothing yet.
+ * them standing, held to between {@link LEVEL_FEWEST_OBSTACLES} and the
+ * density over the whole level's length, rounded up, and never fewer than
+ * the fewest: Morning Round's 1 a kilometre on 2.1 km is 2 to 3, Busy
+ * Round's 2 on 3.0 km is 2 to 6. Its moving hazards are #2364's, and place
+ * nothing yet.
  */
-export function levelObstacleMix(round: Pick<LevelRound, 'hazardsPerKilometre'>): ObstacleMix {
-  return { perKilometre: round.hazardsPerKilometre.static, standingShare: 1 };
+export function levelObstacleMix(
+  round: Pick<LevelRound, 'hazardsPerKilometre'>,
+  lengthMetres: number,
+): ObstacleMix {
+  const perKilometre = round.hazardsPerKilometre.static;
+  return {
+    perKilometre,
+    standingShare: 1,
+    fewest: LEVEL_FEWEST_OBSTACLES,
+    most: Math.max(LEVEL_FEWEST_OBSTACLES, Math.ceil((lengthMetres / 1000) * perKilometre)),
+  };
 }
 
 export interface ObstaclePlacementInput {
@@ -414,12 +452,19 @@ export function placeObstacles(
     refuse('the round runs from a finite distance to one no shorter');
   }
   if (mix !== undefined && !(mix.perKilometre > 0)) return [];
-  const spacing =
+  // A level's count is held to its range (#2362), the span cut into that many stretches.
+  const count =
     mix === undefined
-      ? OBSTACLE_SPACING_METRES
-      : Math.max(OBSTACLE_SPACING_METRES, 1000 / mix.perKilometre);
+      ? Math.floor((to - from) / OBSTACLE_SPACING_METRES)
+      : Math.min(
+          Math.floor((to - from) / LEVEL_SHORTEST_STRETCH_METRES),
+          Math.max(
+            mix.fewest,
+            Math.min(mix.most, Math.ceil(((to - from) / 1000) * mix.perKilometre)),
+          ),
+        );
+  const spacing = mix === undefined ? OBSTACLE_SPACING_METRES : (to - from) / Math.max(1, count);
   const standingShare = mix === undefined ? STANDING_OBSTACLE_SHARE : mix.standingShare;
-  const count = Math.floor((to - from) / spacing);
   // Its own stream of the round's seed, so obstacles do not follow the target pick.
   const base = mixInto(fmix32(seed), OBSTACLE_STREAM);
   const obstacles: Obstacle[] = [];

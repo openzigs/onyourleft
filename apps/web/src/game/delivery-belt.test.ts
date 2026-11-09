@@ -428,9 +428,9 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     const baseLength =
       Math.max(...cabinBase.map((each) => each.z)) - Math.min(...cabinBase.map((each) => each.z));
     expect(roofLength).toBeLessThan(0.6 * baseLength);
-    // …and the bonnet and the boot are low: nothing at either end stands over a metre.
+    // …and the bonnet and the boot are low: nothing at either end stands near the roof.
     const ends = car.filter((each) => Math.abs(each.z) > 1.8);
-    expect(Math.max(...ends.map((each) => each.y))).toBeLessThan(1);
+    expect(Math.max(...ends.map((each) => each.y))).toBeLessThan(0.75 * tall);
     // Its wheels show from the side: over each wheel, nothing but the wheel below its top.
     // The wheels are the paint of the car's lowest point, on the road.
     const lowest = car.reduce((low, each) => (each.y < low.y ? each : low));
@@ -438,14 +438,37 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     const wheels = car.filter((each) => each.paint === BLACK);
     expect(Math.min(...wheels.map((each) => each.y))).toBeCloseTo(0, 6);
     const wheelTop = Math.max(...wheels.map((each) => each.y));
+    // The body is the car's most-used paint; over each wheel it is cut away to the arch.
+    const counts = new Map<string, number>();
+    for (const each of car) counts.set(each.paint, (counts.get(each.paint) ?? 0) + 1);
+    const body = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
     for (const along of [-1.35, 1.38]) {
-      const over = car.filter((each) => each.paint !== BLACK && Math.abs(each.z - along) < 0.15);
+      const over = car.filter((each) => each.paint === body && Math.abs(each.z - along) < 0.15);
       expect(over.length, `over the wheel at ${String(along)}`).toBeGreaterThan(0);
       expect(
         Math.min(...over.map((each) => each.y)),
         `over the wheel at ${String(along)}`,
       ).toBeGreaterThan(wheelTop);
     }
+    belt.dispose();
+  });
+
+  it('rounds the car: its body curves and its edges are rounded, not a few flat faces (round 5)', () => {
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('obstacles').geometry;
+    const normal = geometry.getAttribute('normal');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const facing = new Set<string>();
+    for (let at = 0; at < normal.count; at += 1) {
+      if (kinds.getX(at) !== CAR_KIND) continue;
+      facing.add(
+        [normal.getX(at), normal.getY(at), normal.getZ(at)]
+          .map((each) => each.toFixed(2))
+          .join(','),
+      );
+    }
+    // A box faces six ways; stacked boxes a few dozen at most.
+    expect(facing.size).toBeGreaterThan(200);
     belt.dispose();
   });
 
