@@ -652,6 +652,25 @@ function roomRouteId(roomId: string): string {
  */
 export const STANDING_NOTICE_SECONDS = 15;
 
+/**
+ * What the ride's HUD says when the press of *Ride* could not start the
+ * recording under it — #2381, the owner's ruling of 2026-11-08 (item 3).
+ * `refused`: `GameTrainerPort.recordGameRide` answered `false`, which the ride
+ * controller's `recordForRoom` does for exactly one reason — the ride before
+ * this one is stopped and not finished saving (`canStartNewRide`), the reason
+ * the Ride screen gives its own refused *Start a new ride* (`RideView.tsx`).
+ * `failed`: it threw, and the controller gave no reason, so none is claimed.
+ * ⚠️ Draft wording for the owner.
+ */
+export const RIDE_NOT_RECORDED_TEXT = {
+  label: 'Not recording',
+  refused: 'This ride is not being recorded, because the ride before it is not finished saving.',
+  failed: 'This ride is not being recorded: a recording could not be started on this device.',
+} as const;
+
+/** Why this ride's recording did not start, if it did not — #2381. @see RIDE_NOT_RECORDED_TEXT */
+type NotRecordedAs = 'refused' | 'failed';
+
 /** How the last game ride was ended, as the picker says it — #2349. */
 type RideEndedAs = 'saved' | 'not-saved' | 'discarded' | 'not-deleted' | 'not-recorded';
 
@@ -1413,6 +1432,20 @@ function GameScreen({
    * never said. It is offered on every frame until the core returns it.
    */
   const mayStopSaidRef = useRef(false);
+  /**
+   * Why this ride is not being recorded, where the press of *Ride* could not
+   * start its recording — #2381. Set in `begin`, cleared by the next ride.
+   * The HUD shows it for the ride's first {@link STANDING_NOTICE_SECONDS}, the
+   * road notice's time open (#437), and then gives the cell back: the dashed
+   * *Moving* stays for the rest of the ride.
+   */
+  const [notRecorded, setNotRecorded] = useState<NotRecordedAs | undefined>(undefined);
+  /**
+   * Its sentence, owed to the HUD's one region until said — #2381, on #647's
+   * rule (@see mayStopSaidRef): offered on every frame but the road notice's,
+   * until the core returns it, and then never again this ride.
+   */
+  const notRecordedOwedRef = useRef<string | undefined>(undefined);
   /** @see useOneNoticeOnly */
   const narrowUpright = useOneNoticeOnly();
   /**
@@ -2128,11 +2161,14 @@ function GameScreen({
       // Awaited BEFORE the course line below, so a course's first lap is the
       // recording's. A start that fails or throws leaves the ride unrecorded,
       // as one with no recording was before: the ride still starts.
+      // #2381 (the owner's ruling, item 3): a start that fails is SAID, on
+      // the HUD's notice cell and once through its one region.
+      let unrecorded: NotRecordedAs | undefined;
       if (roomId === undefined && props.trainer?.recordGameRide !== undefined) {
         try {
-          await props.trainer.recordGameRide();
+          unrecorded = (await props.trainer.recordGameRide()) ? undefined : 'refused';
         } catch {
-          // The HUD's *Moving* is a dash: nothing is recording.
+          unrecorded = 'failed';
         }
         // #509: the rider may have left while the recording started. It runs
         // on, as one started on the Ride screen does, which is where it is.
@@ -2278,6 +2314,12 @@ function GameScreen({
       planDiscardedSaidRef.current = trainerPortRef.current?.workoutPlanDiscarded?.();
       replansOffOwedRef.current = false;
       mayStopSaidRef.current = false;
+      // #2381: this ride's own answer, and never the last ride's.
+      setNotRecorded(unrecorded);
+      notRecordedOwedRef.current =
+        unrecorded === undefined
+          ? undefined
+          : `${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT[unrecorded]}`;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -2861,6 +2903,11 @@ function GameScreen({
       } else if (!noticeThisFrame && !mayStopSaidRef.current) {
         events.push({ kind: 'screen-off-risk', text: RIDE_MAY_STOP_SPOKEN });
       }
+      // #2381: this ride is not being recorded — owed until said, once, and
+      // not on the road notice's frame, for the eased sentence's reason above.
+      if (!noticeThisFrame && notRecordedOwedRef.current !== undefined) {
+        events.push({ kind: 'not-recording', text: notRecordedOwedRef.current });
+      }
       if (slope.event !== undefined) events.push(slope.event);
       // #551: the side camera's link going, once, when it goes.
       //
@@ -3045,6 +3092,9 @@ function GameScreen({
       }
       if (heard.kind === 'screen-off-risk') {
         mayStopSaidRef.current = true;
+      }
+      if (heard.kind === 'not-recording') {
+        notRecordedOwedRef.current = undefined;
       }
       if (heard.kind === 'lap-ended') {
         lapOwedRef.current = undefined;
@@ -3477,10 +3527,15 @@ function GameScreen({
    */
   const askToEnd = (): void => {
     setEndAsk('ask');
-    const savable = props.trainer?.rideRecording?.()?.savable === true;
-    setAnnouncement(
-      `${END_RIDE_TEXT.askLabel} ${savable ? END_RIDE_TEXT.ask : END_RIDE_TEXT.askNothingRecorded}`,
-    );
+    const under = props.trainer?.rideRecording?.();
+    // #2381: with no recording under the ride, nothing is saved or deleted.
+    const sentence =
+      under === undefined
+        ? END_RIDE_TEXT.askNotRecorded
+        : under.savable
+          ? END_RIDE_TEXT.ask
+          : END_RIDE_TEXT.askNothingRecorded;
+    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${sentence}`);
   };
   /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
   const keepRiding = (): void => {
@@ -4060,7 +4115,8 @@ function GameScreen({
               className="oyl-end-ride oyl-end-ride--hud"
               step={endAsk}
               canSave={recordedUnder?.savable === true}
-              // #2381: with nothing recorded, nothing is deleted.
+              // #2381: with nothing recorded, one step: *End ride* or
+              // *Keep riding*, and no deletion to warn of.
               recorded={recordedUnder !== undefined}
               // Opened by a press — *End ride*, or back — every time.
               focusOnOpen
@@ -4071,11 +4127,7 @@ function GameScreen({
               }}
               onDiscard={() => {
                 setEndAsk('discard');
-                setAnnouncement(
-                  recordedUnder === undefined
-                    ? `${END_RIDE_TEXT.endLabel} ${END_RIDE_TEXT.endNothingRecorded}`
-                    : `${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`,
-                );
+                setAnnouncement(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
               }}
               onConfirmDiscard={() => {
                 endRide('discard');
@@ -4204,6 +4256,20 @@ function GameScreen({
           voiceLink?.place === 'notice' ? (
             <VoiceNotice key="voice" invite={voiceLink.invite} />
           ) : undefined,
+          // #2381: the press of *Ride* could not start this ride's recording
+          // — said, with the controller's reason where it gave one, rather
+          // than left to a dashed *Moving*. Before #647's, in `announce.ts`'s
+          // order (`not-recording` is rank 5a⁗). Not `live`: the HUD's one
+          // region says it, once. For STANDING_NOTICE_SECONDS of ride, the
+          // world notice's rule, so on a phone it gives the route panel's
+          // cell back (#437). `ride-notices.browser.spec.ts` §"#2381"
+          // measures it at every overlay viewport, over no ride control.
+          notRecorded === undefined ||
+          (state?.elapsed ?? 0) >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="not-recorded" tone="warning" label={RIDE_NOT_RECORDED_TEXT.label}>
+              {RIDE_NOT_RECORDED_TEXT[notRecorded]}
+            </StatusMessage>
+          ),
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.

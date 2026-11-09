@@ -34,7 +34,13 @@
 import { act, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
+import {
+  GameView,
+  RIDE_NOT_RECORDED_TEXT,
+  STANDING_NOTICE_SECONDS,
+  type GamePort,
+  type RidableRoute,
+} from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { createGradientSession } from './gradient';
 import {
@@ -624,7 +630,8 @@ describe('the road the game draws reaches the trainer', () => {
     const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    // #2381: nothing is recorded under this ride, so the question is one step.
+    expect(document.querySelector('[data-oyl-end-ride]')).not.toBeNull();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -708,13 +715,14 @@ describe('the road the game draws reaches the trainer', () => {
     }
 
     // A second attempt with the question open is Keep riding, as Android's
-    // back is (#2356) — even one Discard in — and sends nothing; only an
-    // answer that ends the ride releases the gradient.
+    // back is (#2356), and sends nothing; only an answer that ends the ride
+    // releases the gradient. (Nothing is recorded under this ride, so the
+    // question is #2381's one step; `GameView.test.tsx` §"#2349" holds the
+    // same of the discard step.)
     for (const by of ['typed', 'back'] as const) {
       const writes = commands.written.length;
       await away(by);
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      expect(asked()).toBe('discard');
+      expect(asked()).toBe('ask');
       await away(by);
       expect(asked()).toBeNull();
       expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
@@ -723,8 +731,7 @@ describe('the road the game draws reaches the trainer', () => {
       expect(commands.written.length).toBe(writes);
     }
     await away('typed');
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -1425,6 +1432,12 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       }
       await pump(2);
     };
+    /** The HUD's notice cell, as a rider reads it. */
+    const notices = (): string =>
+      mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '';
+    /** The HUD's one live region. */
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
     const library = async (rig: Awaited<ReturnType<typeof onTheBench>>) =>
       rig.harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
     const sessions = async (rig: Awaited<ReturnType<typeof onTheBench>>) =>
@@ -1434,6 +1447,10 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       const rig = await onTheBench(false);
       await openTheGame(gameTrainerPortOver(rig.controller));
       expect(rig.controller.getSnapshot().phase).toBe('idle');
+      // The owner's words of 2026-11-08, label and sentence.
+      expect(recordingLine()).toBe(
+        'Recording on · Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.',
+      );
       expect(recordingLine()).toContain(RECORDS_ON_RIDE_TEXT);
       expect(recordingLine()).not.toContain(NOT_RECORDING_TEXT);
 
@@ -1542,7 +1559,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       await rig.done();
     });
 
-    it('still starts the ride, unrecorded, when the recording cannot be started', async () => {
+    it('still starts the ride, unrecorded, when the recording cannot be started, and says so with no reason claimed', async () => {
       const rig = await onTheBench(false);
       await openTheGame({
         ...gameTrainerPortOver(rig.controller),
@@ -1552,6 +1569,157 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       await flush();
       expect(buttonStarting('End ride')).toBeDefined();
       expect(rig.controller.getSnapshot().phase).toBe('idle');
+      await pump(2);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.failed);
+      // The thrown error is not the rider's to read.
+      expect(notices()).not.toContain('the store is full');
+      expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT.failed}`);
+      await rig.done();
+    });
+
+    /**
+     * #2381, the owner's ruling of 2026-11-08 (item 3): when the automatic
+     * start fails, the ride's HUD says this ride is not being recorded, and
+     * why — the controller's one reason for a refusal (`recordForRoom`
+     * answers `false` only when the ride before is not finished saving).
+     */
+    it('says on the HUD, and once through its one region, that a refused ride is not being recorded and why — then gives the cell back', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame({
+        ...gameTrainerPortOver(rig.controller),
+        recordGameRide: () => Promise.resolve(false),
+      });
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      // Not a live region of its own: the HUD's one region says it (#445).
+      const notice = queryAll(mounted?.container ?? document, '.oyl-hud__notices *').find((each) =>
+        (each.textContent ?? '').includes(RIDE_NOT_RECORDED_TEXT.refused),
+      );
+      expect(notice?.closest('[aria-live], [role="status"], [role="alert"]')).toBeNull();
+      // Said ONCE, with announcements off (the default): offered until said.
+      expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT.refused}`);
+      expect(offered).toContain('not-recording');
+      offered.length = 0;
+      await pump(4);
+      expect(offered).not.toContain('not-recording');
+      // The ride's controls are still there to press.
+      expect(buttonStarting('Pause')).toBeDefined();
+      expect(buttonStarting('End ride')).toBeDefined();
+      // Gone after the road notice's time open, on the ride's clock.
+      await pump(2 * (STANDING_NOTICE_SECONDS + 1));
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      await rig.done();
+    });
+
+    it('says nothing of the last ride’s refusal on the next ride, whose recording started', async () => {
+      const rig = await onTheBench(false);
+      const port = gameTrainerPortOver(rig.controller);
+      let refuse = true;
+      await openTheGame({
+        ...port,
+        recordGameRide: () =>
+          refuse ? Promise.resolve(false) : (port.recordGameRide?.() ?? Promise.resolve(false)),
+      });
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
+      await flush();
+      refuse = false;
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(4);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(offered).not.toContain('not-recording');
+      await rig.done();
+    });
+
+    it('says nothing of it on a ride whose recording started — the control', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(4);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(offered).not.toContain('not-recording');
+      await rig.done();
+    });
+
+    /**
+     * #2381's review (low): the recording starts BEFORE the course line's
+     * `started`, so a course's first lap belongs to the recording. The ride
+     * controller opens no lap with nothing recording (`noteCourseLine`), so a
+     * recording started after the line would save the first lap as none and
+     * begin counting at the second crossing.
+     */
+    it('starts the recording before the course line, so the first lap of a loop is the recording’s', async () => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 30; index += 1) {
+        const out = index <= 15 ? index : 30 - index;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (out * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      const route: RidableRoute = {
+        id: 'route-circuit',
+        name: 'Test circuit',
+        profile: routeProfile(points, { loop: true }),
+        attempts: 0,
+      };
+      const rig = await onTheBench(false);
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(route)}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+      // Nothing is recording until the press.
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      const strip = (): string =>
+        mounted?.container.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
+      const lapLabel = (): string | undefined => /of (lap \d+)/.exec(strip())?.[1];
+      await rideFor(rig, 2);
+      // A lap is open from the line: the lap's time is the recording's.
+      const early = rig.controller.getSnapshot();
+      expect(early.courseLapSeconds).toBeGreaterThan(0);
+      expect(early.courseLapSeconds).toBe(early.movingSeconds);
+      for (let second = 0; second < 400 && lapLabel() !== 'lap 2'; second += 1) {
+        await rideFor(rig, 1);
+      }
+      expect(lapLabel()).toBe('lap 2');
+      await endAndSaveOnTheHud(rig.controller);
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      const laps = await rig.harness.read(async (store) =>
+        store.listLaps(ATHLETE_A, activityId('the-ride')),
+      );
+      // The first lap is whole — the course's first, from its line — and the
+      // part lap after it is the second.
+      expect(laps.map((lap) => [lap.ordinal, lap.partial])).toEqual([
+        [0, undefined],
+        [1, true],
+      ]);
+      expect(laps[0]?.distance).toBe(route.profile.totalDistance);
       await rig.done();
     });
   });
@@ -2423,8 +2591,7 @@ describe('other riders never reach the trainer — #782 review (N8)', () => {
  */
 async function endTheRide(): Promise<void> {
   await clickThrough(buttonStarting('End ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
 }
 
 /**

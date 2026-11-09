@@ -12,7 +12,7 @@
  */
 
 /** What the question's buttons say. */
-export type EndRideAnswer = 'Save ride' | 'Discard ride' | 'Keep riding';
+export type EndRideAnswer = 'Save ride' | 'Discard ride' | 'Keep riding' | 'End ride';
 
 /** The answer named `answer` in the open question under `root`. */
 export function endRideAnswer(root: ParentNode, answer: EndRideAnswer): HTMLButtonElement {

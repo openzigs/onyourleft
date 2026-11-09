@@ -31,6 +31,7 @@
  * | 5a′ | the room's connection lost | event (#782) | ruling Q3/Q6 | **yes** — #782 |
  * | 5a″ | a race's countdown, its start and its end | event (#785) | the room's own word | **yes** — #785 |
  * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
+ * | 5a⁗ | this ride is not being recorded: its recording could not start | event (#2381) | the owner's ruling of 2026-11-08 | **yes** — #2381 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
@@ -61,6 +62,7 @@
  * | `room-lost` | `GameView` | `net/room-port.ts` §`RoomConnection.status` going to `lost` (#782) |
  * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) |
  * | `room-rider` | `GameView` | `game/room-ride.ts` §`riderEvents`, from the room's frames (#784) |
+ * | `not-recording` | `GameView` | `GameTrainerPort.recordGameRide` answering `false` or throwing at the press of *Ride* (#2381) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
@@ -126,6 +128,17 @@
  * announcements are on": the lowest room event, and never with them off —
  * nothing about it changes what the rider must do. Below the room's lost
  * connection both, and above every reading.
+ *
+ * ⚠️ **Rank 5a⁗ is #2381's**: the press of *Ride* starts a recording by
+ * default (the owner's ruling of 2026-11-08), and this one could not start,
+ * so the ride the rider is on will not be saved. Said ONCE, at the start of
+ * the ride, offered on every frame until it comes back as `kind` (#647's
+ * "owed" rule) and never on the road notice's frame. Below every room event,
+ * which is about other riders moving now; above #647's, which is about a
+ * recording that may stop — this one never started. ⚠️ **In
+ * {@link ALWAYS_SPOKEN}**, for the room-lost reason: the HUD's notice is a
+ * status (SC 4.1.3), and with announcements off — the default — a rider who
+ * cannot see it would learn only at the end that nothing was recorded.
  *
  * ⚠️ **Rank 5b is #647's**: the platform refused to keep the ride alive, so
  * it may stop if the screen goes off. BELOW the side camera, because that has
@@ -229,7 +242,7 @@
  * follow the rider's announcement setting. A ruling for this mode is the
  * owner's, and reversing it is the membership of one array.
  *
- * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Seven kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -290,6 +303,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'room-lost'; readonly text: string }
   | { readonly kind: 'room-race'; readonly text: string }
   | { readonly kind: 'room-rider'; readonly text: string }
+  | { readonly kind: 'not-recording'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
@@ -324,6 +338,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'room-lost',
   'room-race',
   'room-rider',
+  // #2381: this ride's recording could not start. Rank 5a⁗; the module note says why here.
+  'not-recording',
   'screen-off-risk',
   'erg-held',
   // #1240: the heart-rate hold's sentence, BELOW every trainer and workout
@@ -372,6 +388,8 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
+  // #2381: this ride is not being recorded is a status, for room-lost's reason. Rank 5a⁗.
+  'not-recording',
   // #1812: no Delivery kind. The owner's ruling of 2026-10-28: they follow the setting. Rank 5g.
   // #1904: and no lap-race kind, on that ruling. Rank 5h.
 ];

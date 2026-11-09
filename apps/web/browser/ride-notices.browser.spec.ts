@@ -210,6 +210,50 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
   }
 });
 
+/*
+ * #2381 — the press of *Ride* could not start the ride's recording
+ * (`?record=refused`), so the notice cell says this ride is not being
+ * recorded, and why. Held as the room's notice is above: whole, over no panel,
+ * not over the rider (clear of it upright), and over no ride control —
+ * `easedCollisions` requires *Pause* and *End ride* on the stage and uncovered.
+ */
+test.describe('a ride whose recording could not start says so — #2381', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`whole and over nothing — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, '?record=refused');
+      expect(await noticeText(page)).toContain(
+        'This ride is not being recorded, because the ride before it is not finished saving.',
+      );
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          expect(easedCollisions(seen, viewport)).toEqual([]);
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice, 'the notice was laid out').toBeDefined();
+          if (notice === undefined) return;
+          const rider = riderBox(viewport);
+          console.log(
+            `#2381 not recording — ${viewport.name}, ${how} — cell ${notice.box.height.toFixed(0)} px tall` +
+              (viewport.height > viewport.width
+                ? `; ${(rider.top - notice.box.bottom).toFixed(0)} px above the rider's box`
+                : ''),
+          );
+          const others = seen.panels.filter(
+            (each) => each !== notice && each.box.height > 1 && overlap(each.box, notice.box),
+          );
+          expect(others.map(describeItem)).toEqual([]);
+          expect(overlap(notice.box, rider), describeItem(notice)).toBe(false);
+          if (viewport.height > viewport.width) {
+            expect(rider.top - notice.box.bottom, describeItem(notice)).toBeGreaterThanOrEqual(
+              EASED_RIDER_CLEARANCE_PIXELS,
+            );
+          }
+          expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
+        });
+      }
+    });
+  }
+});
+
 /**
  * #647 — #693's re-review, B2: *"Keep the screen on"* beside EACH other
  * notice the HUD never puts away. The notice cell stacks every one of them —

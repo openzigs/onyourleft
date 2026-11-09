@@ -18,6 +18,12 @@
  *   one sample) is offered *Keep riding* and *Discard ride* only.
  * - **`discard`** — asked once more, because discarding is the one answer that
  *   deletes the device copy (ADR 0036 D-3): *Keep riding* and *Discard ride*.
+ * - **Nothing recorded under the ride at all** (`recorded` false, #2381: a
+ *   simulated ride, a preview, a ride whose recording could not start) —
+ *   *Keep riding* and *End ride*, ONE step. There is nothing to save and
+ *   nothing to delete, so neither answer is offered and nothing is asked
+ *   twice; the one question stays, so a stray press or back does not end the
+ *   ride.
  *
  * ## Keep riding is the default, and that is behaviour rather than a style
  *
@@ -90,13 +96,15 @@ export const END_RIDE_TEXT = {
   /** The `discard` step — the owner's sentence (#2349, item 2). */
   discardWarning: 'This ride will be deleted from this device. It can’t be undone.',
   /**
-   * The `discard` step's label and sentence for a ride with NO recording
-   * under it (#2381, the owner's 2026-11-08 comment): a simulated ride, a
-   * preview, a browser that cannot record. Nothing is deleted, so the
-   * deletion warning would be false. ⚠️ Draft wording for the owner.
+   * The `ask` step's sentence for a ride with NO recording under it (#2381,
+   * the owner's 2026-11-08 comment): a simulated ride, a preview, a ride whose
+   * recording could not start. Nothing is saved or deleted, so neither *Save
+   * ride* nor the deletion warning would be true. On both surfaces, after
+   * {@link END_RIDE_TEXT.askLabel}. ⚠️ Draft wording for the owner.
    */
-  endLabel: 'End this ride?',
-  endNothingRecorded: 'Nothing was recorded, so nothing will be deleted.',
+  askNotRecorded: 'Nothing is being recorded, so nothing is saved or deleted.',
+  /** That step's one answer that ends the ride (#2381). */
+  end: 'End ride',
 } as const;
 
 export interface EndRideQuestionProps {
@@ -105,15 +113,19 @@ export interface EndRideQuestionProps {
   readonly canSave: boolean;
   /**
    * Whether anything is recorded under the ride, so that *Discard ride*
-   * deletes something. False (#2381): the `discard` step says that nothing
-   * is deleted rather than warning of a deletion that cannot happen. Absent
-   * is true, which is every Ride-screen use.
+   * deletes something. False (#2381): the question is one step, *Keep
+   * riding* and *End ride*, which calls {@link onConfirmDiscard} — there is
+   * no deletion to warn of or confirm. Absent is true, which is every
+   * Ride-screen use.
    */
   readonly recorded?: boolean;
   readonly onSave: () => void;
   /** The `ask` step's *Discard ride*: asks once more. */
   readonly onDiscard: () => void;
-  /** The `discard` step's *Discard ride*: ends the ride and deletes it. */
+  /**
+   * The `discard` step's *Discard ride*: ends the ride and deletes it. With
+   * nothing recorded, the `ask` step's *End ride*, which deletes nothing.
+   */
   readonly onConfirmDiscard: () => void;
   /** *Keep riding*, Escape, and back: closes the question and changes nothing else. */
   readonly onKeepRiding: () => void;
@@ -160,22 +172,23 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
 
   const discarding = props.step === 'discard';
   const hud = props.surface === 'hud';
-  const nothingToDelete = props.recorded === false;
-  const discardLabel = nothingToDelete ? END_RIDE_TEXT.endLabel : END_RIDE_TEXT.discardLabel;
-  const discardSentence = nothingToDelete
-    ? END_RIDE_TEXT.endNothingRecorded
-    : END_RIDE_TEXT.discardWarning;
-  const label = discarding ? discardLabel : END_RIDE_TEXT.askLabel;
+  // #2381: nothing under the ride to save or delete — one step, see above.
+  const unrecorded = props.recorded === false;
+  const label = discarding ? END_RIDE_TEXT.discardLabel : END_RIDE_TEXT.askLabel;
   const sentence = discarding
-    ? discardSentence
-    : props.canSave
-      ? END_RIDE_TEXT.ask
-      : END_RIDE_TEXT.askNothingRecorded;
+    ? END_RIDE_TEXT.discardWarning
+    : unrecorded
+      ? END_RIDE_TEXT.askNotRecorded
+      : props.canSave
+        ? END_RIDE_TEXT.ask
+        : END_RIDE_TEXT.askNothingRecorded;
   const hudSentence = discarding
-    ? discardSentence
-    : props.canSave
-      ? undefined
-      : END_RIDE_TEXT.hudNothingRecorded;
+    ? END_RIDE_TEXT.discardWarning
+    : unrecorded
+      ? END_RIDE_TEXT.askNotRecorded
+      : props.canSave
+        ? undefined
+        : END_RIDE_TEXT.hudNothingRecorded;
   return (
     <div className={props.className} role="group" aria-label={label} data-oyl-end-ride={props.step}>
       {props.surface === 'ride-screen' ? (
@@ -217,7 +230,16 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
         >
           {END_RIDE_TEXT.keep}
         </Button>
-        {discarding ? null : (
+        {discarding ? null : unrecorded ? (
+          <Button
+            variant="secondary"
+            size="ride"
+            touchLockExempt={hud}
+            onClick={props.onConfirmDiscard}
+          >
+            {END_RIDE_TEXT.end}
+          </Button>
+        ) : (
           <>
             {props.canSave ? (
               <Button variant="secondary" size="ride" touchLockExempt={hud} onClick={props.onSave}>

@@ -288,8 +288,7 @@ describe('a workout’s stall rescue on the game’s HUD — #585', () => {
     expect(region()).toMatch(/^Eased: Pedalling has stopped/);
 
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
     await press('Ride ');
     const heard: string[] = [];
     for (let frame = 0; frame < 12; frame += 1) {

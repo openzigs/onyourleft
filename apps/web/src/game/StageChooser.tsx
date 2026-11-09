@@ -1102,6 +1102,9 @@ export const CANNOT_RECORD_TEXT = 'This browser cannot record a ride.';
  * the end-of-ride question's two answers (`ride/EndRideQuestion.tsx`), so the
  * rider knows before the press that an unwanted ride is theirs to discard.
  */
+/** The label before it — the owner's ruling of 2026-11-08 on #2381 (it replaced "Recorded"). */
+export const RECORDING_ON_LABEL = 'Recording on';
+
 export const RECORDS_ON_RIDE_TEXT =
   'Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.';
 
@@ -1124,7 +1127,7 @@ function RecordingLine(props: { readonly offer: RecordingOffer }): JSX.Element |
     <div className="oyl-chooser__recording">
       {records ? (
         <p className="tw:m-0">
-          <span className="oyl-chooser__recording-label">Recorded</span>
+          <span className="oyl-chooser__recording-label">{RECORDING_ON_LABEL}</span>
           {' · '}
           {RECORDS_ON_RIDE_TEXT}
         </p>

@@ -954,7 +954,10 @@ test.describe('#1221, #2381 — the chooser says, under Ride, that the press rec
       console.log(
         `#2381 — ${viewport.name}: Ride ends at ${String(read.ride?.bottom.toFixed(1))} px, the line at ${String(read.line?.top.toFixed(1))}–${String(read.line?.bottom.toFixed(1))} px`,
       );
-      expect(read.text).toContain('Pressing Ride records this ride.');
+      // The owner's words of 2026-11-08 (#2381), label and sentence.
+      expect(read.text).toBe(
+        'Recording on · Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.',
+      );
       if (read.ride === undefined || read.line === undefined) {
         throw new Error('the chooser has no Ride, or no line under it');
       }

@@ -41,6 +41,7 @@ import { roomPortOver } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import { ManualClock, ScriptedRoom } from '../net/testing';
 import { createRideController } from '../ride/controller';
+import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 
@@ -458,8 +459,7 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     await pump(4);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
 
     expect(buttonStarting('Ride ')?.textContent).toBe(`Ride ${other.name}`);
     expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
@@ -470,8 +470,7 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     await ridePreview(String(POWER), 8, { trainer: readyTrainer(commands), frames: 40 });
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
 
     expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
@@ -663,8 +662,7 @@ describe('a simulated ride reaches no trainer — #1992, CLAUDE.md §6', () => {
     });
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
 
     expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
@@ -677,8 +675,7 @@ describe('a simulated ride reaches no trainer — #1992, CLAUDE.md §6', () => {
       frames: 40,
     });
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
 
     expect(commands.requests.length).toBeGreaterThan(0);
     expect(commands.written.length).toBeGreaterThan(0);
@@ -799,8 +796,7 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await rideFor(rig, 30);
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     for (let index = 0; index < 10; index += 1) await settle();
 
     expect(rig.written).toEqual([]);
@@ -820,8 +816,7 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     for (let index = 0; index < 10; index += 1) await settle();
 
     expect(rig.written).toEqual([]);
@@ -861,13 +856,13 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     expect(rig.controller.getSnapshot().phase).toBe('idle');
     expect(await rig.sessions()).toEqual([]);
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    // #2381: nothing was recorded, so the question does not say it deletes.
+    // #2381: nothing was recorded, so the question is one step and does not
+    // say it deletes.
     expect(document.body.textContent).not.toContain('deleted from this device');
     expect(document.querySelector('[data-oyl-end-ride]')?.textContent).toContain(
-      'Nothing was recorded',
+      END_RIDE_TEXT.askNotRecorded,
     );
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     for (let index = 0; index < 10; index += 1) await settle();
     mounted?.unmount();
     mounted = undefined;

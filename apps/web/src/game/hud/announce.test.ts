@@ -333,6 +333,8 @@ describe('priority is an ORDER, not a politeness', () => {
       'side-camera-lost',
       'room-lost',
       'room-race',
+      // #2381: this ride's recording could not start.
+      'not-recording',
     ]);
     // #1312, third pass: a lap's summary is NOT one of them.
     expect(ALWAYS_SPOKEN).not.toContain('lap-ended');
@@ -355,6 +357,17 @@ describe('priority is an ORDER, not a politeness', () => {
       { ...DEFAULT_ANNOUNCEMENTS, enabled: false },
     );
     expect(said).toEqual(['Room connection lost: reconnecting.']);
+  });
+
+  it('ranks a ride not being recorded below the room’s events and above #647’s, and says it with announcements off — #2381', () => {
+    const rank = PRIORITY.indexOf('not-recording');
+    expect(rank).toBe(PRIORITY.indexOf('room-rider') + 1);
+    expect(PRIORITY.indexOf('screen-off-risk')).toBe(rank + 1);
+    const { said } = run(
+      [{ now: 0, events: [{ kind: 'not-recording', text: 'Not recording: this ride.' }] }],
+      { ...DEFAULT_ANNOUNCEMENTS, enabled: false },
+    );
+    expect(said).toEqual(['Not recording: this ride.']);
   });
 
   it('puts a climb ahead below the safety events and above every reading — #399', () => {
