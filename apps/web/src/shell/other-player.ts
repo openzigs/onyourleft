@@ -189,7 +189,10 @@ export class OtherPlayer implements RiderPlayerInUse {
     } finally {
       this.#polling = false;
     }
-    if (this.#own !== undefined && (quietAtAsk === undefined || this.#own.quietToken() !== quietAtAsk)) {
+    if (
+      this.#own !== undefined &&
+      (quietAtAsk === undefined || this.#own.quietToken() !== quietAtAsk)
+    ) {
       // Not believed: it may be us. Nor is it one of two in a row.
       this.#lastReadingActive = false;
       return;
