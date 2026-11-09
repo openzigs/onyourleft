@@ -67,6 +67,7 @@ import { NO_READING, type HudInput, type TrainerLine } from './fields';
 import type { ControllerPort } from '../delivery/controller-port';
 import type { LaneInputPort } from '../delivery/lane-input-port';
 import { HudCore } from './HudCore';
+import { SIMULATED_MOVING_SENTENCE } from '../simulated-rider';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
 import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
@@ -475,11 +476,19 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           <WorkoutStrip workout={workout} />
         )
       }
-      moreActions={
+      moreActions={(focus) => (
         <>
           {simulated === undefined ? null : (
             <p className="oyl-hud__simulated">
-              {simulated.map((sentence, index) => (
+              {/*
+                The focus readout has no *Moving* field, so the sentence that
+                explains its dash goes while that readout is drawn (owner
+                ruling of 2026-11-09 on PR #2406).
+              */}
+              {(focus
+                ? simulated.filter((sentence) => sentence !== SIMULATED_MOVING_SENTENCE)
+                : simulated
+              ).map((sentence, index) => (
                 <Fragment key={sentence}>
                   {index === 0 ? null : ' '}
                   <span>{sentence}</span>
@@ -602,7 +611,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           )}
           {sound}
         </>
-      }
+      )}
       afterActions={
         /*
         #1347: a race's standings, a panel of their own — on a tablet at the

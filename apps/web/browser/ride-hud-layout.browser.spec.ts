@@ -201,7 +201,8 @@ for (const viewport of [
         return { text: (each.textContent ?? '').trim(), width: box.width, height: box.height };
       }),
     );
-    expect(choices).toHaveLength(7);
+    // Four panels, three sizes and — #2383 — the two arrangements.
+    expect(choices).toHaveLength(9);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);
@@ -226,5 +227,86 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The secondary tier keeps only the ride's times.
       expect(seen.secondary, how).toEqual(['Moving', 'Elapsed', 'Clock']);
     }
+  });
+}
+
+/**
+ * #2383 — THE FOCUS READOUT, at every overlay viewport, in every mode, both
+ * ways (#1120): the same invariants as every other arrangement (everything
+ * on the stage, uncovered; no panel over another or over the leaning rider;
+ * a large value visibly larger than a small one), and its own:
+ *
+ * - the readout holds the six readings #2383 names and the ride's time
+ *   (#2382), in that order, and on this harness, which records, no dash;
+ * - neither tier is drawn, and the readout is centred on the stage;
+ * - and a ride with a mode of its own — a room, a lap race, a Delivery round
+ *   — keeps the full arrangement (`HudCore.tsx` §`isModeReading`): measured
+ *   with the readout in it, a panel was over the leaning rider on an upright
+ *   phone and a race's standings over the controls on the 4:3 tablet.
+ */
+const FOCUS_LABELS = [
+  'Power',
+  'Cadence',
+  'Heart rate',
+  'Speed',
+  'Avg power',
+  'Distance',
+  'Elapsed',
+];
+
+/** Whether a ride the harness is asked for has a mode of its own. */
+function hasOwnMode(query: string): boolean {
+  return query.includes('room=') || query.includes('delivery=');
+}
+
+for (const [mode, query] of MODES.filter(([, each]) => !hasOwnMode(each))) {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`#2383 the focus readout holds its layout — ${mode} — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(
+        browser,
+        viewport,
+        `${query === '' ? '?' : `${query}&`}arrangement=focus`,
+      );
+      const tablet = TABLET_VIEWPORTS.includes(viewport);
+      for (const [how, seen] of await bothWays(page)) {
+        const { faults, clipped } = sizeFaults(seen, viewport);
+        console.log(`#2383 ${mode} ${viewport.name} ${how}: clipped ${clipped.join(', ')}`);
+        expect(faults, how).toEqual([]);
+        expect(seen.focus, how).toEqual(FOCUS_LABELS);
+        for (const label of FOCUS_LABELS) {
+          expect(clipped, how).not.toContain(`reading: ${label}`);
+        }
+        expect(
+          seen.focusValues.filter((value) => value.startsWith('—')),
+          how,
+        ).toEqual([]);
+        expect(seen.primary, how).toEqual([]);
+        expect(seen.secondary, how).toEqual([]);
+        for (const name of ALWAYS_DRAWN) expect(clipped, how).not.toContain(name);
+        expect(seen.primaryValuePixels, how).toBe(
+          tablet ? TABLET_NORMAL_PRIMARY_PIXELS : PHONE_PRIMARY_PIXELS,
+        );
+        const focus = seen.panels.find((each) => each.name.includes('oyl-hud__focus'));
+        expect(focus, how).toBeDefined();
+        if (focus !== undefined) {
+          const centre = (focus.box.left + focus.box.right) / 2;
+          expect(Math.abs(centre - viewport.width / 2), how).toBeLessThanOrEqual(1);
+        }
+      }
+    });
+  }
+}
+
+for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
+  test(`#2383 ${mode} keeps the full arrangement with focus chosen`, async ({ browser }) => {
+    const viewport = OVERLAY_VIEWPORTS.find((each) => each.width === 360 && each.height === 800);
+    if (viewport === undefined) throw new Error('no 360×800 viewport');
+    const page = await sharedRide(browser, viewport, `${query}&arrangement=focus`);
+    const seen = await measure(page);
+    expect(sizeFaults(seen, viewport).faults).toEqual([]);
+    expect(seen.focus).toEqual([]);
+    expect(seen.primary).toContain('Power');
   });
 }

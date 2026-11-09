@@ -125,11 +125,13 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 import {
+  HUD_ARRANGEMENTS,
   HUD_PANELS,
   HUD_TEXT_SIZES,
   panelShown,
   readHudLayout,
   writeHudLayout,
+  type HudArrangement,
   type HudLayoutPreference,
   type HudPanelId,
   type HudTextSize,
@@ -1860,6 +1862,13 @@ const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
   standings: 'A race’s standings',
 };
 
+/** #2383: what each arrangement is called here. */
+const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
+  full: 'Full: every reading',
+  focus:
+    'Focus: power, cadence and heart rate large, with speed, average power, distance and ride time under them',
+};
+
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
   normal: 'Normal',
@@ -1870,9 +1879,11 @@ const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
 /**
  * The ride HUD's panels and the size of its numbers — #2079. Kept on this
  * device (`game/hud/hud-layout-preference.ts`) and read as the next ride
- * starts. **The notices, the controls and power, cadence, heart rate and
- * gradient are not offered**: a notice is where the HUD's safety sentences
- * stand, and a rider must always be able to pause.
+ * starts. **The notices, the controls and power, cadence and heart rate are
+ * not offered**: a notice is where the HUD's safety sentences stand, and a
+ * rider must always be able to pause. Since #2383 the rider may choose the
+ * focus arrangement, which shows the gradient nowhere: it is a choice of
+ * fewer numbers, made off the bike, and the full HUD is one choice away.
  *
  * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
  * as every ride-time control is: it is set from the bars as often as the sofa.
@@ -1901,15 +1912,32 @@ function HudLayoutPanel({
         id="oyl-hud-layout-heading"
         help={
           <p className="oyl-muted">
-            What the game shows while you ride, from your next ride. Power, cadence, heart rate and
-            gradient, the ride controls and every notice are always shown. The text size applies on
-            tablets: a phone or a short window keeps the normal size, because it has no room for
-            larger numbers beside the road.
+            What the game shows while you ride, from your next ride. Power, cadence and heart rate,
+            the ride controls and every notice are always shown. Focus shows one compact readout at
+            the top in place of every reading; a ride in a room, a Delivery round or a lap race
+            keeps the full layout. The text size applies on tablets: a phone or a short window keeps
+            the normal size, because it has no room for larger numbers beside the road.
           </p>
         }
       >
         Ride HUD
       </SectionHeading>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Layout</legend>
+        {HUD_ARRANGEMENTS.map((arrangement) => (
+          <label key={arrangement} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-arrangement"
+              checked={(layout.arrangement ?? 'full') === arrangement}
+              onChange={() => {
+                keep({ ...layout, arrangement });
+              }}
+            />{' '}
+            {HUD_ARRANGEMENT_LABELS[arrangement]}
+          </label>
+        ))}
+      </fieldset>
       <fieldset className="oyl-hud-layout__group">
         <legend>Show</legend>
         {HUD_PANELS.map((panel) => (

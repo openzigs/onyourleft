@@ -186,6 +186,35 @@ describe('the HUD passes the accessibility audit', () => {
 
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
+
+  // #2383: the focus readout is a different tree again — one panel, two
+  // named lists — and is audited as one, with its sensors live and dropped.
+  it('audits clean in the focus arrangement, live and with every sensor dropped', async () => {
+    const focus = { hidden: [], textSize: 'normal', arrangement: 'focus' } as const;
+    mounted = await mount(
+      inRideScreen(<HudPanel {...props({ elapsedSeconds: 65 })} layout={focus} />),
+    );
+    expect(document.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    mounted.unmount();
+
+    const base = props();
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          layout={focus}
+          state={{ ...base.state, input: { power: watts(0), live: false } }}
+          cadence={{ value: undefined, live: false }}
+          heartRate={{ value: undefined, live: false }}
+        />,
+      ),
+    );
+    expect(document.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    // And a dropped sensor is said in words there too, as in the full HUD.
+    expect(announced('Power')).toBe('Power, — W Sensor lost');
+  });
 });
 
 describe('a rider can tell a lost sensor from a zero, on the screen', () => {

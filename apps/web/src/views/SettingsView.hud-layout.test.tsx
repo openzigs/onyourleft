@@ -64,6 +64,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     expect(readHudLayout(localStorage)).toEqual({
       hidden: ['route', 'standings'],
       textSize: 'extra-large',
+      arrangement: 'full',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -82,10 +83,37 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     const offered = queryAll(document, '.oyl-hud-layout__choice').map((each) =>
       (each.textContent ?? '').trim(),
     );
-    expect(offered).toHaveLength(7);
+    // Four panels, three sizes and (#2383) two arrangements.
+    expect(offered).toHaveLength(9);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
+  });
+
+  it('chooses the focus arrangement, kept on the device beside the other choices — #2383', async () => {
+    await settings();
+    // Full is the default.
+    expect(choice('Full').checked).toBe(true);
+    expect(choice('Focus').checked).toBe(false);
+
+    await press(choice('Large'));
+    await press(choice('Focus'));
+
+    // What the next ride reads.
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: [],
+      textSize: 'large',
+      arrangement: 'focus',
+    });
+    // And Settings, opened again, says the same.
+    await settings();
+    expect(choice('Focus').checked).toBe(true);
+    expect(choice('Full').checked).toBe(false);
+    expect(choice('Large').checked).toBe(true);
+
+    // And back.
+    await press(choice('Full'));
+    expect(readHudLayout(localStorage).arrangement).toBe('full');
   });
 
   it('says so when the device will not keep the choice', async () => {

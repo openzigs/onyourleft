@@ -43,6 +43,7 @@ import { auditAccessibility, formatViolations, tabbableElements } from '../../a1
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
+import { simulatedRideSentences } from '../simulated-rider';
 import { FRESH_WEEK, startRound } from '../delivery/round';
 import { hudOf, startRace } from './lap-race-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
@@ -1123,5 +1124,156 @@ describe('the lap splits panel — #2080', () => {
     expect(
       tabbableElements(document).filter((each) => each.classList.contains('oyl-hud__swap')),
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * #2383: the focus arrangement, read off the rendered HUD — the readout in
+ * place of the two tiers, its seven readings in their order, the same figures
+ * the full HUD shows, and the full HUD kept on a ride with a mode of its own.
+ */
+describe('the focus readout — #2383', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: {
+      ...atStartLine(profile),
+      elapsed: seconds(30),
+      input: { power: watts(250), live: true },
+    },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    elapsedSeconds: 754,
+    movingSeconds: 700,
+    rideTotals: { distance: metres(12_345), climbed: metres(80), averagePower: watts(212) },
+  };
+  const focus = { hidden: [], textSize: 'normal', arrangement: 'focus' } as const;
+  const labelsIn = (selector: string): (string | null)[] =>
+    queryAll(mounted?.container ?? document, `${selector} dt`).map((each) => each.textContent);
+  const valueOf = (label: string): string => {
+    const field = queryAll(mounted?.container ?? document, '.oyl-hud__field').find(
+      (each) => each.querySelector('dt')?.textContent === label,
+    );
+    return field?.querySelector('dd')?.textContent ?? '';
+  };
+
+  it('draws one readout in place of the two tiers, its readings in their order', async () => {
+    mounted = await mount(<HudPanel {...base} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud')?.classList).toContain('oyl-hud--focus');
+    expect(mounted.container.querySelector('.oyl-hud__fields--primary')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__fields--secondary')).toBeNull();
+    expect(labelsIn('.oyl-hud__focus-main')).toEqual(['Power', 'Cadence', 'Heart rate']);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+    // Every label in the HUD is one of the readout's: nothing else is drawn.
+    expect(labelsIn('.oyl-hud')).toEqual([
+      ...labelsIn('.oyl-hud__focus-main'),
+      ...labelsIn('.oyl-hud__focus-more'),
+    ]);
+  });
+
+  it('keeps the focus readout whole when the ride readings are hidden', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ ...focus, hidden: ['readings'] }} />);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+  });
+
+  it('shows the figures the full HUD shows, and no dash for a figure that exists', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    const full = [
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      'Elapsed',
+    ].map(valueOf);
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} layout={focus} />);
+    const shown = [
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      'Elapsed',
+    ].map(valueOf);
+    expect(shown).toEqual(full);
+    expect(valueOf('Power')).toBe('250 W');
+    expect(valueOf('Avg power')).toBe('212 W');
+    expect(valueOf('Distance')).toBe('12.3 km');
+    expect(valueOf('Elapsed')).toBe('0:12:34');
+    expect(shown.filter((value) => value.startsWith('—'))).toEqual([]);
+  });
+
+  it('shows the ride’s own clock where nothing records — #2382', async () => {
+    mounted = await mount(
+      <HudPanel {...base} elapsedSeconds={undefined} rideTotals={undefined} layout={focus} />,
+    );
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Ride']);
+    expect(valueOf('Ride')).toBe('0:00:30');
+  });
+
+  it('keeps the full HUD on a ride with a mode of its own', async () => {
+    mounted = await mount(<HudPanel {...base} room={{ nearby: 2 }} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+    expect(mounted.container.querySelector('.oyl-hud')?.classList).not.toContain('oyl-hud--focus');
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0 }}
+        layout={focus}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} lapRace={hudOf(startRace({ laps: 3 }))} layout={focus} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+  });
+
+  it('draws the full HUD with nothing chosen, and with full chosen', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} layout={{ hidden: [], textSize: 'normal', arrangement: 'full' }} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
+    expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+  });
+
+  // Owner ruling of 2026-11-09 on PR #2406: the focus readout has no Moving
+  // field, so the simulated mark's sentence about it goes with Focus on and
+  // stays with Full. The sentences are the ones GameView hands in.
+  const mark = simulatedRideSentences({ watts: 200, speedup: 8, startMetres: undefined });
+  const markText = (): string | null | undefined =>
+    mounted?.container.querySelector('.oyl-hud__simulated')?.textContent;
+
+  it('leaves "Moving needs a recording." out of the simulated mark with Focus on', async () => {
+    mounted = await mount(<HudPanel {...base} simulated={mark} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(markText()).toBe('Simulated ride at 200 W, 8× real time. Not recorded or shared.');
+    expect(mounted.container.textContent).not.toContain('Moving needs a recording.');
+  });
+
+  it('keeps "Moving needs a recording." in the simulated mark with Full', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        simulated={mark}
+        layout={{ hidden: [], textSize: 'normal', arrangement: 'full' }}
+      />,
+    );
+    expect(markText()).toBe(
+      'Simulated ride at 200 W, 8× real time. Not recorded or shared. Moving needs a recording.',
+    );
   });
 });

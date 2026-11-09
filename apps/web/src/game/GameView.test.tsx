@@ -2667,6 +2667,29 @@ describe('the HUD the rider chose — #2079', () => {
     expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
   });
 
+  // #2383: the focus arrangement, as Settings writes it, read as the ride starts.
+  it('draws the focus readout when the device says the rider chose it — #2383', async () => {
+    writeHudLayout(localStorage, { hidden: [], textSize: 'normal', arrangement: 'focus' });
+    const hud = await rideOnce();
+    expect(hud.classList).toContain('oyl-hud--focus');
+    expect(hud.querySelector('.oyl-hud__fields--primary')).toBeNull();
+    expect(queryAll(hud, '.oyl-hud__focus dt').map((dt) => dt.textContent)).toEqual([
+      'Power',
+      'Cadence',
+      'Heart rate',
+      'Speed',
+      'Avg power',
+      'Distance',
+      // #2382: this ride records nothing, so the ride's own clock.
+      'Ride',
+    ]);
+    // The ride's clock runs from the first second, and power is live.
+    expect(hudField('Ride')).toMatch(/^0:00:\d\d$/);
+    expect(hudField('Power')).not.toMatch(/^—/);
+    // The controls are the HUD's still.
+    expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
+  });
+
   it('keeps the graph when only the route is turned off, and the route when only the graph is', async () => {
     writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal' });
     let hud = await rideOnce();

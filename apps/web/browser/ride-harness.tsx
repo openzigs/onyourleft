@@ -184,6 +184,9 @@ export interface StageMeasurement {
   /** The labels of the readings, in document order, per tier. */
   readonly primary: readonly string[];
   readonly secondary: readonly string[];
+  /** #2383: the focus readout's labels and values, in document order; empty in full. */
+  readonly focus: readonly string[];
+  readonly focusValues: readonly string[];
   /** Type sizes in CSS pixels, so "visibly larger" is read off the engine. */
   readonly primaryValuePixels: number;
   readonly secondaryValuePixels: number;
@@ -520,6 +523,9 @@ const DELIVERY = new URLSearchParams(window.location.search).get('delivery') ===
 /** #2079: `?text=large` or `?text=extra-large`, the HUD's text size. */
 const HUD_TEXT_ASKED = new URLSearchParams(window.location.search).get('text');
 const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
+
+/** #2383: `?arrangement=focus`, the focus readout in place of the two tiers. */
+const HUD_FOCUS = new URLSearchParams(window.location.search).get('arrangement') === 'focus';
 
 /** #2079: `?hide=readings,route`, the HUD's panels turned off. */
 const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
@@ -1209,8 +1215,15 @@ function measure(): StageMeasurement {
     givenWay,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
-    primaryValuePixels: fontPixels('.oyl-hud__fields--primary .oyl-hud__value'),
-    secondaryValuePixels: fontPixels('.oyl-hud__fields--secondary .oyl-hud__value'),
+    // #2383: the focus readout's two rows are the two tiers' sizes there.
+    primaryValuePixels: fontPixels(
+      '.oyl-hud__fields--primary .oyl-hud__value, .oyl-hud__focus-main .oyl-hud__value',
+    ),
+    secondaryValuePixels: fontPixels(
+      '.oyl-hud__focus-more .oyl-hud__value, .oyl-hud__fields--secondary .oyl-hud__value',
+    ),
+    focus: labels('.oyl-hud__focus'),
+    focusValues: [...document.querySelectorAll('.oyl-hud__focus dd')].map(textOf),
     chrome: {
       header: document.querySelector('header.oyl-header') !== null,
       navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
@@ -1417,8 +1430,12 @@ async function run(): Promise<void> {
   // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
   // written where Settings writes them, read as the ride starts.
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
-  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0) {
-    writeHudLayout(localStorage, { textSize: HUD_TEXT ?? 'normal', hidden: HUD_HIDDEN });
+  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0 || HUD_FOCUS) {
+    writeHudLayout(localStorage, {
+      textSize: HUD_TEXT ?? 'normal',
+      hidden: HUD_HIDDEN,
+      arrangement: HUD_FOCUS ? 'focus' : 'full',
+    });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
