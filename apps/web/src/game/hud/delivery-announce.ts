@@ -50,7 +50,9 @@
  * the nearest not yet said, and one the rider has passed before it was said
  * is dropped, because a warning behind the rider is noise. A round on a
  * rider's own route says none, as before (`ride-round.ts` §`DeliveryRide.onLevel`).
- * The lane is said as the rider sees it: left, middle or right, never a place.
+ * Where it stands is said as the rider sees it: in the left lane, in the right
+ * lane, or in the middle of the road (the owner's ruling of 2026-11-09), never a
+ * place.
  *
  * ## The words are this project's own (DL1), for the owner's approval
  *
@@ -114,11 +116,20 @@ const OBSTACLE_SAID: Readonly<Record<ObstacleKind, string>> = {
   cone: 'A cone',
 };
 
-/** `A parked car ahead, in the left lane.`: the kind, and the lane as the rider faces it. */
+/**
+ * `A parked car ahead, in the left lane.`: the kind, and where it stands as the
+ * rider faces it. The middle is said as "in the middle of the road", never
+ * "the middle lane": the owner's ruling of 2026-11-09 on PR #2378.
+ */
 export function obstacleAheadSentence(obstacle: Obstacle): string {
   const across = obstacle.stands ?? 0;
-  const lane = across < 0 ? 'left' : across > 0 ? 'right' : 'middle';
-  return `${OBSTACLE_SAID[obstacle.kind]} ahead, in the ${lane} lane.`;
+  const where =
+    across < 0
+      ? 'in the left lane'
+      : across > 0
+        ? 'in the right lane'
+        : 'in the middle of the road';
+  return `${OBSTACLE_SAID[obstacle.kind]} ahead, ${where}.`;
 }
 
 /**

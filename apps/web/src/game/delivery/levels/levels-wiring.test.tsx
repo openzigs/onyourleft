@@ -280,7 +280,7 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
         const all = [...heard];
         if (
           all.some((each) => /^(Delivered to|Missed) the 1st house/.test(each)) &&
-          all.some((each) => / ahead, in the (left|middle|right) lane\.$/.test(each))
+          all.some((each) => / ahead, in the ((left|right) lane|middle of the road)\.$/.test(each))
         ) {
           break;
         }
@@ -300,7 +300,7 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
       // And a parked car or a bin standing ahead, said in words before the rider reaches it.
       expect(
         said.some((each) =>
-          /^A (parked car|bin) ahead, in the (left|middle|right) lane\.$/.test(each),
+          /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
         ),
       ).toBe(true);
       // The credit, for the whole of the ride (D-6.5).
@@ -401,7 +401,7 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
       const said = [...heard];
       expect(
         said.some((each) =>
-          /^A (parked car|bin) ahead, in the (left|middle|right) lane\.$/.test(each),
+          /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
         ),
       ).toBe(true);
       expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);

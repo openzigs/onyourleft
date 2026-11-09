@@ -425,7 +425,9 @@ describe('a standing obstacle ahead, said in words — #2362, ADR 0065 D-10.9', 
 
   it('names the kind and the lane as the rider faces it, and no place or number', () => {
     expect(obstacleAheadSentence(CAR)).toBe('A parked car ahead, in the right lane.');
-    expect(obstacleAheadSentence(BIN)).toBe('A bin ahead, in the middle lane.');
+    expect(obstacleAheadSentence(BIN)).toBe('A bin ahead, in the middle of the road.');
+    // The owner's ruling of 2026-11-09: never "the middle lane".
+    expect(obstacleAheadSentence(BIN)).not.toContain('middle lane');
     expect(obstacleAheadSentence({ ...CAR, stands: -1.75 })).toBe(
       'A parked car ahead, in the left lane.',
     );
@@ -450,7 +452,7 @@ describe('a standing obstacle ahead, said in words — #2362, ADR 0065 D-10.9', 
     caller.ride(13, 24);
     expect(caller.said.map((each) => each.text)).toEqual([
       'A parked car ahead, in the right lane.',
-      'A bin ahead, in the middle lane.',
+      'A bin ahead, in the middle of the road.',
     ]);
   });
 
