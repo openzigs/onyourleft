@@ -19,7 +19,14 @@ import {
 } from '@onyourleft/domain';
 import type { StreamChannelValue } from '@onyourleft/store';
 
-import { rideAveragePower, rideClimbed, rideDistance, rideTotals } from './totals';
+import {
+  rideAveragePower,
+  rideAverageSpeed,
+  rideClimbed,
+  rideDistance,
+  rideEnergy,
+  rideTotals,
+} from './totals';
 
 function series(
   channels: RecordedSeries<StreamChannelValue>['channels'],
@@ -68,7 +75,29 @@ describe('the ride so far (#2076)', () => {
     expect(rideClimbed(indoor, [{ ascent: undefined }])).toBeUndefined();
   });
 
-  it('puts the three together', () => {
+  it('#2387: adds the work of each power reading that exists, for its sample’s length', () => {
+    const ridden: RecordedSeries<StreamChannelValue> = {
+      ...series({ power: [watts(200), undefined, watts(300)] }, 3),
+      sampleInterval: seconds(2),
+    };
+    // 200 W for 2 s and 300 W for 2 s; the dropout adds nothing.
+    expect(rideEnergy(ridden)).toBe(1000);
+  });
+
+  it('#2387: has no energy with no power reading, never nought', () => {
+    expect(rideEnergy(series({}, 3))).toBeUndefined();
+    expect(rideEnergy(series({ power: [undefined, undefined] }, 2))).toBeUndefined();
+    // A rider who stopped pedalling did do nought: that is a reading.
+    expect(rideEnergy(series({ power: [watts(0)] }, 1))).toBe(0);
+  });
+
+  it('#2387: the average speed is the distance over the moving time, and none with none', () => {
+    expect(rideAverageSpeed(metres(9000), 1800)).toBe(5);
+    expect(rideAverageSpeed(metres(9000), 0)).toBeUndefined();
+    expect(rideAverageSpeed(metres(9000), Number.NaN)).toBeUndefined();
+  });
+
+  it('puts the four together', () => {
     const ridden = series(
       { speed: [metresPerSecond(5), metresPerSecond(5)], power: [watts(150), watts(250)] },
       2,
@@ -77,6 +106,7 @@ describe('the ride so far (#2076)', () => {
       distance: 10,
       climbed: 3,
       averagePower: 200,
+      energy: 400,
     });
   });
 });

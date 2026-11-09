@@ -392,6 +392,8 @@ describe('the HUD’s supporting text has a floor (#307 review)', () => {
     // #423. The secondary tier sets its units smaller so that `144 km/h` fits a
     // 5.5 rem track, and "smaller" is exactly what this floor is for.
     '.oyl-hud__fields--secondary .oyl-hud__unit',
+    // #2387: the totals strip's units, smaller for the same reason.
+    '.oyl-hud__totals .oyl-hud__unit',
   ];
 
   /**

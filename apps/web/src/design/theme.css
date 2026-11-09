@@ -13236,6 +13236,164 @@ select.oyl-input {
 }
 
 /* ==========================================================================
+ * THE TOTALS STRIP — #2387.
+ *
+ * The rider's choice in Settings → Ride HUD (`hud-layout-preference.ts`
+ * §"The totals strip"): the whole ride's totals — the lap, the route's
+ * length, the distance to go, the average speed, the energy and the climb
+ * (`totals-strip.ts`) — in one thin panel along the bottom of the road. The
+ * same fields as the tiers', so a value, a unit and a dash are drawn as they
+ * are there, smaller than a secondary reading: they are read now and then.
+ *
+ * WHERE IT IS DRAWN. Along the bottom, between the route panel and the
+ * actions panel and under the rider, placed by `grid-row` and `position:
+ * absolute` against the bottom row (`route actions` in every corners
+ * layout), so it takes no track and moves no panel, as the map credit is
+ * placed (§`.oyl-hud__attribution`). Measured, not chosen
+ * (`ride-hud-layout.browser.spec.ts` §"#2387"): the rider's feet are 80 % of
+ * the way down a landscape frame (`camera.ts` §`riderFrameBox`), so the strip
+ * needs the width between the two bottom panels and a fifth of the height
+ * under the rider:
+ *
+ * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
+ *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
+ *   leaning rider's box.
+ * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
+ *   under the rider.
+ * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
+ *   68 rem tall or more):
+ *   on the actions panel, in its column, by the rule after these
+ *   (§"THE TOTALS STRIP ON A TABLET HELD UPRIGHT"): 176 px between its bottom
+ *   panels is too narrow for it.
+ * - **Anywhere else on the stage it is not drawn**, as the text size is not
+ *   (§"THE HUD'S TEXT SIZE"): a phone on its side has 73 to 97 px under the
+ *   rider and 208 to 316 px between the bottom panels; a phone upright 88 to
+ *   135 px between the rider and the actions panel. Settings says so. Where
+ *   the HUD is stacked under the world it is in the flow, after the
+ *   controls, and covers nothing.
+ *
+ * Its own size whatever the rider's text size, which is a factor on the
+ * tiers' values: the strip's room is measured at this size.
+ * ========================================================================== */
+.oyl-hud__totals {
+  grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+  column-gap: var(--oyl-space-md);
+  row-gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__totals .oyl-hud__value {
+  font-size: 1.25rem;
+  white-space: nowrap;
+}
+
+.oyl-hud__totals .oyl-hud__unit {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* On the stage, not drawn unless a rule below has the room for it. */
+@media (min-width: 46rem) and (min-height: 22.5rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    display: none;
+  }
+}
+
+@media (min-width: 60rem) and (min-height: 40rem), (min-width: 78rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    display: grid;
+    position: absolute;
+    grid-column: 1 / -1;
+    grid-row: -2 / -1;
+    /* The bottom panels are 18 and 20 rem wide (§"the corners layout"): the
+       strip is the road between them, a gap each side. */
+    bottom: 0;
+    left: calc(18rem + var(--oyl-space-md));
+    right: calc(20rem + var(--oyl-space-md));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* The tablet's own sizes are set on every value there (§"#2130"); the
+     strip keeps its own. */
+  .oyl-game--riding .oyl-hud .oyl-hud__totals .oyl-hud__value {
+    font-size: 1.25rem;
+  }
+}
+
+@media (min-width: 78rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+  }
+}
+
+/* ==========================================================================
+ * THE TOTALS STRIP ON A TABLET HELD UPRIGHT — the owner's ruling of
+ * 2026-11-09 on #2387.
+ *
+ * The owner's tablet upright is 800×1280, under the 60 rem the rule above
+ * needs. Upright the road between the bottom panels is too narrow (176 px at
+ * 800) and the gap between the leaning rider and the route panel too short
+ * (74 px), but the bottom row is as tall as the route panel (290 px at
+ * 800×1280) and the actions panel fills only its lower 123 px. So the strip
+ * sits ON the actions panel, in its column: the actions panel moves down into
+ * an implicit row after the grid's last line, the route panel spans both, and
+ * the strip takes the actions panel's own area. Both rows are `auto`, so while
+ * the strip and the actions panel together are shorter than the route panel
+ * no panel moves, and with the route panel turned off the two rows stack: the
+ * strip is on the actions panel, never over it. By the areas' own lines
+ * (`route-start`, `actions-end`), so it holds in every upright template —
+ * the normal one (§"#2130") and the larger text sizes' (§"THE HUD'S TEXT
+ * SIZE") — and only where a strip is drawn (`:has`), so every other ride's
+ * grid is what it was.
+ *
+ * Measured (`ride-hud-layout.browser.spec.ts` §"#2387"): at 800×1280 three
+ * columns in two rows across the actions panel's column, 392 × 104 px, from
+ * 1010 px down (1026 in a workout, whose actions panel is shorter): 102 px
+ * under the leaning rider's box and 35 px over *Pause* and *End ride*, and
+ * 70 px under the rider with the Pixel Tablet's 36 and 32 px insets. No other
+ * panel moves. 68 rem tall or more, because the rider's feet are 71 % of the
+ * way down an upright frame and the strip is about 270 px up from the bottom:
+ * at 768×1024 it measured 13 px under the rider with no insets, which a
+ * gesture bar's inset would take, so a tablet that short keeps it hidden.
+ *
+ * Under 51 rem wide only, the upright templates' three-column range
+ * (§"THE HUD'S TEXT SIZE" §"Upright"). From 51 to 60 rem wide, an upright
+ * 820×1180, 834×1194 or 900×1100, the larger text sizes' actions column is
+ * 132 to 212 px, its cells 27 to 54 px, and every value ran over the next
+ * one (PR #2413's review), so a tablet that wide upright keeps it hidden.
+ *
+ * A phone held upright is not given it (§"Anywhere else" above): between the
+ * leaning rider and the actions panel there are 135 px at 412×915, 115 at
+ * 390×844, 102 at 360×800 and 88 at 360×752, less an 8 px gap each side, and
+ * the strip is 104 px tall in its narrowest shape at 1.25 rem. Only the
+ * 412×915 phone has room, 15 px of it, and an Android gesture or button
+ * bar's bottom inset (24 to 48 px) lifts the actions panel by more than that.
+ * ========================================================================== */
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 68rem) {
+  .oyl-game--riding .oyl-hud:has(> .oyl-hud__totals) > .oyl-hud__route {
+    grid-row: route-start / span 2;
+  }
+
+  .oyl-game--riding .oyl-hud:has(> .oyl-hud__totals) > .oyl-hud__actions {
+    grid-row: actions-end / span 1;
+  }
+
+  .oyl-game--riding .oyl-hud__totals {
+    display: grid;
+    grid-area: actions;
+    align-self: end;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* The tablet's own sizes are set on every value here too (§"#2130"). */
+  .oyl-game--riding .oyl-hud .oyl-hud__totals .oyl-hud__value {
+    font-size: 1.25rem;
+  }
+}
+
+/* ==========================================================================
  * THE COMPACT ROUTE PANEL — #2385.
  *
  * The rider's choice in Settings → Ride HUD (`hud-layout-preference.ts`

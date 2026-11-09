@@ -65,6 +65,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: ['route', 'standings'],
       textSize: 'extra-large',
       arrangement: 'full',
+      totalsStrip: false,
       route: 'full',
     });
     // And Settings, opened again, says the same.
@@ -84,9 +85,9 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     const offered = queryAll(document, '.oyl-hud-layout__choice').map((each) =>
       (each.textContent ?? '').trim(),
     );
-    // Four panels, three sizes, (#2383) two arrangements and (#2385) two
-    // route panels.
-    expect(offered).toHaveLength(11);
+    // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
+    // panels and (#2387) the strip.
+    expect(offered).toHaveLength(12);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -106,6 +107,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: [],
       textSize: 'large',
       arrangement: 'focus',
+      totalsStrip: false,
       route: 'full',
     });
     // And Settings, opened again, says the same.
@@ -117,6 +119,30 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     // And back.
     await press(choice('Full'));
     expect(readHudLayout(localStorage).arrangement).toBe('full');
+  });
+
+  it('adds the totals strip, off by default and kept on the device — #2387', async () => {
+    await settings();
+    expect(choice('The ride’s totals').checked).toBe(false);
+
+    await press(choice('Focus'));
+    await press(choice('The ride’s totals'));
+
+    // What the next ride reads.
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: [],
+      textSize: 'normal',
+      arrangement: 'focus',
+      totalsStrip: true,
+      route: 'full',
+    });
+    // And Settings, opened again, says the same.
+    await settings();
+    expect(choice('The ride’s totals').checked).toBe(true);
+
+    // And off again.
+    await press(choice('The ride’s totals'));
+    expect(readHudLayout(localStorage).totalsStrip).toBe(false);
   });
 
   it('chooses the compact route panel, kept beside the route turned off — #2385', async () => {
@@ -135,6 +161,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: [],
       textSize: 'normal',
       arrangement: 'full',
+      totalsStrip: false,
       route: 'compact',
     });
 
@@ -144,6 +171,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: ['route'],
       textSize: 'normal',
       arrangement: 'full',
+      totalsStrip: false,
       route: 'compact',
     });
 

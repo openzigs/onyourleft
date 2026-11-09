@@ -1176,6 +1176,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the panels a rider turns off and the HUD's text size
                         (#2079), kept on the device and read as a ride starts;
                         never the notices, the controls or the primary readings
+    src/game/hud/totals-strip.ts
+                        the whole ride's totals along the bottom of the road
+                        (#2387), a rider's choice, off by default: the lap (a
+                        loop's only), the route, To go, Avg speed, Energy (kJ,
+                        never a load metric) and Climbed. To go and Climbed are
+                        the tiers' own readings picked by key; Avg speed is
+                        Distance over Moving and Energy the recorder's work
+                        (`recording/totals.ts`). Drawn only on tablets: on
+                        their side between the bottom panels, upright on the
+                        actions panel (`theme.css` §"THE TOTALS STRIP" has the
+                        measurements); not on phones, a ride with a mode, or
+                        the demo
     src/game/hud/recent-trace.ts, RecentGraph.tsx
                         the last ten minutes of power and heart rate (#2078):
                         a fixed ring of 600 one-second slots, written from the

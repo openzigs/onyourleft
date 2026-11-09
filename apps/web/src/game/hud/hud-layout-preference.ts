@@ -34,6 +34,15 @@
  * lap race — keeps the full arrangement whatever is chosen, because its
  * layout is fitted around the two tiers (`HudCore` `isModeReading`).
  *
+ * ## The totals strip — #2387
+ *
+ * On or off ({@link HudLayoutPreference.totalsStrip}), off by default: a thin
+ * strip along the bottom of the road with the whole ride's totals — the lap,
+ * the route's length, the distance to go, the average speed, the energy and
+ * the climb (`totals-strip.ts`). It pairs with either arrangement; with focus
+ * it is where the totals the readout leaves out are read. A ride with a mode
+ * of its own does not draw it, for the reason it keeps the full arrangement.
+ *
  * ## The route panel — #2385
  *
  * Full or compact ({@link HUD_ROUTE_VIEWS}). **Full** is the elevation strip,
@@ -85,6 +94,11 @@ export interface HudLayoutPreference {
    */
   readonly arrangement?: HudArrangement;
   /**
+   * Whether the totals strip is drawn — #2387. Absent is off, so a preference
+   * kept before #2387 reads as the HUD it always drew.
+   */
+  readonly totalsStrip?: boolean;
+  /**
    * Full or compact — #2385. Absent is `full`, so a preference kept before
    * #2385 reads as the route panel it always drew.
    */
@@ -95,6 +109,7 @@ export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
   hidden: [],
   textSize: 'normal',
   arrangement: 'full',
+  totalsStrip: false,
   route: 'full',
 };
 
@@ -137,6 +152,8 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
     hidden,
     textSize: isTextSize(row['textSize']) ? row['textSize'] : DEFAULT_HUD_LAYOUT.textSize,
     arrangement: isArrangement(row['arrangement']) ? row['arrangement'] : 'full',
+    // Only a stored `true` turns it on: anything else is the default, off.
+    totalsStrip: row['totalsStrip'] === true,
     route: isRouteView(row['route']) ? row['route'] : 'full',
   };
 }
@@ -161,6 +178,11 @@ export function writeHudLayout(
 /** Whether a panel is shown under this preference. */
 export function panelShown(preference: HudLayoutPreference, panel: HudPanelId): boolean {
   return !preference.hidden.includes(panel);
+}
+
+/** Whether the rider chose #2387's totals strip under this preference. */
+export function totalsStripChosen(preference: HudLayoutPreference): boolean {
+  return preference.totalsStrip === true;
 }
 
 /** Whether the HUD draws #2383's focus readout under this preference. */
