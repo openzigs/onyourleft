@@ -58,6 +58,7 @@ import {
   metres,
   metresPerSecond,
   pacerGap,
+  POWER_ZONE_LOWER_FRACTIONS,
   routeProfile,
   seconds,
   thresholdShare,
@@ -818,6 +819,112 @@ describe('the zone indicator on the HUD — #2077', () => {
       <HudPanel {...base} state={{ ...state, input: { power: watts(342), live: false } }} />,
     );
     expect(mounted.container.querySelector('.oyl-hud__zone-swatch')).toBeNull();
+  });
+});
+
+/**
+ * #2384: the zone strip — every zone a segment, the zone the indicator says
+ * lit, across every boundary of the rider's threshold, read off the HUD the
+ * ride mounts.
+ */
+describe('the zone strip on the HUD — #2384', () => {
+  const profile = route();
+  const state = atStartLine(profile);
+  const threshold = 250;
+  const base = {
+    profile,
+    state,
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    thresholdPower: watts(threshold),
+  };
+
+  /** The zone field's number, and what the strip lights and draws, at a power. */
+  async function at(
+    power: number,
+    live = true,
+  ): Promise<{ readonly says: string; readonly lit: string[]; readonly tall: string[] }> {
+    mounted?.unmount();
+    mounted = await mount(
+      <HudPanel {...base} state={{ ...state, input: { power: watts(power), live } }} />,
+    );
+    const field = mounted.container.querySelector(
+      '.oyl-hud__field--effort:has(.oyl-hud__zone-strip)',
+    );
+    const segments = queryAll(field ?? document, '.oyl-hud__zone-strip-segment');
+    expect(segments).toHaveLength(7);
+    const zoneOf = (each: Element): string =>
+      /oyl-hud__zone-strip-segment--(\d)/.exec(each.getAttribute('class') ?? '')?.[1] ?? '?';
+    return {
+      says: field?.querySelector('.oyl-hud__value')?.firstChild?.nextSibling?.textContent ?? '',
+      lit: segments
+        .filter((each) => each.classList.contains('oyl-hud__zone-strip-segment--lit'))
+        .map(zoneOf),
+      // The shape, not the colour: the lit segment is the strip's full height.
+      tall: segments.filter((each) => each.getAttribute('height') === '10').map(zoneOf),
+    };
+  }
+
+  it('lights the zone the zone field computes, on each side of every boundary', async () => {
+    expect(await at(0)).toEqual({ says: '1', lit: ['1'], tall: ['1'] });
+    // Each zone's floor, inclusive, and half a watt under it (the zone below).
+    for (const [index, fraction] of POWER_ZONE_LOWER_FRACTIONS.entries()) {
+      if (index === 0) continue;
+      const floor = fraction * threshold;
+      const below = String(index);
+      const above = String(index + 1);
+      expect(await at(floor - 0.5), `${String(floor - 0.5)} W`).toEqual({
+        says: below,
+        lit: [below],
+        tall: [below],
+      });
+      expect(await at(floor), `${String(floor)} W`).toEqual({
+        says: above,
+        lit: [above],
+        tall: [above],
+      });
+    }
+    // And far above the top floor, still zone 7.
+    expect(await at(2000)).toEqual({ says: '7', lit: ['7'], tall: ['7'] });
+  });
+
+  it('says the zone in words as its name, and leaves the field reading as it did', async () => {
+    await at(342);
+    const strip = mounted?.container.querySelector('.oyl-hud__zone-strip');
+    expect(strip?.getAttribute('role')).toBe('img');
+    expect(strip?.getAttribute('aria-label')).toBe('Zone 6 of 7: Anaerobic');
+    expect(strip?.textContent).toBe('');
+    expect(
+      mounted?.container
+        .querySelector('.oyl-hud__field--effort:has(.oyl-hud__zone-strip) dd')
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim(),
+    ).toBe('6 Anaerobic');
+  });
+
+  it('lights nothing, and says so, with the power reading lost', async () => {
+    const seen = await at(342, false);
+    expect(seen.lit).toEqual([]);
+    expect(seen.tall).toEqual([]);
+    expect(
+      mounted?.container.querySelector('.oyl-hud__zone-strip')?.getAttribute('aria-label'),
+    ).toBe('No zone: no power reading');
+  });
+
+  it('is not drawn at all with no threshold set, as the zone field is not', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        thresholdPower={undefined}
+        state={{ ...state, input: { power: watts(342), live: true } }}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__zone-strip')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__zone-bar')).toBeNull();
   });
 });
 

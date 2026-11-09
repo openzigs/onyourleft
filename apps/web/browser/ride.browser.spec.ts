@@ -1014,9 +1014,18 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         reads: (field?.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
         swatch: field?.querySelector('.oyl-hud__zone-swatch--6') !== null,
         parts: field?.querySelectorAll('.oyl-hud__zone-bar-part').length ?? 0,
+        // #2384: and the zone strip, zone 6 lit and named in words.
+        lit: field?.querySelector('.oyl-hud__zone-strip')?.getAttribute('data-oyl-zone-lit'),
+        named: field?.querySelector('.oyl-hud__zone-strip')?.getAttribute('aria-label'),
       };
     });
-    expect(zone).toEqual({ reads: '6 Anaerobic', swatch: true, parts: 7 });
+    expect(zone).toEqual({
+      reads: '6 Anaerobic',
+      swatch: true,
+      parts: 7,
+      lit: '6',
+      named: 'Zone 6 of 7: Anaerobic',
+    });
     for (const [how, seen] of await bothWays(page)) {
       expect(seen.secondary, how).toEqual(
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
