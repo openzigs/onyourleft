@@ -125,8 +125,12 @@ export interface HudCoreProps extends SharedProps {
    * plan (`PlanTrace`), or a workout's strip in its place (#1307).
    */
   readonly routeFigure: ReactNode;
-  /** The actions panel's rows under *Pause* and *End ride*, in their order. */
-  readonly moreActions?: ReactNode;
+  /**
+   * The actions panel's rows under *Pause* and *End ride*, in their order —
+   * or a function of whether the focus readout (#2383) is drawn, for a row
+   * that says something only the full HUD's fields make true.
+   */
+  readonly moreActions?: ReactNode | ((focus: boolean) => ReactNode);
   /** After the actions panel in the document: a race's standings (#1347). */
   readonly afterActions?: ReactNode;
   /**
@@ -458,7 +462,11 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             lanes={props.lanes}
           />
         )}
-        {asking ? null : props.moreActions}
+        {asking
+          ? null
+          : typeof props.moreActions === 'function'
+            ? props.moreActions(focus)
+            : props.moreActions}
       </div>
 
       {props.afterActions}

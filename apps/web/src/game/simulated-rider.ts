@@ -164,9 +164,17 @@ export function simulatedRideSentences(rider: SimulatedRider): readonly string[]
   return [
     `Simulated ride at ${String(rider.watts)} W${pace}.`,
     'Not recorded or shared.',
-    'Moving needs a recording.',
+    SIMULATED_MOVING_SENTENCE,
   ];
 }
+
+/**
+ * {@link simulatedRideSentences}' third sentence, which explains the *Moving*
+ * field's dash. The focus readout (#2383) has no *Moving* field, so the HUD
+ * leaves this sentence out while that readout is drawn (owner ruling of
+ * 2026-11-09 on PR #2406) and keeps it with the full HUD.
+ */
+export const SIMULATED_MOVING_SENTENCE = 'Moving needs a recording.';
 
 /**
  * {@link simulatedRideSentences} as one line, as the HUD's text reads.

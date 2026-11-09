@@ -43,6 +43,7 @@ import { auditAccessibility, formatViolations, tabbableElements } from '../../a1
 import { HudCore } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
+import { simulatedRideSentences } from '../simulated-rider';
 import { FRESH_WEEK, startRound } from '../delivery/round';
 import { hudOf, startRace } from './lap-race-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
@@ -1249,5 +1250,32 @@ describe('the focus readout — #2383', () => {
     );
     expect(mounted.container.querySelector('.oyl-hud__focus')).toBeNull();
     expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+  });
+
+  // Owner ruling of 2026-11-09 on PR #2406: the focus readout has no Moving
+  // field, so the simulated mark's sentence about it goes with Focus on and
+  // stays with Full. The sentences are the ones GameView hands in.
+  const mark = simulatedRideSentences({ watts: 200, speedup: 8, startMetres: undefined });
+  const markText = (): string | null | undefined =>
+    mounted?.container.querySelector('.oyl-hud__simulated')?.textContent;
+
+  it('leaves "Moving needs a recording." out of the simulated mark with Focus on', async () => {
+    mounted = await mount(<HudPanel {...base} simulated={mark} layout={focus} />);
+    expect(mounted.container.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(markText()).toBe('Simulated ride at 200 W, 8× real time. Not recorded or shared.');
+    expect(mounted.container.textContent).not.toContain('Moving needs a recording.');
+  });
+
+  it('keeps "Moving needs a recording." in the simulated mark with Full', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        simulated={mark}
+        layout={{ hidden: [], textSize: 'normal', arrangement: 'full' }}
+      />,
+    );
+    expect(markText()).toBe(
+      'Simulated ride at 200 W, 8× real time. Not recorded or shared. Moving needs a recording.',
+    );
   });
 });
