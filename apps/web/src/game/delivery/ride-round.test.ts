@@ -771,6 +771,7 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
   const LEVEL = {
     houses: FIRST_DAY_HOUSES + 2,
     hazardsPerKilometre: { static: 4, moving: 0 },
+    lengthMetres: 3000,
   } as const;
 
   function onLevel(storage = storageOf()): DeliveryRide {
@@ -786,6 +787,25 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     if (ride === undefined) throw new Error('the town gave no round');
     return ride;
   }
+
+  it('sizes a level’s most from the level’s stated length, never the road measured (round 6)', () => {
+    // The town's road is far longer than half a kilometre; a level stating 500 m at 4 a km
+    // may place at most 2, where the road measured would allow 6 or more.
+    expect(town.profile.totalDistance).toBeGreaterThan(1_500);
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      level: { ...LEVEL, hazardsPerKilometre: { static: 4, moving: 0 }, lengthMetres: 500 },
+    });
+    const last = ride?.throwTargets.at(-1)?.along ?? 0;
+    // A span long enough that its own density would place more than two.
+    expect(Math.ceil((last / 1000) * 4)).toBeGreaterThan(2);
+    expect(ride?.obstacles).toHaveLength(2);
+  });
 
   it('rides the level’s houses, not the week’s, and stands every obstacle', () => {
     const week: WeekProgress = { day: 3, houses: FIRST_DAY_HOUSES, score: 2 };

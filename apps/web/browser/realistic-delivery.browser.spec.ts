@@ -34,6 +34,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   DELIVERY_VILLAGE_DRAW_CALLS,
+  DELIVERY_VILLAGE_FRAME_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
@@ -74,6 +75,10 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     // The ceiling the page chose for the frame it drew is Delivery's, not the frozen one.
     expect(village.page.villageCeiling).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
     expect(village.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
+    // #2362, round 6: and its triangles, which the belt's three calls do not bound.
+    expect(village.result.lastFrame.triangles).toBeLessThanOrEqual(
+      DELIVERY_VILLAGE_FRAME_TRIANGLES,
+    );
     // And it is a ceiling Delivery needs: the same frame is over the frozen 50 by the belt's calls.
     expect(village.result.lastFrame.calls).toBeGreaterThan(REALISTIC_VILLAGE_DRAW_CALLS);
     // A held frame's mean is its count (#1294).
@@ -95,6 +100,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     expect(level.page.delivery).toEqual({ parcels: PIECES, markers: PIECES, obstacles: PIECES });
     expect(level.page.villageCeiling).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
     expect(level.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
+    expect(level.result.lastFrame.triangles).toBeLessThanOrEqual(DELIVERY_VILLAGE_FRAME_TRIANGLES);
     expect(level.result.drawCalls).toBe(level.result.lastFrame.calls);
   });
 });

@@ -371,7 +371,9 @@ export const LEVEL_FEWEST_OBSTACLES = 2;
  * twice {@link OBSTACLE_SIGHT_METRES}, so each still stands at least that far
  * into its stretch and from the one before. A span too short for
  * {@link LEVEL_FEWEST_OBSTACLES} such stretches places fewer; no level round
- * is that short (`obstacles.test.ts` sweeps the shipped levels' rounds).
+ * is that short (`levels/level-obstacles.test.ts` starts each shipped level's
+ * real rounds over their real spans; `obstacles.test.ts` holds the cap on a
+ * short span).
  */
 export const LEVEL_SHORTEST_STRETCH_METRES = 2 * OBSTACLE_SIGHT_METRES;
 
@@ -423,17 +425,21 @@ export interface ObstaclePlacementInput {
 }
 
 /**
- * Place the round's obstacles between `from` and `to`, one in each whole
- * {@link OBSTACLE_SPACING_METRES} of road, from the round's `seed` (#1808's,
- * drawn when the round starts and never stored). The same seed and input
- * give the same obstacles. The first stands at least
+ * Place the round's obstacles between `from` and `to` from the round's `seed`
+ * (#1808's,
+ * drawn when the round starts and never stored), one in each stretch of the
+ * span: on a rider's own route each whole {@link OBSTACLE_SPACING_METRES} of
+ * road; on a level, the span cut into {@link levelObstacleMix}'s count, its
+ * density over the span rounded up and held to its fewest and most, each
+ * stretch at least {@link LEVEL_SHORTEST_STRETCH_METRES}. The same seed and
+ * input give the same obstacles. The first stands at least
  * {@link OBSTACLE_SIGHT_METRES} past `from`, so none is in sight at the start.
  * `setting` is the assist's (#1813): `'fewer'` keeps one in
  * {@link FEWER_OBSTACLES_KEEP_ONE_IN} of these, and `'none'` places none.
  * `steering` is whether the rider can change lane (#1820): with it,
  * {@link STANDING_OBSTACLE_SHARE} of them stand in a seeded lane, each at the
  * distance and of the kind it would have been; without it, none does.
- * `mix` is a level's (#2362): its density sets the stretch, its share how
+ * `mix` is a level's (#2362): its count and stretch as above, its share how
  * many stand, and a standing one is one of {@link LEVEL_STANDING_KINDS}, a
  * parked car always in a kerb lane. Without it, as before.
  */

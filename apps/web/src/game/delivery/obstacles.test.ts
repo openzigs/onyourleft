@@ -28,6 +28,7 @@ import {
   OBSTACLE_SIGHT_METRES,
   OBSTACLE_SPACING_METRES,
   clearOfParkedCars,
+  LEVEL_SHORTEST_STRETCH_METRES,
   ON_TIME_FASTEST_METRES_PER_SECOND,
   PARKED_CAR_CLEARANCE_METRES,
   PARKED_CAR_KERB_GAP_METRES,
@@ -690,6 +691,50 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
         });
       }
     }
+  });
+
+  it('caps a short span’s count at one each LEVEL_SHORTEST_STRETCH_METRES, keeping the sight gap and the span (round 6)', () => {
+    expect(LEVEL_SHORTEST_STRETCH_METRES).toBe(2 * OBSTACLE_SIGHT_METRES);
+    const mix = { perKilometre: 1, standingShare: 1, fewest: 2, most: 3 };
+    for (const [to, expected] of [
+      [100, 0],
+      [200, 1],
+      [239, 1],
+      [240, 2],
+    ] as const) {
+      for (let seed = 0; seed < 200; seed += 1) {
+        const placed = placeObstacles({ from: 0, to }, seed, 'normal', true, mix);
+        expect(placed, `span ${String(to)} m`).toHaveLength(expected);
+        let before = 0;
+        for (const obstacle of placed) {
+          expect(obstacle.along - before).toBeGreaterThanOrEqual(OBSTACLE_SIGHT_METRES);
+          expect(obstacle.along).toBeLessThanOrEqual(to);
+          before = obstacle.along;
+        }
+      }
+    }
+  });
+
+  it('halves a level’s count with the assist at fewer, each kept obstacle where it was (round 6)', () => {
+    for (const level of ROUNDS) {
+      const mix = levelObstacleMix(level.round, level.lengthMetres);
+      for (const to of [966, 1_500, 2_105]) {
+        for (const seed of SEEDS) {
+          const normal = placeObstacles({ from: 0, to }, seed, 'normal', true, mix);
+          const fewer = placeObstacles({ from: 0, to }, seed, 'fewer', true, mix);
+          expect(fewer.length).toBe(Math.ceil(normal.length / FEWER_OBSTACLES_KEEP_ONE_IN));
+          expect(fewer.length).toBeLessThan(normal.length);
+          for (const kept of fewer) expect(normal).toContainEqual(kept);
+        }
+      }
+    }
+  });
+
+  it('reads a level’s most off its stated length, rounded up at a kilometre boundary (round 6)', () => {
+    const round = { hazardsPerKilometre: { static: 2, moving: 0 } };
+    expect(levelObstacleMix(round, 3_000).most).toBe(6);
+    expect(levelObstacleMix(round, 2_999).most).toBe(6);
+    expect(levelObstacleMix(round, 3_001).most).toBe(7);
   });
 
   it('places none for a level with no static hazards, and none with the assist at none', () => {

@@ -1020,7 +1020,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`browser/realistic/delivery.ts`), held by
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
-                        `realistic-budget-village.test.ts`
+                        `realistic-budget-village.test.ts`. ⚠️ **The three
+                        calls do not bound the triangles** (#2362): every
+                        obstacle instance submits the whole roster,
+                        `three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`
+                        (1 522, one car painted per instance), pinned by
+                        `delivery-belt.test.ts`; the 20-piece village frame
+                        is held to `realistic-budget.ts`
+                        §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
+                        measured 201 356) by the same nightly spec
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and

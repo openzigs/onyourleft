@@ -215,10 +215,16 @@ export interface DeliveryRideStart {
    */
   readonly storage: PreferenceStorage | undefined;
   /**
-   * A built-in level's round (#2362, ADR 0065 D-4.1): its houses, and its
-   * hazards for the obstacles. Absent, the week's round on a rider's route.
+   * A built-in level's round (#2362, ADR 0065 D-4.1): its houses, its
+   * hazards for the obstacles, and the level's own stated length, which the
+   * obstacles' most is read off (`obstacles.ts` §`levelObstacleMix`): the
+   * file's `lengthMetres`, never the road as measured, so one length is used
+   * everywhere (review of PR #2378, round 6). Absent, the week's round on a
+   * rider's route.
    */
-  readonly level?: Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> | undefined;
+  readonly level?:
+    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & { readonly lengthMetres: number })
+    | undefined;
 }
 
 /**
@@ -252,9 +258,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
     true,
-    input.level === undefined
-      ? undefined
-      : levelObstacleMix(input.level, input.profile.totalDistance),
+    input.level === undefined ? undefined : levelObstacleMix(input.level, input.level.lengthMetres),
   );
   return {
     week,

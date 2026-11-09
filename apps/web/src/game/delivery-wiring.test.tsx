@@ -2082,7 +2082,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         riderDistance: 0,
         lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
         storage: undefined,
-        level: LEVEL.round,
+        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
       });
       vi.restoreAllMocks();
       if (ride === undefined) continue;

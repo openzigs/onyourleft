@@ -156,7 +156,7 @@ interface Course {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   /** The level's round, on a level. */
-  readonly level?: LevelFile['round'] | undefined;
+  readonly level?: (LevelFile['round'] & { readonly lengthMetres: number }) | undefined;
 }
 
 const TOWN: Course = { corridor: town.corridor, profile: town.profile, origin: ORIGIN };
@@ -164,7 +164,7 @@ const ON_LEVEL: Course = {
   corridor: levelCorridor(LEVEL),
   profile: levelRoute(LEVEL).profile,
   origin: corridorOrigin(levelRoute(LEVEL).profile),
-  level: LEVEL.round,
+  level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
 };
 
 /** The round's seed: distinctive, so its digits are a marker. Under 2³². */

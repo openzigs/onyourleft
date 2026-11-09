@@ -2494,7 +2494,10 @@ function GameScreen({
               lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
               storage: deviceStorage(),
               // #2362: a level's round is its own houses and its parked cars and bins.
-              level: levelRidden?.file.round,
+              level:
+                levelRidden === undefined
+                  ? undefined
+                  : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
             })
           : undefined;
       const noRoundText: string | undefined =

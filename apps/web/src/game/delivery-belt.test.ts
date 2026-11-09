@@ -32,7 +32,12 @@ import {
 } from './delivery/throw';
 import type { DeliveryInView, DeliveryPiece } from './port';
 import type { CorridorPoint } from './terrain';
-import { DELIVERY_PIECE_CAPACITY, DeliveryBelt, type DeliveryPieceKind } from './three-renderer';
+import {
+  DELIVERY_OBSTACLE_TRIANGLES,
+  DELIVERY_PIECE_CAPACITY,
+  DeliveryBelt,
+  type DeliveryPieceKind,
+} from './three-renderer';
 import { PEAK_IRRADIANCE } from './world';
 
 const KINDS: readonly DeliveryPieceKind[] = ['parcels', 'markers', 'obstacles'];
@@ -472,19 +477,27 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     belt.dispose();
   });
 
-  it('paints its cars in three body colours, in the one call, each keeping its colour by its place on the round', () => {
+  it('paints its cars in three body colours from ONE car in the geometry, each instance its own paint by its place on the round (round 6)', () => {
     const belt = new DeliveryBelt('stylised');
-    // Three cars of their own in the one geometry, each the same shape and its own paint.
-    const kindsOfCar = [CAR_KIND, ROSTER.length, ROSTER.length + 1];
-    const bodies = kindsOfCar.map((kind) => {
-      const car = carVertices(belt, kind);
-      expect(car.length, `kind ${String(kind)}`).toBe(carVertices(belt, CAR_KIND).length);
-      // The body is its most-used paint.
-      const counts = new Map<string, number>();
-      for (const each of car) counts.set(each.paint, (counts.get(each.paint) ?? 0) + 1);
-      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    });
-    expect(new Set(bodies).size).toBe(3);
+    const geometry = belt.meshOf('obstacles').geometry;
+    // One car: every vertex's kind is one of the roster's four, none a second or third car.
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const seen = new Set<number>();
+    for (let at = 0; at < kinds.count; at += 1) seen.add(kinds.getX(at));
+    expect([...seen].sort()).toEqual([0, 1, 2, 3]);
+    // Its body, and only its body, takes the instance's paint.
+    const painted = geometry.getAttribute('oylPainted');
+    const car = carVertices(belt, CAR_KIND);
+    const counts = new Map<string, number>();
+    for (const each of car) counts.set(each.paint, (counts.get(each.paint) ?? 0) + 1);
+    const body = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    let paintedBody = 0;
+    for (let at = 0; at < painted.count; at += 1) {
+      if (painted.getX(at) !== 1) continue;
+      expect(kinds.getX(at)).toBe(CAR_KIND);
+      paintedBody += 1;
+    }
+    expect(paintedBody).toBe(car.filter((each) => each.paint === body).length);
 
     const cars = [0, 1, 2, 3, 4].map((index) => ({
       x: 0,
@@ -497,17 +510,45 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     belt.update({ parcels: [], markers: [], obstacles: cars });
     expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([0, 1, 2, 0, 1]);
     expect(belt.drawn('obstacles').every((each) => each.kind === 'parked-car')).toBe(true);
-    const kinds = belt.meshOf('obstacles').geometry.getAttribute('oylObstacleKind');
-    expect([0, 1, 2, 3, 4].map((at) => kinds.getX(at))).toEqual([
-      CAR_KIND,
-      ROSTER.length,
-      ROSTER.length + 1,
-      CAR_KIND,
-      ROSTER.length,
-    ]);
+    // The instances' paints, as uploaded: three different colours, the fourth the first's.
+    const paints = geometry.getAttribute('oylObstaclePaint');
+    const rgb = (at: number): string =>
+      [paints.getX(at), paints.getY(at), paints.getZ(at)].map((each) => each.toFixed(4)).join(',');
+    expect(new Set([0, 1, 2].map(rgb)).size).toBe(3);
+    expect(rgb(3)).toBe(rgb(0));
     // The same car, a frame later and the first off the road: still its own paint.
     belt.update({ parcels: [], markers: [], obstacles: cars.slice(1) });
     expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([1, 2, 0, 1]);
+    belt.dispose();
+  });
+
+  it('stands the car on its tyres with its body clear of the road, so it reads as a car from in front (round 6)', () => {
+    // The lowest point is a tyre's, at the road; away from the wheels nothing of
+    // the car is below 0.22 m, which is what lets the browser gate's kind probe see
+    // under it. (A ten-sided tyre has no corner straight down, and fitted to the
+    // road it sank the whole car by 16 mm, round 6's finding.)
+    const belt = new DeliveryBelt('stylised');
+    const car = carVertices(belt, CAR_KIND);
+    const lowest = car.reduce((low, each) => (each.y < low.y ? each : low));
+    expect(lowest.y).toBeCloseTo(0, 6);
+    // Away from the wheels (their tyres and rims), along the car's whole width.
+    const between = car.filter((each) =>
+      [-1.31, 1.34].every((wheel) => Math.abs(each.z - wheel) > 0.4),
+    );
+    expect(Math.min(...between.map((each) => each.y))).toBeGreaterThan(0.22);
+    belt.dispose();
+  });
+
+  it('holds the obstacle geometry to its triangle budget, which every obstacle instance submits (round 6)', () => {
+    // The kind collapse is per vertex, so EVERY obstacle instance, a bin's or a
+    // cone's too, runs every kind's triangles through the vertex shader. Round 5
+    // held three whole cars (4 526); one painted car is 1 522: bin 88, trolley
+    // 124, cone 42 and the car 1 268. A change past this is for the owner and
+    // the tablet (#733), not a quiet drift.
+    const belt = new DeliveryBelt('stylised');
+    const position = belt.meshOf('obstacles').geometry.getAttribute('position');
+    expect(position.count / 3).toBe(DELIVERY_OBSTACLE_TRIANGLES);
+    expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_600);
     belt.dispose();
   });
 });

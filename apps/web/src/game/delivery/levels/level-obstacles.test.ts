@@ -67,7 +67,7 @@ function countsOn(level: LevelFile): Set<number> {
       riderDistance: 0,
       lineOffset: lineOffsetAt(racingLine(profile), 0),
       storage: undefined,
-      level: level.round,
+      level: { ...level.round, lengthMetres: level.lengthMetres },
     });
     vi.restoreAllMocks();
     expect(ride, `seed ${String(seed)}`).toBeDefined();

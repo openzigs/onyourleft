@@ -70,7 +70,14 @@ export const LEVEL_MOST_STEP_METRES = 50;
 /** How far the stated length may be from the length the points measure. */
 export const LEVEL_LENGTH_TOLERANCE_METRES = 25;
 
-/** The most hazards of one kind a kilometre: one every `obstacles.ts` §`OBSTACLE_SPACING_METRES`. */
+/**
+ * The most hazards of one kind a kilometre a level may ask for: one every
+ * `obstacles.ts` §`OBSTACLE_SPACING_METRES`. What a round places is
+ * `obstacles.ts` §`levelObstacleMix`'s count, this density over the round's
+ * span rounded up and held to its fewest and most, so its stretches can be a
+ * little shorter than that spacing, never shorter than
+ * §`LEVEL_SHORTEST_STRETCH_METRES` (review of PR #2378, round 6).
+ */
 export const LEVEL_MOST_HAZARDS_PER_KILOMETRE = 1000 / OBSTACLE_SPACING_METRES;
 
 /**

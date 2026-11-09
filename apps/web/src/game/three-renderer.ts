@@ -11001,42 +11001,25 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
 ) as readonly DeliveryObstacleKind[];
 
 /**
- * A parked car's body paints — #2362: blue-grey, brick red and pale silver.
- * Each is a whole car of its own in the roster's one geometry, marked with a
- * kind number of its own (the first is the car's place in
- * {@link DELIVERY_OBSTACLE_ORDER}, the others follow the roster), so three
- * colours of car cost no draw call: an instance draws one of them, as it draws
- * one kind ({@link withObstacleKinds}). This project's own colours.
+ * A parked car's body paints — #2362: blue-grey, brick red and pale silver,
+ * this project's own colours. **One car in the geometry, painted per
+ * instance** (round 6 of PR #2378's review): the car's body vertices carry
+ * {@link DELIVERY_PAINTED_ATTRIBUTE}, and {@link withObstacleKinds} takes their
+ * colour from the instance's {@link DELIVERY_OBSTACLE_PAINT_ATTRIBUTE} instead
+ * of the vertex's. Round 5 held three whole cars, one a paint, and every
+ * instance of every kind submitted all three.
  */
 const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
 
-/** The kind number a parked car of paint `paint` is drawn with. @see PARKED_CAR_PAINTS */
-function parkedCarKindNumber(paint: number): number {
-  return paint === 0
-    ? DELIVERY_OBSTACLE_ORDER.indexOf('parked-car')
-    : DELIVERY_OBSTACLE_ORDER.length + paint - 1;
-}
+/** The vertex attribute marking a parked car's body, whose colour is the instance's paint. @see PARKED_CAR_PAINTS */
+const DELIVERY_PAINTED_ATTRIBUTE = 'oylPainted';
 
-/**
- * The kind number an obstacle piece is drawn with: its kind's, or for a parked
- * car one of {@link PARKED_CAR_PAINTS}, chosen by the piece's place on the
- * round so a car keeps its colour for the whole ride.
- */
-function obstacleKindNumber(piece: DeliveryObstaclePiece): number {
-  if (piece.kind !== 'parked-car') return DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
-  return parkedCarKindNumber((piece.index ?? 0) % PARKED_CAR_PAINTS.length);
-}
+/** The instanced attribute holding each obstacle instance's body paint, linear RGB. @see PARKED_CAR_PAINTS */
+const DELIVERY_OBSTACLE_PAINT_ATTRIBUTE = 'oylObstaclePaint';
 
-/** The kind and the paint a kind number stands for. @see obstacleKindNumber */
-function obstacleOfKindNumber(number: number): {
-  readonly kind: DeliveryObstacleKind | undefined;
-  readonly paint: number | undefined;
-} {
-  if (number >= DELIVERY_OBSTACLE_ORDER.length) {
-    return { kind: 'parked-car', paint: number - DELIVERY_OBSTACLE_ORDER.length + 1 };
-  }
-  const kind = DELIVERY_OBSTACLE_ORDER[number];
-  return { kind, paint: kind === 'parked-car' ? 0 : undefined };
+/** Which of {@link PARKED_CAR_PAINTS} a car piece wears: by its place on the round, so it keeps its colour for the ride. */
+function parkedCarPaint(piece: DeliveryObstaclePiece): number {
+  return (piece.index ?? 0) % PARKED_CAR_PAINTS.length;
 }
 
 /**
@@ -11067,12 +11050,20 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};`,
+        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PAINTED_ATTRIBUTE};\nattribute vec3 ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
       `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) );`,
+      'vertex',
+      spliced,
+    );
+    // #2362, round 6: a car's body wears its instance's paint.
+    shader.vertexShader = replacedOrThrown(
+      shader.vertexShader,
+      '#include <color_vertex>',
+      `#include <color_vertex>\n\tvColor.xyz = mix( vColor.xyz, ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE}, ${DELIVERY_PAINTED_ATTRIBUTE} );`,
       'vertex',
       spliced,
     );
@@ -11088,6 +11079,8 @@ interface DeliveryPart {
   readonly glows?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
+  /** For a parked car's body: its colour is the instance's paint (#2362). */
+  readonly painted?: boolean;
 }
 
 /**
@@ -11107,6 +11100,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
   const kinds = new Float32Array(vertices);
+  const painted = new Float32Array(vertices);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
@@ -11121,6 +11115,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       colours[corner * 3 + 2] = paint.b;
       glow[corner] = part.glows === true ? 1 : 0;
       kinds[corner] = part.kind ?? 0;
+      painted[corner] = part.painted === true ? 1 : 0;
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -11133,6 +11128,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
+    geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
   }
   geometry.computeBoundingSphere();
   return geometry;
@@ -11230,7 +11226,7 @@ function roundedProfile(shape: Shape, width: number, round: number): BufferGeome
     bevelThickness: round,
     bevelSize: round,
     bevelSegments: 2,
-    curveSegments: 5,
+    curveSegments: 4,
   })
     .rotateY(-Math.PI / 2)
     .translate(width / 2 - round, 0, 0);
@@ -11443,16 +11439,37 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
-  PARKED_CAR_PAINTS.forEach((paint, at) => {
-    for (const [made, colour] of parkedCarParts(paint)) {
-      parts.push({ made, colour, kind: parkedCarKindNumber(at) });
-    }
-  });
+  // One car: its body's vertices take the instance's paint (round 6).
+  const body = PARKED_CAR_PAINTS[0] as number;
+  for (const [made, colour] of parkedCarParts(body)) {
+    parts.push({
+      made,
+      colour,
+      kind: DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+      painted: colour === body,
+    });
+  }
   return deliveryShape(parts);
 }
 
+/**
+ * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
+ * review: **1 522**, the bin's 88, the trolley's 124, the cone's 42 and one
+ * parked car's 1 268. Every obstacle instance submits all of them (the kind
+ * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
+ * obstacles cost this many times the instances drawn in vertex work, and no
+ * fragment for the collapsed ones.
+ *
+ * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
+ * builds the geometry and does not read this number
+ */
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_522;
+
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
+
+/** Reused by {@link DeliveryBelt.update}, so a frame allocates no colour. */
+const DELIVERY_PAINT_COLOUR = new Color();
 
 /**
  * Delivery's parcels in flight, the markers on the houses still on the round
@@ -11486,6 +11503,9 @@ export class DeliveryBelt {
   readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
   /** Each obstacle instance's kind, by its index in the roster. */
   readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
+  /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
+  readonly #paints = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
+  readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
   #shown = true;
 
   constructor(world: 'stylised' | 'realistic') {
@@ -11499,6 +11519,8 @@ export class DeliveryBelt {
     const obstacles = obstacleShape();
     this.#kinds.setUsage(DynamicDrawUsage);
     obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
+    this.#paints.setUsage(DynamicDrawUsage);
+    obstacles.setAttribute(DELIVERY_OBSTACLE_PAINT_ATTRIBUTE, this.#paints);
     const made = (geometry: BufferGeometry, material: Material): InstancedMesh => {
       const mesh = new InstancedMesh(geometry, material, DELIVERY_PIECE_CAPACITY);
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
@@ -11543,10 +11565,21 @@ export class DeliveryBelt {
     this.#place(this.#meshes.obstacles, obstacles);
     const kinds = this.#kinds.array as Float32Array;
     const count = this.#meshes.obstacles.count;
+    const paints = this.#paints.array as Float32Array;
     for (let at = 0; at < count; at += 1) {
-      kinds[at] = obstacleKindNumber(obstacles[at] as DeliveryObstaclePiece);
+      const piece = obstacles[at] as DeliveryObstaclePiece;
+      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
+      const paint = piece.kind === 'parked-car' ? parkedCarPaint(piece) : -1;
+      this.#paintOf[at] = paint;
+      DELIVERY_PAINT_COLOUR.set(PARKED_CAR_PAINTS[Math.max(0, paint)] as number);
+      paints[at * 3] = DELIVERY_PAINT_COLOUR.r;
+      paints[at * 3 + 1] = DELIVERY_PAINT_COLOUR.g;
+      paints[at * 3 + 2] = DELIVERY_PAINT_COLOUR.b;
     }
-    if (count > 0) this.#kinds.needsUpdate = true;
+    if (count > 0) {
+      this.#kinds.needsUpdate = true;
+      this.#paints.needsUpdate = true;
+    }
   }
 
   #place(mesh: InstancedMesh, pieces: readonly DeliveryPiece[]): void {
@@ -11574,13 +11607,14 @@ export class DeliveryBelt {
     const kinds = this.#kinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
-      const obstacle = what === 'obstacles' ? obstacleOfKindNumber(kinds[at] as number) : undefined;
+      const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
+      const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
         z: matrices[at * 16 + 14] as number,
-        kind: obstacle?.kind,
-        paint: obstacle?.paint,
+        kind,
+        paint,
       });
     }
     return drawn;
