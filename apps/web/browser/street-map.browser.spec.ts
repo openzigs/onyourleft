@@ -270,6 +270,11 @@ for (const viewport of VIEWPORTS) {
  * tall, 766 px at 800×340 against a 400 px sheet when the reach was ±2.5 km.
  * Measured on the sheet and not on the streets, which only reach as far as
  * the town does; and again after riding, where the rider is off the grid.
+ *
+ * ⚠️ One page for all three, resized, and ridden UNPACED: the sheet's box is
+ * read from layout (`getBoundingClientRect` includes the transform), which
+ * needs no frame painted. Paced, five legs of 61 m at each viewport took
+ * 9.9 s and 37.9 s on the CI runner and ran the browser shard out of time.
  */
 const STACKED_VIEWPORTS = [
   { name: 'upright, 600×500', width: 600, height: 500 },
@@ -277,40 +282,39 @@ const STACKED_VIEWPORTS = [
   { name: 'short, 800×340', width: 800, height: 340 },
 ] as const;
 
-for (const viewport of STACKED_VIEWPORTS) {
-  test(`#2380 the sheet covers the whole box in the stacked layout — ${viewport.name}`, async ({
-    page,
-  }) => {
-    test.setTimeout(90_000);
+test('#2380 the sheet covers the whole box in the stacked layout', async ({ page }) => {
+  await page.setViewportSize(STACKED_VIEWPORTS[0]);
+  await open(page, 'street');
+  const gaps = async () =>
+    page.evaluate(() => {
+      const box = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
+      const sheet = document.querySelector('.oyl-hud__street-map-sheet')?.getBoundingClientRect();
+      if (box === undefined || sheet === undefined) return undefined;
+      return {
+        left: box.left - sheet.left,
+        right: sheet.right - box.right,
+        top: box.top - sheet.top,
+        bottom: sheet.bottom - box.bottom,
+        box: box.width,
+      };
+    });
+  for (const viewport of STACKED_VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await open(page, 'street');
-    const gaps = async () =>
-      page.evaluate(() => {
-        const box = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
-        const sheet = document.querySelector('.oyl-hud__street-map-sheet')?.getBoundingClientRect();
-        if (box === undefined || sheet === undefined) return undefined;
-        return {
-          left: box.left - sheet.left,
-          right: sheet.right - box.right,
-          top: box.top - sheet.top,
-          bottom: sheet.bottom - box.bottom,
-          box: box.width,
-        };
-      });
+    // Five places 61 m apart: over 250 m, so across a whole cell of the grid.
     for (let leg = 0; leg < 5; leg += 1) {
       const found = await gaps();
       expect(found, 'the box and the sheet are both on the page').toBeDefined();
       for (const side of ['left', 'right', 'top', 'bottom'] as const) {
         expect(
           found?.[side] ?? -1,
-          `${viewport.name}: the sheet's ${side} edge is short of the box by ${String(-(found?.[side] ?? 0))} px ` +
-            `(the box is ${String(found?.box)} px wide)`,
+          `${viewport.name}, leg ${String(leg)}: the sheet's ${side} edge is short of the box by ` +
+            `${String(-(found?.[side] ?? 0))} px (the box is ${String(found?.box)} px wide)`,
         ).toBeGreaterThanOrEqual(-0.5);
       }
-      await page.evaluate(async () => window.__oylStreetMap?.ride?.(61, 1, true));
+      await page.evaluate(async () => window.__oylStreetMap?.ride?.(61, 1, false));
     }
-  });
-}
+  }
+});
 
 /** Ride `frames` frames on a freshly opened page, and read the engine's main-thread times around it. */
 async function rideOn(page: Page, map: 'street' | 'outline', frames: number, paced: boolean) {
@@ -413,11 +417,11 @@ test('#2380 moving the street map does not paint it again: once per 250 m, not o
   page,
   browser,
 }) => {
-  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
-  // 600 m in 120 paced frames of 5 m: a move on every frame, and two or
-  // three new sheets. A count of paints, which a slow runner cannot raise.
-  const frames = 120;
+  // 300 m in 60 paced frames of 5 m: a move on every frame, and over 250 m,
+  // so at least one new sheet. A count of paints, which a slow runner cannot
+  // raise; the spec's one, because a traced paced frame is its dearest step.
+  const frames = 60;
   const { ridden, map, all } = await paintsOn(page, browser, frames, 5);
   expect(ridden.frames).toBe(frames);
   expect(ridden.views).toBeGreaterThan(frames - 2);
