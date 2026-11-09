@@ -37,7 +37,12 @@ describe('MainActivity registers every in-tree plugin before the bridge is built
   it('finds the plugins it is checking', () => {
     // Non-vacuity: a moved directory would leave the loop below checking nothing.
     expect(pluginClasses()).toEqual(
-      expect.arrayContaining(['RecordingServicePlugin', 'SecureWindowPlugin', 'OtherPlayerPlugin']),
+      expect.arrayContaining([
+        'RecordingServicePlugin',
+        'SecureWindowPlugin',
+        'OtherPlayerPlugin',
+        'AutoplayPlugin',
+      ]),
     );
     expect(bridgeBuilt).toBeGreaterThan(0);
   });

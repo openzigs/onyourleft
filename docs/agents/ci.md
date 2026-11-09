@@ -15,7 +15,7 @@ It has the same authority as the root file. Where the text below says "this file
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
 shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
 shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
-the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
+the browser gate in five parts, `browser-1` to `browser-5` (§"Five browser shards — #2376"; three since #1720) — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
@@ -1810,19 +1810,17 @@ minutes clear of its slowest measured run.
 [41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6, and
 run [41934894471](https://github.com/openzigs/onyourleft/actions/runs/41934894471), the first with
 every shard green.
-Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
-a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
+Columns as in §"Three browser shards — #1720". This was the table `nightly-split.test.ts` reads
+until #2376 added two browser shards: the table it reads is §"Five browser shards — #2376"'s now,
+in the same shape, and this one is the record. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
 the one case that reads this table, before it had their columns; every other case passed.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
 | 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
 | attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
 | attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
 | 41934894471 attempt 1 | 769 | **EPYC 7763** | 373 | Xeon 8370C | 586 | **EPYC 7763** | 411 | EPYC 9V45 | 283 | Xeon 6975P-C | 384 | **EPYC 7763** | 508 | 48 | 250 | 332 | 466 |
-<!-- shard-measurements:end -->
 
 - **`tests-1` took 536 to 586 s, 374 s inside its 960 s stop at the slowest (a Xeon 8370C; 567 s
   on the EPYC 7763), and `tests-2` 279 to 411 s (the slowest on the 7763)**, against the one job's
@@ -2295,3 +2293,138 @@ as before.
   failure is a status or a kind with no URL in it, since the account id is in the endpoint's host.
 - ⚠️ **Until the four are set the nightly is red** at the archive check: the bake falls back to the
   public URL and is answered 403, and the run's failure says `read through https`.
+
+#### Five browser shards — #2376
+
+⚠️ **The browser gate is five jobs since [#2376](https://github.com/openzigs/onyourleft/issues/2376),
+`browser-1` to `browser-5`, and a reviewer who remembers three is reading the old file.** On
+2026-11-08 `browser-2`'s `chromium` part reached its 720 s stop twice ("Timed out waiting 720s for
+the test suite to run"), once on #2374's pull request and once in merge-queue run
+[42511044605](https://github.com/openzigs/onyourleft/actions/runs/42511044605), which took #2353 out
+of the queue. Over the ten green runs read for this change (`main` and the merge queue, that day)
+`browser-1`'s part took 654 to 690 s on the slower runners, `browser-2`'s 708 to 714 s and
+`browser-3`'s up to 672 s, each against the same 720 s. **No stop moved**: each part keeps 720 s and
+three workers, the game run 85 s, the wrapper 825 s and its 14 minutes, each job its 25 minutes and
+the browser install its ten. Nothing left the gate, moved to nightly, or is retried.
+
+**How it was divided.** Each spec file's time in its worker was read from those ten runs' logs (the
+first case's start to the last case's end, as the list reporter prints them), and a simulation of
+Playwright's queue over them — files in path order, each to the first of three workers to come free —
+came within 2 % of every run's own `passed (…)` figure, about 6 to 14 s under it. Taking every file
+at the SLOWEST time measured for it, the `chromium` project is about 5 500 s of worker time:
+
+- **Three shards cannot hold it** under 70 % of 720 s (504 s): a ninth of it is over 600 s. And one
+  file, `ride.browser.spec.ts`, took 598 to 637 s in its one worker on the EPYC 7763, a 9V74 and a
+  Xeon 8573C, most of a stop on its own in any shard. **So it is two files**, divided by section
+  with nothing changed inside a case (#1414's way): the overlay and stacked stage, the moving time
+  and a standing notice stay, and `ride-conditions.browser.spec.ts` takes the rest — a workout eased
+  (#585), sounds on, a side camera (#551), a notice put away (#437), the cull, safe areas, #439's
+  insets, #1441's gesture bar, a laptop's window and the end steps (356 and 334 s at the slowest,
+  estimated from the cases' own times). `playwright test --list --project chromium` gives the same
+  2 397 titles before and after, compared sorted as `file › describe › title` with the second
+  file's name read as the first's.
+- **Four shards were tried first, and were not enough.** Drawn to finish together they simulated
+  at 455 to 459 s, and on this change's first run (run
+  [42520003996](https://github.com/openzigs/onyourleft/actions/runs/42520003996) attempt 1)
+  `browser-1`'s part took **486 s on the EPYC 7763**, 67.5 % of its stop, because
+  `ride-laps.browser.spec.ts` took 359 s against the 341 s it had before. A Xeon 8573C runs these
+  files about 4 % slower than the 7763 and the Xeon 8370C about 15 %, so that part would pass 504 s
+  on either. Twelve workers cannot beat a twelfth of 5 500 s, 458 s; fifteen can come down to a
+  fifteenth, 367 s.
+- **Five shards**, the lists drawn by a search over assignments that makes the slowest simulated
+  part as short as it can be at the slowest figures, then the next slowest, and so on:
+
+| Script | Job | Spec files (of them nightly-only) | Cases | Slowest files (s, slowest measured) | Simulated part, slowest / median figures |
+|---|---|--:|--:|---|--:|
+| `test:browser:shard-1` | `browser-1` | 6 | 513 | `ride-room` 448, `ride-conditions` 334, `controls-first` 217 | 448 / 349 s |
+| `test:browser:shard-2` | `browser-2` | 18 (1) | 458 | `pre-ride` 197, `links` 169, `ride-notices` 111 | 369 / 283 s |
+| `test:browser:shard-3` | `browser-3` | 16 (1), then the `game` run | 252 | `list-detail` 210, `shell-demo` 181, `corridor` 122 | 369 / 258 s |
+| `test:browser:shard-4` | `browser-4` | 15 | 557 | `shell` 276, `ride-hud-layout` 261, `ride-workout` 240 | 367 / 308 s |
+| `test:browser:shard-5` | `browser-5` | 8 (3) | 617 | `ride-laps` 370, `ride` 356, `rideview` 297 | 370 / 316 s |
+
+`browser-1`'s 448 s is `ride-room.browser.spec.ts` in one worker, the slowest it was measured (on
+an EPYC 7763 beside `ride` and `rideview`). The nightly-only files are the five realistic specs that
+hold only `@nightly` describes, in the lists so that every spec is in exactly one.
+
+⚠️ **The demo's two specs are in a shard with no spec that opens the ride harness**, and that is a
+constraint on the search, not its outcome. `shell-demo.browser.spec.ts` and
+`demo-world.browser.spec.ts` draw the realistic world on the CPU, and beside one a ride-harness case
+waiting its 10 s for the race standings (`ride-harness.tsx` §`PATIENCE_MS`) ran out of it twice while
+this was measured, each on an EPYC 7763 in the demo's shard: `ride-laps.browser.spec.ts` §"#2080 …
+at large text — a landscape tablet" (18.8 s, run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), the mutation probe
+below) and, with `ride-room` moved there instead, `ride-room.browser.spec.ts` §"#1356 … the control
+— the smallest corners layout" (16.4 s, run
+[42532792084](https://github.com/openzigs/onyourleft/actions/runs/42532792084) attempt 3). Before
+#2376 `ride-room` and the demo shared `browser-3` on every run read and it did not happen, which is
+what order in a list can hide. `nightly-split.test.ts` holds the constraint from each spec's code
+(`ride.html`, `openRide`, `sharedRide`, `./ride-stage`), so a NEW spec that rides goes red in the
+demo's list. `shell-demo.browser.spec.ts` is still in `browser-3`'s list and the `game` run still
+after its part. The cases are 513 + 458 + 252 + 557 + 617 = 2 397, the whole `chromium` project
+(`playwright test --list` over each script's file filters). ⚠️ **A NEW spec file goes into the list of the shard whose
+newest row below is furthest inside 504 s**, in the same pull request, or `nightly-split.test.ts`
+is red.
+
+**Measured** on this change's own pull request, run
+[42536504988](https://github.com/openzigs/onyourleft/actions/runs/42536504988), attempts 1 to 3 on
+the lists above: each part's `chromium` run against its 720 s stop (Playwright's own `passed (…)`
+figure; the `game` run after `browser-3`'s part against its 85 s):
+
+| Attempt | `browser-1` | `browser-2` | `browser-3` | `browser-4` | `browser-5` | `game` run |
+|---|--:|--:|--:|--:|--:|--:|
+| 1 | 438 s on the EPYC 7763, 61 % | 366 s on the EPYC 7763, 51 % | 270 s on an EPYC 9V74, 38 % | 366 s on the EPYC 7763, 51 % | 366 s on the EPYC 7763, 51 % | 56 s |
+| 2 | 438 s on the EPYC 7763, 61 % | 354 s on the EPYC 7763, 49 % | 270 s on an EPYC 9V74, 38 % | 264 s on an EPYC 9V45, 37 % | 228 s on an EPYC 9V45, 32 % | 58 s |
+| 3 | 456 s on the EPYC 7763, 63 % | 252 s on an EPYC 9V45, 35 % | 210 s on an EPYC 9V45, 29 % | 354 s on a Xeon 8573C, 49 % | 282 s on an EPYC 9V74, 39 % | 39 s |
+
+**Every part of every attempt is under 70 % of its stop: the slowest is 456 s, 63 %**, `browser-1`,
+whose one worker runs `ride-room.browser.spec.ts`. Every other part took 210 to 366 s, 29 to 51 %.
+Against the three-shard gate on the same CPUs that day (§ above): `browser-1` 654 to 690 s,
+`browser-2` 708 to 714 s. ⚠️ Attempt 3's `browser-4` was red on one case,
+`motion.browser.spec.ts` §"#945 … ends the fade, so Ride is pressed as itself" (436 ms against
+200), which is not this change's: it failed the same way on `main` and in the merge queue in runs
+[42380224256](https://github.com/openzigs/onyourleft/actions/runs/42380224256),
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723),
+[42396964437](https://github.com/openzigs/onyourleft/actions/runs/42396964437) and
+[42416283406](https://github.com/openzigs/onyourleft/actions/runs/42416283406). Its part still ran
+whole, so its times are in the table.
+
+**This is the table `nightly-split.test.ts` reads**: columns as in §"Three browser shards — #1720",
+a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
+with no column fails it too.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
+| 42536504988 attempt 1 | 821 | **EPYC 7763** | 400 | EPYC 9V74 | 495 | **EPYC 7763** | 474 | **EPYC 7763** | 475 | **EPYC 7763** | 404 | EPYC 9V74 | 365 | **EPYC 7763** | 403 | **EPYC 7763** | 406 | 25 | 447 | 376 | 337 | 375 | 377 |
+| attempt 2 | 616 | **EPYC 7763** | 409 | **EPYC 7763** | 600 | Xeon 8573C | 406 | **EPYC 7763** | 471 | **EPYC 7763** | 388 | EPYC 9V74 | 358 | EPYC 9V45 | 291 | EPYC 9V45 | 255 | 23 | 445 | 364 | 335 | 270 | 233 |
+| attempt 3 | 503 | EPYC 9V45 | 288 | EPYC 9V74 | 487 | EPYC 9V74 | 377 | **EPYC 7763** | 487 | EPYC 9V45 | 283 | EPYC 9V45 | 276 | Xeon 8573C | 390 | EPYC 9V74 | 314 | 26 | 463 | 259 | 257 | 360 | 290 |
+<!-- shard-measurements:end -->
+
+**The lists before these, as the record.** Each was measured on this pull request and changed for
+the reason given above: the four shards (run 42520003996 attempt 1: `browser-1` 486 s on the EPYC
+7763, 67.5 %); the first five lists, with `ride-room` alone in `browser-1` and `ride-laps` beside the
+demo (run [42522620509](https://github.com/openzigs/onyourleft/actions/runs/42522620509) attempts 1
+to 5 and run 42530045200: every part under 70 %, the slowest 480 s, 67 %, `browser-1` on the 7763);
+and those with the two swapped (run 42532792084 attempts 1 to 3: the slowest 456 s, 63 %, and
+`ride-room` red beside the demo in attempt 3). ⚠️ The demo and a ride-harness case are not a new
+pairing: on `main` before this change `browser-3` held both, and in merge-queue run
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723) the same
+`ride-room` case went red on an EPYC 7763 while the demo's climb ran beside it (15:14:17 to
+15:15:08, the red case at 15:14:43). Attempts whose runs waited for runners (`Wall` 1 562, 1 651 and
+1 121 s, the longest wait between a job being created and starting up to 1 138 s, beside the
+nightly workflow's own jobs for the same push) are left out of every figure here but the parts'
+own times, as #2154 left out its queued attempts.
+
+**The required check goes red when any browser shard does.** Run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), on a commit since
+dropped from the branch, added one case `expect(1, 'deliberately broken').toBe(2)` to one spec in
+each shard's list (`capture`, `logo`, `moderation`, `frame`, `bend`, on the first five lists):
+each of `browser-1` to `browser-5` reported that case `✘` and went red, `checks`, `tests-1` and
+`tests-2` stayed green, and `Repository rules` failed with one line a shard,
+`SHARD001: the shard 'browser-N' ended as 'failure', not 'success'`, for N = 1 to 5. The jobs and
+`needs:` it ran under are the ones on this branch; only the lists moved since.
+
+⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
+run's log and draw the lists again the same way, divide the file that is the floor (one file is
+one worker: `ride-room.browser.spec.ts`, 448 s at its slowest, is the largest now), or add a sixth
+shard (a script, a job, a column here, the job in `needs:`). Not a longer stop.

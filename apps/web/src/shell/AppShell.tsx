@@ -118,7 +118,7 @@ import {
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
-import type { MenuMusic } from './menu-music';
+import { workoutRunning, type MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
@@ -1061,10 +1061,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
+    const snapshot = props.rideController?.getSnapshot();
     const context = {
       immersive,
       routeId: route.id,
-      ridePhase: props.rideController?.getSnapshot().phase,
+      ridePhase: snapshot?.phase,
+      workoutRunning: workoutRunning(snapshot?.workout),
     };
     props.menuSounds?.press(event.target, context);
     // #2058: the same press, and the only thing that can start the music.
@@ -1076,17 +1078,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * new route, the stage taking or giving back the screen, the ride
    * controller's phase moving, the page hidden or shown. None of these is a
    * press, so none can start it (`menu-music.ts` §"Only from the rider's first
-   * press").
+   * press"), except in the Android app, whose shell lets the first visible
+   * menu route start it (#2357). That runs here, after the header — and its
+   * mute — has rendered.
    */
   const menuMusic = props.menuMusic;
   const rideController = props.rideController;
   useEffect(() => {
     if (menuMusic === undefined) return undefined;
     const tell = (): void => {
+      const snapshot = rideController?.getSnapshot();
       menuMusic.update({
         immersive,
         routeId: route.id,
-        ridePhase: rideController?.getSnapshot().phase,
+        ridePhase: snapshot?.phase,
+        workoutRunning: workoutRunning(snapshot?.workout),
       });
     };
     tell();

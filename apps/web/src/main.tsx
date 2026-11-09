@@ -315,6 +315,12 @@ interface ClientPlatform {
    */
   readonly otherPlayer: OtherPlayer | undefined;
   /**
+   * Whether the menus' music may start with no press — #2357: the Android
+   * shell's WebView's own answer (`AutoplayPlugin.java`). `undefined` in a
+   * browser and the demo, which keep the first-press rule.
+   */
+  readonly menuMusicAutoplay: Promise<boolean> | undefined;
+  /**
    * Each connected sensor's battery, for Home's sensors module — #2047. A
    * browser's, from the Web Bluetooth transport; `undefined` in the shell,
    * whose plugin reads no Battery Service yet.
@@ -473,6 +479,10 @@ async function buildPlatform(
       launch,
       steering,
       otherPlayer,
+      // #2357. Its own plugin, `AutoplayPlugin.java`: the WebView's setting,
+      // read back, so the menus' music starts with no tap only where the
+      // platform lets it. Asked once, and not awaited: the shell does not wait for it.
+      menuMusicAutoplay: mobile.capacitorAutoplayAllowed(mobile.capacitorAutoplayPlugin()),
       // #2047: the plugin reads no Battery Service, so the shell shows no level.
       battery: undefined,
     };
@@ -488,6 +498,7 @@ async function buildPlatform(
       launch: NO_LAUNCH,
       steering: undefined,
       otherPlayer: undefined,
+      menuMusicAutoplay: undefined,
       battery: undefined,
     };
   }
@@ -517,6 +528,7 @@ async function buildPlatform(
     systemSettings: undefined,
     launch: NO_LAUNCH,
     otherPlayer: undefined,
+    menuMusicAutoplay: undefined,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -1759,6 +1771,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     // #2253: the rider's own player, which the loop yields to — #2073's
     // `OtherPlayer`, in the Android shell only; none in a browser.
     riderPlayer: platform.otherPlayer,
+    // #2357: in the Android shell only, its WebView's answer; none in a browser.
+    autoplay: platform.menuMusicAutoplay,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).

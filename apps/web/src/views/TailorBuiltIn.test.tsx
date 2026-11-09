@@ -21,7 +21,15 @@ import { athleteId } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { AnalysisPort, AnalysisStore } from '../analysis/store-port';
-import { chooseOption, mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  chooseOption,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 import { workoutStub, type WorkoutStub } from '../workouts/testing';
 import { WorkoutsView } from './WorkoutsView';
 
@@ -119,6 +127,15 @@ function buttonSaying(text: string): HTMLButtonElement {
   return found;
 }
 
+/** A button by its accessible name, as a screen reader says it. */
+function buttonNamed(name: string): HTMLButtonElement {
+  const found = queryAll<HTMLButtonElement>(pane(), 'button').find(
+    (each) => each.getAttribute('aria-label') === name,
+  );
+  if (found === undefined) throw new Error(`no button named ${name}`);
+  return found;
+}
+
 describe('the preview follows every choice — #2305', () => {
   it('changes the rendered graph and words when the length goes from 60 to 45 minutes', async () => {
     await open('sweet-spot-3x12');
@@ -185,6 +202,61 @@ describe('the owner’s ruling of 2026-11-07 — #2305', () => {
     await chooseOption(control<HTMLSelectElement>('length', 'select'), '');
     expect(control<HTMLInputElement>('repeats', 'input').value).toBe('3');
     expect(fact('Shape')).toContain('3 × 12 min');
+  });
+
+  it('(d) lets the rider clear the repeats a chosen length chose, and type their own — #2351', async () => {
+    await open('sweet-spot-3x12');
+    const length = control<HTMLSelectElement>('length', 'select');
+    const repeats = control<HTMLInputElement>('repeats', 'input');
+    await chooseOption(length, '45');
+    expect(repeats.value).toBe('2');
+
+    // Backspace on a phone: the box is empty, and stays so while the rider edits.
+    await typeInto(repeats, '');
+    expect(repeats.value).toBe('');
+    // Nothing is refused and nothing is lost: the length still chooses the workout.
+    expect(hasRefusal('repeats')).toBe(false);
+    expect(length.value).toBe('45');
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, { targetMinutes: 45 })));
+
+    // Then the 4 they meant, not "24".
+    await typeInto(repeats, '4');
+    expect(repeats.value).toBe('4');
+    expect(hasRefusal('repeats')).toBe(false);
+    expect(length.value).toBe('');
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, { repeats: 4 })));
+  });
+
+  it('(d) shows the chosen count again when a length is chosen after the box was cleared — #2351', async () => {
+    await open('sweet-spot-3x12');
+    const length = control<HTMLSelectElement>('length', 'select');
+    const repeats = control<HTMLInputElement>('repeats', 'input');
+    await chooseOption(length, '45');
+    await typeInto(repeats, '');
+    await chooseOption(length, '60');
+    expect(repeats.value).toBe('3');
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, { targetMinutes: 60 })));
+  });
+
+  it('keeps − and + working on a box cleared after a length was chosen — #2351', async () => {
+    await open('sweet-spot-3x12');
+    const length = control<HTMLSelectElement>('length', 'select');
+    const repeats = control<HTMLInputElement>('repeats', 'input');
+    await chooseOption(length, '45');
+    await typeInto(repeats, '');
+
+    // An empty box starts from the template's own count, as every stepper does.
+    await activateWithKeyboard(buttonNamed('Increase repeats'));
+    expect(repeats.value).toBe('3');
+    expect(length.value).toBe('');
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, { repeats: 3 })));
+
+    await activateWithKeyboard(buttonNamed('Increase repeats'));
+    expect(repeats.value).toBe('4');
+    await activateWithKeyboard(buttonNamed('Decrease repeats'));
+    await activateWithKeyboard(buttonNamed('Decrease repeats'));
+    expect(repeats.value).toBe('2');
+    expect(fact('Shape')).toBe(workoutShapeText(tailorWorkout(SWEET_SPOT, { repeats: 2 })));
   });
 
   it('says the length once, with no reason, when no length is chosen', async () => {
