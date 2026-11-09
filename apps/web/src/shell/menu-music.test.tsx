@@ -1637,6 +1637,18 @@ describe('in the Android app the loop starts 3 s after the launch, and 3 s after
     expect(music.made, 'started on a reading from before the rider’s player').toEqual([]);
   });
 
+  it('the music never asks the port for a reading while the rider is on a ride route', async () => {
+    const device = phone();
+    const music = androidRig(device);
+    await shell(music);
+    await device.read();
+    // Gone to a ride route inside the launch's wait: its end asks nothing.
+    await go('#/ride');
+    const before = device.polls;
+    await music.elapse(AUTOPLAY_WAIT_MS);
+    expect(device.polls, 'the port was polled on a ride route').toBe(before);
+  });
+
   it('the return’s wait ends on a reading taken then: a player started inside it is seen', async () => {
     const device = phone();
     const music = androidRig(device);

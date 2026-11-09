@@ -305,6 +305,9 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
 
   /** Ask for a reading now, rather than at the header's next poll. */
   const ask = (): void => {
+    // Never on a ride route: the shell does not poll the port there
+    // (`other-player.ts`), so the ride's own cues are never asked about.
+    if (onMenu !== true) return;
     void deps.riderPlayer?.poll().catch(() => undefined);
   };
 
@@ -349,8 +352,7 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
     !deps.hidden() &&
     !quiet(lastContext) &&
     lastContext.workoutRunning !== true &&
-    !playing &&
-    cancelPause === undefined;
+    !playing;
 
   /**
    * Suspend our context {@link OWN_STREAM_QUIET_MS} after our last sound on a
@@ -358,8 +360,10 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
    * for as long as it runs. `restart` is a press, which may have just made a
    * sound; anything else leaves a wait already set alone, so a ride
    * controller that tells the shell of every sample cannot put it off for
-   * good. Asked again when it falls due, so it never lands on a ride begun in
-   * the wait.
+   * good. Every press and update that finds `mayHush()` false cancels the wait,
+   * and that cancel is what keeps it from landing on a ride begun in it; the
+   * check when it falls due only repeats that against the last context told
+   * of, and is no independent guard.
    */
   const hushLater = (restart: boolean): void => {
     if (!mayHush()) {
