@@ -860,7 +860,8 @@ describe('the zone strip on the HUD — #2384', () => {
     const zoneOf = (each: Element): string =>
       /oyl-hud__zone-strip-segment--(\d)/.exec(each.getAttribute('class') ?? '')?.[1] ?? '?';
     return {
-      says: field?.querySelector('.oyl-hud__value')?.firstChild?.nextSibling?.textContent ?? '',
+      // The number in the strip's own row, the zone field's reading.
+      says: field?.querySelector('.oyl-hud__zone-now')?.textContent ?? '',
       lit: segments
         .filter((each) => each.classList.contains('oyl-hud__zone-strip-segment--lit'))
         .map(zoneOf),

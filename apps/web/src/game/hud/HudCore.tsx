@@ -652,7 +652,6 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           <span className="oyl-hud__detail"> {reading.detail}</span>
         )}
         {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
-        {reading.zone === undefined ? null : <ZoneStrip current={reading.zone.current} />}
         {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
         {reading.stale ? (
           // ⚠️ Words, not only a tint. #94's second criterion is that a
@@ -723,10 +722,10 @@ const ZONE_STRIP_GAP = 2;
  * on the panel (SC 1.4.11, `theme.css` §"THE ZONE STRIP").
  *
  * Lit from the zone indicator's own `current`, so it cannot say a zone the
- * number beside it does not; none lit with no live power. Drawn only where
- * that field is, so not at all with no threshold set. An image NAMED with the
- * zone in words, for a screen reader, and no text of its own: the field's
- * number and name stay the reading.
+ * number beside it does not; none lit with no live power. Drawn beside that
+ * number ({@link Value}), so not at all with no threshold set. An image NAMED
+ * with the zone in words, for a screen reader, and no text of its own: the
+ * field's number and name stay the reading.
  */
 function ZoneStrip(props: { readonly current: number | undefined }): JSX.Element {
   const count = POWER_ZONE_NAMES.length;
@@ -823,19 +822,25 @@ function Value(props: { readonly reading: HudReading }): JSX.Element {
   // #2077: the zone's number beside a swatch of the zone's own colour. The
   // swatch is `aria-hidden`: the number IS the reading, and the name under it
   // says the same in words, so the colour is never the only carrier.
-  if (zone?.current !== undefined) {
+  // #2384: and the zone strip after the number, in the same row, so the strip
+  // takes the width beside the number rather than a row of its own (a row more
+  // pushed a lap race's standings into the actions panel on a tablet).
+  if (zone !== undefined) {
     return (
-      <>
-        <svg
-          className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <rect x="0" y="0" width="10" height="10" rx="2" />
-        </svg>
+      <span className="oyl-hud__zone-now">
+        {zone.current === undefined ? null : (
+          <svg
+            className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
+            viewBox="0 0 10 10"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="0" y="0" width="10" height="10" rx="2" />
+          </svg>
+        )}
         {value}
-      </>
+        <ZoneStrip current={zone.current} />
+      </span>
     );
   }
   const sign = value.charAt(0);
