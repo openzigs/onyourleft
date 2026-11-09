@@ -13,6 +13,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { RIDER_HEIGHT_METRES } from './bicycle';
+import { CAMERA_ABOVE_METRES, MAXIMUM_FIELD_OF_VIEW_DEGREES, NEAR_PLANE_METRES } from './camera';
 import { deliveryInView } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
@@ -238,6 +240,33 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
+  it('carries a glowing hazard marker over each obstacle, above the rider’s helmet and out of the camera’s near reach — #2396', () => {
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('obstacles').geometry;
+    const position = geometry.getAttribute('position');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const glow = geometry.getAttribute('oylGlow');
+    // The frustum nearer than the near plane reaches this far above the eye
+    // at the widest lens a frame opens, so a lower marker would be cut
+    // through by a camera passing over the obstacle.
+    const nearReach =
+      CAMERA_ABOVE_METRES +
+      NEAR_PLANE_METRES * Math.tan(((MAXIMUM_FIELD_OF_VIEW_DEGREES / 2) * Math.PI) / 180);
+    for (const kind of ROSTER) {
+      let glowing = 0;
+      let lowest = Infinity;
+      for (let at = 0; at < position.count; at += 1) {
+        if (kinds.getX(at) !== ROSTER.indexOf(kind) || glow.getX(at) !== 1) continue;
+        glowing += 1;
+        lowest = Math.min(lowest, position.getY(at));
+      }
+      expect(glowing, kind).toBeGreaterThan(0);
+      expect(lowest, kind).toBeGreaterThan(RIDER_HEIGHT_METRES);
+      expect(lowest, kind).toBeGreaterThan(nearReach);
+    }
+    belt.dispose();
+  });
+
   it('places an obstacle the frame hands it, by its kind, on the instance it is drawn with', () => {
     const belt = new DeliveryBelt('stylised');
     const obstacles: Obstacle[] = ROSTER.map((kind, index) => ({
@@ -331,7 +360,7 @@ describe('Delivery’s belt — #1814', () => {
     });
   }
 
-  it('lights no lit part past white, and glows only the marker’s diamond and ring', () => {
+  it('lights no lit part past white, and glows only the marker’s diamond and ring, and each obstacle’s hazard marker overhead (#2396)', () => {
     const belt = new DeliveryBelt('stylised');
     let lit = 0;
     let glowing = 0;
@@ -339,10 +368,13 @@ describe('Delivery’s belt — #1814', () => {
       const geometry = belt.meshOf(what).geometry;
       const colour = geometry.getAttribute('color');
       const glow = geometry.getAttribute('oylGlow');
+      const position = geometry.getAttribute('position');
       for (let at = 0; at < colour.count; at += 1) {
         if (glow.getX(at) === 1) {
           glowing += 1;
-          expect(what).toBe('markers');
+          expect(what).not.toBe('parcels');
+          // An obstacle's body does not glow: only the marker over the rider's helmet does.
+          if (what === 'obstacles') expect(position.getY(at)).toBeGreaterThan(RIDER_HEIGHT_METRES);
           continue;
         }
         lit += 1;
