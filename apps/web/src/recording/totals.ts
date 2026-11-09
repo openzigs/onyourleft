@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * A ride's running totals — how far, how much climbing, what average power —
- * worked out ONE way, for the save and for the screen alike — #2076.
+ * A ride's running totals — how far, how much climbing, what average power,
+ * and since #2387 how much work and how fast on average — worked out ONE way,
+ * for the save and for the screen alike — #2076.
  *
  * ## Why one function
  *
@@ -30,10 +31,14 @@
  */
 
 import {
+  joules,
   metres,
+  metresPerSecond,
   recordedAscent,
   watts,
+  type Joules,
   type Metres,
+  type MetresPerSecond,
   type RecordedSeries,
   type Watts,
 } from '@onyourleft/domain';
@@ -47,6 +52,13 @@ export interface RideTotals {
   readonly climbed: Metres | undefined;
   /** The mean of the power readings that exist, or `undefined` with none. */
   readonly averagePower: Watts | undefined;
+  /**
+   * The work the rider did, or `undefined` with no power reading — #2387's
+   * *Energy*. {@link rideTotals} always says; optional so a figure kept
+   * before #2387 (a test's, a harness's) reads as none rather than nought.
+   * @see rideEnergy
+   */
+  readonly energy?: Joules | undefined;
 }
 
 /**
@@ -99,6 +111,51 @@ export function rideAveragePower(
 }
 
 /**
+ * The work the rider did: each power reading that exists for its sample's
+ * length, added up — #2387. Our own plain figure, shown in kilojoules, and no
+ * load metric of any name (CLAUDE.md §6).
+ *
+ * **A sample with no power adds no work**, as a sample with no speed adds no
+ * distance ({@link rideDistance}): a dropout is missing data, and carrying the
+ * last reading across it invents work the rider may never have done. So a
+ * flaky meter reports short, which is visible and conservative. `undefined` —
+ * a dash, never `0 kJ` — when there is no reading at all: a ride nobody
+ * measured the power of did not do nought joules of work.
+ */
+export function rideEnergy(series: RecordedSeries<StreamChannelValue>): Joules | undefined {
+  const power = series.channels.power;
+  if (power === undefined) {
+    return undefined;
+  }
+  let total = 0;
+  let count = 0;
+  for (const sample of power) {
+    if (sample !== undefined) {
+      total += sample * series.sampleInterval;
+      count += 1;
+    }
+  }
+  return count === 0 ? undefined : joules(total);
+}
+
+/**
+ * The ride's average speed — #2387: its distance over its MOVING time, as a
+ * lap's is (`laps.ts` §`lapAverageSpeed`), so a pause does not slow it. The
+ * distance is {@link RideTotals.distance} and the moving time the recorder's
+ * (`fields.ts` §`HudInput.movingSeconds`), the two figures the HUD shows as
+ * *Distance* and *Moving*. `undefined` with no moving time, where a speed
+ * would be a division by nought.
+ */
+export function rideAverageSpeed(
+  distance: Metres,
+  movingSeconds: number,
+): MetresPerSecond | undefined {
+  return Number.isFinite(movingSeconds) && movingSeconds > 0
+    ? metresPerSecond(distance / movingSeconds)
+    : undefined;
+}
+
+/**
  * How much the ride has climbed. @see the module note
  *
  * `laps` are the recording's laps so far and, last, the lap in progress as a
@@ -119,7 +176,7 @@ export function rideClimbed(
   return metres(stated.reduce((sum, lap) => sum + (lap.ascent as number), 0));
 }
 
-/** All three, over one series and its laps. */
+/** All four, over one series and its laps. */
 export function rideTotals(
   series: RecordedSeries<StreamChannelValue>,
   laps: readonly Pick<RecordedCourseLap, 'ascent'>[],
@@ -128,5 +185,6 @@ export function rideTotals(
     distance: rideDistance(series),
     climbed: rideClimbed(series, laps),
     averagePower: rideAveragePower(series.channels.power),
+    energy: rideEnergy(series),
   };
 }

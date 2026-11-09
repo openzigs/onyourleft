@@ -35,10 +35,12 @@ import { expect, test } from '@playwright/test';
 
 import {
   OVERLAY_VIEWPORTS,
+  STACKED_VIEWPORTS,
   TABLET_VIEWPORTS,
   bothWays,
   layoutFaults,
   measure,
+  overlap,
   roomGivesWay,
   sharedRide,
   type Viewport,
@@ -201,8 +203,9 @@ for (const viewport of [
         return { text: (each.textContent ?? '').trim(), width: box.width, height: box.height };
       }),
     );
-    // Four panels, three sizes and — #2383 — the two arrangements.
-    expect(choices).toHaveLength(9);
+    // Four panels, three sizes, the two arrangements (#2383) and the totals
+    // strip (#2387).
+    expect(choices).toHaveLength(10);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);
@@ -308,5 +311,157 @@ for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
     expect(sizeFaults(seen, viewport).faults).toEqual([]);
     expect(seen.focus).toEqual([]);
     expect(seen.primary).toContain('Power');
+  });
+}
+
+/**
+ * #2387 — THE TOTALS STRIP, at every overlay viewport, on a plain ride and in
+ * a workout, in both arrangements, both ways (#1120): the same invariants as
+ * every other arrangement (everything on the stage, uncovered; no panel over
+ * another or over the leaning rider), and its own:
+ *
+ * - drawn along the bottom between the route panel and the actions panel
+ *   where `theme.css` §"THE TOTALS STRIP" has the room — the two landscape
+ *   tablets — and given way everywhere else on the stage, said so;
+ * - its five readings (six on a loop) in order, and on this harness, which
+ *   records, the port's figures: `RIDE_TOTALS`' energy and climb, and its
+ *   distance over the moving time as the average speed — so the strip is
+ *   read through `GameView`, not built beside it;
+ * - and the focus readout and the full tiers what they are without it.
+ */
+const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Climbed'];
+
+/** `RIDE_TOTALS` and `MOVING_SECONDS` in `ride-harness.tsx`, as the strip shows them. */
+const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '4850 m' };
+
+/** Where the stage has room for the strip: the two landscape tablets. */
+const STRIP_DRAWN = new Set(
+  OVERLAY_VIEWPORTS.filter((each) => each.width >= 960 && each.height >= 640).map(
+    (each) => each.name,
+  ),
+);
+
+/** The strip's panel, where it is drawn. */
+function stripPanel(seen: StageMeasurement): StageMeasurement['panels'][number] | undefined {
+  return seen.panels.find((each) => each.name.includes('oyl-hud__totals'));
+}
+
+for (const arrangement of ['full', 'focus'] as const) {
+  for (const [mode, query] of MODES.filter(([, each]) => !hasOwnMode(each))) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`#2387 the totals strip holds its layout — ${arrangement} — ${mode} — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(
+          browser,
+          viewport,
+          `${query === '' ? '?' : `${query}&`}totals=strip&arrangement=${arrangement}`,
+        );
+        const drawn = STRIP_DRAWN.has(viewport.name);
+        for (const [how, seen] of await bothWays(page)) {
+          const { faults, clipped } = sizeFaults(seen, viewport);
+          console.log(
+            `#2387 ${arrangement} ${mode} ${viewport.name} ${how}: given way ${seen.givenWay.join(', ')}; clipped ${clipped.join(', ')}`,
+          );
+          expect(faults, how).toEqual([]);
+          expect(seen.totals, how).toEqual(STRIP_LABELS);
+          for (const name of ALWAYS_DRAWN) expect(clipped, how).not.toContain(name);
+          // Neither arrangement is changed by it.
+          if (arrangement === 'focus') {
+            expect(seen.focus, how).toEqual(FOCUS_LABELS);
+            expect(seen.primary, how).toEqual([]);
+          } else {
+            expect(seen.focus, how).toEqual([]);
+            expect(seen.primary, how).toContain('Power');
+          }
+          const strip = stripPanel(seen);
+          if (!drawn) {
+            expect(strip, how).toBeUndefined();
+            expect(seen.givenWay, how).toContain('the totals strip');
+            continue;
+          }
+          expect(seen.givenWay, how).not.toContain('the totals strip');
+          expect(strip, how).toBeDefined();
+          if (strip === undefined) continue;
+          const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          // Along the bottom, between the two bottom panels.
+          expect(viewport.height - strip.box.bottom, how).toBeLessThanOrEqual(16);
+          if (route !== undefined && route.box.width > 1) {
+            expect(strip.box.left, how).toBeGreaterThan(route.box.right);
+          }
+          expect(strip.box.right, how).toBeLessThan(actions?.box.left ?? 0);
+          // Every reading on it on the stage and uncovered (`layoutFaults`
+          // holds each item), with the port's figures.
+          const names = seen.items.map((each) => each.name);
+          for (const label of STRIP_LABELS) expect(names, how).toContain(`totals: ${label}`);
+          for (const [label, figure] of Object.entries(STRIP_FIGURES)) {
+            expect(seen.totalsValues[STRIP_LABELS.indexOf(label)], `${how}: ${label}`).toBe(figure);
+          }
+        }
+      });
+    }
+  }
+}
+
+for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.name))) {
+  test(`#2387 the totals strip on a loop names the lap, first — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, '?lap=riding&totals=strip');
+    for (const [how, seen] of await bothWays(page)) {
+      expect(sizeFaults(seen, viewport).faults, how).toEqual([]);
+      expect(seen.totals, how).toEqual(['Lap', ...STRIP_LABELS]);
+      expect(seen.totalsValues[0], how).toBe('1');
+      expect(stripPanel(seen), how).toBeDefined();
+    }
+  });
+
+  test(`#2387 the totals strip keeps its own size at extra-large text — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, '?text=extra-large&totals=strip');
+    for (const [how, seen] of await bothWays(page)) {
+      expect(sizeFaults(seen, viewport).faults, how).toEqual([]);
+      expect(stripPanel(seen), how).toBeDefined();
+      expect(seen.primaryValuePixels, how).toBe(PRIMARY_PIXELS['extra-large']);
+    }
+  });
+}
+
+for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
+  test(`#2387 ${mode} draws no totals strip with the strip chosen`, async ({ browser }) => {
+    const viewport = OVERLAY_VIEWPORTS[0];
+    if (viewport === undefined) throw new Error('no overlay viewport');
+    const page = await sharedRide(browser, viewport, `${query}&totals=strip`);
+    const seen = await measure(page);
+    expect(sizeFaults(seen, viewport).faults).toEqual([]);
+    expect(seen.totals).toEqual([]);
+    expect(stripPanel(seen)).toBeUndefined();
+  });
+}
+
+test('#2387 the control — without the choice there is no totals strip', async ({ browser }) => {
+  const viewport = OVERLAY_VIEWPORTS[0];
+  if (viewport === undefined) throw new Error('no overlay viewport');
+  const seen = await measure(await sharedRide(browser, viewport));
+  expect(seen.totals).toEqual([]);
+  expect(stripPanel(seen)).toBeUndefined();
+});
+
+for (const viewport of STACKED_VIEWPORTS.filter((each) => each.height > 300)) {
+  test(`#2387 where the HUD is stacked the totals strip is in the flow — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const seen = await measure(await sharedRide(browser, viewport, '?totals=strip'));
+    const strip = stripPanel(seen);
+    expect(seen.totals).toEqual(STRIP_LABELS);
+    expect((strip?.box.width ?? 0) * (strip?.box.height ?? 0)).toBeGreaterThan(1);
+    for (const other of seen.panels.filter((each) => each !== strip)) {
+      expect(
+        strip !== undefined && overlap(strip.box, other.box),
+        `the strip over ${other.name}`,
+      ).toBe(false);
+    }
   });
 }

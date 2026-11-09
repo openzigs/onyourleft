@@ -215,6 +215,24 @@ describe('the HUD passes the accessibility audit', () => {
     // And a dropped sensor is said in words there too, as in the full HUD.
     expect(announced('Power')).toBe('Power, — W Sensor lost');
   });
+
+  // #2387: the totals strip is one more named list, audited in both
+  // arrangements, with nothing recorded (its dashes) as well.
+  it('audits clean with the totals strip, in either arrangement', async () => {
+    for (const arrangement of ['full', 'focus'] as const) {
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...props({ elapsedSeconds: 65 })}
+            layout={{ hidden: [], textSize: 'normal', arrangement, totalsStrip: true }}
+          />,
+        ),
+      );
+      expect(document.querySelector('dl.oyl-hud__totals')).not.toBeNull();
+      expect(formatViolations(auditAccessibility(document)), arrangement).toBe('');
+      mounted.unmount();
+    }
+  });
 });
 
 describe('a rider can tell a lost sensor from a zero, on the screen', () => {

@@ -65,6 +65,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: ['route', 'standings'],
       textSize: 'extra-large',
       arrangement: 'full',
+      totalsStrip: false,
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -83,8 +84,8 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     const offered = queryAll(document, '.oyl-hud-layout__choice').map((each) =>
       (each.textContent ?? '').trim(),
     );
-    // Four panels, three sizes and (#2383) two arrangements.
-    expect(offered).toHaveLength(9);
+    // Four panels, three sizes, (#2383) two arrangements and (#2387) the strip.
+    expect(offered).toHaveLength(10);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -104,6 +105,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: [],
       textSize: 'large',
       arrangement: 'focus',
+      totalsStrip: false,
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -114,6 +116,29 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     // And back.
     await press(choice('Full'));
     expect(readHudLayout(localStorage).arrangement).toBe('full');
+  });
+
+  it('adds the totals strip, off by default and kept on the device — #2387', async () => {
+    await settings();
+    expect(choice('The ride’s totals').checked).toBe(false);
+
+    await press(choice('Focus'));
+    await press(choice('The ride’s totals'));
+
+    // What the next ride reads.
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: [],
+      textSize: 'normal',
+      arrangement: 'focus',
+      totalsStrip: true,
+    });
+    // And Settings, opened again, says the same.
+    await settings();
+    expect(choice('The ride’s totals').checked).toBe(true);
+
+    // And off again.
+    await press(choice('The ride’s totals'));
+    expect(readHudLayout(localStorage).totalsStrip).toBe(false);
   });
 
   it('says so when the device will not keep the choice', async () => {

@@ -18,6 +18,7 @@ import {
   focusArrangement,
   panelShown,
   readHudLayout,
+  totalsStripChosen,
   writeHudLayout,
 } from './hud-layout-preference';
 
@@ -37,7 +38,12 @@ describe('the HUD layout preference (#2079)', () => {
     );
     const read = readHudLayout(localStorage);
     // #2383: a choice written with no arrangement reads back as the full HUD.
-    expect(read).toEqual({ hidden: ['route', 'graph'], textSize: 'large', arrangement: 'full' });
+    expect(read).toEqual({
+      hidden: ['route', 'graph'],
+      textSize: 'large',
+      arrangement: 'full',
+      totalsStrip: false,
+    });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
   });
@@ -84,7 +90,12 @@ describe('the focus arrangement (#2383)', () => {
       writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'large', arrangement: 'focus' }),
     ).toBe(true);
     const read = readHudLayout(localStorage);
-    expect(read).toEqual({ hidden: ['graph'], textSize: 'large', arrangement: 'focus' });
+    expect(read).toEqual({
+      hidden: ['graph'],
+      textSize: 'large',
+      arrangement: 'focus',
+      totalsStrip: false,
+    });
     expect(focusArrangement(read)).toBe(true);
   });
 
@@ -96,5 +107,33 @@ describe('the focus arrangement (#2383)', () => {
     expect(readHudLayout(localStorage).arrangement).toBe('full');
     localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ arrangement: 'minimal' }));
     expect(focusArrangement(readHudLayout(localStorage))).toBe(false);
+  });
+});
+
+describe('the totals strip (#2387)', () => {
+  it('is off until the rider chooses it', () => {
+    expect(totalsStripChosen(DEFAULT_HUD_LAYOUT)).toBe(false);
+    expect(totalsStripChosen(readHudLayout(localStorage))).toBe(false);
+  });
+
+  it('keeps the strip on the device and reads it back, beside the other choices', () => {
+    expect(
+      writeHudLayout(localStorage, {
+        hidden: [],
+        textSize: 'normal',
+        arrangement: 'focus',
+        totalsStrip: true,
+      }),
+    ).toBe(true);
+    const read = readHudLayout(localStorage);
+    expect(totalsStripChosen(read)).toBe(true);
+    expect(focusArrangement(read)).toBe(true);
+  });
+
+  it('reads a preference kept before #2387, or anything but true, as off', () => {
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ hidden: [], textSize: 'large' }));
+    expect(totalsStripChosen(readHudLayout(localStorage))).toBe(false);
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ totalsStrip: 'yes' }));
+    expect(totalsStripChosen(readHudLayout(localStorage))).toBe(false);
   });
 });

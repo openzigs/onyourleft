@@ -40,7 +40,7 @@ import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { auditAccessibility, formatViolations, tabbableElements } from '../../a11y/audit';
-import { HudCore } from './HudCore';
+import { HudCore, TOTALS_STRIP_NAME } from './HudCore';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
 import { simulatedRideSentences } from '../simulated-rider';
@@ -55,6 +55,7 @@ import {
   expandWorkout,
   geographicPosition,
   gradePercent,
+  joules,
   metres,
   metresPerSecond,
   pacerGap,
@@ -1383,5 +1384,141 @@ describe('the focus readout — #2383', () => {
     expect(markText()).toBe(
       'Simulated ride at 200 W, 8× real time. Not recorded or shared. Moving needs a recording.',
     );
+  });
+});
+
+/**
+ * #2387: the totals strip, read off the rendered HUD — drawn only where the
+ * rider chose it, on a ride with no mode of its own and never on the demo;
+ * its readings the figures the tiers show beside it; and neither arrangement
+ * changed by it.
+ */
+describe('the totals strip — #2387', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: {
+      ...atStartLine(profile),
+      elapsed: seconds(30),
+      ride: { speed: metresPerSecond(8), distance: metres(400) },
+      input: { power: watts(250), live: true },
+    },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    elapsedSeconds: 754,
+    movingSeconds: 600,
+    rideTotals: {
+      distance: metres(6_000),
+      climbed: metres(80),
+      averagePower: watts(212),
+      energy: joules(127_200),
+    },
+  };
+  const strip = { hidden: [], textSize: 'normal', totalsStrip: true } as const;
+  const labelsIn = (selector: string): (string | null)[] =>
+    queryAll(mounted?.container ?? document, `${selector} dt`).map((each) => each.textContent);
+  const valueIn = (selector: string, label: string): string => {
+    const field = queryAll(mounted?.container ?? document, `${selector} .oyl-hud__field`).find(
+      (each) => each.querySelector('dt')?.textContent === label,
+    );
+    return field?.querySelector('dd')?.textContent ?? '';
+  };
+
+  it('draws the strip, named, with its readings in their order, where the rider chose it', async () => {
+    mounted = await mount(<HudPanel {...base} layout={strip} />);
+    const list = mounted.container.querySelector('dl.oyl-hud__totals');
+    expect(list?.getAttribute('aria-label')).toBe(TOTALS_STRIP_NAME);
+    expect(mounted.container.querySelector('.oyl-hud')?.getAttribute('data-oyl-hud-totals')).toBe(
+      'strip',
+    );
+    expect(labelsIn('.oyl-hud__totals')).toEqual([
+      'Route',
+      'To go',
+      'Avg speed',
+      'Energy',
+      'Climbed',
+    ]);
+    // 6 km in 600 s moving is 10 m/s; 127.2 kJ of work.
+    expect(valueIn('.oyl-hud__totals', 'Avg speed')).toBe('36.0 km/h');
+    expect(valueIn('.oyl-hud__totals', 'Energy')).toBe('127 kJ');
+  });
+
+  it('shows To go and Climbed exactly as the tiers beside it do', async () => {
+    // In either unit: `totals-strip.test.ts` holds the imperial figures.
+    mounted = await mount(<HudPanel {...base} layout={strip} />);
+    for (const label of ['To go', 'Climbed']) {
+      expect(valueIn('.oyl-hud__totals', label), label).toBe(
+        valueIn('.oyl-hud__fields--secondary', label),
+      );
+      expect(valueIn('.oyl-hud__totals', label), label).not.toBe('');
+    }
+  });
+
+  it('keeps its readings when the ride readings are hidden', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ ...strip, hidden: ['readings'] }} />);
+    expect(labelsIn('.oyl-hud__totals')).toEqual([
+      'Route',
+      'To go',
+      'Avg speed',
+      'Energy',
+      'Climbed',
+    ]);
+  });
+
+  it('draws no strip with nothing chosen, or with the strip off', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+    expect(mounted.container.querySelector('[data-oyl-hud-totals]')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} layout={{ ...strip, totalsStrip: false }} />);
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+  });
+
+  it('leaves either arrangement as it is', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ ...strip, arrangement: 'focus' }} />);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+    expect(mounted.container.querySelector('.oyl-hud__totals')).not.toBeNull();
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} layout={strip} />);
+    expect(labelsIn('.oyl-hud__fields--primary')).toContain('Power');
+    expect(labelsIn('.oyl-hud__fields--secondary')).toContain('To go');
+  });
+
+  it('draws no strip on a ride with a mode of its own', async () => {
+    mounted = await mount(<HudPanel {...base} room={{ nearby: 2 }} layout={strip} />);
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0 }}
+        layout={strip}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} lapRace={hudOf(startRace({ laps: 3 }))} layout={strip} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+  });
+
+  it('draws no strip on the demo, which records nothing', async () => {
+    mounted = await mount(
+      <HudCore
+        {...base}
+        layout={strip}
+        units="metric"
+        touchLock={false}
+        labels={{ resume: 'Play', end: 'Stop' }}
+        routeFigure={null}
+        withoutTotals
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
   });
 });

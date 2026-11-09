@@ -130,6 +130,7 @@ import {
   HUD_TEXT_SIZES,
   panelShown,
   readHudLayout,
+  totalsStripChosen,
   writeHudLayout,
   type HudArrangement,
   type HudLayoutPreference,
@@ -1869,6 +1870,10 @@ const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
     'Focus: power, cadence and heart rate large, with speed, average power, distance and ride time under them',
 };
 
+/** #2387: what the totals strip is called here. */
+const HUD_TOTALS_STRIP_LABEL =
+  'The ride’s totals along the bottom: lap, route, distance to go, average speed, energy and climb';
+
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
   normal: 'Normal',
@@ -1884,6 +1889,7 @@ const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
  * rider must always be able to pause. Since #2383 the rider may choose the
  * focus arrangement, which shows the gradient nowhere: it is a choice of
  * fewer numbers, made off the bike, and the full HUD is one choice away.
+ * Since #2387 the rider may add the totals strip, off by default.
  *
  * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
  * as every ride-time control is: it is set from the bars as often as the sofa.
@@ -1915,8 +1921,9 @@ function HudLayoutPanel({
             What the game shows while you ride, from your next ride. Power, cadence and heart rate,
             the ride controls and every notice are always shown. Focus shows one compact readout at
             the top in place of every reading; a ride in a room, a Delivery round or a lap race
-            keeps the full layout. The text size applies on tablets: a phone or a short window keeps
-            the normal size, because it has no room for larger numbers beside the road.
+            keeps the full layout and draws no totals strip. The text size applies on tablets, and
+            the totals strip on tablets on their side: a phone or a short window keeps the normal
+            size, and has no strip, because it has no room for them beside the road.
           </p>
         }
       >
@@ -1958,6 +1965,16 @@ function HudLayoutPanel({
             {HUD_PANEL_LABELS[panel]}
           </label>
         ))}
+        <label className="oyl-hud-layout__choice">
+          <input
+            type="checkbox"
+            checked={totalsStripChosen(layout)}
+            onChange={(event) => {
+              keep({ ...layout, totalsStrip: event.currentTarget.checked });
+            }}
+          />{' '}
+          {HUD_TOTALS_STRIP_LABEL}
+        </label>
       </fieldset>
       <fieldset className="oyl-hud-layout__group">
         <legend>Size of the numbers</legend>

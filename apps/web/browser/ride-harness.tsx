@@ -80,6 +80,7 @@ import {
   degreesLongitude,
   expandWorkout,
   geographicPosition,
+  joules,
   kilograms,
   metres,
   routeProfile,
@@ -187,6 +188,9 @@ export interface StageMeasurement {
   /** #2383: the focus readout's labels and values, in document order; empty in full. */
   readonly focus: readonly string[];
   readonly focusValues: readonly string[];
+  /** #2387: the totals strip's labels and values, in document order; empty with none. */
+  readonly totals: readonly string[];
+  readonly totalsValues: readonly string[];
   /** Type sizes in CSS pixels, so "visibly larger" is read off the engine. */
   readonly primaryValuePixels: number;
   readonly secondaryValuePixels: number;
@@ -527,6 +531,9 @@ const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
 /** #2383: `?arrangement=focus`, the focus readout in place of the two tiers. */
 const HUD_FOCUS = new URLSearchParams(window.location.search).get('arrangement') === 'focus';
 
+/** #2387: `?totals=strip`, the totals strip along the bottom of the road. */
+const HUD_TOTALS = new URLSearchParams(window.location.search).get('totals') === 'strip';
+
 /** #2079: `?hide=readings,route`, the HUD's panels turned off. */
 const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
   (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
@@ -669,12 +676,14 @@ const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 /**
  * #2076: the ride so far, at the widest figures a ride under ten hours
  * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
- * the same object every read, as `useSyncExternalStore` requires.
+ * the same object every read, as `useSyncExternalStore` requires. #2387: and
+ * the work of 425 W for ten hours, `15300 kJ`, the totals strip's widest.
  */
 const RIDE_TOTALS: RideTotals = {
   distance: metres(199_900),
   climbed: metres(4850),
   averagePower: watts(425),
+  energy: joules(15_300_000),
 };
 
 /** #2077: some time in each of the seven power zones, the same object every read. */
@@ -1116,11 +1125,16 @@ function measure(): StageMeasurement {
   const items: StageItem[] = [];
   const givenWay: string[] = [];
   for (const field of document.querySelectorAll('.oyl-hud__field')) {
-    const name = `reading: ${textOf(field.querySelector('dt'))}`;
+    // #2387: a totals strip's reading is named apart from the tier's reading
+    // of the same name (*To go*, *Climbed*), and gives way with its strip.
+    const strip = field.closest('.oyl-hud__totals') !== null;
+    const name = `${strip ? 'totals' : 'reading'}: ${textOf(field.querySelector('dt'))}`;
     const box = field.getBoundingClientRect();
-    const givesWay = ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
-      field.classList.contains(name),
-    );
+    const givesWay =
+      strip ||
+      ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
+        field.classList.contains(name),
+      );
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);
       continue;
@@ -1204,7 +1218,14 @@ function measure(): StageMeasurement {
     // as a panel only when it has been lifted out — otherwise every
     // measurement would find it "over" the panel it is inside.
     panels: [
-      ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
+      // #2387: the totals strip, where it is drawn; where a layout has no room
+      // for it, it is not displayed, and `givenWay` says so.
+      ...[...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].filter((each) => {
+        if (!each.classList.contains('oyl-hud__totals')) return true;
+        if (window.getComputedStyle(each).display !== 'none') return true;
+        givenWay.push('the totals strip');
+        return false;
+      }),
       // #1398: so is the sound row, in a room ride on a phone on its side
       // (`theme.css` §"A ROOM RIDE WITH SOUNDS ON, ON A PHONE").
       ...[
@@ -1224,6 +1245,8 @@ function measure(): StageMeasurement {
     ),
     focus: labels('.oyl-hud__focus'),
     focusValues: [...document.querySelectorAll('.oyl-hud__focus dd')].map(textOf),
+    totals: labels('.oyl-hud__totals'),
+    totalsValues: [...document.querySelectorAll('.oyl-hud__totals dd')].map(textOf),
     chrome: {
       header: document.querySelector('header.oyl-header') !== null,
       navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
@@ -1430,11 +1453,12 @@ async function run(): Promise<void> {
   // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
   // written where Settings writes them, read as the ride starts.
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
-  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0 || HUD_FOCUS) {
+  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0 || HUD_FOCUS || HUD_TOTALS) {
     writeHudLayout(localStorage, {
       textSize: HUD_TEXT ?? 'normal',
       hidden: HUD_HIDDEN,
       arrangement: HUD_FOCUS ? 'focus' : 'full',
+      totalsStrip: HUD_TOTALS,
     });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.

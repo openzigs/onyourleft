@@ -74,9 +74,15 @@ import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { RecentGraph } from './RecentGraph';
 import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
-import { DEFAULT_HUD_LAYOUT, focusArrangement, panelShown } from './hud-layout-preference';
+import {
+  DEFAULT_HUD_LAYOUT,
+  focusArrangement,
+  panelShown,
+  totalsStripChosen,
+} from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
+import { totalsStripReadings } from './totals-strip';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -156,9 +162,9 @@ export interface HudCoreProps extends SharedProps {
    */
   readonly withoutElapsed?: boolean;
   /**
-   * Leaves out *Distance*, *Climbed* and *Avg power* (#2076). The demo's: it
-   * records nothing, so the three would be dashes for as long as it plays.
-   * A rider's ride keeps them.
+   * Leaves out *Distance*, *Climbed* and *Avg power* (#2076), and the totals
+   * strip (#2387). The demo's: it records nothing, so they would be dashes
+   * for as long as it plays. A rider's ride keeps them.
    */
   readonly withoutTotals?: boolean;
 }
@@ -185,6 +191,9 @@ export const FOCUS_NAMES = {
   main: 'Power, cadence and heart rate',
   more: 'Speed, average power, distance and ride time',
 } as const;
+
+/** The totals strip's accessible name — #2387, as {@link PANEL_NAMES} names each tier. */
+export const TOTALS_STRIP_NAME = 'Ride totals';
 
 /**
  * Whether a reading is a mode's own — a room's, a Delivery round's, a lap
@@ -227,6 +236,10 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // #2383: the focus readout in place of the two tiers, on a ride with no
   // mode of its own. @see isModeReading
   const focus = focusArrangement(layout) && !all.some(isModeReading);
+  // #2387: the totals strip, where the rider chose it, on a ride with no mode
+  // of its own for the same reason, and never on the demo (`withoutTotals`).
+  const totals =
+    totalsStripChosen(layout) && !all.some(isModeReading) && props.withoutTotals !== true;
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
@@ -279,6 +292,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       aria-label="Ride metrics"
       data-oyl-hud-text={layout.textSize}
       data-oyl-hud-arrangement={focus ? 'focus' : 'full'}
+      data-oyl-hud-totals={totals ? 'strip' : undefined}
     >
       {/*
         A description list, because that is what these are: a label and its
@@ -471,6 +485,15 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       </div>
 
       {props.afterActions}
+
+      {/*
+        #2387: the whole ride's totals, after the controls in the document —
+        they are read now and then, as a race's standings are — and drawn
+        along the bottom of the road by `theme.css` §"THE TOTALS STRIP". From
+        every reading the HUD has, not only those the rider shows, so turning
+        *Ride readings* off does not empty it.
+      */}
+      {totals ? <TotalsStrip readings={totalsStripReadings(props, all)} /> : null}
 
       {/*
         Last in the document and placed by the grid, not by this position: a
@@ -706,6 +729,21 @@ function FocusReadout(props: { readonly readings: readonly HudReading[] }): JSX.
         ))}
       </dl>
     </div>
+  );
+}
+
+/**
+ * #2387's totals strip: one description list, one row of small readings, each
+ * drawn as every other reading is ({@link Field}), so a value, a unit and a
+ * dash read as they do in the tiers. Named, as each tier is.
+ */
+function TotalsStrip(props: { readonly readings: readonly HudReading[] }): JSX.Element {
+  return (
+    <dl className="oyl-hud__panel oyl-hud__fields oyl-hud__totals" aria-label={TOTALS_STRIP_NAME}>
+      {props.readings.map((reading) => (
+        <Field key={reading.key} reading={reading} />
+      ))}
+    </dl>
   );
 }
 

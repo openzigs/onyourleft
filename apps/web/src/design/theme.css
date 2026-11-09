@@ -13234,3 +13234,91 @@ select.oyl-input {
     font-size: 5rem;
   }
 }
+
+/* ==========================================================================
+ * THE TOTALS STRIP — #2387.
+ *
+ * The rider's choice in Settings → Ride HUD (`hud-layout-preference.ts`
+ * §"The totals strip"): the whole ride's totals — the lap, the route's
+ * length, the distance to go, the average speed, the energy and the climb
+ * (`totals-strip.ts`) — in one thin panel along the bottom of the road. The
+ * same fields as the tiers', so a value, a unit and a dash are drawn as they
+ * are there, smaller than a secondary reading: they are read now and then.
+ *
+ * WHERE IT IS DRAWN. Along the bottom, between the route panel and the
+ * actions panel and under the rider, placed by `grid-row` and `position:
+ * absolute` against the bottom row (`route actions` in every corners
+ * layout), so it takes no track and moves no panel, as the map credit is
+ * placed (§`.oyl-hud__attribution`). Measured, not chosen
+ * (`ride-hud-layout.browser.spec.ts` §"#2387"): the rider's feet are 80 % of
+ * the way down a landscape frame (`camera.ts` §`riderFrameBox`), so the strip
+ * needs the width between the two bottom panels and a fifth of the height
+ * under the rider:
+ *
+ * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
+ *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
+ *   leaning rider's box.
+ * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
+ *   under the rider.
+ * - **Anywhere else on the stage it is not drawn**, as the text size is not
+ *   (§"THE HUD'S TEXT SIZE"): an upright tablet has 176 px between its bottom
+ *   panels; a phone on its side 73 to 97 px under the rider and 208 to 316 px
+ *   between them; a phone upright 88 to 115 px between the rider and the
+ *   actions panel. Settings says so. Where the HUD is stacked under the
+ *   world it is in the flow, after the controls, and covers nothing.
+ *
+ * Its own size whatever the rider's text size, which is a factor on the
+ * tiers' values: the strip's room is measured at this size.
+ * ========================================================================== */
+.oyl-hud__totals {
+  grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+  column-gap: var(--oyl-space-md);
+  row-gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__totals .oyl-hud__value {
+  font-size: 1.25rem;
+  white-space: nowrap;
+}
+
+.oyl-hud__totals .oyl-hud__unit {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* On the stage, not drawn unless a rule below has the room for it. */
+@media (min-width: 46rem) and (min-height: 22.5rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    display: none;
+  }
+}
+
+@media (min-width: 60rem) and (min-height: 40rem), (min-width: 78rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    display: grid;
+    position: absolute;
+    grid-column: 1 / -1;
+    grid-row: -2 / -1;
+    /* The bottom panels are 18 and 20 rem wide (§"the corners layout"): the
+       strip is the road between them, a gap each side. */
+    bottom: 0;
+    left: calc(18rem + var(--oyl-space-md));
+    right: calc(20rem + var(--oyl-space-md));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* The tablet's own sizes are set on every value there (§"#2130"); the
+     strip keeps its own. */
+  .oyl-game--riding .oyl-hud .oyl-hud__totals .oyl-hud__value {
+    font-size: 1.25rem;
+  }
+}
+
+@media (min-width: 78rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+  }
+}
