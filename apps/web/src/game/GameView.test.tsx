@@ -986,6 +986,36 @@ describe('the ride clock from the first second — #2382', () => {
     expect(inSeconds(hudField('Ride'))).toBeGreaterThanOrEqual(10);
   });
 
+  it('freezes while the game is paused and then jumps by the whole pause: it is the wall clock', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    const before = inSeconds(hudField('Ride'));
+
+    const pause = queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+      (button) => button.textContent === 'Pause',
+    );
+    await clickThrough(pause);
+    // What a browser's `cancelAnimationFrame` does: no frame comes while paused.
+    pending.length = 0;
+    nowMs += 5 * 60 * 1000;
+    await pump(5);
+    expect(inSeconds(hudField('Ride'))).toBe(before);
+
+    // Resumed, the simulation credits every step owed since the origin
+    // (`simulation.ts` §`advanceTo`, "wall clock, stall included"), so the
+    // clock reads the pause too. A change that stops it counting the pause is
+    // the owner's to choose (#2404's review), and this test is what says so.
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+        (button) => button.textContent === 'Resume',
+      ),
+    );
+    await pump(2);
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThanOrEqual(before + 5 * 60);
+  });
+
   function rideButton(): HTMLButtonElement | undefined {
     return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
       (button.textContent ?? '').startsWith('Ride '),

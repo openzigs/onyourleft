@@ -556,9 +556,7 @@ describe('the elapsed time and the clock beside the moving time — #2072', () =
   });
 
   it('shows a dash for the moving time and the ride’s own clock where nothing is being recorded — #2382', async () => {
-    mounted = await mount(
-      <HudPanel {...base} state={{ ...base.state, elapsed: seconds(754) }} />, //
-    );
+    mounted = await mount(<HudPanel {...base} state={{ ...base.state, elapsed: seconds(754) }} />);
 
     expect(field('Moving').value).toBe('—');
     // #2382: not a dash, and not *Elapsed*: the ride's clock, under its own
