@@ -1176,6 +1176,11 @@ describe('the focus readout — #2383', () => {
     ]);
   });
 
+  it('keeps the focus readout whole when the ride readings are hidden', async () => {
+    mounted = await mount(<HudPanel {...base} layout={{ ...focus, hidden: ['readings'] }} />);
+    expect(labelsIn('.oyl-hud__focus-more')).toEqual(['Speed', 'Avg power', 'Distance', 'Elapsed']);
+  });
+
   it('shows the figures the full HUD shows, and no dash for a figure that exists', async () => {
     mounted = await mount(<HudPanel {...base} />);
     const full = [

@@ -72,7 +72,7 @@ import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
 import { RecentGraph } from './RecentGraph';
-import { focusReadings } from './focus-readout';
+import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import { DEFAULT_HUD_LAYOUT, focusArrangement, panelShown } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
@@ -230,7 +230,10 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       !(
         !panelShown(layout, 'readings') &&
         readingTier(reading) === 'secondary' &&
-        !keptWithReadingsHidden(reading)
+        !keptWithReadingsHidden(reading) &&
+        // The focus readout names its own readings (speed, average power,
+        // distance): turning "Ride readings" off must not empty it silently.
+        !(focus && (FOCUS_MORE_KEYS as readonly string[]).includes(reading.key))
       ),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.

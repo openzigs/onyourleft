@@ -30,8 +30,9 @@
  * readout at the top: power, cadence and heart rate large, and the speed, the
  * average power, the distance and the ride's time (#2382) smaller under them
  * (`focus-readout.ts`). The route panel, the controls and the notices are the
- * same in both; a room's, a Delivery round's or a lap race's own readings
- * stay, beside it, because they are the ride itself.
+ * same in both. A ride with a mode of its own — a room, a Delivery round or a
+ * lap race — keeps the full arrangement whatever is chosen, because its
+ * layout is fitted around the two tiers (`HudCore` `isModeReading`).
  *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
