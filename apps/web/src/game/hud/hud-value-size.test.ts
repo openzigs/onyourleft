@@ -483,3 +483,29 @@ describe('the gradient in its band’s colour — #2291', () => {
     },
   );
 });
+
+/**
+ * #2385 — the gradient on the compact route tile, drawn as the field's is:
+ * each band class `HudCore` §`RouteTile` puts on the label names a rule that
+ * colours its digits and glyph with THAT band's token, and the digits are at
+ * #2291's 1.5 rem floor for a band's colour (large text, a declared 3:1).
+ */
+describe('the gradient on the compact route tile — #2385', () => {
+  it.each(['descent', 'flat', 'climb', 'steep', 'wall'])(
+    'a %s grade’s digits and glyph on the tile are its own band’s token',
+    (band) => {
+      const selector = `.oyl-hud__tile-grade--${band} :is(.oyl-hud__digits, .oyl-hud__slope)`;
+      const at = declarations.indexOf(`${selector} {`);
+      expect(at, `theme.css has no rule for ${selector}`).toBeGreaterThan(-1);
+      const body = declarations.slice(at, declarations.indexOf('}', at));
+      expect(body).toMatch(new RegExp(`color:\\s*var\\(--oyl-color-hud-grade-${band}\\)`));
+    },
+  );
+
+  it('sets the tile’s digits no smaller than a secondary reading’s, large text', () => {
+    expect(fontSizeRem('.oyl-hud__tile-grade')).toBeGreaterThanOrEqual(
+      fontSizeRem(SECONDARY_VALUE) ?? Infinity,
+    );
+    expect(fontSizeRem('.oyl-hud__tile-grade')).toBeGreaterThanOrEqual(1.5);
+  });
+});

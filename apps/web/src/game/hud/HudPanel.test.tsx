@@ -46,6 +46,7 @@ import { atStartLine } from '../simulation';
 import { simulatedRideSentences } from '../simulated-rider';
 import { FRESH_WEEK, startRound } from '../delivery/round';
 import { hudOf, startRace } from './lap-race-testing';
+import { northCorridor, northRoute } from './street-map-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import {
@@ -1520,5 +1521,178 @@ describe('the totals strip — #2387', () => {
       />,
     );
     expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+  });
+});
+
+/**
+ * #2385: the compact route panel, read off the rendered HUD — the map alone
+ * as a tile, the gradient on it the gradient field's own reading and
+ * changing with it, the route panel still hidden when the rider hid it, and
+ * the full panel kept while a workout's strip holds the map's place.
+ */
+describe('the compact route panel — #2385', () => {
+  const profile = route();
+  const at = (grade: number) => ({
+    profile,
+    state: { ...atStartLine(profile), grade: gradePercent(grade) },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  });
+  const compact = { hidden: [], textSize: 'normal', route: 'compact' } as const;
+  const panel = (): Element | null => mounted?.container.querySelector('.oyl-hud__route') ?? null;
+  const inPanel = (selector: string): Element[] => queryAll(panel() ?? document, selector);
+  const tileGrade = (): Element | null =>
+    mounted?.container.querySelector('.oyl-hud__route .oyl-hud__tile-grade') ?? null;
+  /** The gradient field's value, as the primary list draws it. */
+  const field = (): string | null | undefined =>
+    queryAll(mounted?.container ?? document, '.oyl-hud__fields--primary .oyl-hud__field')
+      .find((each) => each.querySelector('dt')?.textContent === 'Gradient')
+      ?.querySelector('dd')?.textContent;
+
+  it('draws the map alone as a tile, with no elevation strip, when the rider chose it', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} layout={compact} />);
+    expect(panel()?.classList).toContain('oyl-hud__route--compact');
+    expect(panel()?.getAttribute('data-oyl-route-view')).toBe('compact');
+    // The map, inside the tile, and nothing of the full panel's strips.
+    expect(inPanel('.oyl-hud__tile .oyl-hud__plan-svg')).toHaveLength(1);
+    expect(inPanel('.oyl-hud__tile [data-testid="oyl-hud-plan-here"]')).toHaveLength(1);
+    expect(inPanel('.oyl-hud__profile-svg')).toHaveLength(0);
+    expect(inPanel('.oyl-hud__ahead-svg')).toHaveLength(0);
+  });
+
+  it('prints the gradient field’s own reading on the tile, in its band', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} layout={compact} />);
+    expect(field()).toBe('+4.5 %');
+    // The same figure, sign, unit and glyph as the field.
+    expect(tileGrade()?.textContent).toBe('Gradient +4.5 %');
+    expect(tileGrade()?.getAttribute('data-oyl-tile-grade')).toBe('+4.5');
+    expect(tileGrade()?.querySelector('.oyl-hud__digits')?.textContent).toBe('4.5');
+    expect(tileGrade()?.querySelector('.oyl-hud__sign')?.textContent).toBe('+');
+    expect(tileGrade()?.querySelector('[data-oyl-slope]')?.getAttribute('data-oyl-slope')).toBe(
+      'up',
+    );
+    expect(tileGrade()?.classList).toContain('oyl-hud__tile-grade--climb');
+  });
+
+  it('changes with the gradient field, on the same render', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} layout={compact} />);
+    for (const [grade, shown, band] of [
+      [-6.04, '-6.0', 'descent'],
+      [0.02, '0.0', 'flat'],
+      [12.36, '+12.4', 'wall'],
+    ] as const) {
+      await mounted.rerender(<HudPanel {...at(grade)} layout={compact} />);
+      expect(field()).toBe(`${shown} %`);
+      expect(tileGrade()?.getAttribute('data-oyl-tile-grade')).toBe(shown);
+      expect(tileGrade()?.textContent).toBe(`Gradient ${shown} %`);
+      expect(tileGrade()?.classList).toContain(`oyl-hud__tile-grade--${band}`);
+    }
+  });
+
+  it('is said once: hidden beside the full HUD’s field, heard beside the focus readout', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} layout={compact} />);
+    expect(tileGrade()?.getAttribute('aria-hidden')).toBe('true');
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(4.5)} layout={{ ...compact, arrangement: 'focus' }} />);
+    // The focus readout has no gradient field: the tile's is the one there is.
+    expect(field()).toBeUndefined();
+    expect(tileGrade()?.hasAttribute('aria-hidden')).toBe(false);
+    expect(tileGrade()?.textContent).toBe('Gradient +4.5 %');
+  });
+
+  it('draws the street map as the tile on a ride with a corridor', async () => {
+    mounted = await mount(
+      <HudPanel {...at(4.5)} profile={northRoute()} corridor={northCorridor()} layout={compact} />,
+    );
+    expect(inPanel('.oyl-hud__tile .oyl-hud__street-map')).toHaveLength(1);
+    expect(tileGrade()?.getAttribute('data-oyl-tile-grade')).toBe('+4.5');
+    // A sibling of the map's box, never inside it: a new gradient is not a
+    // change to the map (#2380).
+    expect(mounted.container.querySelector('.oyl-hud__street-map .oyl-hud__tile-grade')).toBeNull();
+  });
+
+  it('keeps the route panel hidden when the rider hid it, compact or not', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} layout={{ ...compact, hidden: ['route'] }} />);
+    expect(panel()).toBeNull();
+    expect(tileGrade()).toBeNull();
+    // The gradient is still the field's, in the primary list.
+    expect(field()).toBe('+4.5 %');
+    mounted.unmount();
+    // With the recent graph shown the panel stays, for the graph alone.
+    mounted = await mount(
+      <HudPanel
+        {...at(4.5)}
+        layout={{ ...compact, hidden: ['route'] }}
+        recent={{ samples: [{ power: 200, heartRate: 140 }], written: 1 }}
+      />,
+    );
+    expect(inPanel('.oyl-hud__recent')).toHaveLength(1);
+    expect(inPanel('.oyl-hud__tile')).toHaveLength(0);
+    expect(inPanel('.oyl-hud__plan-svg')).toHaveLength(0);
+    expect(tileGrade()).toBeNull();
+  });
+
+  it('keeps the recent graph under the tile when both are shown', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...at(4.5)}
+        layout={compact}
+        recent={{ samples: [{ power: 200, heartRate: 140 }], written: 1 }}
+      />,
+    );
+    expect(inPanel('.oyl-hud__tile')).toHaveLength(1);
+    expect(inPanel('.oyl-hud__recent')).toHaveLength(1);
+  });
+
+  it('draws the full panel by default, with full chosen, and while a workout runs', async () => {
+    mounted = await mount(<HudPanel {...at(4.5)} />);
+    expect(panel()?.getAttribute('data-oyl-route-view')).toBe('full');
+    expect(inPanel('.oyl-hud__profile-svg')).toHaveLength(1);
+    expect(tileGrade()).toBeNull();
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...at(4.5)} layout={{ ...compact, route: 'full' }} />);
+    expect(panel()?.classList).not.toContain('oyl-hud__route--compact');
+    expect(tileGrade()).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...at(4.5)}
+        layout={compact}
+        workout={{
+          elapsedSeconds: 150,
+          timeline: expandWorkout({
+            name: 'test',
+            blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
+          }),
+          holdingWatts: 150,
+          thresholdWatts: 250,
+          trace: [],
+        }}
+      />,
+    );
+    // The workout's strip is in the map's place, so the panel is full.
+    expect(panel()?.getAttribute('data-oyl-route-view')).toBe('full');
+    expect(inPanel('[data-oyl-workout-graph="hud"]')).toHaveLength(1);
+    expect(tileGrade()).toBeNull();
+  });
+
+  it('is not drawn by the HUD core alone, which is not told its figure is a map (the demo)', async () => {
+    mounted = await mount(
+      <HudCore
+        {...at(4.5)}
+        units="metric"
+        labels={{ resume: 'Play', end: 'Stop' }}
+        touchLock={false}
+        layout={compact}
+        routeFigure={null}
+      />,
+    );
+    expect(panel()?.getAttribute('data-oyl-route-view')).toBe('full');
+    expect(tileGrade()).toBeNull();
   });
 });

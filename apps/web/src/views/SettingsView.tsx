@@ -127,6 +127,7 @@ import {
 import {
   HUD_ARRANGEMENTS,
   HUD_PANELS,
+  HUD_ROUTE_VIEWS,
   HUD_TEXT_SIZES,
   panelShown,
   readHudLayout,
@@ -135,6 +136,7 @@ import {
   type HudArrangement,
   type HudLayoutPreference,
   type HudPanelId,
+  type HudRouteView,
   type HudTextSize,
 } from '../game/hud/hud-layout-preference';
 import {
@@ -1855,10 +1857,14 @@ function LapRaceAssistPanel({
   );
 }
 
-/** #2079: what each panel the rider may turn off is called here. */
+/**
+ * #2079: what each panel the rider may turn off is called here. The route's
+ * names no view (#2385): what it draws is the "Route panel" choice below, and
+ * the compact one has no height profile.
+ */
 const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
   readings: 'Ride readings: speed, distance, the pacer and the rest',
-  route: 'The route: its height profile and its map',
+  route: 'The route panel',
   graph: 'The last ten minutes of power and heart rate',
   standings: 'A race’s standings',
 };
@@ -1873,6 +1879,15 @@ const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
 /** #2387: what the totals strip is called here. */
 const HUD_TOTALS_STRIP_LABEL =
   'The ride’s totals along the bottom: lap, route, distance to go, average speed, energy and climb';
+
+/**
+ * #2385: what each way of drawing the route panel is called here. Neither
+ * begins with a word another choice here begins with.
+ */
+const HUD_ROUTE_VIEW_LABELS: Readonly<Record<HudRouteView, string>> = {
+  full: 'Height profile and map',
+  compact: 'Compact: a small map with the gradient on it',
+};
 
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
@@ -1890,6 +1905,9 @@ const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
  * focus arrangement, which shows the gradient nowhere: it is a choice of
  * fewer numbers, made off the bike, and the full HUD is one choice away.
  * Since #2387 the rider may add the totals strip, off by default.
+ *
+ * Since #2385 the rider may draw the route panel compact: the map alone, with
+ * the gradient on it, which puts the gradient back beside the focus readout.
  *
  * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
  * as every ride-time control is: it is set from the bars as often as the sofa.
@@ -1921,10 +1939,11 @@ function HudLayoutPanel({
             What the game shows while you ride, from your next ride. Power, cadence and heart rate,
             the ride controls and every notice are always shown. Focus shows one compact readout at
             the top in place of every reading; a ride in a room, a Delivery round or a lap race
-            keeps the full layout and draws no totals strip. The text size applies on tablets held
-            either way, and the totals strip on a tablet on its side or a tall, narrow one held
-            upright: a phone or a short window keeps the normal size, and has no strip, because it
-            has no room for them beside the road.
+            keeps the full layout and draws no totals strip. The compact route panel is a small map
+            with the gradient on it, in place of the height profile and the map. The text size
+            applies on tablets held either way, and the totals strip on a tablet on its side or a
+            tall, narrow one held upright: a phone or a short window keeps the normal size, and has
+            no strip, because it has no room for them beside the road.
           </p>
         }
       >
@@ -1976,6 +1995,22 @@ function HudLayoutPanel({
           />{' '}
           {HUD_TOTALS_STRIP_LABEL}
         </label>
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Route panel</legend>
+        {HUD_ROUTE_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-route-view"
+              checked={(layout.route ?? 'full') === view}
+              onChange={() => {
+                keep({ ...layout, route: view });
+              }}
+            />{' '}
+            {HUD_ROUTE_VIEW_LABELS[view]}
+          </label>
+        ))}
       </fieldset>
       <fieldset className="oyl-hud-layout__group">
         <legend>Size of the numbers</legend>

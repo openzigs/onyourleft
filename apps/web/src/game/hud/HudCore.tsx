@@ -76,6 +76,7 @@ import { RecentGraph } from './RecentGraph';
 import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
   DEFAULT_HUD_LAYOUT,
+  compactRoute,
   focusArrangement,
   panelShown,
   totalsStripChosen,
@@ -132,6 +133,14 @@ export interface HudCoreProps extends SharedProps {
    * plan (`PlanTrace`), or a workout's strip in its place (#1307).
    */
   readonly routeFigure: ReactNode;
+  /**
+   * That {@link routeFigure} is the route's map — `PlanTrace` or `StreetMap`
+   * — which #2385's compact route panel draws alone, as a tile with the
+   * gradient on it, when the rider chose it (`hud-layout-preference.ts`
+   * §"The route panel"). `HudPanel` says so on every ride but one a workout
+   * runs, whose strip is in that place; absent (the demo), the panel is full.
+   */
+  readonly routeTile?: boolean;
   /**
    * The actions panel's rows under *Pause* and *End ride*, in their order —
    * or a function of whether the focus readout (#2383) is drawn, for a row
@@ -240,6 +249,9 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // of its own for the same reason, and never on the demo (`withoutTotals`).
   const totals =
     totalsStripChosen(layout) && !all.some(isModeReading) && props.withoutTotals !== true;
+  // #2385: the route panel as a tile, where the rider chose it and the
+  // figure is the route's map. @see HudCoreProps.routeTile
+  const compact = compactRoute(layout) && props.routeTile === true;
   const readings = all.filter(
     (reading) =>
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
@@ -325,8 +337,20 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       */}
       {!panelShown(layout, 'route') &&
       (props.recent === undefined || !panelShown(layout, 'graph')) ? null : (
-        <div className="oyl-hud__panel oyl-hud__route">
-          {panelShown(layout, 'route') ? (
+        <div
+          className={`oyl-hud__panel oyl-hud__route${compact ? ' oyl-hud__route--compact' : ''}`}
+          data-oyl-route-view={compact ? 'compact' : 'full'}
+        >
+          {!panelShown(layout, 'route') ? null : compact ? (
+            <RouteTile
+              figure={props.routeFigure}
+              gradient={readings.find((reading) => reading.key === GRADIENT_KEY)}
+              // The focus readout has no gradient field, so there the tile's is
+              // the one a screen reader meets; in the full HUD it is heard in
+              // the primary list, and the tile's would say it twice.
+              heard={focus}
+            />
+          ) : (
             <>
               <ElevationStrip
                 reading={elevation}
@@ -337,7 +361,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
 
               {props.routeFigure}
             </>
-          ) : null}
+          )}
 
           {/* #2078: the last ten minutes of power and heart rate. */}
           {props.recent === undefined || !panelShown(layout, 'graph') ? null : (
@@ -802,6 +826,56 @@ function ZoneStrip(props: { readonly current: number | undefined }): JSX.Element
         );
       })}
     </svg>
+  );
+}
+
+/**
+ * #2385's compact route panel: the route's map alone, as a small tile, with
+ * the current gradient printed in its top corner.
+ *
+ * ⚠️ **The gradient is the gradient FIELD's reading**, the one
+ * `fields.ts` §`gradientReading` makes from the ride state for the primary
+ * list, drawn by the same {@link Value} and {@link SlopeGlyph} in the same
+ * band's colour: the same digits, the same sign, the same `%`, and so the
+ * same units whatever the rider chose, changing on the render the field
+ * changes on. There is no second figure for it to drift from.
+ *
+ * ⚠️ **Over the map and not in it.** The label is a sibling of the map's box
+ * (`StreetMap.tsx` §"A box, a sheet that moves in it"), on its own opaque
+ * backing, so a new gradient repaints the label and never the sheet of map
+ * under it — #2380's lesson. `street-map.browser.spec.ts` §"#2385" counts the
+ * map's paints while the label changes.
+ *
+ * `heard`: whether a screen reader meets the label. The full HUD's primary
+ * list says the gradient already; the focus readout does not (#2383).
+ */
+function RouteTile(props: {
+  readonly figure: ReactNode;
+  readonly gradient: HudReading | undefined;
+  readonly heard: boolean;
+}): JSX.Element {
+  const { gradient } = props;
+  return (
+    <div className="oyl-hud__tile">
+      {props.figure}
+      {gradient === undefined ? null : (
+        <p
+          className={`oyl-hud__tile-grade oyl-hud__tile-grade--${bandOf(gradient)}`}
+          aria-hidden={props.heard ? undefined : true}
+          data-oyl-tile-grade={gradient.value}
+        >
+          <span className="oyl-visually-hidden">{gradient.label} </span>
+          <Value reading={gradient} />
+          <span className="oyl-hud__tile-unit">
+            {' '}
+            {gradient.unit}
+            {gradient.slope === undefined ? null : (
+              <SlopeGlyph slope={gradient.slope} band={bandOf(gradient)} />
+            )}
+          </span>
+        </p>
+      )}
+    </div>
   );
 }
 

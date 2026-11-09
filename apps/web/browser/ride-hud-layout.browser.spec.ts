@@ -205,9 +205,9 @@ for (const viewport of [
         return { text: (each.textContent ?? '').trim(), width: box.width, height: box.height };
       }),
     );
-    // Four panels, three sizes, the two arrangements (#2383) and the totals
-    // strip (#2387).
-    expect(choices).toHaveLength(10);
+    // Four panels, three sizes, the two arrangements (#2383), the two route
+    // panels (#2385) and the totals strip (#2387).
+    expect(choices).toHaveLength(12);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);

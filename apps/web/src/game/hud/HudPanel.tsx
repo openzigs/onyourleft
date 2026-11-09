@@ -440,6 +440,9 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       timeOfDay={timeOfDay}
       labels={RIDE_LABELS}
       touchLock
+      // #2385: the route's map is the figure, and so may be drawn as the
+      // compact tile, on every ride but a workout's, whose strip is the figure.
+      routeTile={workout === undefined}
       routeFigure={
         /*
           #285 — the other axis. The strip above says how far is left; this says

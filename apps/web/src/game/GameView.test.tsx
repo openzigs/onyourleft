@@ -2690,6 +2690,33 @@ describe('the HUD the rider chose — #2079', () => {
     expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
   });
 
+  // #2385: the compact route panel, as Settings writes it, read as the ride starts.
+  it('draws the compact route tile with the gradient field’s reading when the device says so — #2385', async () => {
+    writeHudLayout(localStorage, { hidden: [], textSize: 'normal', route: 'compact' });
+    const hud = await rideOnce();
+    const route = hud.querySelector('.oyl-hud__route');
+    expect(route?.getAttribute('data-oyl-route-view')).toBe('compact');
+    expect(route?.querySelector('.oyl-hud__tile .oyl-hud__plan-svg')).not.toBeNull();
+    expect(route?.querySelector('.oyl-hud__profile-svg')).toBeNull();
+    // The tile's gradient is the field's, from the ride's own state.
+    const grade = route?.querySelector('.oyl-hud__tile-grade');
+    expect(grade).not.toBeNull();
+    expect(hudField('Gradient')).toBe(`${grade?.getAttribute('data-oyl-tile-grade') ?? ''} %`);
+    // The recent graph is still the panel's.
+    expect(hud.querySelector('[data-testid="oyl-hud-recent"]')).not.toBeNull();
+  });
+
+  it('keeps the route panel hidden when the device says so, compact or not — #2385', async () => {
+    writeHudLayout(localStorage, {
+      hidden: ['route', 'graph'],
+      textSize: 'normal',
+      route: 'compact',
+    });
+    const hud = await rideOnce();
+    expect(hud.querySelector('.oyl-hud__route')).toBeNull();
+    expect(hud.querySelector('.oyl-hud__tile-grade')).toBeNull();
+  });
+
   it('keeps the graph when only the route is turned off, and the route when only the graph is', async () => {
     writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal' });
     let hud = await rideOnce();

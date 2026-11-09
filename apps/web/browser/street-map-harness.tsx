@@ -10,6 +10,13 @@
  * them to each other: the same panel boxes, the same controls, and a map that
  * follows the rider.
  *
+ * With `?route=compact` (#2385) it draws the route panel as the compact tile,
+ * the map alone with the gradient printed on it, and the gradient SWINGS:
+ * `8 × sin(distance / 40 m)` %, so the tile's label changes on nearly every
+ * 5 m frame of a paced ride. That is a harsher ride than any road, on
+ * purpose: the spec counts the map's paints while the label changes, and a
+ * label that repainted the map would show it on every frame.
+ *
  * ## The corridor is a dense synthetic town, on purpose
  *
  * `street-map-testing.ts` §`denseTown`, the one `street-map.test.ts` bounds
@@ -39,7 +46,7 @@ import { StrictMode, useState, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
-import { gradeAt, metres, metresPerSecond, seconds, watts } from '@onyourleft/domain';
+import { gradeAt, gradePercent, metres, metresPerSecond, seconds, watts } from '@onyourleft/domain';
 
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { denseTown, denseTownRoute } from '../src/game/hud/street-map-testing';
@@ -78,6 +85,11 @@ export interface StreetMapRide {
   /** Milliseconds between animation frames, the median and the worst: the frame budget as spent. */
   readonly medianFrameMs: number;
   readonly worstFrameMs: number;
+  /**
+   * How many times the compact tile's gradient label changed (#2385): `0`
+   * with the full route panel, which has no label.
+   */
+  readonly grades: number;
 }
 
 declare global {
@@ -96,9 +108,20 @@ declare global {
 
 const errors: string[] = [];
 
+/** The compact tile's gradient label as drawn, or `undefined` with none. */
+function tileGrade(): string | undefined {
+  return (
+    document.querySelector('.oyl-hud__tile-grade')?.getAttribute('data-oyl-tile-grade') ?? undefined
+  );
+}
+
 const PROFILE = denseTownRoute();
 const CORRIDOR = denseTown();
-const STREET = new URL(window.location.href).searchParams.get('map') !== 'outline';
+const PARAMS = new URL(window.location.href).searchParams;
+const STREET = PARAMS.get('map') !== 'outline';
+/** #2385: the compact route panel, and a gradient that swings (see the module note). */
+const COMPACT = PARAMS.get('route') === 'compact';
+const LAYOUT = { hidden: [], textSize: 'normal', route: COMPACT ? 'compact' : 'full' } as const;
 /** Five kilometres in, so every field has something to say. */
 const START = 5_000;
 
@@ -107,7 +130,7 @@ function stateAt(distance: number): GameState {
     ride: { speed: metresPerSecond(11.1), distance: metres(distance) },
     elapsed: seconds(450),
     ridden: seconds(450),
-    grade: gradeAt(PROFILE, metres(distance)),
+    grade: COMPACT ? gradePercent(8 * Math.sin(distance / 40)) : gradeAt(PROFILE, metres(distance)),
     input: { power: watts(240), live: true },
     headwindMetresPerSecond: 0,
   };
@@ -132,6 +155,10 @@ function Harness(): JSX.Element {
         onPause={() => undefined}
         onEnd={() => undefined}
         announcement=""
+        layout={LAYOUT}
+        // As GameView passes it once a ride has a sample: the graph is in the
+        // route panel, shown or hidden by the stylesheet, as on a real ride.
+        recent={{ samples: [{ power: 240, heartRate: 150 }], written: 1 }}
         {...(STREET ? { corridor: CORRIDOR, attribution: '© OpenStreetMap contributors' } : {})}
       />
     </section>
@@ -167,6 +194,8 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
   const times: number[] = [];
   const intervals: number[] = [];
   let distance = START;
+  let grade = tileGrade();
+  let grades = 0;
   const step = (): void => {
     distance += metresPerFrame;
     const before = performance.now();
@@ -174,6 +203,9 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
       move(distance);
     });
     times.push(performance.now() - before);
+    const now = tileGrade();
+    if (now !== grade) grades += 1;
+    grade = now;
     const records = observer.takeRecords();
     mutations += records.length;
     // Not the box's own attributes (its `aria-label` says how far along the
@@ -209,6 +241,7 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
       worstRenderMs: Math.max(...times),
       medianFrameMs: median(intervals),
       worstFrameMs: intervals.length === 0 ? 0 : Math.max(...intervals),
+      grades,
     };
   };
   if (!paced) {

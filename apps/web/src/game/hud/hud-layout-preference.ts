@@ -43,6 +43,16 @@
  * it is where the totals the readout leaves out are read. A ride with a mode
  * of its own does not draw it, for the reason it keeps the full arrangement.
  *
+ * ## The route panel — #2385
+ *
+ * Full or compact ({@link HUD_ROUTE_VIEWS}). **Full** is the elevation strip,
+ * the road ahead and the map, as it always was, and is the default.
+ * **Compact** is the map alone, as a small tile in the same corner, with the
+ * current gradient printed on it (`HudCore.tsx` §`RouteTile`). It changes how
+ * the route panel is drawn, never whether: a rider who turned the route off
+ * ({@link HUD_PANELS}' `route`) sees no route panel in either. While a
+ * workout runs its strip holds the panel, and the panel is drawn full.
+ *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
  */
@@ -67,6 +77,12 @@ export const HUD_ARRANGEMENTS = ['full', 'focus'] as const;
 /** One of {@link HUD_ARRANGEMENTS}. */
 export type HudArrangement = (typeof HUD_ARRANGEMENTS)[number];
 
+/** How the route panel is drawn, the default first — #2385. */
+export const HUD_ROUTE_VIEWS = ['full', 'compact'] as const;
+
+/** One of {@link HUD_ROUTE_VIEWS}. */
+export type HudRouteView = (typeof HUD_ROUTE_VIEWS)[number];
+
 /** What the rider chose. */
 export interface HudLayoutPreference {
   /** The panels turned off. Empty by default: every panel is shown. */
@@ -82,6 +98,11 @@ export interface HudLayoutPreference {
    * kept before #2387 reads as the HUD it always drew.
    */
   readonly totalsStrip?: boolean;
+  /**
+   * Full or compact — #2385. Absent is `full`, so a preference kept before
+   * #2385 reads as the route panel it always drew.
+   */
+  readonly route?: HudRouteView;
 }
 
 export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
@@ -89,6 +110,7 @@ export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
   textSize: 'normal',
   arrangement: 'full',
   totalsStrip: false,
+  route: 'full',
 };
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
@@ -104,6 +126,10 @@ function isTextSize(value: unknown): value is HudTextSize {
 
 function isArrangement(value: unknown): value is HudArrangement {
   return typeof value === 'string' && (HUD_ARRANGEMENTS as readonly string[]).includes(value);
+}
+
+function isRouteView(value: unknown): value is HudRouteView {
+  return typeof value === 'string' && (HUD_ROUTE_VIEWS as readonly string[]).includes(value);
 }
 
 /**
@@ -128,6 +154,7 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
     arrangement: isArrangement(row['arrangement']) ? row['arrangement'] : 'full',
     // Only a stored `true` turns it on: anything else is the default, off.
     totalsStrip: row['totalsStrip'] === true,
+    route: isRouteView(row['route']) ? row['route'] : 'full',
   };
 }
 
@@ -161,4 +188,12 @@ export function totalsStripChosen(preference: HudLayoutPreference): boolean {
 /** Whether the HUD draws #2383's focus readout under this preference. */
 export function focusArrangement(preference: HudLayoutPreference): boolean {
   return preference.arrangement === 'focus';
+}
+
+/**
+ * Whether the route panel is #2385's compact tile under this preference. Says
+ * nothing of whether it is shown: {@link panelShown} with `route` does.
+ */
+export function compactRoute(preference: HudLayoutPreference): boolean {
+  return preference.route === 'compact';
 }

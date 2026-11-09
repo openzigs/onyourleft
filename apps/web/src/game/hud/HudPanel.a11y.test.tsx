@@ -187,6 +187,26 @@ describe('the HUD passes the accessibility audit', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  // #2385: the compact route panel — the map alone as a tile, the gradient
+  // printed on it — beside the full readings and beside the focus readout,
+  // where the tile's gradient is the one a screen reader meets.
+  it('audits clean with the compact route panel, in both arrangements', async () => {
+    for (const arrangement of ['full', 'focus'] as const) {
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...props({ elapsedSeconds: 65 })}
+            layout={{ hidden: [], textSize: 'normal', arrangement, route: 'compact' }}
+          />,
+        ),
+      );
+      expect(document.querySelector('.oyl-hud__tile-grade')).not.toBeNull();
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+      mounted.unmount();
+      mounted = undefined;
+    }
+  });
+
   // #2383: the focus readout is a different tree again — one panel, two
   // named lists — and is audited as one, with its sensors live and dropped.
   it('audits clean in the focus arrangement, live and with every sensor dropped', async () => {
