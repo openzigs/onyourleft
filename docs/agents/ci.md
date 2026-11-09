@@ -2366,40 +2366,63 @@ newest row below is furthest inside 504 s**, in the same pull request, or `night
 is red.
 
 **Measured** on this change's own pull request, run
-[42522620509](https://github.com/openzigs/onyourleft/actions/runs/42522620509), attempts 1 to 5 —
-each attempt the same commit, and each part's `chromium` run against its 720 s stop (Playwright's
-own `passed (…)` figure; the `game` run after `browser-3`'s part against its 85 s):
+[42536504988](https://github.com/openzigs/onyourleft/actions/runs/42536504988), attempts 1 to 3 on
+the lists above: each part's `chromium` run against its 720 s stop (Playwright's own `passed (…)`
+figure; the `game` run after `browser-3`'s part against its 85 s):
 
 | Attempt | `browser-1` | `browser-2` | `browser-3` | `browser-4` | `browser-5` | `game` run |
 |---|--:|--:|--:|--:|--:|--:|
-| 1 | 294 s on an EPYC 9V45, 41 % | 366 s on the EPYC 7763, 51 % | 366 s on the EPYC 7763, 51 % | 288 s on an EPYC 9V74, 40 % | 252 s on an EPYC 9V45, 35 % | 72 s |
-| 2 | 456 s on the EPYC 7763, 63 % | 306 s on an EPYC 9V74, 42 % | 378 s on the EPYC 7763, 52 % | 294 s on an EPYC 9V74, 41 % | 336 s on the EPYC 7763, 47 % | 72 s |
-| 3 | 342 s on an EPYC 9V74, 48 % | 360 s on the EPYC 7763, 50 % | 246 s on an EPYC 9V45, 34 % | 282 s on an EPYC 9V45, 39 % | 336 s on a Xeon 8370C, 47 % | 41 s |
-| 4 | 474 s on a Xeon 8573C, 66 % | 282 s on an EPYC 9V45, 39 % | 276 s on an EPYC 9V74, 38 % | 366 s on the EPYC 7763, 51 % | 372 s on a Xeon 8370C, 52 % | 56 s |
-| 5 | 480 s on the EPYC 7763, 67 % | 372 s on the EPYC 7763, 52 % | 228 s on an EPYC 9V45, 32 % | 366 s on a Xeon 8370C, 51 % | 276 s on an EPYC 9V74, 38 % | 39 s |
+| 1 | 438 s on the EPYC 7763, 61 % | 366 s on the EPYC 7763, 51 % | 270 s on an EPYC 9V74, 38 % | 366 s on the EPYC 7763, 51 % | 366 s on the EPYC 7763, 51 % | 56 s |
+| 2 | 438 s on the EPYC 7763, 61 % | 354 s on the EPYC 7763, 49 % | 270 s on an EPYC 9V74, 38 % | 264 s on an EPYC 9V45, 37 % | 228 s on an EPYC 9V45, 32 % | 58 s |
+| 3 | 456 s on the EPYC 7763, 63 % | 252 s on an EPYC 9V45, 35 % | 210 s on an EPYC 9V45, 29 % | 354 s on a Xeon 8573C, 49 % | 282 s on an EPYC 9V74, 39 % | 39 s |
 
-**Every part of every attempt is under 70 % of its stop: the slowest is 480 s, 67 %**, and it is
-`browser-1`, whose one worker runs `ride-room.browser.spec.ts` (448 s of attempt 2's 456 on the
-EPYC 7763; it took 385 s there when it shared a part with lighter files, so three heavy files on
-four vCPUs slow each other). Every other part took 228 to 378 s, 32 to 53 %. Against the three-shard
-gate on the same CPUs that day (§ above): `browser-1` 654 to 690 s, `browser-2` 708 to 714 s.
+**Every part of every attempt is under 70 % of its stop: the slowest is 456 s, 63 %**, `browser-1`,
+whose one worker runs `ride-room.browser.spec.ts`. Every other part took 210 to 366 s, 29 to 51 %.
+Against the three-shard gate on the same CPUs that day (§ above): `browser-1` 654 to 690 s,
+`browser-2` 708 to 714 s. ⚠️ Attempt 3's `browser-4` was red on one case,
+`motion.browser.spec.ts` §"#945 … ends the fade, so Ride is pressed as itself" (436 ms against
+200), which is not this change's: it failed the same way on `main` and in the merge queue in runs
+[42380224256](https://github.com/openzigs/onyourleft/actions/runs/42380224256),
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723),
+[42396964437](https://github.com/openzigs/onyourleft/actions/runs/42396964437) and
+[42416283406](https://github.com/openzigs/onyourleft/actions/runs/42416283406). Its part still ran
+whole, so its times are in the table.
 
 **This is the table `nightly-split.test.ts` reads**: columns as in §"Three browser shards — #1720",
 a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too. ⚠️ Every row is from an attempt whose `tests-1` shard was red on the
-one case that reads this table, before it had the `browser-4` and `browser-5` columns; every other
-case passed. ⚠️ **Attempts 1 and 3 are not in it, as #2154 left out its queued attempts**: each
-waited for runners (the longest wait between a job being created and starting was 1 138 s and
-492 s, beside the nightly workflow's own jobs for the same push in attempt 1), so `Wall` was 1 651
-and 1 121 s. Attempts 2, 4 and 5 waited at most 227, 83 and 236 s.
+with no column fails it too.
 
 <!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
-| 42522620509 attempt 2 | 661 | EPYC 9V74 | 321 | Xeon 6975P-C | 391 | EPYC 9V45 | 317 | **EPYC 7763** | 489 | EPYC 9V74 | 338 | **EPYC 7763** | 484 | EPYC 9V74 | 329 | **EPYC 7763** | 373 | 23 | 465 | 312 | 460 | 304 | 348 |
-| attempt 4 | 710 | EPYC 9V45 | 273 | **EPYC 7763** | 610 | Xeon 8573C | 458 | Xeon 8573C | 509 | EPYC 9V45 | 309 | EPYC 9V74 | 367 | **EPYC 7763** | 403 | Xeon 8370C | 405 | 24 | 483 | 287 | 342 | 375 | 381 |
-| attempt 5 | 717 | EPYC 9V74 | 327 | EPYC 9V74 | 470 | **EPYC 7763** | 467 | **EPYC 7763** | 519 | **EPYC 7763** | 412 | EPYC 9V45 | 296 | Xeon 8370C | 401 | EPYC 9V74 | 309 | 26 | 490 | 383 | 274 | 376 | 285 |
+| 42536504988 attempt 1 | 821 | **EPYC 7763** | 400 | EPYC 9V74 | 495 | **EPYC 7763** | 474 | **EPYC 7763** | 475 | **EPYC 7763** | 404 | EPYC 9V74 | 365 | **EPYC 7763** | 403 | **EPYC 7763** | 406 | 25 | 447 | 376 | 337 | 375 | 377 |
+| attempt 2 | 616 | **EPYC 7763** | 409 | **EPYC 7763** | 600 | Xeon 8573C | 406 | **EPYC 7763** | 471 | **EPYC 7763** | 388 | EPYC 9V74 | 358 | EPYC 9V45 | 291 | EPYC 9V45 | 255 | 23 | 445 | 364 | 335 | 270 | 233 |
+| attempt 3 | 503 | EPYC 9V45 | 288 | EPYC 9V74 | 487 | EPYC 9V74 | 377 | **EPYC 7763** | 487 | EPYC 9V45 | 283 | EPYC 9V45 | 276 | Xeon 8573C | 390 | EPYC 9V74 | 314 | 26 | 463 | 259 | 257 | 360 | 290 |
 <!-- shard-measurements:end -->
+
+**The lists before these, as the record.** Each was measured on this pull request and changed for
+the reason given above: the four shards (run 42520003996 attempt 1: `browser-1` 486 s on the EPYC
+7763, 67.5 %); the first five lists, with `ride-room` alone in `browser-1` and `ride-laps` beside the
+demo (run [42522620509](https://github.com/openzigs/onyourleft/actions/runs/42522620509) attempts 1
+to 5 and run 42530045200: every part under 70 %, the slowest 480 s, 67 %, `browser-1` on the 7763);
+and those with the two swapped (run 42532792084 attempts 1 to 3: the slowest 456 s, 63 %, and
+`ride-room` red beside the demo in attempt 3). ⚠️ The demo and a ride-harness case are not a new
+pairing: on `main` before this change `browser-3` held both, and in merge-queue run
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723) the same
+`ride-room` case went red on an EPYC 7763 while the demo's climb ran beside it (15:14:17 to
+15:15:08, the red case at 15:14:43). Attempts whose runs waited for runners (`Wall` 1 562, 1 651 and
+1 121 s, the longest wait between a job being created and starting up to 1 138 s, beside the
+nightly workflow's own jobs for the same push) are left out of every figure here but the parts'
+own times, as #2154 left out its queued attempts.
+
+**The required check goes red when any browser shard does.** Run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), on a commit since
+dropped from the branch, added one case `expect(1, 'deliberately broken').toBe(2)` to one spec in
+each shard's list (`capture`, `logo`, `moderation`, `frame`, `bend`, on the first five lists):
+each of `browser-1` to `browser-5` reported that case `✘` and went red, `checks`, `tests-1` and
+`tests-2` stayed green, and `Repository rules` failed with one line a shard,
+`SHARD001: the shard 'browser-N' ended as 'failure', not 'success'`, for N = 1 to 5. The jobs and
+`needs:` it ran under are the ones on this branch; only the lists moved since.
 
 ⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
 run's log and draw the lists again the same way, divide the file that is the floor (one file is
