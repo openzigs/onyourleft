@@ -236,8 +236,7 @@ describe('a ride takes the screen over — #423', () => {
     await openTheGame();
     await press('Ride ');
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
 
     for (const [name, element] of Object.entries(chrome())) {
       expect(element, name).not.toBeNull();
@@ -267,14 +266,9 @@ describe('a ride takes the screen over — #423', () => {
     expect(chrome().header).toBeNull();
     expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
 
-    // Nothing is recorded under this ride, so Discard ride, asked twice.
+    // Nothing is recorded under this ride, so End ride, asked once (#2381).
     await act(async () => {
-      endRideAnswer(document, 'Discard ride').click();
-      await Promise.resolve();
-    });
-    await settle();
-    await act(async () => {
-      endRideAnswer(document, 'Discard ride').click();
+      endRideAnswer(document, 'End ride').click();
       await Promise.resolve();
     });
     await settle();
@@ -325,8 +319,7 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     await press('Ride ');
     expect(updateOffer()).toBeNull();
     await press('End ride');
-    await press('Discard ride');
-    await press('Discard ride');
+    await press('End ride');
 
     expect(updateOffer()).not.toBeNull();
     expect(button('Update now')).toBeDefined();

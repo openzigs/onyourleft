@@ -372,15 +372,14 @@ function endRideButton(): HTMLButtonElement | undefined {
 }
 
 /**
- * #2349: *End ride*, then *Discard ride* twice — how a game ride with nothing
+ * #2349, #2381: *End ride*, then the question's *End ride* — how a game ride with nothing
  * recorded under it ends now that *End ride* asks first.
  */
 async function endTheRide(
   press: (element: HTMLElement | undefined) => Promise<void> = clickThrough,
 ): Promise<void> {
   await press(endRideButton());
-  await press(endRideAnswer(document, 'Discard ride'));
-  await press(endRideAnswer(document, 'Discard ride'));
+  await press(endRideAnswer(document, 'End ride'));
 }
 
 /** The value a HUD field is showing, found by its label. */
@@ -2129,12 +2128,57 @@ describe('ending a game ride asks first — #2349', () => {
     expect(seen).toEqual(fresh());
   });
 
-  it('offers no Save ride with nothing recorded under the ride', async () => {
+  it('asks once, End ride or Keep riding, with nothing recorded under the ride, and ends it deleting nothing (#2381)', async () => {
     const seen = fresh();
     await onTheStage(recordingTrainer(seen, undefined));
     await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'End ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.askNotRecorded}`);
+    const asked = document.querySelector('[data-oyl-end-ride]')?.textContent ?? '';
+    expect(asked).toContain(END_RIDE_TEXT.askNotRecorded);
+    expect(asked).not.toContain('deleted from this device');
+
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    await settle();
+    // Ended on the one press: back on the picker, nothing saved or deleted.
+    expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    expect(picker()).toContain(RIDE_ENDED_TEXT['not-recorded']);
+    expect(seen.saved).toBe(0);
+    expect(seen.discarded).toBe(0);
+  });
+
+  it('never discards on the one-step End ride: a recording that turned up since is asked about afresh, with the warning (#2381, round 3)', async () => {
+    const seen = fresh();
+    const under: { recording?: { readonly savable: boolean } } = {};
+    await onTheStage({
+      ...recordingTrainer(seen, undefined),
+      rideRecording: () => under.recording,
+    });
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'End ride']);
+    // A room reaching `joined` starts one while the question stands.
+    under.recording = { savable: true };
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // Nothing ended and nothing was deleted: the ride is asked about again.
+    expect(seen).toEqual(fresh());
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
+    // And discarding it now takes the two steps and the owner's warning.
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(seen.discarded).toBe(0);
+  });
+
+  it('keeps both steps and the deletion warning for a ride with a recording under it, even one with nothing in it yet (#2381)', async () => {
+    await onTheStage(recordingTrainer(fresh(), { savable: false }));
+    await clickThrough(endRideButton());
     expect(answers()).toEqual(['Keep riding', 'Discard ride']);
-    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.askNothingRecorded}`);
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(document.querySelector('[data-oyl-end-ride]')?.textContent ?? '').toContain(
+      END_RIDE_TEXT.discardWarning,
+    );
   });
 
   it('offers no Save ride for a recording with nothing in it', async () => {
@@ -2231,7 +2275,7 @@ describe('ending a game ride asks first — #2349', () => {
     expect(picker()).not.toContain(RIDE_ENDED_TEXT.discarded);
   });
 
-  it('ends a ride with nothing recorded on Discard twice, touching no recording', async () => {
+  it('ends a ride with nothing recorded on End ride, asked once, touching no recording (#2381)', async () => {
     const seen = fresh();
     await onTheStage(recordingTrainer(seen, undefined));
     await endTheRide();

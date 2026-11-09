@@ -457,8 +457,8 @@ describe('which world a ride draws — #475', () => {
       await Promise.resolve();
     });
     await settle();
-    // #2349: End ride asks; a ride with nothing recorded ends on Discard twice.
-    for (const answer of ['Discard ride', 'Discard ride'] as const) {
+    // #2349: End ride asks; a ride with nothing recorded ends on End ride, once (#2381).
+    for (const answer of ['End ride'] as const) {
       await act(async () => {
         endRideAnswer(document, answer).click();
         await Promise.resolve();
@@ -496,8 +496,8 @@ describe('which world a ride draws — #475', () => {
       await Promise.resolve();
     });
     await settle();
-    // #2349: End ride asks; a ride with nothing recorded ends on Discard twice.
-    for (const answer of ['Discard ride', 'Discard ride'] as const) {
+    // #2349: End ride asks; a ride with nothing recorded ends on End ride, once (#2381).
+    for (const answer of ['End ride'] as const) {
       await act(async () => {
         endRideAnswer(document, answer).click();
         await Promise.resolve();

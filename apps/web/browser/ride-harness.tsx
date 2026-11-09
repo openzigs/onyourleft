@@ -99,7 +99,7 @@ import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
-import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
@@ -704,10 +704,34 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * recorded under the ride so all three answers are offered.
  * `ride-targets.browser.spec.ts` measures them as ride-time controls.
  * `?end=discard` presses *Discard ride* as well, for the discard step and the
- * owner's warning, the question's tallest state.
+ * owner's warning, the question's tallest state. `?end=unrecorded` (#2381)
+ * opens it over a ride with NOTHING recorded under it, for its one step:
+ * *Keep riding* and *End ride*.
  */
 const END_QUERY = new URLSearchParams(window.location.search).get('end');
-const END_ASKED = END_QUERY === 'asked' || END_QUERY === 'discard';
+const END_ASKED = END_QUERY === 'asked' || END_QUERY === 'discard' || END_QUERY === 'unrecorded';
+/** #2381: something to save under the ride, on the two pages of the question that need one. */
+const END_RECORDED = END_QUERY === 'asked' || END_QUERY === 'discard';
+
+/**
+ * `ride.html?record=refused` — #2381: the press of *Ride* could not start the
+ * recording under the ride (`GameTrainerPort.recordGameRide` answers `false`),
+ * so the HUD's notice cell says this ride is not being recorded, and why:
+ * `refused` is the ride before still saving. Round 3: `?record=` any other
+ * cause `GameTrainerPort.whyNotRecording` names (`not-saved`, `device-full`,
+ * `checkpoint-failed`) says that one instead. Every other page's press starts
+ * a recording, as a real ride controller's does.
+ */
+const RECORD_QUERY = new URLSearchParams(window.location.search).get('record');
+const RECORD_REFUSED = RECORD_QUERY !== null;
+const RECORD_CAUSE: GameNotRecordedReason | undefined =
+  RECORD_QUERY === 'refused'
+    ? 'still-saving'
+    : RECORD_QUERY === 'not-saved' ||
+        RECORD_QUERY === 'device-full' ||
+        RECORD_QUERY === 'checkpoint-failed'
+      ? RECORD_QUERY
+      : undefined;
 
 /**
  * `ride.html?room=race` — #785: the ride is in a private race that is waiting
@@ -973,9 +997,9 @@ const TRAINER: GameTrainerPort = {
   // #1360's re-review (R3). @see ROOM_NOTICE
   recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
-  // #1221: the tallest chooser has nothing recording under it, so the line
-  // under *Ride* and its *Record this ride* are laid out and measured with the
-  // rest. This double records nothing.
+  // #1221, #2381: the tallest chooser has nothing recording under it, so the
+  // line under *Ride* saying the press records is laid out and measured with
+  // the rest. This double records nothing.
   rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
   // #2072: the elapsed time at the same widest figure, so the clock row is
   // laid out and measured with its widest time in it.
@@ -985,9 +1009,11 @@ const TRAINER: GameTrainerPort = {
   rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS),
   // #2077: time in every one of the seven zones, so the bar is drawn whole.
   ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
-  recordGameRide: () => Promise.resolve(false),
-  // #2349: something to save under the ride, only on the page that asks.
-  rideRecording: () => (END_ASKED ? { savable: true } : undefined),
+  // #2381: the press records, unless the page asks for the refusal.
+  recordGameRide: () => Promise.resolve(!RECORD_REFUSED),
+  whyNotRecording: () => RECORD_CAUSE,
+  // #2349: something to save under the ride, only on the pages that ask.
+  rideRecording: () => (END_RECORDED ? { savable: true } : undefined),
   watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE

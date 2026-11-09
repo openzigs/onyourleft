@@ -294,8 +294,7 @@ describe('the HUD’s one live region — #397', () => {
     expect(region()?.textContent).not.toBe('');
 
     await press(button('End ride'));
-    await press(endRideAnswer(document, 'Discard ride'));
-    await press(endRideAnswer(document, 'Discard ride'));
+    await press(endRideAnswer(document, 'End ride'));
     await press(button('Ride '));
     expect(region()?.textContent).toBe('');
   });

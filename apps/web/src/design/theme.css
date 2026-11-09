@@ -6363,10 +6363,9 @@ select.oyl-input {
 }
 
 /*
- * #1221: the line under *Ride* saying the ride will not be saved, and the
- * control that records it. Words in `ink` on `canvas` and an ordinary
- * secondary button, so nothing here is a new colour pair. Under *Ride*, so it
- * moves nothing #940 measures above it.
+ * #1221, #2381: the line under *Ride* saying whether the press records the
+ * ride. Words in `ink` on `canvas`, so nothing here is a new colour pair.
+ * Under *Ride*, so it moves nothing #940 measures above it.
  */
 .oyl-chooser__recording {
   display: flex;
@@ -12448,6 +12447,37 @@ select.oyl-input {
 @media (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
   .oyl-game--riding
     .oyl-hud:has(> .oyl-hud__notices > :not(.oyl-visually-hidden) ~ :not(.oyl-visually-hidden))
+    .oyl-hud__fields--secondary
+    > .oyl-hud__field--total {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* ⚠️ **And on the 4:3 tablet, while THREE notices are drawn, the ride so far
+   gives way** — #2381, recorded as #419 asks. The owner's ruling on PR #2390's
+   round 3 shows the road notice beside *Not recording* on a tablet, and with
+   #647's *Keep the screen on* that is three: under the secondary tier's three
+   rows the cell ended at 509 px on the CI runner's fonts (460 on a Mac's),
+   19 px into the route panel at 490 (`ride-notices.browser.spec.ts`
+   §"#2381"). The three totals are the tier's middle row, and on the ride
+   that puts up *Not recording* they have nothing to show: nothing is being
+   recorded. The graph has given way already (the rule above). */
+@media (min-width: 46rem) and (height > 30rem) and (height < 50rem) {
+  .oyl-game--riding
+    .oyl-hud:has(
+      > .oyl-hud__notices
+        > :not(.oyl-visually-hidden)
+        ~ :not(.oyl-visually-hidden)
+        ~ :not(.oyl-visually-hidden)
+    )
     .oyl-hud__fields--secondary
     > .oyl-hud__field--total {
     position: absolute;

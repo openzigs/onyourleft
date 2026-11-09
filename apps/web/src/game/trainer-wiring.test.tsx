@@ -34,11 +34,18 @@
 import { act, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
+import {
+  GameView,
+  RIDE_NOT_RECORDED_TEXT,
+  STANDING_NOTICE_SECONDS,
+  type GamePort,
+  type RidableRoute,
+} from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
+  type GameNotRecordedReason,
   type GameTrainer,
   type GameTrainerPort,
   type GradientTrainer,
@@ -103,12 +110,7 @@ import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { LAP_NOTICE_SECONDS } from './hud/lap-text';
-import {
-  CANNOT_RECORD_TEXT,
-  NOT_RECORDING_TEXT,
-  RECORDING_REFUSED_TEXT,
-  RECORDING_STARTED_TEXT,
-} from './StageChooser';
+import { CANNOT_RECORD_TEXT, NOT_RECORDING_TEXT, RECORDS_ON_RIDE_TEXT } from './StageChooser';
 import type { CourseLineEvent } from '../recording/laps';
 import { formatDuration } from '../format';
 import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
@@ -629,7 +631,8 @@ describe('the road the game draws reaches the trainer', () => {
     const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
     await clickThrough(buttonStarting('End ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    // #2381: nothing is recorded under this ride, so the question is one step.
+    expect(document.querySelector('[data-oyl-end-ride]')).not.toBeNull();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -713,13 +716,14 @@ describe('the road the game draws reaches the trainer', () => {
     }
 
     // A second attempt with the question open is Keep riding, as Android's
-    // back is (#2356) — even one Discard in — and sends nothing; only an
-    // answer that ends the ride releases the gradient.
+    // back is (#2356), and sends nothing; only an answer that ends the ride
+    // releases the gradient. (Nothing is recorded under this ride, so the
+    // question is #2381's one step; `GameView.test.tsx` §"#2349" holds the
+    // same of the discard step.)
     for (const by of ['typed', 'back'] as const) {
       const writes = commands.written.length;
       await away(by);
-      await clickThrough(endRideAnswer(document, 'Discard ride'));
-      expect(asked()).toBe('discard');
+      expect(asked()).toBe('ask');
       await away(by);
       expect(asked()).toBeNull();
       expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
@@ -728,8 +732,7 @@ describe('the road the game draws reaches the trainer', () => {
       expect(commands.written.length).toBe(writes);
     }
     await away('typed');
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
-    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -1005,7 +1008,19 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
    * client that does not hold control. What is read back is what the MACHINE
    * holds, not what a double was handed.
    */
-  async function onTheBench(refuseControl: boolean) {
+  /**
+   * #2381, round 3: faults put into the rig's store, so a REAL controller can
+   * be driven into each state `canStartNewRide` refuses on. Each is read at
+   * the write, so a test turns one on after the recording has started.
+   */
+  interface BenchFaults {
+    /** A checkpoint's write, its chunk or its header: an error to throw, or nothing. */
+    chunk?: () => 'hang' | Error | undefined;
+    /** The finished ride's save: `hang` (never answers), an error, or nothing. */
+    save?: () => 'hang' | Error | undefined;
+  }
+
+  async function onTheBench(refuseControl: boolean, faults: BenchFaults = {}) {
     const harness = createStoreHarness();
     await seedAthletes(harness);
     const savedIds: string[] = [];
@@ -1017,10 +1032,18 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const controller = createRideController({
       transport,
       store: {
-        putRecordingSession: async (record) =>
-          harness.write(async (store) => store.putRecordingSession(record)),
-        appendRecordingChunk: async (chunk) =>
-          harness.write(async (store) => store.appendRecordingChunk(chunk)),
+        putRecordingSession: async (record) => {
+          const fault = faults.chunk?.();
+          if (fault === 'hang') return new Promise<never>(() => undefined);
+          if (fault !== undefined) throw fault;
+          return harness.write(async (store) => store.putRecordingSession(record));
+        },
+        appendRecordingChunk: async (chunk) => {
+          const fault = faults.chunk?.();
+          if (fault === 'hang') return new Promise<never>(() => undefined);
+          if (fault !== undefined) throw fault;
+          return harness.write(async (store) => store.appendRecordingChunk(chunk));
+        },
         readRecordingSessions: async (owner) =>
           harness.write(async (store) => store.readRecordingSessions(owner)),
         recoverRecording: async (owner, id) =>
@@ -1039,12 +1062,16 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
-          putFinishedRide: (ride) =>
-            harness.write(async (store) => {
+          putFinishedRide: (ride) => {
+            const fault = faults.save?.();
+            if (fault === 'hang') return new Promise<never>(() => undefined);
+            if (fault !== undefined) return Promise.reject(fault);
+            return harness.write(async (store) => {
               const id = await store.putFinishedRide(ride);
               savedIds.push(id);
               return id;
-            }),
+            });
+          },
         },
       },
     });
@@ -1397,66 +1424,122 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
   });
 
   /**
-   * #1221: a game ride with no recording running was ridden and lost, with
-   * only the HUD's dashed *Moving* to say so. The chooser now says it in
-   * words under *Ride*, before the press, and *Record this ride* starts the
-   * REAL controller's recording — which, stopped and saved, is an activity in
-   * the library, read back through the store's own list on the device.
+   * #2381, the owner's ruling of 2026-11-08: a game ride is recorded by
+   * default. #1221 found a game ride with no recording running ridden and
+   * lost, with only the HUD's dashed *Moving* to say so, and offered *Record
+   * this ride*; now the press of *Ride* starts the REAL controller's recording
+   * (`recordGameRide` → `recordForRoom`), and *End ride* asks whether to save
+   * or discard it (#2349). What is saved is read back through the library's
+   * own list on the device's store — no instance anywhere in this rig (ADR
+   * 0036 D-3); what is discarded leaves neither an activity nor a session.
    */
-  describe('a game ride with nothing recording says so, and can be recorded — #1221', () => {
+  describe('a game ride records by default — #2381', () => {
     /** The line under Ride, as a rider reads it. */
     const recordingLine = (): string =>
       mounted?.container.querySelector('.oyl-chooser__recording')?.textContent ?? '';
-
-    it('says before the press that the ride will not be saved, and records it once asked — saved to the library on the device', async () => {
-      const rig = await onTheBench(false);
-      await openTheGame(gameTrainerPortOver(rig.controller));
-      expect(rig.controller.getSnapshot().phase).toBe('idle');
-      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
-      expect(recordingLine()).not.toContain(CANNOT_RECORD_TEXT);
-
-      await clickThrough(buttonStarting('Record this ride'));
-      await flush();
-      expect(rig.controller.getSnapshot().phase).toBe('recording');
-      // The offer is gone, the line says where the ride is saved, and focus is
-      // on Ride rather than lost with the pressed control (SC 2.4.3).
-      expect(buttonStarting('Record this ride')).toBeUndefined();
-      expect(mounted?.container.textContent).not.toContain(NOT_RECORDING_TEXT);
-      expect(mounted?.container.textContent).toContain(RECORDING_STARTED_TEXT);
-      expect(document.activeElement).toBe(buttonStarting('Ride '));
-
-      await clickThrough(buttonStarting('Ride '));
-      await flush();
-      for (let index = 0; index < 10; index += 1) {
+    /** One of the HUD's figures, as a rider reads it. */
+    const field = (label: string): string => {
+      const rows = queryAll(mounted?.container ?? document, '.oyl-hud__field');
+      const row = rows.find((each) => each.querySelector('dt')?.textContent === label);
+      return row?.querySelector('dd')?.textContent ?? '';
+    };
+    /** Seconds of riding: the bench moves, the controller ticks, the game draws. */
+    const rideFor = async (
+      rig: Awaited<ReturnType<typeof onTheBench>>,
+      count: number,
+    ): Promise<void> => {
+      for (let index = 0; index < count; index += 1) {
         await pump(2);
         await act(async () => {
           rig.bench.advance(seconds(1));
           await rig.controller.tick(rig.bench.now);
         });
       }
+      await pump(2);
+    };
+    /** The HUD's notice cell, as a rider reads it. */
+    const notices = (): string =>
+      mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '';
+    /** The HUD's one live region. */
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    const library = async (rig: Awaited<ReturnType<typeof onTheBench>>) =>
+      rig.harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    const sessions = async (rig: Awaited<ReturnType<typeof onTheBench>>) =>
+      (await rig.harness.write(async (store) => store.readRecordingSessions(ATHLETE_A))).sessions;
+
+    it('says before the press that Ride records, records on the press, shows the ride so far, and saves it to the library on the device', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      // The owner's words of 2026-11-08, label and sentence.
+      expect(recordingLine()).toBe(
+        'Recording on · Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.',
+      );
+      expect(recordingLine()).toContain(RECORDS_ON_RIDE_TEXT);
+      expect(recordingLine()).not.toContain(NOT_RECORDING_TEXT);
+
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      await rideFor(rig, 10);
+      // The owner's 2026-11-08 ride showed a dash in every one of these.
+      for (const label of ['Moving', 'Elapsed', 'Distance', 'Climbed', 'Avg power']) {
+        expect(field(label), label).not.toBe('');
+        expect(field(label), label).not.toContain('—');
+      }
+
       await endAndSaveOnTheHud(rig.controller);
       await flush();
       expect(rig.controller.getSnapshot().saveState).toBe('saved');
-      // ⚠️ Read back through the library's own list, on a fresh read of the
-      // device's store — no instance anywhere in this rig (ADR 0036 D-3).
-      const library = await rig.harness.read(async (store) =>
-        store.listActivitySummaries(ATHLETE_A),
-      );
-      expect(library.map((summary) => summary.id)).toEqual([activityId('the-ride')]);
+      expect((await library(rig)).map((summary) => summary.id)).toEqual([activityId('the-ride')]);
       await rig.done();
     });
 
-    it('says nothing under Ride while a recording started on the Ride screen is running', async () => {
+    it('leaves no activity and no recording session when the rider discards it at the end', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await rideFor(rig, 5);
+      // The control: the ride was recorded, so there was something to discard.
+      expect(await sessions(rig)).toHaveLength(1);
+
+      await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await clickThrough(endRideAnswer(document, 'Discard ride'));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).not.toBe('recording');
+      expect(await sessions(rig)).toEqual([]);
+      expect(await library(rig)).toEqual([]);
+      await rig.done();
+    });
+
+    it('carries on a recording started on the Ride screen, and says nothing under Ride', async () => {
       const rig = await onTheBench(false);
       await rig.controller.start();
       await openTheGame(gameTrainerPortOver(rig.controller));
       expect(mounted?.container.querySelector('.oyl-chooser__recording')).toBeNull();
-      expect(buttonStarting('Record this ride')).toBeUndefined();
-      expect(mounted?.container.textContent).not.toContain(RECORDING_STARTED_TEXT);
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      // The same one recording, not a second.
+      expect(await sessions(rig)).toHaveLength(1);
       await rig.done();
     });
 
-    it('says the ride will not be saved again once the recording under it has stopped', async () => {
+    it('leaves a paused recording paused: only the rider’s own Resume resumes one (#516)', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await rig.controller.pause();
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('paused');
+      await rig.done();
+    });
+
+    it('says Ride records again once the recording under it has stopped', async () => {
       const rig = await onTheBench(false);
       await rig.controller.start();
       await openTheGame(gameTrainerPortOver(rig.controller));
@@ -1466,7 +1549,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         await rig.controller.confirmStop();
       });
       await flush();
-      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      expect(recordingLine()).toContain(RECORDS_ON_RIDE_TEXT);
       await rig.done();
     });
 
@@ -1474,20 +1557,314 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       await openTheGame(gameTrainerPortOver(undefined));
       expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
       expect(recordingLine()).toContain(CANNOT_RECORD_TEXT);
-      expect(buttonStarting('Record this ride')).toBeUndefined();
+      expect(recordingLine()).not.toContain(RECORDS_ON_RIDE_TEXT);
     });
 
-    it('says so when the recording could not be started, and keeps the offer', async () => {
+    it('asks the trainer for nothing when the rider left while the recording was starting (#509)', async () => {
+      const rig = await onTheBench(false);
+      const port = gameTrainerPortOver(rig.controller);
+      let started: (running: boolean) => void = () => undefined;
+      await openTheGame({
+        ...port,
+        recordGameRide: () =>
+          new Promise<boolean>((resolve) => {
+            started = resolve;
+          }),
+      });
+      await clickThrough(buttonStarting('Ride '));
+      mounted?.unmount();
+      mounted = undefined;
+      await act(async () => {
+        started(true);
+        await Promise.resolve();
+      });
+      await flush();
+      // The press asked the machine for nothing: no Request Control, no grade.
+      expect(rig.written).toEqual([]);
+      await rig.done();
+    });
+
+    it('still starts the ride, unrecorded, when the recording cannot be started, and says so with no reason claimed', async () => {
       const rig = await onTheBench(false);
       await openTheGame({
         ...gameTrainerPortOver(rig.controller),
-        recordGameRide: () => Promise.resolve(false),
+        recordGameRide: () => Promise.reject(new Error('the store is full')),
       });
-      await clickThrough(buttonStarting('Record this ride'));
+      await clickThrough(buttonStarting('Ride '));
       await flush();
-      expect(recordingLine()).toContain(RECORDING_REFUSED_TEXT);
-      expect(buttonStarting('Record this ride')).toBeDefined();
+      expect(buttonStarting('End ride')).toBeDefined();
       expect(rig.controller.getSnapshot().phase).toBe('idle');
+      await pump(2);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.failed);
+      // The thrown error is not the rider's to read.
+      expect(notices()).not.toContain('the store is full');
+      expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT.failed}`);
+      await rig.done();
+    });
+
+    /**
+     * #2381, round 3: put the REAL controller's last ride into a stopped state
+     * that `canStartNewRide` refuses — the fault turned on after a few
+     * recorded seconds, then *Stop* — so `recordForRoom` refuses for that
+     * cause and no other.
+     */
+    /** The faults that put the ride before into each refused state. */
+    interface StopFaults {
+      readonly chunk?: 'quota' | 'error' | 'hang';
+      readonly save?: 'hang' | 'reject';
+    }
+    const FAULTS_FOR: Readonly<Record<GameNotRecordedReason, StopFaults>> = {
+      'still-saving': { save: 'hang' },
+      'not-saved': { save: 'reject' },
+      'device-full': { chunk: 'quota' },
+      'checkpoint-failed': { chunk: 'error' },
+    };
+
+    async function stoppedWith(
+      cause: GameNotRecordedReason | StopFaults,
+    ): Promise<Awaited<ReturnType<typeof onTheBench>>> {
+      const wanted = typeof cause === 'string' ? FAULTS_FOR[cause] : cause;
+      let on = false;
+      const quota = Object.assign(new Error('no room'), { name: 'QuotaExceededError' });
+      const rig = await onTheBench(false, {
+        chunk: () =>
+          !on
+            ? undefined
+            : wanted.chunk === 'quota'
+              ? quota
+              : wanted.chunk === 'error'
+                ? new Error('the write was aborted')
+                : wanted.chunk,
+        save: () =>
+          !on
+            ? undefined
+            : wanted.save === 'reject'
+              ? new Error('the library refused it')
+              : wanted.save,
+      });
+      await rig.controller.start();
+      for (let second = 0; second < 3; second += 1) {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      }
+      on = true;
+      rig.controller.armStop();
+      // Not awaited: a save that never answers never settles it.
+      void rig.controller.confirmStop().catch(() => undefined);
+      for (let index = 0; index < 20; index += 1) await settle();
+      expect(rig.controller.getSnapshot().phase).toBe('stopped');
+      return rig;
+    }
+
+    /**
+     * #2381, the owner's ruling of 2026-11-08 (item 3): when the automatic
+     * start fails, the ride's HUD says this ride is not being recorded, and
+     * why. Round 3: through the REAL controller, refusing because the ride
+     * before is still saving — the approved sentence.
+     */
+    it('says on the HUD, and once through its one region, that a refused ride is not being recorded and why — then gives the cell back', async () => {
+      const rig = await stoppedWith('still-saving');
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      expect(rig.controller.getSnapshot().phase).toBe('stopped');
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+      // Not a live region of its own: the HUD's one region says it (#445).
+      const notice = queryAll(mounted?.container ?? document, '.oyl-hud__notices *').find((each) =>
+        (each.textContent ?? '').includes(RIDE_NOT_RECORDED_TEXT['still-saving']),
+      );
+      expect(notice?.closest('[aria-live], [role="status"], [role="alert"]')).toBeNull();
+      // Said ONCE, with announcements off (the default): offered until said.
+      expect(region()).toBe(
+        `${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT['still-saving']}`,
+      );
+      expect(offered).toContain('not-recording');
+      offered.length = 0;
+      await pump(4);
+      expect(offered).not.toContain('not-recording');
+      // The ride's controls are still there to press.
+      expect(buttonStarting('Pause')).toBeDefined();
+      expect(buttonStarting('End ride')).toBeDefined();
+      // Gone after the road notice's time open, on the ride's clock.
+      await pump(2 * (STANDING_NOTICE_SECONDS + 1));
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+      await rig.done();
+    });
+
+    it('says nothing of the last ride’s refusal on the next ride, whose recording started', async () => {
+      const rig = await onTheBench(false);
+      const port = gameTrainerPortOver(rig.controller);
+      let refuse = true;
+      await openTheGame({
+        ...port,
+        recordGameRide: () =>
+          refuse ? Promise.resolve(false) : (port.recordGameRide?.() ?? Promise.resolve(false)),
+      });
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      // A refusal with no cause the controller states claims no reason.
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.failed);
+      await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
+      await flush();
+      refuse = false;
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(4);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(offered).not.toContain('not-recording');
+      await rig.done();
+    });
+
+    /**
+     * #2381's review (round 3, medium): `recordForRoom` refuses whenever
+     * `canStartNewRide` does, and "not finished saving" is true of only one
+     * cause. Each other cause is said as itself, in the Ride screen's words,
+     * through the real controller over the real store with the fault in it.
+     */
+    for (const cause of ['not-saved', 'device-full', 'checkpoint-failed'] as const) {
+      it(`says why when the ride before is ${cause}, not that it is still saving`, async () => {
+        const rig = await stoppedWith(cause);
+        await openTheGame(gameTrainerPortOver(rig.controller));
+        await clickThrough(buttonStarting('Ride '));
+        await flush();
+        await pump(2);
+        expect(rig.controller.getSnapshot().phase).toBe('stopped');
+        expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT[cause]);
+        expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+        expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT[cause]}`);
+        await rig.done();
+      });
+    }
+
+    /**
+     * The review of round 3, finding 3: the storage is read FIRST, as the Ride
+     * screen reads it (`StoppedNotice`) — a ride whose last seconds are only
+     * in this tab must not be told "wait". Each case has a storage fault AND a
+     * save that is still running or has failed, so the order decides.
+     */
+    for (const [faults, cause] of [
+      [{ chunk: 'error', save: 'hang' }, 'checkpoint-failed'],
+      [{ chunk: 'quota', save: 'reject' }, 'device-full'],
+    ] as const) {
+      it(`says ${cause} before the save's state when both are wrong (${faults.chunk} + ${faults.save})`, async () => {
+        const rig = await stoppedWith(faults);
+        const snapshot = rig.controller.getSnapshot();
+        // The control: the save's state is wrong too, so the order decides.
+        expect(
+          snapshot.stopping || snapshot.saveState === 'saving' || snapshot.saveState === 'failed',
+        ).toBe(true);
+        await openTheGame(gameTrainerPortOver(rig.controller));
+        await clickThrough(buttonStarting('Ride '));
+        await flush();
+        await pump(2);
+        expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT[cause]);
+        await rig.done();
+      });
+    }
+
+    /**
+     * The review of round 3, finding 4: the `stopping`-only window (#565) —
+     * *Stop* confirmed, the last checkpoint still being written, and the save
+     * not yet begun, so `saveState` still holds the last value it had. It is
+     * the still-saving sentence, not the no-reason one.
+     */
+    it('says the ride before is not finished saving while it is still stopping, before its save begins', async () => {
+      const rig = await stoppedWith({ chunk: 'hang' });
+      const snapshot = rig.controller.getSnapshot();
+      expect(snapshot.stopping).toBe(true);
+      expect(snapshot.saveState).not.toBe('saving');
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+      await rig.done();
+    });
+
+    it('says nothing of it on a ride whose recording started — the control', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      offered.length = 0;
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(4);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.label);
+      expect(offered).not.toContain('not-recording');
+      await rig.done();
+    });
+
+    /**
+     * #2381's review (low): the recording starts BEFORE the course line's
+     * `started`, so a course's first lap belongs to the recording. The ride
+     * controller opens no lap with nothing recording (`noteCourseLine`), so a
+     * recording started after the line would save the first lap as none and
+     * begin counting at the second crossing.
+     */
+    it('starts the recording before the course line, so the first lap of a loop is the recording’s', async () => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 30; index += 1) {
+        const out = index <= 15 ? index : 30 - index;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (out * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      const route: RidableRoute = {
+        id: 'route-circuit',
+        name: 'Test circuit',
+        profile: routeProfile(points, { loop: true }),
+        attempts: 0,
+      };
+      const rig = await onTheBench(false);
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(route)}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+      // Nothing is recording until the press.
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      const strip = (): string =>
+        mounted?.container.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
+      const lapLabel = (): string | undefined => /of (lap \d+)/.exec(strip())?.[1];
+      await rideFor(rig, 2);
+      // A lap is open from the line: the lap's time is the recording's.
+      const early = rig.controller.getSnapshot();
+      expect(early.courseLapSeconds).toBeGreaterThan(0);
+      expect(early.courseLapSeconds).toBe(early.movingSeconds);
+      for (let second = 0; second < 400 && lapLabel() !== 'lap 2'; second += 1) {
+        await rideFor(rig, 1);
+      }
+      expect(lapLabel()).toBe('lap 2');
+      await endAndSaveOnTheHud(rig.controller);
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      const laps = await rig.harness.read(async (store) =>
+        store.listLaps(ATHLETE_A, activityId('the-ride')),
+      );
+      // The first lap is whole — the course's first, from its line — and the
+      // part lap after it is the second.
+      expect(laps.map((lap) => [lap.ordinal, lap.partial])).toEqual([
+        [0, undefined],
+        [1, true],
+      ]);
+      expect(laps[0]?.distance).toBe(route.profile.totalDistance);
       await rig.done();
     });
   });
@@ -2359,8 +2736,7 @@ describe('other riders never reach the trainer — #782 review (N8)', () => {
  */
 async function endTheRide(): Promise<void> {
   await clickThrough(buttonStarting('End ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
-  await clickThrough(endRideAnswer(document, 'Discard ride'));
+  await clickThrough(endRideAnswer(document, 'End ride'));
 }
 
 /**
