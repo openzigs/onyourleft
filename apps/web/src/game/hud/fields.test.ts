@@ -19,6 +19,7 @@ import {
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  RIDE_CLOCK_LABEL,
   RIDE_TOTAL_KEYS,
   WATTS_PER_KILOGRAM_KEY,
   ZONE_KEY,
@@ -1280,14 +1281,44 @@ describe('the ride’s elapsed time and the time of day — #2072', () => {
     expect(field(input, ELAPSED_TIME_KEY)?.value).toBe('0:02:05');
   });
 
-  it('shows a dash with nothing recorded, and the word size past ten hours', () => {
-    for (const elapsedSeconds of [undefined, Number.NaN]) {
-      expect(field({ ...baseInput(), elapsedSeconds }, ELAPSED_TIME_KEY)?.value).toBe(NO_READING);
-    }
+  it('shows a dash for a figure that is not a number, and the word size past ten hours', () => {
+    expect(field({ ...baseInput(), elapsedSeconds: Number.NaN }, ELAPSED_TIME_KEY)?.value).toBe(
+      NO_READING,
+    );
     expect(field({ ...baseInput(), elapsedSeconds: 35_999 }, ELAPSED_TIME_KEY)?.word).toBe(
       undefined,
     );
     expect(field({ ...baseInput(), elapsedSeconds: 36_000 }, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  // #2382: where nothing records, the ride's own clock — never a dash, and
+  // never under the recorder's label.
+  it('shows the ride’s own clock, labelled Ride, where nothing is recorded — #2382', () => {
+    const base = baseInput();
+    const ride: HudInput = { ...base, state: { ...base.state, elapsed: seconds(1) } };
+    expect(field(ride, ELAPSED_TIME_KEY)).toEqual({
+      key: ELAPSED_TIME_KEY,
+      label: RIDE_CLOCK_LABEL,
+      value: '0:00:01',
+      unit: '',
+      stale: false,
+    });
+    expect(RIDE_CLOCK_LABEL).not.toBe('Elapsed');
+    // The moving time is never given the fallback: the recorder's, or a dash.
+    expect(field(ride, MOVING_TIME_KEY)?.value).toBe(NO_READING);
+    // Past ten hours, the word size, as the recorder's figure is.
+    const long: HudInput = { ...base, state: { ...base.state, elapsed: seconds(36_000) } };
+    expect(field(long, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  it('shows the recorder’s figure, labelled Elapsed, the moment a recording runs — #2382', () => {
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      elapsedSeconds: 0,
+    };
+    expect(field(input, ELAPSED_TIME_KEY)).toMatchObject({ label: 'Elapsed', value: '0:00:00' });
   });
 
   it('shows the time of day it is handed as HH:MM, labelled Clock, after the elapsed time', () => {

@@ -922,6 +922,77 @@ describe('the ride’s moving time on the HUD — #1111', () => {
   });
 });
 
+describe('the ride clock from the first second — #2382', () => {
+  /** Whole seconds of an `h:mm:ss` the HUD shows. */
+  function inSeconds(shown: string): number {
+    const [hours = 0, minutes = 0, secs = 0] = shown.split(':').map(Number);
+    return hours * 3600 + minutes * 60 + secs;
+  }
+
+  /** Every label the HUD shows, so a field's absence can be asserted. */
+  function hudLabels(): (string | null)[] {
+    return queryAll(mounted?.container ?? document, '.oyl-hud__field dt').map(
+      (each) => each.textContent,
+    );
+  }
+
+  it('runs the ride’s own clock, labelled Ride, on a ride that records nothing', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    // The ride's first frames: a time, not a dash, before a second has passed.
+    await pump(2);
+    expect(hudField('Ride')).toMatch(/^0:00:0\d$/);
+    expect(hudLabels()).not.toContain('Elapsed');
+    // And it runs: a second and a half of frames later it reads later.
+    const first = inSeconds(hudField('Ride'));
+    await pump(90);
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThan(first);
+    // The moving time is still the recorder's, and there is none.
+    expect(hudField('Moving')).toBe(NO_READING);
+  });
+
+  it('shows the recorder’s elapsed time, labelled Elapsed, whenever a recording runs', async () => {
+    let recorded: number | undefined = 125;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => (recorded === undefined ? undefined : 65),
+      rideElapsedSeconds: () => recorded,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Elapsed')).toBe('0:02:05');
+    expect(hudLabels()).not.toContain('Ride');
+
+    // Ten seconds of frames: the simulation's clock runs, the recorder's
+    // figure (paused, say) does not, and the HUD shows the recorder's.
+    await pump(600);
+    expect(hudField('Elapsed')).toBe('0:02:05');
+
+    // The recording gone: the ride's own clock, under its own label, which
+    // has been running since the first frame — never the recorder's figure.
+    recorded = undefined;
+    await pump(2);
+    expect(hudLabels()).not.toContain('Elapsed');
+    expect(inSeconds(hudField('Ride'))).toBeGreaterThanOrEqual(10);
+  });
+
+  function rideButton(): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
+});
+
 describe('the ride’s moving time while the GAME is paused — #1111’s review', () => {
   /**
    * The game's *Pause* stops the render loop and does NOT pause the recording,
@@ -2557,7 +2628,8 @@ describe('the HUD the rider chose — #2079', () => {
     // …and the secondary readings but the ride's times…
     expect(queryAll(hud, '.oyl-hud__fields--secondary dt').map((dt) => dt.textContent)).toEqual([
       'Moving',
-      'Elapsed',
+      // #2382: this ride records nothing, so the ride's own clock.
+      'Ride',
       'Clock',
     ]);
     // …while power, the controls and the notices' cell are the HUD's still.
