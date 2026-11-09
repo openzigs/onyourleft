@@ -8236,11 +8236,18 @@ select.oyl-input {
    pixels, whatever the box's scale. The rider's mark is `.oyl-hud__plan-here`
    above.
 
-   ⚠️ Its own layer (`will-change`), so that the readings that change on every
-   frame around it never make the engine raster the map again: it is
-   repainted when its own DOM changes, once per 5 m ridden
-   (`street-map.ts` §"The cost"). `street-map.browser.spec.ts` publishes what
-   a paced ride costs with it. */
+   #2380: the box clips a SHEET of map that is wider and taller than it, and
+   the sheet is its own compositor layer (`will-change`), moved by a
+   `transform` once per 5 m ridden. Moving a layer re-strokes nothing, and the
+   sheet's shapes change, and are rasterised again, once per 250 m
+   (`street-map.ts` §"The cost"); before this the map was one SVG whose view
+   box moved, and the tablet re-stroked every street each 5 m. The sheet's
+   top left corner is put in the middle of the box. Its height is set
+   (`streetMapSheetStyle`) in `cqmin` of the box, whose shorter side is the
+   kilometre; that is why the box is a size container. Its width follows from
+   its `viewBox`. The rider's mark is drawn over it, the box's size and fitted
+   with `meet` to the same shorter side, and never moves.
+   `street-map.browser.spec.ts` counts the writes and the paints. */
 .oyl-hud__street-map-line {
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -8248,7 +8255,26 @@ select.oyl-input {
 }
 
 .oyl-hud__street-map {
+  position: relative;
+  overflow: hidden;
+  container-type: size;
+}
+
+.oyl-hud__street-map-sheet {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: auto;
   will-change: transform;
+}
+
+.oyl-hud__street-map-here {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .oyl-hud__street-map-land {

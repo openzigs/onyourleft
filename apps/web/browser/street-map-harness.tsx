@@ -12,11 +12,12 @@
  *
  * ## The corridor is a dense synthetic town, on purpose
  *
- * A street every 100 m both ways across 2 km either side of a 40 km route, a
- * vertex every 20 m, footways between them and a lake every 4 km: more shapes
- * within a kilometre of the rider than a real corridor holds anywhere but a
- * city centre, so what this page costs is an upper end rather than a typical
- * ride. It is arithmetic, and no map data from anywhere.
+ * `street-map-testing.ts` §`denseTown`, the one `street-map.test.ts` bounds
+ * the drawing over: a street every 100 m both ways across 2 km either side of
+ * a 40 km route, a vertex every 20 m, footways between them and a lake every
+ * 4 km: more shapes within a kilometre of the rider than a real corridor holds
+ * anywhere but a city centre, so what this page costs is an upper end rather
+ * than a typical ride. It is arithmetic, and no map data from anywhere.
  *
  * ## What it publishes
  *
@@ -38,24 +39,11 @@ import { StrictMode, useState, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
-import {
-  altitudeMetres,
-  degreesLatitude,
-  degreesLongitude,
-  geographicPosition,
-  gradeAt,
-  metres,
-  metresPerSecond,
-  routeProfile,
-  seconds,
-  watts,
-  type RoutePoint,
-  type RouteProfile,
-} from '@onyourleft/domain';
+import { gradeAt, metres, metresPerSecond, seconds, watts } from '@onyourleft/domain';
 
 import { HudPanel } from '../src/game/hud/HudPanel';
+import { denseTown, denseTownRoute } from '../src/game/hud/street-map-testing';
 import type { GameState } from '../src/game/simulation';
-import type { WorldCorridor } from '../src/game/world-data/corridor';
 
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
@@ -63,10 +51,27 @@ import '../src/design/tailwind.css';
 /** What a ride of the page reports. */
 export interface StreetMapRide {
   readonly frames: number;
-  /** DOM mutation records under the plan view's SVG, attribute and child alike. */
+  /** DOM mutation records under the plan view's box, attribute and child alike. */
   readonly mutations: number;
-  /** How many different `viewBox` values the SVG had. */
+  /**
+   * The records among those that change what is DRAWN rather than where it
+   * is (#2380): a shape's `d`, the sheet's `viewBox`, an element added or
+   * taken away. The rest are the sheet's `style`, its place, and the box's
+   * own `aria-label`, which says how far along the route the rider is.
+   */
+  readonly drawn: number;
+  /**
+   * Those of {@link drawn} made on a frame whose sheet kept its `viewBox`:
+   * what changed in the drawing while the rider moved within the margin.
+   */
+  readonly drawnWithin: number;
+  /**
+   * How many places the view had: the street map's sheet's `viewBox` and
+   * `transform` together, or the outline's `viewBox`.
+   */
   readonly views: number;
+  /** How many different `viewBox` values the street map's sheet had: its regions. */
+  readonly regions: number;
   /** Milliseconds of script per frame spent rendering the HUD, the median and the worst. */
   readonly medianRenderMs: number;
   readonly worstRenderMs: number;
@@ -91,80 +96,8 @@ declare global {
 
 const errors: string[] = [];
 
-/** 40 km due north from 40° N, 75° W. */
-function route(): RouteProfile {
-  const points: RoutePoint[] = [];
-  for (let index = 0; index <= 400; index += 1) {
-    points.push({
-      position: geographicPosition(
-        degreesLatitude(40 + (index * 100) / 111_320),
-        degreesLongitude(-75),
-      ),
-      elevation: altitudeMetres(60 + 20 * Math.sin(index / 30)),
-    });
-  }
-  return routeProfile(points);
-}
-
-/** A line from (x0, z0) to (x1, z1) with a vertex every 20 m. */
-function line(x0: number, z0: number, x1: number, z1: number): Float32Array {
-  const steps = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / 20));
-  const values: number[] = [];
-  for (let step = 0; step <= steps; step += 1) {
-    values.push(x0 + ((x1 - x0) * step) / steps, z0 + ((z1 - z0) * step) / steps);
-  }
-  return Float32Array.from(values);
-}
-
-/** The dense synthetic town: see the module note. Clipped to 1 km tiles, as the archive's are. */
-function town(): WorldCorridor {
-  const streets: WorldCorridor['streets'][number][] = [];
-  const paths: WorldCorridor['paths'][number][] = [];
-  const landUse: WorldCorridor['landUse'][number][] = [];
-  const coveredBoxes: WorldCorridor['coveredBoxes'][number][] = [];
-  for (let tileZ = 0; tileZ < 40_000; tileZ += 1000) {
-    for (const tileX of [-2000, -1000, 0, 1000]) {
-      coveredBoxes.push({ minX: tileX, minZ: tileZ, maxX: tileX + 1000, maxZ: tileZ + 1000 });
-      for (let offset = 0; offset < 1000; offset += 100) {
-        const street = { kind: 'minor_road', kindDetail: '', grade: 'ground' as const };
-        streets.push({
-          ...street,
-          line: line(tileX + offset, tileZ, tileX + offset, tileZ + 1000),
-        });
-        streets.push({
-          ...street,
-          line: line(tileX, tileZ + offset, tileX + 1000, tileZ + offset),
-        });
-        paths.push({
-          kind: 'path',
-          kindDetail: 'footway',
-          line: line(tileX + offset + 50, tileZ, tileX + offset + 50, tileZ + 1000),
-        });
-      }
-    }
-    if (tileZ % 4000 === 0) {
-      const ring: number[] = [];
-      for (let corner = 0; corner < 48; corner += 1) {
-        const angle = (corner / 48) * 2 * Math.PI;
-        ring.push(600 + 250 * Math.cos(angle), tileZ + 500 + 180 * Math.sin(angle));
-      }
-      landUse.push({ layer: 'water', kind: 'lake', rings: [Float32Array.from(ring)] });
-    }
-  }
-  return {
-    routeId: 'street-map-harness',
-    origin: { latitude: 40, longitude: -75, elevation: 60 },
-    covered: () => true,
-    coveredBoxes,
-    landUse,
-    buildings: [],
-    paths,
-    streets,
-  };
-}
-
-const PROFILE = route();
-const CORRIDOR = town();
+const PROFILE = denseTownRoute();
+const CORRIDOR = denseTown();
 const STREET = new URL(window.location.href).searchParams.get('map') !== 'outline';
 /** Five kilometres in, so every field has something to say. */
 const START = 5_000;
@@ -226,7 +159,11 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
   const observer = new MutationObserver(() => undefined);
   observer.observe(svg, { attributes: true, childList: true, subtree: true, characterData: true });
   let mutations = 0;
+  let drawn = 0;
+  let drawnWithin = 0;
+  let region = svg.querySelector('.oyl-hud__street-map-sheet')?.getAttribute('viewBox') ?? '';
   const views = new Set<string>();
+  const regions = new Set<string>();
   const times: number[] = [];
   const intervals: number[] = [];
   let distance = START;
@@ -237,15 +174,37 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
       move(distance);
     });
     times.push(performance.now() - before);
-    mutations += observer.takeRecords().length;
-    views.add(svg.getAttribute('viewBox') ?? '');
+    const records = observer.takeRecords();
+    mutations += records.length;
+    // Not the box's own attributes (its `aria-label` says how far along the
+    // route the rider is), and not the sheet's `style`, which is its place.
+    const drawing = records.filter(
+      (record) => record.target !== svg && record.attributeName !== 'style',
+    ).length;
+    drawn += drawing;
+    const sheet = svg.querySelector<SVGSVGElement>('.oyl-hud__street-map-sheet');
+    // The sheet's place is its region and where in it the rider is.
+    views.add(
+      sheet === null
+        ? (svg.getAttribute('viewBox') ?? '')
+        : `${sheet.getAttribute('viewBox') ?? ''} ${sheet.style.transform}`,
+    );
+    if (sheet !== null) {
+      const now = sheet.getAttribute('viewBox') ?? '';
+      if (now === region) drawnWithin += drawing;
+      region = now;
+      regions.add(now);
+    }
   };
   const done = (): StreetMapRide => {
     observer.disconnect();
     return {
       frames,
       mutations,
+      drawn,
+      drawnWithin,
       views: views.size,
+      regions: regions.size,
       medianRenderMs: median(times),
       worstRenderMs: Math.max(...times),
       medianFrameMs: median(intervals),

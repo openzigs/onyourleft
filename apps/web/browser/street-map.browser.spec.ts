@@ -26,7 +26,10 @@
  * 3. **Its cost**, as counts a slow runner cannot change: over a minute at
  *    40 km/h in 60 frames a second, the plan view's DOM changes only when the
  *    view moves on its 5 m grid — where the outline it replaces moves its mark
- *    every frame. A paced second of each, map and outline, publishes the
+ *    every frame — and then only the sheet's `transform`: what is drawn
+ *    changes once per 250 m (#2380). Paced, the map is painted once per new
+ *    sheet and not once per move, counted from the engine's own trace
+ *    `Paint` events. A paced second of each, map and outline, publishes the
  *    engine's own main-thread times and frame intervals, and asserts none of
  *    them: they are the runner's, a timing gate needs three CI readings before
  *    it may assert anything, and the owner's tablet is what they are for.
@@ -35,7 +38,7 @@
  * test, for the owner.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { inside, overlap, riderBox } from './ride-stage';
@@ -44,7 +47,10 @@ import { inside, overlap, riderBox } from './ride-stage';
 interface StreetMapRide {
   readonly frames: number;
   readonly mutations: number;
+  readonly drawn: number;
+  readonly drawnWithin: number;
   readonly views: number;
+  readonly regions: number;
   readonly medianRenderMs: number;
   readonly worstRenderMs: number;
   readonly medianFrameMs: number;
@@ -219,6 +225,20 @@ for (const viewport of VIEWPORTS) {
     };
     expect(Math.abs((mark?.x ?? 0) + (mark?.width ?? 0) / 2 - middle.x)).toBeLessThanOrEqual(1);
     expect(Math.abs((mark?.y ?? 0) + (mark?.height ?? 0) / 2 - middle.y)).toBeLessThanOrEqual(1);
+    // #2380: the sheet is drawn at #2290's scale, the box's SHORTER side a
+    // kilometre — on an upright phone the box is taller than it is wide —
+    // and so is the mark over it.
+    const scale = await page.evaluate(() => {
+      const sheet = document.querySelector('.oyl-hud__street-map-sheet');
+      const [, , , tall] = (sheet?.getAttribute('viewBox') ?? '').split(' ').map(Number);
+      return { metres: tall ?? 0, pixels: sheet?.getBoundingClientRect().height ?? 0 };
+    });
+    const pixelsPerMetre = Math.min(plan.width, plan.height) / 1000;
+    expect(
+      Math.abs(scale.pixels - scale.metres * pixelsPerMetre),
+      `the sheet is ${scale.pixels.toFixed(1)} px for ${String(scale.metres)} m in a box ` +
+        `${plan.width.toFixed(1)} × ${plan.height.toFixed(1)} px`,
+    ).toBeLessThanOrEqual(1);
     // And streets drawn across the box: the map is there, not a blank square.
     const streets = await page
       .locator('.oyl-hud__street-map [data-oyl-street-map="streets"]')
@@ -243,6 +263,58 @@ for (const viewport of VIEWPORTS) {
     });
   });
 }
+
+/**
+ * The sheet covers the whole box, in the layouts where the box is widest —
+ * #2380's review: `stacked` gives the panel the screen's full width at 5 rem
+ * tall, 766 px at 800×340 against a 400 px sheet when the reach was ±2.5 km.
+ * Measured on the sheet and not on the streets, which only reach as far as
+ * the town does; and again after riding, where the rider is off the grid.
+ *
+ * ⚠️ One page for all three, resized, and ridden UNPACED: the sheet's box is
+ * read from layout (`getBoundingClientRect` includes the transform), which
+ * needs no frame painted. Paced, five legs of 61 m at each viewport took
+ * 9.9 s and 37.9 s on the CI runner and ran the browser shard out of time.
+ */
+const STACKED_VIEWPORTS = [
+  { name: 'upright, 600×500', width: 600, height: 500 },
+  { name: 'upright, 700×600', width: 700, height: 600 },
+  { name: 'short, 800×340', width: 800, height: 340 },
+] as const;
+
+test('#2380 the sheet covers the whole box in the stacked layout', async ({ page }) => {
+  await page.setViewportSize(STACKED_VIEWPORTS[0]);
+  await open(page, 'street');
+  const gaps = async () =>
+    page.evaluate(() => {
+      const box = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
+      const sheet = document.querySelector('.oyl-hud__street-map-sheet')?.getBoundingClientRect();
+      if (box === undefined || sheet === undefined) return undefined;
+      return {
+        left: box.left - sheet.left,
+        right: sheet.right - box.right,
+        top: box.top - sheet.top,
+        bottom: sheet.bottom - box.bottom,
+        box: box.width,
+      };
+    });
+  for (const viewport of STACKED_VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    // Five places 61 m apart: over 250 m, so across a whole cell of the grid.
+    for (let leg = 0; leg < 5; leg += 1) {
+      const found = await gaps();
+      expect(found, 'the box and the sheet are both on the page').toBeDefined();
+      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+        expect(
+          found?.[side] ?? -1,
+          `${viewport.name}, leg ${String(leg)}: the sheet's ${side} edge is short of the box by ` +
+            `${String(-(found?.[side] ?? 0))} px (the box is ${String(found?.box)} px wide)`,
+        ).toBeGreaterThanOrEqual(-0.5);
+      }
+      await page.evaluate(async () => window.__oylStreetMap?.ride?.(61, 1, false));
+    }
+  }
+});
 
 /** Ride `frames` frames on a freshly opened page, and read the engine's main-thread times around it. */
 async function rideOn(page: Page, map: 'street' | 'outline', frames: number, paced: boolean) {
@@ -272,7 +344,7 @@ async function rideOn(page: Page, map: 'street' | 'outline', frames: number, pac
   };
 }
 
-test('#2290 the street map follows the rider, and writes to the DOM only when the view moves', async ({
+test('#2290 #2380 the street map follows the rider, and changes its drawing only once per 250 m', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -282,21 +354,91 @@ test('#2290 the street map follows the rider, and writes to the DOM only when th
   const outline = (await rideOn(page, 'outline', frames, false)).ridden;
   expect(street.frames).toBe(frames);
 
-  // It follows: the view moves once per 5 m step ridden, and no oftener.
+  // It follows: the sheet moves once per 5 m step ridden, and no oftener.
   const metres = frames * METRES_PER_FRAME;
   expect(street.views).toBeGreaterThan(metres / 5 - 2);
   expect(street.views).toBeLessThanOrEqual(Math.ceil(metres / 5) + 1);
-  // And it writes only then: each move rewrites the viewBox and the mark's
-  // two coordinates, and once per 500 m cell the five layers. Eight records
-  // a move is that with room; a map redrawn every frame would be thousands.
-  expect(street.mutations).toBeLessThanOrEqual(8 * street.views);
-  // The control: the outline it replaces moves its mark on every frame.
+  // #2380: while the rider is within the margin, nothing drawn changes —
+  // no `d`, no `viewBox`, no element — only the sheet's `transform`…
+  expect(street.drawnWithin).toBe(0);
+  expect(street.mutations - street.drawn).toBeLessThanOrEqual(street.views);
+  // …and the sheet is drawn again once per 250 m: 667 m from a grid point
+  // is three new sheets, each six paths' `d` and the `viewBox`.
+  expect(street.regions).toBeLessThanOrEqual(Math.ceil(metres / 250) + 1);
+  expect(street.drawn).toBeLessThanOrEqual(7 * street.regions);
+  // The control: crossing the margin does draw it again, so the count above
+  // is of a sheet that changes, not of one stuck where the ride began.
+  expect(street.regions).toBeGreaterThan(1);
+  expect(street.drawn).toBeGreaterThan(0);
+  // And the outline it replaces moves its mark on every frame.
   expect(outline.mutations).toBeGreaterThanOrEqual(frames);
   expect(street.mutations).toBeLessThan(outline.mutations / 10);
   console.log(
-    `#2290 a minute at 40 km/h, ${String(frames)} frames: the street map made ` +
-      `${String(street.mutations)} DOM records in ${String(street.views)} views; the outline ` +
-      `${String(outline.mutations)} in ${String(outline.views)}`,
+    `#2290 #2380 a minute at 40 km/h, ${String(frames)} frames: the street map made ` +
+      `${String(street.mutations)} DOM records in ${String(street.views)} places, ` +
+      `${String(street.drawn)} of them to the drawing, in ${String(street.regions)} sheets; ` +
+      `the outline ${String(outline.mutations)} in ${String(outline.views)}`,
+  );
+});
+
+/** What `devtools.timeline` records for a paint: the node whose layer was painted. */
+interface PaintEvent {
+  readonly name: string;
+  readonly args?: { readonly data?: { readonly nodeName?: string } };
+}
+
+/**
+ * Ride `frames` paced frames of `metresPerFrame` on a freshly opened page, and
+ * count the engine's paints of the street map — #2380. The trace's `Paint`
+ * events are the engine's own record of a layer's content being painted
+ * again, each naming the node the layer is for: any node of the street map's
+ * (`oyl-hud__street-map…`), which is the sheet now and was the whole SVG as
+ * #2290 drew it.
+ */
+async function paintsOn(page: Page, browser: Browser, frames: number, metresPerFrame: number) {
+  await open(page, 'street');
+  await browser.startTracing(page, { categories: ['devtools.timeline'] });
+  const ridden = await page.evaluate(
+    async ([count, step]) => window.__oylStreetMap?.ride?.(count, step, true),
+    [frames, metresPerFrame] as const,
+  );
+  const trace = JSON.parse((await browser.stopTracing()).toString()) as {
+    readonly traceEvents: readonly PaintEvent[];
+  };
+  if (ridden === undefined) throw new Error('the harness published no ride');
+  const paints = trace.traceEvents.filter((event) => event.name === 'Paint');
+  const map = paints.filter((event) =>
+    (event.args?.data?.nodeName ?? '').includes('oyl-hud__street-map'),
+  ).length;
+  return { ridden, map, all: paints.length };
+}
+
+test('#2380 moving the street map does not paint it again: once per 250 m, not once per 5 m', async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // 300 m in 60 paced frames of 5 m: a move on every frame, and over 250 m,
+  // so at least one new sheet. A count of paints, which a slow runner cannot
+  // raise; the spec's one, because a traced paced frame is its dearest step.
+  const frames = 60;
+  const { ridden, map, all } = await paintsOn(page, browser, frames, 5);
+  expect(ridden.frames).toBe(frames);
+  expect(ridden.views).toBeGreaterThan(frames - 2);
+  // The control: the trace does see paints, and the HUD's own on every frame.
+  expect(all).toBeGreaterThan(frames);
+  // A paint per new sheet, and two to spare; #2290's map was painted on
+  // every move, 30 in 30 frames when this was measured against it.
+  expect(map).toBeLessThanOrEqual(ridden.regions + 2);
+  // And the filter matched: the ride crosses a region's edge, so a new sheet
+  // is painted at least once. A count of 0 would be a Chromium that names its
+  // paint nodes differently, and the bounds above would pass on nothing.
+  expect(map).toBeGreaterThanOrEqual(1);
+  expect(map).toBeLessThan(ridden.views / 10);
+  console.log(
+    `#2380 ${String(frames)} paced frames of 5 m, 1280×800: ${String(ridden.views)} moves, ` +
+      `${String(ridden.regions)} sheets, ${String(map)} paints of the street map ` +
+      `(${String(all)} paints in all)`,
   );
 });
 

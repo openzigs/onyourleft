@@ -35,6 +35,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { STREET_MAP_STEP_METRES } from './hud/street-map';
 import { northCorridor, northRoute } from './hud/street-map-testing';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import type { GameRenderer } from './port';
@@ -239,9 +240,16 @@ describe('the street map draws from the corridor the ride already holds — #229
     expect(map?.querySelector('[data-oyl-street-map="route"]')?.getAttribute('d')).toMatch(/^M/);
     // The outline it replaces is not drawn beside it.
     expect(shown.container.querySelector('.oyl-hud__plan-line')).toBeNull();
-    // It follows: the view is centred on the rider, who has ridden north.
-    const [, top] = (map?.getAttribute('viewBox') ?? '').split(' ').map(Number);
-    expect(top ?? 0).toBeLessThan(-500);
+    // It follows: the sheet is placed with the rider in the middle of the box
+    // (`street-map.ts` §`streetMapSheetStyle`), and the rider has ridden north.
+    const sheet = map?.querySelector<SVGSVGElement>('.oyl-hud__street-map-sheet');
+    const [, top, , height] = (sheet?.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    const [, down] = [...(sheet?.style.transform ?? '').matchAll(/(-?[\d.]+)%/g)].map(([, n]) =>
+      Number(n),
+    );
+    const south = (top ?? 0) + (-(down ?? 0) / 100) * (height ?? 0);
+    expect(down, 'the sheet is placed').toBeDefined();
+    expect(south).toBeLessThan(-STREET_MAP_STEP_METRES);
     // With the map data's credit beside it, for the whole ride.
     expect(shown.container.textContent).toContain(OSM_ATTRIBUTION);
 

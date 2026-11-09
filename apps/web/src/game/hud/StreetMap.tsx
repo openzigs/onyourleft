@@ -9,7 +9,7 @@
  *
  * ## In the plan view's box, so nothing on the HUD moves
  *
- * The SVG carries `oyl-hud__plan-svg`, the class every layout in `theme.css`
+ * The box carries `oyl-hud__plan-svg`, the class every layout in `theme.css`
  * sizes the plan view by — including the phones' give-way rules (the short
  * corners layout's 4.5 rem, the middle band's 6 rem, a landscape tablet's
  * 8 rem) — so the panel is the size and in the place it was, covers no more of
@@ -20,6 +20,16 @@
  * above the rider allows (`theme.css` §"THE STREET MAP ON A TALL UPRIGHT
  * PHONE"). The route panel grows downwards into the sky, and still moves no
  * control.
+ *
+ * ## A box, a sheet that moves in it, and a mark that does not — #2380
+ *
+ * The box is an HTML element, the image a rider is told about, and it holds
+ * two drawings: the sheet of map (`street-map.ts` §"The cost"), placed by a
+ * CSS `transform` that is the only thing to change as the rider moves, and
+ * the rider's mark over it in the middle, which never changes. Not one SVG,
+ * as #2290 drew it: a change anywhere in an SVG repaints all of it, so moving
+ * its view box re-stroked every street on the GPU, and an SVG's own shapes
+ * are not given compositor layers of their own.
  *
  * ## The colours are the HUD's own `hudMap*` tokens
  *
@@ -51,10 +61,11 @@ import { PLAN_AHEAD_STROKE_PIXELS, RIDER_MARK_RING_PIXELS, planWhere } from './p
 import {
   STREET_MAP_MARK_RADIUS,
   STREET_MAP_METRES,
-  streetMapCell,
   streetMapCentre,
   streetMapIndex,
   streetMapLayers,
+  streetMapRegion,
+  streetMapSheetStyle,
   streetMapViewBox,
 } from './street-map';
 
@@ -144,6 +155,14 @@ function Line(props: {
   );
 }
 
+/** The mark's drawing: {@link STREET_MAP_METRES} square on the rider, fitted to the box's shorter side. */
+const MARK_VIEW_BOX = [
+  -STREET_MAP_METRES / 2,
+  -STREET_MAP_METRES / 2,
+  STREET_MAP_METRES,
+  STREET_MAP_METRES,
+].join(' ');
+
 export function StreetMap(props: StreetMapProps): JSX.Element {
   const units = useUnits();
   // Once per ride: the corridor and the route are both fixed at the press.
@@ -151,24 +170,30 @@ export function StreetMap(props: StreetMapProps): JSX.Element {
     () => streetMapIndex(props.corridor, props.profile),
     [props.corridor, props.profile],
   );
-  // Per frame, and cheap. The drawing below changes only when this moves to
-  // another grid point, and its shapes only when it moves to another cell.
+  // Per frame, and cheap. The sheet's place changes only when this moves to
+  // another grid point, and its shapes only when its region does (#2380).
   const centre = streetMapCentre(props.corridor.origin, props.profile, props.distance);
-  const { column, row } = streetMapCell(centre);
-  const layers = useMemo(() => streetMapLayers(index, { column, row }), [index, column, row]);
+  const { left, top, width, height } = streetMapRegion(centre);
+  const layers = useMemo(
+    () => streetMapLayers(index, { left, top, width, height }),
+    [index, left, top, width, height],
+  );
+  const region = { left, top, width, height };
 
   return (
     <div className="oyl-hud__plan">
-      <svg
+      <div
         className="oyl-hud__plan-svg oyl-hud__street-map"
-        viewBox={streetMapViewBox(centre)}
-        // `meet`, as the plan view's: one scale for both axes, so the box's
-        // height is the kilometre and its width is more of the same map.
-        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={describe(props, units)}
       >
-        <g aria-hidden="true">
+        <svg
+          className="oyl-hud__street-map-sheet"
+          viewBox={streetMapViewBox(region)}
+          style={streetMapSheetStyle(region, centre)}
+          aria-hidden="true"
+          data-oyl-street-map="sheet"
+        >
           <path
             className={STREET_MAP_PAINTS.land.className}
             data-oyl-street-map="land"
@@ -183,16 +208,25 @@ export function StreetMap(props: StreetMapProps): JSX.Element {
           <Line layer="paths" d={layers.paths} />
           <Line layer="routeEdge" d={layers.route} />
           <Line layer="route" d={layers.route} />
+        </svg>
+        <svg
+          className="oyl-hud__street-map-here"
+          viewBox={MARK_VIEW_BOX}
+          // `meet`, as the plan view's: the box's shorter side is the kilometre,
+          // as it is the sheet's (`street-map.ts` §`streetMapSheetStyle`).
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+        >
           <circle
             className="oyl-hud__plan-here"
-            cx={centre.east}
-            cy={centre.south}
+            cx={0}
+            cy={0}
             r={STREET_MAP_MARK_RADIUS}
             strokeWidth={RIDER_MARK_RING_PIXELS}
             data-testid="oyl-hud-plan-here"
           />
-        </g>
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
