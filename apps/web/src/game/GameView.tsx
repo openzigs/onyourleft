@@ -1005,6 +1005,11 @@ function useMediaMatch(query: string): boolean {
 /** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
 const STYLISED_START: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
 
+/** The town's loading sentence (#2392), as `announce.ts` holds it while it waits for the window. */
+function isTownLoadingEvent(event: AnnouncementEvent): boolean {
+  return event.kind === 'delivery-round-over' && event.text === TOWN_LOADING_TEXT;
+}
+
 /** Begin the Delivery round a ride is waiting to begin, once: `GameScreen`'s `deliveryWaitingRef` (#2392). */
 function beginWaitingRound(waiting: { current: (() => void) | undefined }): void {
   const begin = waiting.current;
@@ -2635,6 +2640,13 @@ function GameScreen({
         if (deliveryOwedRef.current.roundOver === TOWN_LOADING_TEXT) {
           deliveryOwedRef.current = NOTHING_OWED;
         }
+        // #2392, found on the owner's tablet on 2026-11-09: and wherever else it
+        // sits. Handed to the announcer behind a sentence still in its window
+        // ("Keep the screen on…"), it waits there and is said after the round
+        // has begun; so it is taken back. Already said, the region keeps it
+        // until the next cue, 24–40 s on; so the region lets it go.
+        announcerRef.current = withdrawPending(announcerRef.current, isTownLoadingEvent);
+        setAnnouncement((shown) => (shown === TOWN_LOADING_TEXT ? '' : shown));
         const from = simulation.state.ride.distance;
         deliveryRef.current =
           buildings === undefined
@@ -3849,6 +3861,8 @@ function GameScreen({
     const recorded = trainerPort?.rideRecording?.() !== undefined;
     teardown();
     setEndAsk(undefined);
+    // #2392's review: a ride ended while its town loaded has no round waiting.
+    setTownLoading(false);
     setPhase('choosing');
     setChosen(undefined);
     // PR #2113: a preview ends back on an ordinary picker, a new screen.

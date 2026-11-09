@@ -48,6 +48,7 @@ import type { RealisticWorldOutcome } from './realistic-assets';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { GameSimulation } from './simulation';
 import { corridorOrigin } from './terrain';
+import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import { writeRealisticWorldChoice } from './world-preference';
 
 /** Every sentence the real announcer said, in order. */
@@ -267,12 +268,31 @@ const FRAMES_PAST_FIRST_HOUSE = ((): number => {
   throw new Error('the ride never passed the first house');
 })();
 
+/**
+ * The owner's tablet (2026-11-09): no trainer, and a ride that may stop if the
+ * screen goes off, so the region's first sentence is "Keep the screen on…"
+ * and the town's sentence, handed to the announcer beside it, waits behind
+ * it for the window.
+ */
+const TABLET: GameTrainerPort = {
+  readTrainer: () => NO_GAME_TRAINER,
+  askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => undefined,
+  recordingMayStop: () => true,
+  gameRideEnded: () => undefined,
+  rideMovingSeconds: () => undefined,
+  watchRide: () => () => undefined,
+};
+
 /** Mount the game with a round on and the realistic world chosen, and press Ride. */
 async function pressRide(
   renderer: GameRenderer,
   load: () => Promise<GameRenderer> = () => Promise.resolve(renderer),
+  trainer?: GameTrainerPort,
 ): Promise<void> {
-  mounted = await mount(<GameView port={port} renderer={load} now={() => nowMs} delivery />);
+  mounted = await mount(
+    <GameView port={port} renderer={load} trainer={trainer} now={() => nowMs} delivery />,
+  );
   await settle();
   await clickThrough(buttonStarting('Ride '));
 }
@@ -393,6 +413,48 @@ describe('a Delivery round waits for the realistic town before counting a house 
     expect(begunAt).toHaveLength(1);
     expect(notices()).not.toContain(TOWN_LOADING_TEXT);
     expect(said).not.toContain(TOWN_LOADING_TEXT);
+  });
+
+  it('never says the town is loading once it has arrived, when the sentence was waiting inside the announcer', async () => {
+    // The tablet's ordering on Busy Round: the throw controls at 1.80 s, the
+    // region taking the town's sentence at 3.31 s.
+    const arriving = arrivingRenderer([]);
+    await pressRide(arriving.renderer, undefined, TABLET);
+    for (let index = 0; index < 4; index += 1) await pump();
+    // Non-vacuity: the region has said the screen sentence, and the town's,
+    // still owed and offered on every frame, has been handed to the announcer
+    // and waits there for the window.
+    expect(said).toEqual(['Keep the screen on: your ride may stop without it.']);
+    expect(notices()).toContain(TOWN_LOADING_TEXT);
+
+    await arriving.settleLoad({ loaded: true });
+    expect(begunAt).toHaveLength(1);
+    // Past the window, and on: the region never takes it.
+    for (let index = 0; index < 30; index += 1) {
+      await pump();
+      expect(region()?.textContent).not.toBe(TOWN_LOADING_TEXT);
+    }
+    await settle();
+    expect(field('Houses')?.value).toBe(String(WEEK.houses));
+    expect(said).not.toContain(TOWN_LOADING_TEXT);
+  });
+
+  it('lets the region go of the town’s sentence when the town arrives inside its announce window', async () => {
+    // The tablet's ordering on Morning Round: said, and the round begun within one poll.
+    const arriving = arrivingRenderer([]);
+    await pressRide(arriving.renderer);
+    await pump();
+    expect(region()?.textContent).toBe(TOWN_LOADING_TEXT);
+
+    await arriving.settleLoad({ loaded: true });
+    expect(begunAt).toHaveLength(1);
+    expect(region()?.textContent).not.toBe(TOWN_LOADING_TEXT);
+    for (let index = 0; index < 30; index += 1) {
+      await pump();
+      expect(region()?.textContent).not.toBe(TOWN_LOADING_TEXT);
+    }
+    expect(loadingSaid()).toBe(1);
+    expect(field('Houses')?.value).toBe(String(WEEK.houses));
   });
 
   it('begins the round at the press on a ride in the standard world, which loads nothing', async () => {
