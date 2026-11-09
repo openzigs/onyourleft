@@ -2147,6 +2147,29 @@ describe('ending a game ride asks first — #2349', () => {
     expect(seen.discarded).toBe(0);
   });
 
+  it('never discards on the one-step End ride: a recording that turned up since is asked about afresh, with the warning (#2381, round 3)', async () => {
+    const seen = fresh();
+    const under: { recording?: { readonly savable: boolean } } = {};
+    await onTheStage({
+      ...recordingTrainer(seen, undefined),
+      rideRecording: () => under.recording,
+    });
+    await clickThrough(endRideButton());
+    expect(answers()).toEqual(['Keep riding', 'End ride']);
+    // A room reaching `joined` starts one while the question stands.
+    under.recording = { savable: true };
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // Nothing ended and nothing was deleted: the ride is asked about again.
+    expect(seen).toEqual(fresh());
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
+    // And discarding it now takes the two steps and the owner's warning.
+    await clickThrough(endRideAnswer(document, 'Discard ride'));
+    expect(hudRegion()).toBe(`${END_RIDE_TEXT.discardLabel} ${END_RIDE_TEXT.discardWarning}`);
+    expect(seen.discarded).toBe(0);
+  });
+
   it('keeps both steps and the deletion warning for a ride with a recording under it, even one with nothing in it yet (#2381)', async () => {
     await onTheStage(recordingTrainer(fresh(), { savable: false }));
     await clickThrough(endRideButton());

@@ -99,7 +99,7 @@ import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
-import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
 import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
@@ -716,10 +716,22 @@ const END_RECORDED = END_QUERY === 'asked' || END_QUERY === 'discard';
 /**
  * `ride.html?record=refused` — #2381: the press of *Ride* could not start the
  * recording under the ride (`GameTrainerPort.recordGameRide` answers `false`),
- * so the HUD's notice cell says this ride is not being recorded, and why.
- * Every other page's press starts one, as a real ride controller's does.
+ * so the HUD's notice cell says this ride is not being recorded, and why:
+ * `refused` is the ride before still saving. Round 3: `?record=` any other
+ * cause `GameTrainerPort.whyNotRecording` names (`not-saved`, `device-full`,
+ * `checkpoint-failed`) says that one instead. Every other page's press starts
+ * a recording, as a real ride controller's does.
  */
-const RECORD_REFUSED = new URLSearchParams(window.location.search).get('record') === 'refused';
+const RECORD_QUERY = new URLSearchParams(window.location.search).get('record');
+const RECORD_REFUSED = RECORD_QUERY !== null;
+const RECORD_CAUSE: GameNotRecordedReason | undefined =
+  RECORD_QUERY === 'refused'
+    ? 'still-saving'
+    : RECORD_QUERY === 'not-saved' ||
+        RECORD_QUERY === 'device-full' ||
+        RECORD_QUERY === 'checkpoint-failed'
+      ? RECORD_QUERY
+      : undefined;
 
 /**
  * `ride.html?room=race` — #785: the ride is in a private race that is waiting
@@ -999,6 +1011,7 @@ const TRAINER: GameTrainerPort = {
   ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
   // #2381: the press records, unless the page asks for the refusal.
   recordGameRide: () => Promise.resolve(!RECORD_REFUSED),
+  whyNotRecording: () => RECORD_CAUSE,
   // #2349: something to save under the ride, only on the pages that ask.
   rideRecording: () => (END_RECORDED ? { savable: true } : undefined),
   watchRide: () => () => undefined,

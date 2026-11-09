@@ -45,6 +45,7 @@ import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce
 import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
+  type GameNotRecordedReason,
   type GameTrainer,
   type GameTrainerPort,
   type GradientTrainer,
@@ -1007,7 +1008,19 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
    * client that does not hold control. What is read back is what the MACHINE
    * holds, not what a double was handed.
    */
-  async function onTheBench(refuseControl: boolean) {
+  /**
+   * #2381, round 3: faults put into the rig's store, so a REAL controller can
+   * be driven into each state `canStartNewRide` refuses on. Each is read at
+   * the write, so a test turns one on after the recording has started.
+   */
+  interface BenchFaults {
+    /** A checkpoint's write, its chunk or its header: an error to throw, or nothing. */
+    chunk?: () => Error | undefined;
+    /** The finished ride's save: `hang` (never answers), an error, or nothing. */
+    save?: () => 'hang' | Error | undefined;
+  }
+
+  async function onTheBench(refuseControl: boolean, faults: BenchFaults = {}) {
     const harness = createStoreHarness();
     await seedAthletes(harness);
     const savedIds: string[] = [];
@@ -1019,10 +1032,16 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const controller = createRideController({
       transport,
       store: {
-        putRecordingSession: async (record) =>
-          harness.write(async (store) => store.putRecordingSession(record)),
-        appendRecordingChunk: async (chunk) =>
-          harness.write(async (store) => store.appendRecordingChunk(chunk)),
+        putRecordingSession: async (record) => {
+          const fault = faults.chunk?.();
+          if (fault !== undefined) throw fault;
+          return harness.write(async (store) => store.putRecordingSession(record));
+        },
+        appendRecordingChunk: async (chunk) => {
+          const fault = faults.chunk?.();
+          if (fault !== undefined) throw fault;
+          return harness.write(async (store) => store.appendRecordingChunk(chunk));
+        },
         readRecordingSessions: async (owner) =>
           harness.write(async (store) => store.readRecordingSessions(owner)),
         recoverRecording: async (owner, id) =>
@@ -1041,12 +1060,16 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
-          putFinishedRide: (ride) =>
-            harness.write(async (store) => {
+          putFinishedRide: (ride) => {
+            const fault = faults.save?.();
+            if (fault === 'hang') return new Promise<never>(() => undefined);
+            if (fault !== undefined) return Promise.reject(fault);
+            return harness.write(async (store) => {
               const id = await store.putFinishedRide(ride);
               savedIds.push(id);
               return id;
-            }),
+            });
+          },
         },
       },
     });
@@ -1578,31 +1601,69 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     });
 
     /**
+     * #2381, round 3: put the REAL controller's last ride into a stopped state
+     * that `canStartNewRide` refuses — the fault turned on after a few
+     * recorded seconds, then *Stop* — so `recordForRoom` refuses for that
+     * cause and no other.
+     */
+    async function stoppedWith(
+      cause: GameNotRecordedReason,
+    ): Promise<Awaited<ReturnType<typeof onTheBench>>> {
+      let on = false;
+      const quota = Object.assign(new Error('no room'), { name: 'QuotaExceededError' });
+      const rig = await onTheBench(false, {
+        chunk: () =>
+          on && cause === 'device-full'
+            ? quota
+            : on && cause === 'checkpoint-failed'
+              ? new Error('the write was aborted')
+              : undefined,
+        save: () =>
+          on && cause === 'still-saving'
+            ? 'hang'
+            : on && cause === 'not-saved'
+              ? new Error('the library refused it')
+              : undefined,
+      });
+      await rig.controller.start();
+      for (let second = 0; second < 3; second += 1) {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      }
+      on = true;
+      rig.controller.armStop();
+      // Not awaited: a save that never answers never settles it.
+      void rig.controller.confirmStop().catch(() => undefined);
+      for (let index = 0; index < 20; index += 1) await settle();
+      expect(rig.controller.getSnapshot().phase).toBe('stopped');
+      return rig;
+    }
+
+    /**
      * #2381, the owner's ruling of 2026-11-08 (item 3): when the automatic
      * start fails, the ride's HUD says this ride is not being recorded, and
-     * why — the controller's one reason for a refusal (`recordForRoom`
-     * answers `false` only when the ride before is not finished saving).
+     * why. Round 3: through the REAL controller, refusing because the ride
+     * before is still saving — the approved sentence.
      */
     it('says on the HUD, and once through its one region, that a refused ride is not being recorded and why — then gives the cell back', async () => {
-      const rig = await onTheBench(false);
-      await openTheGame({
-        ...gameTrainerPortOver(rig.controller),
-        recordGameRide: () => Promise.resolve(false),
-      });
+      const rig = await stoppedWith('still-saving');
+      await openTheGame(gameTrainerPortOver(rig.controller));
       offered.length = 0;
       await clickThrough(buttonStarting('Ride '));
       await flush();
       await pump(2);
-      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      expect(rig.controller.getSnapshot().phase).toBe('stopped');
       expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.label);
-      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
       // Not a live region of its own: the HUD's one region says it (#445).
       const notice = queryAll(mounted?.container ?? document, '.oyl-hud__notices *').find((each) =>
-        (each.textContent ?? '').includes(RIDE_NOT_RECORDED_TEXT.refused),
+        (each.textContent ?? '').includes(RIDE_NOT_RECORDED_TEXT['still-saving']),
       );
       expect(notice?.closest('[aria-live], [role="status"], [role="alert"]')).toBeNull();
       // Said ONCE, with announcements off (the default): offered until said.
-      expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT.refused}`);
+      expect(region()).toBe(
+        `${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT['still-saving']}`,
+      );
       expect(offered).toContain('not-recording');
       offered.length = 0;
       await pump(4);
@@ -1612,7 +1673,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(buttonStarting('End ride')).toBeDefined();
       // Gone after the road notice's time open, on the ride's clock.
       await pump(2 * (STANDING_NOTICE_SECONDS + 1));
-      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
       await rig.done();
     });
 
@@ -1628,7 +1689,8 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       await clickThrough(buttonStarting('Ride '));
       await flush();
       await pump(2);
-      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.refused);
+      // A refusal with no cause the controller states claims no reason.
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT.failed);
       await clickThrough(buttonStarting('End ride'));
       await clickThrough(endRideAnswer(document, 'End ride'));
       await flush();
@@ -1642,6 +1704,27 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(offered).not.toContain('not-recording');
       await rig.done();
     });
+
+    /**
+     * #2381's review (round 3, medium): `recordForRoom` refuses whenever
+     * `canStartNewRide` does, and "not finished saving" is true of only one
+     * cause. Each other cause is said as itself, in the Ride screen's words,
+     * through the real controller over the real store with the fault in it.
+     */
+    for (const cause of ['not-saved', 'device-full', 'checkpoint-failed'] as const) {
+      it(`says why when the ride before is ${cause}, not that it is still saving`, async () => {
+        const rig = await stoppedWith(cause);
+        await openTheGame(gameTrainerPortOver(rig.controller));
+        await clickThrough(buttonStarting('Ride '));
+        await flush();
+        await pump(2);
+        expect(rig.controller.getSnapshot().phase).toBe('stopped');
+        expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT[cause]);
+        expect(notices()).not.toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+        expect(region()).toBe(`${RIDE_NOT_RECORDED_TEXT.label}: ${RIDE_NOT_RECORDED_TEXT[cause]}`);
+        await rig.done();
+      });
+    }
 
     it('says nothing of it on a ride whose recording started — the control', async () => {
       const rig = await onTheBench(false);

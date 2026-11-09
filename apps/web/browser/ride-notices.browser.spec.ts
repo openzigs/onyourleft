@@ -218,39 +218,71 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
  * `easedCollisions` requires *Pause* and *End ride* on the stage and uncovered.
  */
 test.describe('a ride whose recording could not start says so — #2381', () => {
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`whole and over nothing — ${viewport.name}`, async ({ page }) => {
-      await openRide(page, viewport, '?record=refused');
-      expect(await noticeText(page)).toContain(
-        'This ride is not being recorded, because the ride before it is not finished saving.',
-      );
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, () => {
-          expect(easedCollisions(seen, viewport)).toEqual([]);
-          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-          expect(notice, 'the notice was laid out').toBeDefined();
-          if (notice === undefined) return;
-          const rider = riderBox(viewport);
-          console.log(
-            `#2381 not recording — ${viewport.name}, ${how} — cell ${notice.box.height.toFixed(0)} px tall` +
-              (viewport.height > viewport.width
-                ? `; ${(rider.top - notice.box.bottom).toFixed(0)} px above the rider's box`
-                : ''),
-          );
-          const others = seen.panels.filter(
-            (each) => each !== notice && each.box.height > 1 && overlap(each.box, notice.box),
-          );
-          expect(others.map(describeItem)).toEqual([]);
-          expect(overlap(notice.box, rider), describeItem(notice)).toBe(false);
-          if (viewport.height > viewport.width) {
-            expect(rider.top - notice.box.bottom, describeItem(notice)).toBeGreaterThanOrEqual(
-              EASED_RIDER_CLEARANCE_PIXELS,
+  // Round 3 (the review of 4f726fde): and in its tallest stack — the longest
+  // cause's sentence, with the road notice that would open beside it for the
+  // same first seconds, and #647's *Keep the screen on*, which never goes
+  // away. Measured, that stack ran off a phone in landscape and came to 34 px
+  // of the rider at 360×752, so (`GameView` §`notRecordedShown`) the road
+  // notice gives way to this one while it stands, and on the narrowest
+  // upright phones (`oneNoticeOnly`) this one gives way to #647's.
+  for (const [query, words, what] of [
+    [
+      '?record=refused',
+      'This ride is not being recorded, because the ride before it is not finished saving.',
+      'alone',
+    ],
+    [
+      '?record=not-saved&trainer=workout&keepalive=failed',
+      'because the ride before it could not be added to your activities.',
+      'with the road notice and #647',
+    ],
+  ] as const) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`${what}: whole and over nothing — ${viewport.name}`, async ({ page }) => {
+        await openRide(page, viewport, query);
+        const text = await noticeText(page);
+        const stacked = query.includes('keepalive=failed');
+        if (stacked && oneNoticeOnly(viewport)) {
+          expect(text).not.toContain(words);
+        } else {
+          expect(text).toContain(words);
+        }
+        if (stacked) {
+          expect(text).toContain('Keep the screen on');
+          // The road notice, and its control, are off the HUD meanwhile.
+          expect((await keepScreenOnNotice(page)).roadNoticeOnHud).toBe(false);
+          expect(
+            (await measure(page)).items.some((each) => each.name === 'control: Trainer notice'),
+          ).toBe(false);
+        }
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(how, () => {
+            expect(easedCollisions(seen, viewport)).toEqual([]);
+            const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+            expect(notice, 'the notice was laid out').toBeDefined();
+            if (notice === undefined) return;
+            const rider = riderBox(viewport);
+            console.log(
+              `#2381 not recording — ${viewport.name}, ${how} — cell ${notice.box.height.toFixed(0)} px tall` +
+                (viewport.height > viewport.width
+                  ? `; ${(rider.top - notice.box.bottom).toFixed(0)} px above the rider's box`
+                  : ''),
             );
-          }
-          expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
-        });
-      }
-    });
+            const others = seen.panels.filter(
+              (each) => each !== notice && each.box.height > 1 && overlap(each.box, notice.box),
+            );
+            expect(others.map(describeItem)).toEqual([]);
+            expect(overlap(notice.box, rider), describeItem(notice)).toBe(false);
+            if (viewport.height > viewport.width) {
+              expect(rider.top - notice.box.bottom, describeItem(notice)).toBeGreaterThanOrEqual(
+                EASED_RIDER_CLEARANCE_PIXELS,
+              );
+            }
+            expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
+          });
+        }
+      });
+    }
   }
 });
 

@@ -114,18 +114,21 @@ export interface EndRideQuestionProps {
   /**
    * Whether anything is recorded under the ride, so that *Discard ride*
    * deletes something. False (#2381): the question is one step, *Keep
-   * riding* and *End ride*, which calls {@link onConfirmDiscard} — there is
-   * no deletion to warn of or confirm. Absent is true, which is every
-   * Ride-screen use.
+   * riding* and *End ride*, which calls {@link onEnd} — there is no deletion
+   * to warn of or confirm. Absent is true, which is every Ride-screen use.
    */
   readonly recorded?: boolean;
+  /**
+   * The one-step *End ride* (#2381, round 3): ends a ride with nothing
+   * recorded under it. ⚠️ Never a discard — the surface re-checks at the
+   * press and asks afresh if a recording has turned up since. Required
+   * wherever {@link recorded} can be false; absent, *End ride* is not offered.
+   */
+  readonly onEnd?: () => void;
   readonly onSave: () => void;
   /** The `ask` step's *Discard ride*: asks once more. */
   readonly onDiscard: () => void;
-  /**
-   * The `discard` step's *Discard ride*: ends the ride and deletes it. With
-   * nothing recorded, the `ask` step's *End ride*, which deletes nothing.
-   */
+  /** The `discard` step's *Discard ride*: ends the ride and deletes it. */
   readonly onConfirmDiscard: () => void;
   /** *Keep riding*, Escape, and back: closes the question and changes nothing else. */
   readonly onKeepRiding: () => void;
@@ -173,7 +176,7 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
   const discarding = props.step === 'discard';
   const hud = props.surface === 'hud';
   // #2381: nothing under the ride to save or delete — one step, see above.
-  const unrecorded = props.recorded === false;
+  const unrecorded = props.recorded === false && props.onEnd !== undefined;
   const label = discarding ? END_RIDE_TEXT.discardLabel : END_RIDE_TEXT.askLabel;
   const sentence = discarding
     ? END_RIDE_TEXT.discardWarning
@@ -231,12 +234,7 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
           {END_RIDE_TEXT.keep}
         </Button>
         {discarding ? null : unrecorded ? (
-          <Button
-            variant="secondary"
-            size="ride"
-            touchLockExempt={hud}
-            onClick={props.onConfirmDiscard}
-          >
+          <Button variant="secondary" size="ride" touchLockExempt={hud} onClick={props.onEnd}>
             {END_RIDE_TEXT.end}
           </Button>
         ) : (
