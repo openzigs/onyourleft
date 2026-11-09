@@ -47,12 +47,7 @@ import {
   type MouseEvent,
 } from 'react';
 
-import {
-  DEFAULT_UNIT_SYSTEM,
-  isLevelRouteId,
-  type KitColour,
-  type UnitSystem,
-} from '@onyourleft/store';
+import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
 import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
@@ -112,7 +107,6 @@ import type { UpdateWatcher } from '../offline/update';
 
 import { NavIcon } from './NavIcon';
 import {
-  gameRouteFromHash,
   groupDestination,
   hrefFor,
   LEVEL_GAME_SUMMARY,
@@ -661,6 +655,7 @@ function viewFor(
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
   },
+  onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -783,6 +778,8 @@ function viewFor(
           kitColour={kit.colour}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
+          // #2362: a built-in level's card chosen, for the line under the title.
+          onLevelChosen={onLevelChosen}
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
@@ -926,6 +923,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #423, and described at length below. Declared before the router because
   // #945 asks it, per navigation, whether the navigation may animate.
   const [immersive, setImmersive] = useState(false);
+  /**
+   * Whether the trainer game's setup has a built-in Delivery level's card
+   * chosen — #2362, round 4 of PR #2378's review: the line under the title
+   * follows the chosen card, never the address, which stays on the level
+   * when the rider picks a saved route. Told by `GameViewProps.onLevelChosen`.
+   */
+  const [levelChosen, setLevelChosen] = useState(false);
   // #2349's review, B2: a browser Back or a typed address under a ride on the
   // game's stage is asked about first (`ride-leave.ts`).
   const [rideLeaves] = useState(rideLeave);
@@ -1102,10 +1106,20 @@ export function AppShell(props: AppShellProps): JSX.Element {
         <RideLeaveContext value={rideLeaves}>
           <ViewBoundary key={route.id}>
             <Suspense fallback={<ViewLoading />}>
-              {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-                colour: kitColour,
-                onChange: setKitColour,
-              })}
+              {viewFor(
+                match,
+                props,
+                units,
+                setUnits,
+                riderMass,
+                setRiderMass,
+                setImmersive,
+                {
+                  colour: kitColour,
+                  onChange: setKitColour,
+                },
+                setLevelChosen,
+              )}
             </Suspense>
           </ViewBoundary>
         </RideLeaveContext>
@@ -1230,11 +1244,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
             </h1>
             {immersive ? null : (
               <p className="oyl-muted">
-                {/* #2362: the setup opened on a built-in level is a Delivery round's, not a saved route's. */}
-                {route.id === 'game' &&
-                isLevelRouteId(gameRouteFromHash(globalThis.location.hash) ?? '')
-                  ? LEVEL_GAME_SUMMARY
-                  : route.summary}
+                {/* #2362: a built-in level's card chosen in the setup is a Delivery round's, not a saved route's. */}
+                {route.id === 'game' && levelChosen ? LEVEL_GAME_SUMMARY : route.summary}
               </p>
             )}
             {/*

@@ -366,6 +366,18 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     // #2362: while held clear of a parked car already hit, the obstacles meet
     // the rider in the lane they steer to, never at the move-aside's offset,
     // so the move scores no crash of its own (review of PR #2378, round 3).
+    // ⚠️ Two couplings, each held by a test (round 4):
+    // - `held` is read AFTER the steering's step, so it is true only because
+    //   one tick's sideways step carries the rider from the moved offset back
+    //   past `PARKED_CAR_CLEARANCE_METRES` into the car's width. A clearance
+    //   larger than that step would make `held` flicker false
+    //   (`ride-round.test.ts` §"one tick's lane step").
+    // - While held, the rider is scored in their lane and drawn beside the car,
+    //   so an obstacle at the drawn place would pass through the drawn rider.
+    //   No generated round has one there: `placeObstacles` keeps neighbours at
+    //   least `OBSTACLE_SIGHT_METRES` (60 m) apart, and a hold lasts at most
+    //   the car's length and the bicycle's, about 6 m (`obstacles.test.ts`
+    //   §"no other obstacle within a parked car's hold").
     const held =
       clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) !== undefined;
     const lateral = held ? (LANE_OFFSETS_METRES[steer.lane] as number) : steer.offset;

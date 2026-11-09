@@ -585,6 +585,37 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
     ).toBeUndefined();
   });
 
+  it('places no other obstacle within a parked car’s hold, on any level at any seed', () => {
+    // The hold lasts while the bicycle overlaps the car along the road: its length and the car's.
+    const car = OBSTACLE_KINDS['parked-car'];
+    const hold = 2 * car.halfLength + RIDER_AHEAD_METRES + RIDER_BEHIND_METRES;
+    expect(hold).toBeLessThan(OBSTACLE_SIGHT_METRES);
+    let cars = 0;
+    for (const level of ROUNDS) {
+      for (const seed of SEEDS) {
+        const placed = placeObstacles(
+          { from: 0, to: level.lengthMetres },
+          seed,
+          'normal',
+          true,
+          levelObstacleMix(level.round),
+        );
+        for (const obstacle of placed) {
+          if (obstacle.kind !== 'parked-car') continue;
+          cars += 1;
+          for (const other of placed) {
+            if (other === obstacle) continue;
+            expect(
+              Math.abs(other.along - obstacle.along),
+              `${level.id} at ${String(seed)}`,
+            ).toBeGreaterThan(hold + OBSTACLE_KINDS[other.kind].halfLength);
+          }
+        }
+      }
+    }
+    expect(cars).toBeGreaterThan(0);
+  });
+
   it('blocks at most one lane at every distance of every level, a parked car’s whole length counted', () => {
     let cars = 0;
     for (const level of ROUNDS) {

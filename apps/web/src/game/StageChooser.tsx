@@ -82,7 +82,7 @@ import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 import type { PacerChoice } from './pacer-choice';
-import { realisticWorldChosenText } from './realistic-assets';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
@@ -307,7 +307,9 @@ export const LEVEL_SETUP_TEXT = {
   world: (inShell: boolean): string =>
     inShell
       ? 'This round rides in the realistic world. Your choice in Settings stays as it is.'
-      : 'This round rides in the realistic world, which this browser downloads when the ride starts, about 33 MB. Your choice in Settings stays as it is.',
+      : 'This round rides in the realistic world. This browser downloads it when the ride starts, ' +
+        `${REALISTIC_DOWNLOAD_SIZE_TEXT}, and does not keep it on this device for use offline. ` +
+        'Your choice in Settings stays as it is.',
 } as const;
 
 /** The level's world notice — #2362. One chooser a page, so a fixed id. */
@@ -475,10 +477,18 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
     return <p>Loading your routes…</p>;
   }
   // #2293: the circuits are a lap race's courses, so they come with one or not at all.
-  // #2362: and none on a setup opened on a built-in level, which is
-  // Delivery's (review of PR #2378, round 3).
+  // #2362: and none while a built-in level's card is chosen, which is
+  // Delivery's; a saved route chosen on the same setup offers them as any
+  // setup does (review of PR #2378, rounds 3 and 4).
+  const levelChosen =
+    props.level !== undefined &&
+    (props.picked === undefined ||
+      props.picked === props.level.routeId ||
+      ![...props.routes, ...(props.circuits?.circuits ?? [])].some(
+        (route) => route.id === props.picked,
+      ));
   const circuits =
-    props.lapRace === undefined || props.circuits === undefined || props.level !== undefined
+    props.lapRace === undefined || props.circuits === undefined || levelChosen
       ? []
       : props.circuits.circuits;
   const first = props.routes[0] ?? circuits[0];

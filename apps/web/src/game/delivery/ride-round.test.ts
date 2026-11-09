@@ -20,6 +20,7 @@ import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  PARKED_CAR_CLEARANCE_METRES,
   parkedCarStands,
   RIDER_AHEAD_METRES,
   RIDER_BEHIND_METRES,
@@ -562,7 +563,7 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     );
   }
 
-  it('counts the crash, then never draws the rider inside the car: beside it, steering for the clear lane', () => {
+  it('counts the crash, then never draws the rider inside the car: beside it, still steering for their own lane, and drawn back in it after the car', () => {
     let ride = carAhead();
     let crashes = 0;
     let drawnInside = 0;
@@ -585,6 +586,16 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     expect(ride.steer.lane).toBe(LANE_OFFSETS_METRES.length - 1);
     expect(ride.steer.offset).toBe(LANE_OFFSETS_METRES.at(-1));
     expect(ride.score).toBe(0);
+  });
+
+  it('holds the clearance under one tick’s lane step, which is what keeps a moved rider held beside the car', () => {
+    // From the moved offset, one tick of steering back toward the kerb lane must
+    // re-enter the car's width, or `held` would go false between two ticks.
+    const step =
+      (((LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number)) /
+        LANE_CHANGE_SECONDS) *
+      DELIVERY_TICK_SECONDS;
+    expect(PARKED_CAR_CLEARANCE_METRES).toBeLessThan(step);
   });
 
   it('scores no second crash from the move-aside: another obstacle beside the car meets the rider in their own lane', () => {

@@ -575,6 +575,13 @@ export interface GameViewProps {
    */
   readonly onImmersive?: ((immersive: boolean) => void) | undefined;
   /**
+   * Whether the setup's chosen card is a built-in Delivery level — #2362,
+   * round 4 of PR #2378's review: the shell's line under the title follows the
+   * chosen card, not the address. Told `false` when it stops being one, when
+   * a ride starts and when this unmounts.
+   */
+  readonly onLevelChosen?: ((chosen: boolean) => void) | undefined;
+  /**
    * The tablet's side-camera pairing — #551. While a phone is paired its state
    * is one line on the HUD, its link going is said through the HUD's one
    * region, and *Stop side camera* is on the stage while it films.
@@ -2601,6 +2608,23 @@ function GameScreen({
       onImmersive(false);
     };
   }, [onTheStage, onImmersive]);
+
+  // #2362: whether the chosen card is the level, as the chooser chooses it:
+  // the card the address or a press picked, else the first, which is the level.
+  const levelPicked =
+    phase === 'choosing' &&
+    level !== undefined &&
+    (picked === undefined ||
+      picked === level.route.id ||
+      ![...(routes ?? []), ...circuits].some((route) => route.id === picked));
+  const onLevelChosen = props.onLevelChosen;
+  useEffect(() => {
+    if (onLevelChosen === undefined) return;
+    onLevelChosen(levelPicked);
+    return () => {
+      onLevelChosen(false);
+    };
+  }, [levelPicked, onLevelChosen]);
 
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
   useEffect(() => {

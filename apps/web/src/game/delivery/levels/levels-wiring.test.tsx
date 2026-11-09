@@ -342,12 +342,29 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     }
   });
 
-  it('says under the title that a level’s setup is a built-in round’s, and a saved route’s setup as before', async () => {
+  it('says under the title what the chosen card is: a built-in round’s on the level, a saved route’s after picking one, and back (round 4)', async () => {
+    const routes: readonly RidableRoute[] = [
+      { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
+    ];
     globalThis.location.hash = hrefForGamePlay('delivery', levelRouteId(FIRST.id));
-    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port()} />);
-    await until(() => document.querySelector('.oyl-view-head p') !== null);
-    expect(document.querySelector('.oyl-view-head p')?.textContent).toBe(LEVEL_GAME_SUMMARY);
-    mounted.unmount();
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port(routes)} />);
+    const subtitle = (): string | null | undefined =>
+      document.querySelector('.oyl-view-head p')?.textContent;
+    const radio = (id: string): HTMLInputElement | undefined =>
+      queryAll<HTMLInputElement>(document, '.oyl-chooser__card input[type="radio"]').find(
+        (each) => each.value === id,
+      );
+    await until(() => radio('saved-0') !== undefined);
+    await until(() => subtitle() === LEVEL_GAME_SUMMARY);
+    await click(radio('saved-0'));
+    expect(subtitle()).toBe(routeById('game').summary);
+    // The address still names the level: the line follows the card, not the address.
+    expect(gameRouteFromHash(globalThis.location.hash)).toBe(levelRouteId(FIRST.id));
+    await click(radio(levelRouteId(FIRST.id)));
+    expect(subtitle()).toBe(LEVEL_GAME_SUMMARY);
+  });
+
+  it('says a saved route’s line under the title on the plain setup', async () => {
     globalThis.location.hash = '#/game';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port()} />);
     await until(() => document.querySelector('.oyl-view-head p') !== null);

@@ -24,6 +24,7 @@ import { northRoute } from '../../route-fixtures-testing';
 import { OSM_ATTRIBUTION } from '../../../map/basemap';
 import { hrefFor, routeById } from '../../../shell/routes';
 import { mount, queryAll, settle, type Mounted } from '../../../testing/mount';
+import { stripComments } from '../../../units/no-inline-units';
 import { pacerChoice } from '../../pacer-choice';
 import { DEFAULT_RIDING_POSITION, type RidingPosition } from '../../rider';
 import { DEFAULT_LAP_RACE_CHOICE } from '../../lap-race/choice';
@@ -37,6 +38,7 @@ import {
   type DeliveryCourse,
   type RidableRoute,
 } from '../../StageChooser';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT } from '../../realistic-assets';
 import { windChoice } from '../../wind-choice';
 
 import { parseLevelFile } from './level-file';
@@ -178,7 +180,10 @@ describe('the setup on a built-in level — #2362, round 2', () => {
   });
 
   it('tells a browser rider the realistic world is downloaded, and the Android app nothing of the kind', () => {
-    expect(LEVEL_SETUP_TEXT.world(false)).toContain('downloads when the ride starts, about 33 MB');
+    // The size and the offline rule in Settings' own terms, the size from the one shared constant.
+    expect(LEVEL_SETUP_TEXT.world(false)).toContain(
+      `downloads it when the ride starts, ${REALISTIC_DOWNLOAD_SIZE_TEXT}, and does not keep it on this device for use offline.`,
+    );
     expect(LEVEL_SETUP_TEXT.world(true)).not.toMatch(/download|MB/);
     for (const inShell of [false, true]) {
       expect(LEVEL_SETUP_TEXT.world(inShell)).toContain('Your choice in Settings stays as it is.');
@@ -244,16 +249,36 @@ describe('the setup on a built-in level — #2362, round 2', () => {
   it('offers no lap race and no built-in circuits on a level, and says what a level’s round is', async () => {
     const root = await render();
     expect(root.textContent).not.toContain(LAP_RACE_CHOICE_TEXT.label);
+    expect(root.querySelector('.oyl-game__lap-race')).toBeNull();
     expect(root.textContent).not.toContain(BUILT_IN_CIRCUITS_TEXT.heading);
     expect(root.querySelector('[data-credit="circuits"]')).toBeNull();
     expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.levelHint);
     expect(root.textContent).not.toContain(DELIVERY_CHOICE_TEXT.hint);
-    // A saved route chosen instead says the round's own hint.
-    const own = queryAll<HTMLInputElement>(root, '.oyl-chooser__card input[type="radio"]').find(
-      (radio) => radio.value === OWN[0]?.id,
-    );
-    own?.click();
+    // A saved route chosen instead: its race and the built-in circuits, as on any
+    // setup, and the round's own hint (round 4: from the chosen card, both ways).
+    const radio = (id: string): HTMLInputElement | undefined =>
+      queryAll<HTMLInputElement>(root, '.oyl-chooser__card input[type="radio"]').find(
+        (each) => each.value === id,
+      );
+    radio(OWN[0]?.id ?? '')?.click();
     await settle();
     expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.hint);
+    expect(root.querySelector('.oyl-game__lap-race')).not.toBeNull();
+    expect(root.textContent).toContain(BUILT_IN_CIRCUITS_TEXT.heading);
+    // And the level chosen again: neither.
+    radio(LEVEL.id)?.click();
+    await settle();
+    expect(root.querySelector('.oyl-game__lap-race')).toBeNull();
+    expect(root.textContent).not.toContain(BUILT_IN_CIRCUITS_TEXT.heading);
+    expect(root.textContent).toContain(DELIVERY_CHOICE_TEXT.levelHint);
+  });
+
+  it('says the download’s size from one constant, in Settings and on a level’s setup alike', () => {
+    const SOURCE = join(HERE, '..', '..', '..');
+    for (const file of ['game/StageChooser.tsx', 'views/SettingsView.tsx']) {
+      const code = stripComments(readFileSync(join(SOURCE, file), 'utf8'));
+      expect(code, file).toContain('REALISTIC_DOWNLOAD_SIZE_TEXT');
+      expect(code, file).not.toMatch(/\d+\s*MB/);
+    }
   });
 });
