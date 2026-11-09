@@ -241,6 +241,7 @@ import {
   levelRoute,
   type ListedLevel,
 } from './delivery/levels/levels';
+import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -3000,8 +3001,9 @@ function GameScreen({
         setState(simulation.state);
       }
 
-      // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
-      // run while the ride is paused — nor does this loop), from the same
+      // #397: the announcer, on the RIDE's clock (`elapsed`, the wall clock:
+      // no frame runs while the game is paused, so nothing announces then,
+      // and the pause is counted on resume), from the same
       // readings the HUD renders. Pure: its carry-over lives in the ref.
       const readings = hudReadings({
         state: simulation.state,
@@ -3418,6 +3420,11 @@ function GameScreen({
           roomRacing === undefined
             ? undefined
             : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        // #1853: where the round has steered the rider, the place the
+        // obstacles meet them; none on a ride with no round, or in a room (DL9).
+        const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
+          inRoom: roomRef.current !== undefined,
+        });
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3481,11 +3488,19 @@ function GameScreen({
           // (DL9). Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads it back off every frame's input.
           steeredLateral:
-            raceDrawn?.steeredLateral ??
-            roomRaceDrawn?.steeredLateral ??
-            steeredLateralFor(deliveryRef.current?.steer, {
-              inRoom: roomRef.current !== undefined,
-            }),
+            raceDrawn?.steeredLateral ?? roomRaceDrawn?.steeredLateral ?? deliverySteered,
+          // #2396: and the camera's eye moved off any parked car it is
+          // alongside, so it never passes through one. A drawing only.
+          // Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads it back off every frame's input.
+          cameraLateral:
+            deliverySteered === undefined || deliveryRef.current === undefined
+              ? undefined
+              : eyeLateralBesideParkedCars(
+                  deliveryRef.current.obstacles,
+                  drawn.riderDistance,
+                  deliverySteered,
+                ),
           ...(raceDrawn === undefined
             ? {}
             : {
@@ -4064,8 +4079,9 @@ function GameScreen({
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
-  // way unless the rider asks for it — on the RIDE's clock, so a paused ride
-  // does not put away a notice nobody has had time to read.
+  // way unless the rider asks for it — on the RIDE's clock (`elapsed`, the
+  // wall clock: frozen on screen while the game is paused, and on resume it
+  // counts the whole pause, so a long pause puts the notice away).
   const noticeOpen =
     noticeChoice === 'open' ||
     (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);

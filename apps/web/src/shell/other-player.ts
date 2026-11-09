@@ -22,6 +22,15 @@
  *   apart are a player.
  * - **Never on a ride route** (ruling 2): `AppShell` neither renders it nor
  *   polls there, so the ride's own cues are never read as the rider's player.
+ * - **Never a reading of our own stream** (#2253). Once our audio context has
+ *   started, `isMusicActive()` stays true for as long as it runs, even with
+ *   every sound paused (measured on the tablet, 2026-11-08): two readings in
+ *   a row then showed *Your music app* with no other app playing. So a
+ *   reading is believed only when our own output held no stream open at the
+ *   ask, and had not opened one by the answer ({@link OwnOutput}); any other
+ *   reading changes nothing and breaks the run of two. `menu-music.ts`
+ *   suspends our context on a quiet menu route, so most readings there are
+ *   believed.
  *
  * ## What a press sends
  *
@@ -39,6 +48,7 @@
  * an export and a sync payload after the control has been used.
  */
 
+import type { CueOutput } from '../game/audio-port';
 import { isNativeShell, shellPlatform, type CapacitorGlobal } from '../support/capacitor';
 
 import type { OtherPlayerKey, OtherPlayerPort, RiderPlayerInUse } from './other-player-port';
@@ -66,6 +76,12 @@ export interface OtherPlayerClock {
   /** Call `tick` every `milliseconds`. @returns the stop. */
   every(milliseconds: number, tick: () => void): () => void;
 }
+
+/**
+ * Our own audio output, as far as a reading needs it — #2253: the app's one
+ * `CueOutput` (`game/web-audio.ts` §`sharedCueOutput`).
+ */
+export type OwnOutput = Pick<CueOutput, 'quietToken'>;
 
 /** The page's own clock and `setInterval`. */
 export const BROWSER_OTHER_PLAYER_CLOCK: OtherPlayerClock = {
@@ -100,10 +116,22 @@ export class OtherPlayer implements RiderPlayerInUse {
   /** When the last press was made, or `-Infinity`. */
   #pressedAt = Number.NEGATIVE_INFINITY;
   #polling = false;
+  readonly #own: OwnOutput | undefined;
+  readonly #readingListeners = new Set<() => void>();
 
-  constructor(port: OtherPlayerPort, clock: OtherPlayerClock = BROWSER_OTHER_PLAYER_CLOCK) {
+  /**
+   * @param own our own audio output, whose open stream the platform counts as
+   *   music playing (#2253). `main.tsx` hands in the app's one output;
+   *   `undefined` believes every reading, for a port that cannot hear us.
+   */
+  constructor(
+    port: OtherPlayerPort,
+    clock: OtherPlayerClock = BROWSER_OTHER_PLAYER_CLOCK,
+    own: OwnOutput | undefined = undefined,
+  ) {
     this.#port = port;
     this.#clock = clock;
+    this.#own = own;
   }
 
   /** For `useSyncExternalStore`: the same object until something changes. */
@@ -119,6 +147,13 @@ export class OtherPlayer implements RiderPlayerInUse {
 
   riderPlayerInUse(): boolean {
     return this.#snapshot.playing;
+  }
+
+  onReading(listener: () => void): () => void {
+    this.#readingListeners.add(listener);
+    return () => {
+      this.#readingListeners.delete(listener);
+    };
   }
 
   /**
@@ -143,6 +178,9 @@ export class OtherPlayer implements RiderPlayerInUse {
   async poll(): Promise<void> {
     if (this.#polling) return;
     this.#polling = true;
+    // #2253: our own stream, open at the ask or opened by the answer, would be
+    // read as music playing.
+    const quietAtAsk = this.#own?.quietToken();
     let active: boolean;
     try {
       active = (await this.#port.otherAudioActive()) === true;
@@ -151,6 +189,14 @@ export class OtherPlayer implements RiderPlayerInUse {
     } finally {
       this.#polling = false;
     }
+    if (
+      this.#own !== undefined &&
+      (quietAtAsk === undefined || this.#own.quietToken() !== quietAtAsk)
+    ) {
+      // Not believed: it may be us. Nor is it one of two in a row.
+      this.#lastReadingActive = false;
+      return;
+    }
     const sighted = active && this.#lastReadingActive;
     this.#lastReadingActive = active;
     const settling = this.#clock.now() - this.#pressedAt < PRESS_SETTLE_MILLISECONDS;
@@ -158,6 +204,7 @@ export class OtherPlayer implements RiderPlayerInUse {
       seen: this.#snapshot.seen || sighted,
       playing: settling ? this.#snapshot.playing : active,
     });
+    for (const listener of [...this.#readingListeners]) listener();
   }
 
   /** A press on the header's control. Never rejects: a key not sent is a press that did nothing. */

@@ -133,7 +133,7 @@ import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
-import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
+import { BROWSER_OTHER_PLAYER_CLOCK, OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -467,8 +467,14 @@ async function buildPlatform(
     );
     // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
     // others in `MainActivity`: media keys have nothing to do with a link.
+    // #2253: over the app's one audio output, so a reading of our own open
+    // stream is never believed as the rider's player.
     const otherPlayer = otherPlayerOffered(platformCapacitor())
-      ? new OtherPlayer(mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()))
+      ? new OtherPlayer(
+          mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()),
+          BROWSER_OTHER_PLAYER_CLOCK,
+          sharedCueOutput(),
+        )
       : undefined;
     return {
       rideController,

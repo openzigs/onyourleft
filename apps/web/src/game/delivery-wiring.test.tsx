@@ -153,12 +153,19 @@ vi.mock('./delivery/ride-round', async (importOriginal) => {
  * round, so it is read back off the input the drawn frame was made from.
  */
 const steeredInputs = vi.hoisted((): (number | undefined)[] => []);
+/**
+ * The `cameraLateral` of every input `GameView` built a frame from, in order
+ * — #2396, read back for `steeredLateral`'s reason: `scene.ts`
+ * §`SceneInput.cameraLateral` is optional the unsafe way round too.
+ */
+const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
     ...actual,
     sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
       steeredInputs.push(args[0].steeredLateral);
+      cameraInputs.push(args[0].cameraLateral);
       return actual.sceneFrame(...args);
     },
   };
@@ -2170,6 +2177,28 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
       expect(without.offered).not.toContain('delivery-crash');
       expect(without.writes.length).toBeGreaterThan(20);
       expect(withCars.writes).toStrictEqual(without.writes);
+    },
+  );
+
+  it(
+    'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',
+    { timeout: 30_000 },
+    async () => {
+      steeredInputs.length = 0;
+      cameraInputs.length = 0;
+      const ridden = await rideLevel('normal');
+      expect(ridden.offered).toContain('delivery-crash');
+      // Every frame a round steered carried the eye too: none forgot it.
+      const steered = steeredInputs.flatMap((lateral, index) =>
+        lateral === undefined ? [] : [{ lateral, eye: cameraInputs[index] }],
+      );
+      expect(steered.length).toBeGreaterThan(20);
+      for (const frame of steered) expect(typeof frame.eye).toBe('number');
+      // And passing the car, the eye stood off it, toward the middle of the road.
+      const movedOff = steered.filter(
+        (frame) => frame.eye !== undefined && frame.lateral - frame.eye > 0.5,
+      );
+      expect(movedOff.length).toBeGreaterThan(0);
     },
   );
 });

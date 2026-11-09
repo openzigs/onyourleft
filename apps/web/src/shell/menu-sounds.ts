@@ -37,8 +37,12 @@
  * A menu sound resumes the shared context and does not suspend it again. The
  * ride's `release()` (#447) suspends only a context a RIDE began, and a delayed
  * suspend here could land on a ride a rider started inside its delay, which
- * would silence the ride's tone. So an idle context runs on after a menu sound
- * until the page goes or a ride ends: the cost of a feature a rider turned on.
+ * would silence the ride's tone. So in a browser an idle context runs on after
+ * a menu sound until the page goes or a ride ends: the cost of a feature a
+ * rider turned on. In the Android shell `menu-music.ts` suspends it a second
+ * after the last menu sound on a quiet menu route (#2253: its open stream reads
+ * as the rider's own player), and asks again when that second is up, so the
+ * suspension never lands on a ride or a workout begun inside it.
  *
  * ## A sound is never the only carrier
  *

@@ -874,22 +874,31 @@ export const RIDE_CLOCK_LABEL = 'Ride';
  * HUD are told apart by their labels, and `Moving` is not `Moving time` for
  * {@link movingTimeReading}'s reason. Where each is drawn is `theme.css`
  * §"THE CLOCK ROW".
- */
-/**
+ *
  * ## Where nothing records — #2382
  *
  * A simulated ride, an unrecorded one, or a browser that cannot record has no
  * recorder figure, and until #2382 this field was a dash for the whole ride.
  * There it shows the ride's own clock instead — the simulation's
- * `GameState.elapsed`, which counts from the ride's first step and stops
- * while the game is paused (the loop does not run) — under the label
+ * `GameState.elapsed`, which counts from the ride's first step on the wall
+ * clock, stall included — under the label
  * {@link RIDE_CLOCK_LABEL}, never `Elapsed`.
  *
- * ⚠️ **One figure or the other, never both, and the label says which.** The
- * recorder's figure counts the pauses and the ride's clock does not, so the
- * two would disagree after the first pause; a rider who reads `Elapsed` reads
+ * ⚠️ **One figure or the other, never both, and the label says which.** Both
+ * count a pause, but they are not the same clock: the recorder's starts when
+ * the recording does and moves only on the instants the recording is told
+ * about, while the ride's starts at the ride's first step and moves on the
+ * wall clock, so the two would disagree. A rider who reads `Elapsed` reads
  * what the saved activity will say, and `Ride` is only ever on a ride that
- * saves nothing to disagree with. The moment a recording runs its figure
+ * saves nothing to disagree with.
+ *
+ * ⚠️ **The ride's clock freezes on screen while the game is paused (no frame
+ * runs) and then jumps by the whole pause on resume**: nothing calls
+ * `holdAt` on resume, so `advanceTo` credits every step owed since the origin
+ * (`simulation.ts`). Whether it should hold instead is the owner's call
+ * (#2404's review); `GameView.test.tsx` pins what it does today.
+ *
+ * The moment a recording runs its figure
  * replaces this one ({@link HudInput.elapsedSeconds} is defined), and
  * {@link movingTimeReading} is never given this fallback: a moving time is
  * the recorder's or a dash.

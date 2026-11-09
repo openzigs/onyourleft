@@ -11187,7 +11187,63 @@ const DELIVERY_PAINT = {
   carTrim: 0x2a2d31,
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
+  hazard: 0xe8432f,
 } as const;
+
+/**
+ * How high the middle of an obstacle's hazard marker floats above the road,
+ * in metres — #2396: **2.7**. @see obstacleHazardMarker
+ *
+ * Two bounds and the number between them. **Above the rider's line of
+ * sight**: the chase camera's eye is 2 m up and 4.5 m behind a 1.515 m helmet
+ * (`camera.ts` §`roadAppearsOverRiderMetres`), so anything in the rider's
+ * lane lower than that sight line is behind their back, and a bin 15 m to
+ * 60 m ahead, though drawn, sits within a few pixels of the helmet and reads
+ * as part of the rider — the defect #2396 is. A marker whose bottom is over
+ * about 1.6 m clears the helmet from a metre ahead, and at this height it
+ * stands about 7° above it at every distance. **Above the near plane's
+ * reach**: the eye passes over an obstacle a rider rode into, and the frustum
+ * nearer than `camera.ts` §`NEAR_PLANE_METRES` reaches 0.5 m above the eye
+ * on the widest (90 degree) lens, which the test holds, so 2.5 m above the
+ * road with the eye at 2.0 m; a marker lower than that would be cut through
+ * by the camera, #2396's other defect. Its bottom is at 2.52 m, a 0.02 m
+ * margin over that cut-off.
+ */
+const HAZARD_MARKER_MIDDLE_METRES = 2.7;
+
+/** How tall the hazard marker is, apex to base, in metres. @see obstacleHazardMarker */
+const HAZARD_MARKER_HEIGHT_METRES = 0.36;
+
+/**
+ * How far the hazard marker's corners reach from its middle, in metres:
+ * **0.2**, the cone's half width, so the marker stands inside every kind's
+ * collision box and the footprint `delivery-belt.test.ts` holds is unchanged.
+ */
+const HAZARD_MARKER_REACH_METRES = 0.2;
+
+/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+
+/**
+ * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
+ * at the obstacle from {@link HAZARD_MARKER_MIDDLE_METRES} above the road.
+ * From behind it is a ▼, which a doorstep's amber diamond on a white post is
+ * not. Every kind carries one, so it is drawn in the obstacles' own instanced
+ * call: no draw call, no instance and no wiring of its own.
+ *
+ * ⚠️ **On every bin, trolley and cone, not only one in the rider's lane.**
+ * The rider changes lane, a crossing obstacle crosses theirs, and a marker
+ * that came and went with the lane would be a second thing to watch. It is a
+ * drawing and decides nothing: no collision reads it. **Not on a parked
+ * car** ({@link HAZARD_MARKED_KINDS}): 1.8 m wide, a car is never behind a
+ * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
+ * the street does not have.
+ */
+function obstacleHazardMarker(): BufferGeometry {
+  return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
+    .rotateX(Math.PI)
+    .translate(0, HAZARD_MARKER_MIDDLE_METRES, 0);
+}
 
 /** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
 function parcelShape(): BufferGeometry {
@@ -11364,12 +11420,23 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
  * origin. Each kind's footprint is its collision box in `obstacles.ts`
  * §`OBSTACLE_KINDS`, `2 × halfWidth` across and `2 × halfLength` along, so
  * what the rider sees is what the rider hits; the test holds the two equal.
+ * Each kind also carries its hazard marker overhead ({@link
+ * obstacleHazardMarker}, #2396), inside that footprint.
  */
 function obstacleShape(): BufferGeometry {
   const parts: DeliveryPart[] = [];
   const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
     parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
   };
+  // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
+  for (const kind of HAZARD_MARKED_KINDS) {
+    parts.push({
+      made: obstacleHazardMarker(),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
+    });
+  }
   {
     const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfWidth;
     const along = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfLength;
@@ -11454,8 +11521,9 @@ function obstacleShape(): BufferGeometry {
 
 /**
  * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
- * review: **1 522**, the bin's 88, the trolley's 124, the cone's 42 and one
- * parked car's 1 268. Every obstacle instance submits all of them (the kind
+ * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
+ * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
+ * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
  * obstacles cost this many times the instances drawn in vertex work, and no
  * fragment for the collapsed ones.
@@ -11463,7 +11531,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_522;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

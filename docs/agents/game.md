@@ -154,7 +154,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         it LOOKS AT THE ROAD through a bend (`scene.ts`
                         §`cameraPose`: up to 25 m up the route, nearer where
                         that would push the rider past 20° off the axis) from
-                        the eye it always had, so in a bend the pose's x/z are
+                        the eye it always had (but a Delivery round moves it off a parked car, #2396,
+                        `delivery/camera-clear.ts`), so in a bend the pose's x/z are
                         not the rider; `GameView` damps its heading
                         (`dampedHeading`, frame-rate independent, slower under
                         reduced motion); `chase-camera-bend.test.ts` rides it
@@ -1024,7 +1025,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         calls do not bound the triangles** (#2362): every
                         obstacle instance submits the whole roster,
                         `three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`
-                        (1 522, one car painted per instance), pinned by
+                        (1 546, one car painted per instance), pinned by
                         `delivery-belt.test.ts`; the 20-piece village frame
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
