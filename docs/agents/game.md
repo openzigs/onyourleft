@@ -1024,7 +1024,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         calls do not bound the triangles** (#2362): every
                         obstacle instance submits the whole roster,
                         `three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`
-                        (1 522, one car painted per instance), pinned by
+                        (1 546, one car painted per instance), pinned by
                         `delivery-belt.test.ts`; the 20-piece village frame
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;

@@ -240,7 +240,7 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
-  it('carries a glowing hazard marker over each obstacle, above the rider’s helmet and out of the camera’s near reach — #2396', () => {
+  it('carries a glowing hazard marker over each bin, trolley and cone, above the rider’s helmet and out of the camera’s near reach, and none over a parked car — #2396', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('obstacles').geometry;
     const position = geometry.getAttribute('position');
@@ -259,6 +259,11 @@ describe('Delivery’s belt — #1814', () => {
         if (kinds.getX(at) !== ROSTER.indexOf(kind) || glow.getX(at) !== 1) continue;
         glowing += 1;
         lowest = Math.min(lowest, position.getY(at));
+      }
+      if (kind === 'parked-car') {
+        // 1.8 m wide, never behind the rider: no sign over an ordinary parked car.
+        expect(glowing, kind).toBe(0);
+        continue;
       }
       expect(glowing, kind).toBeGreaterThan(0);
       expect(lowest, kind).toBeGreaterThan(RIDER_HEIGHT_METRES);
@@ -575,7 +580,8 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // The kind collapse is per vertex, so EVERY obstacle instance, a bin's or a
     // cone's too, runs every kind's triangles through the vertex shader. Round 5
     // held three whole cars (4 526); one painted car is 1 522: bin 88, trolley
-    // 124, cone 42 and the car 1 268. A change past this is for the owner and
+    // 124, cone 42 and the car 1 268, and #2396 adds 8 for each of three hazard
+    // markers, 1 546. A change past this is for the owner and
     // the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');

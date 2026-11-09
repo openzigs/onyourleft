@@ -11226,11 +11226,17 @@ const HAZARD_MARKER_REACH_METRES = 0.2;
  * not. Every kind carries one, so it is drawn in the obstacles' own instanced
  * call: no draw call, no instance and no wiring of its own.
  *
- * ⚠️ **On every obstacle, not only one in the rider's lane.** The rider
- * changes lane, a crossing obstacle crosses theirs, and a marker that came
- * and went with the lane would be a second thing to watch. It is a drawing
- * and decides nothing: no collision reads it.
+ * ⚠️ **On every bin, trolley and cone, not only one in the rider's lane.**
+ * The rider changes lane, a crossing obstacle crosses theirs, and a marker
+ * that came and went with the lane would be a second thing to watch. It is a
+ * drawing and decides nothing: no collision reads it. **Not on a parked
+ * car** ({@link HAZARD_MARKED_KINDS}): 1.8 m wide, a car is never behind a
+ * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
+ * the street does not have.
  */
+/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+
 function obstacleHazardMarker(): BufferGeometry {
   return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
     .rotateX(Math.PI)
@@ -11420,8 +11426,8 @@ function obstacleShape(): BufferGeometry {
   const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
     parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
   };
-  // #2396: each kind's hazard marker, over its own shape and collapsed with it.
-  for (const kind of DELIVERY_OBSTACLE_ORDER) {
+  // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
+  for (const kind of HAZARD_MARKED_KINDS) {
     parts.push({
       made: obstacleHazardMarker(),
       colour: DELIVERY_PAINT.hazard,
@@ -11513,8 +11519,9 @@ function obstacleShape(): BufferGeometry {
 
 /**
  * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
- * review: **1 522**, the bin's 88, the trolley's 124, the cone's 42 and one
- * parked car's 1 268. Every obstacle instance submits all of them (the kind
+ * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
+ * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
+ * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
  * obstacles cost this many times the instances drawn in vertex work, and no
  * fragment for the collapsed ones.
@@ -11522,7 +11529,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_522;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

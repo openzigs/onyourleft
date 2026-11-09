@@ -572,7 +572,7 @@ export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
  * PR #2378's review: **205 000**. Beside {@link DELIVERY_VILLAGE_DRAW_CALLS},
  * because the belt's calls stay at three while its obstacle geometry can grow
  * unseen: every obstacle instance submits the whole roster
- * (`three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`, 1 522). Measured on the
+ * (`three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`, 1 522; 1 546 since #2396). Measured on the
  * frozen frame with 20 of each piece in the pinned Chromium on 2026-11-09:
  * 201 356 triangles (the level frame, `town=level`, 181 615). Round 5's three
  * whole cars made it 261 436, within 2 % of the frame #1523 measured on the
