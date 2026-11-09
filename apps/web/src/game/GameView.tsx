@@ -996,6 +996,15 @@ interface PreviewAsked {
 }
 
 /**
+ * The wall clock a simulated ride's frames are timed by when none is injected.
+ * A module-level function so its identity is the same on every render
+ * (#2379): `frameNow` is a dependency of the ride effect.
+ */
+function performanceNow(): number {
+  return performance.now();
+}
+
+/**
  * What a simulated ride is given in place of the shell's props — #1992.
  *
  * ⚠️ **No trainer port, no room and no rooms, and no Delivery round**, and
@@ -1022,7 +1031,7 @@ function useSimulatedRide(
     () =>
       simulated === undefined
         ? givenNow
-        : simulatedClock(givenNow ?? (() => performance.now()), simulated.speedup),
+        : simulatedClock(givenNow ?? performanceNow, simulated.speedup),
     [givenNow, simulated],
   );
   if (simulated === undefined) return given;
@@ -1030,7 +1039,11 @@ function useSimulatedRide(
     ...given,
     port,
     now,
-    frameNow: givenNow ?? (() => performance.now()),
+    // ⚠️ #2379: `performanceNow`, not an arrow written here. This is a
+    // dependency of the ride effect, and an arrow made on every render re-ran
+    // that effect on every render of the screen — a loader call (every scenery
+    // model again) cancelled before its view was made, so no frame was drawn.
+    frameNow: givenNow ?? performanceNow,
     trainer: undefined,
     room: undefined,
     roomId: undefined,

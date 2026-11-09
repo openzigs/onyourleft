@@ -61,8 +61,13 @@ function times(text: string | null | undefined, part: string): number {
   return (text ?? '').split(part).length - 1;
 }
 
-/** On the tailor pane: 45 minutes at −5 %, then the address *Ride it* links to. */
-async function rideItAddress(): Promise<string> {
+/**
+ * On the tailor pane: 45 minutes at `intensity` (−5 % unless said), then the
+ * address *Ride it* links to. `undefined` leaves the intensity as written.
+ */
+async function rideItAddress(
+  options: { readonly intensity?: string | undefined } = { intensity: '-5' },
+): Promise<string> {
   mounted = await mount(
     <WorkoutsView port={workoutStub(OWNER)} selected="built-in:sweet-spot-3x12" />,
   );
@@ -74,7 +79,7 @@ async function rideItAddress(): Promise<string> {
     throw new Error('no tailor controls');
   }
   await chooseOption(length, '45');
-  await typeInto(intensity, '-5');
+  if (options.intensity !== undefined) await typeInto(intensity, options.intensity);
   const link = queryAll<HTMLAnchorElement>(pane as Element, 'a').find(
     (each) => each.textContent === 'Ride it',
   );
@@ -171,6 +176,33 @@ describe('Ride it opens the Ride screen with the tailored built-in loaded — #2
     expect(document.body.textContent).toContain('Set your threshold power on the Analysis screen');
     expect(rideButton()).toBeUndefined();
     expect(stub.calls.startWorkout).toEqual([]);
+  });
+
+  it('says a length-only choice’s length once, beside a name that is the template’s — #2351', async () => {
+    const href = await rideItAddress({ intensity: undefined });
+    expect(href).toBe('#/ride?workout=built-in%3Asweet-spot-3x12&length=45');
+    const { stub, started } = await rideScreen(href, { thresholdPower: 250 });
+
+    const lengthOnly = SWEET_SPOT.name;
+    const panel = document.querySelector('.oyl-ride__group--trainer');
+    expect(panel?.textContent).toContain(`${lengthOnly} — 47 min,`);
+    const line = queryAll(panel ?? document, 'li').find((each) =>
+      (each.textContent ?? '').startsWith(lengthOnly),
+    );
+    expect(line).toBeDefined();
+    expect(times(line?.textContent, '47 min')).toBe(1);
+    expect(times(line?.textContent, '45 min')).toBe(0);
+
+    const ride = queryAll<HTMLButtonElement>(document, 'button').find((each) =>
+      (each.textContent ?? '').startsWith(`Ride ${lengthOnly}`),
+    );
+    expect(ride).toBeDefined();
+    await activateWithKeyboard(ride as HTMLButtonElement);
+    await settle();
+    expect(stub.calls.startWorkout).toEqual([lengthOnly]);
+    expect(started[0]?.workout.blocks).toStrictEqual(
+      tailorWorkout(SWEET_SPOT, { targetMinutes: 45 }).blocks,
+    );
   });
 
   it('lists it first, before the saved workouts, each with its own Ride', async () => {
