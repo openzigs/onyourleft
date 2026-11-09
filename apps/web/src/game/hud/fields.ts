@@ -434,6 +434,10 @@ export interface HudInput {
    * does not count, and an hour in the HUD and the saved ride would disagree
    * about how long the rider rode.
    *
+   * The one place the simulation's clock is shown is a ride with NO recorder
+   * figure, under its own label, where there is no saved ride to disagree
+   * with — #2382, `elapsedTimeReading` — and never as a moving time.
+   *
    * `undefined` where nothing is being recorded — no ride controller, or no
    * ride started on the Ride screen — and then the field shows
    * {@link NO_READING}: there is no moving time to quote, and a zero would say
@@ -455,8 +459,10 @@ export interface HudInput {
    * the two differ by exactly the time paused, which is the whole of what a
    * rider reading both is told.
    *
-   * `undefined` where nothing is being recorded, and then the field shows
-   * {@link NO_READING}, as the moving time does.
+   * `undefined` where nothing is being recorded, and then — since #2382 —
+   * the field is not a dash: it shows the RIDE's own clock instead, under
+   * another label ({@link elapsedTimeReading} says which, and why it is not
+   * a second clock beside this one).
    */
   readonly elapsedSeconds?: number | undefined;
   /**
@@ -616,7 +622,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // beside both. Each is present on every ride (the clock on every ride's
     // HUD), so their indices are the same on every ride; they moved every
     // gap, room and wind field two places along, once.
-    elapsedTimeReading(input.elapsedSeconds),
+    elapsedTimeReading(input.elapsedSeconds, state.elapsed),
     ...clockReading(input.timeOfDay),
     // #2076: the ride so far, after the clock and before every gap. Present
     // on every ride (a dash with nothing recorded), so their indices are the
@@ -853,6 +859,12 @@ function movingTimeReading(movingSeconds: number | undefined): HudReading {
 export const ELAPSED_TIME_KEY = 'elapsedTime';
 
 /**
+ * The label of the ride's own clock, where nothing records — #2382.
+ * @see elapsedTimeReading
+ */
+export const RIDE_CLOCK_LABEL = 'Ride';
+
+/**
  * The elapsed-time field — #2072: the ride's time with its pauses, beside
  * {@link movingTimeReading}'s without them, in the same `h:mm:ss`, never
  * stale, and set at the word size past ten hours for the same reason.
@@ -862,8 +874,47 @@ export const ELAPSED_TIME_KEY = 'elapsedTime';
  * HUD are told apart by their labels, and `Moving` is not `Moving time` for
  * {@link movingTimeReading}'s reason. Where each is drawn is `theme.css`
  * §"THE CLOCK ROW".
+ *
+ * ## Where nothing records — #2382
+ *
+ * A simulated ride, an unrecorded one, or a browser that cannot record has no
+ * recorder figure, and until #2382 this field was a dash for the whole ride.
+ * There it shows the ride's own clock instead — the simulation's
+ * `GameState.elapsed`, which counts from the ride's first step on the wall
+ * clock, stall included — under the label
+ * {@link RIDE_CLOCK_LABEL}, never `Elapsed`.
+ *
+ * ⚠️ **One figure or the other, never both, and the label says which.** Both
+ * count a pause, but they are not the same clock: the recorder's starts when
+ * the recording does and moves only on the instants the recording is told
+ * about, while the ride's starts at the ride's first step and moves on the
+ * wall clock, so the two would disagree. A rider who reads `Elapsed` reads
+ * what the saved activity will say, and `Ride` is only ever on a ride that
+ * saves nothing to disagree with.
+ *
+ * ⚠️ **The ride's clock freezes on screen while the game is paused (no frame
+ * runs) and then jumps by the whole pause on resume**: nothing calls
+ * `holdAt` on resume, so `advanceTo` credits every step owed since the origin
+ * (`simulation.ts`). Whether it should hold instead is the owner's call
+ * (#2404's review); `GameView.test.tsx` pins what it does today.
+ *
+ * The moment a recording runs its figure
+ * replaces this one ({@link HudInput.elapsedSeconds} is defined), and
+ * {@link movingTimeReading} is never given this fallback: a moving time is
+ * the recorder's or a dash.
+ *
+ * ⚠️ **Same key, same place.** The field keeps {@link ELAPSED_TIME_KEY}, so it
+ * is drawn where *Elapsed* is (`theme.css` §"THE CLOCK ROW") and #94's order
+ * is unchanged; only its label and its figure differ. `Ride` is shorter than
+ * `Elapsed`, so the row it was measured at still holds it.
  */
-function elapsedTimeReading(elapsedSeconds: number | undefined): HudReading {
+function elapsedTimeReading(
+  elapsedSeconds: number | undefined,
+  rideClockSeconds: number,
+): HudReading {
+  if (elapsedSeconds === undefined) {
+    return rideTimeReading(ELAPSED_TIME_KEY, RIDE_CLOCK_LABEL, rideClockSeconds);
+  }
   return rideTimeReading(ELAPSED_TIME_KEY, 'Elapsed', elapsedSeconds);
 }
 

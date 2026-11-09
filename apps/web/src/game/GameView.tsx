@@ -3001,8 +3001,9 @@ function GameScreen({
         setState(simulation.state);
       }
 
-      // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
-      // run while the ride is paused — nor does this loop), from the same
+      // #397: the announcer, on the RIDE's clock (`elapsed`, the wall clock:
+      // no frame runs while the game is paused, so nothing announces then,
+      // and the pause is counted on resume), from the same
       // readings the HUD renders. Pure: its carry-over lives in the ref.
       const readings = hudReadings({
         state: simulation.state,
@@ -4078,8 +4079,9 @@ function GameScreen({
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
-  // way unless the rider asks for it — on the RIDE's clock, so a paused ride
-  // does not put away a notice nobody has had time to read.
+  // way unless the rider asks for it — on the RIDE's clock (`elapsed`, the
+  // wall clock: frozen on screen while the game is paused, and on resume it
+  // counts the whole pause, so a long pause puts the notice away).
   const noticeOpen =
     noticeChoice === 'open' ||
     (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);

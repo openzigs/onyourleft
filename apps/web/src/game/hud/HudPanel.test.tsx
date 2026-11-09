@@ -254,7 +254,7 @@ describe('the HUD is four panels (#423)', () => {
       'To go',
       'Moving',
       // #2072: the elapsed time and the clock, after the moving time.
-      'Elapsed',
+      'Ride', // #2382: nothing recorded here, so the ride's own clock
       'Clock',
       // #2076: the ride so far, after the clock and before every gap.
       'Distance',
@@ -290,7 +290,7 @@ describe('the HUD is four panels (#423)', () => {
       'Speed',
       'To go',
       'Moving',
-      'Elapsed',
+      'Ride',
       'Clock',
       'Distance',
       'Climbed',
@@ -555,11 +555,17 @@ describe('the elapsed time and the clock beside the moving time — #2072', () =
     expect(labels.indexOf('Clock')).toBe(labels.indexOf('Elapsed') + 1);
   });
 
-  it('shows a dash for each where nothing is being recorded', async () => {
-    mounted = await mount(<HudPanel {...base} />);
+  it('shows a dash for the moving time and the ride’s own clock where nothing is being recorded — #2382', async () => {
+    mounted = await mount(<HudPanel {...base} state={{ ...base.state, elapsed: seconds(754) }} />);
 
     expect(field('Moving').value).toBe('—');
-    expect(field('Elapsed').value).toBe('—');
+    // #2382: not a dash, and not *Elapsed*: the ride's clock, under its own
+    // label, in the elapsed field's place.
+    expect(field('Ride').value).toBe('0:12:34');
+    expect(field('Ride').classes).toContain('oyl-hud__field--elapsed');
+    expect(queryAll(mounted.container, 'dt').map((each) => each.textContent)).not.toContain(
+      'Elapsed',
+    );
   });
 
   it('leaves the demo’s HUD with neither: no clock handed in, and its elapsed time left out', async () => {
@@ -899,7 +905,7 @@ describe('the rider’s HUD layout — #2079', () => {
       mounted = await mount(
         <HudPanel {...base} {...input} layout={{ hidden: ['readings'], textSize: 'normal' }} />,
       );
-      expect(secondaryLabels()).toEqual(['Moving', 'Elapsed', 'Clock', ...own]);
+      expect(secondaryLabels()).toEqual(['Moving', 'Ride', 'Clock', ...own]);
     });
   }
 
