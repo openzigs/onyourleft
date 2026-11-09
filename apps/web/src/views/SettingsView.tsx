@@ -1921,9 +1921,9 @@ function HudLayoutPanel({
             What the game shows while you ride, from your next ride. Power, cadence and heart rate,
             the ride controls and every notice are always shown. Focus shows one compact readout at
             the top in place of every reading; a ride in a room, a Delivery round or a lap race
-            keeps the full layout and draws no totals strip. The text size applies on tablets, and
-            the totals strip on tablets on their side: a phone or a short window keeps the normal
-            size, and has no strip, because it has no room for them beside the road.
+            keeps the full layout and draws no totals strip. The text size and the totals strip
+            apply on tablets, held either way: a phone or a short window keeps the normal size, and
+            has no strip, because it has no room for them beside the road.
           </p>
         }
       >

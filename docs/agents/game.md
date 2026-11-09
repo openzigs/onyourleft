@@ -1183,9 +1183,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         never a load metric) and Climbed. To go and Climbed are
                         the tiers' own readings picked by key; Avg speed is
                         Distance over Moving and Energy the recorder's work
-                        (`recording/totals.ts`). Drawn only on the landscape
-                        tablets (`theme.css` §"THE TOTALS STRIP" has the
-                        measurements); not on a ride with a mode, or the demo
+                        (`recording/totals.ts`). Drawn only on tablets: on
+                        their side between the bottom panels, upright on the
+                        actions panel (`theme.css` §"THE TOTALS STRIP" has the
+                        measurements); not on phones, a ride with a mode, or
+                        the demo
     src/game/hud/recent-trace.ts, RecentGraph.tsx
                         the last ten minutes of power and heart rate (#2078):
                         a fixed ring of 600 one-second slots, written from the

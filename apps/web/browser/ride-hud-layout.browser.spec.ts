@@ -46,6 +46,7 @@ import {
   type Viewport,
 } from './ride-stage';
 import type { StageMeasurement } from './ride-harness';
+import { PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 test.afterAll(releaseSharedPage);
@@ -322,7 +323,9 @@ for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
  *
  * - drawn along the bottom between the route panel and the actions panel
  *   where `theme.css` §"THE TOTALS STRIP" has the room — the two landscape
- *   tablets — and given way everywhere else on the stage, said so;
+ *   tablets — and, on a tablet held upright (the owner's ruling of
+ *   2026-11-09), on the actions panel in its column, beside the route panel;
+ *   and given way everywhere else on the stage — the phones — said so;
  * - its five readings (six on a loop) in order, and on this harness, which
  *   records, the port's figures: `RIDE_TOTALS`' energy and climb, and its
  *   distance over the moving time as the average speed — so the strip is
@@ -334,12 +337,57 @@ const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Climbed'];
 /** `RIDE_TOTALS` and `MOVING_SECONDS` in `ride-harness.tsx`, as the strip shows them. */
 const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '4850 m' };
 
-/** Where the stage has room for the strip: the two landscape tablets. */
+/**
+ * Where the stage has room for the strip: the two landscape tablets, and the
+ * owner's tablet upright (`theme.css` §"THE TOTALS STRIP ON A TABLET HELD
+ * UPRIGHT": 68 rem tall or more). Not a phone, either way.
+ */
 const STRIP_DRAWN = new Set(
-  OVERLAY_VIEWPORTS.filter((each) => each.width >= 960 && each.height >= 640).map(
+  OVERLAY_VIEWPORTS.filter(
+    (each) =>
+      (each.width >= 960 && each.height >= 640) || (each.width >= 736 && each.height >= 1088),
+  ).map((each) => each.name),
+);
+
+/** The upright tablets the strip is drawn on, which place it on the actions panel. */
+const STRIP_UPRIGHT = new Set(
+  OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.name) && each.height > each.width).map(
     (each) => each.name,
   ),
 );
+
+/**
+ * Where the strip is on the stage, beside the panels it is placed by:
+ * landscape, along the bottom between the route panel and the actions panel;
+ * upright, on the actions panel and in its column, beside the route panel.
+ */
+function stripPlaceFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const strip = stripPanel(seen);
+  if (strip === undefined) return ['no strip'];
+  const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+  const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+  if (actions === undefined) return ['no actions panel'];
+  const faults: string[] = [];
+  if (route !== undefined && route.box.width > 1 && strip.box.left <= route.box.right) {
+    faults.push(
+      `strip ${String(strip.box.left)} not right of the route panel ${String(route.box.right)}`,
+    );
+  }
+  if (STRIP_UPRIGHT.has(viewport.name)) {
+    // On the actions panel, in the bottom row beside the route panel, and no
+    // wider than the actions panel's column. With the route turned off what is
+    // left of its panel is 82 px tall and the strip stands above it.
+    if (strip.box.bottom > actions.box.top) faults.push('strip not above the actions panel');
+    if (route !== undefined && route.box.width > 1 && route.box.height > 100) {
+      if (strip.box.top < route.box.top) faults.push('strip above the route panel’s top');
+    }
+    if (strip.box.right > actions.box.right + 1) faults.push('strip past the actions panel');
+  } else {
+    if (viewport.height - strip.box.bottom > 16) faults.push('strip not along the bottom');
+    if (strip.box.right >= actions.box.left) faults.push('strip not left of the actions panel');
+  }
+  return faults;
+}
 
 /** The strip's panel, where it is drawn. */
 function stripPanel(seen: StageMeasurement): StageMeasurement['panels'][number] | undefined {
@@ -383,14 +431,7 @@ for (const arrangement of ['full', 'focus'] as const) {
           expect(seen.givenWay, how).not.toContain('the totals strip');
           expect(strip, how).toBeDefined();
           if (strip === undefined) continue;
-          const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
-          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-          // Along the bottom, between the two bottom panels.
-          expect(viewport.height - strip.box.bottom, how).toBeLessThanOrEqual(16);
-          if (route !== undefined && route.box.width > 1) {
-            expect(strip.box.left, how).toBeGreaterThan(route.box.right);
-          }
-          expect(strip.box.right, how).toBeLessThan(actions?.box.left ?? 0);
+          expect(stripPlaceFaults(seen, viewport), how).toEqual([]);
           // Every reading on it on the stage and uncovered (`layoutFaults`
           // holds each item), with the port's figures.
           const names = seen.items.map((each) => each.name);
@@ -428,6 +469,80 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
     }
   });
 }
+
+/**
+ * The owner's ruling of 2026-11-09: the strip on the owner's tablet held
+ * upright, 800×1280. Beyond the cases above: with the route panel turned off,
+ * where the actions panel's two rows are no longer held open by the route
+ * panel and the strip must still sit on the actions panel, not over it; and
+ * with the Pixel Tablet's insets, which lift every bottom panel towards the
+ * rider (`insets.ts` §`PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED`).
+ */
+const UPRIGHT_TABLET = OVERLAY_VIEWPORTS.find((each) => each.width === 800 && each.height === 1280);
+
+test('#2387 upright, the totals strip sits on the actions panel with the route panel off', async ({
+  browser,
+}) => {
+  if (UPRIGHT_TABLET === undefined) throw new Error('no 800×1280 viewport');
+  const page = await sharedRide(browser, UPRIGHT_TABLET, '?totals=strip&hide=route');
+  for (const [how, seen] of await bothWays(page)) {
+    expect(sizeFaults(seen, UPRIGHT_TABLET).faults, how).toEqual([]);
+    expect(stripPlaceFaults(seen, UPRIGHT_TABLET), how).toEqual([]);
+  }
+});
+
+test('#2387 upright, the totals strip clears the rider with the tablet’s insets', async ({
+  browser,
+}) => {
+  if (UPRIGHT_TABLET === undefined) throw new Error('no 800×1280 viewport');
+  const page = await sharedRide(browser, UPRIGHT_TABLET, '?totals=strip');
+  const { top, bottom } = PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED;
+  await page.evaluate(
+    ([above, below]) => {
+      const style = document.documentElement.style;
+      style.setProperty('--safe-area-inset-top', `${String(above)}px`);
+      style.setProperty('--safe-area-inset-bottom', `${String(below)}px`);
+    },
+    [top, bottom] as const,
+  );
+  try {
+    const seen = await measure(page);
+    const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+    // The insets are in force: the actions panel is lifted off the bottom.
+    expect(
+      UPRIGHT_TABLET.height - (actions?.box.bottom ?? UPRIGHT_TABLET.height),
+    ).toBeGreaterThanOrEqual(bottom);
+    expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
+    expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
+  } finally {
+    await page.evaluate(() => {
+      const style = document.documentElement.style;
+      style.removeProperty('--safe-area-inset-top');
+      style.removeProperty('--safe-area-inset-bottom');
+    });
+  }
+});
+
+/**
+ * And the edge of the rule: a tablet upright under 68 rem tall keeps it
+ * hidden. At 768×1024 the strip measured 13 px under the leaning rider with
+ * no insets, which a gesture bar's inset takes.
+ */
+test('#2387 a shorter upright tablet, 768×1024, gives the totals strip way', async ({
+  browser,
+}) => {
+  const viewport: Viewport = {
+    name: 'a shorter tablet upright — 768×1024',
+    width: 768,
+    height: 1024,
+    unstagedFails: false,
+  };
+  // Not a viewport the HUD's layout is held at (its route panel meets the
+  // leaning rider with no strip at all), so only the strip is held here.
+  const seen = await measure(await sharedRide(browser, viewport, '?totals=strip'));
+  expect(stripPanel(seen)).toBeUndefined();
+  expect(seen.givenWay).toContain('the totals strip');
+});
 
 for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
   test(`#2387 ${mode} draws no totals strip with the strip chosen`, async ({ browser }) => {
