@@ -781,13 +781,6 @@ const ONE_NOTICE_ONLY_QUERY = '(min-width: 22.5rem) and (width < 25rem) and (min
  */
 const REPLANS_OFF_SAID = `${REPLAN_LABEL}: ${REPLANS_OFF}`;
 
-/** Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names. `false` with no `matchMedia`. */
-function oneNoticeOnly(): boolean {
-  return (
-    typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
-  );
-}
-
 /** What there is to watch with no trainer port: nothing, and nothing to stop. */
 function watchNothing(): () => void {
   return () => undefined;
@@ -922,7 +915,7 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
 }
 
 /**
- * {@link oneNoticeOnly}, kept current — #693's re-review.
+ * Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names, kept current — #693's re-review.
  *
  * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
  * every frame, but a PAUSED one does not, so a rider who paused and turned a
@@ -931,12 +924,39 @@ function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
  * keep off the rider. The `change` event re-renders the HUD by itself.
  */
 function useOneNoticeOnly(): boolean {
-  const [matches, setMatches] = useState(oneNoticeOnly);
+  return useMediaMatch(ONE_NOTICE_ONLY_QUERY);
+}
+
+/**
+ * Whether this window is a phone's — #2381, the owner's ruling of 2026-11-08
+ * on PR #2390's round 3: *"the road notice gives way to Not recording only
+ * where space is short (phones). On a tablet both notices show."* A phone is
+ * a window whose shorter side is 30 rem (480 px) or less, the line the
+ * browser gate draws between its phone and tablet viewports
+ * (`ride-stage.ts` §`TABLET_VIEWPORTS`); both of a phone's layouts, corners
+ * on its side and column upright, have no free cell for a second notice
+ * (`theme.css` §"WHERE THERE IS NO FREE CELL").
+ */
+const SHORT_OF_SPACE_QUERY = '(max-width: 30rem), (max-height: 30rem)';
+
+/** {@link SHORT_OF_SPACE_QUERY}, kept current, for {@link useOneNoticeOnly}'s reason. */
+function useShortOfSpace(): boolean {
+  return useMediaMatch(SHORT_OF_SPACE_QUERY);
+}
+
+/**
+ * A media query's answer, subscribed rather than read during render — #693's
+ * re-review, for {@link useOneNoticeOnly}. `false` with no `matchMedia`.
+ */
+function useMediaMatch(query: string): boolean {
+  const [matches, setMatches] = useState(
+    () => typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
+  );
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
       return undefined;
     }
-    const list = window.matchMedia(ONE_NOTICE_ONLY_QUERY);
+    const list = window.matchMedia(query);
     const changed = (): void => {
       setMatches(list.matches);
     };
@@ -946,7 +966,7 @@ function useOneNoticeOnly(): boolean {
     return () => {
       list.removeEventListener('change', changed);
     };
-  }, []);
+  }, [query]);
   return matches;
 }
 
@@ -1480,6 +1500,8 @@ function GameScreen({
   const notRecordedOwedRef = useRef<string | undefined>(undefined);
   /** @see useOneNoticeOnly */
   const narrowUpright = useOneNoticeOnly();
+  /** #2381, round 4. @see SHORT_OF_SPACE_QUERY */
+  const shortOfSpace = useShortOfSpace();
   /**
    * The side camera — #551. The hook is what re-renders the HUD when the
    * phone's state changes, including while the ride is paused and the loop is
@@ -3882,11 +3904,13 @@ function GameScreen({
   // cell ran off a phone in landscape** (844×390, 736×360), pushing *Pause*
   // and *End ride* below the stage, and upright at 360×752 it ended 34 px
   // above the rider. So, #585's and #693's trade again:
-  // - while it stands, the road notice is not on the HUD, its control
-  //   included. That notice was said at the start of the ride and is about the
-  //   hills; this one is about the ride not being kept. It comes back, in
-  //   whatever state the rider's choice and the ride's clock give it, once
-  //   this one has gone.
+  // - while it stands ON A PHONE (@see SHORT_OF_SPACE_QUERY: the owner's
+  //   ruling on round 3, "only where space is short"), the road notice is not
+  //   on the HUD, its control included. That notice was said at the start of
+  //   the ride and is about the hills; this one is about the ride not being
+  //   kept. It comes back, in whatever state the rider's choice and the
+  //   ride's clock give it, once this one has gone. On a tablet both show:
+  //   measured, the stack clears everything there.
   // - on the narrowest upright phones while the ride may stop with the screen
   //   off (@see ONE_NOTICE_ONLY_QUERY), the cell holds that one sentence,
   //   which is never put away, and this one is off the HUD. It is still SAID
@@ -3898,7 +3922,7 @@ function GameScreen({
     (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS &&
     !(mayStop && narrowUpright);
   const roadNotice =
-    eased === undefined && !(mayStop && narrowUpright) && !notRecordedShown
+    eased === undefined && !(mayStop && narrowUpright) && !(notRecordedShown && shortOfSpace)
       ? trainerRoadNotice(trainer, 'riding')
       : undefined;
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the

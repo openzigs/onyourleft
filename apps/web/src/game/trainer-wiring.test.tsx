@@ -1015,7 +1015,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
    */
   interface BenchFaults {
     /** A checkpoint's write, its chunk or its header: an error to throw, or nothing. */
-    chunk?: () => Error | undefined;
+    chunk?: () => 'hang' | Error | undefined;
     /** The finished ride's save: `hang` (never answers), an error, or nothing. */
     save?: () => 'hang' | Error | undefined;
   }
@@ -1034,11 +1034,13 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       store: {
         putRecordingSession: async (record) => {
           const fault = faults.chunk?.();
+          if (fault === 'hang') return new Promise<never>(() => undefined);
           if (fault !== undefined) throw fault;
           return harness.write(async (store) => store.putRecordingSession(record));
         },
         appendRecordingChunk: async (chunk) => {
           const fault = faults.chunk?.();
+          if (fault === 'hang') return new Promise<never>(() => undefined);
           if (fault !== undefined) throw fault;
           return harness.write(async (store) => store.appendRecordingChunk(chunk));
         },
@@ -1606,24 +1608,39 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
      * recorded seconds, then *Stop* — so `recordForRoom` refuses for that
      * cause and no other.
      */
+    /** The faults that put the ride before into each refused state. */
+    interface StopFaults {
+      readonly chunk?: 'quota' | 'error' | 'hang';
+      readonly save?: 'hang' | 'reject';
+    }
+    const FAULTS_FOR: Readonly<Record<GameNotRecordedReason, StopFaults>> = {
+      'still-saving': { save: 'hang' },
+      'not-saved': { save: 'reject' },
+      'device-full': { chunk: 'quota' },
+      'checkpoint-failed': { chunk: 'error' },
+    };
+
     async function stoppedWith(
-      cause: GameNotRecordedReason,
+      cause: GameNotRecordedReason | StopFaults,
     ): Promise<Awaited<ReturnType<typeof onTheBench>>> {
+      const wanted = typeof cause === 'string' ? FAULTS_FOR[cause] : cause;
       let on = false;
       const quota = Object.assign(new Error('no room'), { name: 'QuotaExceededError' });
       const rig = await onTheBench(false, {
         chunk: () =>
-          on && cause === 'device-full'
-            ? quota
-            : on && cause === 'checkpoint-failed'
-              ? new Error('the write was aborted')
-              : undefined,
+          !on
+            ? undefined
+            : wanted.chunk === 'quota'
+              ? quota
+              : wanted.chunk === 'error'
+                ? new Error('the write was aborted')
+                : wanted.chunk,
         save: () =>
-          on && cause === 'still-saving'
-            ? 'hang'
-            : on && cause === 'not-saved'
+          !on
+            ? undefined
+            : wanted.save === 'reject'
               ? new Error('the library refused it')
-              : undefined,
+              : wanted.save,
       });
       await rig.controller.start();
       for (let second = 0; second < 3; second += 1) {
@@ -1725,6 +1742,51 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         await rig.done();
       });
     }
+
+    /**
+     * The review of round 3, finding 3: the storage is read FIRST, as the Ride
+     * screen reads it (`StoppedNotice`) — a ride whose last seconds are only
+     * in this tab must not be told "wait". Each case has a storage fault AND a
+     * save that is still running or has failed, so the order decides.
+     */
+    for (const [faults, cause] of [
+      [{ chunk: 'error', save: 'hang' }, 'checkpoint-failed'],
+      [{ chunk: 'quota', save: 'reject' }, 'device-full'],
+    ] as const) {
+      it(`says ${cause} before the save's state when both are wrong (${faults.chunk} + ${faults.save})`, async () => {
+        const rig = await stoppedWith(faults);
+        const snapshot = rig.controller.getSnapshot();
+        // The control: the save's state is wrong too, so the order decides.
+        expect(
+          snapshot.stopping || snapshot.saveState === 'saving' || snapshot.saveState === 'failed',
+        ).toBe(true);
+        await openTheGame(gameTrainerPortOver(rig.controller));
+        await clickThrough(buttonStarting('Ride '));
+        await flush();
+        await pump(2);
+        expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT[cause]);
+        await rig.done();
+      });
+    }
+
+    /**
+     * The review of round 3, finding 4: the `stopping`-only window (#565) —
+     * *Stop* confirmed, the last checkpoint still being written, and the save
+     * not yet begun, so `saveState` still holds the last value it had. It is
+     * the still-saving sentence, not the no-reason one.
+     */
+    it('says the ride before is not finished saving while it is still stopping, before its save begins', async () => {
+      const rig = await stoppedWith({ chunk: 'hang' });
+      const snapshot = rig.controller.getSnapshot();
+      expect(snapshot.stopping).toBe(true);
+      expect(snapshot.saveState).not.toBe('saving');
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      await pump(2);
+      expect(notices()).toContain(RIDE_NOT_RECORDED_TEXT['still-saving']);
+      await rig.done();
+    });
 
     it('says nothing of it on a ride whose recording started — the control', async () => {
       const rig = await onTheBench(false);

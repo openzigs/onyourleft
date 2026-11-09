@@ -223,8 +223,10 @@ test.describe('a ride whose recording could not start says so — #2381', () => 
   // same first seconds, and #647's *Keep the screen on*, which never goes
   // away. Measured, that stack ran off a phone in landscape and came to 34 px
   // of the rider at 360×752, so (`GameView` §`notRecordedShown`) the road
-  // notice gives way to this one while it stands, and on the narrowest
-  // upright phones (`oneNoticeOnly`) this one gives way to #647's.
+  // notice gives way to this one while it stands — on a PHONE only, the
+  // owner's ruling on round 3 (`SHORT_OF_SPACE_QUERY`; here `onAPhone`): on a
+  // tablet both show, held over nothing — and on the narrowest upright phones
+  // (`oneNoticeOnly`) this one gives way to #647's, and is still SAID.
   for (const [query, words, what] of [
     [
       '?record=refused',
@@ -244,16 +246,30 @@ test.describe('a ride whose recording could not start says so — #2381', () => 
         const stacked = query.includes('keepalive=failed');
         if (stacked && oneNoticeOnly(viewport)) {
           expect(text).not.toContain(words);
+          // Off the HUD, and still said once by its one region (#445): the
+          // review of round 3, finding 6.
+          await expect.poll(async () => hudRegion(page), { timeout: 20_000 }).toContain(words);
         } else {
           expect(text).toContain(words);
         }
         if (stacked) {
           expect(text).toContain('Keep the screen on');
-          // The road notice, and its control, are off the HUD meanwhile.
-          expect((await keepScreenOnNotice(page)).roadNoticeOnHud).toBe(false);
-          expect(
-            (await measure(page)).items.some((each) => each.name === 'control: Trainer notice'),
-          ).toBe(false);
+          const roadOnHud = (await keepScreenOnNotice(page)).roadNoticeOnHud;
+          const toggle = (await measure(page)).items.find(
+            (each) => each.name === 'control: Trainer notice',
+          );
+          if (onAPhone(viewport)) {
+            // Where space is short, the road notice and its control give way.
+            expect(roadOnHud).toBe(false);
+            expect(toggle).toBeUndefined();
+          } else {
+            // On a tablet both show, the road notice's control on the stage.
+            expect(roadOnHud).toBe(true);
+            expect(toggle, 'the road notice’s control').toBeDefined();
+            if (toggle !== undefined) {
+              expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
+            }
+          }
         }
         for (const [how, seen] of await bothWays(page)) {
           await test.step(how, () => {
@@ -284,7 +300,40 @@ test.describe('a ride whose recording could not start says so — #2381', () => 
       });
     }
   }
+
+  // The control: the give-way taken away. `matchMedia` answers "no" to
+  // `SHORT_OF_SPACE_QUERY` before the page loads, so on the two short phones
+  // in landscape the road notice stands beside the stack — and the stack must
+  // then collide, or the rule is held over a stack that always fitted.
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => each.name.includes('844×390') || each.name.includes('736×360'),
+  )) {
+    test(`the control — without the give-way, the stack collides — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await page.addInitScript(() => {
+        const real = window.matchMedia.bind(window);
+        window.matchMedia = (query: string): MediaQueryList =>
+          real(query.includes('max-height: 30rem') ? 'not all' : query);
+      });
+      await openRide(page, viewport, '?record=not-saved&trainer=workout&keepalive=failed');
+      expect((await keepScreenOnNotice(page)).roadNoticeOnHud).toBe(true);
+      const collisions = easedCollisions(await measure(page), viewport);
+      console.log(`#2381 control — ${viewport.name}: ${collisions.join('; ')}`);
+      expect(collisions).not.toEqual([]);
+    });
+  }
 });
+
+/** The HUD's one live region, as a screen reader would hear it. */
+async function hudRegion(page: Page): Promise<string> {
+  return page.evaluate(
+    () => document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
+  );
+}
+
+/** `ride-stage.ts` §`TABLET_VIEWPORTS`' line: a phone's shorter side is 480 px or less. */
+const onAPhone = (viewport: Viewport): boolean => Math.min(viewport.width, viewport.height) <= 480;
 
 /**
  * #647 — #693's re-review, B2: *"Keep the screen on"* beside EACH other
