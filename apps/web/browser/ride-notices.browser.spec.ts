@@ -269,6 +269,19 @@ test.describe('a ride whose recording could not start says so — #2381', () => 
             if (toggle !== undefined) {
               expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
             }
+            // Under 50 rem tall (the 4:3 tablet), three drawn notices: the ride
+            // so far gives way (`theme.css` §"#2381"), or on the CI runner's
+            // fonts the cell ran 19 px into the route panel.
+            if (viewport.height < 800) {
+              const totals = await page.evaluate(() =>
+                [...document.querySelectorAll('.oyl-hud__field--total')].map((each) => {
+                  const box = each.getBoundingClientRect();
+                  return box.width * box.height;
+                }),
+              );
+              expect(totals.length).toBeGreaterThan(0);
+              expect(totals.every((area) => area <= 1)).toBe(true);
+            }
           }
         }
         for (const [how, seen] of await bothWays(page)) {
