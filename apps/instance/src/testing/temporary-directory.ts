@@ -9,14 +9,17 @@
  * Every instance test that opens a store writes a real SQLite file under
  * `os.tmpdir()`, in WAL mode at SQLite's default `synchronous = FULL`, so
  * every commit is an `fsync`. On a Linux runner an `fsync` reaches the disk,
- * and three Vitest workers making them at once wait on each other: the
- * instance project's cases went past their 5 s timeout on `main` and on pull
- * requests that did not touch it, all within one 40 s window of a run (run
- * 42551494214), while CPU time barely moved. Measured on #2398, the eight
- * files that timed out took 161.5 s of summed case time on a disk `/tmp` and
- * 39.0 s on `/dev/shm`, in the same Linux container on four CPUs; on macOS,
- * forcing every `fsync` to reach the drive (`PRAGMA fullfsync`) took them
- * from 6 s to 145 s of wall time with user CPU at 17.5 s against 21.8 s.
+ * and a slow moment of the disk stalls every worker at once: the instance
+ * project's cases, about 0.1 s each alone, went past their 5 s timeout on
+ * `main` and on pull requests that did not touch it, seven files inside one
+ * 40 s window of run 42551494214, with three ordinary instance files and
+ * nothing else running on four vCPUs. Measured on #2398: the eight files that
+ * timed out took 161.5 s of summed case time on a disk `/tmp` and 39.0 s on
+ * `/dev/shm`, in the same Linux container on four CPUs; on macOS, forcing
+ * every `fsync` to reach the drive (`PRAGMA fullfsync`) took them from 6 s
+ * to 145 s of wall time with user CPU at 17.5 s against 21.8 s. On the runner
+ * itself, a quiet one, the project's case time fell from 637 to 640 s to 512
+ * to 537 s on the same CPU model (`docs/agents/ci.md` section 4c).
  *
  * ⚠️ **The store is not changed.** Its pragmas are the ones a running
  * instance has, and `node-sqlite.test.ts` reads them back; a test-only

@@ -2260,12 +2260,20 @@ Vitest's 5 s timeout, on `main` (run 42540622721) and on pull requests that did 
 `apps/instance` (run 42551494214, seven files at once inside 40 s). **The cause was the disk, not
 the CPU.** Every instance test that opens a store writes a real SQLite file under `os.tmpdir()`,
 in WAL mode at SQLite's default `synchronous = FULL`, so every commit is an `fsync`; on the runner
-that reaches the disk, and the project's three workers wait on each other's. Measured on #2398:
+that reaches the disk, and a slow moment of the disk stalls every worker at once. In that window
+the three workers held three ordinary instance files and nothing else — no file that forks a
+process, no other project — on four vCPUs, and cases that take about 0.1 s alone took over 5 s;
+the `main` failure (`notice-retention.test.ts`, on a 9V45) had the same shape. Measured on #2398:
 macOS with every `fsync` forced to the drive (`PRAGMA fullfsync`) took the eight files that timed
 out from 6 s to 145 s of wall time while user CPU went from 17.5 s to 21.8 s; in a Linux container
 on four CPUs the same files took 161.5 s of summed case time with `/tmp` on disk and 39.0 s on
 tmpfs, and the whole of `test:required:shard-2` 434 s with 15 failed cases (1 141 s of `instance`
-case time) against 182 s with none (316 s).
+case time) against 182 s with none (316 s). On the runners themselves (a throwaway workflow on a
+branch that was then deleted, run 42555647120 and 42556608805), `test:required:shard-2` passed
+**20 times in a row** with the change: five jobs of four runs, on two EPYC 7763s, two Xeon 8573Cs
+and a Xeon 8370C, with `instance` case time 403 to 537 s a run (512 to 537 s on the 7763s). Two
+control jobs of two runs without it took 637 to 640 s on an EPYC 7763 and 458 to 464 s on a 9V45. The control's four runs had no timeout: a quiet disk costs about a fifth, and it is the
+disk's slow moments, which no runner can be picked for, that turned it into a red check.
 
 **So the `instance` project's `setupFiles` give each test file a directory of its own on
 `/dev/shm`**, which Node's `os.tmpdir()` then answers, and remove it after the file
