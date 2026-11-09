@@ -126,6 +126,11 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     expect(choice('Compact').checked).toBe(false);
 
     await press(choice('Compact'));
+    // The checkbox that shows the route names no view, so with the compact
+    // panel chosen it promises no height profile.
+    const show = choice('The route');
+    expect(show.closest('label')?.textContent?.trim()).toBe('The route panel');
+    expect(show.closest('label')?.textContent).not.toMatch(/height profile/i);
     expect(readHudLayout(localStorage)).toEqual({
       hidden: [],
       textSize: 'normal',

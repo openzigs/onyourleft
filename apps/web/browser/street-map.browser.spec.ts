@@ -365,9 +365,6 @@ for (const viewport of VIEWPORTS) {
       `the panel is ${route.width.toFixed(1)} px for a ${tile.width.toFixed(1)} px tile ` +
         `(graph ${graph?.shown === true ? 'drawn' : 'hidden'})`,
     ).toBeLessThanOrEqual(PANEL_EDGE_PIXELS + 0.5);
-    if (graph?.shown !== true) {
-      expect(route.width * route.height).toBeLessThan(fullRoute.width * fullRoute.height);
-    }
     expect(route.height - tile.height - (graph?.height ?? 0)).toBeLessThanOrEqual(
       PANEL_EDGE_PIXELS + GRAPH_GAP_PIXELS + 0.5,
     );

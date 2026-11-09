@@ -1856,10 +1856,14 @@ function LapRaceAssistPanel({
   );
 }
 
-/** #2079: what each panel the rider may turn off is called here. */
+/**
+ * #2079: what each panel the rider may turn off is called here. The route's
+ * names no view (#2385): what it draws is the "Route panel" choice below, and
+ * the compact one has no height profile.
+ */
 const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
   readings: 'Ride readings: speed, distance, the pacer and the rest',
-  route: 'The route: its height profile and its map',
+  route: 'The route panel',
   graph: 'The last ten minutes of power and heart rate',
   standings: 'A race’s standings',
 };
