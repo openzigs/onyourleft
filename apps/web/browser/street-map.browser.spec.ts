@@ -34,6 +34,16 @@
  *    them: they are the runner's, a timing gate needs three CI readings before
  *    it may assert anything, and the owner's tablet is what they are for.
  *
+ * 4. **The compact route panel — #2385.** With `?route=compact` the route
+ *    panel is the map alone as a tile with the gradient printed on it. At
+ *    each viewport the compact panel stays inside the full panel's box (so
+ *    it covers no road the full one left clear), the tile is the full map's
+ *    height, the label is inside the tile, clear of the rider's mark and in
+ *    large text, it says what the gradient field says, and no control moves.
+ *    Paced, with the gradient swinging so the label changes on nearly every
+ *    frame, the map is still painted once per new sheet and not once per
+ *    frame (counted as in 3).
+ *
  * The screenshots of the route panel at each viewport are attached to the
  * test, for the owner.
  */
@@ -55,6 +65,7 @@ interface StreetMapRide {
   readonly worstRenderMs: number;
   readonly medianFrameMs: number;
   readonly worstFrameMs: number;
+  readonly grades: number;
 }
 
 declare global {
@@ -95,9 +106,17 @@ const SCREEN_MARGIN_PIXELS = 16;
 /** 40 km/h, one frame of sixty. */
 const METRES_PER_FRAME = 40 / 3.6 / 60;
 
-async function open(page: Page, map: 'street' | 'outline'): Promise<void> {
+async function open(
+  page: Page,
+  map: 'street' | 'outline',
+  route: 'full' | 'compact' = 'full',
+): Promise<void> {
+  const query = [
+    ...(map === 'outline' ? ['map=outline'] : []),
+    ...(route === 'compact' ? ['route=compact'] : []),
+  ].join('&');
   const response = await page.goto(
-    `${HARNESS_ORIGIN}/street-map.html${map === 'outline' ? '?map=outline' : ''}`,
+    `${HARNESS_ORIGIN}/street-map.html${query === '' ? '' : `?${query}`}`,
   );
   if (response === null || !response.ok()) {
     throw new Error(
@@ -130,6 +149,8 @@ async function boxes(page: Page): Promise<Record<string, Box | undefined>> {
       credit: box(document.querySelector('.oyl-hud__attribution')),
       pause: box(button('Pause')),
       end: box(button('End ride')),
+      grade: box(document.querySelector('.oyl-hud__tile-grade')),
+      mark: box(document.querySelector('.oyl-hud__plan-svg circle')),
     };
   });
 }
@@ -259,6 +280,141 @@ for (const viewport of VIEWPORTS) {
     const panel = page.locator('.oyl-hud__route');
     await testInfo.attach(`route panel, ${viewport.name}`, {
       body: await panel.screenshot(),
+      contentType: 'image/png',
+    });
+  });
+}
+
+/** The tile's least width (`theme.css` §"THE COMPACT ROUTE PANEL"): 6 rem. */
+const TILE_LEAST_PIXELS = 96;
+
+/** What a HUD panel adds to what it holds, across: `--oyl-space-sm` and a 1 px border, each side. */
+const PANEL_EDGE_PIXELS = 18;
+
+for (const viewport of VIEWPORTS) {
+  test(`#2385 the compact route tile stays inside the full panel, and moves nothing — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await open(page, 'street');
+    const full = await boxes(page);
+    await open(page, 'street', 'compact');
+    await expect(
+      page.locator('.oyl-hud__route--compact .oyl-hud__tile .oyl-hud__street-map'),
+    ).toHaveCount(1);
+    // The full panel's strips are not drawn.
+    await expect(page.locator('.oyl-hud__route .oyl-hud__profile-svg')).toHaveCount(0);
+    const compact = await boxes(page);
+    const edges = (found: Box | undefined, name: string) => {
+      expect(found, name).toBeDefined();
+      const left = found?.left ?? 0;
+      const top = found?.top ?? 0;
+      return {
+        left,
+        top,
+        width: found?.width ?? 0,
+        height: found?.height ?? 0,
+        right: left + (found?.width ?? 0),
+        bottom: top + (found?.height ?? 0),
+      };
+    };
+    const within = (
+      inner: ReturnType<typeof edges>,
+      outer: ReturnType<typeof edges>,
+      what: string,
+    ) => {
+      expect(inner.left, `${what}: left`).toBeGreaterThanOrEqual(outer.left - 0.5);
+      expect(inner.top, `${what}: top`).toBeGreaterThanOrEqual(outer.top - 0.5);
+      expect(inner.right, `${what}: right`).toBeLessThanOrEqual(outer.right + 0.5);
+      expect(inner.bottom, `${what}: bottom`).toBeLessThanOrEqual(outer.bottom + 0.5);
+    };
+    const fullRoute = edges(full.route, 'the full route panel');
+    const route = edges(compact.route, 'the compact route panel');
+    const tile = edges(compact.plan, 'the tile');
+    const grade = edges(compact.grade, 'the gradient label');
+    const mark = edges(compact.mark, 'the rider’s mark');
+
+    // Inside the full panel's box, so it covers no road the full one left clear…
+    within(
+      route,
+      fullRoute,
+      `the compact panel ${JSON.stringify(route)} in the full ${JSON.stringify(fullRoute)}`,
+    );
+    expect(route.width * route.height).toBeLessThan(fullRoute.width * fullRoute.height);
+    // A corner tile: the panel is its tile and the panel's own padding and
+    // border (8 px and 1 px each side), and no empty width beside it.
+    expect(
+      route.width - tile.width,
+      `the panel is ${route.width.toFixed(1)} px for a ${tile.width.toFixed(1)} px tile`,
+    ).toBeLessThanOrEqual(PANEL_EDGE_PIXELS + 0.5);
+    expect(route.height - tile.height).toBeLessThanOrEqual(PANEL_EDGE_PIXELS + 0.5);
+    // …and no ride-time control moves.
+    for (const name of ['pause', 'end'] as const) {
+      const was = edges(full[name], name);
+      const is = edges(compact[name], name);
+      for (const side of ['left', 'top', 'width', 'height'] as const) {
+        expect(Math.abs(is[side] - was[side]), `${name}.${side}`).toBeLessThanOrEqual(0.5);
+      }
+    }
+    // The tile is the full map's height, and as wide, but never under 6 rem.
+    const fullPlan = edges(full.plan, 'the full map');
+    expect(Math.abs(tile.height - fullPlan.height), 'the tile’s height').toBeLessThanOrEqual(0.5);
+    expect(
+      Math.abs(tile.width - Math.max(tile.height, TILE_LEAST_PIXELS)),
+      `the tile is ${tile.width.toFixed(1)} × ${tile.height.toFixed(1)} px`,
+    ).toBeLessThanOrEqual(0.5);
+    // The label is on the tile, whole, and clear of the rider's mark under it.
+    within(grade, tile, `the label ${JSON.stringify(grade)} on the tile ${JSON.stringify(tile)}`);
+    expect(grade.bottom, 'the label ends above the rider’s mark').toBeLessThanOrEqual(mark.top);
+    // The mark is still in the middle of the tile.
+    expect(Math.abs(mark.left + mark.width / 2 - (tile.left + tile.width / 2))).toBeLessThanOrEqual(
+      1,
+    );
+    expect(Math.abs(mark.top + mark.height / 2 - (tile.top + tile.height / 2))).toBeLessThanOrEqual(
+      1,
+    );
+    // Large text, so its band's colour is a declared 3:1 pair (#2291), and
+    // the same reading the gradient field shows.
+    const drawn = await page.evaluate(() => {
+      const label = document.querySelector('.oyl-hud__tile-grade');
+      const digits = label?.querySelector('.oyl-hud__digits');
+      const field = [...document.querySelectorAll('.oyl-hud__field')].find(
+        (each) => each.querySelector('dt')?.textContent === 'Gradient',
+      );
+      return {
+        digitsPixels:
+          digits === null || digits === undefined
+            ? 0
+            : parseFloat(getComputedStyle(digits).fontSize),
+        weight:
+          digits === null || digits === undefined ? 0 : Number(getComputedStyle(digits).fontWeight),
+        label: label?.textContent ?? '',
+        field: field?.querySelector('dd')?.textContent ?? '',
+      };
+    });
+    expect(drawn.digitsPixels).toBeGreaterThanOrEqual(24);
+    expect(drawn.weight).toBeGreaterThanOrEqual(700);
+    expect(drawn.field).not.toBe('');
+    expect(drawn.label).toBe(`Gradient ${drawn.field}`);
+    // On the screen and clear of the leaning rider.
+    const stage = { name: viewport.name, width: viewport.width, height: viewport.height };
+    expect(inside(route, { ...stage, unstagedFails: false }), 'the compact panel on screen').toBe(
+      true,
+    );
+    expect(overlap(route, riderBox({ ...stage, unstagedFails: false })), 'over the rider').toBe(
+      false,
+    );
+
+    console.log(
+      `#2385 the compact tile at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
+        `${tile.width.toFixed(1)} × ${tile.height.toFixed(1)} px, its panel ` +
+        `${route.width.toFixed(0)} × ${route.height.toFixed(0)} (the full panel's ` +
+        `${fullRoute.width.toFixed(0)} × ${fullRoute.height.toFixed(0)}); the label ` +
+        `${grade.width.toFixed(0)} × ${grade.height.toFixed(0)}, ${(mark.top - grade.bottom).toFixed(1)} px ` +
+        `above the mark`,
+    );
+    await testInfo.attach(`compact route panel, ${viewport.name}`, {
+      body: await page.locator('.oyl-hud__route').screenshot(),
       contentType: 'image/png',
     });
   });
@@ -395,8 +551,14 @@ interface PaintEvent {
  * (`oyl-hud__street-map…`), which is the sheet now and was the whole SVG as
  * #2290 drew it.
  */
-async function paintsOn(page: Page, browser: Browser, frames: number, metresPerFrame: number) {
-  await open(page, 'street');
+async function paintsOn(
+  page: Page,
+  browser: Browser,
+  frames: number,
+  metresPerFrame: number,
+  route: 'full' | 'compact' = 'full',
+) {
+  await open(page, 'street', route);
   await browser.startTracing(page, { categories: ['devtools.timeline'] });
   const ridden = await page.evaluate(
     async ([count, step]) => window.__oylStreetMap?.ride?.(count, step, true),
@@ -439,6 +601,33 @@ test('#2380 moving the street map does not paint it again: once per 250 m, not o
     `#2380 ${String(frames)} paced frames of 5 m, 1280×800: ${String(ridden.views)} moves, ` +
       `${String(ridden.regions)} sheets, ${String(map)} paints of the street map ` +
       `(${String(all)} paints in all)`,
+  );
+});
+
+test('#2385 the compact tile’s gradient changes without painting the map again', async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // As above, with the compact tile and a gradient that swings (the harness's
+  // note), so the label over the map changes on nearly every frame.
+  const frames = 60;
+  const { ridden, map, all } = await paintsOn(page, browser, frames, 5, 'compact');
+  expect(ridden.frames).toBe(frames);
+  expect(ridden.views).toBeGreaterThan(frames - 2);
+  // The label did change, most frames: a count of the label's own writes.
+  expect(ridden.grades).toBeGreaterThan(frames / 2);
+  expect(all).toBeGreaterThan(frames);
+  // And the map is still painted per new sheet, not per change of the label.
+  expect(map).toBeLessThanOrEqual(ridden.regions + 2);
+  expect(map).toBeGreaterThanOrEqual(1);
+  expect(map).toBeLessThan(ridden.grades / 10);
+  // Nothing the label changes is in the map's drawing.
+  expect(ridden.drawnWithin).toBe(0);
+  console.log(
+    `#2385 ${String(frames)} paced frames of 5 m with the compact tile, 1280×800: ` +
+      `${String(ridden.grades)} changes of the gradient on it, ${String(ridden.regions)} sheets, ` +
+      `${String(map)} paints of the street map (${String(all)} paints in all)`,
   );
 });
 

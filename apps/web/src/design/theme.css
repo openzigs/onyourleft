@@ -13234,3 +13234,96 @@ select.oyl-input {
     font-size: 5rem;
   }
 }
+
+/* ==========================================================================
+ * THE COMPACT ROUTE PANEL — #2385.
+ *
+ * The rider's choice in Settings → Ride HUD (`hud-layout-preference.ts`
+ * §"The route panel"): the route's map alone, as a small tile in the route
+ * panel's corner, with the current gradient printed in its top corner
+ * (`HudCore.tsx` §`RouteTile`). No elevation strip, no road ahead.
+ *
+ * THE TILE'S SIZE. As tall as the plan view's box in each layout — every rule
+ * above that sizes `.oyl-hud__plan-svg` still does, the tall upright phone's
+ * larger street map included — and square, but never under 6 rem wide: the
+ * gradient's widest label, `-12.5 %` with its glyph, is about 88 px on its
+ * backing, and a phone on its side gives the box 4.5 rem. So the tile is
+ * never taller than the full panel's map, nor wider than the full panel, and
+ * its panel stays inside the full panel's box in every layout:
+ * `street-map.browser.spec.ts` §"#2385" measures that at every viewport it
+ * lays out, so the compact panel covers no road the full one left clear. With
+ * the recent graph shown as well (#2078) the panel keeps its full width, for
+ * the graph, and the tile stands at its start.
+ *
+ * THE GRADIENT. Its digits are 1.5 rem, the secondary tier's, which is
+ * #2291's floor for a band's colour (large text, a declared 3:1 on the
+ * surface in `tokens.ts`); the sign and the unit are the HUD's small sizes in
+ * its ink. On the panel's own opaque surface, so it reads over any map, and
+ * in the box's top start corner, clear of the rider's mark in its middle.
+ * ========================================================================== */
+.oyl-game--riding .oyl-hud__route.oyl-hud__route--compact,
+.oyl-hud__route.oyl-hud__route--compact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.oyl-game--riding .oyl-hud__route.oyl-hud__route--compact:not(:has(> .oyl-hud__recent)) {
+  justify-self: start;
+  width: auto;
+}
+
+.oyl-hud__tile {
+  position: relative;
+}
+
+.oyl-hud__route--compact .oyl-hud__tile .oyl-hud__plan-svg {
+  aspect-ratio: 1;
+  width: auto;
+  min-width: 6rem;
+}
+
+.oyl-hud__tile-grade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0 var(--oyl-space-xs);
+  background: var(--oyl-color-hud-surface);
+  border-bottom-right-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink);
+  font-family: var(--oyl-font-family-display);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.oyl-hud__tile-unit {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* The digits and the glyph in the band's colour, as the field's are
+   (§"THE GRADIENT IN ITS BAND'S COLOUR"). */
+.oyl-hud__tile-grade--descent :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-descent);
+}
+
+.oyl-hud__tile-grade--flat :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-flat);
+}
+
+.oyl-hud__tile-grade--climb :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-climb);
+}
+
+.oyl-hud__tile-grade--steep :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-steep);
+}
+
+.oyl-hud__tile-grade--wall :is(.oyl-hud__digits, .oyl-hud__slope) {
+  color: var(--oyl-color-hud-grade-wall);
+}
