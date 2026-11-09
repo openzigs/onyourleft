@@ -11203,9 +11203,11 @@ const DELIVERY_PAINT = {
  * about 1.6 m clears the helmet from a metre ahead, and at this height it
  * stands about 7° above it at every distance. **Above the near plane's
  * reach**: the eye passes over an obstacle a rider rode into, and the frustum
- * nearer than `camera.ts` §`NEAR_PLANE_METRES` reaches 0.35 m above the eye;
- * a marker lower than 2.35 m would be cut through by the camera, #2396's
- * other defect. Its bottom is at 2.52 m.
+ * nearer than `camera.ts` §`NEAR_PLANE_METRES` reaches 0.5 m above the eye
+ * on the widest (90 degree) lens, which the test holds, so 2.5 m above the
+ * road with the eye at 2.0 m; a marker lower than that would be cut through
+ * by the camera, #2396's other defect. Its bottom is at 2.52 m, a 0.02 m
+ * margin over that cut-off.
  */
 const HAZARD_MARKER_MIDDLE_METRES = 2.7;
 
@@ -11218,6 +11220,9 @@ const HAZARD_MARKER_HEIGHT_METRES = 0.36;
  * collision box and the footprint `delivery-belt.test.ts` holds is unchanged.
  */
 const HAZARD_MARKER_REACH_METRES = 0.2;
+
+/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
 
 /**
  * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
@@ -11234,9 +11239,6 @@ const HAZARD_MARKER_REACH_METRES = 0.2;
  * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
  * the street does not have.
  */
-/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
-const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
-
 function obstacleHazardMarker(): BufferGeometry {
   return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
     .rotateX(Math.PI)
