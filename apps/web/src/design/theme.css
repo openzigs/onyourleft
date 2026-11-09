@@ -12102,7 +12102,8 @@ select.oyl-input {
  * lit (`HudCore.tsx` §`ZoneStrip`). The row is a flex line, so the strip takes
  * the width beside the number and never wraps: a row of its own made the
  * field 14 px taller, and on a 1280×800 tablet a lap race's standings came
- * within 9 px of the actions panel (`ride-laps.browser.spec.ts` §"#2080"). A segment is dimmed onto the panel in its zone's colour
+ * within 9 px of the actions panel (`ride-laps.browser.spec.ts` §"#2080").
+ * A segment is dimmed onto the panel in its zone's colour
  * (`hudZoneBand*`) with an outline in the label's colour, which is the 3:1 on
  * `hudSurface` that lets the strip's scale be seen (SC 1.4.11); the lit one is
  * its zone's full colour (`hudZone*`, each a declared 3:1 on the panel) in an

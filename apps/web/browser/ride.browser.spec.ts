@@ -1019,6 +1019,31 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         named: field?.querySelector('.oyl-hud__zone-strip')?.getAttribute('aria-label'),
       };
     });
+    // #2384: and drawn, not merely present: the attributes above are React's
+    // whatever the CSS does, so read the boxes. A strip `display: none`, or
+    // squeezed to nothing by the row's flex, has no width; the lit segment is
+    // taller than an unlit one.
+    const boxes = await page.evaluate(() => {
+      const strip = document.querySelector('.oyl-hud__field--effort .oyl-hud__zone-strip');
+      const lit = strip
+        ?.querySelector('.oyl-hud__zone-strip-segment--lit')
+        ?.getBoundingClientRect();
+      const unlit = strip
+        ?.querySelector('.oyl-hud__zone-strip-segment:not(.oyl-hud__zone-strip-segment--lit)')
+        ?.getBoundingClientRect();
+      return {
+        width: strip?.getBoundingClientRect().width ?? 0,
+        lit: lit?.height ?? 0,
+        unlit: unlit?.height ?? 0,
+      };
+    });
+    // The effort field is clipped away with the totals on a phone's corners
+    // layout, so the boxes are read where the totals are drawn.
+    if (rideTotalsDrawn(viewport)) {
+      expect(boxes.width, 'the strip is drawn at a width').toBeGreaterThan(30);
+      expect(boxes.unlit, 'an unlit segment is drawn').toBeGreaterThan(0);
+      expect(boxes.lit, 'the lit segment stands taller').toBeGreaterThan(boxes.unlit);
+    }
     expect(zone).toEqual({
       reads: '6 Anaerobic',
       swatch: true,
