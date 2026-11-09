@@ -2253,6 +2253,30 @@ writes, the App's setup and the views are in [`docs/roadmap-board.md`](../roadma
 [#1201](https://github.com/openzigs/onyourleft/issues/1201) stays the written plan; the board
 mirrors it.
 
+#### The instance's tests write to memory — #2398
+
+⚠️ **`tests-2` went red on cases of the `instance` project that take about 0.1 s alone**, past
+Vitest's 5 s timeout, on `main` (run 42540622721) and on pull requests that did not touch
+`apps/instance` (run 42551494214, seven files at once inside 40 s). **The cause was the disk, not
+the CPU.** Every instance test that opens a store writes a real SQLite file under `os.tmpdir()`,
+in WAL mode at SQLite's default `synchronous = FULL`, so every commit is an `fsync`; on the runner
+that reaches the disk, and the project's three workers wait on each other's. Measured on #2398:
+macOS with every `fsync` forced to the drive (`PRAGMA fullfsync`) took the eight files that timed
+out from 6 s to 145 s of wall time while user CPU went from 17.5 s to 21.8 s; in a Linux container
+on four CPUs the same files took 161.5 s of summed case time with `/tmp` on disk and 39.0 s on
+tmpfs, and the whole of `test:required:shard-2` 434 s with 15 failed cases (1 141 s of `instance`
+case time) against 182 s with none (316 s).
+
+**So the `instance` project's `setupFiles` give each test file a directory of its own on
+`/dev/shm`**, which Node's `os.tmpdir()` then answers, and remove it after the file
+(`apps/instance/src/testing/temporary-directory.ts`). **No timeout moved and the store did not
+change**: its pragmas are the ones a running instance has; an `fsync` on tmpfs simply returns.
+Only a tmpfs with at least 1 GiB free on which a file may be run qualifies — Docker mounts a
+container's `/dev/shm` `noexec` and 64 MiB, and `home-deploy.test.ts` runs scripts it writes there
+— and anything else, macOS included, stays on disk as before. On a GitHub-hosted Linux runner
+`temporary-directory.test.ts` fails if `/dev/shm` stops qualifying, so the fix cannot switch itself
+off with every test green.
+
 #### The basemap archive's read token — #2275
 
 `tiles.openzigs.com` answers a GitHub-hosted runner's range request with **HTTP 403**
