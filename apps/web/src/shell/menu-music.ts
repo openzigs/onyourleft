@@ -29,19 +29,18 @@
  * AUTOPLAY_WAIT_MS} (3 s, the owner's ruling of 2026-11-08 on #2369) after one
  * of two moments:
  *
- * - **The launch**, on a menu route. The header reads the rider's player as
- *   it mounts (`OtherPlayer.watch` asks at once), and none of our own sounds
- *   has played yet, so the reading that lands in those 3 s is the rider's
- *   alone. A launch on a ride route waits {@link OWN_LOOP_SETTLE_MS} from its
- *   first menu route instead, as any return from a ride route does: the
- *   ride's own sounds may still be counted in the header's first reading.
+ * - **The launch**, from its first visible menu route (a launch on a ride
+ *   route counts from its first menu route).
  * - **The rider coming back to the app** — the page shown again on a menu
  *   route, whether or not the loop had played before. Our loop paused at once
  *   when the page was hidden, and our audio context was suspended with it, so
  *   a reading taken after the return is not of us; one is asked for at the
- *   return ({@link RiderPlayer.poll}) rather
- *   than left to the header's next 4 s poll, which a hidden page may also have
- *   held back.
+ *   return ({@link RiderPlayer.poll}) rather than left to the header's next
+ *   4 s poll, which a hidden page may also have held back.
+ *
+ * At the end of either wait a reading is asked for again, and the loop starts
+ * only once it has landed and said the rider's player is not in use (#2253):
+ * a player the rider started inside the wait is still seen.
  *
  * WCAG 2.2 SC 1.4.2 asks that audio playing by itself for more than 3 s can
  * be stopped from the page: the header's *Mute all sound* does that, and is
@@ -80,27 +79,39 @@
  * MenuMusicDeps.riderPlayer} is asked before the loop starts or comes back,
  * and a "yes" keeps it silent.
  *
- * ⚠️ **Our own loop never counts as the rider's player.** The answer comes
- * from Android's `isMusicActive()` (spike 0034 §1.3), which is true while OUR
- * loop plays too, so a reading taken while the loop could be heard says
- * nothing about the rider. Two rules keep it out:
+ * ⚠️ **Our own sound never counts as the rider's player.** The answer comes
+ * from Android's `isMusicActive()` (spike 0034 §1.3), and on the tablet it is
+ * true for as long as our audio context RUNS, even with every sound paused
+ * (2026-11-08): one menu sound was enough for the header to show *Your music
+ * app* with no other app playing, and for a press to leave the loop silent
+ * for seconds. Three rules keep us out:
  *
- * - **While the loop plays, the question is not asked at all.** The loop is
- *   not stopped by a reading that is most likely itself.
- * - **After the loop falls silent, it is not asked for {@link
- *   OWN_LOOP_SETTLE_MS}**, counted again from each return to a visible menu
- *   route (the header reads only there): the answer may still be a reading
- *   of our own loop. A loop that would come back in that time waits, and
- *   comes back at its end only if the rider's player is not in use. A return
- *   to the app — the page shown again — waits {@link AUTOPLAY_WAIT_MS}
- *   instead, for a reading asked for at the return: the loop paused at once
- *   when the page was hidden, so that reading cannot be it (#2357).
+ * - **A reading is believed only if our stream was shut throughout it**
+ *   (`OtherPlayer`, over `CueOutput.quietToken`). Any other reading changes
+ *   nothing, the header's included. So while the loop plays nothing is
+ *   believed, and the loop is never stopped by itself.
+ * - **On a quiet menu route our context is suspended** ({@link
+ *   OWN_STREAM_QUIET_MS} after our last sound), so the header's readings
+ *   there are believed. Only in the Android shell, where the context can be
+ *   woken outside a press, and only where `quieten` may: never on a ride
+ *   route, while immersive, during a ride, over a running or paused workout,
+ *   or while the loop plays or fades. A ride route keeps its context: a
+ *   *Ride* press inside the loop's fade has its cues (#2369's item 4), and
+ *   the suspension waits for the next menu route instead.
+ * - **After the loop falls silent, and after each return to a visible menu
+ *   route** (the header reads only there), the loop waits for a believed
+ *   reading taken since: the one before may be minutes old, from before our
+ *   loop played. One is asked for once the suspension has landed ({@link
+ *   OWN_STREAM_CLOSE_MS}), and a loop that would have come back in the wait
+ *   comes back when it lands, if the rider's player is not in use.
  *
  * So the loop yields when the rider starts their player in their own app —
  * the page is hidden, the loop pauses, and on the way back it stays silent.
- * A player started while our loop plays and the page is on screen (a
- * headset's button) reads the same as our own loop, and is not seen: that is
- * #2060's question, whether the WebView takes audio focus.
+ * A player started while our loop plays (a headset's button, or a player
+ * that starts just after ours) reads the same as our own loop, and is not
+ * seen: no reading can be believed while our stream is open, and the AOSP
+ * playback list that could tell the two apart is anonymised for an app like
+ * this one. That is #2060's question, whether the WebView takes audio focus.
  *
  * ## The file
  *
@@ -153,12 +164,20 @@ export const HOLDS_THE_MUSIC = '.oyl-header__mute';
 export const THE_RIDERS_PLAYER = '.oyl-other-player';
 
 /**
- * How long the loop must have been silent, on a visible menu route, before the
- * rider's player is asked about — #2253. #2073's header reads `isMusicActive()`
- * every 4 s and gives a reading 2 s at most: by then a reading taken after the
- * loop fell silent has landed, and it cannot be the loop.
+ * How long our own output must have made no sound, on a quiet menu route in
+ * the Android shell, before our audio context is suspended — #2253. Over the
+ * menus' longest sound (130 ms, `web-audio.ts`) many times, so a rider tapping
+ * through the menus does not open and shut the platform's stream at each tap.
  */
-export const OWN_LOOP_SETTLE_MS = 6_000;
+export const OWN_STREAM_QUIET_MS = 1_000;
+
+/**
+ * How long after that suspension a reading of the rider's player is asked for
+ * — #2253. Measured on the tablet (#2369): a suspend landed in 36 ms, and
+ * `isMusicActive()` read false from then on. A reading asked before it has
+ * landed is not believed, and the header's next poll is the one that counts.
+ */
+export const OWN_STREAM_CLOSE_MS = 250;
 
 /**
  * How long the loop waits before it starts with no press — #2357, the owner's
@@ -176,8 +195,13 @@ export const AUTOPLAY_WAIT_MS = 3_000;
  * `shell/other-player-port.ts`, so its `OtherPlayer` is one.
  */
 export interface RiderPlayer {
-  /** Whether the rider's own player is in use now. ⚠️ It may be reading our own loop. */
+  /**
+   * Whether the rider's own player is in use, by the latest reading that
+   * cannot have been our own sound (#2253). ⚠️ That reading may be old.
+   */
   riderPlayerInUse(): boolean;
+  /** Call `listener` after each reading that is believed. @returns the unsubscribe. */
+  onReading(listener: () => void): () => void;
   /**
    * Take a reading now, rather than at the header's next poll — asked when the
    * rider comes back to the app (#2357). `OtherPlayer.poll`.
@@ -247,13 +271,17 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
   /** The pause waiting for a fade to end, to cancel when the rider comes back. */
   let cancelPause: (() => void) | undefined;
   /**
-   * Whether an answer about the rider's player cannot be our own loop, read
-   * only while the loop is silent: true until the loop first plays, then false
-   * from each pause and each return to a visible menu route until {@link
-   * OWN_LOOP_SETTLE_MS} has passed.
+   * Whether a reading of the rider's player that cannot have been our own
+   * sound has landed since the last moment it could have changed unseen — the
+   * launch, the loop falling silent, a return to a visible menu route, the end
+   * of a 3 s wait (#2253). Always so where there is no rider's player.
    */
-  let settled = true;
-  let cancelSettle: (() => void) | undefined;
+  let fresh = deps.riderPlayer === undefined;
+  /** The return's {@link AUTOPLAY_WAIT_MS}: no start or return with no press until it is over. */
+  let held = false;
+  let cancelHold: (() => void) | undefined;
+  /** The suspension of our context waiting on a quiet menu route (#2253). */
+  let cancelHush: (() => void) | undefined;
   /** Whether the last {@link MenuMusic.update} was on a visible menu route. */
   let onMenu: boolean | undefined;
   let lastContext: PressContext | undefined;
@@ -270,42 +298,100 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
   /** Whether the page was hidden at the last {@link MenuMusic.update}. */
   let wasHidden = false;
 
-  /** The loop is silent from now: wait before believing the rider's player again. */
-  const unsettle = (ms: number = OWN_LOOP_SETTLE_MS): void => {
-    if (deps.riderPlayer === undefined) return;
-    cancelSettle?.();
-    settled = false;
-    cancelSettle = deps.schedule(() => {
-      cancelSettle = undefined;
-      settled = true;
-      // What the loop would have done had it not had to wait.
-      if (lastContext !== undefined) music.update(lastContext);
+  /** A reading from before now is not enough: wait for a believed one (#2253). */
+  const stale = (): void => {
+    if (deps.riderPlayer !== undefined) fresh = false;
+  };
+
+  /** Ask for a reading now, rather than at the header's next poll. */
+  const ask = (): void => {
+    // Never on a ride route: the shell does not poll the port there
+    // (`other-player.ts`), so the ride's own cues are never asked about.
+    if (onMenu !== true) return;
+    void deps.riderPlayer?.poll().catch(() => undefined);
+  };
+
+  /** No start or return with no press for `ms`; then a reading is asked for. */
+  const holdFor = (ms: number): void => {
+    cancelHold?.();
+    held = true;
+    cancelHold = deps.schedule(() => {
+      cancelHold = undefined;
+      held = false;
+      // The reading the loop goes by is taken at the end of the wait, so a
+      // player the rider started inside it is seen.
+      stale();
+      ask();
     }, ms);
   };
 
   /**
    * The rider is back in the app, on a menu route (#2357): our loop paused
-   * when the page was hidden, so a reading taken now cannot be it. Ask for one
-   * and wait {@link AUTOPLAY_WAIT_MS} for it, before a start or a return.
+   * when the page was hidden, so a reading taken now cannot be it. Ask for one,
+   * and wait {@link AUTOPLAY_WAIT_MS} before a start or a return with no press.
    */
   const backInTheApp = (): void => {
     if (deps.riderPlayer === undefined) return;
-    unsettle(AUTOPLAY_WAIT_MS);
-    void deps.riderPlayer.poll().catch(() => undefined);
+    stale();
+    ask();
+    holdFor(AUTOPLAY_WAIT_MS);
   };
 
   /** Whether the loop may start or come back: the rider's player is not in use, as far as can be told. */
   const mayStart = (): boolean =>
-    deps.riderPlayer === undefined || (settled && !deps.riderPlayer.riderPlayerInUse());
+    deps.riderPlayer === undefined || (fresh && !deps.riderPlayer.riderPlayerInUse());
+
+  /**
+   * Whether our context may be suspended now, on a visible menu route — #2253.
+   * The same rules as `quieten`, and our loop neither playing nor fading:
+   * never over a ride, a ride route, the stage, or a running or paused workout.
+   */
+  const mayHush = (): boolean =>
+    deps.riderPlayer !== undefined &&
+    lastContext !== undefined &&
+    !deps.hidden() &&
+    !quiet(lastContext) &&
+    lastContext.workoutRunning !== true &&
+    !playing;
+
+  /**
+   * Suspend our context {@link OWN_STREAM_QUIET_MS} after our last sound on a
+   * quiet menu route — #2253: a running context reads as the rider's player
+   * for as long as it runs. `restart` is a press, which may have just made a
+   * sound; anything else leaves a wait already set alone, so a ride
+   * controller that tells the shell of every sample cannot put it off for
+   * good. Every press and update that finds `mayHush()` false cancels the wait,
+   * and that cancel is what keeps it from landing on a ride begun in it; the
+   * check when it falls due only repeats that against the last context told
+   * of, and is no independent guard.
+   */
+  const hushLater = (restart: boolean): void => {
+    if (!mayHush()) {
+      cancelHush?.();
+      cancelHush = undefined;
+      return;
+    }
+    if (cancelHush !== undefined && !restart) return;
+    cancelHush?.();
+    cancelHush = deps.schedule(() => {
+      cancelHush = undefined;
+      if (!mayHush()) return;
+      deps.output.suspend();
+      // Once it has landed, a reading cannot be us.
+      if (!fresh) deps.schedule(ask, OWN_STREAM_CLOSE_MS);
+    }, OWN_STREAM_QUIET_MS);
+  };
 
   const pause = (into: HTMLMediaElement): void => {
     into.pause();
-    unsettle();
+    // The rider may have started their player while ours was heard.
+    stale();
   };
 
   const play = (into: HTMLMediaElement): void => {
-    // A context suspended behind a hidden page (`quieten`) is woken first.
-    // Only where `quieten` runs: in a browser `resume()` stays inside a press.
+    // A context suspended behind a hidden page (`quieten`) or on a quiet menu
+    // route (`hushLater`) is woken first. Only where those run: in a browser
+    // `resume()` stays inside a press.
     if (deps.riderPlayer !== undefined) deps.output.resume();
     cancelPause?.();
     cancelPause = undefined;
@@ -363,27 +449,34 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
     if (!playing) play(element);
   };
 
+  /** What a press does to the loop, before the quiet route's suspension is set again. */
+  const pressed = (target: EventTarget | null, context: PressContext): void => {
+    if (deps.track === undefined || quiet(context)) return;
+    if (target instanceof Element && target.closest(THE_RIDERS_PLAYER) !== null) return;
+    if (
+      element === undefined &&
+      target instanceof Element &&
+      target.closest(HOLDS_THE_MUSIC) !== null
+    ) {
+      return;
+    }
+    if (!wanted(deps.mix())) {
+      if (element !== undefined) stop(element, false);
+      return;
+    }
+    // The rider's player is in use, or no reading since our loop was heard says otherwise.
+    if (!playing && !mayStart()) return;
+    // Inside the press: in a browser, the one place a context may be made
+    // and resumed.
+    start(deps.track);
+  };
+
   const music: MenuMusic = {
     press(target, context) {
       lastContext = context;
-      if (deps.track === undefined || quiet(context)) return;
-      if (target instanceof Element && target.closest(THE_RIDERS_PLAYER) !== null) return;
-      if (
-        element === undefined &&
-        target instanceof Element &&
-        target.closest(HOLDS_THE_MUSIC) !== null
-      ) {
-        return;
-      }
-      if (!wanted(deps.mix())) {
-        if (element !== undefined) stop(element, false);
-        return;
-      }
-      // The rider's player is in use, or our loop was heard too lately to tell.
-      if (!playing && !mayStart()) return;
-      // Inside the press: in a browser, the one place a context may be made
-      // and resumed.
-      start(deps.track);
+      pressed(target, context);
+      // The press may have made a menu sound: our stream is open again.
+      hushLater(true);
     },
     update(context) {
       lastContext = context;
@@ -402,18 +495,18 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
       if (hidden && !quiet(context) && !workout) quieten();
       if (element === undefined) {
         // Never played, but the header did not read while the rider was away
-        // either: a press now would ask a reading from before they left, when
-        // they may have started their own player (#2242's review).
+        // either: a press now would go by a reading from before they left,
+        // when they may have started their own player (#2242's review).
         if (returned) backInTheApp();
-        else if (cameBack) unsettle();
-        // #2357: at launch the header has not read the rider's player yet.
-        // Its reading on mount lands within AUTOPLAY_WAIT_MS of this, the
-        // first visible menu route: a start with no press waits that long.
+        else if (cameBack) stale();
+        // #2357: the launch's wait, from the first visible menu route. At its
+        // end a reading is asked for, and the start goes by that one.
         if (!launchWaited && nowOnMenu && deps.riderPlayer !== undefined) {
           launchWaited = true;
           deps.schedule(() => {
             launchWaitOver = true;
-            if (lastContext !== undefined) music.update(lastContext);
+            stale();
+            ask();
           }, AUTOPLAY_WAIT_MS);
         }
         // The shell lets it start with no press, this is a visible menu route,
@@ -423,15 +516,14 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
           nowOnMenu &&
           !workout &&
           launchWaitOver &&
+          !held &&
           deps.track !== undefined &&
           wanted(deps.mix()) &&
           mayStart()
         ) {
           start(deps.track);
         }
-        return;
-      }
-      if (hidden) {
+      } else if (hidden) {
         stop(element, false);
       } else if (quiet(context)) {
         stop(element, true);
@@ -440,17 +532,25 @@ export function createMenuMusic(deps: MenuMusicDeps): MenuMusic {
         // no new answer to wait for.
         const fading = cancelPause !== undefined;
         // The header did not read while the rider was away (#2073 reads on a
-        // visible menu route only): its answer may be our loop, from before.
-        // Back in the app, our loop paused as the page was hidden, so a
-        // reading asked for now is not it (#2357).
+        // visible menu route only). Back in the app, our loop paused as the
+        // page was hidden, so a reading asked for now is not it (#2357).
         if (returned && !fading) backInTheApp();
-        else if (cameBack && !fading) unsettle();
+        else if (cameBack && !fading) stale();
         // Never back by itself over a running or paused workout (#2357):
         // only a press brings the loop over one.
-        if (wanted(deps.mix()) && !workout && (fading || mayStart())) play(element);
+        if (wanted(deps.mix()) && !workout && (fading || (!held && mayStart()))) play(element);
       }
+      hushLater(false);
     },
   };
+  // The first believed reading after a wait: what the loop would have done
+  // had it not had to wait. Later ones change nothing by themselves — the loop
+  // never starts on its own because the rider's player stopped.
+  deps.riderPlayer?.onReading(() => {
+    if (fresh) return;
+    fresh = true;
+    if (lastContext !== undefined) music.update(lastContext);
+  });
   void deps.autoplay?.then(
     (allowed) => {
       autoplay = allowed === true;

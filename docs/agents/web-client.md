@@ -763,6 +763,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         #2357 the Android app also starts it with no press,
                         `AUTOPLAY_WAIT_MS` (3 s) after the launch and after
                         each return to the app on a menu route. Since
+                        #2253 our own open stream never reads as the rider's
+                        player: `OtherPlayer` believes a reading only when
+                        `CueOutput.quietToken()` held from ask to answer, and
+                        in the Android shell `menu-music.ts` suspends the
+                        context 1 s after our last sound on a quiet menu route
+                        (never over a ride, a workout or the loop). Since
                         #2057 the loop is `public/audio/`'s one Ogg Opus file
                         (`MENU_MUSIC_FILE`), made by
                         `tools/audio/encode-menu-music.sh`;

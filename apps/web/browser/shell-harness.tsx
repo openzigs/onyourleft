@@ -910,6 +910,8 @@ function main(): void {
       ? new OtherPlayer(
           { sendKey: () => Promise.resolve(), otherAudioActive: () => Promise.resolve(true) },
           { now: () => 0, every: () => () => undefined },
+          // #2253: over the one output, as `main.tsx` composes it.
+          sharedCueOutput(),
         )
       : undefined;
 
