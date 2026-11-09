@@ -2815,68 +2815,76 @@ function GameScreen({
       // simulation advances regardless, which is exactly the decoupling
       // `simulation.ts` is about. A rider whose GPU is slow to hand over a
       // context still gets a HUD and a ride.
-      void load().then((renderer) => {
-        // ⚠️ Not after this effect has been cleaned up — found by #475's
-        // tests. A rider who ends the ride while `three` is still arriving has
-        // had the stage unmounted, and a view built then would hold a GL
-        // context on a detached canvas that nothing destroys — and the NEXT
-        // ride would find `viewRef` set, build no view of its own, and draw
-        // into that detached canvas: a black world. A pause cleans up too, and
-        // the resume's own run of this effect builds the view instead.
-        if (cancelled) {
-          return;
-        }
-        if (viewRef.current === undefined) {
-          const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
-          viewRef.current = view;
-          // #623: dressed before its first frame. @see kitColourRef
-          view.setRiderKit(kitColourRef.current);
-          // #1622: the season this ride started with, not a fresh read.
-          view.setSeason(seasonRef.current);
-          view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
-          // #475: the realistic world, for a ride that asked for it — AFTER
-          // the view exists, so the rider rides the stylised world while ~33
-          // MiB arrive rather than a black canvas, and the swap is one whole
-          // world for another (ADR 0026 D-3) the moment it is all here.
-          if (realisticWantedRef.current) {
-            // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
-            arrivingSinceRef.current = clock();
-            const arrived = (outcome: RealisticWorldOutcome): void => {
-              // The ride this was for may have ended while the files arrived,
-              // or the arrival window may have lapsed and the ladder left
-              // realism on the stylised world's frames.
-              if (viewRef.current !== view || !qualityRef.current.realistic) {
-                return;
-              }
-              if (outcome.loaded) {
-                // #2289: the next frames upload the world; they are not counted.
-                qualityRef.current = realisticWorldArrived(qualityRef.current);
-                view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
-                // #2392: the town is here, so the round begins from where the rider is.
-                beginWaitingRound(deliveryWaitingRef);
-                return;
-              }
-              // D-7: the stylised world's TOP, every kind at once, and said.
-              qualityRef.current = STYLISED_START;
-              setQualityLevel(INITIAL_QUALITY.level);
-              setRealisticRung(false);
-              const text = realisticWorldNotice(outcome);
-              if (text !== undefined) {
-                setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
-              }
-              // #2392: the round begins in the world the ride fell back to.
-              beginWaitingRound(deliveryWaitingRef);
-            };
-            // #2289's review: a load that REJECTS takes D-7's fallback too, as
-            // a failed one does — otherwise the ride would stay arriving until
-            // the window lapsed, drawing the stylised world under a realistic
-            // rung. The port does not promise never to reject.
-            void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
-              arrived({ loaded: false, offline: false, detail: String(error) });
-            });
+      void load().then(
+        (renderer) => {
+          // ⚠️ Not after this effect has been cleaned up — found by #475's
+          // tests. A rider who ends the ride while `three` is still arriving has
+          // had the stage unmounted, and a view built then would hold a GL
+          // context on a detached canvas that nothing destroys — and the NEXT
+          // ride would find `viewRef` set, build no view of its own, and draw
+          // into that detached canvas: a black world. A pause cleans up too, and
+          // the resume's own run of this effect builds the view instead.
+          if (cancelled) {
+            return;
           }
-        }
-      });
+          if (viewRef.current === undefined) {
+            const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
+            viewRef.current = view;
+            // #623: dressed before its first frame. @see kitColourRef
+            view.setRiderKit(kitColourRef.current);
+            // #1622: the season this ride started with, not a fresh read.
+            view.setSeason(seasonRef.current);
+            view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
+            // #475: the realistic world, for a ride that asked for it — AFTER
+            // the view exists, so the rider rides the stylised world while ~33
+            // MiB arrive rather than a black canvas, and the swap is one whole
+            // world for another (ADR 0026 D-3) the moment it is all here.
+            if (realisticWantedRef.current) {
+              // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
+              arrivingSinceRef.current = clock();
+              const arrived = (outcome: RealisticWorldOutcome): void => {
+                // The ride this was for may have ended while the files arrived,
+                // or the arrival window may have lapsed and the ladder left
+                // realism on the stylised world's frames.
+                if (viewRef.current !== view || !qualityRef.current.realistic) {
+                  return;
+                }
+                if (outcome.loaded) {
+                  // #2289: the next frames upload the world; they are not counted.
+                  qualityRef.current = realisticWorldArrived(qualityRef.current);
+                  view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  // #2392: the town is here, so the round begins from where the rider is.
+                  beginWaitingRound(deliveryWaitingRef);
+                  return;
+                }
+                // D-7: the stylised world's TOP, every kind at once, and said.
+                qualityRef.current = STYLISED_START;
+                setQualityLevel(INITIAL_QUALITY.level);
+                setRealisticRung(false);
+                const text = realisticWorldNotice(outcome);
+                if (text !== undefined) {
+                  setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
+                }
+                // #2392: the round begins in the world the ride fell back to.
+                beginWaitingRound(deliveryWaitingRef);
+              };
+              // #2289's review: a load that REJECTS takes D-7's fallback too, as
+              // a failed one does — otherwise the ride would stay arriving until
+              // the window lapsed, drawing the stylised world under a realistic
+              // rung. The port does not promise never to reject.
+              void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
+                arrived({ loaded: false, offline: false, detail: String(error) });
+              });
+            }
+          }
+        },
+        () => {
+          // #2392's review: `three` failed to arrive, so no view and no realistic
+          // load will ever settle. The round was always allowed to run on the HUD
+          // alone, so it begins now rather than being lost for the whole ride.
+          if (!cancelled) beginWaitingRound(deliveryWaitingRef);
+        },
+      );
     }
 
     // ⚠️ **#423 made this necessary rather than nice.** The canvas used to be

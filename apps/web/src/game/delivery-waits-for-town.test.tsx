@@ -34,6 +34,7 @@ import { startDeliveryRide } from './delivery/ride-round';
 import type { WeekProgress } from './delivery/round';
 import { THROW_WINDOW_AFTER_METRES } from './delivery/throw';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { endRideAnswer } from './end-ride-testing';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import type { GameRenderer, SceneFrame } from './port';
 import { REALISTIC_ARRIVAL_LIMIT_MS } from './quality';
@@ -43,7 +44,6 @@ import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { GameSimulation } from './simulation';
 import { corridorOrigin } from './terrain';
 import { writeRealisticWorldChoice } from './world-preference';
-import { endRideAnswer } from './end-ride-testing';
 
 /** Every sentence the real announcer said, in order. */
 const said = vi.hoisted((): string[] => []);
@@ -253,10 +253,11 @@ const FRAMES_PAST_FIRST_HOUSE = ((): number => {
 })();
 
 /** Mount the game with a round on and the realistic world chosen, and press Ride. */
-async function pressRide(renderer: GameRenderer): Promise<void> {
-  mounted = await mount(
-    <GameView port={port} renderer={() => Promise.resolve(renderer)} now={() => nowMs} delivery />,
-  );
+async function pressRide(
+  renderer: GameRenderer,
+  load: () => Promise<GameRenderer> = () => Promise.resolve(renderer),
+): Promise<void> {
+  mounted = await mount(<GameView port={port} renderer={load} now={() => nowMs} delivery />);
   await settle();
   await clickThrough(buttonStarting('Ride '));
 }
@@ -340,6 +341,15 @@ describe('a Delivery round waits for the realistic town before counting a house 
     await pump(2 * FRAME_MS);
     await settle();
     expect(begunAt).toHaveLength(1);
+  });
+
+  it('begins the round when the renderer module itself fails to load', async () => {
+    const arriving = arrivingRenderer([]);
+    await pressRide(arriving.renderer, () => Promise.reject(new Error('three did not arrive')));
+    for (let index = 0; index < 3; index += 1) await pump();
+    await settle();
+    expect(begunAt).toHaveLength(1);
+    expect(field('Houses')?.value).toBe(String(WEEK.houses));
   });
 
   it('begins the round at the press on a ride in the standard world, which loads nothing', async () => {
