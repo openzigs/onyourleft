@@ -381,6 +381,34 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
   });
 });
 
+describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, ADR 0065 D-10.9', () => {
+  it(
+    'says the parked car or bin ahead with announcements off, the default, and no house, miss or crash',
+    { timeout: 30_000 },
+    async () => {
+      localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
+      expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
+      stubSeed(7);
+      await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+      await click(rideButton());
+      await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+      const heard = new Set<string>();
+      // As long as the first case rides, which hears the first house said with announcements on.
+      for (let frame = 0; frame < 480; frame += 1) {
+        await pump();
+        heard.add(region());
+      }
+      const said = [...heard];
+      expect(
+        said.some((each) =>
+          /^A (parked car|bin) ahead, in the (left|middle|right) lane\.$/.test(each),
+        ),
+      ).toBe(true);
+      expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);
+    },
+  );
+});
+
 describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
   it('rides the level’s round with the chooser’s Delivery switch turned off', async () => {
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));

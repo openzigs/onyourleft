@@ -124,7 +124,10 @@ describe('Delivery follows the rider’s announcement setting — #1812, the own
   }
 
   it('says no delivery, miss, crash or round’s end with announcements off, the default', () => {
-    for (const kind of DELIVERY_KINDS) expect(ALWAYS_SPOKEN).not.toContain(kind);
+    // The four follow the setting (2026-10-28); the hazard ahead does not (2026-11-08, #2362).
+    for (const kind of DELIVERY_KINDS) {
+      expect(ALWAYS_SPOKEN.includes(kind)).toBe(kind === 'delivery-obstacle-ahead');
+    }
     expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
     expect(rideARound(DEFAULT_ANNOUNCEMENTS)).toEqual([]);
   });

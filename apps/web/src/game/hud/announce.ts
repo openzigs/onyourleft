@@ -36,7 +36,7 @@
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
- * | 5g | a standing obstacle ahead on a level (#2362), a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2; ADR 0065 D-10.9 | **yes** — #1812 |
+ * | 5g | a standing obstacle ahead on a level (#2362), a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2; ADR 0065 D-10.9 | the obstacle ahead **yes** (#2362, the owner's ruling of 2026-11-08); the other four no (2026-10-28) |
  * | 5h | a lap race's finish, a hit, a lap, an item and a place, in that order | event (#1904) | ADR 0060 | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
@@ -210,7 +210,10 @@
  * "owed" rule of #647 — `hud/delivery-announce.ts` holds it, one sentence per
  * kind at most, so what is owed never grows into a queue. ⚠️ **Not in
  * {@link ALWAYS_SPOKEN}**, none of the four: they follow the rider's
- * announcement setting, said only when announcements are on. That is the
+ * announcement setting, said only when announcements are on. ⚠️ **The
+ * obstacle ahead IS in it** (#2362): the owner's ruling of 2026-11-08 on PR
+ * #2378 says a hazard is always said, whatever the setting, because ADR 0065
+ * D-10.9 allows no warning carried by sight alone. That is the
  * owner's ruling of 2026-10-28 on #1812 ("Only when announcements on"), which
  * reversed this PR's first cut. It decides nothing about #1316's `lap-ended`.
  *
@@ -379,7 +382,11 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
-  // #1812: no Delivery kind. The owner's ruling of 2026-10-28: they follow the setting. Rank 5g.
+  // #2362: a standing obstacle ahead on a level, ALWAYS said: the owner's ruling of
+  // 2026-11-08 on PR #2378, as ADR 0065 D-10.9 requires (no hazard warned by sight alone).
+  'delivery-obstacle-ahead',
+  // #1812: and no other Delivery kind. The owner's ruling of 2026-10-28: a
+  // delivery, a miss, a crash and the round's end follow the setting. Rank 5g.
   // #1904: and no lap-race kind, on that ruling. Rank 5h.
 ];
 

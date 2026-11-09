@@ -333,6 +333,8 @@ describe('priority is an ORDER, not a politeness', () => {
       'side-camera-lost',
       'room-lost',
       'room-race',
+      // #2362: a hazard ahead on a level, by the owner's ruling of 2026-11-08.
+      'delivery-obstacle-ahead',
     ]);
     // #1312, third pass: a lap's summary is NOT one of them.
     expect(ALWAYS_SPOKEN).not.toContain('lap-ended');
