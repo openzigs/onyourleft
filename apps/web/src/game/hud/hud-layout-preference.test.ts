@@ -15,6 +15,8 @@ import {
   HUD_ARRANGEMENTS,
   HUD_LAYOUT_STORAGE_KEY,
   HUD_PANELS,
+  HUD_ROUTE_VIEWS,
+  compactRoute,
   focusArrangement,
   panelShown,
   readHudLayout,
@@ -36,8 +38,14 @@ describe('the HUD layout preference (#2079)', () => {
       true,
     );
     const read = readHudLayout(localStorage);
-    // #2383: a choice written with no arrangement reads back as the full HUD.
-    expect(read).toEqual({ hidden: ['route', 'graph'], textSize: 'large', arrangement: 'full' });
+    // #2383, #2385: a choice written with no arrangement and no route view
+    // reads back as the full HUD and the full route panel.
+    expect(read).toEqual({
+      hidden: ['route', 'graph'],
+      textSize: 'large',
+      arrangement: 'full',
+      route: 'full',
+    });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
   });
@@ -84,7 +92,12 @@ describe('the focus arrangement (#2383)', () => {
       writeHudLayout(localStorage, { hidden: ['graph'], textSize: 'large', arrangement: 'focus' }),
     ).toBe(true);
     const read = readHudLayout(localStorage);
-    expect(read).toEqual({ hidden: ['graph'], textSize: 'large', arrangement: 'focus' });
+    expect(read).toEqual({
+      hidden: ['graph'],
+      textSize: 'large',
+      arrangement: 'focus',
+      route: 'full',
+    });
     expect(focusArrangement(read)).toBe(true);
   });
 
@@ -96,5 +109,53 @@ describe('the focus arrangement (#2383)', () => {
     expect(readHudLayout(localStorage).arrangement).toBe('full');
     localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ arrangement: 'minimal' }));
     expect(focusArrangement(readHudLayout(localStorage))).toBe(false);
+  });
+});
+
+describe('the compact route panel (#2385)', () => {
+  it('is full until the rider chooses, and full is the default', () => {
+    expect(HUD_ROUTE_VIEWS).toEqual(['full', 'compact']);
+    expect(readHudLayout(localStorage).route).toBe('full');
+    expect(compactRoute(DEFAULT_HUD_LAYOUT)).toBe(false);
+  });
+
+  it('keeps compact on the device and reads it back, beside the other choices', () => {
+    expect(
+      writeHudLayout(localStorage, {
+        hidden: ['graph'],
+        textSize: 'large',
+        arrangement: 'focus',
+        route: 'compact',
+      }),
+    ).toBe(true);
+    const read = readHudLayout(localStorage);
+    expect(read).toEqual({
+      hidden: ['graph'],
+      textSize: 'large',
+      arrangement: 'focus',
+      route: 'compact',
+    });
+    expect(compactRoute(read)).toBe(true);
+    // Compact says how the route panel is drawn, never whether.
+    expect(panelShown(read, 'route')).toBe(true);
+  });
+
+  it('keeps the route hidden beside compact: the two are separate choices', () => {
+    writeHudLayout(localStorage, { hidden: ['route'], textSize: 'normal', route: 'compact' });
+    const read = readHudLayout(localStorage);
+    expect(compactRoute(read)).toBe(true);
+    expect(panelShown(read, 'route')).toBe(false);
+  });
+
+  it('reads a preference kept before #2385, or a view it does not know, as full', () => {
+    localStorage.setItem(
+      HUD_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ hidden: ['route'], textSize: 'normal', arrangement: 'focus' }),
+    );
+    expect(readHudLayout(localStorage).route).toBe('full');
+    // And the owner's hidden route panel is still hidden.
+    expect(panelShown(readHudLayout(localStorage), 'route')).toBe(false);
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ route: 'tiny' }));
+    expect(compactRoute(readHudLayout(localStorage))).toBe(false);
   });
 });

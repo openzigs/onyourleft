@@ -65,6 +65,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: ['route', 'standings'],
       textSize: 'extra-large',
       arrangement: 'full',
+      route: 'full',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -83,8 +84,9 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     const offered = queryAll(document, '.oyl-hud-layout__choice').map((each) =>
       (each.textContent ?? '').trim(),
     );
-    // Four panels, three sizes and (#2383) two arrangements.
-    expect(offered).toHaveLength(9);
+    // Four panels, three sizes, (#2383) two arrangements and (#2385) two
+    // route panels.
+    expect(offered).toHaveLength(11);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -104,6 +106,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       hidden: [],
       textSize: 'large',
       arrangement: 'focus',
+      route: 'full',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -114,6 +117,45 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     // And back.
     await press(choice('Full'));
     expect(readHudLayout(localStorage).arrangement).toBe('full');
+  });
+
+  it('chooses the compact route panel, kept beside the route turned off — #2385', async () => {
+    await settings();
+    // The full route panel is the default.
+    expect(choice('Height profile and map').checked).toBe(true);
+    expect(choice('Compact').checked).toBe(false);
+
+    await press(choice('Compact'));
+    // The checkbox that shows the route names no view, so with the compact
+    // panel chosen it promises no height profile.
+    const show = choice('The route');
+    expect(show.closest('label')?.textContent?.trim()).toBe('The route panel');
+    expect(show.closest('label')?.textContent).not.toMatch(/height profile/i);
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: [],
+      textSize: 'normal',
+      arrangement: 'full',
+      route: 'compact',
+    });
+
+    // Turning the route off keeps the choice of how it is drawn, and hides it.
+    await press(choice('The route'));
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: ['route'],
+      textSize: 'normal',
+      arrangement: 'full',
+      route: 'compact',
+    });
+
+    // And Settings, opened again, says the same.
+    await settings();
+    expect(choice('Compact').checked).toBe(true);
+    expect(choice('Height profile and map').checked).toBe(false);
+    expect(choice('The route').checked).toBe(false);
+
+    // And back.
+    await press(choice('Height profile and map'));
+    expect(readHudLayout(localStorage).route).toBe('full');
   });
 
   it('says so when the device will not keep the choice', async () => {
