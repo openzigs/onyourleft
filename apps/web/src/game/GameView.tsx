@@ -241,6 +241,7 @@ import {
   levelRoute,
   type ListedLevel,
 } from './delivery/levels/levels';
+import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -3418,6 +3419,11 @@ function GameScreen({
           roomRacing === undefined
             ? undefined
             : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        // #1853: where the round has steered the rider, the place the
+        // obstacles meet them; none on a ride with no round, or in a room (DL9).
+        const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
+          inRoom: roomRef.current !== undefined,
+        });
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3481,11 +3487,19 @@ function GameScreen({
           // (DL9). Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads it back off every frame's input.
           steeredLateral:
-            raceDrawn?.steeredLateral ??
-            roomRaceDrawn?.steeredLateral ??
-            steeredLateralFor(deliveryRef.current?.steer, {
-              inRoom: roomRef.current !== undefined,
-            }),
+            raceDrawn?.steeredLateral ?? roomRaceDrawn?.steeredLateral ?? deliverySteered,
+          // #2396: and the camera's eye moved off any parked car it is
+          // alongside, so it never passes through one. A drawing only.
+          // Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads it back off every frame's input.
+          cameraLateral:
+            deliverySteered === undefined || deliveryRef.current === undefined
+              ? undefined
+              : eyeLateralBesideParkedCars(
+                  deliveryRef.current.obstacles,
+                  drawn.riderDistance,
+                  deliverySteered,
+                ),
           ...(raceDrawn === undefined
             ? {}
             : {

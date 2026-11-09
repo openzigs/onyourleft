@@ -26,6 +26,13 @@
  *    what it and its hazard marker draw stands clear above the rider's top.
  *    With no marker (`three-renderer.ts` §`obstacleHazardMarker`) every case
  *    is red: the obstacle sits on the helmet, then behind the rider.
+ * 6. **The camera stays out of a parked car** (#2396): the rider back in the
+ *    car's lane just past it, the camera 4.5 m behind still beside it, the
+ *    eye where `delivery/camera-clear.ts` puts it; the car covers at most a
+ *    fifth of the road under the rider. With the eye behind the rider, a
+ *    flat block of the car's paint covers 65 % to 98 % of it.
+ * 7. **The owner's photographs** of #2396: a bin in the rider's lane, and a
+ *    parked car being passed, before and after.
  *
  * ⚠️ An ordinary ride's village frame is `realistic-town.browser.spec.ts`',
  * which this change does not touch: no view builds the belt until a frame
@@ -81,6 +88,27 @@ const IN_LANE_FRAMES = [
   { name: 'a 16 : 10 tablet', width: 1280, height: 800 },
   { name: 'an upright phone', width: 390, height: 844 },
 ] as const;
+
+/**
+ * #2396: where the camera's eye is, metres past a parked car's middle, while
+ * the rider 4.5 m ahead is back in the car's lane and clear of it: from half
+ * a metre behind the car's back (the near plane's reach) to its front, every
+ * half metre. The car is 4.4 m long.
+ */
+const EYE_BESIDE_CAR: readonly number[] = Array.from(
+  { length: 10 },
+  (_, index) => -2.7 + 0.5 * index,
+);
+
+/**
+ * The most of the road under the rider — the middle third of the frame's
+ * bottom quarter — a car the camera is beside may cover: **a fifth**. #2396's
+ * own number, from its measurement: with the eye moved off the car its side
+ * reaches 10 % of that strip on the tablet and none on a phone; with the eye
+ * behind the rider, inside the car, a flat block of its paint covers 65 % to
+ * 98 %, the frame the owner saw.
+ */
+const MOST_CAR_IN_THE_BOTTOM = 0.2;
 
 /** Each kind in the right-hand lane, the racing line's home, and a bin on the centre line. */
 const IN_LANE_CASES = [
@@ -215,6 +243,35 @@ test.describe('Delivery’s belt — #1814', () => {
     }
   }
 
+  for (const { name, width, height } of IN_LANE_FRAMES) {
+    test(`#2396: the camera stays out of a parked car the rider has just passed, on ${name}`, async ({
+      page,
+    }) => {
+      await open(page);
+      const samples = await page.evaluate(
+        (asked) => window.__oylDelivery?.pastParkedCar(asked.eyes, asked.width, asked.height),
+        { eyes: EYE_BESIDE_CAR, width, height },
+      );
+      if (samples === undefined) throw new Error('no harness');
+      console.log(
+        `#2396 past a parked car on ${name}: ` +
+          samples
+            .map(
+              (sample) =>
+                `eye ${sample.eyeAhead.toFixed(1)} m at ${sample.eyeLateral.toFixed(2)} m, ` +
+                `${(100 * sample.underRiderCovered).toFixed(1)} %`,
+            )
+            .join('; '),
+      );
+      expect(samples).toHaveLength(EYE_BESIDE_CAR.length);
+      for (const sample of samples) {
+        expect(sample.underRiderCovered, `eye ${String(sample.eyeAhead)} m`).toBeLessThanOrEqual(
+          MOST_CAR_IN_THE_BOTTOM,
+        );
+      }
+    });
+  }
+
   test('photographs a Delivery frame for the owner', async ({ page }, testInfo) => {
     await open(page);
     await page.evaluate(() => window.__oylDelivery?.showcase());
@@ -236,6 +293,20 @@ test.describe('Delivery’s belt — #1814', () => {
         body: shot,
         contentType: 'image/png',
       });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+
+  for (const behind of [true, false]) {
+    const when = behind ? 'before' : 'after';
+    test(`#2396: photographs a parked car being passed for the owner, the camera as it was ${when} the fix`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((b) => window.__oylDelivery?.pastCarShowcase(-1.2, b), behind);
+      const shot = await page.locator('#delivery-past-car').screenshot();
+      await testInfo.attach(`delivery-past-car-${when}`, { body: shot, contentType: 'image/png' });
       expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
       expect(shot.byteLength).toBeGreaterThan(5000);
     });

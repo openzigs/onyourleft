@@ -588,21 +588,41 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     expect(ride.score).toBe(0);
   });
 
-  it('holds the clearance under one tick’s lane step, which is what keeps a moved rider held beside the car', () => {
-    // From the moved offset, one tick of steering back toward the kerb lane must
-    // re-enter the car's width, or `held` would go false between two ticks.
+  it('draws the held rider at the clearance on every tick beside the car, though the clearance is more than a tick’s lane step — #2396', () => {
+    // #2362 held the rider only while one tick's step back toward the kerb lane
+    // re-entered the car's own width, so its clearance had to be under that
+    // step. #2396 holds by the car's width plus the clearance, so a gap wider
+    // than one step holds steady rather than drifting out and snapping back.
     const step =
       (((LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number)) /
         LANE_CHANGE_SECONDS) *
       DELIVERY_TICK_SECONDS;
-    expect(PARKED_CAR_CLEARANCE_METRES).toBeLessThan(step);
+    expect(PARKED_CAR_CLEARANCE_METRES).toBeGreaterThan(step);
+    const moved =
+      parkedCarStands('right') -
+      (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + PARKED_CAR_CLEARANCE_METRES);
+    let ride = carAhead();
+    const offsets: number[] = [];
+    while (ride.along < 60) {
+      ride = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        speed: SPEED,
+      }).ride;
+      const beside =
+        ride.along + RIDER_AHEAD_METRES > 40 - CAR.halfLength &&
+        ride.along - RIDER_BEHIND_METRES < 40 + CAR.halfLength;
+      if (ride.obstacleState.crashed[0] === true && beside) offsets.push(ride.steer.offset);
+    }
+    expect(offsets.length).toBeGreaterThan(5);
+    for (const offset of offsets) expect(offset).toBeCloseTo(moved, 9);
   });
 
   it('scores no second crash from the move-aside: another obstacle beside the car meets the rider in their own lane', () => {
     const ride = carAhead();
     // A bin beside the car where the held rider is met if the move-aside counted, clear of their own lane.
     const stands = parkedCarStands('right');
-    const moved = stands - (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + 0.05);
+    const moved = stands - (CAR.halfWidth + RIDER_HALF_WIDTH_METRES + PARKED_CAR_CLEARANCE_METRES);
     const bin: Obstacle = { kind: 'bin', along: 41, stands: moved - 0.15 };
     const lane = LANE_OFFSETS_METRES.at(-1) as number;
     expect(Math.abs(lane - bin.stands)).toBeGreaterThan(

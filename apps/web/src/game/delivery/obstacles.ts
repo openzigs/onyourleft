@@ -234,9 +234,14 @@ export const PARKED_CAR_KERB_GAP_METRES = 0.2;
 
 /**
  * How far a rider moved clear of a parked car is drawn from its side, in
- * metres — #2362: a hand's breadth, so the two are drawn apart, not touching.
+ * metres — **0.75**, #2396. It was a hand's breadth (0.05) in #2362, and the
+ * owner's comment of 2026-11-09 on #2396 found an unsteered ride drawn passing
+ * every right-hand car that close. Three-quarters of a metre is about a car
+ * door's swing, the room a rider leaves a parked car; it puts the rider's
+ * middle 0.55 m right of the centre line, still on the road's right half.
+ * This project's own number, for the owner's screenshots.
  */
-export const PARKED_CAR_CLEARANCE_METRES = 0.05;
+export const PARKED_CAR_CLEARANCE_METRES = 0.75;
 
 /**
  * Where a parked car stands across the road, in metres right of the centre
@@ -609,7 +614,11 @@ export interface DrawnLane {
  * drawn offset moves**: the lane the rider steers to is theirs, kept as it
  * was (round 3 of PR #2378's review), so once past the car they ease back to
  * it at the steering's own speed. Their distance and speed are the
- * simulation's (ADR 0065 D-11). A car not yet touched is left to
+ * simulation's (ADR 0065 D-11). ⚠️ **Held by the car's width plus the
+ * clearance** since #2396: a rider at the clearance who steers back toward the
+ * car by any amount is beside it again and held, so the clearance may be more
+ * than one tick's lane step without the rider drifting out of the hold and
+ * back, a sawtooth every few ticks. A car not yet touched is left to
  * {@link stepObstacles}, which counts it. While a rider is held clear,
  * `ride-round.ts` meets every other obstacle at the lane they steer to, not at
  * the moved offset, so the move-aside never scores a crash of its own.
@@ -625,6 +634,9 @@ export function clearOfParkedCars(
     if (state.crashed[index] !== true) return;
     const shape = OBSTACLE_KINDS[obstacle.kind];
     const offset = moved?.offset ?? rider.offset;
+    // #2396: the car widened by the clearance, so a rider held at it, who
+    // steers back toward the car by any amount, is inside again and held.
+    const held = shape.halfWidth + PARKED_CAR_CLEARANCE_METRES;
     if (
       !overlaps(
         rider.along - RIDER_BEHIND_METRES,
@@ -635,8 +647,8 @@ export function clearOfParkedCars(
       !overlaps(
         offset - RIDER_HALF_WIDTH_METRES,
         offset + RIDER_HALF_WIDTH_METRES,
-        obstacle.stands - shape.halfWidth,
-        obstacle.stands + shape.halfWidth,
+        obstacle.stands - held,
+        obstacle.stands + held,
       )
     ) {
       return;
