@@ -26,6 +26,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 
+import { POWER_ZONE_NAMES } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
@@ -708,6 +709,64 @@ function FocusReadout(props: { readonly readings: readonly HudReading[] }): JSX.
   );
 }
 
+/** The gap between two of the zone strip's segments, in its 100-wide box — #2384. */
+const ZONE_STRIP_GAP = 2;
+
+/**
+ * The zone strip — #2384: every power zone of the rider's threshold as a row
+ * of equal segments, in zone order, each dimmed onto the panel in its zone's
+ * colour, and the zone the rider is in now LIT: its full colour, the strip's
+ * full height where the others are less than half of it, and outlined in the
+ * HUD's ink. So the zone is read by where the tall segment stands, never by
+ * its colour alone (SC 1.4.1), and every segment's outline is a declared 3:1
+ * on the panel (SC 1.4.11, `theme.css` §"THE ZONE STRIP").
+ *
+ * Lit from the zone indicator's own `current`, so it cannot say a zone the
+ * number beside it does not; none lit with no live power. Drawn beside that
+ * number ({@link Value}), so not at all with no threshold set. An image NAMED
+ * with the zone in words, for a screen reader, and no text of its own: the
+ * field's number and name stay the reading.
+ */
+function ZoneStrip(props: { readonly current: number | undefined }): JSX.Element {
+  const count = POWER_ZONE_NAMES.length;
+  const width = (100 - ZONE_STRIP_GAP * (count - 1)) / count;
+  const name = props.current === undefined ? undefined : POWER_ZONE_NAMES[props.current - 1];
+  const label =
+    props.current === undefined || name === undefined
+      ? 'No zone: no power reading'
+      : `Zone ${String(props.current)} of ${String(count)}: ${name}`;
+  return (
+    <svg
+      className="oyl-hud__zone-strip"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+      focusable="false"
+      data-oyl-zone-lit={props.current === undefined ? '' : String(props.current)}
+    >
+      {POWER_ZONE_NAMES.map((_, index) => {
+        const zone = index + 1;
+        const lit = zone === props.current;
+        return (
+          <rect
+            key={zone}
+            className={[
+              'oyl-hud__zone-strip-segment',
+              `oyl-hud__zone-strip-segment--${String(zone)}`,
+              ...(lit ? ['oyl-hud__zone-strip-segment--lit'] : []),
+            ].join(' ')}
+            x={index * (width + ZONE_STRIP_GAP)}
+            y={lit ? 0 : 3}
+            width={width}
+            height={lit ? 10 : 4}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 /**
  * This ride's time in each power zone — #2077: one thin bar, each zone's share
  * a segment in its colour, in zone order. `aria-hidden`, and never the only
@@ -763,19 +822,25 @@ function Value(props: { readonly reading: HudReading }): JSX.Element {
   // #2077: the zone's number beside a swatch of the zone's own colour. The
   // swatch is `aria-hidden`: the number IS the reading, and the name under it
   // says the same in words, so the colour is never the only carrier.
-  if (zone?.current !== undefined) {
+  // #2384: and the zone strip after the number, in the same row, so the strip
+  // takes the width beside the number rather than a row of its own (a row more
+  // pushed a lap race's standings into the actions panel on a tablet).
+  if (zone !== undefined) {
     return (
-      <>
-        <svg
-          className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <rect x="0" y="0" width="10" height="10" rx="2" />
-        </svg>
+      <span className="oyl-hud__zone-now">
+        {zone.current === undefined ? null : (
+          <svg
+            className={`oyl-hud__zone-swatch oyl-hud__zone-swatch--${String(zone.current)}`}
+            viewBox="0 0 10 10"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="0" y="0" width="10" height="10" rx="2" />
+          </svg>
+        )}
         {value}
-      </>
+        <ZoneStrip current={zone.current} />
+      </span>
     );
   }
   const sign = value.charAt(0);

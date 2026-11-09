@@ -12097,6 +12097,103 @@ select.oyl-input {
 }
 
 /*
+ * THE ZONE STRIP — #2384: every power zone as a row of equal segments after
+ * the zone's number, in the number's own row, the zone the rider is in now
+ * lit (`HudCore.tsx` §`ZoneStrip`). The row is a flex line, so the strip takes
+ * the width beside the number and never wraps: a row of its own made the
+ * field 14 px taller, and on a 1280×800 tablet a lap race's standings came
+ * within 9 px of the actions panel (`ride-laps.browser.spec.ts` §"#2080").
+ * A segment is dimmed onto the panel in its zone's colour
+ * (`hudZoneBand*`) with an outline in the label's colour, which is the 3:1 on
+ * `hudSurface` that lets the strip's scale be seen (SC 1.4.11); the lit one is
+ * its zone's full colour (`hudZone*`, each a declared 3:1 on the panel) in an
+ * outline of the HUD's ink, and the strip's full height where the others are
+ * four tenths of it. The height and the place are the cue as well as the
+ * colour (SC 1.4.1), and the strip is named with the zone in words.
+ */
+.oyl-hud__zone-now {
+  display: flex;
+  align-items: baseline;
+}
+
+.oyl-hud__zone-strip {
+  flex: 1 1 0;
+  align-self: center;
+  min-width: 0;
+  max-width: 6em;
+  height: 0.45em;
+  margin-inline-start: 0.25em;
+  overflow: visible;
+}
+
+.oyl-hud__zone-strip-segment {
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__zone-strip-segment--1 {
+  fill: var(--oyl-color-hud-zone-band1);
+}
+
+.oyl-hud__zone-strip-segment--2 {
+  fill: var(--oyl-color-hud-zone-band2);
+}
+
+.oyl-hud__zone-strip-segment--3 {
+  fill: var(--oyl-color-hud-zone-band3);
+}
+
+.oyl-hud__zone-strip-segment--4 {
+  fill: var(--oyl-color-hud-zone-band4);
+}
+
+.oyl-hud__zone-strip-segment--5 {
+  fill: var(--oyl-color-hud-zone-band5);
+}
+
+.oyl-hud__zone-strip-segment--6 {
+  fill: var(--oyl-color-hud-zone-band6);
+}
+
+.oyl-hud__zone-strip-segment--7 {
+  fill: var(--oyl-color-hud-zone-band7);
+}
+
+.oyl-hud__zone-strip-segment--lit {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--1 {
+  fill: var(--oyl-color-hud-zone1);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--2 {
+  fill: var(--oyl-color-hud-zone2);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--3 {
+  fill: var(--oyl-color-hud-zone3);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--4 {
+  fill: var(--oyl-color-hud-zone4);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--5 {
+  fill: var(--oyl-color-hud-zone5);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--6 {
+  fill: var(--oyl-color-hud-zone6);
+}
+
+.oyl-hud__zone-strip-segment--lit.oyl-hud__zone-strip-segment--7 {
+  fill: var(--oyl-color-hud-zone7);
+}
+
+/*
  * THE LAST TEN MINUTES — #2078: power and heart rate, under the route plan.
  *
  * In the route panel, its full width, 4 rem tall: the power line solid in the
