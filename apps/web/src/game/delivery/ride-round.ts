@@ -6,7 +6,9 @@
  *
  * `GameView` holds one {@link DeliveryRide} for a ride with Delivery on, and
  * this module is the whole of what it does with one: {@link startDeliveryRide}
- * at the press, {@link stepDeliveryRide} on every simulation step that ran,
+ * at the press — on a realistic ride, once its world has loaded or failed to (or the arrival window has lapsed),
+ * from where the rider is then (#2392, `GameView.tsx` §`deliveryWaitingRef`)
+ * — {@link stepDeliveryRide} on every simulation step that ran,
  * and {@link endDeliveryRide} when the round is over or the ride ends. It
  * composes the round (`round.ts`), the target pick (`targets.ts`), the throw
  * (`throw.ts`), the obstacles (`obstacles.ts`) and the lane steering

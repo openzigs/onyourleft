@@ -297,6 +297,7 @@ import {
   oweRoundChange,
   oweRoundOver,
   TOO_FEW_HOUSES_TEXT,
+  TOWN_LOADING_TEXT,
   type DeliveryOwed,
 } from './hud/delivery-announce';
 import { lineOffsetAt, racingLine } from './racing-line';
@@ -1005,6 +1006,18 @@ function useMediaMatch(query: string): boolean {
 /** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
 const STYLISED_START: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
 
+/** The town's loading sentence (#2392), as `announce.ts` holds it while it waits for the window. */
+function isTownLoadingEvent(event: AnnouncementEvent): boolean {
+  return event.kind === 'delivery-round-over' && event.text === TOWN_LOADING_TEXT;
+}
+
+/** Begin the Delivery round a ride is waiting to begin, once: `GameScreen`'s `deliveryWaitingRef` (#2392). */
+function beginWaitingRound(waiting: { current: (() => void) | undefined }): void {
+  const begin = waiting.current;
+  waiting.current = undefined;
+  begin?.();
+}
+
 /**
  * The settings a ride draws with — #475. On the realistic ladder,
  * `quality.ts` §`worldRung`; on the stylised one, `rungFor` as before, which is
@@ -1362,6 +1375,12 @@ function GameScreen({
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
+   * Whether the HUD says the round is waiting for the town — #2392, the
+   * owner's ruling of 2026-11-09: from the press of a realistic Delivery ride
+   * until its round begins (@see deliveryWaitingRef). `false` on every other ride.
+   */
+  const [townLoading, setTownLoading] = useState(false);
+  /**
    * The lap that has just ended, and the ride time it ended at — #1312. On
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
    * notice's rule, and `undefined` until the rider completes the course with
@@ -1716,6 +1735,21 @@ function GameScreen({
    * press and held for the ride; `undefined` on every ordinary ride.
    */
   const deliveryRef = useRef<DeliveryRide | undefined>(undefined);
+  /**
+   * The Delivery round this ride asked for and has not yet begun — #2392, the
+   * owner's ruling of 2026-11-08 on #2362: a round on a realistic ride does
+   * not count its first house until the realistic world has loaded or has
+   * failed to load, so no house is scored or missed in the stylised world drawn
+   * while the town arrives. Set at the press, for a realistic ride only, and
+   * taken once by {@link beginWaitingRound}: when the load settles either way,
+   * or when the arrival window lapses (`quality.ts`
+   * §`REALISTIC_ARRIVAL_LIMIT_MS`), so a load that never settles does not hold
+   * the round for the whole ride. (The ladder cannot leave realism before
+   * either: it is not fed while the world arrives.) It begins from where the
+   * rider is then (`targets.ts` picks the houses ahead of them), and a ride
+   * ended first has begun no round, so its week is as it was.
+   */
+  const deliveryWaitingRef = useRef<(() => void) | undefined>(undefined);
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
   /**
@@ -2592,36 +2626,68 @@ function GameScreen({
       const deliveryAsked = deliveryWanted;
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
-      deliveryRef.current =
-        deliveryAsked && roomId === undefined && mappedBuildingsRef.current !== undefined
-          ? startDeliveryRide({
-              buildings: mappedBuildingsRef.current,
-              profile,
-              origin: corridorOrigin(profile),
-              riderDistance: simulation.state.ride.distance,
-              // #1853: the steering starts from the racing line, never from
-              // where a level bot or ghost has eased the drawn rider.
-              lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
-              storage: deviceStorage(),
-              // #2362: a level's round is its own houses and its parked cars and bins.
-              level:
-                levelRidden === undefined
-                  ? undefined
-                  : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
-            })
-          : undefined;
-      const noRoundText: string | undefined =
-        !deliveryAsked || roomId !== undefined || deliveryRef.current !== undefined
-          ? undefined
-          : mappedBuildingsRef.current === undefined
-            ? HOUSES_NOT_READY_TEXT
-            : TOO_FEW_HOUSES_TEXT;
-      if (noRoundText !== undefined) deliveryOwedRef.current = oweNoRound(noRoundText);
-      setNoRound(
-        noRoundText === undefined
-          ? undefined
-          : { text: noRoundText, from: simulation.state.elapsed },
-      );
+      deliveryRef.current = undefined;
+      deliveryWaitingRef.current = undefined;
+      setNoRound(undefined);
+      setTownLoading(false);
+      // #2392: the round, its houses picked from where the rider is when it
+      // begins — at the press on a stylised ride, and once the realistic world
+      // has loaded or failed to on a realistic one. @see deliveryWaitingRef
+      const buildings = mappedBuildingsRef.current;
+      const beginRound = (): void => {
+        // #2392: the town's wait is over, so its notice goes, and its sentence
+        // is no longer owed if it has not been said: it is no longer true.
+        setTownLoading(false);
+        if (deliveryOwedRef.current.roundOver === TOWN_LOADING_TEXT) {
+          deliveryOwedRef.current = NOTHING_OWED;
+        }
+        // #2392, found on the owner's tablet on 2026-11-09: and wherever else it
+        // sits. Handed to the announcer behind a sentence still in its window
+        // ("Keep the screen on…"), it waits there and is said after the round
+        // has begun; so it is taken back. Already said, the region keeps it
+        // until the next cue, 24–40 s on; so the region lets it go.
+        announcerRef.current = withdrawPending(announcerRef.current, isTownLoadingEvent);
+        setAnnouncement((shown) => (shown === TOWN_LOADING_TEXT ? '' : shown));
+        const from = simulation.state.ride.distance;
+        deliveryRef.current =
+          buildings === undefined
+            ? undefined
+            : startDeliveryRide({
+                buildings,
+                profile,
+                origin: corridorOrigin(profile),
+                riderDistance: from,
+                // #1853: the steering starts from the racing line, never from
+                // where a level bot or ghost has eased the drawn rider.
+                lineOffset: lineOffsetAt(racingLine(profile), from),
+                storage: deviceStorage(),
+                // #2362: a level's round is its own houses and its parked cars and bins.
+                level:
+                  levelRidden === undefined
+                    ? undefined
+                    : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
+              });
+        const noRoundText: string | undefined =
+          deliveryRef.current !== undefined
+            ? undefined
+            : buildings === undefined
+              ? HOUSES_NOT_READY_TEXT
+              : TOO_FEW_HOUSES_TEXT;
+        if (noRoundText !== undefined) deliveryOwedRef.current = oweNoRound(noRoundText);
+        setNoRound(
+          noRoundText === undefined
+            ? undefined
+            : { text: noRoundText, from: simulation.state.elapsed },
+        );
+      };
+      if (deliveryAsked && roomId === undefined) {
+        if (realistic) {
+          deliveryWaitingRef.current = beginRound;
+          // #2392, the owner's ruling of 2026-11-09: said while the town arrives.
+          setTownLoading(true);
+          deliveryOwedRef.current = oweNoRound(TOWN_LOADING_TEXT);
+        } else beginRound();
+      }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
       // the rider's mass; its seed is drawn inside and kept by nothing.
@@ -2780,64 +2846,76 @@ function GameScreen({
       // simulation advances regardless, which is exactly the decoupling
       // `simulation.ts` is about. A rider whose GPU is slow to hand over a
       // context still gets a HUD and a ride.
-      void load().then((renderer) => {
-        // ⚠️ Not after this effect has been cleaned up — found by #475's
-        // tests. A rider who ends the ride while `three` is still arriving has
-        // had the stage unmounted, and a view built then would hold a GL
-        // context on a detached canvas that nothing destroys — and the NEXT
-        // ride would find `viewRef` set, build no view of its own, and draw
-        // into that detached canvas: a black world. A pause cleans up too, and
-        // the resume's own run of this effect builds the view instead.
-        if (cancelled) {
-          return;
-        }
-        if (viewRef.current === undefined) {
-          const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
-          viewRef.current = view;
-          // #623: dressed before its first frame. @see kitColourRef
-          view.setRiderKit(kitColourRef.current);
-          // #1622: the season this ride started with, not a fresh read.
-          view.setSeason(seasonRef.current);
-          view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
-          // #475: the realistic world, for a ride that asked for it — AFTER
-          // the view exists, so the rider rides the stylised world while ~33
-          // MiB arrive rather than a black canvas, and the swap is one whole
-          // world for another (ADR 0026 D-3) the moment it is all here.
-          if (realisticWantedRef.current) {
-            // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
-            arrivingSinceRef.current = clock();
-            const arrived = (outcome: RealisticWorldOutcome): void => {
-              // The ride this was for may have ended while the files arrived,
-              // or the arrival window may have lapsed and the ladder left
-              // realism on the stylised world's frames.
-              if (viewRef.current !== view || !qualityRef.current.realistic) {
-                return;
-              }
-              if (outcome.loaded) {
-                // #2289: the next frames upload the world; they are not counted.
-                qualityRef.current = realisticWorldArrived(qualityRef.current);
-                view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
-                return;
-              }
-              // D-7: the stylised world's TOP, every kind at once, and said.
-              qualityRef.current = STYLISED_START;
-              setQualityLevel(INITIAL_QUALITY.level);
-              setRealisticRung(false);
-              const text = realisticWorldNotice(outcome);
-              if (text !== undefined) {
-                setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
-              }
-            };
-            // #2289's review: a load that REJECTS takes D-7's fallback too, as
-            // a failed one does — otherwise the ride would stay arriving until
-            // the window lapsed, drawing the stylised world under a realistic
-            // rung. The port does not promise never to reject.
-            void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
-              arrived({ loaded: false, offline: false, detail: String(error) });
-            });
+      void load().then(
+        (renderer) => {
+          // ⚠️ Not after this effect has been cleaned up — found by #475's
+          // tests. A rider who ends the ride while `three` is still arriving has
+          // had the stage unmounted, and a view built then would hold a GL
+          // context on a detached canvas that nothing destroys — and the NEXT
+          // ride would find `viewRef` set, build no view of its own, and draw
+          // into that detached canvas: a black world. A pause cleans up too, and
+          // the resume's own run of this effect builds the view instead.
+          if (cancelled) {
+            return;
           }
-        }
-      });
+          if (viewRef.current === undefined) {
+            const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
+            viewRef.current = view;
+            // #623: dressed before its first frame. @see kitColourRef
+            view.setRiderKit(kitColourRef.current);
+            // #1622: the season this ride started with, not a fresh read.
+            view.setSeason(seasonRef.current);
+            view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
+            // #475: the realistic world, for a ride that asked for it — AFTER
+            // the view exists, so the rider rides the stylised world while ~33
+            // MiB arrive rather than a black canvas, and the swap is one whole
+            // world for another (ADR 0026 D-3) the moment it is all here.
+            if (realisticWantedRef.current) {
+              // #2289: when the load started, for REALISTIC_ARRIVAL_LIMIT_MS.
+              arrivingSinceRef.current = clock();
+              const arrived = (outcome: RealisticWorldOutcome): void => {
+                // The ride this was for may have ended while the files arrived,
+                // or the arrival window may have lapsed and the ladder left
+                // realism on the stylised world's frames.
+                if (viewRef.current !== view || !qualityRef.current.realistic) {
+                  return;
+                }
+                if (outcome.loaded) {
+                  // #2289: the next frames upload the world; they are not counted.
+                  qualityRef.current = realisticWorldArrived(qualityRef.current);
+                  view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  // #2392: the town is here, so the round begins from where the rider is.
+                  beginWaitingRound(deliveryWaitingRef);
+                  return;
+                }
+                // D-7: the stylised world's TOP, every kind at once, and said.
+                qualityRef.current = STYLISED_START;
+                setQualityLevel(INITIAL_QUALITY.level);
+                setRealisticRung(false);
+                const text = realisticWorldNotice(outcome);
+                if (text !== undefined) {
+                  setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
+                }
+                // #2392: the round begins in the world the ride fell back to.
+                beginWaitingRound(deliveryWaitingRef);
+              };
+              // #2289's review: a load that REJECTS takes D-7's fallback too, as
+              // a failed one does — otherwise the ride would stay arriving until
+              // the window lapsed, drawing the stylised world under a realistic
+              // rung. The port does not promise never to reject.
+              void renderer.loadRealisticWorld().then(arrived, (error: unknown) => {
+                arrived({ loaded: false, offline: false, detail: String(error) });
+              });
+            }
+          }
+        },
+        () => {
+          // #2392's review: `three` failed to arrive, so no view and no realistic
+          // load will ever settle. The round was always allowed to run on the HUD
+          // alone, so it begins now rather than being lost for the whole ride.
+          if (!cancelled) beginWaitingRound(deliveryWaitingRef);
+        },
+      );
     }
 
     // ⚠️ **#423 made this necessary rather than nice.** The canvas used to be
@@ -3623,6 +3701,8 @@ function GameScreen({
           since === undefined
             ? qualityRef.current
             : realisticArrivalLapsed(qualityRef.current, at - since);
+        // #2392: a load that has not settled in the arrival window holds the round no longer.
+        if (previous !== qualityRef.current) beginWaitingRound(deliveryWaitingRef);
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
@@ -3796,6 +3876,8 @@ function GameScreen({
     const recorded = trainerPort?.rideRecording?.() !== undefined;
     teardown();
     setEndAsk(undefined);
+    // #2392's review: a ride ended while its town loaded has no round waiting.
+    setTownLoading(false);
     setPhase('choosing');
     setChosen(undefined);
     // PR #2113: a preview ends back on an ordinary picker, a new screen.
@@ -4560,6 +4642,15 @@ function GameScreen({
               {noRound.text}
             </StatusMessage>
           ),
+          // #2392, the owner's ruling of 2026-11-09: the round waiting for the
+          // town, from the press until it begins — not on a clock, because the
+          // wait is up to the arrival window. Not `live`, for #1818's reason:
+          // the HUD's one region says it once (`oweNoRound`, announcements on).
+          townLoading ? (
+            <StatusMessage key="town-loading" tone="info" label={NO_ROUND_LABEL}>
+              {TOWN_LOADING_TEXT}
+            </StatusMessage>
+          ) : undefined,
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of
