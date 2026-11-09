@@ -288,6 +288,12 @@ for (const viewport of VIEWPORTS) {
 /** The tile's least width (`theme.css` §"THE COMPACT ROUTE PANEL"): 6 rem. */
 const TILE_LEAST_PIXELS = 96;
 
+/** The recent graph beside the tile, when drawn (`theme.css` §"THE COMPACT ROUTE PANEL"): 12 rem. */
+const GRAPH_PIXELS = 192;
+
+/** The gap the panel puts between its children: at most `--oyl-space-sm`. */
+const GRAPH_GAP_PIXELS = 8;
+
 /** What a HUD panel adds to what it holds, across: `--oyl-space-sm` and a 1 px border, each side. */
 const PANEL_EDGE_PIXELS = 18;
 
@@ -342,12 +348,29 @@ for (const viewport of VIEWPORTS) {
     );
     expect(route.width * route.height).toBeLessThan(fullRoute.width * fullRoute.height);
     // A corner tile: the panel is its tile and the panel's own padding and
-    // border (8 px and 1 px each side), and no empty width beside it.
+    // border (8 px and 1 px each side), and no empty width beside it. The
+    // recent graph (#2078) is in the DOM as on a real ride; where the
+    // stylesheet hides it the panel is the tile, and where it draws it the
+    // panel is the graph's 12 rem wide, never the full panel's width.
+    const graph = await page.evaluate(() => {
+      const found = document.querySelector('.oyl-hud__route--compact .oyl-hud__recent');
+      if (found === null) return undefined;
+      const box = found.getBoundingClientRect();
+      return { shown: getComputedStyle(found).display !== 'none', height: box.height };
+    });
+    expect(graph, 'the recent graph is in the compact panel, as on a real ride').toBeDefined();
+    const graphWidth = graph?.shown === true ? GRAPH_PIXELS : 0;
     expect(
-      route.width - tile.width,
-      `the panel is ${route.width.toFixed(1)} px for a ${tile.width.toFixed(1)} px tile`,
+      route.width - Math.max(tile.width, graphWidth),
+      `the panel is ${route.width.toFixed(1)} px for a ${tile.width.toFixed(1)} px tile ` +
+        `(graph ${graph?.shown === true ? 'drawn' : 'hidden'})`,
     ).toBeLessThanOrEqual(PANEL_EDGE_PIXELS + 0.5);
-    expect(route.height - tile.height).toBeLessThanOrEqual(PANEL_EDGE_PIXELS + 0.5);
+    if (graph?.shown !== true) {
+      expect(route.width * route.height).toBeLessThan(fullRoute.width * fullRoute.height);
+    }
+    expect(route.height - tile.height - (graph?.height ?? 0)).toBeLessThanOrEqual(
+      PANEL_EDGE_PIXELS + GRAPH_GAP_PIXELS + 0.5,
+    );
     // …and no ride-time control moves.
     for (const name of ['pause', 'end'] as const) {
       const was = edges(full[name], name);

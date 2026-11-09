@@ -156,6 +156,9 @@ function Harness(): JSX.Element {
         onEnd={() => undefined}
         announcement=""
         layout={LAYOUT}
+        // As GameView passes it once a ride has a sample: the graph is in the
+        // route panel, shown or hidden by the stylesheet, as on a real ride.
+        recent={{ samples: [{ power: 240, heartRate: 150 }], written: 1 }}
         {...(STREET ? { corridor: CORRIDOR, attribution: '© OpenStreetMap contributors' } : {})}
       />
     </section>

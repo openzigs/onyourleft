@@ -13252,8 +13252,9 @@ select.oyl-input {
  * its panel stays inside the full panel's box in every layout:
  * `street-map.browser.spec.ts` §"#2385" measures that at every viewport it
  * lays out, so the compact panel covers no road the full one left clear. With
- * the recent graph shown as well (#2078) the panel keeps its full width, for
- * the graph, and the tile stands at its start.
+ * the recent graph shown as well (#2078) the panel is 12 rem wide, for the
+ * graph, and the tile stands at its start; where the graph is hidden (a
+ * phone) the panel is the tile.
  *
  * THE GRADIENT. Its digits are 1.5 rem, the secondary tier's, which is
  * #2291's floor for a band's colour (large text, a declared 3:1 on the
@@ -13268,9 +13269,19 @@ select.oyl-input {
   align-items: flex-start;
 }
 
-.oyl-game--riding .oyl-hud__route.oyl-hud__route--compact:not(:has(> .oyl-hud__recent)) {
+.oyl-game--riding .oyl-hud__route.oyl-hud__route--compact {
   justify-self: start;
   width: auto;
+}
+
+/* The graph beside the tile is a fixed 12 rem, never the panel's width: the
+   panel shrinks to its widest child, and the graph is `display: none` on a
+   phone (#2078) yet still in the DOM, so a `:has()` on it cannot tell the
+   two apart. Fixed, the panel is the tile alone where the graph is hidden
+   and 12 rem where it is drawn. */
+.oyl-hud__route--compact .oyl-hud__recent {
+  width: 12rem;
+  max-width: 100%;
 }
 
 .oyl-hud__tile {
