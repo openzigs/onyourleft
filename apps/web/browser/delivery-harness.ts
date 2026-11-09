@@ -30,10 +30,23 @@
  * 5. **`showcase()`** — a real view's frame with a parcel in flight, a house's
  *    marker and one obstacle of each kind, on a canvas the spec photographs
  *    for the owner (the lane's ruling of 2026-10-28).
+ * 6. **`inLane(kind, lane, aheads, clearShare, width, height)`** — #2396: a
+ *    real view's frame with the rider steered into a lane and an obstacle
+ *    standing in that lane at each distance ahead, and how many of the pixels
+ *    it and its hazard marker changed stand clear above the rider's top.
+ * 7. **`inLaneShowcase(ahead)`** — #2396's photograph: that frame on the
+ *    owner's tablet, a bin in the rider's lane and a cone beyond it.
+ * 8. **`pastParkedCar(eyeAheads, width, height)`** — #2396: the rider back in
+ *    the right-hand lane just past a parked car, the camera still beside it,
+ *    and how much of the road under the rider the car covers at each place.
  */
 
 import { metres } from '@onyourleft/domain';
 
+import {
+  CAMERA_BEHIND_RIDER_METRES,
+  eyeLateralBesideParkedCars,
+} from '../src/game/delivery/camera-clear';
 import { deliveryInView } from '../src/game/delivery/in-view';
 import {
   parkedCarStands,
@@ -97,6 +110,21 @@ declare global {
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
+      inLane(
+        kind: ObstacleKind,
+        lane: number,
+        aheads: readonly number[],
+        clearShare: number,
+        width: number,
+        height: number,
+      ): InLaneReading;
+      inLaneShowcase(ahead: number): void;
+      pastCarShowcase(eyeAhead: number, behind: boolean): void;
+      pastParkedCar(
+        eyeAheads: readonly number[],
+        width: number,
+        height: number,
+      ): readonly PastCarSample[];
     };
   }
 }
@@ -371,12 +399,265 @@ function carsShowcase(): void {
   });
 }
 
+/** One distance {@link inLane} read: the obstacle `ahead` metres up the rider's own lane. */
+export interface InLaneSample {
+  /** How far ahead of the rider the obstacle stands, metres. */
+  readonly ahead: number;
+  /** Pixels the obstacle and its marker changed, with the rider drawn in front of them. */
+  readonly drawn: number;
+  /** Of those, the pixels at least the asked share of the frame's height above the rider's top. */
+  readonly clear: number;
+}
+
+/** What {@link inLane} read: where the rider's top is, and each distance. */
+export interface InLaneReading {
+  /** The rider's highest drawn row, as a share of the frame's height from its top. */
+  readonly riderTop: number;
+  readonly samples: readonly InLaneSample[];
+}
+
+/**
+ * An obstacle standing in the rider's own lane, read at each of `aheads` —
+ * #2396. A real view (`threeGameRenderer.create`) draws the stylised world's
+ * frame with the rider steered into `lane` (`SceneInput.steeredLateral`, as a
+ * round steers them), and a standing obstacle of `kind` placed in that lane by
+ * the real `in-view.ts` §`deliveryInView`. The pixels the obstacle changes are
+ * read against the same frame with no round in view, so the rider's body in
+ * front of it is subtracted by the renderer itself, and the rider's own top is
+ * read the same way against a frame with no rider. Each frame drawn twice and
+ * the second read, so an upload is not what is counted.
+ */
+function inLane(
+  kind: ObstacleKind,
+  lane: number,
+  aheads: readonly number[],
+  clearShare: number,
+  width: number,
+  height: number,
+): InLaneReading {
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const gl = shown.getContext('webgl2');
+  if (gl === null) throw new Error('the view has no WebGL2 context');
+  const start = atStartLine(ROUTE);
+  const frame = sceneFrame({
+    profile: ROUTE,
+    origin: ORIGIN,
+    state: { ...start, ride: { ...start.ride, distance: metres(RIDER) } },
+    steeredLateral: lane,
+  });
+  const read = (drawnFrame: SceneFrame): Uint8Array => {
+    view.render(drawnFrame);
+    view.render(drawnFrame);
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return pixels;
+  };
+  /** Each changed pixel's row, counted from the BOTTOM as `readPixels` has them. */
+  const changedRows = (a: Uint8Array, b: Uint8Array): number[] => {
+    const rows: number[] = [];
+    for (let at = 0; at < a.length; at += 4) {
+      if (a[at] !== b[at] || a[at + 1] !== b[at + 1] || a[at + 2] !== b[at + 2]) {
+        rows.push(Math.floor(at / 4 / width));
+      }
+    }
+    return rows;
+  };
+  const noRound: DeliveryInView = { parcels: [], markers: [], obstacles: [] };
+  const withRider = read({ ...frame, delivery: noRound });
+  const riderless = {
+    ...frame,
+    markers: frame.markers.filter((marker) => marker.kind !== 'rider'),
+  };
+  const riderRows = changedRows(read({ ...riderless, delivery: noRound }), withRider);
+  if (riderRows.length === 0) throw new Error('the frame drew no rider');
+  const riderTopRow = Math.max(...riderRows);
+  const clearRow = riderTopRow + clearShare * height;
+  const samples = aheads.map((ahead): InLaneSample => {
+    const obstacles: Obstacle[] = [{ kind, along: RIDER + ahead, stands: lane }];
+    const delivery = deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles,
+      obstacleState: startObstacles(obstacles),
+    });
+    const rows = changedRows(withRider, read({ ...frame, delivery }));
+    return { ahead, drawn: rows.length, clear: rows.filter((row) => row >= clearRow).length };
+  });
+  view.destroy();
+  return { riderTop: 1 - (riderTopRow + 1) / height, samples };
+}
+
+/** One place {@link pastParkedCar} read: the eye `eyeAhead` metres past the car's middle. */
+export interface PastCarSample {
+  readonly eyeAhead: number;
+  /** Where the eye stood across the road, metres right of the centre line. */
+  readonly eyeLateral: number;
+  /** The share of the road under the rider — the middle third of the frame's bottom quarter — the car's pixels cover. */
+  readonly underRiderCovered: number;
+}
+
+/**
+ * #2396: a rider back in the right-hand lane just past a parked car at the
+ * right-hand kerb, clear of it, while the chase camera 4.5 m behind is still
+ * beside it — the frame the owner saw filled with car colour. Each of
+ * `eyeAheads` puts the eye that far past the car's middle; the eye stands
+ * where the real `camera-clear.ts` §`eyeLateralBesideParkedCars` puts it,
+ * handed to the real `sceneFrame` as `GameView` hands it. The car's pixels
+ * are read against the same frame with no round in view.
+ */
+function pastParkedCar(
+  eyeAheads: readonly number[],
+  width: number,
+  height: number,
+): readonly PastCarSample[] {
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const gl = shown.getContext('webgl2');
+  if (gl === null) throw new Error('the view has no WebGL2 context');
+  const car: Obstacle[] = [{ kind: 'parked-car', along: RIDER, stands: parkedCarStands('right') }];
+  const lane = 1.75;
+  const start = atStartLine(ROUTE);
+  const noRound: DeliveryInView = { parcels: [], markers: [], obstacles: [] };
+  const bottomRows = Math.floor(height / 4);
+  const read = (drawnFrame: SceneFrame): Uint8Array => {
+    view.render(drawnFrame);
+    view.render(drawnFrame);
+    // `readPixels` rows run from the BOTTOM: the bottom quarter is the first rows.
+    const pixels = new Uint8Array(width * bottomRows * 4);
+    gl.readPixels(0, 0, width, bottomRows, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return pixels;
+  };
+  const samples = eyeAheads.map((eyeAhead): PastCarSample => {
+    const riderAlong = RIDER + eyeAhead + CAMERA_BEHIND_RIDER_METRES;
+    const eyeLateral = eyeLateralBesideParkedCars(car, riderAlong, lane);
+    const frame = sceneFrame({
+      profile: ROUTE,
+      origin: ORIGIN,
+      state: { ...start, ride: { ...start.ride, distance: metres(riderAlong) } },
+      steeredLateral: lane,
+      cameraLateral: eyeLateral,
+    });
+    const without = read({ ...frame, delivery: noRound });
+    const withCar = read({
+      ...frame,
+      delivery: deliveryInView({
+        corridor: frame.corridor,
+        targets: [],
+        round: startRound(1),
+        throws: NO_PARCELS,
+        obstacles: car,
+        obstacleState: startObstacles(car),
+      }),
+    });
+    // The middle third of the bottom quarter: the road under the rider.
+    const fromColumn = Math.floor(width / 3);
+    const toColumn = Math.ceil((2 * width) / 3);
+    let covered = 0;
+    for (let row = 0; row < bottomRows; row += 1) {
+      for (let column = fromColumn; column < toColumn; column += 1) {
+        const at = (row * width + column) * 4;
+        if (
+          without[at] !== withCar[at] ||
+          without[at + 1] !== withCar[at + 1] ||
+          without[at + 2] !== withCar[at + 2]
+        ) {
+          covered += 1;
+        }
+      }
+    }
+    return {
+      eyeAhead,
+      eyeLateral,
+      underRiderCovered: covered / ((toColumn - fromColumn) * bottomRows),
+    };
+  });
+  view.destroy();
+  return samples;
+}
+
+/**
+ * #2396's photograph for the owner: the rider steered into the right-hand
+ * lane on the owner's 16 : 10 tablet, a bin standing in that lane `ahead`
+ * metres up the road and a cone in the next lane 6 m beyond it.
+ */
+function inLaneShowcase(ahead: number): void {
+  const shown = canvas(1280, 800);
+  shown.id = 'delivery-in-lane';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  const start = atStartLine(ROUTE);
+  const frame = sceneFrame({
+    profile: ROUTE,
+    origin: ORIGIN,
+    state: { ...start, ride: { ...start.ride, distance: metres(RIDER) } },
+    steeredLateral: 1.75,
+  });
+  const obstacles: Obstacle[] = [
+    { kind: 'bin', along: RIDER + ahead, stands: 1.75 },
+    { kind: 'cone', along: RIDER + ahead + 6, stands: 0 },
+  ];
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles,
+      obstacleState: startObstacles(obstacles),
+    }),
+  });
+}
+
+/**
+ * #2396's photograph of a parked car being passed: {@link pastParkedCar}'s
+ * frame on the owner's tablet with the eye `eyeAhead` metres past the car's
+ * middle, standing where `camera-clear.ts` puts it — or, with `behind`, where
+ * it stood before #2396, behind the rider, for the owner to compare.
+ */
+function pastCarShowcase(eyeAhead: number, behind: boolean): void {
+  const shown = canvas(1280, 800);
+  shown.id = 'delivery-past-car';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  const car: Obstacle[] = [{ kind: 'parked-car', along: RIDER, stands: parkedCarStands('right') }];
+  const riderAlong = RIDER + eyeAhead + CAMERA_BEHIND_RIDER_METRES;
+  const start = atStartLine(ROUTE);
+  const frame = sceneFrame({
+    profile: ROUTE,
+    origin: ORIGIN,
+    state: { ...start, ride: { ...start.ride, distance: metres(riderAlong) } },
+    steeredLateral: 1.75,
+    cameraLateral: behind ? undefined : eyeLateralBesideParkedCars(car, riderAlong, 1.75),
+  });
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles: car,
+      obstacleState: startObstacles(car),
+    }),
+  });
+}
+
 window.__oylDelivery = {
   ready: true,
+  pastCarShowcase,
   carsShowcase,
   viewCalls,
   markerLeaves,
   probeCalls,
   kinds,
   showcase,
+  inLane,
+  inLaneShowcase,
+  pastParkedCar,
 };
