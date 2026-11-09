@@ -121,19 +121,22 @@ export const STREET_MAP_CELL_METRES = 500;
 export const STREET_MAP_MARGIN_METRES = 250;
 
 /**
- * Half the widest stretch drawn east–west: **2.5 km**. A phone upright gives
- * the panel about 22 rem by 5 rem, which at {@link STREET_MAP_METRES} tall is
- * 2.2 km either side of the rider, and the rider is up to half of
- * {@link STREET_MAP_MARGIN_METRES} from the sheet's middle: 2.325 km, under
- * this. `street-map.browser.spec.ts` holds the streets across the box at
- * every viewport it measures.
+ * Half the widest stretch drawn east–west: **6 km**. The widest box is the
+ * `stacked` layout's: the route panel at the screen's full width and 5 rem
+ * (80 px, a kilometre) tall, so a screen 800 px wide gives a box 766 px across,
+ * 4.8 km either side of the rider. The rider is up to half of
+ * {@link STREET_MAP_MARGIN_METRES} from the sheet's middle: 4.9 km, under this,
+ * which holds a box to about 930 px wide. `street-map.browser.spec.ts` holds
+ * the sheet over the box in three stacked viewports and the streets across it
+ * at every viewport it measures.
  *
  * ⚠️ The region is this wide on every box, a tablet's too, rather than as
  * wide as the box measured: the sheet is rasterised once per 250 m, so its
  * width costs one raster in 22 s, where measuring the box would add a resize
- * path to every ride.
+ * path to every ride. A stacked box wider than about 930 px (a window under
+ * 22.5 rem tall and wider than that) is not covered.
  */
-const REACH_ACROSS_METRES = 2500;
+const REACH_ACROSS_METRES = 6000;
 
 /**
  * How far a shape may reach from the middle of its bounds: **650 m**. The

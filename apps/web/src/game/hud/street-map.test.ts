@@ -131,7 +131,7 @@ describe('the street map draws what the corridor holds, near the rider — #2290
     expect(pointsOf(drawn.route).length).toBeGreaterThan(100);
   });
 
-  it('does not draw a street 6 km away', () => {
+  it('does not draw a street 8 km away', () => {
     const far = pointsOf(drawnAt(0).streets).filter(([east]) => east > 1000);
     expect(far).toEqual([]);
     // The control: the same street, moved within reach, IS drawn.
@@ -145,7 +145,7 @@ describe('the street map draws what the corridor holds, near the rider — #2290
       ),
     };
     expect(pointsOf(drawnAt(0, moved).streets)).toContainEqual([1500, 0]);
-    expect(FAR_EAST_METRES).toBeGreaterThan(5000);
+    expect(FAR_EAST_METRES).toBeGreaterThan(6000);
   });
 
   it('draws nothing the basemap style does not: no building, no park', () => {
@@ -297,8 +297,11 @@ function touches(
 }
 
 describe('the sheet holds the box and its margin, and nothing further — #2380', () => {
-  /** The widest box any layout gives the panel, as half its width: `REACH_ACROSS_METRES`' 22 rem by 5. */
-  const HALF_WIDEST_BOX = (22 / 5) * (STREET_MAP_METRES / 2);
+  /**
+   * The widest box a layout gives the panel, as half its width: the stacked
+   * layout's, 800 px wide (766 px of it box) by 5 rem (a kilometre) tall.
+   */
+  const HALF_WIDEST_BOX = (766 / 80) * (STREET_MAP_METRES / 2);
 
   it('holds the whole box, wherever the rider is on the grid', () => {
     const corridor = denseTown();
@@ -388,8 +391,8 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
           kind: 'minor_road',
           kindDetail: '',
           grade: 'ground' as const,
-          // East along 100 m north, 4 km out of the sheet and back.
-          line: Float32Array.of(0, 100, -2000, 100, -6000, 100, -6000, 200, -2000, 200, 0, 200),
+          // East along 100 m north, 6 km out of the sheet and back.
+          line: Float32Array.of(0, 100, -2000, 100, -8000, 100, -8000, 200, -2000, 200, 0, 200),
         },
       ],
     };
@@ -398,9 +401,9 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
       streetMapRegion({ east: 0, south: 0 }),
     );
     expect(drawn.streets.match(/M/g)).toHaveLength(2);
-    // The two segments that reach in, to 6 km east, are kept whole; the one
-    // wholly off the sheet, from 6 km north of 100 m to 200 m, is not.
-    expect(segmentsOf(drawn.streets)).not.toContainEqual([6000, -100, 6000, -200]);
+    // The two segments that reach in, to 8 km east, are kept whole; the one
+    // wholly off the sheet, from 8 km north of 100 m to 200 m, is not.
+    expect(segmentsOf(drawn.streets)).not.toContainEqual([8000, -100, 8000, -200]);
     expect(pointsOf(drawn.streets)).toContainEqual([0, -100]);
     expect(pointsOf(drawn.streets)).toContainEqual([0, -200]);
   });

@@ -264,6 +264,54 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
+/**
+ * The sheet covers the whole box, in the layouts where the box is widest —
+ * #2380's review: `stacked` gives the panel the screen's full width at 5 rem
+ * tall, 766 px at 800×340 against a 400 px sheet when the reach was ±2.5 km.
+ * Measured on the sheet and not on the streets, which only reach as far as
+ * the town does; and again after riding, where the rider is off the grid.
+ */
+const STACKED_VIEWPORTS = [
+  { name: 'upright, 600×500', width: 600, height: 500 },
+  { name: 'upright, 700×600', width: 700, height: 600 },
+  { name: 'short, 800×340', width: 800, height: 340 },
+] as const;
+
+for (const viewport of STACKED_VIEWPORTS) {
+  test(`#2380 the sheet covers the whole box in the stacked layout — ${viewport.name}`, async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await open(page, 'street');
+    const gaps = async () =>
+      page.evaluate(() => {
+        const box = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
+        const sheet = document.querySelector('.oyl-hud__street-map-sheet')?.getBoundingClientRect();
+        if (box === undefined || sheet === undefined) return undefined;
+        return {
+          left: box.left - sheet.left,
+          right: sheet.right - box.right,
+          top: box.top - sheet.top,
+          bottom: sheet.bottom - box.bottom,
+          box: box.width,
+        };
+      });
+    for (let leg = 0; leg < 5; leg += 1) {
+      const found = await gaps();
+      expect(found, 'the box and the sheet are both on the page').toBeDefined();
+      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+        expect(
+          found?.[side] ?? -1,
+          `${viewport.name}: the sheet's ${side} edge is short of the box by ${String(-(found?.[side] ?? 0))} px ` +
+            `(the box is ${String(found?.box)} px wide)`,
+        ).toBeGreaterThanOrEqual(-0.5);
+      }
+      await page.evaluate(async () => window.__oylStreetMap?.ride?.(61, 1, true));
+    }
+  });
+}
+
 /** Ride `frames` frames on a freshly opened page, and read the engine's main-thread times around it. */
 async function rideOn(page: Page, map: 'street' | 'outline', frames: number, paced: boolean) {
   await open(page, map);
@@ -378,6 +426,10 @@ test('#2380 moving the street map does not paint it again: once per 250 m, not o
   // A paint per new sheet, and two to spare; #2290's map was painted on
   // every move, 30 in 30 frames when this was measured against it.
   expect(map).toBeLessThanOrEqual(ridden.regions + 2);
+  // And the filter matched: the ride crosses a region's edge, so a new sheet
+  // is painted at least once. A count of 0 would be a Chromium that names its
+  // paint nodes differently, and the bounds above would pass on nothing.
+  expect(map).toBeGreaterThanOrEqual(1);
   expect(map).toBeLessThan(ridden.views / 10);
   console.log(
     `#2380 ${String(frames)} paced frames of 5 m, 1280×800: ${String(ridden.views)} moves, ` +

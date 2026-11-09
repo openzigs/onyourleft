@@ -28,8 +28,8 @@ import {
 
 import type { WorldCorridor } from '../world-data/corridor';
 
-/** How far east the far street is: 6 km. */
-export const FAR_EAST_METRES = 6000;
+/** How far east the far street is: 8 km. */
+export const FAR_EAST_METRES = 8000;
 
 /** The crossing street's metres north of the start. */
 export const CROSSING_NORTH_METRES = 200;
