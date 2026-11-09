@@ -31,7 +31,7 @@
  * invariants, the panels gone and the notices' cell still the HUD's.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import {
   OVERLAY_VIEWPORTS,
@@ -40,13 +40,14 @@ import {
   bothWays,
   layoutFaults,
   measure,
+  openRide,
   overlap,
   roomGivesWay,
   sharedRide,
   type Viewport,
 } from './ride-stage';
 import type { StageMeasurement } from './ride-harness';
-import { PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED } from './insets';
+import { applyInsets, PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED, resolvedInsets } from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 test.afterAll(releaseSharedPage);
@@ -340,12 +341,14 @@ const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '
 /**
  * Where the stage has room for the strip: the two landscape tablets, and the
  * owner's tablet upright (`theme.css` §"THE TOTALS STRIP ON A TABLET HELD
- * UPRIGHT": 68 rem tall or more). Not a phone, either way.
+ * UPRIGHT": under 51 rem wide and 68 rem tall or more). Not a phone, either
+ * way.
  */
 const STRIP_DRAWN = new Set(
   OVERLAY_VIEWPORTS.filter(
     (each) =>
-      (each.width >= 960 && each.height >= 640) || (each.width >= 736 && each.height >= 1088),
+      (each.width >= 960 && each.height >= 640) ||
+      (each.width >= 736 && each.width < 816 && each.height >= 1088),
   ).map((each) => each.name),
 );
 
@@ -392,6 +395,59 @@ function stripPlaceFaults(seen: StageMeasurement, viewport: Viewport): string[] 
 /** The strip's panel, where it is drawn. */
 function stripPanel(seen: StageMeasurement): StageMeasurement['panels'][number] | undefined {
   return seen.panels.find((each) => each.name.includes('oyl-hud__totals'));
+}
+
+/**
+ * Each of the strip's cells holds its own words, and no two cells overlap —
+ * PR #2413's review. `layoutFaults` holds each panel and each item against the
+ * stage, not a value against its own cell: a value with `white-space: nowrap`
+ * in a cell narrower than it prints over the next one and no fault says so.
+ * So the words' own box (a `Range` over the cell) against the cell's, here.
+ * None where no strip is drawn.
+ */
+async function stripCellFaults(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const strip = document.querySelector('.oyl-hud__totals');
+    if (strip === null || window.getComputedStyle(strip).display === 'none') return [];
+    const cells = [...strip.children].map((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      return {
+        name: cell.querySelector('dt')?.textContent ?? '?',
+        cell: cell.getBoundingClientRect(),
+        words: range.getBoundingClientRect(),
+      };
+    });
+    const faults: string[] = [];
+    for (const { name, cell, words } of cells) {
+      if (words.left < cell.left - 1 || words.right > cell.right + 1) {
+        faults.push(
+          `${name}: words ${String(Math.round(words.width))} px in a cell ${String(Math.round(cell.width))} px wide`,
+        );
+      }
+    }
+    cells.forEach((a, index) => {
+      for (const b of cells.slice(index + 1)) {
+        const across = Math.min(a.cell.right, b.cell.right) - Math.max(a.cell.left, b.cell.left);
+        const down = Math.min(a.cell.bottom, b.cell.bottom) - Math.max(a.cell.top, b.cell.top);
+        if (across > 1 && down > 1) faults.push(`${a.name} overlaps ${b.name}`);
+      }
+    });
+    return faults;
+  });
+}
+
+/** The route and actions panels' boxes, to compare a ride with the strip and one without. */
+function bottomPanels(seen: StageMeasurement): Record<string, readonly number[]> {
+  const boxes: Record<string, readonly number[]> = {};
+  for (const name of ['oyl-hud__route', 'oyl-hud__actions']) {
+    const panel = seen.panels.find((each) => each.name.includes(name));
+    if (panel !== undefined) {
+      const { box } = panel;
+      boxes[name] = [box.left, box.top, box.right, box.bottom].map(Math.round);
+    }
+  }
+  return boxes;
 }
 
 for (const arrangement of ['full', 'focus'] as const) {
@@ -492,36 +548,77 @@ test('#2387 upright, the totals strip sits on the actions panel with the route p
 });
 
 test('#2387 upright, the totals strip clears the rider with the tablet’s insets', async ({
-  browser,
+  page,
 }) => {
   if (UPRIGHT_TABLET === undefined) throw new Error('no 800×1280 viewport');
-  const page = await sharedRide(browser, UPRIGHT_TABLET, '?totals=strip');
-  const { top, bottom } = PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED;
-  await page.evaluate(
-    ([above, below]) => {
-      const style = document.documentElement.style;
-      style.setProperty('--safe-area-inset-top', `${String(above)}px`);
-      style.setProperty('--safe-area-inset-bottom', `${String(below)}px`);
-    },
-    [top, bottom] as const,
-  );
-  try {
-    const seen = await measure(page);
-    const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-    // The insets are in force: the actions panel is lifted off the bottom.
-    expect(
-      UPRIGHT_TABLET.height - (actions?.box.bottom ?? UPRIGHT_TABLET.height),
-    ).toBeGreaterThanOrEqual(bottom);
-    expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
-    expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
-  } finally {
-    await page.evaluate(() => {
-      const style = document.documentElement.style;
-      style.removeProperty('--safe-area-inset-top');
-      style.removeProperty('--safe-area-inset-bottom');
+  // Its own page (ride-stage.ts §`sharedRide`): the insets are the engine's,
+  // told before anything is laid out, so `env()` itself reports them.
+  await applyInsets(page, PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED);
+  await openRide(page, UPRIGHT_TABLET, '?totals=strip');
+  expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED);
+  const seen = await measure(page);
+  const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+  // The insets are in force: the actions panel is lifted off the bottom.
+  expect(
+    UPRIGHT_TABLET.height - (actions?.box.bottom ?? UPRIGHT_TABLET.height),
+  ).toBeGreaterThanOrEqual(PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED.bottom);
+  expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
+  expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
+  expect(await stripCellFaults(page)).toEqual([]);
+});
+
+/**
+ * At every text size upright the strip is drawn, each value in its own cell,
+ * and no panel moves for it: the route and actions panels have the boxes they
+ * have with no strip (the theme's §"THE TOTALS STRIP ON A TABLET HELD
+ * UPRIGHT" says so, and PR #2413's review asked that it be held).
+ */
+for (const size of ['normal', 'large', 'extra-large'] as const) {
+  for (const [mode, query] of [
+    ['a plain ride', ''],
+    ['a workout', 'trainer=workout&'],
+  ] as const) {
+    test(`#2387 upright at ${size} text, the totals strip fits and no panel moves — ${mode}`, async ({
+      browser,
+    }) => {
+      if (UPRIGHT_TABLET === undefined) throw new Error('no 800×1280 viewport');
+      const text = size === 'normal' ? '' : `text=${size}&`;
+      const plain = await measure(await sharedRide(browser, UPRIGHT_TABLET, `?${query}${text}`));
+      const page = await sharedRide(browser, UPRIGHT_TABLET, `?${query}${text}totals=strip`);
+      const seen = await measure(page);
+      expect(stripPanel(seen)).toBeDefined();
+      expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
+      expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
+      expect(await stripCellFaults(page)).toEqual([]);
+      expect(bottomPanels(seen)).toEqual(bottomPanels(plain));
+      expect(Object.keys(bottomPanels(seen))).toEqual(['oyl-hud__route', 'oyl-hud__actions']);
     });
   }
-});
+}
+
+/**
+ * And a tablet upright 51 to 60 rem wide — PR #2413's review: there the larger
+ * text sizes' actions column is 132 to 212 px, and a strip in it had 27 to
+ * 54 px cells, every value printed over the next. It keeps the strip hidden;
+ * and whatever a later rule draws there, each value is held to its own cell.
+ */
+for (const size of ['large', 'extra-large'] as const) {
+  test(`#2387 a wider upright tablet, 820×1180, at ${size} text: no strip over its own cells`, async ({
+    browser,
+  }) => {
+    const viewport: Viewport = {
+      name: 'a wider tablet upright — 820×1180',
+      width: 820,
+      height: 1180,
+      unstagedFails: false,
+    };
+    const page = await sharedRide(browser, viewport, `?text=${size}&totals=strip`);
+    expect(await stripCellFaults(page)).toEqual([]);
+    const seen = await measure(page);
+    expect(stripPanel(seen)).toBeUndefined();
+    expect(seen.givenWay).toContain('the totals strip');
+  });
+}
 
 /**
  * And the edge of the rule: a tablet upright under 68 rem tall keeps it

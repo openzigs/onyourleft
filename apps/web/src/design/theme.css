@@ -4090,7 +4090,7 @@ a.oyl-button {
   padding: var(--oyl-space-sm);
 }
 
-@media (min-width: 60rem), (min-width: 48rem) and (min-height: 64rem) {
+@media (min-width: 60rem), (min-width: 48rem) and (min-height: 60rem) {
   .oyl-ride {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -13261,7 +13261,8 @@ select.oyl-input {
  * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
  *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
  *   under the rider.
- * - **A tablet held upright** (the owner's 800×1280, 68 rem tall or more):
+ * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
+ *   68 rem tall or more):
  *   on the actions panel, in its column, by the rule after these
  *   (§"THE TOTALS STRIP ON A TABLET HELD UPRIGHT"): 176 px between its bottom
  *   panels is too narrow for it.
@@ -13357,6 +13358,12 @@ select.oyl-input {
  * at 768×1024 it measured 13 px under the rider with no insets, which a
  * gesture bar's inset would take, so a tablet that short keeps it hidden.
  *
+ * Under 51 rem wide only, the upright templates' three-column range
+ * (§"THE HUD'S TEXT SIZE" §"Upright"). From 51 to 60 rem wide, an upright
+ * 820×1180, 834×1194 or 900×1100, the larger text sizes' actions column is
+ * 132 to 212 px, its cells 27 to 54 px, and every value ran over the next
+ * one (PR #2413's review), so a tablet that wide upright keeps it hidden.
+ *
  * A phone held upright is not given it (§"Anywhere else" above): between the
  * leaning rider and the actions panel there are 135 px at 412×915, 115 at
  * 390×844, 102 at 360×800 and 88 at 360×752, less an 8 px gap each side, and
@@ -13364,7 +13371,7 @@ select.oyl-input {
  * 412×915 phone has room, 15 px of it, and an Android gesture or button
  * bar's bottom inset (24 to 48 px) lifts the actions panel by more than that.
  * ========================================================================== */
-@media (min-width: 46rem) and (width < 60rem) and (min-height: 68rem) {
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 68rem) {
   .oyl-game--riding .oyl-hud:has(> .oyl-hud__totals) > .oyl-hud__route {
     grid-row: route-start / span 2;
   }
