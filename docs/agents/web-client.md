@@ -760,6 +760,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         load), the same `quiet` rule as the sounds stops it with
                         a fade, a hidden page pauses it; an `<audio>` element
                         made at that press, routed into the music bus. Since
+                        #2357 the Android app also starts it with no press,
+                        `AUTOPLAY_WAIT_MS` (3 s) after the launch and after
+                        each return to the app on a menu route. Since
                         #2057 the loop is `public/audio/`'s one Ogg Opus file
                         (`MENU_MUSIC_FILE`), made by
                         `tools/audio/encode-menu-music.sh`;

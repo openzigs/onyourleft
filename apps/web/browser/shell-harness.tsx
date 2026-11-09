@@ -941,6 +941,8 @@ function main(): void {
                   hidden: () => document.hidden,
                   // #2253: with `?own-player=heard`, the rider's player is in use.
                   riderPlayer: otherPlayer,
+                  // #2357: a browser, so the first press starts it, as in the app's browser build.
+                  autoplay: undefined,
                 }),
               }
             : {})}
