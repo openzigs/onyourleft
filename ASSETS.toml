@@ -2558,10 +2558,34 @@ tool = "Node.js 26.13.0, pmtiles 4.5.0"
 # `apps/web/src/game/delivery/levels/data/` and, beyond the circuits' directory
 # above, nowhere else (D-7.2). Each level file gets a row here in the shape of
 # the circuits' rows, with `script = "apps/web/tools/delivery-levels/author-level.ts"`;
-# #2361 ships none, so there is no row yet, and #2362 adds the first two.
+# #2361 shipped none, and #2362 added the first two, below.
 # `inputsha256` is the file's own `archive.sha256`: the authoring tool's digest
 # of every tile it read and every 3DEP answer, in order. No region is named in
 # a row (D-13.2).
+
+[[asset]]
+path = "apps/web/src/game/delivery/levels/data/morning-round.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring tool (#2362)"
+licence = "ODbL-1.0"
+read = "2026-11-08"
+sha256 = "15e5de6ca16f74da649e0662065349b17612f5e6e9f186562930b2fdf079af3c"
+modified = "the archive's street lines round a start, joined into one closed loop of this project's own design, and the building footprints of the corridor within 250 m of it, keeping no OSM identifier, no name, no address and no other layer; heights sampled from USGS 3DEP at every point (ADR 0065 D-2, D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "6df48e74109aaf8cda8558f07f70ffadfe65446b0b7593c289f2431fc2d22915"
+script = "apps/web/tools/delivery-levels/author-level.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
+
+[[asset]]
+path = "apps/web/src/game/delivery/levels/data/busy-round.json"
+source = "This project's own basemap archive (ADR 0062), built from OpenStreetMap (OpenStreetMap contributors, ODbL 1.0); heights from the USGS 3D Elevation Program (public domain); made by the committed authoring tool (#2362)"
+licence = "ODbL-1.0"
+read = "2026-11-08"
+sha256 = "ad2cb90d2877e1fec58c20dbade0cc5d3329c7d37fad358b3fa129345f1d2502"
+modified = "the archive's street lines round a start, joined into one closed loop of this project's own design, and the building footprints of the corridor within 250 m of it, keeping no OSM identifier, no name, no address and no other layer; heights sampled from USGS 3DEP at every point (ADR 0065 D-2, D-7)"
+input = "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles"
+inputsha256 = "061df1cb7fd8ed28e18ae65b2230d1ba1ef271699e4cdae485783312ea10405d"
+script = "apps/web/tools/delivery-levels/author-level.ts"
+tool = "Node.js 26.13.0, pmtiles 4.5.0"
 
 [[asset]]
 path = "apps/web/public/audio/upbeat-game-loop-aurora-ride.ogg"

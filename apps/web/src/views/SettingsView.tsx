@@ -151,6 +151,7 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT } from '../game/realistic-assets';
 import { readRealisticReport, realisticReportText } from '../game/realistic-report';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
@@ -1486,10 +1487,10 @@ function GameWorldPanel({
               on one tablet, not on phones.
             </p>
             <p className="oyl-muted">
-              In a browser the realistic world is downloaded when a ride starts — about 33 MB — and
-              is not kept on this device for use offline. With no network, or if it cannot be
-              loaded, the ride is in the standard world instead and the ride screen says so. In the
-              Android app it is already on the device.
+              In a browser the realistic world is downloaded when a ride starts —{' '}
+              {REALISTIC_DOWNLOAD_SIZE_TEXT} — and is not kept on this device for use offline. With
+              no network, or if it cannot be loaded, the ride is in the standard world instead and
+              the ride screen says so. In the Android app it is already on the device.
             </p>
           </>
         }

@@ -193,6 +193,8 @@ describe('a Delivery frame’s pieces — #1814', () => {
         y: road.y,
         z: expect.closeTo(road.z, 9) as number,
         yaw: expect.closeTo(0, 9) as number,
+        // #2362: its place on the round, which a parked car's paint is chosen by.
+        index: 0,
       },
     ]);
     expect(obstacleAcross(obstacle, 0)).toBeLessThan(0);

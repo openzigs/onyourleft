@@ -15,14 +15,24 @@
  * way to their licence beside them (D-5.1), as the setup's chooser shows
  * them. So a rider with no routes of their own still has courses to race.
  *
+ * Delivery's list starts with the app's built-in levels (#2362, ADR 0065
+ * D-8.1), from `GamePort.listDeliveryLevels`, **above every saved route**,
+ * under a heading of their own and with the OpenStreetMap credit beside
+ * them (D-6.5). The listing reads no level's file (D-2.5): a level's name,
+ * length and houses are the catalogue's. So a rider with no routes and no
+ * instance still has a round to ride.
+ *
  * ⚠️ **Delivery rides in the realistic world only** (the owner's ruling DL6:
  * its houses are the mapped houses a realistic town draws), so with the
- * stylised world chosen the setup offers no round. This page says so, with
- * the way to Settings, and offers no course: a course chosen here would open
- * a setup with no Delivery in it.
+ * stylised world chosen the setup offers no round on a rider's own route.
+ * This page says so, with the way to Settings, and offers no saved route: one
+ * chosen here would open a setup with no Delivery in it. The built-in levels
+ * are still listed above it (the owner's ruling of 2026-11-08 on PR #2378):
+ * a level rides in the realistic world for that ride only, and Settings is
+ * not changed.
  */
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { metres, type RouteProfile } from '@onyourleft/domain';
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { ButtonLink } from '../design/Button';
@@ -32,6 +42,7 @@ import { VisuallyHidden } from '../design/VisuallyHidden';
 import { choosableCourses, coursesFor, type GameCourse } from '../game/courses';
 import type { GamePort } from '../game/GameView';
 import { readDeliveryProgress } from '../game/delivery/delivery-progress';
+import type { ListedLevel } from '../game/delivery/levels/levels';
 import { deviceStorage } from '../game/hud/announce-preference';
 import {
   BUILT_IN_CIRCUITS_TEXT,
@@ -43,6 +54,7 @@ import { readRealisticWorldChoice } from '../game/world-preference';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { hrefFor, hrefForGamePlay, routeById, type GameMode } from '../shell/routes';
 import { useUnits } from '../units/context';
+import { formatDistance, measurementText } from '../units/format';
 
 /** The rider-facing words of the course pickers: the project's own, naming no other game. */
 export const GAME_COURSES_TEXT = {
@@ -51,13 +63,22 @@ export const GAME_COURSES_TEXT = {
   loading: 'Reading your routes…',
   noRoutesHeading: 'No saved routes yet',
   noRoutes: 'You have no saved routes yet. Each game is ridden on one of your saved routes.',
+  // #2362, round 2, for the owner's approval: under the built-in rounds, where
+  // the sentence above is no longer true.
+  noRoutesBesideLevels: 'You have no saved routes yet. A route you save is listed here too.',
   importRoute: 'Import a GPX file on the Routes screen',
+  // #2362, round 3, for the owner's approval: about the saved routes only, so
+  // the built-in rounds above it do not read as unplayable.
   deliveryNeedsWorld:
-    'A Delivery round rides in the realistic world, and this device has the standard one chosen.',
+    'A Delivery round on one of your saved routes rides in the realistic world, and this device has the standard one chosen.',
   changeWorld: 'Choose the realistic world in Settings',
   back: 'Back to Games',
   noLoops: 'None of your routes is a loop yet. A lap race needs a route that ends where it starts.',
   openRoutes: 'Open Routes',
+  // #2362: the built-in levels' heading and their one line each, for the owner's approval.
+  levelsHeading: 'Built-in rounds',
+  levelHouses: (houses: number): string =>
+    `${String(houses)} ${houses === 1 ? 'house' : 'houses'} on the round`,
 } as const;
 
 export interface GameCoursesViewProps {
@@ -78,12 +99,16 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
   // as the setup reads them, so the list does not fill a moment later. A
   // circuit that cannot be read costs the circuits and never the routes.
   const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
+  // #2362: the built-in levels, Delivery's only, listed with the routes and
+  // reading no level's file. A list that cannot be read costs the levels.
+  const [levels, setLevels] = useState<readonly ListedLevel[]>([]);
   useEffect(() => {
     // A picker handed another game keeps this state while the routes are
     // read again, so the lap race's circuits go at once and are never counted
     // under Delivery. AppShell's `ViewBoundary key={route.id}` remounts the
     // view today; this does not lean on it.
     setCircuits([]);
+    setLevels([]);
     if (port === undefined) {
       setRoutes([]);
       return;
@@ -93,12 +118,21 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       mode === 'lap-race'
         ? (port.listCircuits?.() ?? Promise.resolve([])).catch((): readonly RidableRoute[] => [])
         : Promise.resolve([]);
-    void Promise.all([port.listRoutes(), builtIn]).then(([found, circuitsFound]) => {
-      if (!cancelled) {
-        setCircuits(circuitsFound);
-        setRoutes(found);
-      }
-    });
+    const levelsListed =
+      mode === 'delivery'
+        ? (port.listDeliveryLevels?.() ?? Promise.resolve([])).catch(
+            (): readonly ListedLevel[] => [],
+          )
+        : Promise.resolve([]);
+    void Promise.all([port.listRoutes(), builtIn, levelsListed]).then(
+      ([found, circuitsFound, levelsFound]) => {
+        if (!cancelled) {
+          setCircuits(circuitsFound);
+          setLevels(levelsFound);
+          setRoutes(found);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -133,10 +167,18 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       controller.abort();
     };
   }, [port, routes, countsWanted]);
+  // #2362: the built-in levels, first, above every saved route (ADR 0065 D-8.1).
+  const builtInLevels =
+    mode === 'delivery' && levels.length > 0 ? <LevelsSection levels={levels} /> : null;
   if (mode === 'delivery' && !worldChosen) {
+    // The owner's ruling of 2026-11-08 on PR #2378: the levels are listed in
+    // the standard world too, each ridden in the realistic world for that
+    // ride only. The rider's own routes keep the notice and the way to
+    // Settings, as before.
     return (
       <div className="oyl-game-courses">
         <BackToGames />
+        {builtInLevels}
         <StatusMessage tone="info" label="Delivery">
           {GAME_COURSES_TEXT.deliveryNeedsWorld}
         </StatusMessage>
@@ -156,7 +198,29 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
       </div>
     );
   }
+  const noRoutes = (
+    <EmptyState
+      art="road"
+      seed={7}
+      heading={GAME_COURSES_TEXT.noRoutesHeading}
+      level={2}
+      action={
+        <ButtonLink href={hrefFor(routeById('routes'))}>{GAME_COURSES_TEXT.importRoute}</ButtonLink>
+      }
+    >
+      <p>{GAME_COURSES_TEXT.noRoutesBesideLevels}</p>
+    </EmptyState>
+  );
   if (routes.length === 0 && circuits.length === 0) {
+    if (builtInLevels !== null) {
+      return (
+        <div className="oyl-game-courses">
+          <BackToGames />
+          {builtInLevels}
+          {noRoutes}
+        </div>
+      );
+    }
     return (
       <div className="oyl-game-courses">
         <BackToGames />
@@ -194,6 +258,7 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
           <a href={hrefFor(routeById('routes'))}>{GAME_COURSES_TEXT.openRoutes}</a>
         </p>
       ) : null}
+      {builtInLevels}
       <h2 id={headingId}>{GAME_COURSES_TEXT.heading}</h2>
       <ul className="oyl-game-courses__list oyl-sections" aria-labelledby={headingId}>
         {courses.map((course) => (
@@ -209,6 +274,43 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The built-in levels — #2362, ADR 0065 D-8.1: each with its name, its
+ * length and its houses, and the way to its round; the OpenStreetMap credit
+ * and the way to the licence beside them (D-6.5). In unlock order, as the
+ * port lists them.
+ */
+function LevelsSection(props: { readonly levels: readonly ListedLevel[] }): JSX.Element {
+  const units = useUnits();
+  const headingId = useId();
+  return (
+    <section className="oyl-game-courses__levels" aria-labelledby={headingId}>
+      <h2 id={headingId}>{GAME_COURSES_TEXT.levelsHeading}</h2>
+      <ul className="oyl-game-courses__list oyl-sections" aria-labelledby={headingId}>
+        {props.levels.map((level) => (
+          <li key={level.id} className="oyl-panel oyl-game-courses__course" data-level={level.id}>
+            <h3 className="oyl-game-courses__name">{level.name}</h3>
+            <p className="oyl-muted">
+              {measurementText(formatDistance(metres(level.lengthMetres), units))} ·{' '}
+              {GAME_COURSES_TEXT.levelHouses(level.houses)}
+            </p>
+            <p className="tw:mb-0">
+              <ButtonLink variant="secondary" href={hrefForGamePlay('delivery', level.routeId)}>
+                {GAME_COURSES_TEXT.choose}
+                <VisuallyHidden>: {level.name}</VisuallyHidden>
+              </ButtonLink>
+            </p>
+          </li>
+        ))}
+      </ul>
+      <p className="oyl-game-courses__credit" data-credit="levels">
+        {OSM_ATTRIBUTION} ·{' '}
+        <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+      </p>
+    </section>
   );
 }
 

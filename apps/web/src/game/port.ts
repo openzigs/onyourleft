@@ -525,7 +525,7 @@ export interface WaterFrame {
  * `delivery/in-view.ts` builds {@link DeliveryInView} from
  * the roster, so a kind added there and not here does not typecheck.
  */
-export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone';
+export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone' | 'parked-car';
 
 /** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
 export interface DeliveryPiece {
@@ -538,6 +538,12 @@ export interface DeliveryPiece {
 /** An obstacle, and which of the roster it is. */
 export interface DeliveryObstaclePiece extends DeliveryPiece {
   readonly kind: DeliveryObstacleKind;
+  /**
+   * Which of the round's obstacles it is, its place in the round's list, the
+   * same for the whole ride — #2362: the view picks a parked car's paint from
+   * it, so a car keeps its colour. Absent, the first paint.
+   */
+  readonly index?: number;
 }
 
 /**

@@ -37,7 +37,7 @@ import {
   type JSX,
 } from 'react';
 
-import { isCircuitRouteId, type KitColour } from '@onyourleft/store';
+import { isCircuitRouteId, isLevelRouteId, type KitColour } from '@onyourleft/store';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
@@ -234,6 +234,13 @@ import { useRecordingGuard } from '../ride/useRideController';
 import { END_RIDE_TEXT, EndRideQuestion, type EndRideStep } from '../ride/EndRideQuestion';
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { countCourses } from './delivery/courses';
+import type { LevelFile } from './delivery/levels/level-file';
+import {
+  levelCorridor,
+  levelOfRouteId,
+  levelRoute,
+  type ListedLevel,
+} from './delivery/levels/levels';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
@@ -284,6 +291,7 @@ import {
   NO_ROUND_LABEL,
   NOTHING_OWED,
   oweCrash,
+  oweObstacleAhead,
   oweNoRound,
   oweRoundChange,
   oweRoundOver,
@@ -353,6 +361,22 @@ export interface GamePort {
    * `check:wiring`; `circuits/circuits-wiring.test.tsx` is what goes red.
    */
   listCircuits?(): Promise<readonly RidableRoute[]>;
+  /**
+   * The app's built-in Delivery levels, as the Delivery picker lists them —
+   * #2362, ADR 0065 D-8.1: each one's id, name, length and houses, from
+   * `delivery/levels/catalogue.ts`, **reading no level file** (D-2.5). Solo
+   * Delivery rounds only. Absent, the picker offers none. ⚠️ An optional
+   * member, for {@link listCircuits}' reason; `delivery/levels/levels-wiring.test.tsx`
+   * is what goes red.
+   */
+  listDeliveryLevels?(): Promise<readonly ListedLevel[]>;
+  /**
+   * One built-in level, read in full — #2362: only the file of the level
+   * the rider chose (D-2.5). `undefined` for an id the app does not ship.
+   * Its id is the `level:` route id's second half (`levels.ts`
+   * §`levelOfRouteId`).
+   */
+  loadDeliveryLevel?(id: string): Promise<LevelFile | undefined>;
   /**
    * The ghost for the rider's best previous attempt on a route, if any.
    *
@@ -551,6 +575,13 @@ export interface GameViewProps {
    * shell goes on rendering it while the chrome is absent.
    */
   readonly onImmersive?: ((immersive: boolean) => void) | undefined;
+  /**
+   * Whether the setup's chosen card is a built-in Delivery level — #2362,
+   * round 4 of PR #2378's review: the shell's line under the title follows the
+   * chosen card, not the address. Told `false` when it stops being one, when
+   * a ride starts and when this unmounts.
+   */
+  readonly onLevelChosen?: ((chosen: boolean) => void) | undefined;
   /**
    * The tablet's side-camera pairing — #551. While a phone is paired its state
    * is one line on the HUD, its link going is said through the HUD's one
@@ -1864,7 +1895,21 @@ function GameScreen({
   const [rideHasCorridor, setRideHasCorridor] = useState(false);
   // #2293: whether THIS ride is on a built-in circuit, set beside the one above
   // for the same reason: the credit's render reads it (ADR 0064 D-5.3).
-  const [rideOnCircuit, setRideOnCircuit] = useState(false);
+  const [rideOnBuiltIn, setRideOnBuiltIn] = useState(false);
+  /**
+   * The built-in level the setup was opened on, read in full — #2362, ADR
+   * 0065: from `GamePort.loadDeliveryLevel`, with the routes, and only when
+   * the address names a `level:` route (the Delivery picker's link). Its
+   * route is a card in the chooser and its corridor is its own file's
+   * (`levels.ts` §`levelCorridor`, D-2.4): no archive, no store. Never in
+   * {@link routes}, so it is never a room's course (D-8.1).
+   */
+  const [level, setLevel] = useState<
+    | { readonly file: LevelFile; readonly route: RidableRoute; readonly corridor: WorldCorridor }
+    | undefined
+  >(undefined);
+  /** The address's route as the screen opened, which names the level to read. */
+  const openedOn = useRef(picked);
   /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
   /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
@@ -1885,12 +1930,31 @@ function GameScreen({
     const builtIn = (port.listCircuits?.() ?? Promise.resolve([])).catch(
       (): readonly RidableRoute[] => [],
     );
-    void Promise.all([port.listRoutes(), builtIn]).then(([found, circuitsFound]) => {
-      if (!cancelled) {
-        setCircuits(circuitsFound);
-        setRoutes(found);
-      }
-    });
+    // #2362: the level the Delivery picker opened this on, read with the
+    // routes for the same reason, so its card is there when the chooser is.
+    const levelId = openedOn.current === undefined ? undefined : levelOfRouteId(openedOn.current);
+    const levelRead = (
+      levelId === undefined
+        ? Promise.resolve(undefined)
+        : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined))
+    ).catch((): undefined => undefined);
+    void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
+      ([found, circuitsFound, levelFound]) => {
+        if (!cancelled) {
+          setCircuits(circuitsFound);
+          setLevel(
+            levelFound === undefined
+              ? undefined
+              : {
+                  file: levelFound,
+                  route: levelRoute(levelFound),
+                  corridor: levelCorridor(levelFound),
+                },
+          );
+          setRoutes(found);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -1971,7 +2035,7 @@ function GameScreen({
       // then, in the tick.
       const delivery = deliveryRef.current;
       if (delivery !== undefined && delivery.outcome === undefined) {
-        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery));
+        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery), delivery);
       }
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
@@ -2017,13 +2081,26 @@ function GameScreen({
   // #2293: a built-in circuit's corridor is read like any route's, under its
   // `circuit:` key (ADR 0064 D-2.2); the chooser's first choice is the
   // rider's first route, or the first circuit when they have none.
+  // #2362: and a built-in level's is its own file's, with no request and
+  // nothing stored (ADR 0065 D-2.4). A level rides in the realistic world
+  // whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378),
+  // so its corridor is always there.
+  const levelRoutes = level === undefined ? [] : [level.route];
   const corridorRoute =
     routes === undefined
       ? undefined
-      : ([...routes, ...circuits].find((route) => route.id === picked) ?? routes[0] ?? circuits[0]);
+      : ([...levelRoutes, ...routes, ...circuits].find((route) => route.id === picked) ??
+        routes[0] ??
+        circuits[0]);
   useEffect(() => {
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
+    if (corridorRoute !== undefined && choosing && corridorRoute.id === level?.route.id) {
+      const own: CorridorState = { kind: 'ready', corridor: level.corridor };
+      corridorStateRef.current = own;
+      setCorridorState(own);
+      return;
+    }
     if (port?.loadWorldCorridor === undefined || corridorRoute === undefined || !choosing) {
       return;
     }
@@ -2037,13 +2114,15 @@ function GameScreen({
     return () => {
       controller.abort();
     };
-  }, [port, corridorRoute, choosing]);
+  }, [port, corridorRoute, choosing, level]);
 
   // #2294: with a Delivery round chosen, every saved route's houses for a
   // round, counted on this device through the same corridor port, one route
   // at a time, while the rider chooses — and abandoned, as the read above
   // is, when a ride starts or the round is switched off. Only with the
-  // realistic world chosen, where the round is offered (DL6).
+  // realistic world chosen, where a round is offered on a saved route (DL6).
+  // A built-in level is counted by nothing here: it holds its own round, which
+  // the chooser says in either world (#2362, `RoutePicker`'s `level`).
   const coursesWanted =
     choosing && withDelivery && routes !== undefined && readRealisticWorldChoice(deviceStorage());
   useEffect(() => {
@@ -2094,6 +2173,14 @@ function GameScreen({
       // anything is asked of the trainer or drawn, rather than ridden as
       // something the circuit is not offered for.
       const onCircuit = isCircuitRouteId(route.id);
+      // #2362, ADR 0065 D-8.1: a built-in level is a solo Delivery round and
+      // nothing else, so a press on one is always a round, never in a room,
+      // and only on the level this screen read.
+      const onLevel = isLevelRouteId(route.id);
+      const levelRidden = onLevel && level?.route.id === route.id ? level : undefined;
+      if (onLevel && (levelRidden === undefined || props.roomId !== undefined)) {
+        return;
+      }
       const circuitRace = props.lapRace ?? lapRace;
       if (
         onCircuit &&
@@ -2183,8 +2270,9 @@ function GameScreen({
       // ride rather than a throw from a ride already begun.
       // #2293: never on a built-in circuit, whatever the address says.
       const deliveryWanted =
-        !onCircuit &&
-        (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash)));
+        onLevel ||
+        (!onCircuit &&
+          (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash))));
       // #784: the room entered on the picker's panel — but only for a ride
       // started from the panel, on the room's own road: a rider in a room who
       // presses *Ride* on one of their own routes rides it alone. Else the
@@ -2232,7 +2320,11 @@ function GameScreen({
           return;
         }
       }
-      const realistic = readRealisticWorldChoice(deviceStorage());
+      // #2362, the owner's ruling of 2026-11-08 on PR #2378: a built-in level
+      // rides in the realistic world for this ride only, whatever Settings
+      // chose, and the choice is never written. Where that world cannot load,
+      // D-7's fallback below says so, as for any realistic ride.
+      const realistic = onLevel || readRealisticWorldChoice(deviceStorage());
       realisticWantedRef.current = realistic;
       // #623: the rider's kit colour, read at the start of the ride and held
       // for it, like the mass below. A view left from a previous ride is
@@ -2449,8 +2541,9 @@ function GameScreen({
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
       // #2293, ADR 0064 D-5.3: the road this ride draws is a circuit's line,
-      // drawn from OpenStreetMap, so the credit is owed in every world.
-      setRideOnCircuit(onCircuit);
+      // drawn from OpenStreetMap, so the credit is owed in every world; and
+      // #2362, ADR 0065 D-6.5, a level's line and its buildings, the same.
+      setRideOnBuiltIn(onCircuit || onLevel);
       // #1546: the mask every placement rule reads, built ONCE, here — never
       // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
       landClassRef.current =
@@ -2509,6 +2602,11 @@ function GameScreen({
               // where a level bot or ghost has eased the drawn rider.
               lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
               storage: deviceStorage(),
+              // #2362: a level's round is its own houses and its parked cars and bins.
+              level:
+                levelRidden === undefined
+                  ? undefined
+                  : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
             })
           : undefined;
       const noRoundText: string | undefined =
@@ -2567,6 +2665,7 @@ function GameScreen({
       props.lapRace,
       soundsOut,
       simulated,
+      level,
     ],
   );
 
@@ -2634,6 +2733,23 @@ function GameScreen({
       onImmersive(false);
     };
   }, [onTheStage, onImmersive]);
+
+  // #2362: whether the chosen card is the level, as the chooser chooses it:
+  // the card the address or a press picked, else the first, which is the level.
+  const levelPicked =
+    phase === 'choosing' &&
+    level !== undefined &&
+    (picked === undefined ||
+      picked === level.route.id ||
+      ![...(routes ?? []), ...circuits].some((route) => route.id === picked));
+  const onLevelChosen = props.onLevelChosen;
+  useEffect(() => {
+    if (onLevelChosen === undefined) return;
+    onLevelChosen(levelPicked);
+    return () => {
+      onLevelChosen(false);
+    };
+  }, [levelPicked, onLevelChosen]);
 
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
   useEffect(() => {
@@ -3227,12 +3343,16 @@ function GameScreen({
         deliveryRef.current = stepped.ride;
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
+        if (stepped.ride.onLevel) {
+          owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
+        }
         const ended = stepped.ride.outcome;
         if (ended !== undefined && delivery.outcome === undefined) {
           owed = oweRoundOver(owed, ended, stepped.ride.score);
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
-          keepDeliveryWeek(deviceStorage(), ended);
+          keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
@@ -3713,7 +3833,8 @@ function GameScreen({
           />
         )}
         <RoutePicker
-          routes={routes}
+          // #2362: the level the Delivery picker opened this on, first, as a card.
+          routes={routes === undefined ? undefined : [...levelRoutes, ...routes]}
           // #940: the card the rider chose, kept here so it survives a ride.
           picked={picked}
           onPick={setPicked}
@@ -3732,6 +3853,17 @@ function GameScreen({
           worldChosen={readRealisticWorldChoice(deviceStorage())}
           // #1539: the one line about the chosen route's corridor.
           corridor={corridorState}
+          // #2362: the level the Delivery picker opened this on: its card, its
+          // credit beside it (ADR 0065 D-6.5), and its world.
+          level={
+            level === undefined
+              ? undefined
+              : {
+                  routeId: level.route.id,
+                  credit: OSM_ATTRIBUTION,
+                  houses: level.file.round.houses,
+                }
+          }
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
           onGhost={chooseOwnGhost}
@@ -3759,8 +3891,14 @@ function GameScreen({
           delivery={{
             chosen: withDelivery,
             onChoose: chooseDelivery,
-            week: readDeliveryProgress(deviceStorage()),
-            // #2294: what each saved route holds for the round, as counted.
+            // #2362: on a level, its round's houses stand for the day's.
+            week: ((week) =>
+              level !== undefined && picked === level.route.id
+                ? { ...week, houses: level.file.round.houses }
+                : week)(readDeliveryProgress(deviceStorage())),
+            // #2294: what each saved route holds for the round, as counted. A
+            // level's own count is its offer's (#2362, `level` above), in
+            // either world.
             courses,
           }}
           // #1907: a lap race, offered on a loop; the assisted setting read
@@ -4187,7 +4325,7 @@ function GameScreen({
         // circuit, in every world, the stylised one included, because the
         // road itself is the circuit's line drawn from OpenStreetMap. A ride
         // on the stylised world on the rider's own route still shows none.
-        attribution={rideHasCorridor || rideOnCircuit ? OSM_ATTRIBUTION : undefined}
+        attribution={rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined}
         // #2290: and the plan view draws that corridor as a street map around
         // the rider — on exactly the rides that carry the corridor's credit
         // (a stylised-world ride on a circuit carries the credit and draws no

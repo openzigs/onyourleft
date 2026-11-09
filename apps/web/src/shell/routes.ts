@@ -1028,6 +1028,14 @@ export function hrefForGameRoute(id: string): string {
 }
 
 /**
+ * The line under the trainer game's title on a setup opened on a built-in
+ * Delivery level — #2362, round 3 of PR #2378's review, for the owner's
+ * approval: the route's own summary is about saved routes, pacers and ghosts,
+ * none of which a level has.
+ */
+export const LEVEL_GAME_SUMMARY = 'Ride a built-in Delivery round.';
+
+/**
  * The route {@link hrefForGameRoute} chose, or `undefined`. Total, for
  * {@link matchHash}'s reason: `URLSearchParams` decodes a lone `%` as itself
  * rather than throwing, and an empty value is no choice.

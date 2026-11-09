@@ -819,6 +819,14 @@ function buildGamePort(
     // is what goes red.
     listCircuits: async (): Promise<readonly RidableRoute[]> =>
       (await import('./game/circuits/circuits')).loadBuiltInCircuits(),
+    // #2362, ADR 0065: the built-in Delivery levels, from the bundle — no
+    // store, no instance, no request. The list is the catalogue's and reads
+    // no level file; a level's own file is read only when it is chosen
+    // (D-2.5). ⚠️ Optional members, as `listCircuits` is;
+    // `game/delivery/levels/levels-wiring.test.tsx` is what goes red.
+    listDeliveryLevels: async () => (await import('./game/shipped-levels')).SHIPPED_LEVELS.list(),
+    loadDeliveryLevel: async (id: string) =>
+      (await import('./game/shipped-levels')).SHIPPED_LEVELS.load(id),
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];

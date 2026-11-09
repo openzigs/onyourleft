@@ -79,9 +79,10 @@ import { StatusMessage } from '../design/StatusMessage';
 import { Stepper } from '../design/Stepper';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { isNativeShell, platformCapacitor } from '../support/capacitor';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 import type { PacerChoice } from './pacer-choice';
-import { realisticWorldChosenText } from './realistic-assets';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
@@ -271,6 +272,50 @@ export interface CircuitsOffer {
   readonly credit: string;
 }
 
+/**
+ * The built-in Delivery level the setup was opened on — #2362, ADR 0065:
+ * its card is among {@link RoutePickerProps.routes}, first, and this says
+ * which one it is. It is never one of the rider's own routes, so the cards'
+ * summary does not count it; the OpenStreetMap credit and the way to the
+ * licence stand beside its card (D-6.5); and it rides in the realistic world
+ * whatever Settings chose (the owner's ruling of 2026-11-08 on PR #2378).
+ */
+export interface LevelOffer {
+  /** The level's card's route id, in the `level:` namespace. */
+  readonly routeId: string;
+  /** `map/basemap.ts` §`OSM_ATTRIBUTION`, handed in for {@link CircuitsOffer.credit}'s reason. */
+  readonly credit: string;
+  /**
+   * The houses on the level's round, which its card says it holds once the
+   * round is chosen, in either world: the level's own count, from its file,
+   * never one of the rider's routes' counts (review of PR #2378, round 3).
+   */
+  readonly houses: number;
+}
+
+/**
+ * The rider-facing words of a built-in level in the setup — #2362, round 2,
+ * for the owner's approval: the project's own, naming no place.
+ */
+export const LEVEL_SETUP_TEXT = {
+  /** The notice's label, before its sentence. */
+  worldLabel: 'Realistic world',
+  /**
+   * With the standard world chosen. In a browser the realistic set is not
+   * precached (ADR 0026 D-7), so the press downloads it, as Settings warns;
+   * inside the Android shell it ships in the app and nothing is downloaded.
+   */
+  world: (inShell: boolean): string =>
+    inShell
+      ? 'This round rides in the realistic world. Your choice in Settings stays as it is.'
+      : 'This round rides in the realistic world. This browser downloads it when the ride starts, ' +
+        `${REALISTIC_DOWNLOAD_SIZE_TEXT}, and does not keep it on this device for use offline. ` +
+        'Your choice in Settings stays as it is.',
+} as const;
+
+/** The level's world notice — #2362. One chooser a page, so a fixed id. */
+export const LEVEL_WORLD_ID = 'oyl-chooser-level-world';
+
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
   readonly routes: readonly RidableRoute[] | undefined;
@@ -349,7 +394,8 @@ interface RoutePickerProps {
   readonly corridor?: CorridorState | undefined;
   /**
    * A Delivery round to offer — #1818. Drawn only where {@link worldChosen}
-   * (DL6); `undefined` draws nothing. @see DeliveryOffer
+   * (DL6), or on a built-in level, which rides in the realistic world
+   * whatever Settings chose (#2362); `undefined` draws nothing. @see DeliveryOffer
    */
   readonly delivery?: DeliveryOffer | undefined;
   /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
@@ -359,6 +405,8 @@ interface RoutePickerProps {
    * `undefined`, or none, draws nothing. @see CircuitsOffer
    */
   readonly circuits?: CircuitsOffer | undefined;
+  /** The built-in level among {@link routes} — #2362. `undefined`, none is. @see LevelOffer */
+  readonly level?: LevelOffer | undefined;
   /**
    * *Preview without a trainer* — #1992, the owner's ruling on PR #2113: the
    * chosen route ridden by the simulated rider. `undefined` draws nothing.
@@ -428,8 +476,20 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
     return <p>Loading your routes…</p>;
   }
   // #2293: the circuits are a lap race's courses, so they come with one or not at all.
+  // #2362: and none while a built-in level's card is chosen, which is
+  // Delivery's; a saved route chosen on the same setup offers them as any
+  // setup does (review of PR #2378, rounds 3 and 4).
+  const levelChosen =
+    props.level !== undefined &&
+    (props.picked === undefined ||
+      props.picked === props.level.routeId ||
+      ![...props.routes, ...(props.circuits?.circuits ?? [])].some(
+        (route) => route.id === props.picked,
+      ));
   const circuits =
-    props.lapRace === undefined || props.circuits === undefined ? [] : props.circuits.circuits;
+    props.lapRace === undefined || props.circuits === undefined || levelChosen
+      ? []
+      : props.circuits.circuits;
   const first = props.routes[0] ?? circuits[0];
   if (first === undefined) {
     // ⚠️ #232's second criterion: an empty picker says **how a route gets
@@ -493,13 +553,35 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       .filter((id) => id !== undefined)
       .join(' ') || undefined;
   const headingId = `${ids}-heading`;
-  // #1818: offered with the realistic world only (DL6), so asked for only then.
-  const deliveryOffer = props.worldChosen ? props.delivery : undefined;
+  // #2362: a built-in level is chosen, which rides in the realistic world
+  // whatever Settings chose; and the rider's own routes, without it.
+  const levelId = props.level?.routeId;
+  const onLevel = levelId !== undefined && chosen.id === levelId;
+  const ownRoutes = props.routes.filter((route) => route.id !== levelId);
+  // #1818: offered with the realistic world only (DL6), so asked for only
+  // then, or on a built-in level, which rides in it for that ride (#2362).
+  const deliveryOffer = props.worldChosen || onLevel ? props.delivery : undefined;
   // #2294: every card says what its route holds for a round, once one is chosen.
   const courses =
     deliveryOffer?.chosen === true && deliveryOffer.courses !== undefined
       ? { courses: deliveryOffer.courses, week: deliveryOffer.week }
       : undefined;
+  // #2362: and a level's card its own round's houses, in either world, from
+  // the level's own count and never the saved routes' counting.
+  const levelCourse: DeliveryCourse | undefined =
+    deliveryOffer?.chosen === true && props.level !== undefined
+      ? { kind: 'counted', houses: props.level.houses }
+      : undefined;
+  const courseOf = (route: RidableRoute): CourseLine | undefined => {
+    if (route.id === levelId) {
+      return levelCourse === undefined || deliveryOffer === undefined
+        ? undefined
+        : deliveryCourseLine(levelCourse, deliveryOffer.week);
+    }
+    return courses === undefined
+      ? undefined
+      : deliveryCourseLine(courses.courses.get(route.id), courses.week);
+  };
   const notices = [
     props.worldChosen ? (
       // #475, and since #1011 ONE compact line rather than a box: which world,
@@ -508,6 +590,18 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       // and #503's promise has to be the last thing before Ride.
       // @see RealisticWorldLine
       <RealisticWorldLine key="world" />
+    ) : onLevel ? (
+      // #2362: the level's world, for this ride only, and Settings untouched.
+      // The app's own info notice (round 3 of PR #2378's review), not the
+      // realistic world's compact line, which is about a Settings choice.
+      <StatusMessage
+        key="world"
+        id={LEVEL_WORLD_ID}
+        tone="info"
+        label={LEVEL_SETUP_TEXT.worldLabel}
+      >
+        {LEVEL_SETUP_TEXT.world(isNativeShell(platformCapacitor()))}
+      </StatusMessage>
     ) : undefined,
     props.corridor === undefined ? undefined : (
       // #1539: towns from map data, in one line that names no place — beside
@@ -552,8 +646,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       </StatusMessage>
     ),
   ].filter((each) => each !== undefined);
+  // #2362: a press on a built-in level is always a Delivery round, so no race is offered on one.
   const lapRace =
-    props.lapRace === undefined ? undefined : (
+    props.lapRace === undefined || onLevel ? undefined : (
       <LapRaceControl offer={props.lapRace} route={chosen} builtIn={onCircuit} idPrefix={ids} />
     );
   return (
@@ -662,8 +757,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       <h2 id={headingId}>Choose a route</h2>
       <RouteCards
         summary={
-          courses === undefined ? undefined : (
-            <CoursesLine routes={props.routes} courses={courses.courses} week={courses.week} />
+          // #2362: the rider's own routes only; a built-in level is not one of them.
+          courses === undefined || ownRoutes.length === 0 ? undefined : (
+            <CoursesLine routes={ownRoutes} courses={courses.courses} week={courses.week} />
           )
         }
         routes={props.routes}
@@ -672,11 +768,8 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         units={props.units}
         labelledBy={headingId}
         idPrefix={ids}
-        course={
-          courses === undefined
-            ? undefined
-            : (route) => deliveryCourseLine(courses.courses.get(route.id), courses.week)
-        }
+        level={props.level}
+        course={courseOf}
         circuits={
           circuits.length === 0 || props.circuits === undefined ? undefined : (
             <CircuitCards
@@ -742,12 +835,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         {deliveryOffer === undefined || onCircuit ? null : (
           <DeliveryControl
             offer={deliveryOffer}
+            onLevel={onLevel}
             // #2294: said beside the switch too, for the route chosen.
-            chosenCourse={
-              courses === undefined
-                ? undefined
-                : deliveryCourseLine(courses.courses.get(chosen.id), courses.week)
-            }
+            chosenCourse={courseOf(chosen)}
           />
         )}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
@@ -904,7 +994,7 @@ function RouteCards(props: {
   readonly labelledBy: string;
   readonly idPrefix: string;
   /** #2294: each route's line about a Delivery round; `undefined` draws none. */
-  readonly course?: ((route: RidableRoute) => CourseLine) | undefined;
+  readonly course?: ((route: RidableRoute) => CourseLine | undefined) | undefined;
   /** #2294: the line over the cards saying how many hold a round. Inside the group, in its grid area. */
   readonly summary?: JSX.Element | undefined;
   /**
@@ -912,28 +1002,50 @@ function RouteCards(props: {
    * same fieldset and radio group: a route and a circuit are one choice.
    */
   readonly circuits?: JSX.Element | undefined;
+  /** #2362: which of {@link routes} is a built-in level, its credit drawn beside its card. */
+  readonly level?: LevelOffer | undefined;
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
+  const card = (route: RidableRoute, index: number): JSX.Element => (
+    <RouteCard
+      key={route.id}
+      route={route}
+      radioId={`${group}-${String(index)}`}
+      group={group}
+      chosen={route.id === props.chosen.id}
+      onPick={props.onPick}
+      units={props.units}
+      course={props.course?.(route)}
+    />
+  );
+  const levelAt = props.routes.findIndex((route) => route.id === props.level?.routeId);
+  const level = levelAt < 0 ? undefined : props.routes[levelAt];
+  const own = props.routes
+    .map((route, index) => ({ route, index }))
+    .filter(({ index }) => index !== levelAt);
   return (
     <fieldset
       className="oyl-chooser__routes tw:mt-0 tw:mx-0 tw:mb-md tw:p-0 tw:border-0 tw:min-w-0"
       aria-labelledby={props.labelledBy}
     >
+      {level === undefined || props.level === undefined ? null : (
+        // #2362, ADR 0065 D-6.5: the level's card, and beside it the
+        // OpenStreetMap credit and the way to the licence its file is under.
+        <>
+          <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
+            {card(level, levelAt)}
+          </ul>
+          <p className="oyl-chooser__circuits-credit" data-credit="level">
+            {props.level.credit} ·{' '}
+            <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+          </p>
+        </>
+      )}
+      {/* #2362: the summary counts the rider's own routes, so it heads their cards, after the level's. */}
       {props.summary}
-      {props.routes.length === 0 ? null : (
+      {own.length === 0 ? null : (
         <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
-          {props.routes.map((route, index) => (
-            <RouteCard
-              key={route.id}
-              route={route}
-              radioId={`${group}-${String(index)}`}
-              group={group}
-              chosen={route.id === props.chosen.id}
-              onPick={props.onPick}
-              units={props.units}
-              course={props.course?.(route)}
-            />
-          ))}
+          {own.map(({ route, index }) => card(route, index))}
         </ul>
       )}
       {props.circuits}
@@ -1339,6 +1451,13 @@ export const DELIVERY_CHOICE_TEXT = {
     'Nothing in the round changes what your trainer is sent. A route with fewer mapped houses ' +
     `than the round rides a shorter one, and one with fewer than ${String(FEWEST_DELIVERY_HOUSES)} ` +
     'is an ordinary ride.',
+  /**
+   * #2362, round 3, for the owner's approval: on a built-in level, whose
+   * round is its own houses, so the sentence about a short route does not hold.
+   */
+  levelHint:
+    'Throw parcels to the doorsteps of the houses on the round as you ride through the town. ' +
+    'Nothing in the round changes what your trainer is sent.',
 } as const;
 
 /**
@@ -1513,6 +1632,8 @@ function DeliveryControl(props: {
   readonly offer: DeliveryOffer;
   /** #2294: the chosen route's line, with the round chosen and counted. */
   readonly chosenCourse?: CourseLine | undefined;
+  /** #2362: the chosen card is a built-in level, whose round is its own houses. */
+  readonly onLevel?: boolean;
 }): JSX.Element {
   const noRound = props.chosenCourse?.holds === false ? props.chosenCourse : undefined;
   return (
@@ -1542,7 +1663,7 @@ function DeliveryControl(props: {
         {deliveryWeekText(props.offer.week)}
       </p>
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
-        {DELIVERY_CHOICE_TEXT.hint}
+        {props.onLevel === true ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}
       </p>
     </div>
   );

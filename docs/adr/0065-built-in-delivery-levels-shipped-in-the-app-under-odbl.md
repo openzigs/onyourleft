@@ -510,3 +510,28 @@ were asked in this pull request and answered there on 2026-11-08 in a [comment](
 | The demo's two measured bakes and their ceiling | `apps/web/tools/demo/demo-routes.ts` §`DEMO_ROUTE_MAX_BYTES` | 2026-11-08 |
 | The circuits' format, files, rows and repository rule | `apps/web/src/game/circuits/`, `ASSETS.toml`, `scripts/check-repo-rules.sh` §`ASSET_DATABASE_DIR` | 2026-11-08 |
 | The roster rule superseded | `apps/web/src/game/delivery/obstacles.ts`, its header's *"Our own roster (DL1)"* | 2026-11-08 |
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-08** — **`ASSET_DATABASE_DIR` is now `ASSET_DATABASE_DIRS`.** Context's *What exists
+  today* and the Sources table cite `scripts/check-repo-rules.sh` §`ASSET_DATABASE_DIR`, the one
+  directory where `ASSET004` admitted `ODbL-1.0` when this was written. #2361 (pull request #2372),
+  building D-7.2, made it a list of the two directories and renamed it `ASSET_DATABASE_DIRS`. Read
+  each `§ASSET_DATABASE_DIR` above as `§ASSET_DATABASE_DIRS`. No decision changes. Recorded by
+  #2362.
+- **2026-11-08** — **A level is listed and ridden in the realistic world whatever Settings chose.**
+  The owner's ruling on pull request #2378 ([#2362, comment of
+  2026-11-08](https://github.com/openzigs/onyourleft/issues/2362#issuecomment-6727623184)): the
+  built-in rounds are always listed in the Delivery picker, with the standard world chosen too.
+  Choosing one rides it in the realistic world **for that ride only**, and the rider's Settings
+  choice is never written. A rider's own route keeps DL6 (ADR 0059 D-3.1): with the standard world
+  chosen it offers no round. **Its relation to ADR 0026 D-7:** that decision's
+  heading fetches realism *"when the rider asks for it"*, and its body says *"when the rider chooses
+  the realistic world (D-3)"*. A press on a level is recorded here as the rider asking for it, for
+  that ride. In a browser the press therefore downloads the realistic set, which is still excluded
+  from the precache and still not kept for offline use. The level's setup says so in the browser
+  only. Inside the Android shell the set ships in the APK and nothing is downloaded. D-7's fallback
+  holds unchanged: if the set cannot be loaded, the ride is in the standard world and the ride
+  screen says so. No other decision changes. Recorded by #2362.

@@ -6,8 +6,8 @@
  *
  * Every drawn or counted case uses the synthetic `fixtures/fixture-level.json`
  * (D-7.5). The shipped files under `data/` are only read for their shape,
- * their licence fields, their sizes and their `ASSETS.toml` rows, which D-7.5
- * allows; #2361 ships none, so those cases hold for every file #2362 adds.
+ * their licence fields, their sizes, their `ASSETS.toml` rows and their
+ * catalogue entries, which D-7.5 allows.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,17 +21,18 @@ import { circuitRouteId, isLevelRouteId, levelRouteId, routeId } from '@onyourle
 
 import { ODBL_LICENCE_URL, ODBL_NOTICE } from '../../../map/basemap';
 import { modulesUnder } from '../../cannot-reach-trainer-testing';
-import { SHIPPED_LEVEL_FILES } from '../../shipped-levels';
+import { SHIPPED_LEVEL_FILES, SHIPPED_LEVELS } from '../../shipped-levels';
 import { roundHousesOn } from '../courses';
 import { LEVEL_HOUSE_MARGIN } from '../../../../tools/delivery-levels/author-level';
 import { levelFileSizes, levelSizeFindings } from '../../../../tools/delivery-levels/level-sizes';
+import { LEVEL_CATALOGUE, type LevelListing } from './catalogue';
 import { LEVEL_LICENCE, parseLevelFile, type LevelFile } from './level-file';
 import {
   levelBuildingFeature,
   levelCorridor,
+  levelLibrary,
   levelOfRouteId,
   levelRoute,
-  loadBuiltInLevels,
 } from './levels';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -150,42 +151,144 @@ describe('levelCorridor — #2361, D-2.2 and D-2.4', () => {
   });
 });
 
-describe('loadBuiltInLevels — #2361, D-2.5', () => {
-  it('reads a good file under its own name, and leaves out one that is not a level', async () => {
-    const levels = await loadBuiltInLevels({
-      './data/fixture-level.json': () => Promise.resolve(fixtureJson()),
-      './data/broken.json': () => Promise.resolve({ format: 'something else' }),
-      './data/failing.json': () => Promise.reject(new Error('chunk failed to load')),
-      // A good file under another name: its id is not its file's.
-      './data/renamed.json': () => Promise.resolve(fixtureJson()),
-    });
-    expect(levels.map((level) => level.id)).toStrictEqual(['fixture-level']);
-    expect(levels[0]).toStrictEqual(fixture());
+describe('levelLibrary reads a level’s own file — #2361, D-2.5', () => {
+  it('reads a good file under its own name, and refuses one under another or that is not a level', async () => {
+    const listed = ['fixture-level', 'broken', 'failing', 'renamed'].map((id) => ({
+      id,
+      name: 'Fixture Lane',
+      lengthMetres: 2000,
+      houses: 6,
+    }));
+    const library = levelLibrary(
+      {
+        './data/fixture-level.json': () => Promise.resolve(fixtureJson()),
+        './data/broken.json': () => Promise.resolve({ format: 'something else' }),
+        './data/failing.json': () => Promise.reject(new Error('chunk failed to load')),
+        // A good file under another name: its id is not its file's.
+        './data/renamed.json': () => Promise.resolve(fixtureJson()),
+      },
+      listed,
+    );
+    await expect(library.load('fixture-level')).resolves.toStrictEqual(fixture());
+    for (const id of ['broken', 'failing', 'renamed']) {
+      await expect(library.load(id), id).resolves.toBeUndefined();
+    }
   });
 
-  it('lists the levels in unlock order, fewest houses first (D-4.3)', async () => {
-    const level = (id: string, houses: number) => () =>
-      Promise.resolve({
-        ...fixtureJson(),
-        id,
-        round: { ...(fixtureJson().round as object), houses },
-      });
-    const levels = await loadBuiltInLevels({
-      './data/third.json': level('third', 9),
-      './data/first.json': level('first', 4),
-      './data/second.json': level('second', 6),
+  it('lists the levels in unlock order, fewest houses first (D-4.3)', () => {
+    const level = (id: string, houses: number) => ({
+      id,
+      name: 'Fixture Lane',
+      lengthMetres: 2000,
+      houses,
     });
-    expect(levels.map((each) => each.id)).toStrictEqual(['first', 'second', 'third']);
+    const library = levelLibrary(
+      {
+        './data/third.json': () => Promise.resolve(undefined),
+        './data/first.json': () => Promise.resolve(undefined),
+        './data/second.json': () => Promise.resolve(undefined),
+      },
+      [level('third', 9), level('first', 4), level('second', 6)],
+    );
+    expect(library.list().map((each) => each.id)).toStrictEqual(['first', 'second', 'third']);
   });
 
   it('loads every file the app ships, and the app ships no fixture', async () => {
-    const levels = await loadBuiltInLevels(SHIPPED_LEVEL_FILES);
-    expect(levels.map((level) => `${level.id}.json`).sort()).toStrictEqual(SHIPPED);
+    const levels = await Promise.all(
+      SHIPPED_LEVELS.list().map((listed) => SHIPPED_LEVELS.load(listed.id)),
+    );
+    expect(levels.map((level) => `${String(level?.id)}.json`).sort()).toStrictEqual(SHIPPED);
+    expect(Object.keys(SHIPPED_LEVEL_FILES).length).toBe(SHIPPED.length);
     expect(SHIPPED).not.toContain('fixture-level.json');
   });
 });
 
+describe('levelLibrary: the listing is not the level — #2362, D-2.5', () => {
+  /** Loaders that count what they were asked for. */
+  function counted(paths: readonly string[]): {
+    readonly loaders: Record<string, () => Promise<unknown>>;
+    readonly read: string[];
+  } {
+    const read: string[] = [];
+    const loaders = Object.fromEntries(
+      paths.map((path) => [
+        path,
+        () => {
+          read.push(path);
+          const id = path.replace(/^.*\//, '').replace(/\.json$/, '');
+          return Promise.resolve({ ...fixtureJson(), id });
+        },
+      ]),
+    );
+    return { loaders, read };
+  }
+
+  const LISTED: readonly LevelListing[] = [
+    { id: 'second', name: 'Second Lane', lengthMetres: 2000, houses: 6 },
+    { id: 'first', name: 'First Lane', lengthMetres: 2000, houses: 4 },
+    // Listed, and shipped by no file: never offered.
+    { id: 'missing', name: 'Missing Lane', lengthMetres: 2000, houses: 5 },
+  ];
+
+  it('lists from the catalogue alone, in unlock order, and reads no file to do it', () => {
+    const { loaders, read } = counted(['./data/first.json', './data/second.json']);
+    const library = levelLibrary(loaders, LISTED);
+    expect(library.list().map((level) => level.id)).toStrictEqual(['first', 'second']);
+    expect(library.list()[0]?.routeId).toBe(levelRouteId('first'));
+    expect(read).toStrictEqual([]);
+  });
+
+  it('reads only the chosen level’s file, in full', async () => {
+    const { loaders, read } = counted(['./data/first.json', './data/second.json']);
+    const library = levelLibrary(loaders, LISTED);
+    const chosen = await library.load('second');
+    expect(read).toStrictEqual(['./data/second.json']);
+    expect(chosen?.id).toBe('second');
+    expect(chosen?.buildings.length).toBe(fixture().buildings.length);
+  });
+
+  it('loads nothing for an id it does not ship, and nothing for a file that is not a level', async () => {
+    const library = levelLibrary(
+      {
+        './data/first.json': () => Promise.resolve({ format: 'something else' }),
+        './data/second.json': () => Promise.reject(new Error('chunk failed to load')),
+      },
+      LISTED,
+    );
+    await expect(library.load('missing')).resolves.toBeUndefined();
+    await expect(library.load('first')).resolves.toBeUndefined();
+    await expect(library.load('second')).resolves.toBeUndefined();
+  });
+});
+
 describe('the shipped level files — #2361, D-3.2, D-6.2 and D-7', () => {
+  it('are each in the catalogue the picker lists, field for field, and nothing else is (#2362)', () => {
+    const files = SHIPPED.map((name) =>
+      parseLevelFile(JSON.parse(readFileSync(join(DATA, name), 'utf8')), name.slice(0, -5)),
+    );
+    expect(SHIPPED.length).toBeGreaterThanOrEqual(2);
+    expect([...LEVEL_CATALOGUE].sort((a, b) => a.id.localeCompare(b.id))).toStrictEqual(
+      files
+        .map((file) => ({
+          id: file.id,
+          name: file.name,
+          lengthMetres: file.lengthMetres,
+          houses: file.round.houses,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    );
+  });
+
+  it('are listed by the app’s own library, in unlock order, without reading one (#2362)', () => {
+    expect(
+      SHIPPED_LEVELS.list()
+        .map((level) => `${level.id}.json`)
+        .sort(),
+    ).toStrictEqual(SHIPPED);
+    const houses = SHIPPED_LEVELS.list().map((level) => level.houses);
+    expect(houses).toStrictEqual([...houses].sort((a, b) => a - b));
+  });
+
   it('each read as a level, carry the licence inside, and are named in ASSETS.toml under ODbL-1.0', () => {
     const manifest = readFileSync(join(REPOSITORY, 'ASSETS.toml'), 'utf8');
     for (const name of SHIPPED) {
@@ -207,6 +310,8 @@ describe('the shipped level files — #2361, D-3.2, D-6.2 and D-7', () => {
 
   it('have the notice beside them, naming where the whole database is offered (§4.6 a)', () => {
     const beside = readFileSync(join(DATA, 'LICENCE-ODbL.txt'), 'utf8');
+    // #2362: and the same bytes in the app's public licences, which the credits screen reads.
+    expect(readFileSync(join(WEB, 'public', 'licences', 'levels-ODbL.txt'), 'utf8')).toBe(beside);
     expect(beside).toContain(ODBL_NOTICE.replace('here under the Open', 'here under the\nOpen'));
     expect(beside).toContain(ODBL_LICENCE_URL);
     expect(beside).toContain('https://www.openstreetmap.org/copyright');

@@ -804,6 +804,9 @@
     "Each one follows streets drawn from OpenStreetMap, so each file is made available under the Open Database License 1.0 too.",
     "Their heights come from the USGS 3D Elevation Program, which is in the public domain.",
     "Read the circuits’ licence notice",
+    "It also ships the files of its built-in Delivery levels.",
+    "Each one follows streets and holds the building footprints beside them, drawn from OpenStreetMap, so each file is made available under the Open Database License 1.0 too.",
+    "Read the Delivery levels’ licence notice",
     "© ESA WorldCover project 2020 / Contains modified Copernicus Sentinel data (2020) processed by ESA WorldCover consortium.",
     "The map files also hold a land-cover layer derived from ESA WorldCover, which is published under the Creative Commons Attribution 4.0 licence.",
     "This app does not draw that layer.",
@@ -1011,7 +1014,7 @@
     "Delivery: choose a course",
     "Choose a route for your Delivery round, then set up the ride.",
     "Back to Games",
-    "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
+    "iDelivery: A Delivery round on one of your saved routes rides in the realistic world, and this device has the standard one chosen.",
     "Choose the realistic world in Settings"
   ],
   "lap-race-courses empty": [
@@ -2695,6 +2698,9 @@
     "Each one follows streets drawn from OpenStreetMap, so each file is made available under the Open Database License 1.0 too.",
     "Their heights come from the USGS 3D Elevation Program, which is in the public domain.",
     "Read the circuits’ licence notice",
+    "It also ships the files of its built-in Delivery levels.",
+    "Each one follows streets and holds the building footprints beside them, drawn from OpenStreetMap, so each file is made available under the Open Database License 1.0 too.",
+    "Read the Delivery levels’ licence notice",
     "© ESA WorldCover project 2020 / Contains modified Copernicus Sentinel data (2020) processed by ESA WorldCover consortium.",
     "The map files also hold a land-cover layer derived from ESA WorldCover, which is published under the Creative Commons Attribution 4.0 licence.",
     "This app does not draw that layer.",
@@ -3073,7 +3079,7 @@
     "Delivery: choose a course",
     "Choose a route for your Delivery round, then set up the ride.",
     "Back to Games",
-    "iDelivery: A Delivery round rides in the realistic world, and this device has the standard one chosen.",
+    "iDelivery: A Delivery round on one of your saved routes rides in the realistic world, and this device has the standard one chosen.",
     "Choose the realistic world in Settings"
   ],
   "lap-race-courses populated": [

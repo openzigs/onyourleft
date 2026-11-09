@@ -163,7 +163,7 @@ import {
   villageRoute,
 } from '../src/demo/synthetic-road';
 import { outAndBackRoute } from '../src/game/route-fixtures-testing';
-import { plannedTown } from './realistic/town';
+import { fixtureLevelTown, plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** #1627: one village-square tree's triangles, as the belt counts them. */
@@ -522,7 +522,10 @@ async function run(): Promise<void> {
                                   ? civicStreetFixture(latitude)
                                   : config.town === 'grounds'
                                     ? fencedGroundsFixture(latitude)
-                                    : undefined;
+                                    : // #2362: the fixture level, its corridor its own file's.
+                                      config.town === 'level'
+                                      ? fixtureLevelTown()
+                                      : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

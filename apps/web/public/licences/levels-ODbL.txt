@@ -1,0 +1,28 @@
+The built-in Delivery levels of On Your Left
+
+Each level file in the data directory apps/web/src/game/delivery/levels/data/ is one level: a line
+of points with heights, the building footprints of the corridor round it, the
+level's name, length and round, and the licence it is offered under. Each line
+follows streets, and each footprint is a building, drawn from OpenStreetMap
+data, read through this project's own basemap archive, so each file is a
+database derived from OpenStreetMap.
+
+Contains information from OpenStreetMap, which is made available here under the
+Open Database License (ODbL).
+
+These files are made available under the Open Database License 1.0:
+https://opendatacommons.org/licenses/odbl/1-0/
+
+OpenStreetMap data (c) OpenStreetMap contributors:
+https://www.openstreetmap.org/copyright
+
+The levels' heights are sampled from the USGS 3D Elevation Program (3DEP),
+which is in the public domain. Nothing is owed for them; they are credited as a
+courtesy.
+
+The files are offered whole, free of charge, in this project's public
+repository and inside every build of the app:
+https://github.com/openzigs/onyourleft/tree/main/apps/web/src/game/delivery/levels/data
+
+The program that reads them is a separate work, under the GNU Affero General
+Public License 3.0 or later. The ODbL governs the data, not the program.

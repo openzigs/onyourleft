@@ -15,15 +15,14 @@
  * trainer walk refuses to pass over, so it is outside `delivery/`, and is
  * handed in here as the circuits are handed to the game.
  *
- * #2361 ships no level: `data/` holds only the notice, and nothing in the app
- * calls {@link loadBuiltInLevels} yet. #2362 commits the first two files and
- * lists them in the Delivery picker. Tests use the synthetic
- * `fixtures/fixture-level.json`, so no test is a Produced Work of a real level
- * (D-7.5). Nothing here imports a trainer port, a gradient or the simulation
- * (`delivery-cannot-reach-trainer.test.ts` walks this directory, D-11).
- *
- * @unwired #2361 ships the loader and no level; the build tool and the tests
- * read it, and #2362 hands it the shipped files and lists them in the picker.
+ * The listing is not the level (D-2.5, #2362): {@link levelLibrary} answers
+ * the picker from `catalogue.ts` — each level's id, name, length and houses —
+ * without calling a loader, and reads one file in full only when that level
+ * is chosen. `levels.test.ts` holds the catalogue to the files. Tests use the
+ * synthetic `fixtures/fixture-level.json`, so no test is a Produced Work of a
+ * real level (D-7.5). Nothing here imports a trainer port, a gradient or the
+ * simulation (`delivery-cannot-reach-trainer.test.ts` walks this directory,
+ * D-11).
  */
 
 import { routeProfile, type AltitudeMetres, type GeographicPosition } from '@onyourleft/domain';
@@ -42,7 +41,8 @@ import {
   worldCorridorOf,
   type WorldCorridor,
 } from '../../world-data/corridor';
-import { parseLevelFile, type LevelBuilding, type LevelFile } from './level-file';
+import type { LevelListing } from './catalogue';
+import { LEVEL_ID_PATTERN, parseLevelFile, type LevelBuilding, type LevelFile } from './level-file';
 
 /** One loader per file under `data/`, by its path. */
 export type LevelLoaders = Readonly<Record<string, () => Promise<unknown>>>;
@@ -55,7 +55,7 @@ export type LevelLoaders = Readonly<Record<string, () => Promise<unknown>>>;
 export function levelOfRouteId(routeId: string): string | undefined {
   if (!isLevelRouteId(routeId)) return undefined;
   const level = routeId.slice(LEVEL_ROUTE_PREFIX.length);
-  return /^[a-z][a-z0-9-]{1,31}$/.test(level) ? level : undefined;
+  return LEVEL_ID_PATTERN.test(level) ? level : undefined;
 }
 
 /** A checked file, as a ridable route keyed `level:<id>`, a loop or point to point, with no attempts. */
@@ -114,23 +114,46 @@ function idOfPath(path: string): string {
   return path.replace(/^.*\//, '').replace(/\.json$/, '');
 }
 
+/** A level as the picker lists it, with the `level:` route id its link opens the setup on. */
+export interface ListedLevel extends LevelListing {
+  readonly routeId: string;
+}
+
+/** The built-in levels as the game asks for them: listed from the catalogue, loaded one at a time (D-2.5). */
+export interface LevelLibrary {
+  /** Every shipped level, in unlock order, from the catalogue alone: no file is read. */
+  list(): readonly ListedLevel[];
+  /**
+   * One level, read in full: only its own file's loader is called. `undefined`
+   * for an id the bundle does not ship, or a file that does not read as one.
+   */
+  load(id: string): Promise<LevelFile | undefined>;
+}
+
 /**
- * Every level, in unlock order: fewest houses first, as D-4.3 has each later
- * level hold strictly more. A file that does not read as a level is left out
- * and the rest are offered: a damaged bundle loses a rider that level and not
- * the others.
+ * The library over `loaders` (one per file, by path) and `catalogue` (one
+ * listing per level). A listing with no file is not offered, so a bundle
+ * missing a file loses a rider that level and not the list.
  */
-export async function loadBuiltInLevels(loaders: LevelLoaders): Promise<readonly LevelFile[]> {
-  const read = await Promise.all(
-    Object.entries(loaders).map(async ([path, load]): Promise<LevelFile | undefined> => {
+export function levelLibrary(
+  loaders: LevelLoaders,
+  catalogue: readonly LevelListing[],
+): LevelLibrary {
+  const byId = new Map(Object.entries(loaders).map(([path, load]) => [idOfPath(path), load]));
+  const listed = catalogue
+    .filter((listing) => byId.has(listing.id))
+    .sort((a, b) => a.houses - b.houses || a.id.localeCompare(b.id))
+    .map((listing) => ({ ...listing, routeId: levelRouteId(listing.id) }));
+  return {
+    list: () => listed,
+    load: async (id) => {
+      const load = byId.get(id);
+      if (load === undefined) return undefined;
       try {
-        return parseLevelFile(await load(), idOfPath(path));
+        return parseLevelFile(await load(), id);
       } catch {
         return undefined;
       }
-    }),
-  );
-  return read
-    .filter((file) => file !== undefined)
-    .sort((a, b) => a.round.houses - b.round.houses || a.id.localeCompare(b.id));
+    },
+  };
 }

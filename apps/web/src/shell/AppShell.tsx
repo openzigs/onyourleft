@@ -109,6 +109,7 @@ import { NavIcon } from './NavIcon';
 import {
   groupDestination,
   hrefFor,
+  LEVEL_GAME_SUMMARY,
   NAV_GROUPS,
   navGroupOf,
   routesInGroup,
@@ -654,6 +655,7 @@ function viewFor(
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
   },
+  onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -776,6 +778,8 @@ function viewFor(
           kitColour={kit.colour}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
+          // #2362: a built-in level's card chosen, for the line under the title.
+          onLevelChosen={onLevelChosen}
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
@@ -919,6 +923,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #423, and described at length below. Declared before the router because
   // #945 asks it, per navigation, whether the navigation may animate.
   const [immersive, setImmersive] = useState(false);
+  /**
+   * Whether the trainer game's setup has a built-in Delivery level's card
+   * chosen — #2362, round 4 of PR #2378's review: the line under the title
+   * follows the chosen card, never the address, which stays on the level
+   * when the rider picks a saved route. Told by `GameViewProps.onLevelChosen`.
+   */
+  const [levelChosen, setLevelChosen] = useState(false);
   // #2349's review, B2: a browser Back or a typed address under a ride on the
   // game's stage is asked about first (`ride-leave.ts`).
   const [rideLeaves] = useState(rideLeave);
@@ -1101,10 +1112,20 @@ export function AppShell(props: AppShellProps): JSX.Element {
         <RideLeaveContext value={rideLeaves}>
           <ViewBoundary key={route.id}>
             <Suspense fallback={<ViewLoading />}>
-              {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-                colour: kitColour,
-                onChange: setKitColour,
-              })}
+              {viewFor(
+                match,
+                props,
+                units,
+                setUnits,
+                riderMass,
+                setRiderMass,
+                setImmersive,
+                {
+                  colour: kitColour,
+                  onChange: setKitColour,
+                },
+                setLevelChosen,
+              )}
             </Suspense>
           </ViewBoundary>
         </RideLeaveContext>
@@ -1227,7 +1248,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
             <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
               {route.title}
             </h1>
-            {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+            {immersive ? null : (
+              <p className="oyl-muted">
+                {/* #2362: a built-in level's card chosen in the setup is a Delivery round's, not a saved route's. */}
+                {route.id === 'game' && levelChosen ? LEVEL_GAME_SUMMARY : route.summary}
+              </p>
+            )}
             {/*
               #993: one line under the title, and the rest one press away.
               AFTER the line rather than inside the heading, so the `h1` is
