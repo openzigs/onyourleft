@@ -18,6 +18,10 @@
  * The rider rides past the window of the first house a round begun at the
  * press would have held, while the load is pending; so a round counting from
  * the press is red here as a miss on the HUD.
+ *
+ * And the owner's ruling of 2026-11-09: while the round waits, the HUD says
+ * {@link TOWN_LOADING_TEXT} in its notices and its one region says it once,
+ * and the notice goes when the round begins, however it begins.
  */
 
 import { act } from 'react';
@@ -36,6 +40,7 @@ import { THROW_WINDOW_AFTER_METRES } from './delivery/throw';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { endRideAnswer } from './end-ride-testing';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
+import { TOWN_LOADING_TEXT } from './hud/delivery-announce';
 import type { GameRenderer, SceneFrame } from './port';
 import { REALISTIC_ARRIVAL_LIMIT_MS } from './quality';
 import { lineOffsetAt, racingLine } from './racing-line';
@@ -214,6 +219,16 @@ function notices(): string {
   return mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '';
 }
 
+/** The HUD's one live region: a polite `status`, and what it says now. */
+function region(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-oyl-announcer="hud"]');
+}
+
+/** How many times the one region has said the town is loading. */
+function loadingSaid(): number {
+  return said.filter((text) => text === TOWN_LOADING_TEXT).length;
+}
+
 /**
  * How many frames of this file's ride carry the rider past the close of the
  * first house's window on the round a press would have begun: the ride's own
@@ -278,6 +293,11 @@ describe('a Delivery round waits for the realistic town before counting a house 
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
     expect(drawn.every((frame) => frame.delivery === undefined)).toBe(true);
     expect(said.filter((text) => /^(Delivered|Missed|Crashed|Round over)/.test(text))).toEqual([]);
+    // The owner's ruling of 2026-11-09: the wait is said in words, on the HUD
+    // and once, politely, through the one region.
+    expect(notices()).toContain(TOWN_LOADING_TEXT);
+    expect(loadingSaid()).toBe(1);
+    expect(region()?.getAttribute('role')).toBe('status');
     const loadedFrom = drawn.length;
 
     await arriving.settleLoad({ loaded: true });
@@ -295,6 +315,9 @@ describe('a Delivery round waits for the realistic town before counting a house 
     expect(after.length).toBeGreaterThan(0);
     expect(after.every((frame) => (frame.delivery?.markers.length ?? 0) > 0)).toBe(true);
     expect(said.filter((text) => text.startsWith('Missed'))).toEqual([]);
+    // The town is here, so the notice is gone, and it was never said again.
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+    expect(loadingSaid()).toBe(1);
 
     // A ride ended now has passed no house of its round, so the week is as it was.
     await clickThrough(buttonStarting('End ride'));
@@ -314,9 +337,11 @@ describe('a Delivery round waits for the realistic town before counting a house 
       for (let index = 0; index < 10; index += 1) await pump();
       expect(begunAt).toEqual([]);
       expect(field('Houses')).toBeUndefined();
+      expect(notices()).toContain(TOWN_LOADING_TEXT);
 
       await arriving.settleLoad(outcome);
-      // D-7's fallback is said, and the round is ridden in that world.
+      // D-7's fallback is said, the wait is over, and the round is ridden in that world.
+      expect(notices()).not.toContain(TOWN_LOADING_TEXT);
       expect(notices().length).toBeGreaterThan(0);
       for (let index = 0; index < 3; index += 1) await pump();
       await settle();
@@ -338,9 +363,12 @@ describe('a Delivery round waits for the realistic town before counting a house 
     await pump(REALISTIC_ARRIVAL_LIMIT_MS - 6 * FRAME_MS);
     await settle();
     expect(begunAt).toEqual([]);
+    expect(notices()).toContain(TOWN_LOADING_TEXT);
     await pump(2 * FRAME_MS);
     await settle();
     expect(begunAt).toHaveLength(1);
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+    expect(loadingSaid()).toBe(1);
   });
 
   it('begins the round when the renderer module itself fails to load', async () => {
@@ -350,6 +378,21 @@ describe('a Delivery round waits for the realistic town before counting a house 
     await settle();
     expect(begunAt).toHaveLength(1);
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+  });
+
+  it('never says the town is loading once it has arrived, if the region had not said it yet', async () => {
+    const arriving = arrivingRenderer([]);
+    await pressRide(arriving.renderer);
+    expect(arriving.asked()).toBe(true);
+    expect(loadingSaid()).toBe(0);
+    // The town arrives before the ride's first frame, so before the region spoke.
+    await arriving.settleLoad({ loaded: true });
+    for (let index = 0; index < 5; index += 1) await pump();
+    await settle();
+    expect(begunAt).toHaveLength(1);
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+    expect(said).not.toContain(TOWN_LOADING_TEXT);
   });
 
   it('begins the round at the press on a ride in the standard world, which loads nothing', async () => {
@@ -358,7 +401,12 @@ describe('a Delivery round waits for the realistic town before counting a house 
     await pressRide(arriving.renderer);
     expect(arriving.asked()).toBe(false);
     expect(begunAt).toEqual([0]);
-    await pump();
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+    for (let index = 0; index < 5; index += 1) await pump();
+    await settle();
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
+    // A ride that loads no town never says it is loading one.
+    expect(notices()).not.toContain(TOWN_LOADING_TEXT);
+    expect(said).not.toContain(TOWN_LOADING_TEXT);
   });
 });

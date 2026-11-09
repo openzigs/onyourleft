@@ -261,8 +261,23 @@ export function oweRoundOver(
   return { ...NOTHING_OWED, roundOver: [...lead, sentence].join(' ') };
 }
 
-/** The HUD notice's label for a ride that asked for a round and has none — #1818. */
+/**
+ * The HUD notice's label for a ride that asked for a round and has none —
+ * #1818 — and for a round still waiting for the town (#2392,
+ * {@link TOWN_LOADING_TEXT}).
+ */
 export const NO_ROUND_LABEL = 'Delivery';
+
+/**
+ * What a rider on a realistic Delivery ride is told while the round waits for
+ * the realistic town — #2392, worded by the owner and approved on 2026-11-09.
+ * On the HUD as a notice from the press until the round begins (the town
+ * loaded, the load failed, or the arrival window lapsed), and said once
+ * through the one region on {@link TOO_FEW_HOUSES_TEXT}'s rules
+ * ({@link oweNoRound}: rank 5g, so only with announcements on). A sentence
+ * still owed when the round begins is no longer offered.
+ */
+export const TOWN_LOADING_TEXT = 'Loading the town… your round starts when it arrives.';
 
 /**
  * What a rider who chose a Delivery round is told when the press read the

@@ -296,6 +296,7 @@ import {
   oweRoundChange,
   oweRoundOver,
   TOO_FEW_HOUSES_TEXT,
+  TOWN_LOADING_TEXT,
   type DeliveryOwed,
 } from './hud/delivery-announce';
 import { lineOffsetAt, racingLine } from './racing-line';
@@ -1367,6 +1368,12 @@ function GameScreen({
   const [noRound, setNoRound] = useState<
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
+  /**
+   * Whether the HUD says the round is waiting for the town — #2392, the
+   * owner's ruling of 2026-11-09: from the press of a realistic Delivery ride
+   * until its round begins (@see deliveryWaitingRef). `false` on every other ride.
+   */
+  const [townLoading, setTownLoading] = useState(false);
   /**
    * The lap that has just ended, and the ride time it ended at — #1312. On
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
@@ -2616,11 +2623,18 @@ function GameScreen({
       deliveryRef.current = undefined;
       deliveryWaitingRef.current = undefined;
       setNoRound(undefined);
+      setTownLoading(false);
       // #2392: the round, its houses picked from where the rider is when it
       // begins — at the press on a stylised ride, and once the realistic world
       // has loaded or failed to on a realistic one. @see deliveryWaitingRef
       const buildings = mappedBuildingsRef.current;
       const beginRound = (): void => {
+        // #2392: the town's wait is over, so its notice goes, and its sentence
+        // is no longer owed if it has not been said: it is no longer true.
+        setTownLoading(false);
+        if (deliveryOwedRef.current.roundOver === TOWN_LOADING_TEXT) {
+          deliveryOwedRef.current = NOTHING_OWED;
+        }
         const from = simulation.state.ride.distance;
         deliveryRef.current =
           buildings === undefined
@@ -2654,8 +2668,12 @@ function GameScreen({
         );
       };
       if (deliveryAsked && roomId === undefined) {
-        if (realistic) deliveryWaitingRef.current = beginRound;
-        else beginRound();
+        if (realistic) {
+          deliveryWaitingRef.current = beginRound;
+          // #2392, the owner's ruling of 2026-11-09: said while the town arrives.
+          setTownLoading(true);
+          deliveryOwedRef.current = oweNoRound(TOWN_LOADING_TEXT);
+        } else beginRound();
       }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
@@ -4594,6 +4612,15 @@ function GameScreen({
               {noRound.text}
             </StatusMessage>
           ),
+          // #2392, the owner's ruling of 2026-11-09: the round waiting for the
+          // town, from the press until it begins — not on a clock, because the
+          // wait is up to the arrival window. Not `live`, for #1818's reason:
+          // the HUD's one region says it once (`oweNoRound`, announcements on).
+          townLoading ? (
+            <StatusMessage key="town-loading" tone="info" label={NO_ROUND_LABEL}>
+              {TOWN_LOADING_TEXT}
+            </StatusMessage>
+          ) : undefined,
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of
