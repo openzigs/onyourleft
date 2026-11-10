@@ -9,8 +9,8 @@
   request; D-9 lists each one. **Nothing is built by this ADR**: [#2425](https://github.com/openzigs/onyourleft/issues/2425)
   builds it
 - **Date**: 2026-11-10
-- **Deciders**: **the owner**, on the four rulings of 2026-11-09 quoted in Context. **The author**, on
-  everything else, each part marked as the author's recommendation where it is decided
+- **Deciders**: **the owner**, on the four rulings of 2026-11-09 quoted in Context, and on R-11 to
+  R-13 of D-9 on 2026-11-10 on this ADR's pull request. **The author**, on everything else, each part marked as the author's recommendation where it is decided
 - **Issue**: [#2424](https://github.com/openzigs/onyourleft/issues/2424), under the epic
   [#2421](https://github.com/openzigs/onyourleft/issues/2421), a child of
   [#16](https://github.com/openzigs/onyourleft/issues/16)
@@ -151,24 +151,27 @@ draft in a solo ride.
    switch of D-6 on. **Unchanged**: a room (the room's `k` is the only `k`, and a room has no pacer,
    ruling Q18), a lap race (D-2), and a ride with neither a pacer nor a ghost, which is bit-identical
    to today down to the odometer (`#drafted` returns the same object at `k = 1`).
-6. **A source that has finished leaves the field** (**the author's recommendation**, added
-   2026-11-10 on review of this ADR's pull request). The room already does this: `room.ts` §`draft`
-   takes only riders on the road, because *"a finisher has left it"*. Here:
-   - **The ghost gives no draft once its attempt has ended**, from the step at which
-     `ghostHasFinished(track, ghostClock(state))` is true (`replay.ts:202`). `ghostDistanceAt` clamps
-     to `track.totalDistance` from then on (`replay.ts:186-188`), so without this rule a ghost that
-     finished, or that stopped short of the route's end, would stand on the road as a stationary
-     rider: a shelter for the 30 m behind it (`DRAFT_REACH_METRES`, `draft.ts:53`) and a
-     leading-rider effect for the 30 m past it. Leaving the field ends both.
-   - **The pacer gives no draft once it is past the end of a route that is not a loop**, from the
-     step at which `state.bot.state.distance >= profile.totalDistance`. The pacer itself never
-     stops: `advanceBot` integrates `bot.state.distance` with no limit (`simulation.ts:745-749`), and
-     the only clamp is the grade lookup's, `distanceOnRoute` (`packages/domain/src/route/profile.ts:554`),
-     so past the end of a point-to-point route it rides on at the last grade. A rider who finishes
-     after it would otherwise be sheltered by a pacer on road that is not there. On a loop there is
-     no end, and the pacer stays in the field for the whole ride.
-   - A source that has left the field is not in the `fieldDraftFactors` call at all, so the rider's
-     `k` is what it would be with that source absent: `k = 1` when nothing else is near.
+6. **A source that has finished stays in the field and still gives a draft.** **The owner's
+   ruling, 2026-11-10**, on this ADR's pull request: *"A ghost that has finished its attempt, or a
+   pacer past the end of a route that is not a loop, stays in the field and still gives a draft."*
+   It reverses the author's earlier recommendation that a finished source leave the field, as the
+   room's finisher does (`room.ts` §`draft`, *"a finisher has left it"*); a solo ride does not follow
+   the room here. Where each source sits:
+   - **The ghost stays at `ghostDistanceAt`'s clamped distance, the end of its attempt.** From the
+     step at which `ghostHasFinished(track, ghostClock(state))` is true (`replay.ts:202`),
+     `ghostDistanceAt` returns `track.totalDistance` (`replay.ts:186-188`), and that is the distance
+     the ghost enters `fieldDraftFactors` with, for the rest of the ride. A ghost whose attempt ended
+     short of the route's end is therefore **a stationary rider at that point**: a rider who catches
+     it can sit in the 30 m behind it (`DRAFT_REACH_METRES`, `draft.ts:53`) and be sheltered, and
+     can pass it and take the leading-rider effect (D-1.3) for the 30 m past it, as from any rider
+     on the road. A ghost that finished at the route's end sits at the end, where a rider who is
+     behind it reaches it only by finishing.
+   - **The pacer keeps its unclamped `bot.state.distance`.** The pacer never stops: `advanceBot`
+     integrates `bot.state.distance` with no limit (`simulation.ts:745-749`), and the only clamp is
+     the grade lookup's, `distanceOnRoute` (`packages/domain/src/route/profile.ts:554`). Past the end
+     of a point-to-point route it rides on at the last grade, and its unclamped odometer is the
+     distance it enters `fieldDraftFactors` with, so it keeps sheltering a rider still within 30 m
+     behind it. On a loop there is no end to pass.
 
 ### D-2 — Lap-race bots stay undrafted (decision 2)
 
@@ -234,8 +237,9 @@ A rider who drafts their own best ghost beats it partly on its shelter. **The ow
    indicator is visual and not spoken (#2426). **The author's reading of that ruling**: a solo draft
    gains no spoken cue at all, so #2425's criterion that the room's `draftEvent` cue fires on a solo
    ride is superseded by ruling 3; the solo ride feeds the visual mark and the draft field. The
-   rooms' spoken cue is unchanged. The reading is a share of aerodynamic drag, `(1 − k) × 100 %`,
-   never watts (ADR 0038 D-5, kept).
+   rooms' spoken cue is unchanged. **The solo caller keeps the `inDraft` state `draftEvent` returns
+   (D-5.6) and never queues the spoken `room-draft` event it also returns.** The reading is a share
+   of aerodynamic drag, `(1 − k) × 100 %`, never watts (ADR 0038 D-5, kept).
 6. **What "drafted" means** (**the author's recommendation**, added 2026-11-10 on review of this
    ADR's pull request). "Any step at `k < 1`" would mark nearly every ride with the switch on: a solo
    ride starts level with the pacer or the ghost, and every start, and every pass, crosses the 30 m
@@ -259,9 +263,9 @@ A rider who drafts their own best ghost beats it partly on its shelter. **The ow
      minimum share of its distance.** Distance, not time, because a segment is a stretch of road and
      a drafted rider covers it in less time. For "Your best" (D-5.1) the span is the attempt the
      outcome settles; for a segment (D-5.2) it is the effort.
-   - **The share's value is not decided here.** It is a single named constant that #2425 defines,
-     with **10 %** as the recommended starting value for the owner to approve on #2425; it is
-     unsourced. A later change to it changes that constant and no ADR. The two thresholds of the
+   - **The share's value is not fixed by this ADR.** It is a single named constant that #2425
+     defines. **The owner approved 10 % of the distance as its value on 2026-11-10**, on this ADR's
+     pull request; it is unsourced. A later change to it changes that constant and no ADR. The two thresholds of the
      in-draft state stay what they are in `room-ride.ts`, also unsourced, and are not changed by this
      ADR.
 
@@ -319,7 +323,9 @@ the `describe` as follows, and nothing else in it:
 ### D-9 — What the owner is asked to confirm on this pull request
 
 Each line is the author's recommendation; the owner's ruling of 2026-11-09 did not answer it. Until
-the owner confirms or changes it, it is Proposed.
+the owner confirms or changes it, it is Proposed. **R-11, R-12 and R-13 were ruled by the owner on
+2026-11-10** on this ADR's pull request: R-11 reversed the author's recommendation, and R-12 and R-13
+approved it.
 
 | # | Question | Recommendation | Where |
 |---|---|---|---|
@@ -333,9 +339,9 @@ the owner confirms or changes it, it is Proposed.
 | R-8 | The FIT export carries the fact | **Open**, not in this epic | D-5.4 |
 | R-9 | A solo draft has no spoken cue (the author's reading of ruling 3) | **Yes** | D-5.5 |
 | R-10 | The switch is on by default, and with it off no solo draft field is shown | **Yes** | D-6 |
-| R-11 | A ghost past the end of its attempt, and a pacer past the end of a route that is not a loop, give no draft | **Yes** | D-1.6 |
-| R-12 | "Drafted" is `draftEvent`'s 10 % / 5 % state on the whole solo `k`, advanced per simulation step, for at least a minimum share of the distance; the share is one named constant #2425 defines (10 % recommended, the owner approves it on #2425) | **Yes** | D-5.6 |
-| R-13 | With the physics switch on and the display preference off, the Draft field and the mark are hidden and the ride is still marked | **Yes** | D-6 |
+| R-11 | A ghost past the end of its attempt, and a pacer past the end of a route that is not a loop, stay in the field and still give a draft (the ghost at the end of its attempt, the pacer at its unclamped distance) | **Owner's ruling, 2026-11-10: yes** (reversing the author's "no") | D-1.6 |
+| R-12 | "Drafted" is `draftEvent`'s 10 % / 5 % state on the whole solo `k`, advanced per simulation step, for at least a minimum share of the distance; the share is one named constant #2425 defines (10 %) | **Approved by the owner, 2026-11-10: 10 %** | D-5.6 |
+| R-13 | With the physics switch on and the display preference off, the Draft field and the mark are hidden and the ride is still marked | **Approved by the owner, 2026-11-10** | D-6 |
 
 ---
 
@@ -365,7 +371,7 @@ the owner confirms or changes it, it is Proposed.
 
 | Issue | Constraint |
 |---|---|
-| #2425 | D-1's inputs (odometer distances only, `fieldDraftFactors` unchanged); the pacer and ghost never take a draft; a finished ghost, or a pacer past the end of a route that is not a loop, leaves the field (D-1.6); D-6's switch with an off position byte-identical to today; D-8's test change and no other change to `drafting.test.ts`'s existing assertions; D-5's marks, by D-5.6's definition (`draftEvent` on the whole `k`, per simulation step) with the share as one named constant whose value the owner approves on #2425, read back on the rendered text; D-7's gate green unmodified; no spoken solo cue (D-5.5) |
+| #2425 | D-1's inputs (odometer distances only, `fieldDraftFactors` unchanged); the pacer and ghost never take a draft; a finished ghost stays in the field at the end of its attempt, and a pacer past the end of a route that is not a loop stays in it at its unclamped distance, both still giving a draft (D-1.6, the owner's ruling of 2026-11-10); D-6's switch with an off position byte-identical to today; D-8's test change and no other change to `drafting.test.ts`'s existing assertions; D-5's marks, by D-5.6's definition (`draftEvent` on the whole `k`, per simulation step) with the share as one named constant, 10 % as the owner approved on 2026-11-10, read back on the rendered text; D-7's gate green unmodified; no spoken solo cue: `draftEvent`'s state is kept and its `room-draft` event never queued (D-5.5) |
 | #2426 | A solo source feeds the same in-draft state as a room's; not spoken (ruling 3) |
 | #2423 | Its test is the trainer gate D-7 names; a new drafting source must keep it green unmodified |
 | #2422 | The bend easing's drawn place is never a draft input (D-1.2) |
