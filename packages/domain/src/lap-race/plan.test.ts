@@ -18,6 +18,17 @@ import {
 import { BOT_TIER_WATTS_PER_KILOGRAM, BOT_TIERS } from './bots';
 import { LapRaceError } from './errors';
 import {
+  BOT_ABILITY_SPREAD,
+  BOT_CLIMBER_GRADE_PERCENT,
+  BOT_EVEN_PACE,
+  BOT_PACING_STYLES,
+  BOT_SPRINTER_GRADE_PERCENT,
+  BOT_SPRINTER_SPRINT_FACTOR,
+  BOT_STYLE_BUDGET_FACTOR,
+  BOT_STYLE_EASING,
+  type BotPace,
+} from './pace';
+import {
   BOT_PLAN_BANKING,
   BOT_PLAN_FLAT_GRADE_PERCENT,
   BOT_PLAN_SURGE_CEILING,
@@ -113,7 +124,12 @@ describe('a plan is fixed from the tier, the course and the race’s seed (ADR 0
   it('is scalars only, with nowhere for a recorded ride or another racer', () => {
     expect(Object.keys(HARD).sort()).toEqual([
       'budgetJoules',
+      'climbGradePercent',
+      'easedWatts',
       'floorWatts',
+      'hardFromMetres',
+      'hardToMetres',
+      'ownWatts',
       'raceMetres',
       'sprintMetres',
       'surgeWatts',
@@ -260,5 +276,124 @@ describe('it refuses what is not a ride', () => {
     expect(codeOf(() => step(HARD, HARD.budgetJoules + 1, 0))).toBe('reserve-out-of-range');
     expect(codeOf(() => step(HARD, Number.NaN, 0))).toBe('reserve-out-of-range');
     expect(codeOf(() => step(HARD, 0, 0))).toBeUndefined();
+  });
+});
+
+describe('each bot’s own pace (#2455)', () => {
+  const pace = (style: BotPace['style'], ability = 1): BotPace => ({ style, ability });
+  const planOf = (style: BotPace['style'], ability = 1): BotRacePlan =>
+    botRacePlan('hard', COURSE, 1, pace(style, ability));
+
+  it('is #1960’s plan with no pace given, and with the even pace at full ability', () => {
+    expect(botRacePlan('hard', COURSE, 1, BOT_EVEN_PACE)).toEqual(HARD);
+    expect(HARD.ownWatts).toBe(HARD.tierWatts);
+    expect(HARD.easedWatts).toBe(HARD.tierWatts);
+    expect(HARD.climbGradePercent).toBe(PACING_CLIMB_REFERENCE_GRADE_PERCENT);
+  });
+
+  it('rides its own ability on the flat, and holds the tier’s bounds whatever it is', () => {
+    const weak = planOf('even', 1 - BOT_ABILITY_SPREAD);
+    expect(weak.ownWatts).toBeCloseTo(TIER * (1 - BOT_ABILITY_SPREAD), 9);
+    expect(weak.surgeWatts).toBe(HARD.surgeWatts);
+    expect(weak.floorWatts).toBe(HARD.floorWatts);
+    // Banking 5 % under its OWN power, into a reserve with room.
+    expect(step(weak, 0, 0).power).toBeCloseTo(weak.ownWatts * (1 - BOT_PLAN_BANKING), 9);
+    // Full, it holds its own power, which is under its tier's.
+    expect(step(weak, weak.budgetJoules, 0).power).toBeCloseTo(weak.ownWatts, 9);
+    // Down a steep descent it eases, but never under the tier's −20 % floor.
+    expect(step(weak, 0, -12).power).toBeCloseTo(HARD.floorWatts, 9);
+  });
+
+  it('rides no more than its own power, so never its tier’s, up a climb with an empty reserve', () => {
+    for (const style of BOT_PACING_STYLES) {
+      const plan = planOf(style, 1 - BOT_ABILITY_SPREAD / 2);
+      for (const at of [MID, plan.raceMetres - 1]) {
+        const ridden = step(plan, 0, 8, at).power;
+        expect(ridden, style).toBeLessThanOrEqual(plan.ownWatts + 1e-9);
+        expect(ridden, style).toBeLessThan(plan.tierWatts);
+      }
+    }
+  });
+
+  it('fades after the first lap as a fast starter, and saves for the last as a negative splitter', () => {
+    const bolter = planOf('fast-start');
+    const closer = planOf('negative-split');
+    const full = (plan: BotRacePlan, at: number): number =>
+      step(plan, plan.budgetJoules, 0, at).power;
+    // A full reserve, on the flat: what it rides as its own at each point.
+    expect(full(bolter, 500)).toBeCloseTo(TIER, 9);
+    expect(full(bolter, 2_500)).toBeCloseTo(TIER * (1 - BOT_STYLE_EASING), 9);
+    expect(full(closer, 2_500)).toBeCloseTo(TIER * (1 - BOT_STYLE_EASING), 9);
+    expect(full(closer, 4_500)).toBeCloseTo(TIER, 9);
+    // The first and the last lap, on its own effort distance.
+    expect([bolter.hardFromMetres, bolter.hardToMetres]).toEqual([0, 2_000]);
+    expect([closer.hardFromMetres, closer.hardToMetres]).toEqual([4_000, Number.POSITIVE_INFINITY]);
+    // A race of one lap: the first and the last third.
+    const once = raceCourse(3_000, 1);
+    expect(botRacePlan('hard', once, 1, pace('fast-start')).hardToMetres).toBe(1_000);
+    expect(botRacePlan('hard', once, 1, pace('negative-split')).hardFromMetres).toBe(2_000);
+  });
+
+  it('climbs harder as a climber and saves on climbs as a sprinter, with a larger reserve each', () => {
+    const climb = (style: BotPace['style']): number => step(planOf(style), 2_000, 4).power;
+    // At 4 %: a climber's full surge, the even pace's half, a sprinter's quarter.
+    expect(climb('climber')).toBeCloseTo(HARD.surgeWatts, 9);
+    expect(climb('even')).toBeCloseTo(TIER + (HARD.surgeWatts - TIER) / 2, 9);
+    expect(climb('sprinter')).toBeCloseTo(TIER + (HARD.surgeWatts - TIER) / 4, 9);
+    expect(planOf('climber').climbGradePercent).toBe(BOT_CLIMBER_GRADE_PERCENT);
+    expect(planOf('sprinter').climbGradePercent).toBe(BOT_SPRINTER_GRADE_PERCENT);
+    for (const style of ['climber', 'sprinter'] as const) {
+      expect(planOf(style).budgetJoules).toBeCloseTo(
+        BOT_TIER_BUDGET_JOULES.hard * BOT_STYLE_BUDGET_FACTOR,
+        9,
+      );
+    }
+    expect(planOf('fast-start').budgetJoules).toBe(BOT_TIER_BUDGET_JOULES.hard);
+  });
+
+  it('opens a sprinter’s kick further out, from the same draw as the field’s', () => {
+    for (let seed = 0; seed < 20; seed += 1) {
+      const even = botRacePlan('brisk', COURSE, seed);
+      const sprinter = botRacePlan('brisk', COURSE, seed, pace('sprinter'));
+      expect(sprinter.sprintMetres).toBeCloseTo(even.sprintMetres * BOT_SPRINTER_SPRINT_FACTOR, 9);
+    }
+    // Never longer than the race.
+    expect(botRacePlan('brisk', raceCourse(250, 1), 3, pace('sprinter')).sprintMetres).toBe(250);
+  });
+
+  it('books every joule against its own power: the account still balances', () => {
+    for (const style of BOT_PACING_STYLES) {
+      const plan = planOf(style, 0.95);
+      let reserve = 0;
+      let surplus = 0;
+      let at = 0;
+      for (let tick = 0; tick < 2_000; tick += 1) {
+        const grade = 9 * Math.sin(tick / 7) * Math.cos(tick / 23);
+        const elapsed = 0.05 + ((tick * 37) % 30) / 20;
+        const own =
+          at >= plan.hardFromMetres && at < plan.hardToMetres ? plan.ownWatts : plan.easedWatts;
+        const next = botPlanStep(plan, reserve, { effortDistance: at, grade, elapsed });
+        expect(next.power, style).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+        expect(next.power, style).toBeGreaterThanOrEqual(plan.floorWatts - 1e-9);
+        surplus += (next.power - own) * elapsed;
+        reserve = next.reserve;
+        at += 5 * elapsed;
+      }
+      expect(at, style).toBeGreaterThan(plan.raceMetres);
+      expect(surplus, style).toBeCloseTo(0 - reserve, 6);
+    }
+  });
+
+  it('refuses a pace with an ability outside its band, or a style it does not name', () => {
+    for (const ability of [1.01, 1 - BOT_ABILITY_SPREAD - 0.01, Number.NaN]) {
+      expect(codeOf(() => botRacePlan('hard', COURSE, 1, pace('even', ability)))).toBe(
+        'pace-out-of-range',
+      );
+    }
+    const unknown = { style: 'drafter', ability: 1 } as unknown as BotPace;
+    expect(codeOf(() => botRacePlan('hard', COURSE, 1, unknown))).toBe('pace-out-of-range');
+    expect(
+      codeOf(() => botRacePlan('hard', COURSE, 1, pace('climber', 1 - BOT_ABILITY_SPREAD))),
+    ).toBeUndefined();
   });
 });

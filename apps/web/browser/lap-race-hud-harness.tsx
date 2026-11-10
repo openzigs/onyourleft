@@ -43,6 +43,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
 import {
+  BOT_PACING_STYLES,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   altitudeMetres,
   createItemRace,
@@ -175,7 +176,7 @@ const STAGE_IN_FLOW = { position: 'relative', inset: 'auto', height: '100vh' } a
 
 const RIDER = 'rider';
 const BOTS = Array.from({ length: 11 }, (_, index) => `bot-${String(index + 1).padStart(2, '0')}`);
-const TIERS = ['steady', 'brisk', 'hard', 'fierce'] as const;
+const STYLES = BOT_PACING_STYLES;
 
 function holding(race: ItemRaceState, id: string, kind: ItemKind): ItemRaceState {
   return {
@@ -209,7 +210,7 @@ function hudOf(race: ItemRaceState): LapRaceHud {
       BOTS.map((id, index) => [
         id,
         {
-          name: botName(TIERS[index % TIERS.length] ?? 'steady', index + 1),
+          name: botName(STYLES[index % STYLES.length] ?? 'even', index + 1),
           wattsPerKilogram: 3.5,
         },
       ]),

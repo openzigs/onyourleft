@@ -6,6 +6,7 @@
  */
 
 import {
+  BOT_PACING_STYLES,
   BOT_TIERS,
   GUST_REACH_METRES,
   ITEM_KINDS,
@@ -26,6 +27,7 @@ import { atStartLine } from '../simulation';
 
 import { NO_READING, hudReadings } from './fields';
 import {
+  BOT_STYLE_TEXT,
   BOT_TIER_TEXT,
   ITEM_TEXT,
   LAP_RACE_ITEM_KEY,
@@ -213,8 +215,23 @@ describe('the lap race’s fields (#1904)', () => {
       expect(ITEM_TEXT[kind].said.toLowerCase()).toContain(ITEM_TEXT[kind].name.toLowerCase());
     }
     for (const tier of BOT_TIERS) {
-      expect(botName(tier, 2)).toBe(`${BOT_TIER_TEXT[tier]} bot 2`);
+      expect(BOT_TIER_TEXT[tier]).not.toBe(tier);
     }
+  });
+
+  it('names a bot by its pacing style and its number, never by the tier the whole field shares (#2455)', () => {
+    const words = BOT_PACING_STYLES.map((style) => BOT_STYLE_TEXT[style]);
+    // Five different words, one word each, none of them a key or a tier's word.
+    expect(new Set(words).size).toBe(BOT_PACING_STYLES.length);
+    for (const style of BOT_PACING_STYLES) {
+      expect(BOT_STYLE_TEXT[style]).toMatch(/^\S+$/u);
+      expect(BOT_STYLE_TEXT[style]).not.toBe(style);
+      expect(Object.values(BOT_TIER_TEXT)).not.toContain(BOT_STYLE_TEXT[style]);
+      expect(botName(style, 2)).toBe(`${BOT_STYLE_TEXT[style]} 2`);
+    }
+    // No longer than the longest name before #2455, so the standings' line still fits.
+    const longest = Math.max(...BOT_PACING_STYLES.map((style) => botName(style, 7).length));
+    expect(longest).toBeLessThanOrEqual('Fierce bot 7'.length);
   });
 });
 

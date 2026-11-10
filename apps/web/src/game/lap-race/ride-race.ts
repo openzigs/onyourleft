@@ -60,11 +60,13 @@
 
 import {
   BOT_MASS_KILOGRAMS,
+  botFieldPaces,
   botFieldPersonalities,
   createItemRace,
   racePosition,
   raceCourse,
   seconds,
+  type BotPace,
   type BotPersonality,
   type BotSkill,
   type ItemRaceState,
@@ -231,6 +233,9 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
   const personalities = botFieldPersonalities(seed, ids.length);
+  // #2455: each bot its own ability and pacing style, from the race's seed,
+  // so the field spreads into a race rather than riding as one.
+  const paces = botFieldPaces(seed, ids.length);
   const race = createItemRace(
     assistedRaceSetup(
       assist,
@@ -246,12 +251,18 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   );
   return {
     race,
-    // A mixed field: the three personalities in turn, from the race's seed.
+    // A mixed field: the three personalities and the five pacing styles in
+    // turn, and an ability each, from the race's seed.
     bots: ids.map((id, index) =>
-      lapRaceBot(id, tier, {
-        personality: personalities[index] as BotPersonality,
-        skill: LAP_RACE_BOT_SKILL,
-      }),
+      lapRaceBot(
+        id,
+        tier,
+        {
+          personality: personalities[index] as BotPersonality,
+          skill: LAP_RACE_BOT_SKILL,
+        },
+        paces[index] as BotPace,
+      ),
     ),
     seed,
     assist,
@@ -259,7 +270,9 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     startAlong: input.riderDistance,
     along: input.riderDistance,
     conditions: input.conditions,
-    names: Object.fromEntries(ids.map((id, index) => [id, botName(tier, index + 1)])),
+    names: Object.fromEntries(
+      ids.map((id, index) => [id, botName((paces[index] as BotPace).style, index + 1)]),
+    ),
     owed: lapRaceOwedAtStart(race, LAP_RACE_RIDER_ID),
   };
 }

@@ -17,6 +17,8 @@
  *
  * The whole of a bot is an id, a {@link BotTier}, a `BotStrategy` (#1959: a
  * personality and a skill, which decide its lanes and items and nothing else),
+ * a `BotPace` (#2455: its ability at or under its tier and its pacing style
+ * off the course, which its race plan reads and its decisions never do),
  * what its decisions remember from the last tick, its own energy reserve
  * (#1960), and its own ride state. The whole of a tick's inputs is the elapsed
  * time, the course's conditions (the same {@link BotCourse} the #92 bot takes,
@@ -45,6 +47,7 @@
 
 import type {
   BotMemory,
+  BotPace,
   BotStrategy,
   ItemRaceState,
   RaceTickInput,
@@ -52,6 +55,7 @@ import type {
   Watts,
 } from '@onyourleft/domain';
 import {
+  BOT_EVEN_PACE,
   BOT_MEMORY_AT_START,
   botPlanStep,
   botRacePlan,
@@ -64,13 +68,19 @@ import {
 import { advancePlannedBot, BOT_AT_START_LINE, botDemand, type BotCourse } from './pacer';
 import type { RideState } from './simulate';
 
-/** One bot in a race: an id, a tier, a strategy, and where its own power has taken it. */
+/** One bot in a race: an id, a tier, a strategy, a pace, and where its own power has taken it. */
 export interface LapRaceBot {
   readonly id: string;
-  /** Its strength: the only thing that sets its power. */
+  /** Its strength's tier: with its {@link pace}, the only thing that sets its power. */
   readonly tier: BotTier;
   /** How it decides (#1959): chosen apart from the tier, and never read on the way to its power. */
   readonly strategy: BotStrategy;
+  /**
+   * How it paces the race (#2455): its ability at or under its tier and its
+   * style off the course, fixed at the start from the race's seed. Read on
+   * the way to its power, by its race plan, and never by its decisions.
+   */
+  readonly pace: BotPace;
   /** What its decisions remember from the last tick of this race: nothing stored, nothing recorded. */
   readonly memory: BotMemory;
   /**
@@ -100,12 +110,22 @@ export interface BotRaceStep {
   readonly rider?: Omit<RaceTickInput, 'atMs'>;
 }
 
-/** A bot on the start line, with its strength and its way of racing chosen apart. */
-export function lapRaceBot(id: string, tier: BotTier, strategy: BotStrategy): LapRaceBot {
+/**
+ * A bot on the start line, with its strength, its way of racing and its pace
+ * chosen apart. With no pace, it rides #1960's even plan at its tier's full
+ * power.
+ */
+export function lapRaceBot(
+  id: string,
+  tier: BotTier,
+  strategy: BotStrategy,
+  pace: BotPace = BOT_EVEN_PACE,
+): LapRaceBot {
   return {
     id,
     tier,
     strategy,
+    pace,
     memory: BOT_MEMORY_AT_START,
     reserve: 0,
     ride: BOT_AT_START_LINE,
@@ -147,11 +167,15 @@ export function stepBotRace(
     const course: BotCourse = { ...step.conditions, plan: botTierPlan(bot.tier) };
     // The plan reads the bot's own odometer, its effort distance, and the
     // grade under it there: never the race's view of where the bot is.
-    const planned = botPlanStep(botRacePlan(bot.tier, race.course, step.seed), bot.reserve, {
-      effortDistance: bot.ride.distance,
-      grade: botDemand(bot.ride, course).grade,
-      elapsed: step.elapsed,
-    });
+    const planned = botPlanStep(
+      botRacePlan(bot.tier, race.course, step.seed, bot.pace),
+      bot.reserve,
+      {
+        effortDistance: bot.ride.distance,
+        grade: botDemand(bot.ride, course).grade,
+        elapsed: step.elapsed,
+      },
+    );
     const tick = advancePlannedBot(bot.ride, step.elapsed, course, planned.power);
     effortDistances[bot.id] = tick.state.distance;
     return {

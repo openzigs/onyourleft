@@ -68,6 +68,7 @@ import {
   GUST_REACH_METRES,
   racePosition,
   standings,
+  type BotPacingStyle,
   type BotTier,
   type ItemKind,
   type ItemRaceState,
@@ -121,11 +122,28 @@ export const BOT_TIER_TEXT: Readonly<Record<BotTier, string>> = {
 };
 
 /**
- * A bot's name in the standings: its tier and its number in the field, `Brisk bot 2`.
+ * What a bot's pacing style is called, as its name in the standings — #2455.
+ * ⚠️ Draft words for the owner's approval. One short word each, so the
+ * longest name, `Sprinter 7`, is shorter than #1906's `Fierce bot 7` was.
+ * `Steady` is a tier's word, so the even pace is *Tempo*, a tempo rider's.
+ */
+export const BOT_STYLE_TEXT: Readonly<Record<BotPacingStyle, string>> = {
+  even: 'Tempo',
+  'fast-start': 'Bolter',
+  'negative-split': 'Closer',
+  climber: 'Climber',
+  sprinter: 'Sprinter',
+};
+
+/**
+ * A bot's name in the standings: its pacing style and its number in the
+ * field, `Climber 4` (#2455). Every bot of a field rides the one tier the
+ * rider chose, so its style is what tells it apart; until #2455 it was the
+ * tier, and a field of seven read `Steady bot 1` to `Steady bot 7`.
  * `lap-race/ride-race.ts` names the field's bots with it when a race starts (#1906).
  */
-export function botName(tier: BotTier, number: number): string {
-  return `${BOT_TIER_TEXT[tier]} bot ${String(number)}`;
+export function botName(style: BotPacingStyle, number: number): string {
+  return `${BOT_STYLE_TEXT[style]} ${String(number)}`;
 }
 
 /** The HUD's words for a lap race. ⚠️ Draft wording for the owner's approval. */
