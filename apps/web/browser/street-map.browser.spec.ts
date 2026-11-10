@@ -110,10 +110,12 @@ async function open(
   page: Page,
   map: 'street' | 'outline',
   route: 'full' | 'compact' = 'full',
+  town: 'north' | 'east' = 'north',
 ): Promise<void> {
   const query = [
     ...(map === 'outline' ? ['map=outline'] : []),
     ...(route === 'compact' ? ['route=compact'] : []),
+    ...(town === 'east' ? ['town=east'] : []),
   ].join('&');
   const response = await page.goto(
     `${HARNESS_ORIGIN}/street-map.html${query === '' ? '' : `?${query}`}`,
@@ -446,6 +448,10 @@ for (const viewport of VIEWPORTS) {
  * tall, 766 px at 800×340 against a 400 px sheet when the reach was ±2.5 km.
  * Measured on the sheet and not on the streets, which only reach as far as
  * the town does; and again after riding, where the rider is off the grid.
+ * The north route moves the rider off it only north–south, so the case rides
+ * the east route too (#2397): there the rider is up to 125 m east or west of
+ * the sheet's middle, which is what `REACH_ACROSS_METRES` is sized for. Every
+ * side short at every leg is reported, not only the first.
  *
  * ⚠️ One page for all three, resized, and ridden UNPACED: the sheet's box is
  * read from layout (`getBoundingClientRect` includes the transform), which
@@ -458,9 +464,7 @@ const STACKED_VIEWPORTS = [
   { name: 'short, 800×340', width: 800, height: 340 },
 ] as const;
 
-test('#2380 the sheet covers the whole box in the stacked layout', async ({ page }) => {
-  await page.setViewportSize(STACKED_VIEWPORTS[0]);
-  await open(page, 'street');
+test('#2380 #2397 the sheet covers the whole box in the stacked layout', async ({ page }) => {
   const gaps = async () =>
     page.evaluate(() => {
       const box = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
@@ -474,20 +478,33 @@ test('#2380 the sheet covers the whole box in the stacked layout', async ({ page
         box: box.width,
       };
     });
-  for (const viewport of STACKED_VIEWPORTS) {
-    await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    // Five places 61 m apart: over 250 m, so across a whole cell of the grid.
-    for (let leg = 0; leg < 5; leg += 1) {
-      const found = await gaps();
-      expect(found, 'the box and the sheet are both on the page').toBeDefined();
-      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
-        expect(
-          found?.[side] ?? -1,
-          `${viewport.name}, leg ${String(leg)}: the sheet's ${side} edge is short of the box by ` +
-            `${String(-(found?.[side] ?? 0))} px (the box is ${String(found?.box)} px wide)`,
-        ).toBeGreaterThanOrEqual(-0.5);
+  for (const town of ['north', 'east'] as const) {
+    await page.setViewportSize(STACKED_VIEWPORTS[0]);
+    await open(page, 'street', 'full', town);
+    for (const viewport of STACKED_VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      // Five places 63 m apart: 252 m, so across a whole cell of the grid.
+      // A ride starts from the harness's start each time, so each leg rides
+      // from there to its own place.
+      for (let leg = 0; leg < 5; leg += 1) {
+        const metres = 1 + 63 * leg;
+        await page.evaluate(
+          async (frames) => window.__oylStreetMap?.ride?.(frames, 1, false),
+          metres,
+        );
+        const found = await gaps();
+        expect(found, 'the box and the sheet are both on the page').toBeDefined();
+        for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+          expect
+            .soft(
+              found?.[side] ?? -1,
+              `${town} route, ${viewport.name}, ${String(metres)} m on: the sheet's ${side} edge is ` +
+                `short of the box by ${String(-(found?.[side] ?? 0))} px (the box is ` +
+                `${String(found?.box)} px wide)`,
+            )
+            .toBeGreaterThanOrEqual(-0.5);
+        }
       }
-      await page.evaluate(async () => window.__oylStreetMap?.ride?.(61, 1, false));
     }
   }
 });
