@@ -89,6 +89,42 @@ export interface MappedBuildingsInView {
   /** Where the rider is drawn, local metres. */
   readonly x: number;
   readonly z: number;
+  /**
+   * The route from the rider `realistic-budget.ts` §`MAPPED_RANKED_AHEAD_METRES` on, `x, z`
+   * every {@link MAPPED_AHEAD_STEP_METRES} — #2429: what a refill ranks the
+   * buildings by ({@link rankFrom}). Absent, they are ranked by `x`, `z`.
+   */
+  readonly ahead?: Float32Array;
+}
+
+/** How far apart {@link MappedBuildingsInView.ahead}'s points are, metres: **25**. */
+export const MAPPED_AHEAD_STEP_METRES = 25;
+
+/**
+ * How far `(x, z)` is from the road a refill ranks by — #2429: from the
+ * nearest point of `ahead` (`x, z` pairs, a polyline), or from `(fromX,
+ * fromZ)` where `ahead` is absent or a single point.
+ */
+export function rankFrom(
+  ahead: Float32Array | undefined,
+  fromX: number,
+  fromZ: number,
+  x: number,
+  z: number,
+): number {
+  if (ahead === undefined || ahead.length < 4) return Math.hypot(x - fromX, z - fromZ);
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let at = 0; at + 3 < ahead.length; at += 2) {
+    const ax = ahead[at] as number;
+    const az = ahead[at + 1] as number;
+    const dx = (ahead[at + 2] as number) - ax;
+    const dz = (ahead[at + 3] as number) - az;
+    const span = dx * dx + dz * dz;
+    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+    const off = Math.hypot(x - ax - dx * t, z - az - dz * t);
+    if (off < nearest) nearest = off;
+  }
+  return nearest;
 }
 
 /** Indexes a ride's plans — once, at the press. */
@@ -306,7 +342,15 @@ function landmarksAhead(
  *
  * Every plan within {@link MAPPED_BUILDING_REACH_METRES} of `(x, z)` by its
  * centroid, **nearest first**; each beyond {@link MAPPED_BUILDING_NEAR_METRES}
- * at its far level. Taken in that order until the next would pass
+ * at its far level.
+ *
+ * ⚠️ **Nearest to the road ahead, since #2429**, where `ahead` is given
+ * ({@link MappedBuildingsInView.ahead}): each plan, and each rival, is
+ * ranked by its distance from that stretch of route ({@link rankFrom}), and
+ * reach and level are still measured from `(x, z)`. Ranked from `(x, z)`, the
+ * nearest {@link MAPPED_BUILDING_MAX} of a dense town stood as much behind the
+ * rider as ahead, and the set was held for a chunk, so a house drew when the
+ * rider was beside it. Taken in that order until the next would pass
  * `triangleBudget` or {@link MAPPED_BUILDING_MAX} are taken — so the drawn set
  * is the nearest, and a far building never takes a near one's place but for
  * the landmarks below.
@@ -359,6 +403,7 @@ export function selectMappedBuildings(
   surfaceSlots: number = MAPPED_BUILDING_DRAW_CALLS,
   rivals: RivalStructures = NO_RIVALS,
   models?: readonly number[],
+  ahead?: Float32Array,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -378,7 +423,9 @@ export function selectMappedBuildings(
     const plan = plans[index] as FootprintPlan;
     const apart = Math.hypot(plan.centroid.x - x, plan.centroid.z - z);
     if (apart > MAPPED_BUILDING_REACH_METRES) continue;
-    distances[index] = apart;
+    // #2429: ranked by the road ahead, where there is one.
+    distances[index] =
+      ahead === undefined ? apart : rankFrom(ahead, x, z, plan.centroid.x, plan.centroid.z);
     order[inReach] = index;
     inReach += 1;
   }
@@ -386,13 +433,13 @@ export function selectMappedBuildings(
   order
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
-  const ahead = landmarksAhead(plans, order, inReach);
+  const landmarks = landmarksAhead(plans, order, inReach);
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   let stopped = false;
   for (let at = 0; at < inReach && into.count < MAPPED_BUILDING_MAX; at += 1) {
     const index = order[at] as number;
     const plan = plans[index] as FootprintPlan;
-    const apart = distances[index] as number;
+    const rank = distances[index] as number;
     // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
     // nearer than a house the walk has not reached yet. Two costs it does
     // accept, by design (ADR 0054's 2026-11-03 amendment): its triangles come
@@ -400,11 +447,11 @@ export function selectMappedBuildings(
     // can drop a structure nearer the rider than the church; and it opens its
     // wall and roof slots before the nearest houses, so the slot check below
     // can pass over a near house that would need a 7th surface.
-    if (at >= ahead && !rivalsWithin(apart)) {
+    if (at >= landmarks && !rivalsWithin(rank)) {
       stopped = true;
       break;
     }
-    const far = apart > MAPPED_BUILDING_NEAR_METRES;
+    const far = Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES;
     // #1585: near, with a model that fits, and the models loaded. With no
     // slot left for the models' group the plan is drawn as its extrusion,
     // whose surfaces may already be open, rather than passed over.
@@ -418,7 +465,7 @@ export function selectMappedBuildings(
     const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
       // A landmark taken ahead that does not fit leaves the nearest to their own walk.
-      if (at < ahead) continue;
+      if (at < landmarks) continue;
       stopped = true;
       break;
     }

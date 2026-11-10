@@ -355,6 +355,7 @@ import {
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
+  rankFrom,
   roleTriangles,
   selectMappedBuildings,
   surfaceOfRole,
@@ -19729,6 +19730,8 @@ export class MappedBuildingBelt {
     triangleBudget: number,
     chunk?: number,
     rivals: RivalStructures = NO_RIVALS,
+    /** #2429: the road ahead the buildings are ranked by. @see selectMappedBuildings */
+    ahead?: Float32Array,
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
@@ -19742,6 +19745,7 @@ export class MappedBuildingBelt {
       MAPPED_BUILDING_DRAW_CALLS,
       rivals,
       this.#houses?.triangles,
+      ahead,
     );
     const surfaces = selection.surfaces;
     let end = 0;
@@ -20594,7 +20598,8 @@ export function refillMappedBuildings(
   let at = 0;
   for (const item of scatter) {
     if (!isStructureKind(item.kind)) continue;
-    rivalDistances[at] = Math.hypot(item.x - view.x, item.z - view.z);
+    // #2429: by the road ahead, as the buildings it is ranked against are.
+    rivalDistances[at] = rankFrom(view.ahead, view.x, view.z, item.x, item.z);
     at += 1;
   }
   rivalDistances.subarray(0, count).sort();
@@ -20608,6 +20613,7 @@ export function refillMappedBuildings(
       count,
       triangles: structure,
     },
+    view.ahead,
   );
   return items - Math.ceil(stats.triangles / structure);
 }
