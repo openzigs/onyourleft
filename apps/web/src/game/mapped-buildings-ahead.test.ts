@@ -24,7 +24,7 @@ import { metres } from '@onyourleft/domain';
 import { footprintPlans, FOOTPRINT_MAX_VERTICES, mappedTown } from './footprint-buildings';
 import { mixedTownFixture, rowTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
-import { mappedBuildingsOf } from './mapped-buildings';
+import { mappedBuildingsOf, mappedChunk } from './mapped-buildings';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
@@ -33,7 +33,7 @@ import {
   REALISTIC_STRUCTURE_ITEMS,
 } from './realistic-budget';
 import { nearestOnDrawnRoad } from './road-grid';
-import { sceneFrame } from './scene';
+import { drawnRiderDistance, sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { drawnRoadFrame } from './terrain';
 import { MappedBuildingBelt, refillMappedBuildings } from './three-renderer';
@@ -90,8 +90,14 @@ function ride(fixture: ReturnType<typeof rowTownFixture>, from: number, to: numb
   let mostBuildings = 0;
   let mostCalls = 0;
   let owed = 0;
+  // As `GameView` does since #2145: a whole frame is built only where the
+  // rider's chunk changes, and every other frame refills from that frame's
+  // view under its own chunk, which returns at once.
+  let built: ReturnType<typeof sceneFrame> | undefined;
+  let builtChunk: number | undefined;
+  let drawn = new Set<number>();
   for (let distance = from; distance < to; distance += STEP) {
-    const frame = sceneFrame({
+    const input = {
       profile,
       origin,
       state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
@@ -100,22 +106,30 @@ function ride(fixture: ReturnType<typeof rowTownFixture>, from: number, to: numb
       mappedBuildings: buildings,
       mappedTown: town,
       structureItems: REALISTIC_STRUCTURE_ITEMS,
-    });
-    const view = frame.mappedBuildings;
+    };
+    const chunk = mappedChunk(drawnRiderDistance(input));
+    if (built === undefined || chunk !== builtChunk) {
+      built = sceneFrame(input);
+      builtChunk = chunk;
+    }
+    const view = built.mappedBuildings;
     if (view === undefined) throw new Error('no mapped buildings in the frame');
+    const refills = belt.refills;
     refillMappedBuildings(
       belt,
-      view,
-      frame.scatter,
-      frame.billboards.length,
+      { ...view, chunk },
+      built.scatter,
+      built.billboards.length,
       REALISTIC_STRUCTURE_ITEMS,
     );
-    mostBuildings = Math.max(mostBuildings, belt.stats.buildings);
-    mostCalls = Math.max(mostCalls, belt.stats.drawCalls);
-    const drawn = new Set<number>();
-    for (let place = 0; place < belt.stats.buildings; place += 1) {
-      const at = belt.drawnAt(place);
-      if (at !== undefined) drawn.add(at.plan);
+    if (belt.refills !== refills) {
+      mostBuildings = Math.max(mostBuildings, belt.stats.buildings);
+      mostCalls = Math.max(mostCalls, belt.stats.drawCalls);
+      drawn = new Set<number>();
+      for (let place = 0; place < belt.stats.buildings; place += 1) {
+        const at = belt.drawnAt(place);
+        if (at !== undefined) drawn.add(at.plan);
+      }
     }
     for (const index of drawn) {
       const at = place[index];
