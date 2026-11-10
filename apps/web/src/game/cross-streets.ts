@@ -1130,7 +1130,12 @@ export interface SideRoadClearance {
   readonly on: typeof onSideRoad;
 }
 
-/** Every answer worked out afresh: what both filters did before #2439. */
+/**
+ * Every answer worked out afresh: what both filters did before #2439.
+ *
+ * @test-facing the comparison `side-road-clearance.test.ts` holds the cache
+ * against: the product always passes `scene.ts`'s cached clearance (#2439).
+ */
 export const UNCACHED_SIDE_ROAD_CLEARANCE: SideRoadClearance = { on: onSideRoad };
 
 /**
