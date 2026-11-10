@@ -657,7 +657,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...gapReadings(input),
     ...roomReadings(input.room),
     // #2425: a solo ride's draft, where a room's would be; a ride runs one.
-    ...(input.soloDraft === undefined ? [] : [draftField(input.soloDraft)]),
+    ...(input.soloDraft === undefined ? [] : [draftField(input.soloDraft, SOLO_DRAFT_KEY)]),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
@@ -841,10 +841,16 @@ export function isRoomReading(reading: HudReading): boolean {
  * gap, the ghost's gap (and the dashed field that stands in for both) and the
  * wind. `theme.css` §"A ROOM RIDE ON A PHONE" hides them while a room's
  * readings are on the HUD, and says what that costs. Since #1812 they give way
- * to a Delivery round's readings the same way.
+ * to a Delivery round's readings the same way. Since #2425 a solo ride's
+ * draft does too: it is the pacer's and the ghost's, and goes with them.
  */
 export function givesWayToTheRoom(reading: HudReading): boolean {
-  return reading.key === 'gap' || reading.key.startsWith('gap-') || reading.key === 'wind';
+  return (
+    reading.key === 'gap' ||
+    reading.key.startsWith('gap-') ||
+    reading.key === 'wind' ||
+    reading.key === SOLO_DRAFT_KEY
+  );
 }
 
 /**
@@ -1048,6 +1054,14 @@ function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReadin
 export const DRAFT_LABEL = 'Draft';
 
 /**
+ * The key of a SOLO ride's draft field — #2425. Not `room-draft`: a key
+ * beginning `room-` is a room's reading ({@link isRoomReading}), and on a
+ * phone a room's readings take the places of the pacer's, the ghost's and the
+ * wind's (`theme.css` §"A ROOM RIDE ON A PHONE"), which a solo ride keeps.
+ */
+export const SOLO_DRAFT_KEY = 'solo-draft';
+
+/**
  * The room's draft on this rider, as a share of aerodynamic drag — #787,
  * ADR 0038 D-5 — and since #2425 a solo ride's ({@link HudInput.soloDraft}). The unit says what it is a share of, so a small number on a
  * climb, where there is little air to push, reads as a fact and not a fault
@@ -1060,8 +1074,8 @@ export const DRAFT_LABEL = 'Draft';
  * drawn … If the scale is instead the theoretical maximum, the gauge says
  * so"*). `'Off'` and the dash carry none: there is nothing to measure.
  */
-function draftField(draft: RoomHud['draft']): HudReading {
-  const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
+function draftField(draft: RoomHud['draft'], key = 'room-draft'): HudReading {
+  const base = { key, label: DRAFT_LABEL, stale: false } as const;
   if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
   if (draft === undefined || !Number.isFinite(draft)) {
     return { ...base, value: NO_READING, unit: '' };

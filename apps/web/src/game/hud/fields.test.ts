@@ -1190,7 +1190,7 @@ describe('the room on the HUD — #783', () => {
 
   it('shows a solo ride’s draft as a room’s is drawn, rounded, where the room’s fields would be — #2425', () => {
     const solo = (percent: number) =>
-      hudReadings({ ...baseInput(), soloDraft: percent }).find((r) => r.key === 'room-draft');
+      hudReadings({ ...baseInput(), soloDraft: percent }).find((r) => r.key === 'solo-draft');
     expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '% of drag' });
     expect(solo(33.6)?.detail).toBe('at most 59 %');
     expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
@@ -1198,8 +1198,9 @@ describe('the room on the HUD — #783', () => {
     // Absent with no solo draft handed in, and every other field where it was.
     const without = hudReadings(baseInput()).map((r) => r.key);
     const withIt = hudReadings({ ...baseInput(), soloDraft: 12 }).map((r) => r.key);
-    expect(without).not.toContain('room-draft');
-    expect(withIt.filter((key) => key !== 'room-draft')).toEqual(without);
+    expect(without).not.toContain('solo-draft');
+    expect(withIt).not.toContain('room-draft');
+    expect(withIt.filter((key) => key !== 'solo-draft')).toEqual(without);
   });
 
   it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {

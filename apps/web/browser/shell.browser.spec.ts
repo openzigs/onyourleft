@@ -2216,9 +2216,10 @@ test.describe('#397 — the announcement controls', () => {
     // carries it for the same reason and shipped without it. Twenty-seven
     // since #787's Draft switch, which carries it too. Twenty-eight since
     // #1622's Holiday decorations switch, in the Game world panel.
+    // Twenty-nine since #2425's Draft on your own switch, which carries it too.
     expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
     expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
-    expect(seen.length).toBe(28);
+    expect(seen.length).toBe(29);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);

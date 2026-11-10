@@ -275,6 +275,8 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       'Zone',
       'Pacer',
       'Your best',
+      // #2425: a solo ride's draft — a round is ridden alone — on a tablet only.
+      'Draft',
       'Wind',
       'Houses',
       'Score',

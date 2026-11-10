@@ -258,6 +258,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Zone',
         'Pacer',
         'Your best',
+        // #2425: the pacer's and the ghost's draft (ADR 0066), on by default.
+        'Draft',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
@@ -265,8 +267,10 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // controls and, since #1482, the touch lock — since #2075 the road ahead
       // beside the strip, and since #2076 and #2077 the ride so far and the
       // rider's effort, where they are drawn. And since #2078 the recent
-      // graph, where it is drawn.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 25 : 19);
+      // graph, where it is drawn. And since #2425 a solo ride's draft, drawn
+      // on a tablet only (`theme.css` §"A SOLO RIDE'S DRAFT, ON A TABLET
+      // ONLY"), so a phone draws as many as before.
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 26 : 19);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -1056,11 +1060,19 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
       );
       if (!rideTotalsDrawn(viewport)) {
-        // #2078: and the recent graph, not drawn on a phone's overlay either.
-        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS, 'the recent graph']);
+        // #2078: and the recent graph, not drawn on a phone's overlay either;
+        // and since #2425 a solo ride's draft, drawn on a tablet only.
+        expect(seen.givenWay, how).toEqual([
+          ...RIDE_TOTAL_READINGS,
+          'reading: Draft',
+          'the recent graph',
+        ]);
         continue;
       }
-      expect(seen.givenWay, how).toEqual([]);
+      // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
+      // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
+      const draftDrawn = viewport.width >= 800 && viewport.height >= 752;
+      expect(seen.givenWay, how).toEqual(draftDrawn ? [] : ['reading: Draft']);
       const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
       if (panel === undefined) throw new Error(`${how}: no secondary panel`);
       // Stacked, the readings scroll: drawn, in their panel and over no other
@@ -1111,7 +1123,7 @@ for (const viewport of STACKED_VIEWPORTS) {
       // Twelve readings since #2072's elapsed time and clock, and the rest as
       // above — the ride so far and the rider's effort (#2076, #2077), the
       // road ahead (#2075) and the recent graph (#2078), drawn where the HUD
-      // stacks.
+      // stacks. A solo ride's draft (#2425) is drawn on a tablet only.
       expect(seen.items).toHaveLength(25);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);

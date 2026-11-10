@@ -1134,7 +1134,10 @@ function measure(): StageMeasurement {
       strip ||
       ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
         field.classList.contains(name),
-      );
+      ) ||
+      // #2425: a solo ride's draft, away from a tablet (`theme.css` §"A SOLO
+      // RIDE'S DRAFT, ON A TABLET ONLY").
+      field.classList.contains('oyl-hud__field--solo-draft');
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);
       continue;
