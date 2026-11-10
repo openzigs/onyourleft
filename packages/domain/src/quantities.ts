@@ -15,6 +15,8 @@
  * | distance | metre | `Metres` | non-negative |
  * | speed | metre per second | `MetresPerSecond` | non-negative |
  * | power | watt | `Watts` | non-negative |
+ * | work | joule | `Joules` | non-negative |
+ * | food energy | kilocalorie | `Kilocalories` | non-negative |
  * | cadence | revolution per minute | `RevolutionsPerMinute` | non-negative |
  * | heart rate | beat per minute | `BeatsPerMinute` | non-negative |
  * | altitude | metre | `AltitudeMetres` | **signed** |
@@ -146,6 +148,23 @@ export type Joules = Quantity<'joule'>;
 export function joules(value: number): Joules {
   assertNotNegative(value, 'work in joules');
   return value as Joules;
+}
+
+/**
+ * Food energy, in kilocalories — the unit a ride's calorie estimate is shown
+ * in (#2431), and so a brand of its own rather than a {@link Joules}: the two
+ * differ by a factor of 4184, and a kilocalorie read as a joule is the error
+ * that factor makes.
+ *
+ * Non-negative for {@link Joules}'s reason: it is the energy a rider spent,
+ * and a negative figure means an estimate produced something unphysical.
+ */
+export type Kilocalories = Quantity<'kilocalorie'>;
+
+/** @throws {UnitError} if not a finite, non-negative number. */
+export function kilocalories(value: number): Kilocalories {
+  assertNotNegative(value, 'energy in kilocalories');
+  return value as Kilocalories;
 }
 
 // --- Cadence ----------------------------------------------------------------
