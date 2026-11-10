@@ -964,6 +964,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `OYL-REALISTIC` line and readout;
                         `realistic-lap-race.browser.spec.ts` holds it
                         (required, not nightly: the stylised world)
+    src/game/draft-cannot-reach-trainer.test.tsx
+                        ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
+                        #2421): a draft changes the rider's speed and
+                        nothing else. The real `GameView`, ride controller
+                        and #44 simulator, one power trace on
+                        `rollingRoute()` at k = 1 and at `draftWith(0.6)`,
+                        read back as control point octets: every simulation
+                        write is the road's grade at the odometer and the
+                        protocol client's defaults for the rest, a
+                        workout's ERG writes are the same bytes at the same
+                        frames, and the release the same bytes. A new
+                        drafting source (#2425, #2422) keeps it green
+                        UNMODIFIED
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round

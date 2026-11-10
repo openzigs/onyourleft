@@ -34,6 +34,7 @@ import {
   northRoute,
 } from './street-map-testing';
 import { PLAN_SIZE, RIDER_MARK_RADIUS } from './plan';
+import type { WorldCorridor } from '../world-data/corridor';
 
 /** Every `x y` pair in a path `d`. */
 function pointsOf(d: string): readonly (readonly [number, number])[] {
@@ -296,6 +297,26 @@ function touches(
   );
 }
 
+/**
+ * How many of a corridor's street segments reach into the region, counted
+ * from the corridor itself (the corridor's `x` is WEST, `z` NORTH).
+ */
+function streetSegmentsTouching(corridor: WorldCorridor, region: StreetMapRegion): number {
+  return corridor.streets.reduce((count, street) => {
+    let touching = 0;
+    for (let index = 0; index + 3 < street.line.length; index += 2) {
+      const segment = [
+        -(street.line[index] as number),
+        -(street.line[index + 1] as number),
+        -(street.line[index + 2] as number),
+        -(street.line[index + 3] as number),
+      ] as const;
+      if (touches(segment, region)) touching += 1;
+    }
+    return count + touching;
+  }, 0);
+}
+
 describe('the sheet holds the box and its margin, and nothing further — #2380', () => {
   /**
    * The widest box a layout gives the panel, as half its width: the stacked
@@ -303,21 +324,26 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
    */
   const HALF_WIDEST_BOX = (766 / 80) * (STREET_MAP_METRES / 2);
 
-  it('holds the whole box, wherever the rider is on the grid', () => {
-    const corridor = denseTown();
-    const profile = denseTownRoute();
-    for (let distance = 4000; distance < 6000; distance += 7) {
-      const centre = streetMapCentre(corridor.origin, profile, distance);
-      const region = streetMapRegion(centre);
-      // The box round the rider, every side inside the sheet.
-      expect(region.left).toBeLessThanOrEqual(centre.east - HALF_WIDEST_BOX);
-      expect(region.left + region.width).toBeGreaterThanOrEqual(centre.east + HALF_WIDEST_BOX);
-      expect(region.top).toBeLessThanOrEqual(centre.south - STREET_MAP_METRES / 2);
-      expect(region.top + region.height).toBeGreaterThanOrEqual(
-        centre.south + STREET_MAP_METRES / 2,
-      );
-    }
-  });
+  // Both ways (#2397): the north route moves the rider off the grid only
+  // north–south, and the reach is sized for the rider off it east–west.
+  it.each(['north', 'east'] as const)(
+    'holds the whole box, wherever the rider is on the grid — riding %s',
+    (heading) => {
+      const corridor = denseTown(heading);
+      const profile = denseTownRoute(heading);
+      for (let distance = 4000; distance < 6000; distance += 7) {
+        const centre = streetMapCentre(corridor.origin, profile, distance);
+        const region = streetMapRegion(centre);
+        // The box round the rider, every side inside the sheet.
+        expect(region.left).toBeLessThanOrEqual(centre.east - HALF_WIDEST_BOX);
+        expect(region.left + region.width).toBeGreaterThanOrEqual(centre.east + HALF_WIDEST_BOX);
+        expect(region.top).toBeLessThanOrEqual(centre.south - STREET_MAP_METRES / 2);
+        expect(region.top + region.height).toBeGreaterThanOrEqual(
+          centre.south + STREET_MAP_METRES / 2,
+        );
+      }
+    },
+  );
 
   it('draws a dense town’s streets only where they reach into the sheet, and every one that does', () => {
     const corridor = denseTown();
@@ -331,22 +357,8 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
     const streets = segmentsOf(drawn.streets);
     const paths = segmentsOf(drawn.paths);
     for (const segment of [...streets, ...paths]) expect(touches(segment, region)).toBe(true);
-    // …and every street segment of the town's that does is drawn, counted
-    // here from the corridor itself (the corridor's `x` is WEST, `z` NORTH).
-    const expected = corridor.streets.reduce((count, street) => {
-      let touching = 0;
-      for (let index = 0; index + 3 < street.line.length; index += 2) {
-        const segment = [
-          -(street.line[index] as number),
-          -(street.line[index + 1] as number),
-          -(street.line[index + 2] as number),
-          -(street.line[index + 3] as number),
-        ] as const;
-        if (touches(segment, region)) touching += 1;
-      }
-      return count + touching;
-    }, 0);
-    expect(streets.length).toBe(expected);
+    // …and every street segment of the town's that does is drawn.
+    expect(streets.length).toBe(streetSegmentsTouching(corridor, region));
 
     // So the path data a sheet can hold is bounded by its area, not by the
     // cells round it. On this PR the town's sheet is 6,040 street and 3,040
@@ -356,6 +368,37 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
     const bytes = drawn.streets.length + drawn.paths.length;
     expect(bytes).toBeLessThan(120_000);
     expect(streets.length + paths.length).toBeLessThan(10_000);
+  });
+
+  it('bounds the sheet on a route running east through the dense town, where its long side lies along the streets — #2397', () => {
+    // The same town turned a quarter turn, so the sheet's 12 km runs along
+    // it rather than across its 4 km. 20 km in, the whole sheet is over the
+    // town: the worst orientation, in the worst place.
+    const corridor = denseTown('east');
+    const profile = denseTownRoute('east');
+    const centre = streetMapCentre(corridor.origin, profile, 20_000);
+    expect(centre.east).toBeCloseTo(20_000, -2);
+    expect(centre.south).toBe(0);
+    const region = streetMapRegion(centre);
+    const drawn = streetMapLayers(streetMapIndex(corridor, profile), region);
+
+    const streets = segmentsOf(drawn.streets);
+    const paths = segmentsOf(drawn.paths);
+    for (const segment of [...streets, ...paths]) expect(touches(segment, region)).toBe(true);
+    expect(streets.length).toBe(streetSegmentsTouching(corridor, region));
+    // The control: the town is drawn the sheet's whole width, so the bound
+    // below is a bound on the reach and not on how far the town goes.
+    const easts = pointsOf(drawn.streets).map(([east]) => east);
+    expect(Math.min(...easts)).toBeLessThanOrEqual(region.left + 20);
+    expect(Math.max(...easts)).toBeGreaterThanOrEqual(region.left + region.width - 20);
+
+    // On this PR the sheet is 27,858 segments and 295 KB of `d`, 2.7 times the
+    // north route's 111 KB at the same place: the cost of the 6 km reach
+    // (`street-map.ts` §`REACH_ACROSS_METRES`), paid once per 250 m. A reach
+    // 500 m wider each way is over this.
+    const bytes = drawn.streets.length + drawn.paths.length;
+    expect(bytes).toBeLessThan(310_000);
+    expect(streets.length + paths.length).toBeLessThan(29_000);
   });
 
   it('cuts a covered tile and a lake to the sheet, and keeps the lake’s island dry', () => {
