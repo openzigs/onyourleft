@@ -835,6 +835,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ADR 0060 D-2.2 (#1898): the same walk and forbidden
                         set over the lap race's roots, `game/lap-race/` and
                         `packages/domain/src/lap-race/`
+    src/game/draft-cannot-reach-trainer.test.tsx
+                        ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
+                        #2421): a draft changes the rider's speed and
+                        nothing else. The real `GameView`, ride controller
+                        and #44 simulator, one power trace on
+                        `rollingRoute()` at k = 1 and at `draftWith(0.6)`,
+                        read back as control point octets: every simulation
+                        write is the road's grade at the odometer and the
+                        protocol client's defaults for the rest, a
+                        workout's ERG writes are the same bytes at the same
+                        frames, and the release the same bytes. A new
+                        drafting source (#2425, #2422) keeps it green
+                        UNMODIFIED
     src/game/lap-race/ride-race.ts
                         a solo lap race inside a game ride (#1906, ADR 0060):
                         `GameView` holds one per ride, asked for by the
