@@ -31,6 +31,7 @@ import type {
   RouteProfile,
   ElevationSource,
   GradePercent,
+  Kilocalories,
   Kilograms,
   Metres,
   ReplanRecord,
@@ -83,6 +84,26 @@ type VisibilitiesAgree = [
 ];
 const visibilitiesAgree: VisibilitiesAgree = [true, true];
 void visibilitiesAgree;
+
+/**
+ * What a stored calorie estimate was worked out from (#2433). `'power'` and
+ * `'heart-rate'` are `@onyourleft/domain`'s `CaloriesBasis`; `'file'` is
+ * reserved for a figure an imported file states itself (#2435, #2436).
+ */
+export type ActivityCaloriesBasis = 'power' | 'heart-rate' | 'file';
+
+/** Every {@link ActivityCaloriesBasis}, for the decoder. */
+export const ACTIVITY_CALORIES_BASES: readonly ActivityCaloriesBasis[] = [
+  'power',
+  'heart-rate',
+  'file',
+];
+
+/** @see ActivityRecord.calories */
+export interface ActivityCalories {
+  readonly energy: Kilocalories;
+  readonly basis: ActivityCaloriesBasis;
+}
 
 /**
  * The sex whose coefficients a heart-rate calorie estimate uses — #2432. Two
@@ -330,6 +351,23 @@ export interface ActivityRecord {
    */
   readonly routeId?: RouteId;
   readonly averagePower?: Watts;
+
+  /**
+   * The ride's calorie estimate, worked out **once, when it was saved or
+   * imported** (#2433), and the basis it rests on.
+   *
+   * Stored rather than worked out on read for `averagePower`'s reason: the
+   * samples are in hand at save, and a list must not decode streams. Stored
+   * also **freezes** the rider's weight and age at the ride, so a later change
+   * in Settings does not rewrite last year's rides — the same rule
+   * `FrozenEffortAttributes` keeps for a segment board.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `AthleteRecord.thresholdPower` gives: a ride saved before #2433, and a ride
+   * with neither power nor a heart-rate estimate, has none — a dash on screen,
+   * never `0 kcal`.
+   */
+  readonly calories?: ActivityCalories;
 
   /**
    * The **threshold-independent** half of this ride's load (#77).

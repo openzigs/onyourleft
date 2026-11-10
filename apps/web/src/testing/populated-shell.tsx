@@ -31,6 +31,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilocalories,
   metres,
   metresPerSecond,
   revolutionsPerMinute,
@@ -447,6 +448,9 @@ function ride(index: number): ActivityRecord {
     movingTime: seconds(movingTimeOf(index)),
     distance: metres(123_456),
     averagePower: watts(234),
+    // #2433: a five-digit estimate on its longest basis, so the walks lay out
+    // the widest the ride page's Calories line can be.
+    calories: { energy: kilocalories(55_123), basis: 'heart-rate' },
     hasPosition: index % 2 === 0,
   });
 }

@@ -11,6 +11,9 @@
  * written to a database and read back, not about a fixture the view was handed.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { kilograms, metres, unixSeconds } from '@onyourleft/domain';
@@ -1492,5 +1495,32 @@ describe('TransferView — the erase, in two sections (#1026)', () => {
     expect([...confirm.querySelectorAll('button')].map((button) => button.textContent)).toContain(
       'Erase everything',
     );
+  });
+});
+
+describe('TransferView — an imported ride’s calorie estimate (#2433)', () => {
+  it('estimates a heart-rate ride with the rider’s current inputs, read for the batch', async () => {
+    const port = await openPort();
+    await (harness ?? never()).write(async (store) => {
+      await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 });
+      await store.setAthleteMass(ATHLETE_A, kilograms(64));
+    });
+    mounted = await mount(<TransferView port={port} />);
+
+    // `nominal-ride.gpx` carries heart rate and no power, so only the
+    // athlete's inputs can give it a figure.
+    const gpx = readFileSync(
+      join(import.meta.dirname, '../../../../packages/fit/fixtures/corpus/nominal-ride.gpx'),
+      'utf8',
+    );
+    await choose([fileOf('nominal-ride.gpx', gpx)]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    const [row] = await (harness ?? never()).read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A),
+    );
+    expect(row?.calories?.basis).toBe('heart-rate');
+    expect(row!.calories!.energy).toBeGreaterThan(0);
   });
 });

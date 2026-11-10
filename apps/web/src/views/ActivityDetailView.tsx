@@ -113,6 +113,7 @@ import {
 import { curveRows, onRideDurations } from '../detail/curve';
 import type { PickKind } from '../detail/TraceChart';
 import type { SharedTrack } from '../detail/privacy';
+import { CaloriesFact } from '../detail/CaloriesFact';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
@@ -852,6 +853,17 @@ export function ActivityDetailView({
                 {activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}
               </dd>
             </div>
+            {/* #2433: the estimate stored when the ride was saved, as the
+            result card shows it. Read off the record, so a later change of
+            weight or age in Settings does not move it. After *Position*, the
+            sixth fact, because it takes a row of its own (`CaloriesFact.tsx`
+            §`CaloriesFact`): placed after the fifth it left that one alone on
+            a row of two on a phone. */}
+            <CaloriesFact
+              calories={activity.calories}
+              hasPower={activity.averagePower !== undefined}
+              hasHeartRate={available.includes('heartRate')}
+            />
             {/* #785: the races this ride was ridden in, as each room said it —
             kept with the ride on this device, one line each, in order (#1360's
             review, N3). No row for a ride in no race. */}

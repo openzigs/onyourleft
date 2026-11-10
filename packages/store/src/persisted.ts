@@ -24,6 +24,7 @@
 
 import {
   beatsPerMinute,
+  kilocalories,
   kilograms,
   degreesBearing,
   gradePercent,
@@ -64,6 +65,8 @@ import {
   workoutId,
 } from './ids';
 import type {
+  ActivityCalories,
+  ActivityCaloriesBasis,
   ActivityRecord,
   RideFacts,
   RoomRaceFact,
@@ -90,6 +93,7 @@ import type {
 } from './records';
 import {
   CAMERA_FRAME_SOURCES,
+  ACTIVITY_CALORIES_BASES,
   FRAMING_CHECK_RECORDS,
   isBirthYear,
   parseCalorieSex,
@@ -141,6 +145,8 @@ export interface PersistedActivity {
   /** @see ActivityRecord.routeId — the link #93's ghost lookup indexes on. */
   routeId?: string;
   averagePower?: number;
+  /** @see ActivityRecord.calories — #2433, optional, so no schema version. */
+  calories?: { energy: number; basis: string };
   /** @see ActivityRecord.effortWeightedPower — the load summary #77 reads. */
   effortWeightedPower?: number;
   effortWeightedHeartRate?: number;
@@ -591,6 +597,11 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  // #2433. Named field by field, as `rideFacts` is, so a member added to the
+  // type is not written until this says so.
+  if (record.calories !== undefined) {
+    row.calories = { energy: record.calories.energy, basis: record.calories.basis };
+  }
   // The load summary (#77), each written conditionally for the same reason.
   // ⚠️ At most one basis is ever set — `records.ts` states why — and this
   // function does not enforce it: a record that carried both would be written
@@ -858,6 +869,25 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   };
 }
 
+/** @throws {StoreDecodeError} for an energy that is not one, or a basis that is not one of the three. */
+function decodedCalories(stored: unknown): ActivityCalories {
+  const { energy, basis } = (typeof stored === 'object' && stored !== null ? stored : {}) as {
+    energy?: unknown;
+    basis?: unknown;
+  };
+  if (!ACTIVITY_CALORIES_BASES.includes(basis as ActivityCaloriesBasis)) {
+    throw new StoreDecodeError('activity.calories.basis: must be power, heart-rate or file');
+  }
+  return {
+    energy: decoded(
+      'activity.calories.energy',
+      decodedNumber('activity.calories.energy', energy),
+      kilocalories,
+    ),
+    basis: basis as ActivityCaloriesBasis,
+  };
+}
+
 /** @throws {StoreDecodeError} */
 export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
   const averagePower = decodedOptionalPower('activity.averagePower', row.averagePower);
@@ -912,6 +942,10 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('activity.averagePower', averagePower, watts) }),
+    // #2433. Absent stays absent: a ride saved before it has no estimate, and a
+    // reader that invented one would be lying about the disk. Present is
+    // validated on the same terms as every other field.
+    ...(row.calories === undefined ? {} : { calories: decodedCalories(row.calories) }),
     // Absent stays absent, on `fromPersistedAthlete`'s reasoning: a row written
     // before #77 genuinely has no load summary, and a reader that invented one
     // would be lying about the disk. `apps/web` offers to compute the missing

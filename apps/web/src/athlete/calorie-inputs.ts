@@ -23,20 +23,8 @@
  * `privacy/calorie-inputs-stay-here.test.ts` holds that.
  */
 
-import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
+import type { CalorieRider, UnixSeconds } from '@onyourleft/domain';
 import type { AthleteRecord, CalorieSex } from '@onyourleft/store';
-
-/**
- * What the heart-rate estimate needs to know about the rider — the shape of
- * `@onyourleft/domain`'s `CalorieRider` (#2431), written out here because that
- * type has not landed on this branch. It is structurally the same, so the
- * estimator takes this as it is.
- */
-export interface CalorieRiderInputs {
-  readonly sex?: CalorieSex;
-  readonly ageYears?: number;
-  readonly mass?: Kilograms;
-}
 
 /** How far back a year of birth may be: 120 years before this one. */
 export const BIRTH_YEAR_SPAN_YEARS = 120;
@@ -103,7 +91,7 @@ export function calorieInputsToSave(
 export function calorieRiderFor(
   athlete: AthleteRecord | undefined,
   rideStartedAt: UnixSeconds,
-): CalorieRiderInputs {
+): CalorieRider {
   const rideYear = new Date(rideStartedAt * 1000).getUTCFullYear();
   return {
     ...(athlete?.calorieSex === undefined ? {} : { sex: athlete.calorieSex }),
