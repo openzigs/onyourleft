@@ -63,7 +63,7 @@ import type {
 } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
-import { sceneryReach } from './near-field';
+import { sceneryPlanRadius } from './near-field';
 import {
   LINE_LIMIT_METRES,
   leanAt,
@@ -597,12 +597,16 @@ const SCENERY_CLEARANCE = sideRoadClearance(onSideRoad);
  * driveways (2026-11-09); a shrub's reach is 1.54 m at its largest, so it
  * keeps the 1.5 m and a little more.
  */
-function sideRoadNaturalMargin(item: ScatterItem): number {
+export function sideRoadNaturalMargin(item: ScatterItem): number {
+  // A radius, not the box's half-width: foliage at a diagonal of the box
+  // stands up to √2 times that from the trunk (as `near-field.ts` §`intrudes`
+  // reasons). A rock does not sway.
   const reach = Math.max(
-    sceneryReach(item.kind, 'realistic').x,
-    sceneryReach(item.kind, 'stylised').x,
+    sceneryPlanRadius(item.kind, 'realistic'),
+    sceneryPlanRadius(item.kind, 'stylised'),
   );
-  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + FOLIAGE_SWAY_METRES);
+  const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
 }
 
 /**

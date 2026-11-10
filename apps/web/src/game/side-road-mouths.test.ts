@@ -20,12 +20,16 @@ import { describe, expect, it } from 'vitest';
 import { metres } from '@onyourleft/domain';
 import type { StreetFeature } from '@onyourleft/map-features';
 
-import { SIDE_ROAD_STRUCTURE_MARGIN_METRES, type SideRoad } from './cross-streets';
+import {
+  SIDE_ROAD_SCENERY_MARGIN_METRES,
+  SIDE_ROAD_STRUCTURE_MARGIN_METRES,
+  type SideRoad,
+} from './cross-streets';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryReach } from './near-field';
 import { northRoute } from './route-fixtures-testing';
-import type { ScatterItem } from './scatter';
-import { sceneFrame } from './scene';
+import { SCATTER_SCALE_HIGHEST, type ScatterItem } from './scatter';
+import { sceneFrame, sideRoadNaturalMargin } from './scene';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
@@ -129,11 +133,13 @@ function toTarmac(road: SideRoad, x: number, z: number): number {
  */
 function naturalClearance(item: ScatterItem): number | undefined {
   if (item.kind in STRUCTURE_FOOTPRINTS) return undefined;
-  const reach = Math.max(
-    sceneryReach(item.kind, 'realistic').x,
-    sceneryReach(item.kind, 'stylised').x,
-  );
-  return reach * item.scale + FOLIAGE_SWAY_METRES;
+  // The box is square in plan, so its corner is √2 times its half-width.
+  const reach =
+    Math.SQRT2 *
+    Math.max(sceneryReach(item.kind, 'realistic').x, sceneryReach(item.kind, 'stylised').x);
+  const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
+  // Never less than the old margin: a small shrub still stands that far off.
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
 }
 
 /** How far a structure's whole footprint is from a side road's tarmac, sampled every half-metre. */
@@ -204,10 +210,31 @@ describe('nothing drawn across a side road or a driveway at its mouth — #2428'
     expect([...across]).toEqual([]);
   });
 
+  it('never stands a small shrub or a stone closer than the old 1.5 m', () => {
+    const at = (kind: ScatterItem['kind'], scale: number): ScatterItem => ({
+      kind,
+      x: 0,
+      y: 0,
+      z: 0,
+      rotation: 0,
+      scale,
+      variant: 0,
+    });
+    expect(sideRoadNaturalMargin(at('shrub', 0.7))).toBe(SIDE_ROAD_SCENERY_MARGIN_METRES);
+    expect(sideRoadNaturalMargin(at('rock', 0.5))).toBe(SIDE_ROAD_SCENERY_MARGIN_METRES);
+    // A tall fir reaches past it, by its corner and not its half-width.
+    expect(sideRoadNaturalMargin(at('tree-conifer', 1.4))).toBeGreaterThan(
+      sceneryReach('tree-conifer', 'realistic').x * 1.4 * 1.4,
+    );
+  });
+
   it('leaves the scenery away from the side roads as it was', () => {
     // The same frames with no streets mapped: everything further than the
     // widest clearance from the side roads stands in both.
-    const widest = 3.65 * 1.4 + FOLIAGE_SWAY_METRES + 1;
+    const widest =
+      Math.SQRT2 * sceneryReach('tree-conifer', 'realistic').x * SCATTER_SCALE_HIGHEST +
+      FOLIAGE_SWAY_METRES +
+      1;
     let compared = 0;
     for (const { distance, frame } of RIDE.filter((_, index) => index % 3 === 0)) {
       const bare = frameAt(distance, []);
