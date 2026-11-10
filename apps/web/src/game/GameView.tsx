@@ -1293,8 +1293,10 @@ function GameScreen({
   /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
   const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
   /**
-   * #2420: the HUD's 3 s power, one per game ride, fed by the loop after the
-   * simulation took the raw reading. Read by the HUD and by nothing else.
+   * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
+   * raw reading. Read by the HUD and by nothing else. A new ride's clock starts
+   * again from nought, and a clock that goes back starts the average again
+   * (`power-average.ts`), so no watt of the last ride is in the next.
    */
   const powerAverageRef = useRef<PowerAverage>(createPowerAverage());
   const [recentTrace, setRecentTrace] = useState<
@@ -2442,8 +2444,6 @@ function GameScreen({
       // the height it will be and nothing moves when the first second lands.
       recentTraceRef.current = createRecentTrace();
       setRecentTrace({ samples: [], written: 0 });
-      // #2420: and a new 3 s average, so no watt of the last ride is in it.
-      powerAverageRef.current = createPowerAverage();
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
