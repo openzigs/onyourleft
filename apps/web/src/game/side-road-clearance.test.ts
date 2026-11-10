@@ -26,6 +26,7 @@ import {
   SIDE_ROAD_CLEARANCE_MAX_ENTRIES,
   sideRoadClearance,
   type SideRoad,
+  UNCACHED_SIDE_ROAD_CLEARANCE,
 } from './cross-streets';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { northRoute } from './route-fixtures-testing';
@@ -133,7 +134,7 @@ describe('the side roads clearance, remembered — #2439', () => {
     let kept = 0;
     let structuresRemoved = 0;
     for (const { roads, items } of RIDE) {
-      const fresh = clearOfSideRoads(items, roads);
+      const fresh = clearOfSideRoads(items, roads, UNCACHED_SIDE_ROAD_CLEARANCE);
       expect(clearOfSideRoads(items, roads, clearance)).toEqual(fresh);
       kept += fresh.length;
       removed += items.length - fresh.length;
@@ -143,7 +144,7 @@ describe('the side roads clearance, remembered — #2439', () => {
       // A board wherever an item stands, square to the road or not.
       const boards = items.map((item) => ({ x: item.x, z: item.z, rotation: item.rotation }));
       expect(boardsClearOfSideRoads(boards, roads, BILLBOARD_FOOTPRINT, clearance)).toEqual(
-        boardsClearOfSideRoads(boards, roads, BILLBOARD_FOOTPRINT),
+        boardsClearOfSideRoads(boards, roads, BILLBOARD_FOOTPRINT, UNCACHED_SIDE_ROAD_CLEARANCE),
       );
     }
     // The fixture: several side roads in every frame, and items both sides of the line.
@@ -175,7 +176,7 @@ describe('the side roads clearance, remembered — #2439', () => {
 
   it('asks nothing again of a second frame sceneFrame builds at the same place', () => {
     const spy = vi.mocked(onSideRoad);
-    // Past every frame `RIDE` built, so this one's scenery is new to it.
+    // Further on than the frames `RIDE` built, so most of this one's scenery is new to it.
     const distance = VILLAGE.centre + 500;
     spy.mockClear();
     const first = frameAt(distance);
@@ -193,7 +194,9 @@ describe('the side roads clearance, remembered — #2439', () => {
     const clearance = sideRoadClearance(test);
     const { roads, items } = RIDE[60] as (typeof RIDE)[number];
     // The side road that takes the most off.
-    const counted = roads.map((road) => items.length - clearOfSideRoads(items, [road]).length);
+    const counted = roads.map(
+      (road) => items.length - clearOfSideRoads(items, [road], UNCACHED_SIDE_ROAD_CLEARANCE).length,
+    );
     const busiest = roads[counted.indexOf(Math.max(...counted))] as SideRoad;
     const others = roads.filter((road) => road !== busiest);
     expect(Math.max(...counted)).toBeGreaterThan(0);
@@ -201,7 +204,7 @@ describe('the side roads clearance, remembered — #2439', () => {
     const all = clearOfSideRoads(items, roads, clearance);
     const fewer = clearOfSideRoads(items, others, clearance);
     expect(fewer).not.toEqual(all);
-    expect(fewer).toEqual(clearOfSideRoads(items, others));
+    expect(fewer).toEqual(clearOfSideRoads(items, others, UNCACHED_SIDE_ROAD_CLEARANCE));
     expect(fewer.length).toBeGreaterThan(all.length);
 
     // Back in view, the road it let go of is asked about again, and only that one.
@@ -252,12 +255,45 @@ describe('the side roads clearance, remembered — #2439', () => {
     );
     const first = clearOfSideRoads(shrubs, [road], clearance);
     expect(test.mock.calls.length).toBe(shrubs.length);
-    expect(first).toEqual(clearOfSideRoads(shrubs, [road]));
+    expect(first).toEqual(clearOfSideRoads(shrubs, [road], UNCACHED_SIDE_ROAD_CLEARANCE));
     // The first ones were let go to hold the last, so they are asked about again.
     test.mockClear();
     expect(clearOfSideRoads(shrubs.slice(0, 100), [road], clearance)).toEqual(
-      clearOfSideRoads(shrubs.slice(0, 100), [road]),
+      clearOfSideRoads(shrubs.slice(0, 100), [road], UNCACHED_SIDE_ROAD_CLEARANCE),
     );
     expect(test.mock.calls.length).toBe(100);
+  });
+  it('answers each heading apart, at the same place with the same footprint', () => {
+    const clearance = sideRoadClearance(realOnSideRoad);
+    const road = (RIDE[60] as (typeof RIDE)[number]).roads[0] as SideRoad;
+    const [ax, az, bx, bz] = road.segments as unknown as [number, number, number, number];
+    const length = Math.hypot(bx - ax, bz - az);
+    // A long, narrow footprint 2 m off the first segment's edge: it reaches the road
+    // when turned towards it and not when turned along it.
+    const off = (road.halfWidths[0] as number) + 2;
+    const x = (ax + bx) / 2 - ((bz - az) / length) * off;
+    const z = (az + bz) / 2 + ((bx - ax) / length) * off;
+    const footprint = { x: 0.5, back: 5, front: 5 };
+    const headings = Array.from({ length: 16 }, (_, index) => (index * Math.PI) / 8);
+    const fresh = headings.map((rotation) =>
+      realOnSideRoad([road], { x, z, rotation }, footprint, 0.5),
+    );
+    // The fixture: the heading changes the answer.
+    expect(fresh).toContain(true);
+    expect(fresh).toContain(false);
+    const cached = headings.map((rotation) =>
+      clearance.on([road], { x, z, rotation }, footprint, 0.5),
+    );
+    expect(cached).toEqual(fresh);
+  });
+
+  it('cannot be called without a clearance, so scene.ts cannot fall back to the uncached path unseen', () => {
+    // Checked by `tsc`: were the parameter optional again, the directive would be unused and fail.
+    // @ts-expect-error a clearance is required
+    const noClearance = () => clearOfSideRoads([], []);
+    // @ts-expect-error a clearance is required
+    const noBoardClearance = () => boardsClearOfSideRoads([], [], BILLBOARD_FOOTPRINT);
+    expect(noClearance()).toEqual([]);
+    expect(noBoardClearance()).toEqual([]);
   });
 });

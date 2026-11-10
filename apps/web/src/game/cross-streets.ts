@@ -1137,15 +1137,20 @@ const POINT: Footprint = { x: 0, back: 0, front: 0 };
 /**
  * How {@link clearOfSideRoads} and {@link boardsClearOfSideRoads} ask
  * whether something stands on a side road: {@link onSideRoad}'s question,
- * answered either afresh every time ({@link UNCACHED}) or by a
+ * answered either afresh every time ({@link UNCACHED_SIDE_ROAD_CLEARANCE}) or by a
  * {@link sideRoadClearance}, which remembers each answer.
  */
 export interface SideRoadClearance {
   readonly on: typeof onSideRoad;
 }
 
-/** Every answer worked out afresh: what both filters did before #2439. */
-const UNCACHED: SideRoadClearance = { on: onSideRoad };
+/**
+ * Every answer worked out afresh: what both filters did before #2439.
+ *
+ * @test-facing the comparison `side-road-clearance.test.ts` holds the cache
+ * against: the product always passes `scene.ts`'s cached clearance (#2439).
+ */
+export const UNCACHED_SIDE_ROAD_CLEARANCE: SideRoadClearance = { on: onSideRoad };
 
 /**
  * The most answers one {@link sideRoadClearance} holds: **16 384** — #2439.
@@ -1261,9 +1266,7 @@ export function sideRoadClearance(test: typeof onSideRoad): SideRoadClearance {
         let answer = byKey.get(key);
         if (answer === undefined) {
           if (entries >= SIDE_ROAD_CLEARANCE_MAX_ENTRIES) {
-            for (const each of answers.values()) {
-              for (const map of each.byFootprint.values()) map.clear();
-            }
+            for (const each of answers.values()) each.byFootprint.clear();
             entries = 0;
           }
           answer = test([road], at, footprint, margin);
@@ -1285,7 +1288,8 @@ const POINT_MARGIN = (): number => SIDE_ROAD_SCENERY_MARGIN_METRES;
  * its whole footprint (`settlements.ts` §`STRUCTURE_FOOTPRINTS`), anything
  * else by where it stands, `naturalMargin(item)` clear —
  * {@link SIDE_ROAD_SCENERY_MARGIN_METRES} unless the caller says more.
- * The same array where there is no side road. `clearance` is how each is
+ * The same array where there is no side road. `clearance` is required, so that a caller cannot fall back to the
+ * uncached path unseen; it is how each is
  * asked — #2439: `scene.ts` hands every frame the same
  * {@link sideRoadClearance}, and the same items are kept either way.
  *
@@ -1299,7 +1303,7 @@ const POINT_MARGIN = (): number => SIDE_ROAD_SCENERY_MARGIN_METRES;
 export function clearOfSideRoads(
   items: readonly ScatterItem[],
   roads: readonly SideRoad[],
-  clearance: SideRoadClearance = UNCACHED,
+  clearance: SideRoadClearance,
   naturalMargin: (item: ScatterItem) => number = POINT_MARGIN,
 ): readonly ScatterItem[] {
   if (roads.length === 0) return items;
@@ -1318,7 +1322,7 @@ export function boardsClearOfSideRoads<
   boards: readonly Board[],
   roads: readonly SideRoad[],
   footprint: Footprint,
-  clearance: SideRoadClearance = UNCACHED,
+  clearance: SideRoadClearance,
 ): readonly Board[] {
   if (roads.length === 0) return boards;
   return boards.filter(
