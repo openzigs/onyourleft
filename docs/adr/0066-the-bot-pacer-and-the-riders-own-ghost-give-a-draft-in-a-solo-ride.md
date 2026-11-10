@@ -138,7 +138,10 @@ draft in a solo ride.
    **odometer** distances only: the rider's `state.ride.distance`, the pacer's
    `state.bot.state.distance` on the same fixed step, and the ghost's `ghostDistanceAt` at
    `ghostClock(state)`. **Never** `racing-line.ts`, `scene.ts` §`lateralOf`, or the drawn place from
-   `bend-easing.ts` (ADR 0038 D-3.4). The table is unchanged, so is `physicsVersion`.
+   `bend-easing.ts` (ADR 0038 D-3.4). The table is unchanged, so is `physicsVersion`. **On a solo
+   ride the simulation's `k` is the only `k`**: there is no room, so nothing predicts it and nothing
+   corrects it. ADR 0038 D-4 (the room computes `k` from its own positions and the client predicts
+   it) is about rooms and does not reach a solo ride; it requires no room-side check of a solo draft.
 3. **The leading-rider effect applies** (ADR 0038 D-3.2, 0.976-0.999): a rider with the pacer or the
    ghost close behind gets `k_ahead_of` too. It is the same function, and leaving it out would be a
    second model.
@@ -157,9 +160,13 @@ draft in a solo ride.
      finished, or that stopped short of the route's end, would stand on the road as a stationary
      rider: a shelter for the 30 m behind it (`DRAFT_REACH_METRES`, `draft.ts:53`) and a
      leading-rider effect for the 30 m past it. Leaving the field ends both.
-   - **The pacer gives no draft once its ride has ended**, by the same rule, if its ride can end.
-     Whether the pacer stops at the route's end was not checked for this ADR; #2425 confirms it, and
-     applies the rule wherever the pacer stops.
+   - **The pacer gives no draft once it is past the end of a route that is not a loop**, from the
+     step at which `state.bot.state.distance >= profile.totalDistance`. The pacer itself never
+     stops: `advanceBot` integrates `bot.state.distance` with no limit (`simulation.ts:745-749`), and
+     the only clamp is the grade lookup's, `distanceOnRoute` (`packages/domain/src/route/profile.ts:554`),
+     so past the end of a point-to-point route it rides on at the last grade. A rider who finishes
+     after it would otherwise be sheltered by a pacer on road that is not there. On a loop there is
+     no end, and the pacer stays in the field for the whole ride.
    - A source that has left the field is not in the `fieldDraftFactors` call at all, so the rider's
      `k` is what it would be with that source absent: `k = 1` when nothing else is near.
 
@@ -230,24 +237,33 @@ A rider who drafts their own best ghost beats it partly on its shelter. **The ow
    rooms' spoken cue is unchanged. The reading is a share of aerodynamic drag, `(1 − k) × 100 %`,
    never watts (ADR 0038 D-5, kept).
 6. **What "drafted" means** (**the author's recommendation**, added 2026-11-10 on review of this
-   ADR's pull request; **a default the owner can change**). "Any step at `k < 1`" would mark nearly every ride with the switch on: a solo
+   ADR's pull request). "Any step at `k < 1`" would mark nearly every ride with the switch on: a solo
    ride starts level with the pacer or the ghost, and every start, and every pass, crosses the 30 m
-   window in which `k` is below 1, if only by the leading-rider effect's 0.1 %. A mark that is
-   always present tells the rider nothing. So:
-   - **In the draft** is the same state the in-draft mark of #2426 shows, so what the rider saw and
-     what is recorded never disagree: it begins when the share of drag saved from **behind** a pacer
-     or ghost reaches `DRAFT_IN_PERCENT` (10 %) and ends when it falls below `DRAFT_OUT_PERCENT`
-     (5 %), the hysteresis of `room-ride.ts:407-414`. **Only the shelter behind counts**: the
-     leading-rider effect (D-1.3) alone never puts the rider in the draft, because at 0.1-2.4 % it is
-     below the entry threshold by construction.
-   - **A ride or an effort is drafted** when the rider was in the draft for **at least 10 % of its
-     distance**. Distance, not time, because a segment is a stretch of road and a drafted rider covers
-     it in less time. For "Your best" (D-5.1) the span is the attempt the outcome settles; for a
-     segment (D-5.2) it is the effort.
-   - **The 10 % share is unsourced**, a judgement that a stretch of shelter long enough to matter is
-     a tenth of the road; it is one named constant in #2425, and the owner may change it on this pull
-     request or later without a new ADR. The two thresholds of the in-draft state stay what they are
-     in `room-ride.ts`, also unsourced, and are not changed by this ADR.
+   window in which `k` is below 1, if only by the leading-rider effect, which is under 0.1 % past
+   5 m. A mark that is always present tells the rider nothing. So:
+   - **In the draft is `draftEvent`'s state** (`room-ride.ts:434-446`), fed the rider's **whole**
+     solo `k` as the Draft field's reading, `(1 − k) × 100 %`: it begins when that reading reaches
+     `DRAFT_IN_PERCENT` (10 %) and ends when it falls below `DRAFT_OUT_PERCENT` (5 %). It is the same
+     transition, on the same `k`, that the in-draft mark of #2426 follows, so what the rider saw and
+     what is recorded can never disagree. The `k` is the one `fieldDraftFactors` returns (D-1.2);
+     nothing is computed beside it.
+   - **An observation, not a rule**: the leading-rider effect (D-1.3) is at most 2.4 % (`LEADING`,
+     0.976 at 0.05 m, `draft.ts:75`), so on its own it never reaches the 10 % entry and never marks a
+     ride by itself.
+   - **The state advances once per fixed simulation step**, from that step's `k`, not once per
+     rendered frame as the room's spoken cue does today (`GameView.tsx:3209-3210`). A catch-up after a
+     stall or a backgrounded tab then credits each step to the state it was ridden in, two runs of the
+     same ride record the same share, and a ride with the screen off is still recorded. The mark
+     reads the same state, so it lags the record by at most one frame.
+   - **The rule: a ride or an effort is drafted when the rider was in the draft for at least a
+     minimum share of its distance.** Distance, not time, because a segment is a stretch of road and
+     a drafted rider covers it in less time. For "Your best" (D-5.1) the span is the attempt the
+     outcome settles; for a segment (D-5.2) it is the effort.
+   - **The share's value is not decided here.** It is a single named constant that #2425 defines,
+     with **10 %** as the recommended starting value for the owner to approve on #2425; it is
+     unsourced. A later change to it changes that constant and no ADR. The two thresholds of the
+     in-draft state stay what they are in `room-ride.ts`, also unsourced, and are not changed by this
+     ADR.
 
 ### D-6 — The switch (decision 6)
 
@@ -262,7 +278,11 @@ rider is at k = 1, as today."*
 - **It is a different switch from `draft-preference.ts`.** That one decides only what a rider is
   **shown** about a room's draft, and the room's maker decides the room's physics. This one decides
   the **physics** of a solo ride. **The author's recommendation**: with it off there is no solo draft
-  to show, so the solo ride shows no draft field.
+  to show, so the solo ride shows no draft field. **With it on and the `draft-preference.ts` display
+  preference off**, the solo Draft field and #2426's mark inside it are hidden, as they are in a
+  room; the physics is unchanged, the in-draft state is still advanced (D-5.6), and a drafted ride is
+  still marked *"with its draft"*, because the mark records what the rider was ridden at, not what
+  they were shown.
 - **It has no effect in a room or a lap race**, where D-1.5 and D-2 already decide.
 
 ### D-7 — The trainer never feels a draft (decision 7)
@@ -313,8 +333,9 @@ the owner confirms or changes it, it is Proposed.
 | R-8 | The FIT export carries the fact | **Open**, not in this epic | D-5.4 |
 | R-9 | A solo draft has no spoken cue (the author's reading of ruling 3) | **Yes** | D-5.5 |
 | R-10 | The switch is on by default, and with it off no solo draft field is shown | **Yes** | D-6 |
-| R-11 | A ghost past the end of its attempt, and a pacer whose ride has ended, give no draft | **Yes** | D-1.6 |
-| R-12 | "Drafted" is in the draft (the 10 % / 5 % state, shelter from behind only) for at least 10 % of the distance, a number the owner can change | **Yes, 10 %** | D-5.6 |
+| R-11 | A ghost past the end of its attempt, and a pacer past the end of a route that is not a loop, give no draft | **Yes** | D-1.6 |
+| R-12 | "Drafted" is `draftEvent`'s 10 % / 5 % state on the whole solo `k`, advanced per simulation step, for at least a minimum share of the distance; the share is one named constant #2425 defines (10 % recommended, the owner approves it on #2425) | **Yes** | D-5.6 |
+| R-13 | With the physics switch on and the display preference off, the Draft field and the mark are hidden and the ride is still marked | **Yes** | D-6 |
 
 ---
 
@@ -344,7 +365,7 @@ the owner confirms or changes it, it is Proposed.
 
 | Issue | Constraint |
 |---|---|
-| #2425 | D-1's inputs (odometer distances only, `fieldDraftFactors` unchanged); the pacer and ghost never take a draft; a finished ghost or pacer leaves the field (D-1.6); D-6's switch with an off position byte-identical to today; D-8's test change and no other change to `drafting.test.ts`'s existing assertions; D-5's marks, by D-5.6's definition with the share as one named constant, read back on the rendered text; D-7's gate green unmodified; no spoken solo cue (D-5.5) |
+| #2425 | D-1's inputs (odometer distances only, `fieldDraftFactors` unchanged); the pacer and ghost never take a draft; a finished ghost, or a pacer past the end of a route that is not a loop, leaves the field (D-1.6); D-6's switch with an off position byte-identical to today; D-8's test change and no other change to `drafting.test.ts`'s existing assertions; D-5's marks, by D-5.6's definition (`draftEvent` on the whole `k`, per simulation step) with the share as one named constant whose value the owner approves on #2425, read back on the rendered text; D-7's gate green unmodified; no spoken solo cue (D-5.5) |
 | #2426 | A solo source feeds the same in-draft state as a room's; not spoken (ruling 3) |
 | #2423 | Its test is the trainer gate D-7 names; a new drafting source must keep it green unmodified |
 | #2422 | The bend easing's drawn place is never a draft input (D-1.2) |
