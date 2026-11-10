@@ -669,7 +669,7 @@ export function SettingsView({
         />
 
         {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
-        <CalorieInputsPanel port={calorieInputs} />
+        <CalorieInputsPanel port={calorieInputs} riderMass={riderMass} />
 
         {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
         <KitPanel

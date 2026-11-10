@@ -8,7 +8,7 @@
  * the panel says what it cannot keep.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { kilograms, unixSeconds, type Kilograms } from '@onyourleft/domain';
 import type { AthleteRecord } from '@onyourleft/store';
 import {
   ATHLETE_A,
@@ -29,6 +29,7 @@ import {
   CALORIE_INPUTS_LEAD,
   CALORIE_INPUTS_NO_ATHLETE,
   CALORIE_INPUTS_NO_STORE,
+  CALORIE_INPUTS_NO_WEIGHT,
   CALORIE_INPUTS_NOT_READ,
   CALORIE_INPUTS_SAVED,
   CALORIE_INPUTS_SET,
@@ -36,7 +37,10 @@ import {
   calorieInputsSaveFailure,
 } from './CalorieInputsPanel';
 
-const THIS_YEAR = new Date().getFullYear();
+const THIS_YEAR = new Date().getUTCFullYear();
+
+/** A weight the rider entered, for the screens where one is. */
+const ENTERED = kilograms(64.5);
 
 let harness: StoreHarness;
 let writer: PersistentStore;
@@ -55,8 +59,15 @@ afterEach(async () => {
   await harness.destroy();
 });
 
-/** The Settings screen, in the `main` the shell renders it in, with this panel's port. */
-async function openSettings(port: CalorieInputsPort | undefined): Promise<void> {
+/**
+ * The Settings screen, in the `main` the shell renders it in, with this panel's
+ * port and an entered weight — `null` for a rider who has entered none, since
+ * `undefined` takes the default.
+ */
+async function openSettings(
+  port: CalorieInputsPort | undefined,
+  { riderMass = ENTERED }: { readonly riderMass?: Kilograms | null } = {},
+): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Settings</h1>
@@ -64,6 +75,7 @@ async function openSettings(port: CalorieInputsPort | undefined): Promise<void> 
         units="metric"
         onUnitsChange={() => undefined}
         onRiderMassChange={() => undefined}
+        riderMass={riderMass ?? undefined}
         calorieInputs={port}
       />
     </main>,
@@ -143,6 +155,35 @@ describe('the calorie-inputs panel on Settings (#2432)', () => {
     await reload();
     expect(controls().sex.value).toBe('');
     expect(controls().year.value).toBe('');
+  });
+
+  it('with sex and year but no weight entered, says a weight is needed and where, not that a ride gets a figure', async () => {
+    await writer.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 });
+    await openSettings({ store: writer, athleteId: ATHLETE_A }, { riderMass: null });
+    expect(said()).toContain(CALORIE_INPUTS_NO_WEIGHT);
+    expect(said()).toContain('Your weight');
+    expect(said()).not.toContain(CALORIE_INPUTS_SET);
+    expect(said()).not.toContain(CALORIE_INPUTS_UNSET);
+  });
+
+  it('shows what the store answered after a save, not what was typed', async () => {
+    const row: AthleteRecord = { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1) };
+    await openSettings({
+      athleteId: ATHLETE_A,
+      store: {
+        getAthlete: async () => Promise.resolve(row),
+        // Keeps the sex and drops the year: the screen must show the year as unset.
+        setAthleteCalorieInputs: async (_, inputs) =>
+          Promise.resolve({
+            ...row,
+            ...(inputs.calorieSex === undefined ? {} : { calorieSex: inputs.calorieSex }),
+          }),
+      },
+    });
+    await enter('female', '1985');
+    expect(controls().sex.value).toBe('female');
+    expect(controls().year.value).toBe('');
+    expect(said()).toContain(CALORIE_INPUTS_UNSET);
   });
 
   it.each([

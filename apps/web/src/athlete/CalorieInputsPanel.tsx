@@ -16,11 +16,18 @@
  * what happens without them. It is kept on the screen rather than behind the
  * section's ⓘ (#666), because it is about what leaves the device. The line
  * under the form says whether a heart-rate ride gets a figure today, from the
- * stored row: with either unset, {@link CALORIE_INPUTS_UNSET}.
+ * stored sex and year and the weight the rider entered: all three,
+ * {@link CALORIE_INPUTS_SET}; both of these but no weight,
+ * {@link CALORIE_INPUTS_NO_WEIGHT}; otherwise {@link CALORIE_INPUTS_UNSET}.
+ *
+ * The weight is `SettingsView`'s `riderMass` rather than this panel's read of
+ * the row, because the weight panel beside it can change it after this one
+ * has read, and `riderMass` is what that save updates.
  */
 
 import { useEffect, useId, useState, type JSX } from 'react';
 
+import type { Kilograms } from '@onyourleft/domain';
 import type { CalorieSex } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
@@ -38,13 +45,21 @@ export const CALORIE_INPUTS_LEAD =
   'device, are never sent to an instance or a model, and go only into your own account export. ' +
   'Leave them unset and such a ride shows no calorie figure.';
 
-/** Said under the form when the stored row has both. */
+/** Said under the form when the stored row has both and a weight is entered. */
 export const CALORIE_INPUTS_SET =
   'A ride with heart rate and no power gets a calorie estimate from these and your weight.';
 
+/**
+ * Said under the form when the stored row has both but no weight is entered:
+ * the estimate uses the entered weight and never the assumed one (#2430's open
+ * question 3), so the rider is told what is missing and where to enter it.
+ */
+export const CALORIE_INPUTS_NO_WEIGHT =
+  'Still no calorie figure on a ride with heart rate and no power: enter a weight under Your weight, above.';
+
 /** Said under the form when the stored row lacks either. */
 export const CALORIE_INPUTS_UNSET =
-  'With either unset, a ride with heart rate and no power shows no calorie figure.';
+  'A ride with heart rate and no power shows no calorie figure until these and your weight are all set.';
 
 export const CALORIE_INPUTS_SAVED = 'Saved. Rides you save from now on use these.';
 
@@ -83,10 +98,16 @@ interface Stored {
 
 export function CalorieInputsPanel({
   port,
-  currentYear = new Date().getFullYear(),
+  riderMass,
+  currentYear = new Date().getUTCFullYear(),
 }: {
   readonly port?: CalorieInputsPort | undefined;
-  /** The year it is now, which bounds the year of birth. A test hands one in. */
+  /** The weight the rider entered, `undefined` when they have not: never the assumed one. */
+  readonly riderMass?: Kilograms | undefined;
+  /**
+   * The year it is now, which bounds the year of birth. In UTC, the clock
+   * `calorieRiderFor` takes the ride's year from. A test hands one in.
+   */
   readonly currentYear?: number;
 }): JSX.Element {
   const [stored, setStored] = useState<Stored | undefined>(undefined);
@@ -241,9 +262,11 @@ export function CalorieInputsPanel({
 
       {stored === undefined ? null : (
         <p className="oyl-muted">
-          {stored.calorieSex !== undefined && stored.birthYear !== undefined
-            ? CALORIE_INPUTS_SET
-            : CALORIE_INPUTS_UNSET}
+          {stored.calorieSex === undefined || stored.birthYear === undefined
+            ? CALORIE_INPUTS_UNSET
+            : riderMass === undefined
+              ? CALORIE_INPUTS_NO_WEIGHT
+              : CALORIE_INPUTS_SET}
         </p>
       )}
     </section>

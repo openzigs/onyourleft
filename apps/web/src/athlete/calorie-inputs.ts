@@ -99,15 +99,21 @@ export function calorieInputsToSave(
  * is the resolution the rider gave, so a ride in the weeks either side of a
  * birthday or of New Year may be a year out, which moves Keytel's figure by
  * under 1 % (#2432's design note).
+ *
+ * An age below one year — a ride dated before the rider was born, as an
+ * imported file from a head unit with no clock set is (1970) — is not passed
+ * through: it is an unknown age, so the ride gets no figure rather than one
+ * made from a negative age.
  */
 export function calorieRiderFor(
   athlete: AthleteRecord | undefined,
   rideStartedAt: UnixSeconds,
 ): CalorieRiderInputs {
   const rideYear = new Date(rideStartedAt * 1000).getUTCFullYear();
+  const ageYears = athlete?.birthYear === undefined ? undefined : rideYear - athlete.birthYear;
   return {
     ...(athlete?.calorieSex === undefined ? {} : { sex: athlete.calorieSex }),
-    ...(athlete?.birthYear === undefined ? {} : { ageYears: rideYear - athlete.birthYear }),
+    ...(ageYears === undefined || ageYears < 1 ? {} : { ageYears }),
     ...(athlete?.mass === undefined ? {} : { mass: athlete.mass }),
   };
 }

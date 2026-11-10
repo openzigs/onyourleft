@@ -646,9 +646,9 @@ function maskedWordsPort(populated: boolean): MaskedWordsPort {
 }
 
 /**
- * The rider's sex and year of birth (#2432) — set in the populated walk, so
- * its line under the form says a heart-rate ride gets a figure, and unset in
- * the empty one, so it says one does not.
+ * The rider's sex and year of birth (#2432) — set in the populated walk, which
+ * enters no weight, so its line under the form says the weight is still
+ * needed, and unset in the empty one, so it says no figure is shown.
  */
 function calorieInputsPort(populated: boolean): CalorieInputsPort {
   const inputs = populated ? { calorieSex: 'female' as const, birthYear: 1985 } : {};
