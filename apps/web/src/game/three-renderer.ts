@@ -20569,7 +20569,9 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * allocates nothing.
  *
  * **The frame's procedural structures and the mapped buildings are ranked
- * together, by distance from the rider, under the one cap** — #1586, ADR 0054
+ * together, under the one cap** — the buildings by the road ahead since #2429,
+ * the structures' rivals likewise, though the structure belts still choose
+ * WHICH structures in frame order, nearest the rider — #1586, ADR 0054
  * D-5.6's "the nearest come first, within the cap" (the owner's lane
  * direction). Until #1586 every procedural structure was taken first, so a
  * town's edge with 36 field boundaries ahead drew none of its buildings.
@@ -20983,7 +20985,7 @@ class RealisticDrawing {
    *
    * On a frame whose chunk changed (or whose rung did) the belt refills inside
    * the rung's structure term, the frame's procedural structures and the
-   * mapped buildings ranked together by distance from the rider (#1586,
+   * mapped buildings ranked together by the road ahead (#1586, #2429,
    * {@link refillMappedBuildings}) — every structure item and billboard in the
    * frame counted at `REALISTIC_TRIANGLES.structure`, which is what the
    * structure term prices each at. Until the next refill the procedural structures keep to

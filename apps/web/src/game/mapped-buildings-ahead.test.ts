@@ -24,11 +24,17 @@ import { metres } from '@onyourleft/domain';
 import { footprintPlans, FOOTPRINT_MAX_VERTICES, mappedTown } from './footprint-buildings';
 import { mixedTownFixture, rowTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
-import { mappedBuildingsOf, mappedChunk } from './mapped-buildings';
+import {
+  mappedBuildingsOf,
+  mappedChunk,
+  MappedSelection,
+  selectMappedBuildings,
+} from './mapped-buildings';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_NEAR_METRES,
   MAPPED_CHUNK_METRES,
   REALISTIC_STRUCTURE_ITEMS,
 } from './realistic-budget';
@@ -90,9 +96,10 @@ function ride(fixture: ReturnType<typeof rowTownFixture>, from: number, to: numb
   let mostBuildings = 0;
   let mostCalls = 0;
   let owed = 0;
-  // As `GameView` does since #2145: a whole frame is built only where the
-  // rider's chunk changes, and every other frame refills from that frame's
-  // view under its own chunk, which returns at once.
+  // A whole frame is built only where the rider's chunk changes, and every
+  // other frame refills from that frame's view under its own chunk, which
+  // returns at once. `GameView` builds a frame every animation frame, but the
+  // belt reads the view only at a refill, so the belt draws the same plans.
   let built: ReturnType<typeof sceneFrame> | undefined;
   let builtChunk: number | undefined;
   let drawn = new Set<number>();
@@ -214,5 +221,48 @@ describe('the mapped buildings drawn ahead of the rider — #2429', () => {
     belt.invalidate();
     expect(refillMappedBuildings(belt, view, [hedge], 0, 1)).toBe(1);
     expect(belt.stats.buildings).toBe(0);
+  });
+
+  it('still measures the near and far level from the rider, though it ranks by the road ahead', () => {
+    // A house the road passes, with the rider 200 m off (past the near
+    // distance, inside the reach). Ranked by the road it is 0 m away, well
+    // inside the near distance; measured from the rider it is far, and a far
+    // building is drawn as its far level.
+    const { profile, origin, corridor } = rowTownFixture();
+    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    const buildings = mappedBuildingsOf(plans);
+    const [plan] = plans;
+    if (plan === undefined) throw new Error('no plans on the fixture');
+    const { x, z } = plan.centroid;
+    const apart = MAPPED_BUILDING_NEAR_METRES + 50;
+    const ahead = new Float32Array([x - 1, z, x + 1, z]);
+    const chosen = new MappedSelection();
+    selectMappedBuildings(
+      buildings,
+      x + apart,
+      z,
+      1e9,
+      chosen,
+      undefined,
+      undefined,
+      undefined,
+      ahead,
+    );
+    const at = [...chosen.plans.subarray(0, chosen.count)].indexOf(0);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(chosen.far[at]).toBe(1);
+    // The control: the rider beside it, the same house is drawn whole.
+    selectMappedBuildings(
+      buildings,
+      x + 10,
+      z,
+      1e9,
+      chosen,
+      undefined,
+      undefined,
+      undefined,
+      ahead,
+    );
+    expect(chosen.far[[...chosen.plans.subarray(0, chosen.count)].indexOf(0)]).toBe(0);
   });
 });
