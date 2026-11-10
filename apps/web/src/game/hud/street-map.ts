@@ -134,8 +134,9 @@ export const STREET_MAP_MARGIN_METRES = 250;
  * ⚠️ **On a route running east–west the reach is paid in full** (#2397). Along
  * a street grid running the sheet's long way, a dense town's sheet is 2.7
  * times the path data of the same town crossed north–south: 295 KB of `d`
- * against 111 KB (`street-map.test.ts` bounds both), built and rasterised
- * once per 250 m. Whether the tablet holds its frames on that new sheet is
+ * against 111 KB (measured; `street-map.test.ts` bounds the east figure, under
+ * 310 KB at 20 km, and the north route only at 5 km, under 120 KB), built and
+ * rasterised once per 250 m. Whether the tablet holds its frames on that new sheet is
  * #733's device check, not a number a runner can give.
  *
  * ⚠️ The region is this wide on every box, a tablet's too, rather than as
