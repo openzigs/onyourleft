@@ -2740,3 +2740,66 @@ describe('a pull does not undo a change made here while it waited on the instanc
     }, 60_000);
   });
 });
+
+describe('the calorie inputs never leave the device through a sync (#2432)', () => {
+  /** What a ride's signed record may claim — `sync.ts` §`claimsOf`, and nothing about the rider. */
+  const CLAIM_KEYS = [
+    'activityId',
+    'averagePower',
+    'distance',
+    'elapsedTime',
+    'hasPosition',
+    'movingTime',
+    'name',
+    'startedAt',
+    'startedAtTimeZone',
+  ];
+
+  it('sends neither the sex nor the year of birth in any body, and claimsOf names only the ride', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const on = device(world.url);
+    await importRides(on, RIDES);
+    await on.harness.write((store) =>
+      store.setAthleteCalorieInputs(LOCAL_ATHLETE, { calorieSex: 'female', birthYear: 1985 }),
+    );
+
+    // Every body this device sends the instance, on every transport it has.
+    const sent: { path: string; body: unknown }[] = [];
+    const { auth, sealed, sync } = on.transport;
+    on.transport.auth = {
+      post: async (path, body) => {
+        sent.push({ path, body });
+        return auth.post(path, body);
+      },
+    };
+    on.transport.sealed = {
+      post: async (path, body) => {
+        sent.push({ path, body });
+        return sealed.post(path, body);
+      },
+    };
+    on.transport.sync = {
+      json: async (method, path, body) => {
+        sent.push({ path, body });
+        return sync.json(method, path, body);
+      },
+      bytes: async (path) => sync.bytes(path),
+    };
+
+    const signedIn = await signInToInstance(signInDependencies(instanceTesting.TEST_ORIGIN, on));
+    on.transport.setToken(signedIn.sessionToken);
+    const report = await on.harness.write((store) => syncWithInstance(syncDependencies(on, store)));
+    expect(report).toMatchObject({ pushed: RIDES.length, failures: [] });
+
+    const records = sent.filter((entry) => entry.path === '/v1/sync/records');
+    expect(records).toHaveLength(RIDES.length);
+    for (const { body } of records) {
+      const claims = (body as { record: { claims: Record<string, unknown> } }).record.claims;
+      for (const key of Object.keys(claims)) expect(CLAIM_KEYS).toContain(key);
+    }
+    const everything = JSON.stringify(sent);
+    expect(everything).not.toContain('calorieSex');
+    expect(everything).not.toContain('birthYear');
+    expect(everything).not.toContain('"female"');
+  }, 60_000);
+});

@@ -91,6 +91,8 @@ import type {
 import {
   CAMERA_FRAME_SOURCES,
   FRAMING_CHECK_RECORDS,
+  isBirthYear,
+  parseCalorieSex,
   RIDE_WRITE_UP_SOURCES,
   RIDERLESS_SYNC_BASE_KINDS,
   SYNC_BASE_KINDS,
@@ -112,6 +114,10 @@ export interface PersistedAthlete {
   thresholdPower?: number;
   thresholdHeartRate?: number;
   mass?: number;
+  /** @see AthleteRecord.calorieSex — #2432, stored as its bare word. */
+  calorieSex?: string;
+  /** @see AthleteRecord.birthYear — #2432. */
+  birthYear?: number;
   /** @see AthleteRecord.units — a display preference, stored as its bare word. */
   units?: string;
   /** @see AthleteRecord.kitColour — a palette key, stored as its bare word. */
@@ -458,6 +464,12 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.mass !== undefined) {
     row.mass = record.mass;
   }
+  if (record.calorieSex !== undefined) {
+    row.calorieSex = record.calorieSex;
+  }
+  if (record.birthYear !== undefined) {
+    row.birthYear = record.birthYear;
+  }
   if (record.units !== undefined) {
     row.units = record.units;
   }
@@ -511,6 +523,17 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
   // effort was. This is only ever the source of that copy.
   if (row.mass !== undefined) {
     record.mass = decoded('athlete.mass', decodedNumber('athlete.mass', row.mass), kilograms);
+  }
+  // #2432. Absent stays absent for the reason above. Present but unrecognised
+  // reads as unset rather than a `StoreDecodeError`, for `units`' reason below:
+  // these decide only whether a heart-rate ride shows a calorie figure, and
+  // unset shows none — `records.ts` §`parseCalorieSex`.
+  const calorieSex = parseCalorieSex(row.calorieSex);
+  if (calorieSex !== undefined) {
+    record.calorieSex = calorieSex;
+  }
+  if (isBirthYear(row.birthYear)) {
+    record.birthYear = row.birthYear;
   }
   // #238. Absent stays absent for the reason above. Present but unrecognised
   // becomes the default rather than a `StoreDecodeError`, which is the one
