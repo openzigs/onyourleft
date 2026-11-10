@@ -333,13 +333,14 @@ async function rideAt(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
     if (next === undefined)
       throw new Error(`the ride stopped asking for frames at ${String(frame)}`);
     nowMs += FRAME_MS;
-    // The bench keeps whole seconds: it is moved on, and a workout ticked,
-    // each time the frame clock passes one — at the same frames in every run.
-    if (Math.floor(nowMs / 1000) > Math.floor((nowMs - FRAME_MS) / 1000)) {
-      bench.advance(seconds(1));
-      if (mode === 'erg') await own.tick(bench.now);
-    }
     await act(async () => {
+      // The bench keeps whole seconds: it is moved on, and a workout ticked,
+      // each time the frame clock passes one — at the same frames in every
+      // run. Inside `act`, because what the machine answers reaches the screen.
+      if (Math.floor(nowMs / 1000) > Math.floor((nowMs - FRAME_MS) / 1000)) {
+        bench.advance(seconds(1));
+        if (mode === 'erg') await own.tick(bench.now);
+      }
       next(nowMs);
       await Promise.resolve();
       await Promise.resolve();
@@ -391,11 +392,15 @@ const simulationRides = (): Promise<{ readonly alone: Run; readonly drafted: Run
   (simulationPair ??= ridePair('simulation'));
 
 /**
- * A case that rides two of the runs above (the second simulation case reads
- * the first's). PROVISIONAL, to be measured on CI: locally (Apple silicon)
- * each paying case took 2.1 s, and 3.1 s under coverage.
+ * A case that rides two of the runs above, the second simulation case reading
+ * the first's: about three times the slowest figure under coverage, as
+ * `docs/agents/ci.md` §4c asks of a case slow under coverage. The figures,
+ * 2026-11-10, the grade case then the ERG case: 4 484 ms and 3 663 ms on CI's
+ * `Tests` (run 42891832209, AMD EPYC 9V45); locally 2.1 s and 2.0 s, and 3.1 s
+ * and 3.0 s under coverage, so about 6.5 s under coverage on that runner. On
+ * an EPYC 7763 the first run went past Vitest's default 5 s (42889357062).
  */
-const RIDES = { timeout: 30_000 } as const;
+const RIDES = { timeout: 20_000 } as const;
 
 const SET_SIMULATION_PARAMETERS = 0x11;
 const SET_TARGET_POWER = 0x05;
