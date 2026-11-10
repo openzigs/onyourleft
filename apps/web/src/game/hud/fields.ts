@@ -1063,11 +1063,13 @@ export const SOLO_DRAFT_KEY = 'solo-draft';
 
 /**
  * The room's draft on this rider, as a share of aerodynamic drag — #787,
- * ADR 0038 D-5 — and since #2425 a solo ride's ({@link HudInput.soloDraft}). The unit says what it is a share of, so a small number on a
- * climb, where there is little air to push, reads as a fact and not a fault
- * (#327's indicator criteria). Only on a ride in a room, like every room
- * field: absent everywhere else, on the `NO_READING` precedent — and only
- * when the rider's setting shows it ({@link RoomHud.draftShown}).
+ * ADR 0038 D-5 — and since #2425 a solo ride's ({@link HudInput.soloDraft}).
+ * The unit says what it is a share of, so a small number on a climb, where
+ * there is little air to push, reads as a fact and not a fault (#327's
+ * indicator criteria). On a ride in a room, or a solo ride that is drafted
+ * (behind the pacer or the rider's own ghost): absent everywhere else, on the
+ * `NO_READING` precedent — and only when the rider's setting shows it
+ * ({@link RoomHud.draftShown}).
  *
  * A number carries a gauge toward {@link DRAFT_FULL_SCALE_PERCENT}, and the
  * phrase under it says what that full scale is (#327: *"the full-scale mark is

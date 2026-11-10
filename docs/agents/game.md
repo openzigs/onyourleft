@@ -133,9 +133,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         behind the pacer and their own ghost: per step,
                         fieldDraftFactors over odometers only (never a drawn
                         place), the ghost as a ghostDistanceAt handed in at
-                        setup, never re-simulated; neither gives way to the
-                        rider. solo-draft.ts holds the inputs and the 10 %
-                        "drafted" share; solo-draft-preference.ts the device
+                        setup, never re-simulated; neither the pacer nor the
+                        ghost takes a draft from the rider.
+                        solo-draft.ts holds the inputs and the 10 % "drafted"
+                        share; solo-draft-preference.ts the device
                         switch, whose off is today's ride to the bit. Never in
                         a room (the room's k) or a lap race (ADR 0061 D-4)
     src/game/camera.ts  the chase camera as ONE composition (#424) — height,

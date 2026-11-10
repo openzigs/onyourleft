@@ -37,7 +37,47 @@ import { DRAFT_READING_STORAGE_KEY } from './draft-preference';
 import type { GhostOutcome } from './ghost-outcome';
 import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
-import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
+import type { LapRaceChoice } from './lap-race/choice';
+import { circuitRoute } from './route-fixtures-testing';
+import type { SimulationParameters } from '@onyourleft/sensors/protocol';
+import {
+  gameTrainerPortOver,
+  NO_GAME_TRAINER,
+  type GameTrainerPort,
+  type GradientTrainer,
+} from './trainer-port';
+
+/** The ride's odometer at each frame the game drew, read from the simulation's own state. */
+const odometers = vi.hoisted((): number[] => []);
+vi.mock('./scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./scene')>();
+  return {
+    ...actual,
+    sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
+      odometers.push(args[0].state.ride.distance);
+      return actual.sceneFrame(...args);
+    },
+  };
+});
+
+/** Every distance the ride sampled the trainer's gradient session at. */
+const sampled = vi.hoisted((): number[] => []);
+vi.mock('./gradient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./gradient')>();
+  return {
+    ...actual,
+    createGradientSession: (...args: Parameters<typeof actual.createGradientSession>) => {
+      const session = actual.createGradientSession(...args);
+      return {
+        ...session,
+        sample: (at: Parameters<typeof session.sample>[0], distance: number, bounded?: boolean) => {
+          sampled.push(distance);
+          session.sample(at, distance, bounded);
+        },
+      };
+    },
+  };
+});
 
 /** Five level kilometres, with one attempt on it so a ghost can be raced. */
 function levelRoute(): RidableRoute {
@@ -88,6 +128,33 @@ function pedallingPort(
   };
 }
 
+/** A loop of about 250 m with one attempt on it, so a lap race can be raced with the own ghost ticked. */
+function loopRoute(rolling = false): RidableRoute {
+  const elevation = rolling ? (along: number) => 2.5 * Math.sin(along / 20) : () => 0;
+  return { id: 'route-loop', name: 'Loop', profile: circuitRoute(40, elevation), attempts: 1 };
+}
+
+/** A ready trainer through the real `gameTrainerPortOver`, keeping every simulation write it is handed. */
+function writingTrainer(written: SimulationParameters[]): GameTrainerPort {
+  const control: GradientTrainer = {
+    setSimulationParameters: (parameters) => {
+      written.push(parameters);
+      return Promise.resolve();
+    },
+    letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+  };
+  return gameTrainerPortOver({
+    getSnapshot: () => ({
+      trainer: { paired: true, controllable: true, canSimulate: true, hasControl: true },
+      workout: undefined,
+    }),
+    simulationControl: () => control,
+    requestTrainerControl: () => Promise.resolve(),
+    noteGameRideEnded: () => undefined,
+    subscribe: () => () => undefined,
+  });
+}
+
 const renderer: GameRenderer = {
   loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
   create: () => ({
@@ -122,6 +189,8 @@ const trainer: GameTrainerPort = {
 };
 
 beforeEach(() => {
+  odometers.length = 0;
+  sampled.length = 0;
   pending = [];
   nowMs = 1_000_000;
   handed = [];
@@ -181,13 +250,27 @@ async function rideSolo(options: {
   readonly ownGhost?: boolean;
   readonly riderGhost?: RiderGhostLoad;
   readonly own?: GhostTrack;
+  /** A lap race on a loop, as the chooser sends it alongside the own-ghost flag. */
+  readonly lapRace?: LapRaceChoice;
+  /** The shell's room for this ride: a ride in a room has the room's `k`, never a solo one. */
+  readonly roomId?: string;
+  /** Ride a rolling loop through the real trainer port, every write kept here. */
+  readonly written?: SimulationParameters[];
   readonly frames: number;
 }): Promise<{ readonly draft: (string | undefined)[]; readonly heard: string[] }> {
   mounted = await mount(
     <GameView
-      port={pedallingPort(levelRoute(), options.riderGhost, options.own)}
+      port={pedallingPort(
+        options.lapRace === undefined && options.written === undefined
+          ? levelRoute()
+          : loopRoute(options.written !== undefined),
+        options.riderGhost,
+        options.own,
+      )}
+      {...(options.lapRace === undefined ? {} : { lapRace: options.lapRace })}
+      {...(options.roomId === undefined ? {} : { roomId: options.roomId })}
       renderer={() => Promise.resolve(renderer)}
-      trainer={trainer}
+      trainer={options.written === undefined ? trainer : writingTrainer(options.written)}
       now={() => nowMs}
     />,
   );
@@ -223,6 +306,12 @@ async function rideSolo(options: {
     heard.push(spoken());
   }
   return { draft, heard };
+}
+
+function unmountForReride(): void {
+  mounted?.unmount();
+  mounted = undefined;
+  pending = [];
 }
 
 async function endTheRide(): Promise<void> {
@@ -277,6 +366,52 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
     });
     expect(field('Bea')).toBeDefined();
     expect(draft.every((text) => text === undefined)).toBe(true);
+  });
+});
+
+describe('the trainer never feels a solo draft — #2425, ADR 0066 D-1, through the real GameView', () => {
+  it('writes the same kinds of parameter drafted and undrafted: a grade, no draft term', async () => {
+    const drafted: SimulationParameters[] = [];
+    const { draft } = await rideSolo({ pacer: true, written: drafted, frames: 120 });
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    expect(drafted.length).toBeGreaterThan(5);
+    await endTheRide();
+    unmountForReride();
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
+    const alone: SimulationParameters[] = [];
+    await rideSolo({ pacer: true, written: alone, frames: 120 });
+    expect(alone.length).toBeGreaterThan(5);
+    const shape = (written: SimulationParameters[]) =>
+      written.map((parameters) => Object.keys(parameters).sort().join());
+    expect(new Set(shape(drafted))).toEqual(new Set(shape(alone)));
+    // Everything but the grade is the ride's constant: the draft is in none of it.
+    const constants = (written: SimulationParameters[]) =>
+      new Set(written.map((parameters) => JSON.stringify({ ...parameters, grade: undefined })));
+    expect(constants(drafted)).toEqual(constants(alone));
+    // The only input a draft could reach a write by is the distance the gradient
+    // session is sampled at: it is the simulation's own odometer, the one the
+    // frame is drawn from, and never a place a draft moved.
+    expect(sampled.length).toBeGreaterThan(5);
+    for (const distance of sampled) expect(odometers).toContain(distance);
+  });
+});
+
+describe('no solo draft in a room — #2425, ADR 0066 D-1.5', () => {
+  it('hands a ride in a room no solo k, pacer or not: the room’s is the only one', async () => {
+    const { draft } = await rideSolo({ pacer: true, roomId: 'room-1', frames: 60 });
+    expect(draft.every((text) => text === undefined)).toBe(true);
+    await endTheRide();
+    expect(handed.every((ended) => ended.drafted !== true)).toBe(true);
+  });
+});
+
+describe('no solo draft in a lap race — #2425, ADR 0066 D-2', () => {
+  it('drafts nobody behind the own ghost the chooser sends with a lap race', async () => {
+    const race: LapRaceChoice = { laps: 2, bots: 3, tier: 'brisk', itemsOn: false };
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
+    expect(draft.every((text) => text === undefined)).toBe(true);
+    await endTheRide();
+    expect(handed.every((ended) => ended.drafted !== true)).toBe(true);
   });
 });
 

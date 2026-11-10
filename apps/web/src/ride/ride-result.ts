@@ -107,7 +107,7 @@ export const GAME_OUTCOME_TEXT: Readonly<Record<GhostOutcome, string>> = {
 export function gameOutcomeText(result: SavedRide): string | undefined {
   if (result.gameOutcome === undefined) return undefined;
   const text = GAME_OUTCOME_TEXT[result.gameOutcome];
-  return result.gameOutcomeDrafted === true ? `${text.slice(0, -1)}, with its draft.` : text;
+  return result.gameOutcomeDrafted === true ? `${text.replace(/\.$/, '')}, with its draft.` : text;
 }
 
 /**
