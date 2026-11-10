@@ -1030,17 +1030,15 @@ function squaredToSegment(
 }
 
 /**
- * Whether a footprint standing at `at` comes within `margin` of any side
- * road in `roads` — its box sampled every half-metre round its edge and
- * through its middle, against each arm's centreline less its half-width.
+ * Where a footprint standing at `at` is sampled, `x, z` pairs: its box every
+ * half-metre round its edge and through its middle. What {@link onSideRoad}
+ * measures, and since #2428 what `mapped-buildings.ts`
+ * §`clearOfDriveways` measures against a driveway.
  */
-export function onSideRoad(
-  roads: readonly SideRoad[],
+export function footprintSamples(
   at: { readonly x: number; readonly z: number; readonly rotation: number },
   footprint: Footprint,
-  margin: number,
-): boolean {
-  if (roads.length === 0) return false;
+): number[] {
   const cos = Math.cos(at.rotation);
   const sin = Math.sin(at.rotation);
   // The footprint's own frame: `x` across, `z` the way it faces.
@@ -1056,6 +1054,22 @@ export function onSideRoad(
       points.push(at.x + lx * cos + lz * sin, at.z - lx * sin + lz * cos);
     }
   }
+  return points;
+}
+
+/**
+ * Whether a footprint standing at `at` comes within `margin` of any side
+ * road in `roads` — its box sampled every half-metre round its edge and
+ * through its middle, against each arm's centreline less its half-width.
+ */
+export function onSideRoad(
+  roads: readonly SideRoad[],
+  at: { readonly x: number; readonly z: number; readonly rotation: number },
+  footprint: Footprint,
+  margin: number,
+): boolean {
+  if (roads.length === 0) return false;
+  const points = footprintSamples(at, footprint);
   const reach = Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + margin + 10;
   for (const road of roads) {
     const s = road.segments;

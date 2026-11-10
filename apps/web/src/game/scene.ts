@@ -117,6 +117,7 @@ import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
+  clearOfDriveways,
   clearOfMappedBuildings,
   mappedChunk,
   type MappedBuildings,
@@ -679,7 +680,12 @@ function scenery(
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
-  const built = clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin);
+  // #2428: and none across a mapped building's driveway, a roadside hedge
+  // row the likeliest.
+  const built = clearOfDriveways(
+    clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
+    input.mappedBuildings,
+  );
   // #1549: and off every mapped building's ground, by #1534's rule — whose
   // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
@@ -688,6 +694,8 @@ function scenery(
       : clearOfMappedBuildings(
           clearOfSettlements(natural, footprints, land),
           input.mappedBuildings,
+          // #2428: off a driveway by its drawn reach, as off a side road.
+          sideRoadNaturalMargin,
         ),
     sideRoads,
     SCENERY_CLEARANCE,
