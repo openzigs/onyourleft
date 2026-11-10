@@ -1183,10 +1183,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the ride's clock, fed by the frame loop AFTER
                         `advanceTo` took the raw reading; a gap is left out,
                         never a zero, and a meter not live has no average.
-                        ⚠️ Display only: the power field, W/kg, the zone and
-                        the focus readout read it; the simulation, the trainer,
-                        the recording, the totals, the zone time, the recent
-                        graph and the spoken power keep the raw reading
+                        ⚠️ Display only: the power field, W/kg, the zone, the
+                        focus readout and the spoken power (owner ruling,
+                        2026-11-09) read it; the simulation, the trainer, the
+                        recording, the totals, the zone time and the recent
+                        graph keep the raw reading
                         (`power-shown-wiring.test.tsx` holds them identical)
     src/game/hud/totals-strip.ts
                         the whole ride's totals along the bottom of the road

@@ -18,7 +18,9 @@
  * advanced with, every octet written to the trainer's control point, the ride
  * the store kept (every stream, the distance, the times, the average power)
  * and the ride's totals on the HUD — identical in both views — and the power
- * the HUD drew each frame, which is not.
+ * the HUD drew each frame, which is not. Nor is the power the announcer said
+ * (`[data-oyl-announcer="hud"]`, announcements on, power every 15 s): the
+ * owner ruled on 2026-11-09 that spoken power follows the choice too.
  */
 
 import { act } from 'react';
@@ -34,6 +36,7 @@ import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, type RidableRoute } from './GameView';
+import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import {
   DEFAULT_HUD_LAYOUT,
   HUD_LAYOUT_STORAGE_KEY,
@@ -141,6 +144,8 @@ function field(label: RegExp): { readonly term: string; readonly value: string }
 interface Ridden {
   /** The power the HUD drew each frame, in watts, `undefined` for a dash. */
   readonly shown: readonly (number | undefined)[];
+  /** Each power sentence the announcer said, with what the HUD showed on that frame. */
+  readonly spoken: readonly { readonly said: number; readonly shown: number | undefined }[];
   /** The power field's term, as the last frame drew it. */
   readonly term: string;
   /** The controller's power each frame — the raw reading. */
@@ -160,6 +165,11 @@ async function ride(view: HudPowerView): Promise<Ridden> {
   pending = [];
   nowMs = START_MS;
   writeHudLayout(localStorage, { ...DEFAULT_HUD_LAYOUT, power: view });
+  // Announcements on, power at the shortest cadence: said once in the ride.
+  localStorage.setItem(
+    ANNOUNCEMENTS_STORAGE_KEY,
+    JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true, powerEverySeconds: 15 }),
+  );
   const harness = createStoreHarness();
   await seedAthletes(harness);
   const { transport, bench } = createSimulator({
@@ -225,6 +235,8 @@ async function ride(view: HudPowerView): Promise<Ridden> {
   const shown: (number | undefined)[] = [];
   const raw: (number | undefined)[] = [];
   const totals: string[] = [];
+  const spoken: { said: number; shown: number | undefined }[] = [];
+  let lastSaid = '';
   let term = '';
   for (let frame = 0; frame < FRAMES; frame += 1) {
     if (frame % FRAMES_PER_SECOND === 0) {
@@ -239,6 +251,12 @@ async function ride(view: HudPowerView): Promise<Ridden> {
     term = power?.term ?? '';
     const digits = /^(\d+)/.exec(power?.value ?? '')?.[1];
     shown.push(digits === undefined ? undefined : Number(digits));
+    const said = document.querySelector('[data-oyl-announcer="hud"]')?.textContent?.trim() ?? '';
+    const sentence = /^Power (\d+) watts$/.exec(said);
+    if (said !== lastSaid && sentence?.[1] !== undefined) {
+      spoken.push({ said: Number(sentence[1]), shown: shown.at(-1) });
+    }
+    lastSaid = said;
     const reading = gameSensors(controller.getSnapshot()).rider;
     raw.push(reading.live ? reading.power : undefined);
     totals.push(field(/^Avg power$/)?.value ?? '');
@@ -261,9 +279,11 @@ async function ride(view: HudPowerView): Promise<Ridden> {
   mounted = undefined;
   vi.restoreAllMocks();
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
   if (activity === undefined || streams === undefined) throw new Error('the ride was not saved');
   return {
     shown,
+    spoken,
     term,
     raw,
     simulated,
@@ -306,6 +326,20 @@ describe('power as a 3 s average or instant, on the ride — #2420', () => {
         expect(value).toBeGreaterThanOrEqual(232);
         expect(value).toBeLessThanOrEqual(268);
       }
+
+      // Spoken power follows the choice (owner ruling, 2026-11-09): what the
+      // announcer said is what the HUD drew on that frame, in either view —
+      // the 3 s average in one, a raw 200 or 300 in the other.
+      expect(average.spoken.length).toBe(1);
+      expect(instant.spoken.length).toBe(1);
+      for (const each of [...average.spoken, ...instant.spoken]) {
+        expect(each.said).toBe(each.shown);
+      }
+      for (const each of average.spoken) {
+        expect(each.said).toBeGreaterThanOrEqual(232);
+        expect(each.said).toBeLessThanOrEqual(268);
+      }
+      for (const each of instant.spoken) expect([200, 300]).toContain(each.said);
 
       // The ride itself, the same in both views. Non-vacuity first: it was
       // simulated, written, recorded and totalled.

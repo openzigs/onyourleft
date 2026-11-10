@@ -14,10 +14,11 @@
  * ⚠️ **Nothing here reaches the simulation, the trainer, the recorder or a
  * sync.** `GameView` feeds this from the frame loop, AFTER the simulation was
  * advanced with the raw reading, and only the HUD reads what it says
- * (`fields.ts` §`HudInput.shownPower`). The physics, what is written to the
- * trainer (ADR 0059, `docs/agents/wiring-gate.md`'s trainer-command seam), the
- * recording, the ride's totals, the zone time and the recent graph all keep
- * the raw readings; `power-shown-wiring.test.tsx` rides the same trace in both
+ * (`fields.ts` §`HudInput.shownPower`) — the HUD and the announcer, which
+ * speaks the power the HUD shows (owner ruling, 2026-11-09). The physics, what
+ * is written to the trainer (ADR 0059, `docs/agents/wiring-gate.md`'s
+ * trainer-command seam), the recording, the ride's totals, the zone time and
+ * the recent graph all keep the raw readings; `power-shown-wiring.test.tsx` rides the same trace in both
  * modes and holds them identical.
  *
  * One reading deliberately stays raw: the "You" row of a lap race's standings

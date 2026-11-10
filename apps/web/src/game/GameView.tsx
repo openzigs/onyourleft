@@ -312,6 +312,7 @@ import {
   powerView,
   readHudLayout,
   type HudLayoutPreference,
+  type HudPowerView,
 } from './hud/hud-layout-preference';
 import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
@@ -1294,9 +1295,10 @@ function GameScreen({
   const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
   /**
    * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
-   * raw reading. Read by the HUD and by nothing else. A new ride's clock starts
-   * again from nought, and a clock that goes back starts the average again
-   * (`power-average.ts`), so no watt of the last ride is in the next.
+   * raw reading. Read by the HUD and the announcer, and by nothing else. A new
+   * ride's clock starts again from nought, and a clock that goes back starts the
+   * average again (`power-average.ts`), so no watt of the last ride is in the
+   * next.
    */
   const powerAverageRef = useRef<PowerAverage>(createPowerAverage());
   const [recentTrace, setRecentTrace] = useState<
@@ -1910,6 +1912,12 @@ function GameScreen({
   const draftShownRef = useRef(false);
   /** #2079: the HUD's panels and text size, read as each ride begins. */
   const [hudLayout, setHudLayout] = useState<HudLayoutPreference>(DEFAULT_HUD_LAYOUT);
+  /**
+   * #2420: the rider's power view, for the announcer — the owner's ruling of
+   * 2026-11-09 is that spoken power follows the 3 s / instant choice. A ref,
+   * set where {@link hudLayout} is, because the loop reads it every frame.
+   */
+  const powerViewRef = useRef<HudPowerView>(powerView(DEFAULT_HUD_LAYOUT));
   /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
   const inDraftRef = useRef(false);
   /**
@@ -2288,7 +2296,9 @@ function GameScreen({
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
       draftShownRef.current = readDraftReadingChoice(deviceStorage());
       // #2079: the rider's panels and text size, as Settings left them.
-      setHudLayout(readHudLayout(deviceStorage()));
+      const layout = readHudLayout(deviceStorage());
+      setHudLayout(layout);
+      powerViewRef.current = powerView(layout);
       // #551: a link already lost when the ride starts is on the HUD's line,
       // and is not news — only a link that goes DURING this ride is said.
       sideLostRef.current = sideCameraLost(
@@ -3100,12 +3110,15 @@ function GameScreen({
       // no frame runs while the game is paused, so nothing announces then,
       // and the pause is counted on resume), from the same
       // readings the HUD renders. Pure: its carry-over lives in the ref.
+      // #2420: spoken power is the power the HUD shows, 3 s or instant as the
+      // rider chose (owner ruling, 2026-11-09), from the same average.
       const readings = hudReadings({
         state: simulation.state,
         profile: chosen.profile,
         cadence: sensors.cadence,
         heartRate: sensors.heartRate,
         units: unitsRef.current,
+        shownPower: { view: powerViewRef.current, average: powerAverageRef.current.average },
       });
       // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
       const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
