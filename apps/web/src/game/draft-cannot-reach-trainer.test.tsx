@@ -15,6 +15,14 @@
  * tolerance or change the trace. If one of these goes red, the draft has
  * reached the trainer, and that is a change to ADR 0038, not to this test.
  *
+ * The draft is pinned by `draftWith(DRAFTED)` the moment each simulation is
+ * built, and no later call touches it. A source that sets the draft itself on
+ * every step (#2425's solo draft, on by default) overwrites it, and the
+ * non-vacuity check (`drafted.distance` beyond `alone.distance`) goes red. The
+ * source then switches ITSELF off in these runs, through its own preference or
+ * prop, which is a change to the source and not to this file; it may not edit
+ * a run here to make room for itself.
+ *
  * Every run is the real `GameView`, the real ride controller `main.tsx` builds,
  * its real `createTrainerControl`, and the #44 simulator's FTMS trainer, read
  * back as the OCTETS on its control point (`ride/simulated-trainer-testing.ts`).
@@ -31,9 +39,13 @@
  *   never off the `distance` argument, so a caller that sampled anywhere else
  *   is caught by the grade it wrote.
  *
- * What each run holds, in every state the game leaves a trainer in:
+ * What each run holds, in the three states a ride can leave a trainer in
+ * (the other four, such as a refused or a lost control, are
+ * `trainer-wiring.test.tsx`'s):
  *
- * - **Simulation mode**: every Set Indoor Bike Simulation Parameters write is
+ * - **Simulation mode**: every write during the ride that is not a Set
+ *   Indoor Bike Simulation Parameters is the same bytes in the same order,
+ *   drafted or not, and every Set Indoor Bike Simulation Parameters write is
  *   the road's grade at the rider's own odometer at the tick that offered it,
  *   to the encoding's 0.01 % quantum, and its wind speed, rolling resistance
  *   and wind resistance coefficient are the protocol client's own defaults,
@@ -438,6 +450,16 @@ describe('a draft reaches no trainer write in simulation mode — #2423, ADR 003
 
       // The draft took effect: the same trace rode further.
       expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
+
+      // Nothing but grades is written during the ride, and what else is
+      // written (a Stop, a Reset, a target power) is the same bytes in the
+      // same order, drafted or not: the grade check below cannot see an
+      // opcode it does not filter for.
+      const notGrades = (run: Run): readonly (readonly number[])[] =>
+        run.riding
+          .filter((write) => write.bytes[0] !== SET_SIMULATION_PARAMETERS)
+          .map((write) => write.bytes);
+      expect(notGrades(drafted)).toEqual(notGrades(alone));
 
       for (const [name, run] of [
         ['alone', alone],
