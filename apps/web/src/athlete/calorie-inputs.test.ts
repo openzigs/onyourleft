@@ -28,6 +28,17 @@ describe('calorieRiderFor', () => {
     expect(calorieRiderFor({ ...ROW, birthYear: 1990 }, in2020).ageYears).toBe(30);
   });
 
+  it('gives no age for a ride dated before the rider was born, as a 1970 file from an unset clock is', () => {
+    const in1970 = unixSeconds(0);
+    expect(calorieRiderFor({ ...ROW, birthYear: 1985 }, in1970)).not.toHaveProperty('ageYears');
+    const inBirthYear = unixSeconds(Date.UTC(1985, 5, 1) / 1000);
+    expect(calorieRiderFor({ ...ROW, birthYear: 1985 }, inBirthYear)).not.toHaveProperty(
+      'ageYears',
+    );
+    const aYearOn = unixSeconds(Date.UTC(1986, 5, 1) / 1000);
+    expect(calorieRiderFor({ ...ROW, birthYear: 1985 }, aYearOn).ageYears).toBe(1);
+  });
+
   it('gives no age with no birth year', () => {
     expect(calorieRiderFor(ROW, A_RIDE_IN_2026)).not.toHaveProperty('ageYears');
   });
