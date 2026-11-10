@@ -103,4 +103,18 @@ describe('the HUD’s 3 s power — #2420', () => {
     average.observe(Number.NaN, 900);
     expect(average.average).toBe(200);
   });
+
+  it('does not let the first reading after a pause stand for the whole window', () => {
+    const average = createPowerAverage();
+    for (let at = 0; at <= 5; at += 0.25) average.observe(at, 250);
+    // A 60 s jump of the clock (a pause, a backgrounded tab), then one frame at 0 W.
+    average.observe(65, 0);
+    average.observe(65.25, 250);
+    // 0.25 s of 250 W after a lone 0 W frame with no time of its own: 250 W,
+    // not the 0 W the jump would have weighted across the whole window.
+    expect(average.average).toBe(250);
+    average.observe(65.5, 100);
+    // The gap is left out: 250 W for 0.25 s then 100 W for 0.25 s.
+    expect(average.average).toBeCloseTo(175, 6);
+  });
 });

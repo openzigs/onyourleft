@@ -20,11 +20,18 @@
  * the raw readings; `power-shown-wiring.test.tsx` rides the same trace in both
  * modes and holds them identical.
  *
+ * One reading deliberately stays raw: the "You" row of a lap race's standings
+ * (`lap-race-hud.ts`) shows W/kg from the instant reading, because it sits
+ * beside the bots' figures, which are instants too.
+ *
  * ## The average
  *
  * A **time-weighted** mean over the last {@link POWER_AVERAGE_SECONDS} of the
- * RIDE's clock (the simulation's `elapsed`, as `recent-trace.ts` reads it): a
- * paused game, whose clock stands still, moves nothing. The reading a frame
+ * RIDE's clock (the simulation's `elapsed`, as `recent-trace.ts` reads it). A
+ * frame gap longer than {@link MAX_FRAME_GAP_SECONDS}, which is what a pause
+ * or a backgrounded tab leaves when the clock resumes, is left out like any
+ * other gap, so the first frame after it does not stand for the whole window.
+ * The reading a frame
  * sees has held since the frame before it, so each frame's reading covers the
  * time since the last frame; a reading that holds for two seconds weighs twice
  * one that holds for one, however many frames drew it.
@@ -45,6 +52,14 @@
 
 /** The window, in seconds of the ride's clock. */
 export const POWER_AVERAGE_SECONDS = 3;
+
+/**
+ * The longest stretch of the ride's clock one reading is taken to have held
+ * across. A frame arrives every few hundredths of a second; a longer gap is a
+ * pause or a backgrounded tab (the clock is the wall clock and counts it on
+ * resume), and the reading before it says nothing about the time between.
+ */
+export const MAX_FRAME_GAP_SECONDS = 1;
 
 /** One stretch of the ride's clock over which one live reading held. */
 interface Held {
@@ -85,7 +100,7 @@ export function createPowerAverage(windowSeconds = POWER_AVERAGE_SECONDS): Power
         last = undefined;
       }
       const live = watts !== undefined && Number.isFinite(watts);
-      if (live && last !== undefined && at > last) {
+      if (live && last !== undefined && at > last && at - last <= MAX_FRAME_GAP_SECONDS) {
         const newest = held.at(-1);
         if (newest !== undefined && newest.watts === watts && newest.to === last) {
           newest.to = at;
