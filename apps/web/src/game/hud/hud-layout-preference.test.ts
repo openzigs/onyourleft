@@ -15,10 +15,12 @@ import {
   HUD_ARRANGEMENTS,
   HUD_LAYOUT_STORAGE_KEY,
   HUD_PANELS,
+  HUD_POWER_VIEWS,
   HUD_ROUTE_VIEWS,
   compactRoute,
   focusArrangement,
   panelShown,
+  powerView,
   readHudLayout,
   totalsStripChosen,
   writeHudLayout,
@@ -39,14 +41,16 @@ describe('the HUD layout preference (#2079)', () => {
       true,
     );
     const read = readHudLayout(localStorage);
-    // #2383, #2385, #2387: a choice written with no arrangement, no route view
-    // and no strip reads back as the full HUD, the full route panel and no strip.
+    // #2383, #2385, #2387, #2420: a choice written with no arrangement, no
+    // route view, no strip and no power view reads back as the full HUD, the
+    // full route panel, no strip and the 3 s power.
     expect(read).toEqual({
       hidden: ['route', 'graph'],
       textSize: 'large',
       arrangement: 'full',
       totalsStrip: false,
       route: 'full',
+      power: 'average',
     });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
@@ -100,6 +104,7 @@ describe('the focus arrangement (#2383)', () => {
       arrangement: 'focus',
       totalsStrip: false,
       route: 'full',
+      power: 'average',
     });
     expect(focusArrangement(read)).toBe(true);
   });
@@ -166,6 +171,7 @@ describe('the compact route panel (#2385)', () => {
       arrangement: 'focus',
       totalsStrip: false,
       route: 'compact',
+      power: 'average',
     });
     expect(compactRoute(read)).toBe(true);
     // Compact says how the route panel is drawn, never whether.
@@ -189,5 +195,51 @@ describe('the compact route panel (#2385)', () => {
     expect(panelShown(readHudLayout(localStorage), 'route')).toBe(false);
     localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ route: 'tiny' }));
     expect(compactRoute(readHudLayout(localStorage))).toBe(false);
+  });
+});
+
+describe('power as a 3 s average or instant (#2420)', () => {
+  it('is the 3 s average until the rider chooses, and the average is the default', () => {
+    expect(HUD_POWER_VIEWS).toEqual(['average', 'instant']);
+    expect(DEFAULT_HUD_LAYOUT.power).toBe('average');
+    expect(readHudLayout(localStorage).power).toBe('average');
+    expect(powerView(DEFAULT_HUD_LAYOUT)).toBe('average');
+  });
+
+  it('keeps instant on the device and reads it back, beside the other choices', () => {
+    expect(
+      writeHudLayout(localStorage, {
+        hidden: ['graph'],
+        textSize: 'large',
+        arrangement: 'focus',
+        power: 'instant',
+      }),
+    ).toBe(true);
+    const read = readHudLayout(localStorage);
+    expect(read).toEqual({
+      hidden: ['graph'],
+      textSize: 'large',
+      arrangement: 'focus',
+      totalsStrip: false,
+      route: 'full',
+      power: 'instant',
+    });
+    expect(powerView(read)).toBe('instant');
+  });
+
+  it('reads a preference kept before #2420, or a view it does not know, as the average', () => {
+    localStorage.setItem(
+      HUD_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ hidden: ['route'], textSize: 'normal', route: 'compact' }),
+    );
+    expect(readHudLayout(localStorage).power).toBe('average');
+    // And every other choice kept before it is kept.
+    expect(compactRoute(readHudLayout(localStorage))).toBe(true);
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ power: 'smoothed' }));
+    expect(powerView(readHudLayout(localStorage))).toBe('average');
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ power: 1 }));
+    expect(powerView(readHudLayout(localStorage))).toBe('average');
+    // A preference built by hand with no power view says the average too.
+    expect(powerView({ hidden: [], textSize: 'normal' })).toBe('average');
   });
 });

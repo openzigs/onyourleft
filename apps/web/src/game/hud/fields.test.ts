@@ -19,6 +19,7 @@ import {
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  POWER_QUALIFIERS,
   RIDE_CLOCK_LABEL,
   RIDE_TOTAL_KEYS,
   WATTS_PER_KILOGRAM_KEY,
@@ -1778,5 +1779,87 @@ describe('the rider’s W/kg and power zone — #2077', () => {
     expect(zone?.value).toBe(NO_READING);
     expect(zone?.detail).toBeUndefined();
     expect(zone?.zone).toEqual({ current: undefined, shares: [] });
+  });
+});
+
+/**
+ * #2420: the power the rider chose to see — the 3 s average or the reading as
+ * it arrives — on the power field, W/kg and the zone. `power-average.ts` makes
+ * the average; `power-shown-wiring.test.tsx` holds the wiring, and that the
+ * ride itself reads the raw reading in both.
+ */
+describe('power as a 3 s average or instant — #2420', () => {
+  const riding = (power: number, live = true, paired = true): HudInput => {
+    const base = baseInput();
+    return { ...base, state: { ...base.state, input: { power: watts(power), live, paired } } };
+  };
+  const field = (input: HudInput, key: string) =>
+    hudReadings(input).find((each) => each.key === key);
+
+  it('shows the 3 s average, rounded, and says so after the label', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: '3 s', value: '252', unit: 'W' });
+    expect(power?.stale).toBe(false);
+  });
+
+  it('shows the reading as it arrives in the instant view, and says so', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'instant', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: 'instant', value: '312' });
+  });
+
+  it('is the raw reading under its plain label where no choice is handed in (the demo)', () => {
+    const power = field(riding(312), 'power');
+    expect(power?.value).toBe('312');
+    expect(power?.qualifier).toBeUndefined();
+  });
+
+  it('names each view in words', () => {
+    expect(POWER_QUALIFIERS).toEqual({ average: '3 s', instant: 'instant' });
+  });
+
+  it('is a dash, marked lost, when the meter drops in either view — never the average', () => {
+    for (const view of ['average', 'instant'] as const) {
+      const power = field({ ...riding(0, false), shownPower: { view, average: 240 } }, 'power');
+      expect([power?.value, power?.stale]).toEqual([NO_READING, true]);
+    }
+  });
+
+  it('is a bare dash with nothing paired, in either view', () => {
+    const power = field(
+      { ...riding(0, false, false), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect([power?.value, power?.stale]).toEqual([NO_READING, false]);
+  });
+
+  it('is the raw reading where the average has nothing yet', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect(power?.value).toBe('312');
+  });
+
+  it('takes W/kg and the zone from the same power the field shows', () => {
+    const effort = (view: 'average' | 'instant') =>
+      hudReadings({
+        ...riding(342),
+        riderMass: kilograms(72),
+        thresholdPower: watts(250),
+        shownPower: { view, average: 200 },
+      });
+    const pick = (readings: ReturnType<typeof hudReadings>, key: string) =>
+      readings.find((each) => each.key === key)?.value;
+    // 200 W over 72 kg is 2.8 and zone 3 of 250 W; 342 W is 4.8 and zone 6.
+    expect(pick(effort('average'), WATTS_PER_KILOGRAM_KEY)).toBe('2.8');
+    expect(pick(effort('average'), ZONE_KEY)).toBe('3');
+    expect(pick(effort('instant'), WATTS_PER_KILOGRAM_KEY)).toBe('4.8');
+    expect(pick(effort('instant'), ZONE_KEY)).toBe('6');
   });
 });

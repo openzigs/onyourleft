@@ -64,7 +64,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import type { ChasedGap } from '../src/game/hud/fields';
+import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
 import type { GameState } from '../src/game/simulation';
@@ -141,6 +141,14 @@ const STATE: GameState = {
   input: { power: watts(342), live: true },
   headwindMetresPerSecond: MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
 };
+
+/**
+ * #2420: power as \`GameView\` hands it to every ride — the 3 s average, the
+ * default — so the field is measured under the term a rider reads,
+ * *Power (3 s)*. The average is the state's own reading, so no number here
+ * changes.
+ */
+const SHOWN_POWER: ShownPower = { view: 'average', average: STATE.input.power };
 
 const CHASES: readonly ChasedGap[] = [
   {
@@ -236,6 +244,7 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}

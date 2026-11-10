@@ -91,7 +91,7 @@ const MODES = [
 ] as const;
 
 /** What is never given way, at any size, in any mode. */
-const ALWAYS_DRAWN = ['reading: Power', 'control: Pause', 'control: End ride'];
+const ALWAYS_DRAWN = ['reading: Power (3 s)', 'control: Pause', 'control: End ride'];
 
 /** The layout's faults, less a clipped item's, and the clipped items' names. */
 function sizeFaults(
@@ -206,8 +206,9 @@ for (const viewport of [
       }),
     );
     // Four panels, three sizes, the two arrangements (#2383), the two route
-    // panels (#2385) and the totals strip (#2387).
-    expect(choices).toHaveLength(12);
+    // panels (#2385), the totals strip (#2387) and the two ways to show power
+    // (#2420).
+    expect(choices).toHaveLength(14);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);
@@ -227,7 +228,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       expect(names, how).not.toContain('the elevation strip');
       expect(names, how).not.toContain('the plan view');
       expect(names, how).not.toContain('the recent graph');
-      expect(names, how).toContain('reading: Power');
+      expect(names, how).toContain('reading: Power (3 s)');
       expect(names, how).toContain('control: Pause');
       // The secondary tier keeps only the ride's times.
       expect(seen.secondary, how).toEqual(['Moving', 'Elapsed', 'Clock']);
@@ -250,7 +251,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
  *   phone and a race's standings over the controls on the 4:3 tablet.
  */
 const FOCUS_LABELS = [
-  'Power',
+  // #2420: the 3 s average, the default every ride draws.
+  'Power (3 s)',
   'Cadence',
   'Heart rate',
   'Speed',
@@ -312,7 +314,7 @@ for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
     const seen = await measure(page);
     expect(sizeFaults(seen, viewport).faults).toEqual([]);
     expect(seen.focus).toEqual([]);
-    expect(seen.primary).toContain('Power');
+    expect(seen.primary).toContain('Power (3 s)');
   });
 }
 
@@ -476,7 +478,7 @@ for (const arrangement of ['full', 'focus'] as const) {
             expect(seen.primary, how).toEqual([]);
           } else {
             expect(seen.focus, how).toEqual([]);
-            expect(seen.primary, how).toContain('Power');
+            expect(seen.primary, how).toContain('Power (3 s)');
           }
           const strip = stripPanel(seen);
           if (!drawn) {
