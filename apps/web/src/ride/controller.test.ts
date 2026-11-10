@@ -8647,6 +8647,34 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       ).toEqual([activityId('ride-1')]);
       expect(await held()).toEqual([]);
     });
+
+    // #2433's review: the rider the port reads is part of what the recovered
+    // ride is saved with, so a strap-only ride keeps its heart-rate estimate.
+    it('keeps a strap-only ride’s heart-rate estimate, with the rider the port reads (#2433)', async () => {
+      const first = benchWith({ devices: 'strap' });
+      await first.controller.pair('heart-rate');
+      await first.controller.start();
+      await ride(first, 10);
+      first.controller.dispose();
+      const id = first.sessionIds[0]!;
+      const port = keepingPort(async (owner, ride, at) =>
+        harness.write(async (store) => store.moveActivityToRecentlyDeleted(owner, ride, at)),
+      );
+      const next = benchWith({
+        rideSave: {
+          ...port,
+          calorieRider: () => Promise.resolve({ sex: 'male', ageYears: 40, mass: kilograms(80) }),
+        },
+        devices: 'strap',
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(true);
+      next.controller.dispose();
+
+      const [kept] = await held();
+      expect(kept?.summary.calories?.basis).toBe('heart-rate');
+      expect(kept?.summary.calories?.energy).toBeGreaterThan(0);
+    });
   });
 
   /**
@@ -10405,7 +10433,12 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
       },
     });
     const rig = benchWith({
-      rideSave: { ...port, calorieRider: () => Promise.reject(new Error('blocked')) },
+      rideSave: {
+        ...port,
+        calorieRider: () => {
+          throw new Error('blocked, before any promise');
+        },
+      },
       devices: 'strap',
     });
     await rig.controller.pair('heart-rate');

@@ -3070,7 +3070,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (port.calorieRider === undefined || startedAt === undefined) {
       return {};
     }
-    return port.calorieRider(startedAt).catch(() => ({}));
+    try {
+      return await port.calorieRider(startedAt);
+    } catch {
+      // A throw before the promise and a rejection after it are the same loss.
+      return {};
+    }
   };
 
   /**
