@@ -1263,24 +1263,36 @@ export function sideRoadClearance(test: typeof onSideRoad): SideRoadClearance {
   };
 }
 
+/** {@link SIDE_ROAD_SCENERY_MARGIN_METRES} for every tree, shrub and rock, whatever its size. */
+const POINT_MARGIN = (): number => SIDE_ROAD_SCENERY_MARGIN_METRES;
+
 /**
  * `items`, less every one standing on a side road in view: a structure by
  * its whole footprint (`settlements.ts` §`STRUCTURE_FOOTPRINTS`), anything
- * else by where it stands, {@link SIDE_ROAD_SCENERY_MARGIN_METRES} clear.
+ * else by where it stands, `naturalMargin(item)` clear —
+ * {@link SIDE_ROAD_SCENERY_MARGIN_METRES} unless the caller says more.
  * The same array where there is no side road. `clearance` is how each is
  * asked — #2439: `scene.ts` hands every frame the same
  * {@link sideRoadClearance}, and the same items are kept either way.
+ *
+ * ⚠️ **`scene.ts` says more — #2428.** A tree is drawn reaching up to 5.1 m
+ * from where it stands, so 1.5 m off the edge its branches lay across the
+ * side road; the scene keeps each one off by its own drawn reach
+ * (`scene.ts` §`sideRoadNaturalMargin`). The reach is `near-field.ts`'s,
+ * which this file cannot import without a cycle through
+ * `footprint-buildings.ts`, so it is handed in.
  */
 export function clearOfSideRoads(
   items: readonly ScatterItem[],
   roads: readonly SideRoad[],
   clearance: SideRoadClearance = UNCACHED,
+  naturalMargin: (item: ScatterItem) => number = POINT_MARGIN,
 ): readonly ScatterItem[] {
   if (roads.length === 0) return items;
   return items.filter((item) => {
     const footprint = (STRUCTURE_FOOTPRINTS as Readonly<Record<string, Footprint>>)[item.kind];
     return footprint === undefined
-      ? !clearance.on(roads, item, POINT, SIDE_ROAD_SCENERY_MARGIN_METRES)
+      ? !clearance.on(roads, item, POINT, naturalMargin(item))
       : !clearance.on(roads, item, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES);
   });
 }

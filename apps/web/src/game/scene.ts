@@ -62,6 +62,8 @@ import type {
   WaterFrame,
 } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import { FOLIAGE_SWAY_METRES } from './foliage-light';
+import { sceneryReach } from './near-field';
 import {
   LINE_LIMIT_METRES,
   leanAt,
@@ -92,6 +94,7 @@ import {
   clearOfSideRoads,
   mappedJunctions,
   onSideRoad,
+  SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
   type SideRoad,
@@ -582,6 +585,27 @@ function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFr
 const SCENERY_CLEARANCE = sideRoadClearance(onSideRoad);
 
 /**
+ * How far off a side road's edge a tree, shrub or rock stands, in metres —
+ * #2428: its whole drawn reach at its scale, the larger of the two worlds'
+ * (`near-field.ts` §`sceneryReach`: one arrangement draws both, ADR 0026
+ * D-3), with the realistic foliage's sway ({@link FOLIAGE_SWAY_METRES}), and
+ * never less than `cross-streets.ts` §`SIDE_ROAD_SCENERY_MARGIN_METRES`.
+ *
+ * Measured as a point 1.5 m clear, a fir at the top of its scale reaches
+ * 5.1 m, 3.6 m across the side road: more than a driveway's whole 3.5 m.
+ * That is the likeliest of what the owner saw drawn across crossings and
+ * driveways (2026-11-09); a shrub's reach is 1.54 m at its largest, so it
+ * keeps the 1.5 m and a little more.
+ */
+function sideRoadNaturalMargin(item: ScatterItem): number {
+  const reach = Math.max(
+    sceneryReach(item.kind, 'realistic').x,
+    sceneryReach(item.kind, 'stylised').x,
+  );
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + FOLIAGE_SWAY_METRES);
+}
+
+/**
  * The scenery for exactly the stretch of road this frame drew.
  *
  * ⚠️ **The span comes from the corridor rather than from `VIEW_AHEAD_METRES` and
@@ -651,7 +675,7 @@ function scenery(
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
-  const built = clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE);
+  const built = clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin);
   // #1549: and off every mapped building's ground, by #1534's rule — whose
   // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
@@ -663,6 +687,7 @@ function scenery(
         ),
     sideRoads,
     SCENERY_CLEARANCE,
+    sideRoadNaturalMargin,
   );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
