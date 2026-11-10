@@ -206,6 +206,14 @@
  * Delivery." is now "A gamepad such as an Xbox controller steers and throws
  * in Delivery.". Both are lines this pull request added; nothing else moves.
  *
+ * ⚠️ **Re-recorded by #2425, awaiting the owner's approval with that pull
+ * request**, on Settings on both walks: one line REWORDED, because the switch
+ * now also hides a solo ride's draft (ADR 0066 R-13): "Show my draft when
+ * riding in a room" is now "Show my draft", and two lines are added to its
+ * help to say so. The new *Draft on your own* section (ADR 0066 D-6) adds
+ * its heading, its help's name, six help sentences and its switch. Nothing
+ * is dropped.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -162,6 +162,7 @@ import { REALISTIC_DOWNLOAD_SIZE_TEXT } from '../game/realistic-assets';
 import { readRealisticReport, realisticReportText } from '../game/realistic-report';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import { readSoloDraftChoice, writeSoloDraftChoice } from '../game/solo-draft-preference';
 import {
   OBSTACLE_SETTINGS,
   readDeliveryAssist,
@@ -769,6 +770,9 @@ export function SettingsView({
         <DraftReadingPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
         />
+
+        {/* #2425: whether a solo ride drafts behind the pacer and your own best. */}
+        <SoloDraftPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
         <MapTilesPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
@@ -2087,6 +2091,10 @@ function DraftReadingPanel({
               it. Turning this off changes only what you see and hear: whether a room drafts is
               chosen by whoever made it.
             </p>
+            <p className="oyl-muted">
+              On a ride on your own, this also shows the draft from the pacer and your best, when
+              you ride behind them. That draft is never spoken.
+            </p>
           </>
         }
       >
@@ -2108,7 +2116,74 @@ function DraftReadingPanel({
               );
             }}
           />{' '}
-          Show my draft when riding in a room
+          Show my draft
+        </label>
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Whether a solo ride drafts the rider behind the bot pacer and their own best
+ * — #2425, ADR 0066 D-6: **the physics**, on by default, one device setting,
+ * and not {@link DraftReadingPanel}'s, which decides only what is shown.
+ * `game/solo-draft-preference.ts` says why. `oyl-solo-draft` is the tests'
+ * hook; the `oyl-announce` class for its switch's 24×24 target.
+ */
+function SoloDraftPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [drafted, setDrafted] = useState(() => readSoloDraftChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  return (
+    <section
+      className="oyl-panel oyl-announce oyl-solo-draft"
+      aria-labelledby="oyl-solo-draft-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-solo-draft-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              On a ride on your own, riding close behind the pacer or your best takes less effort,
+              as behind another rider on the road. Neither of them gets anything from you. A result
+              against your best that you rode partly in its draft says so.
+            </p>
+            <p className="oyl-muted">
+              Turn this off to ride on your own with no draft at all, as before. It changes nothing
+              in a room or a race. Your trainer is never sent a draft, only the gradient of the road
+              you are on.
+            </p>
+          </>
+        }
+      >
+        Draft on your own
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={drafted}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setDrafted(next);
+              setMessage(
+                writeSoloDraftChoice(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Draft behind the pacer and your best
         </label>
       </p>
       {message === undefined ? null : (

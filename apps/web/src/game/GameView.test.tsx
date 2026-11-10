@@ -753,14 +753,16 @@ describe('your own best crossing the line (#259)', () => {
     await startRiding({ pacer: false, ghost: true, track: OUTPACED_GHOST });
 
     // Five seconds in: the attempt has finished forty metres up the road and
-    // this rider is nowhere near it.
+    // this rider is nowhere near it. #2425: they rode the first of those
+    // metres in its draft, and the finished attempt stays in the field
+    // (ADR 0066 D-1.6), so the result says so (D-5.1).
     await pump(20);
-    expect(hudField('Your best')).toBe('Finished ahead of you');
+    expect(hudField('Your best')).toBe('Finished ahead of you, with its draft');
 
     // Ten seconds later they are well past forty metres — and they are still
     // the slower of the two, because the four seconds it took have gone.
     await pump(40);
-    expect(hudField('Your best')).toBe('Finished ahead of you');
+    expect(hudField('Your best')).toBe('Finished ahead of you, with its draft');
     expect(hudField('Your best')).not.toContain('Beaten');
   });
 
@@ -867,7 +869,8 @@ describe('your own best crossing the line (#259)', () => {
     await clickThrough(rideButton());
     await pump(20);
     await pump(40);
-    expect(hudField('Your best')).toBe('Finished ahead of you');
+    // #2425: ridden partly in the attempt's draft, as above.
+    expect(hudField('Your best')).toBe('Finished ahead of you, with its draft');
     await endTheRide();
     pending = [];
     expect(handed).toEqual(['beaten', 'not-beaten']);

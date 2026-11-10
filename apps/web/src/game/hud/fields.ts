@@ -295,6 +295,13 @@ export interface ChasedGap {
    * from an intensity and a route and rides for as long as the rider does.
    */
   readonly outcome?: GhostOutcome | undefined;
+  /**
+   * That the attempt {@link outcome} settles was ridden in a draft — #2425,
+   * ADR 0066 D-5.1, by D-5.6's definition (`solo-draft.ts` §`draftedRide`),
+   * latched with the outcome. The settled field then says *"with its draft"*
+   * in words. Absent, or `false`, reads exactly as before.
+   */
+  readonly drafted?: boolean | undefined;
 }
 
 /**
@@ -394,6 +401,16 @@ export interface HudInput {
    * held for it, so its fields never appear or vanish mid-ride.
    */
   readonly room?: RoomHud | undefined;
+  /**
+   * The rider's draft on a SOLO ride — #2425, ADR 0066: the share of their
+   * aerodynamic drag the pacer's and their own ghost's draft removed on the
+   * last step, `(1 − k) × 100` from the simulation's own `k`
+   * (`simulation.ts` §`GameState.soloDraft`). Drawn as a room's Draft field
+   * is ({@link draftField}). Absent — and no field — on a ride with no solo
+   * draft, with the solo draft switched off, and with the rider's display
+   * preference off (D-6, R-13). Never on a ride in a room, which has its own.
+   */
+  readonly soloDraft?: number | undefined;
   /**
    * The Delivery round, on a Delivery ride — #1812. Absent on every other
    * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
@@ -639,6 +656,8 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...zoneReading(state, input.thresholdPower, input.powerZoneTime),
     ...gapReadings(input),
     ...roomReadings(input.room),
+    // #2425: a solo ride's draft, where a room's would be; a ride runs one.
+    ...(input.soloDraft === undefined ? [] : [draftField(input.soloDraft)]),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
@@ -1030,7 +1049,7 @@ export const DRAFT_LABEL = 'Draft';
 
 /**
  * The room's draft on this rider, as a share of aerodynamic drag — #787,
- * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
+ * ADR 0038 D-5 — and since #2425 a solo ride's ({@link HudInput.soloDraft}). The unit says what it is a share of, so a small number on a
  * climb, where there is little air to push, reads as a fact and not a fault
  * (#327's indicator criteria). Only on a ride in a room, like every room
  * field: absent everywhere else, on the `NO_READING` precedent — and only
@@ -1133,15 +1152,28 @@ function gapReading(chase: ChasedGap): HudReading {
   // speed and pretending it is unknown would hide something that is known.
   return chase.outcome === undefined
     ? timeGap(key, label, chase.gap)
-    : settledGap(key, label, chase.outcome);
+    : settledGap(key, label, chase.outcome, chase.drafted === true);
 }
 
+/**
+ * What a settled field adds when the attempt was ridden in a draft — #2425,
+ * ADR 0066 D-5.1's words. ⚠️ Draft wording for the owner.
+ */
+export const WITH_ITS_DRAFT = 'with its draft';
+
 /** A settled race's word where the number was — #259. @see SETTLED */
-function settledGap(key: string, label: string, outcome: GhostOutcome): HudReading {
+function settledGap(
+  key: string,
+  label: string,
+  outcome: GhostOutcome,
+  drafted: boolean,
+): HudReading {
   // `word` because all three of these are — see {@link HudReading.word} for
   // what a word does to a 7 rem grid track at 2.5 rem.
   const { value, detail } = SETTLED[outcome];
-  return { key, label, value, unit: '', detail, stale: false, word: true };
+  // #2425: in words beside the result, never by colour alone (D-5.1).
+  const said = drafted ? `${detail}, ${WITH_ITS_DRAFT}` : detail;
+  return { key, label, value, unit: '', detail: said, stale: false, word: true };
 }
 
 /**

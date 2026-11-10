@@ -69,6 +69,12 @@ export interface SavedRide {
    */
   readonly gameOutcome: GhostOutcome | undefined;
   /**
+   * That the attempt {@link gameOutcome} settles was ridden in the pacer's or
+   * the ghost's draft — #2425, ADR 0066 D-5.1 and D-5.6, latched by the game
+   * with the outcome. Only ever `true` beside a {@link gameOutcome}.
+   */
+  readonly gameOutcomeDrafted?: boolean | undefined;
+  /**
    * A threshold test ridden on this ride, and its estimate or the refusal of
    * one — #2307. `undefined` for a ride with no test on it, which the Ride
    * screen answers with no offer at all.
@@ -91,6 +97,18 @@ export const GAME_OUTCOME_TEXT: Readonly<Record<GhostOutcome, string>> = {
   level: 'In your last trainer game ride, you matched your best on that route.',
   'not-beaten': 'In your last trainer game ride, your best on that route finished ahead of you.',
 };
+
+/**
+ * The card's sentence about the game's outcome, or `undefined` with none —
+ * {@link GAME_OUTCOME_TEXT}, and after an attempt ridden in a draft the words
+ * *"with its draft"* (#2425, ADR 0066 D-5.1), so a result won partly on the
+ * shelter of the ghost or the pacer says so. ⚠️ Draft wording for the owner.
+ */
+export function gameOutcomeText(result: SavedRide): string | undefined {
+  if (result.gameOutcome === undefined) return undefined;
+  const text = GAME_OUTCOME_TEXT[result.gameOutcome];
+  return result.gameOutcomeDrafted === true ? `${text.slice(0, -1)}, with its draft.` : text;
+}
 
 /**
  * The average heart rate the ride's page states, or `undefined` for a ride

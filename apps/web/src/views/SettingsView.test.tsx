@@ -65,6 +65,7 @@ import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 import { readRealisticWorldChoice } from '../game/world-preference';
 import { writeRealisticReport } from '../game/realistic-report';
 import { DRAFT_READING_STORAGE_KEY, readDraftReadingChoice } from '../game/draft-preference';
+import { readSoloDraftChoice } from '../game/solo-draft-preference';
 import { OSM_ATTRIBUTION, readBasemapConfig, type BasemapConfig } from '../map/basemap';
 import { MAP_TILES_STORAGE_KEY, readMapTilesChoice } from '../map/tiles-preference';
 
@@ -1148,6 +1149,65 @@ describe('the game world — #475', () => {
     mounted.unmount();
     expect(copy).toBe('Your last ride in the realistic world stayed in it.');
     expect(details).toBeNull();
+  });
+});
+
+describe('drafting on your own — #2425, ADR 0066 D-6', () => {
+  function disk(): PreferenceStorage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+  }
+
+  const settings = (store: PreferenceStorage) =>
+    mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+
+  const toggleIn = (root: ParentNode) =>
+    root.querySelector<HTMLInputElement>('.oyl-solo-draft input[role="switch"]');
+
+  it('is on until the rider turns it off, kept on this device and read back by the ride’s own reader', async () => {
+    const store = disk();
+    const mounted = await settings(store);
+    const toggle = toggleIn(mounted.container);
+    expect(toggle?.closest('label')?.textContent).toContain('Draft behind the pacer and your best');
+    expect(toggle?.checked).toBe(true);
+    expect(readSoloDraftChoice(store)).toBe(true);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readSoloDraftChoice(store)).toBe(false);
+    expect(readDraftReadingChoice(store)).toBe(true);
+    expect(mounted.container.querySelector('.oyl-solo-draft')?.textContent).toContain(
+      ANNOUNCEMENTS_SAVED,
+    );
+    mounted.unmount();
+
+    const again = await settings(store);
+    expect(toggleIn(again.container)?.checked).toBe(false);
+    again.unmount();
+  });
+
+  it('says it changes nothing in a room or a race, and never in watts', async () => {
+    const mounted = await settings(disk());
+    const copy = (mounted.container.querySelector('.oyl-solo-draft')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(copy).toContain('It changes nothing in a room or a race');
+    expect(copy).not.toMatch(/\bW\b|watt/i);
+    mounted.unmount();
   });
 });
 

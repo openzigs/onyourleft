@@ -354,8 +354,11 @@ export interface GameTrainerPort {
    * write. Named so nothing else in production calls a method of that name —
    * the controller's is `noteGameRideEnded` — so `WIRE003` goes red if
    * `GameView` stops calling it.
+   *
+   * `drafted` (#2425, ADR 0066 D-5.1): that the attempt the outcome settles
+   * was ridden in the pacer's or the ghost's draft, latched with it.
    */
-  gameRideEnded(outcome: GhostOutcome | undefined): void;
+  gameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
@@ -614,7 +617,7 @@ interface GameTrainerSource {
   /** #2077. @see GameTrainerPort.ridePowerZoneTime. Optional for a source with no recording. */
   powerZoneTime?(threshold: Watts): TimeInZones | undefined;
   /** #1042. @see GameTrainerPort.gameRideEnded */
-  noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -772,8 +775,8 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       return isDrawable(workout) ? workout : undefined;
     },
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
-    gameRideEnded: (outcome) => {
-      controller?.noteGameRideEnded(outcome);
+    gameRideEnded: (outcome, drafted) => {
+      controller?.noteGameRideEnded(outcome, drafted);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide

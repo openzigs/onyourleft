@@ -1207,8 +1207,12 @@ export interface RideController {
    * result card when it is saved. Ignored unless a
    * ride is recording or paused: a game ride with no recording under it is
    * saved nowhere, so there is nothing to attach it to. Decides no write.
+   *
+   * `drafted` (#2425, ADR 0066 D-5.1): that attempt was ridden in the pacer's
+   * or the ghost's draft, latched by the game with the outcome; kept beside
+   * the outcome it came with, and with it only.
    */
-  noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
@@ -1509,6 +1513,12 @@ export function createRideController(options: RideControllerOptions): RideContro
   let resultAnnounced = false;
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
+  /**
+   * Whether {@link gameOutcome}'s attempt was ridden in a draft — #2425. Set
+   * with every settled outcome and read only beside one, so it needs no reset
+   * of its own: `gameOutcome`'s is the one that matters.
+   */
+  let gameOutcomeDrafted = false;
   /**
    * The course laps of this recording as the HUD was told them, in order —
    * each worked out as its line was crossed. What is SAVED is the recorder's
@@ -3103,6 +3113,10 @@ export function createRideController(options: RideControllerOptions): RideContro
             // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
             averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
             gameOutcome: outcomeInGame,
+            // #2425: only beside the outcome it was latched with.
+            ...(outcomeInGame !== undefined && gameOutcomeDrafted
+              ? { gameOutcomeDrafted: true }
+              : {}),
             // #2307: a test's estimate, from the blocks and power this save wrote.
             ...(testInRide === undefined
               ? {}
@@ -3922,7 +3936,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
     },
 
-    noteGameRideEnded(outcome: GhostOutcome | undefined): void {
+    noteGameRideEnded(outcome: GhostOutcome | undefined, drafted = false): void {
       if (phase !== 'recording' && phase !== 'paused') {
         return;
       }
@@ -3931,6 +3945,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       // to say — and must not erase what an earlier one did say.
       if (outcome !== undefined) {
         gameOutcome = outcome;
+        gameOutcomeDrafted = drafted;
       }
     },
 
