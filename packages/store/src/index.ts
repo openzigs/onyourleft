@@ -34,6 +34,7 @@ export type {
   WorkoutBlockFact,
   WorkoutBlockOutcome,
   AthleteRecord,
+  CalorieSex,
   CameraFrameOutlineRecord,
   CameraFrameRecord,
   CameraFrameSource,
@@ -75,6 +76,8 @@ export type {
 export {
   CAMERA_FRAME_SOURCES,
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
+  isBirthYear,
+  parseCalorieSex,
   RIDE_WRITE_UP_SOURCES,
   RIDER_TEXT_KINDS,
   RIDERLESS_SYNC_BASE_KINDS,

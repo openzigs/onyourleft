@@ -77,6 +77,8 @@ import {
   MaskedWordsPanel,
 } from '../athlete/MaskedWordsPanel';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
+import { CALORIE_INPUTS_LEAD, CalorieInputsPanel } from '../athlete/CalorieInputsPanel';
 import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { DocumentsPanel } from '../rider-text/DocumentsPanel';
@@ -295,6 +297,8 @@ export const DELIVERY_ASSIST_STAYS_HERE =
  */
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_WHERE_IT_GOES,
+  // #2432: where the sex and year of birth are kept, and that they are never sent.
+  CALORIE_INPUTS_LEAD,
   ANNOUNCEMENTS_STAY_HERE,
   DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
@@ -470,6 +474,12 @@ export interface SettingsViewProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The rider's sex and year of birth, for a heart-rate calorie estimate
+   * (#2432). `undefined` where this browser has no local store — the panel
+   * then says so and offers no control.
+   */
+  readonly calorieInputs?: CalorieInputsPort | undefined;
+  /**
    * The rider's goals and documents for the ride analysis (#836).
    * `undefined` where this browser has no local store — each panel then says
    * so and offers no control.
@@ -505,6 +515,7 @@ export function SettingsView({
   basemap,
   themeStorage,
   maskedWords,
+  calorieInputs,
   riderText,
   workoutGoals,
   soundOutput,
@@ -656,6 +667,9 @@ export function SettingsView({
           {...(riderMass === undefined ? {} : { riderMass })}
           onRiderMassChange={onRiderMassChange}
         />
+
+        {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
+        <CalorieInputsPanel port={calorieInputs} />
 
         {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
         <KitPanel

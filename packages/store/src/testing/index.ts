@@ -102,6 +102,7 @@ export {
   memoryWriteStoreFactory,
   misfiledKitColourStoreFactory,
   lastWordDroppedStoreFactory,
+  droppedBirthYearStoreFactory,
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
   appendingEffortStoreFactory,
