@@ -853,17 +853,6 @@ export function ActivityDetailView({
                 {activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}
               </dd>
             </div>
-            {/* #2433: the estimate stored when the ride was saved, as the
-            result card shows it. Read off the record, so a later change of
-            weight or age in Settings does not move it. After *Position*, the
-            sixth fact, because it takes a row of its own (`CaloriesFact.tsx`
-            §`CaloriesFact`): placed after the fifth it left that one alone on
-            a row of two on a phone. */}
-            <CaloriesFact
-              calories={activity.calories}
-              hasPower={activity.averagePower !== undefined}
-              hasHeartRate={available.includes('heartRate')}
-            />
             {/* #785: the races this ride was ridden in, as each room said it —
             kept with the ride on this device, one line each, in order (#1360's
             review, N3). No row for a ride in no race. */}
@@ -1027,6 +1016,24 @@ export function ActivityDetailView({
         </div>
 
         <div>
+          {/*
+        #2433: the estimate stored when the ride was saved, as the result card
+        shows it, read off the record so a later change of weight or age in
+        Settings does not move it. At the head of the second group rather than
+        in the figures above, which is the top of the second column on a
+        tablet: on a phone the figures already end 33 px above the fold on the
+        CI runner's font (`controls-first.browser.spec.ts`, populated
+        390×844), and any row added to them put the page's first control under
+        it. `CaloriesFact.tsx` §`CaloriesFact` has the measurements.
+      */}
+          <dl className="oyl-ride-summary">
+            <CaloriesFact
+              calories={activity.calories}
+              hasPower={activity.averagePower !== undefined}
+              hasHeartRate={available.includes('heartRate')}
+            />
+          </dl>
+
           {/*
         #1319: a ride with a workout lists its blocks, under their own
         heading after the laps — two tables, never one (WorkoutBlocksTable).

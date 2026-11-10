@@ -143,12 +143,14 @@ export function CaloriesLine({
 /**
  * The `<dt>`/`<dd>` pair, for a `<dl>` of ride facts — the ride's page.
  *
- * ⚠️ **The whole width of the facts, on one line**, for {@link CaloriesLine}'s
- * reason one screen over: on a phone the facts are two columns of 9rem, and a
- * seventh fact in one of them wrapped its words down four lines, which put the
- * page's first control 72 px under the fold (`controls-first.browser.spec.ts`).
- * Across the row, the figure and its basis, or the dash and its reason, are one
- * line, and the row costs what any other fact's does.
+ * ⚠️ **Not among the page's first figures**, for {@link CaloriesLine}'s reason
+ * one screen over. On a phone those figures are two columns of 9rem, and the
+ * page's first control is under them. A seventh fact in a column wrapped down
+ * four lines and put that control 72 px under the fold; across the whole row
+ * it cost a row, 42 px under it on the CI runner, where the figures end 33 px
+ * above the fold to begin with (`controls-first.browser.spec.ts`, populated,
+ * 390×844). So the page renders it at the head of its second group — the top
+ * of the second column on a tablet — across the width, on one line.
  */
 export function CaloriesFact({
   calories,
