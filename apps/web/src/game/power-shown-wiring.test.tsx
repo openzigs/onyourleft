@@ -313,6 +313,9 @@ describe('power as a 3 s average or instant, on the ride — #2420', () => {
       expect(average.simulated.some((input) => input.power === watts(300))).toBe(true);
       expect(average.written.length).toBeGreaterThan(1);
       expect(average.totals.at(-1)).toMatch(/^\d+ W$/);
+      // The simulation was advanced with the raw readings, never an average
+      // between them (before the first reading, a meter not live: 0 W).
+      for (const input of average.simulated) expect([0, 200, 300]).toContain(input.power);
       expect(instant.simulated).toStrictEqual(average.simulated);
       expect(instant.written).toStrictEqual(average.written);
       expect(instant.recorded).toStrictEqual(average.recorded);
