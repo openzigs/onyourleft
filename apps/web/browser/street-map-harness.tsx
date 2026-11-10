@@ -17,6 +17,15 @@
  * purpose: the spec counts the map's paints while the label changes, and a
  * label that repainted the map would show it on every frame.
  *
+ * With `?ride=real` (#2419) every frame changes what a REAL ride changes and
+ * a simulated one does not (`useSimulatedRide` passes no trainer and no live
+ * sensors): power, heart rate and cadence, so their fields and the zone
+ * field; the time in each zone, so the zone bar; a written second of the
+ * recent graph, so its heart-rate line; and the trainer status line. Every
+ * one of them on every frame, where a ride writes the graph once a second:
+ * harsher than a ride, on purpose. `route-panel.browser.spec.ts` counts the
+ * route panel's paints while they change.
+ *
  * ## The corridor is a dense synthetic town, on purpose
  *
  * `street-map-testing.ts` §`denseTown`, the one `street-map.test.ts` bounds
@@ -25,6 +34,10 @@
  * 4 km: more shapes within a kilometre of the rider than a real corridor holds
  * anywhere but a city centre, so what this page costs is an upper end rather
  * than a typical ride. It is arithmetic, and no map data from anywhere.
+ *
+ * With `?town=east` (#2397) the route runs due east and the town is turned
+ * with it, so the rider's place moves east–west on the sheet's grid, which
+ * the north route never does.
  *
  * ## What it publishes
  *
@@ -46,11 +59,20 @@ import { StrictMode, useState, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
-import { gradeAt, gradePercent, metres, metresPerSecond, seconds, watts } from '@onyourleft/domain';
+import {
+  gradeAt,
+  gradePercent,
+  metres,
+  metresPerSecond,
+  seconds,
+  watts,
+  type TimeInZones,
+} from '@onyourleft/domain';
 
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { denseTown, denseTownRoute } from '../src/game/hud/street-map-testing';
 import type { GameState } from '../src/game/simulation';
+import type { TraceSample } from '../src/game/hud/recent-trace';
 
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
@@ -115,39 +137,87 @@ function tileGrade(): string | undefined {
   );
 }
 
-const PROFILE = denseTownRoute();
-const CORRIDOR = denseTown();
 const PARAMS = new URL(window.location.href).searchParams;
+/** #2397: which way the route runs through the town (see the module note). */
+const HEADING = PARAMS.get('town') === 'east' ? 'east' : 'north';
+const PROFILE = denseTownRoute(HEADING);
+const CORRIDOR = denseTown(HEADING);
 const STREET = PARAMS.get('map') !== 'outline';
 /** #2385: the compact route panel, and a gradient that swings (see the module note). */
 const COMPACT = PARAMS.get('route') === 'compact';
 const LAYOUT = { hidden: [], textSize: 'normal', route: COMPACT ? 'compact' : 'full' } as const;
+/** #2419: what a real ride changes, changed on every frame (see the module note). */
+const REAL = PARAMS.get('ride') === 'real';
 /** Five kilometres in, so every field has something to say. */
 const START = 5_000;
+/** #2419: the rider's threshold, so a real ride has a zone field and a zone bar. */
+const THRESHOLD = 250;
 
-function stateAt(distance: number): GameState {
+/** #2419: power that swings across three zones, so the zone field changes too. */
+function powerAt(frame: number): number {
+  return REAL ? Math.round(240 + 60 * Math.sin(frame / 3)) : 240;
+}
+
+function stateAt(distance: number, frame: number): GameState {
   return {
     ride: { speed: metresPerSecond(11.1), distance: metres(distance) },
     elapsed: seconds(450),
     ridden: seconds(450),
     grade: COMPACT ? gradePercent(8 * Math.sin(distance / 40)) : gradeAt(PROFILE, metres(distance)),
-    input: { power: watts(240), live: true },
+    input: { power: watts(powerAt(frame)), live: true },
     headwindMetresPerSecond: 0,
   };
 }
 
-let moveTo: ((distance: number) => void) | undefined;
+/** #2419: the recorder's time in zone, a second more of one zone on every frame. */
+function zoneTimeAt(frame: number): TimeInZones {
+  const perZone = [60, 120, 180, 90, 30, 10, 0].map((spent, zone) =>
+    seconds(spent + (zone === frame % 5 ? frame : Math.floor(frame / 5))),
+  );
+  return {
+    perZone,
+    covered: seconds(perZone.reduce((sum, spent) => sum + (spent as number), 0)),
+  };
+}
+
+/** #2419: the recent graph's last minute, a second written on every frame. */
+function recentAt(frame: number): {
+  readonly samples: readonly TraceSample[];
+  readonly written: number;
+} {
+  const written = 60 + frame;
+  const samples = Array.from({ length: 60 }, (_, index) => {
+    const second = written - 60 + index;
+    return { power: 240 + 60 * Math.sin(second / 3), heartRate: 150 + (second % 20) };
+  });
+  return { samples, written };
+}
+
+/** Where the rider is, and how many frames of the ride have been drawn. */
+interface Place {
+  readonly distance: number;
+  readonly frame: number;
+}
+
+let moveTo: ((place: Place) => void) | undefined;
 
 function Harness(): JSX.Element {
-  const [distance, setDistance] = useState(START);
-  moveTo = setDistance;
+  const [{ distance, frame }, setPlace] = useState<Place>({ distance: START, frame: 0 });
+  moveTo = setPlace;
+  const real = REAL
+    ? {
+        thresholdPower: watts(THRESHOLD),
+        powerZoneTime: zoneTimeAt(frame),
+        trainer: { gradePercent: gradeAt(PROFILE, metres(distance)) as number, writes: frame },
+      }
+    : {};
   return (
     <section className="oyl-game oyl-game--riding" aria-label="Trainer game">
       <HudPanel
         profile={PROFILE}
-        state={stateAt(distance)}
-        cadence={{ value: 88, live: true }}
-        heartRate={{ value: 150, live: true }}
+        state={stateAt(distance, frame)}
+        cadence={{ value: REAL ? 80 + (frame % 15) : 88, live: true }}
+        heartRate={{ value: REAL ? 150 + (frame % 20) : 150, live: true }}
         movingSeconds={450}
         elapsedSeconds={450}
         chases={[]}
@@ -158,7 +228,8 @@ function Harness(): JSX.Element {
         layout={LAYOUT}
         // As GameView passes it once a ride has a sample: the graph is in the
         // route panel, shown or hidden by the stylesheet, as on a real ride.
-        recent={{ samples: [{ power: 240, heartRate: 150 }], written: 1 }}
+        recent={REAL ? recentAt(frame) : { samples: [{ power: 240, heartRate: 150 }], written: 1 }}
+        {...real}
         {...(STREET ? { corridor: CORRIDOR, attribution: '© OpenStreetMap contributors' } : {})}
       />
     </section>
@@ -194,13 +265,16 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
   const times: number[] = [];
   const intervals: number[] = [];
   let distance = START;
+  let frame = 0;
   let grade = tileGrade();
   let grades = 0;
   const step = (): void => {
     distance += metresPerFrame;
+    frame += 1;
     const before = performance.now();
+    const place = { distance, frame };
     flushSync(() => {
-      move(distance);
+      move(place);
     });
     times.push(performance.now() - before);
     const now = tileGrade();

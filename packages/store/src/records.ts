@@ -85,6 +85,35 @@ const visibilitiesAgree: VisibilitiesAgree = [true, true];
 void visibilitiesAgree;
 
 /**
+ * The sex whose coefficients a heart-rate calorie estimate uses — #2432. Two
+ * words because Keytel et al. 2005 fits two equations; *Not set* is the field
+ * being absent, never a third value.
+ */
+export type CalorieSex = 'female' | 'male';
+
+/**
+ * The stored sex, or `undefined` for anything else (#2432).
+ *
+ * An unrecognised value on disk reads as unset rather than a
+ * `StoreDecodeError`, for `unit-system.ts`' reason: a hand-edited row decides
+ * only whether a heart-rate ride shows a calorie figure, which is not worth
+ * taking a rider's library away over, and unset shows none.
+ */
+export function parseCalorieSex(value: unknown): CalorieSex | undefined {
+  return value === 'female' || value === 'male' ? value : undefined;
+}
+
+/**
+ * Whether a value can be a stored {@link AthleteRecord.birthYear}: a whole
+ * number (#2432). The plausible range — not in the future, not more than 120
+ * years back — needs today's date, which this package does not read, so the
+ * screen that takes the entry checks it.
+ */
+export function isBirthYear(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+/**
  * The owner of the data on this device.
  *
  * Not an account: Phase 1 has no accounts and no server (owner decision D6).
@@ -137,6 +166,31 @@ export interface AthleteRecord {
    * ever the *source* of that copy.
    */
   readonly mass?: Kilograms;
+
+  /**
+   * The sex whose coefficients the heart-rate calorie estimate uses (#2432):
+   * Keytel et al. 2005 fits one equation for men and one for women, and with
+   * neither chosen a ride with heart rate and no power has no calorie figure.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #2432 reads back with
+   * none, which is a rider who has not said, and nothing substitutes a default.
+   *
+   * ⚠️ **On this device only.** Nothing that is sent to an instance or a model
+   * reads it; the one place it leaves is the rider's own account export.
+   */
+  readonly calorieSex?: CalorieSex;
+
+  /**
+   * The year the rider was born, for the heart-rate calorie estimate's age
+   * (#2432): the age for a ride is the ride's start year minus this. A year
+   * rather than an age, which goes stale, or a date of birth, which identifies
+   * a person far better than an estimate needs.
+   *
+   * Optional for the reason `thresholdPower` gives above, and on this device
+   * only, as {@link AthleteRecord.calorieSex} is.
+   */
+  readonly birthYear?: number;
 
   /**
    * Which units this athlete reads their numbers in (#238).

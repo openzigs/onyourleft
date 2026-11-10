@@ -66,6 +66,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
@@ -570,6 +571,12 @@ export interface AppShellProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The settings screen's read and write of the rider's sex and year of
+   * birth, for a heart-rate calorie estimate (#2432). Optional like every
+   * other port here.
+   */
+  readonly calorieInputs?: CalorieInputsPort | undefined;
+  /**
    * The rider's goals, ride notes and documents for the ride analysis (#836)
    * — `rider-text/rider-text-port.ts`. Optional like every other port here;
    * without one each box says there is no store to keep it in.
@@ -887,6 +894,7 @@ function viewFor(
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
           maskedWords={props.maskedWords}
+          calorieInputs={props.calorieInputs}
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
           soundOutput={props.soundOutput}

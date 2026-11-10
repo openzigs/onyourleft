@@ -281,6 +281,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   settings: [
     'Units',
     'Your weight',
+    // #2432: what the heart-rate estimate is fitted on, and that a ride with
+    // power needs neither input; where they are kept stays above the form.
+    'Calorie estimate from heart rate',
     // #1813: what Delivery is and what each of its assists changes.
     'Delivery',
     // #1905: and the lap race's, the same way.

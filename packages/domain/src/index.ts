@@ -34,6 +34,7 @@ export type {
   DegreesLongitude,
   GeographicPosition,
   GradePercent,
+  Kilocalories,
   Kilograms,
   KilometresPerHour,
   Metres,
@@ -58,6 +59,7 @@ export {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilocalories,
   kilograms,
   kilometresPerHour,
   metres,
@@ -458,6 +460,20 @@ export type {
   ThresholdTestRule,
 } from './analysis/threshold-estimate';
 export { estimateThreshold, THRESHOLD_TEST_RULES } from './analysis/threshold-estimate';
+
+// A ride's calorie estimate (#2431, epic #2430): from its work at an assumed
+// gross efficiency, else from its heart rate by Keytel 2005, else none. The
+// sources, the efficiency ruling and the per-sample rules are in
+// `analysis/calories.ts`.
+
+export type { CalorieEstimate, CalorieRider, CaloriesBasis } from './analysis/calories';
+export {
+  ASSUMED_GROSS_EFFICIENCY,
+  caloriesFromHeartRate,
+  caloriesFromWork,
+  JOULES_PER_KILOCALORIE,
+  rideCalories,
+} from './analysis/calories';
 
 // --- Training zones (#78) ----------------------------------------------------
 //

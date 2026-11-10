@@ -617,6 +617,25 @@ describe('the manifest names its fields rather than spreading the row', () => {
     expect(athlete['kitColour']).toBe('magenta');
   });
 
+  it('carries the sex and year of birth the rider entered — #2432', async () => {
+    await seedLibrary(1);
+    await harness.write(async (store) =>
+      store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 }),
+    );
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['calorieSex']).toBe('female');
+    expect(athlete['birthYear']).toBe(1985);
+  });
+
+  it('carries neither for a rider who entered neither — #2432', async () => {
+    await seedLibrary(1);
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['calorieSex']).toBeUndefined();
+    expect(athlete['birthYear']).toBeUndefined();
+  });
+
   it('carries no kit colour for a rider who never chose one', async () => {
     await seedLibrary(1);
     const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;

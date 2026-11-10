@@ -163,6 +163,7 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
 import type { WorkoutGoalsPort } from './workout-goals/workout-goals-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import {
@@ -1059,6 +1060,11 @@ function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/** The rider's sex and year of birth (#2432), over the same connection. */
+function buildCalorieInputsPort(): CalorieInputsPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
 /**
  * The rider's goals, ride notes and documents (#836), over the same
  * connection: kept on this device first, and synced by `instance/sync.ts`
@@ -1831,6 +1837,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
+          calorieInputs={buildCalorieInputsPort()}
           riderText={buildRiderTextPort()}
           workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}

@@ -88,6 +88,7 @@ import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
@@ -645,6 +646,30 @@ function maskedWordsPort(populated: boolean): MaskedWordsPort {
 }
 
 /**
+ * The rider's sex and year of birth (#2432) — set in the populated walk, which
+ * enters no weight, so its line under the form says the weight is still
+ * needed, and unset in the empty one, so it says no figure is shown.
+ */
+function calorieInputsPort(populated: boolean): CalorieInputsPort {
+  const inputs = populated ? { calorieSex: 'female' as const, birthYear: 1985 } : {};
+  return {
+    athleteId: ATHLETE,
+    store: {
+      getAthlete: (id): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), ...inputs }),
+      setAthleteCalorieInputs: (id, next): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: unixSeconds(NOW),
+          ...(next.calorieSex === undefined ? {} : { calorieSex: next.calorieSex }),
+          ...(next.birthYear === undefined ? {} : { birthYear: next.birthYear }),
+        }),
+    },
+  };
+}
+
+/**
  * The rider's goals, a note on the fixture ride and two documents (#836) — in
  * the populated walk, with one unbreakable word and one long file name, so the
  * reflow walk lays out the widest a box and a row can be.
@@ -858,6 +883,7 @@ export function PopulatedShell({
       settings={settingsPort()}
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
+      calorieInputs={calorieInputsPort(populated)}
       riderText={riderTextPort(populated)}
       workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
