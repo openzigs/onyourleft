@@ -309,9 +309,11 @@ import {
 } from './hud/recent-trace';
 import {
   DEFAULT_HUD_LAYOUT,
+  powerView,
   readHudLayout,
   type HudLayoutPreference,
 } from './hud/hud-layout-preference';
+import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
   pacerGap,
@@ -1290,6 +1292,11 @@ function GameScreen({
   const [state, setState] = useState<GameState | undefined>(undefined);
   /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
   const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
+  /**
+   * #2420: the HUD's 3 s power, one per game ride, fed by the loop after the
+   * simulation took the raw reading. Read by the HUD and by nothing else.
+   */
+  const powerAverageRef = useRef<PowerAverage>(createPowerAverage());
   const [recentTrace, setRecentTrace] = useState<
     { readonly samples: readonly TraceSample[]; readonly written: number } | undefined
   >(undefined);
@@ -2435,6 +2442,8 @@ function GameScreen({
       // the height it will be and nothing moves when the first second lands.
       recentTraceRef.current = createRecentTrace();
       setRecentTrace({ samples: [], written: 0 });
+      // #2420: and a new 3 s average, so no watt of the last ride is in it.
+      powerAverageRef.current = createPowerAverage();
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
@@ -3063,6 +3072,14 @@ function GameScreen({
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a
       // second, and a reading that is not live is a gap, never a zero.
+      // #2420: the HUD's 3 s power, from the reading the simulation was just
+      // advanced with, on the ride's clock. AFTER `advanceTo`, and nothing it
+      // says goes back: the physics, the trainer and the recording keep the
+      // raw reading in either view (`power-average.ts`).
+      powerAverageRef.current.observe(
+        simulation.state.elapsed,
+        sensors.rider.live ? sensors.rider.power : undefined,
+      );
       const traceSecond = sampleSecond(recentTraceRef.current.second, simulation.state.elapsed);
       if (traceSecond !== undefined) {
         const trace = recentTraceRef.current;
@@ -4238,6 +4255,11 @@ function GameScreen({
         recent={recentTrace}
         // #2079: the rider's panels and text size.
         layout={hudLayout}
+        // #2420: power as a 3 s average or instant, as the rider chose.
+        shownPower={{
+          view: powerView(hudLayout),
+          average: powerAverageRef.current.average,
+        }}
         // #2077: the rider's W/kg from the weight the physics rides (`undefined`
         // when none is set, never the default), and the zone indicator from
         // their own threshold and the recorder's time in each zone.

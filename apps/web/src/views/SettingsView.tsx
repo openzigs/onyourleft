@@ -127,15 +127,18 @@ import {
 import {
   HUD_ARRANGEMENTS,
   HUD_PANELS,
+  HUD_POWER_VIEWS,
   HUD_ROUTE_VIEWS,
   HUD_TEXT_SIZES,
   panelShown,
+  powerView,
   readHudLayout,
   totalsStripChosen,
   writeHudLayout,
   type HudArrangement,
   type HudLayoutPreference,
   type HudPanelId,
+  type HudPowerView,
   type HudRouteView,
   type HudTextSize,
 } from '../game/hud/hud-layout-preference';
@@ -1889,6 +1892,12 @@ const HUD_ROUTE_VIEW_LABELS: Readonly<Record<HudRouteView, string>> = {
   compact: 'Compact: a small map with the gradient on it',
 };
 
+/** #2420: what each way of showing power is called here. */
+const HUD_POWER_VIEW_LABELS: Readonly<Record<HudPowerView, string>> = {
+  average: '3-second average',
+  instant: 'Instant',
+};
+
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
   normal: 'Normal',
@@ -1908,6 +1917,9 @@ const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
  *
  * Since #2385 the rider may draw the route panel compact: the map alone, with
  * the gradient on it, which puts the gradient back beside the focus readout.
+ *
+ * Since #2420 the rider may show power instant rather than as the 3-second
+ * average, the default: what the HUD shows, and nothing the ride records.
  *
  * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
  * as every ride-time control is: it is set from the bars as often as the sofa.
@@ -1935,16 +1947,24 @@ function HudLayoutPanel({
         level={3}
         id="oyl-hud-layout-heading"
         help={
-          <p className="oyl-muted">
-            What the game shows while you ride, from your next ride. Power, cadence and heart rate,
-            the ride controls and every notice are always shown. Focus shows one compact readout at
-            the top in place of every reading; a ride in a room, a Delivery round or a lap race
-            keeps the full layout and draws no totals strip. The compact route panel is a small map
-            with the gradient on it, in place of the height profile and the map. The text size
-            applies on tablets held either way, and the totals strip on a tablet on its side or a
-            tall, narrow one held upright: a phone or a short window keeps the normal size, and has
-            no strip, because it has no room for them beside the road.
-          </p>
+          <>
+            <p className="oyl-muted">
+              What the game shows while you ride, from your next ride. Power, cadence and heart
+              rate, the ride controls and every notice are always shown. Focus shows one compact
+              readout at the top in place of every reading; a ride in a room, a Delivery round or a
+              lap race keeps the full layout and draws no totals strip. The compact route panel is a
+              small map with the gradient on it, in place of the height profile and the map. The
+              text size applies on tablets held either way, and the totals strip on a tablet on its
+              side or a tall, narrow one held upright: a phone or a short window keeps the normal
+              size, and has no strip, because it has no room for them beside the road.
+            </p>
+            <p className="oyl-muted">
+              Power changes with every pedal stroke, so by default the game shows the average of the
+              last 3 seconds, as most bike computers do. It is about a second behind a sudden
+              change; Instant shows each reading as it arrives. Either way, the trainer, the
+              recording and the ride’s totals use every reading as it arrives.
+            </p>
+          </>
         }
       >
         Ride HUD
@@ -1962,6 +1982,22 @@ function HudLayoutPanel({
               }}
             />{' '}
             {HUD_ARRANGEMENT_LABELS[arrangement]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Power</legend>
+        {HUD_POWER_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-power-view"
+              checked={powerView(layout) === view}
+              onChange={() => {
+                keep({ ...layout, power: view });
+              }}
+            />{' '}
+            {HUD_POWER_VIEW_LABELS[view]}
           </label>
         ))}
       </fieldset>

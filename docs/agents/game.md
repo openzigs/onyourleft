@@ -1175,7 +1175,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/hud/hud-layout-preference.ts
                         the panels a rider turns off and the HUD's text size
                         (#2079), kept on the device and read as a ride starts;
-                        never the notices, the controls or the primary readings
+                        never the notices, the controls or the primary readings.
+                        Since #2420 also how power is shown: the 3 s average
+                        (the default; absent or unknown reads as it) or instant
+    src/game/hud/power-average.ts
+                        the HUD's 3 s power (#2420): a time-weighted mean over
+                        the ride's clock, fed by the frame loop AFTER
+                        `advanceTo` took the raw reading; a gap is left out,
+                        never a zero, and a meter not live has no average.
+                        ⚠️ Display only: the power field, W/kg, the zone and
+                        the focus readout read it; the simulation, the trainer,
+                        the recording, the totals, the zone time, the recent
+                        graph and the spoken power keep the raw reading
+                        (`power-shown-wiring.test.tsx` holds them identical)
     src/game/hud/totals-strip.ts
                         the whole ride's totals along the bottom of the road
                         (#2387), a rider's choice, off by default: the lap (a
