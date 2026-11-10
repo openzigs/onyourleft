@@ -219,6 +219,85 @@ export function sampledCornerRoute(
 }
 
 /**
+ * How many samples either side of {@link jitteredJunctionRoute}'s corner are
+ * moved sideways: **six**, 60 m of road each way, the stretch a GPS track or a
+ * traced street wanders over through a junction.
+ */
+export const JUNCTION_JITTERED_SAMPLES = 6;
+
+/**
+ * A street corner as an imported course draws it — #2422: 1 500 m north, a
+ * turn of `degrees` to the `hand` side at **one sample**, and 1 500 m on along
+ * the new heading, sampled every **10 m** (one second of a GPS track at
+ * 36 km/h). The {@link JUNCTION_JITTERED_SAMPLES} samples either side of the
+ * corner are moved across their own leg by up to `jitter` metres, uniformly,
+ * from a 32-bit xorshift started at `seed`, so the same arguments are always
+ * the same route.
+ *
+ * ⚠️ **Synthetic, and derived from a shape, not a place**: no coordinate in it
+ * was read from anybody's ride. With `jitter` nought it is the same junction
+ * un-jittered, which is the line radius #2422's bound is measured against.
+ *
+ * The default seed is one a scan of seeds on 2026-11-10 found pins the line:
+ * its jitter puts the samples either side of the corner where the line, held
+ * to the carriageway, can no longer spread the turn, and it turns the whole
+ * 90° at the corner's one sample (a peak of 0.151 per metre against the
+ * un-jittered 0.058). Most seeds do not; this is the case #2422 is about.
+ *
+ * `grade`, a fraction, is the road's steady gradient to the corner, and level
+ * after it; nought, the default, is level throughout. A grade that changes at
+ * the corner is what makes a trainer's writes there depend on WHERE the grade
+ * is read, which the easing must never move.
+ */
+export function jitteredJunctionRoute(
+  degrees = 90,
+  hand: 'right' | 'left' = 'right',
+  jitter = 3,
+  seed = 12_345,
+  grade = 0,
+): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const corner = 1_500;
+  const spacing = 10;
+  const turn = (degrees * Math.PI) / 180;
+  const mirror = hand === 'right' ? 1 : -1;
+  let state = seed >>> 0 || 1;
+  const next = (): number => {
+    // A 32-bit xorshift: a fixed sequence, not a seed the ride reads.
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 2 * corner + 1e-9; along += spacing) {
+    const past = Math.max(0, along - corner);
+    let east = past * Math.sin(turn);
+    let north = Math.min(along, corner) + past * Math.cos(turn);
+    const fromCorner = Math.round(Math.abs(along - corner) / spacing);
+    if (fromCorner >= 1 && fromCorner <= JUNCTION_JITTERED_SAMPLES) {
+      // Across this sample's own leg: east on the way in, the new leg's normal after.
+      const across = (2 * next() - 1) * jitter;
+      if (along < corner) {
+        east += across;
+      } else {
+        east += across * Math.cos(turn);
+        north -= across * Math.sin(turn);
+      }
+    }
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(grade * Math.min(along, corner)),
+    });
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
  * floor meets its walls 20 m either side of the stream, inside a bridge's
  * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to

@@ -4,7 +4,9 @@
  * The drawn rider eases off for a sharp bend — #1998: the lean it is drawn at,
  * the place it is drawn at and the speed lost and given back, read through
  * the frame a renderer is handed, and that nothing a ride records or a
- * trainer is sent moves.
+ * trainer is sent moves. And #2422: a corner an imported course draws at one
+ * sample, with the samples either side wandering, is eased as the corner it
+ * is rather than as the spike the line makes of it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,8 +23,11 @@ import {
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
+import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
+
 import {
   BRAKING_METRES_PER_SECOND_SQUARED,
+  CURVATURE_WINDOW_METRES,
   EASED_LEAN_RADIANS,
   EASING_WINDOW_METRES,
   GIVE_BACK_SHARE,
@@ -33,6 +38,13 @@ import {
 } from './bend-easing';
 import { combinedLean } from './bicycle';
 import { CAMERA_BEHIND_METRES } from './camera';
+import {
+  GAME_TRAINER_MODULES,
+  WIRING_SOURCE,
+  plantedOver,
+  seamViolations,
+  trainerCommandSeam,
+} from './cannot-reach-trainer-testing';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
 import { lineOffsetAt, racingLine, type RacingLine } from './racing-line';
@@ -40,8 +52,10 @@ import {
   circuitRoute,
   cornerRoute,
   hairpinRoute,
+  jitteredJunctionRoute,
   levelHairpinRoute,
   northRoute,
+  plannerCornerRoute,
 } from './route-fixtures-testing';
 import { cameraPose, chaseRider, drawnRiderDistance, placedRiders, sceneFrame } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
@@ -424,4 +438,213 @@ describe('nothing a ride records or a trainer is sent moves — #1998', () => {
     // Non-vacuity: the two rides were DRAWN differently, so the easing ran.
     expect(eased.drawn).not.toEqual(before.drawn);
   }, 30_000);
+});
+
+/**
+ * One power trace, 400 W, ridden through the simulation and the gradient
+ * session with a frame drawn every 200 ms in the order `GameView`'s loop does
+ * it — #2422. `route` is called once per ride, so each ride has a fresh line.
+ */
+async function rideThrough(
+  route: () => RouteProfile,
+  uneased: boolean,
+  untilMs: number,
+): Promise<{
+  trace: number[];
+  written: SimulationParameters[];
+  writtenAt: number[];
+  drawn: number[];
+  distance: number;
+}> {
+  const profile = route();
+  const written: SimulationParameters[] = [];
+  const writtenAt: number[] = [];
+  let now = 0;
+  const session = createGradientSession({
+    profile,
+    control: {
+      setSimulationParameters: async (parameters) => {
+        written.push(parameters);
+        writtenAt.push(now);
+        return Promise.resolve();
+      },
+      letGo: async () => Promise.resolve({ kind: 'stopped' }),
+    },
+  });
+  const simulation = new GameSimulation({
+    profile,
+    conditions: { totalMass: kilograms(80), airDensityKilogramsPerCubicMetre: 1.2 },
+  });
+  const origin = corridorOrigin(profile);
+  const trace: number[] = [];
+  const drawn: number[] = [];
+  for (; now <= untilMs; now += 200) {
+    simulation.advanceTo(now, { power: watts(400), live: true });
+    session.sample(simulation.state.elapsed, simulation.state.ride.distance);
+    const frame = sceneFrame({ profile, origin, state: simulation.state, uneased });
+    drawn.push(frame.camera.x, frame.camera.z);
+    // The recorded distance, the HUD's speed and the clock.
+    trace.push(
+      simulation.state.ride.distance,
+      simulation.state.ride.speed,
+      simulation.state.elapsed,
+    );
+    await session.settled();
+  }
+  session.stop();
+  return { trace, written, writtenAt, drawn, distance: simulation.state.ride.distance };
+}
+
+/** `v` in km/h as metres a second. */
+const KMH = 1 / 3.6;
+
+/** The steady-turn speed at {@link EASED_LEAN_RADIANS} on a radius: `√(g·tan 25°·R)`. */
+function steadyTurnSpeed(radius: number): number {
+  return Math.sqrt(
+    STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED * Math.tan(EASED_LEAN_RADIANS) * radius,
+  );
+}
+
+/** The line's tightest radius between two distances, from its own samples. */
+function tightestRadius(route: RouteProfile, from: number, to: number): number {
+  const line = racingLine(route);
+  let peak = 0;
+  line.curvatures.forEach((curvature, index) => {
+    const at = index * route.resolution;
+    if (at >= from && at <= to) peak = Math.max(peak, Math.abs(curvature));
+  });
+  return 1 / peak;
+}
+
+/** The slowest a rider holding `speed` is drawn between two odometer readings. */
+function slowestDrawn(route: RouteProfile, speed: number, from: number, to: number): number {
+  const line = racingLine(route);
+  let slowest = Number.POSITIVE_INFINITY;
+  for (let at = from; at <= to; at += 0.5) {
+    slowest = Math.min(slowest, easedPlace(line, at, speed).speed);
+  }
+  return slowest;
+}
+
+/**
+ * The corners #2422 is about: each, the stretch of odometer that rides
+ * through it, and the same corner un-jittered, whose line's radius is the bound.
+ */
+const JUNCTIONS: readonly (readonly [string, RouteProfile, number, number, RouteProfile])[] = [
+  [
+    'a 90° junction drawn at one sample, the samples either side wandering 3 m',
+    jitteredJunctionRoute(),
+    1_200,
+    1_900,
+    jitteredJunctionRoute(90, 'right', 0),
+  ],
+  [
+    'plannerCornerRoute(90), a 90° turn at one sample of a 25 m course',
+    plannerCornerRoute(90),
+    1_200,
+    1_900,
+    plannerCornerRoute(90),
+  ],
+];
+
+describe('a corner an imported course draws at one sample — #2422', () => {
+  it('is the case: the wandering samples pin the line, and it turns the whole corner at one sample', () => {
+    // Non-vacuity for everything below: the jittered junction's line is far
+    // tighter than the same junction un-jittered — the spike #1998 slowed for.
+    expect(tightestRadius(jitteredJunctionRoute(), 1_400, 1_600)).toBeLessThan(7);
+    expect(tightestRadius(jitteredJunctionRoute(90, 'right', 0), 1_400, 1_600)).toBeGreaterThan(17);
+    // And the window that reads it is wider than the spike, two samples.
+    expect(CURVATURE_WINDOW_METRES).toBeGreaterThan(2 * jitteredJunctionRoute().resolution);
+  });
+
+  it.each(JUNCTIONS)(
+    'draws a rider at 30–45 km/h through %s no slower than 90 % of the un-jittered line’s steady-turn speed at 25°',
+    (_, route, from, to, clean) => {
+      const floor = steadyTurnSpeed(tightestRadius(clean, 1_400, 1_600));
+      for (const kmh of [30, 35, 40, 45]) {
+        const speed = kmh * KMH;
+        // Jitter may not deepen the slow-down by more than a tenth.
+        expect(slowestDrawn(route, speed, from, to)).toBeGreaterThanOrEqual(
+          0.9 * Math.min(speed, floor),
+        );
+      }
+    },
+  );
+
+  it('still eases the junction itself: a rider faster than its steady-turn speed is drawn slower', () => {
+    const floor = steadyTurnSpeed(
+      tightestRadius(jitteredJunctionRoute(90, 'right', 0), 1_400, 1_600),
+    );
+    const slowest = slowestDrawn(jitteredJunctionRoute(), 45 * KMH, 1_200, 1_900);
+    expect(slowest).toBeLessThan(45 * KMH - 1);
+    expect(slowest).toBeLessThan(1.2 * floor);
+  });
+
+  it.each([
+    ...JUNCTIONS,
+    ...BENDS.map(([name, route, from, to]) => [name, route, from, to, route] as const),
+  ])(
+    'never surges through %s: no faster than the give-back, and never backwards between frames 50 ms apart',
+    (_, route, from, to) => {
+      const line = racingLine(route);
+      for (const kmh of [30, 35, 40, 45]) {
+        const speed = kmh * KMH;
+        // A frame every 50 ms at a held speed: the odometer moves speed × 0.05.
+        const step = speed * 0.05;
+        let previous = easedPlace(line, from, speed);
+        for (let at = from + step; at <= to + 300; at += step) {
+          const place = easedPlace(line, at, speed);
+          expect(place.speed).toBeLessThanOrEqual(speed * (1 + GIVE_BACK_SHARE) + 1e-9);
+          expect(place.distance).toBeGreaterThanOrEqual(previous.distance);
+          previous = place;
+        }
+      }
+    },
+  );
+
+  // Each DESCENDS 4 % to the corner and is level after it, so the grade a
+  // trainer is sent changes at the corner: a write read at any place but the
+  // odometer — the eased place is metres behind it there — is a different one.
+  it.each([
+    ['the jittered junction', () => jitteredJunctionRoute(90, 'right', 3, 12_345, -0.04)],
+    ['plannerCornerRoute(90)', () => plannerCornerRoute(90, 'right', -0.04, 0)],
+  ] as const)(
+    'sends the same simulation-parameter writes at the same times through %s, and records the same ride, eased or not',
+    async (_, route) => {
+      const eased = await rideThrough(route, false, 150_000);
+      const before = await rideThrough(route, true, 150_000);
+      // Through the corner and well out of it.
+      expect(eased.distance).toBeGreaterThan(1_700);
+      expect(eased.written.length).toBeGreaterThan(0);
+      expect(eased.written).toEqual(before.written);
+      expect(eased.writtenAt).toEqual(before.writtenAt);
+      expect(eased.trace).toEqual(before.trace);
+      // Non-vacuity: the two rides were DRAWN differently, so the easing ran.
+      expect(eased.drawn).not.toEqual(before.drawn);
+    },
+    60_000,
+  );
+});
+
+describe('no trainer-path module can see the easing — #2422', () => {
+  const easing = 'apps/web/src/game/bend-easing.ts';
+  const trainerPath = [...trainerCommandSeam(WIRING_SOURCE), ...GAME_TRAINER_MODULES];
+
+  it('reaches bend-easing.ts from none of the trainer-command seam, gradient.ts, trainer-port.ts or ride/trainer.ts', () => {
+    expect(trainerPath).toEqual(expect.arrayContaining([...GAME_TRAINER_MODULES]));
+    expect(trainerPath.length).toBeGreaterThan(GAME_TRAINER_MODULES.length);
+    expect(seamViolations(trainerPath, [easing])).toEqual([]);
+  });
+
+  it('is a walk that can fail: a planted import of the easing in gradient.ts is caught', () => {
+    const gradient = 'apps/web/src/game/gradient.ts';
+    const found = seamViolations(
+      [gradient],
+      [easing],
+      plantedOver({
+        [gradient]: "import { easedPlace } from './bend-easing';\nvoid easedPlace;\n",
+      }),
+    );
+    expect(found).not.toEqual([]);
+  });
 });

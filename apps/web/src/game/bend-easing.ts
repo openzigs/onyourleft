@@ -20,7 +20,9 @@
  * is their odometer, moving at a drawn speed `u`:
  *
  * - **Into a bend**, `u` is at most the speed whose steady-turn lean on the
- *   LINE is {@link EASED_LEAN_RADIANS} (25°), `√(g·tan 25° / |κ|)`, and it
+ *   LINE is {@link EASED_LEAN_RADIANS} (25°), `√(g·tan 25° / |κ|)` — `κ` the
+ *   line's curvature as a rider could ride it, with a turn the line makes at
+ *   one sample spread over {@link CURVATURE_WINDOW_METRES} (#2422) — and it
  *   comes down to it at {@link BRAKING_METRES_PER_SECOND_SQUARED} before the
  *   bend, and goes back up at {@link PICK_UP_METRES_PER_SECOND_SQUARED} after.
  *   While `u` is below the rider's own speed `v`, the drawn rider falls behind
@@ -152,6 +154,53 @@ const LIMIT_STEP_METRES = 0.5;
  */
 const LEAN_READ_METRES = 0.5;
 
+/**
+ * How much sharper than both of its neighbours a sample of the line's
+ * curvature must be to be read as a turn squeezed into ONE sample: **1.5
+ * times**. Chosen from a measurement on 2026-11-10: on every bend this suite
+ * draws (the 5, 10 and 20 m hairpins and corners, a 135° corner, the S-bends,
+ * a stadium, a circuit, the 5 m sampled corners, `plannerCornerRoute` at 45°
+ * and 90° and `plannerRoute`) no sample of the line is more than **1.12**
+ * times both of its neighbours, because a line the solve can spread is
+ * spread (`racing-line.ts` minimises its PEAK). Where the line cannot spread
+ * a turn it is far over: **5.96** on `plannerCornerRoute(120)` and **32** on
+ * `jitteredJunctionRoute`. So every bend that is spread is eased exactly as
+ * before, to the bit, and only a squeezed one is read differently.
+ */
+export const ISOLATED_TURN_RATIO = 1.5;
+
+/**
+ * Over how much of the line a turn squeezed into one sample is spread: **30
+ * m**, the mean |curvature| over 15 m either side of that sample — #2422.
+ * Chosen, and why:
+ *
+ * A street corner on an imported course is drawn at one sample, and a GPS
+ * track or a traced street wanders a few metres across the road either side
+ * of it. Those samples pin the line against the road's edge and it can no
+ * longer spread the turn: on `jitteredJunctionRoute` (3 m of jitter) it turns
+ * the whole 90° at one sample, a peak of 0.151 per metre (a radius of 6.6 m),
+ * where the same junction un-jittered peaks at 0.058 (17.4 m). The line is
+ * known only every 10 m and is linear between, so that one sample is a spike
+ * 20 m wide that no rider rides: read at its tightest within half a metre, as
+ * #1998 did, it eased a rider at 35 km/h to 19.8 km/h, 13 m behind their
+ * odometer, through a corner whose un-jittered line a rider takes at 32 km/h.
+ *
+ * 30 m is a little longer than a 90° corner's turn on the line at the
+ * un-jittered radius (about 27 m), so the squeezed turn is read as about the
+ * turn it is: 1.51 rad over 30 m, a radius of 19 m. The mean of the
+ * |curvature|, never the signed one, so a wander back the other way cannot
+ * cancel the turn out. And it is never read as more than the sample itself,
+ * nor less than {@link ISOLATED_TURN_RATIO} times its sharper neighbour.
+ *
+ * ⚠️ **What it costs**: through that one sample the rider is drawn faster than
+ * the sample's own curvature allows at {@link EASED_LEAN_RADIANS}, so the lean
+ * `racing-line.ts` §`leanAt` draws there is more than 25° for a moment, up to
+ * its 38.7° cap. The lean is rate-limited, so it is a roll in and out over a
+ * few metres, not a snap; and the lean is drawn from the line, which this file
+ * does not change.
+ */
+export const CURVATURE_WINDOW_METRES = 30;
+
 /** Where a speed limit is no limit — a straight, curvature nought. Finite so it interpolates. */
 const NO_LIMIT_SQUARED = 1e12;
 
@@ -178,8 +227,9 @@ export interface EasedPlace {
  *    sample that is under it can reach back to — by braking from the
  *    give-back's speed — is where the lag can first be other than nought.
  * 2. **The limit** on a half-metre grid from there to beyond the odometer by
- *    a stop's length: the steady-turn limit of the tightest curvature within
- *    {@link LEAN_READ_METRES}, brought down ahead of a bend at
+ *    a stop's length: the steady-turn limit of the tightest RIDEABLE
+ *    curvature within {@link LEAN_READ_METRES} (@see rideableCurvatures),
+ *    brought down ahead of a bend at
  *    {@link BRAKING_METRES_PER_SECOND_SQUARED} and up after it at
  *    {@link PICK_UP_METRES_PER_SECOND_SQUARED}. Fine, not per sample: the
  *    limit's square, `g·tan 25° / κ`, is convex in a curvature that is linear
@@ -324,9 +374,67 @@ function tightestNear(line: RacingLine, distance: number): number {
   return tightest;
 }
 
-/** The line's |curvature| at a distance, linear between samples — `racing-line.ts` §`curvatureAt`'s reading. */
+/**
+ * The line's curvature as a rider could ride it, per sample — #2422: the
+ * line's own, except that a sample more than {@link ISOLATED_TURN_RATIO} times
+ * as sharp as both of its neighbours, a turn the line makes at one sample, is
+ * read as the mean |curvature| over {@link CURVATURE_WINDOW_METRES} about it —
+ * never more than its own and never less than that ratio times its sharper
+ * neighbour — with its own sign. Every other sample is the line's, to the bit.
+ *
+ * Computed once per line and cached against the line OBJECT in a `WeakMap`,
+ * as `racing-line.ts` caches the line against its profile.
+ */
+function rideableCurvatures(line: RacingLine): Float64Array {
+  const known = rideable.get(line);
+  if (known !== undefined) {
+    return known;
+  }
+  const raw = line.curvatures;
+  const found = Float64Array.from(raw);
+  const resolution: number = line.profile.resolution;
+  const last = raw.length - 1;
+  for (let index = 0; index <= last; index += 1) {
+    const here = Math.abs(raw[index] as number);
+    const neighbour = Math.max(
+      index > 0 ? Math.abs(raw[index - 1] as number) : 0,
+      index < last ? Math.abs(raw[index + 1] as number) : 0,
+    );
+    // Only an isolated sample can be read as anything but its own, so the
+    // window's mean is worked out there and nowhere else: a long route's
+    // first frame reads one sample in a few hundred, not every one.
+    if (here <= ISOLATED_TURN_RATIO * neighbour) continue;
+    const spread = Math.max(
+      ISOLATED_TURN_RATIO * neighbour,
+      meanCurvatureNear(raw, line, index * resolution),
+    );
+    if (spread < here) {
+      found[index] = Math.sign(raw[index] as number) * spread;
+    }
+  }
+  rideable.set(line, found);
+  return found;
+}
+
+const rideable = new WeakMap<RacingLine, Float64Array>();
+
+/** The mean of `values`' |curvature| on {@link LIMIT_STEP_METRES} over {@link CURVATURE_WINDOW_METRES} centred on `distance`. */
+function meanCurvatureNear(values: Float64Array, line: RacingLine, distance: number): number {
+  const steps = Math.round(CURVATURE_WINDOW_METRES / 2 / LIMIT_STEP_METRES);
+  let sum = 0;
+  for (let step = -steps; step <= steps; step += 1) {
+    sum += curvatureOf(values, line, distance + step * LIMIT_STEP_METRES);
+  }
+  return sum / (2 * steps + 1);
+}
+
+/** The line's RIDEABLE |curvature| at a distance, linear between samples. @see rideableCurvatures */
 function curvatureAt(line: RacingLine, distance: number): number {
-  const values = line.curvatures;
+  return curvatureOf(rideableCurvatures(line), line, distance);
+}
+
+/** `values`' |curvature| at a distance, linear between samples — `racing-line.ts` §`curvatureAt`'s reading. */
+function curvatureOf(values: Float64Array, line: RacingLine, distance: number): number {
   if (values.length < 2) {
     return 0;
   }

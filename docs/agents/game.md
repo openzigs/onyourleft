@@ -313,7 +313,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its odometer less a lag, at a speed whose lean on the
                         line is at most 25°, braking at 3 m/s² and picking up
                         at 1 m/s², and the lag is given back after the bend at
-                        up to 15 % over the rider's speed. ⚠️ **A drawing,
+                        up to 15 % over the rider's speed. Since #2422 the
+                        limit reads the line's curvature as a rider could ride
+                        it: a sample more than 1.5 times as sharp as both its
+                        neighbours (a turn the line makes at ONE sample, which
+                        a junction an imported course draws as a vertex, with
+                        the samples either side wandering, pins the line into)
+                        is read as the mean |curvature| over 30 m about it.
+                        Measured on `jitteredJunctionRoute` at 35 km/h: eased
+                        to 19.8 km/h with 13.2 m of lag before, 34.2 km/h and
+                        none after; every bend the line spreads (no sample
+                        over 1.12 times its neighbours on any fixture) eases
+                        exactly as before. ⚠️ The cost: through that one
+                        sample the drawn lean passes 25°, to its 38.7° cap for
+                        a moment. ⚠️ **A drawing,
                         never physics**: the simulation, the trainer's grade,
                         recording, the HUD, the ghost's replay and the pacer's
                         gap stay on the odometer, and `bend-easing.test.ts`
