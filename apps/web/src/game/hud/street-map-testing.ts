@@ -12,7 +12,9 @@
  *
  * {@link denseTown} and {@link denseTownRoute} are #2380's: a town denser
  * than a real corridor holds anywhere but a city centre, which the unit tests
- * bound the drawing over and `browser/street-map-harness.tsx` rides.
+ * bound the drawing over and `browser/street-map-harness.tsx` rides. Each
+ * runs north by default and, given `'east'`, east (#2397): the same town
+ * turned a quarter turn, so the sheet's long side runs along it.
  */
 
 import { NO_BUILDING_FIELDS } from '@onyourleft/map-features';
@@ -111,19 +113,47 @@ export function northCorridor(routeId = 'north'): WorldCorridor {
 }
 
 /**
- * 40 km due north from 0° N, 0° E, a sample every 100 m — #2380. On the
- * equator at the prime meridian, in the sea: no place a rider could ride, so
- * nothing here is of anywhere.
+ * Which way {@link denseTownRoute} runs, and {@link denseTown} with it — #2397.
+ * The sheet is 12 km east–west by 1.5 km north–south (`street-map.ts`
+ * §`REACH_ACROSS_METRES`), so a town 4 km wide draws a third of the sheet's
+ * long side one way and all of it the other.
  */
-export function denseTownRoute(): RouteProfile {
+export type DenseTownHeading = 'north' | 'east';
+
+/**
+ * 40 km due north (or, #2397, due east) from 0° N, 0° E, a sample every
+ * 100 m — #2380. On the equator at the prime meridian, in the sea: no place a
+ * rider could ride, so nothing here is of anywhere.
+ */
+export function denseTownRoute(heading: DenseTownHeading = 'north'): RouteProfile {
   const points: RoutePoint[] = [];
   for (let index = 0; index <= 400; index += 1) {
+    const along = (index * 100) / 111_320;
     points.push({
-      position: geographicPosition(degreesLatitude((index * 100) / 111_320), degreesLongitude(0)),
+      position: geographicPosition(
+        degreesLatitude(heading === 'north' ? along : 0),
+        degreesLongitude(heading === 'east' ? along : 0),
+      ),
       elevation: altitudeMetres(60 + 20 * Math.sin(index / 30)),
     });
   }
   return routeProfile(points);
+}
+
+/**
+ * A quarter turn clockwise seen from above, in the corridor's frame (`x` WEST,
+ * `z` NORTH): north becomes east and west becomes north, so `(x, z)` is
+ * `(-z, x)`. At the equator a degree of longitude is a degree of latitude's
+ * metres, so the turned town lies along {@link denseTownRoute}`('east')` as
+ * the unturned one lies along the north route.
+ */
+function turned(values: Float32Array): Float32Array {
+  const out = new Float32Array(values.length);
+  for (let index = 0; index + 1 < values.length; index += 2) {
+    out[index] = -(values[index + 1] as number);
+    out[index + 1] = values[index] as number;
+  }
+  return out;
 }
 
 /** A line from (x0, z0) to (x1, z1) with a vertex every 20 m. */
@@ -141,9 +171,10 @@ function denseLine(x0: number, z0: number, x1: number, z1: number): Float32Array
  * street every 100 m both ways across 2 km either side of the route, a vertex
  * every 20 m, a footway between each pair of streets running north and a lake
  * every 4 km, cut into 1 km tiles as the archive's are. It is arithmetic, and
- * no map data from anywhere.
+ * no map data from anywhere. Given `'east'` (#2397), the same town turned
+ * a quarter turn ({@link turned}), round the east route.
  */
-export function denseTown(): WorldCorridor {
+export function denseTown(heading: DenseTownHeading = 'north'): WorldCorridor {
   const streets: WorldCorridor['streets'][number][] = [];
   const paths: WorldCorridor['paths'][number][] = [];
   const landUse: WorldCorridor['landUse'][number][] = [];
@@ -177,7 +208,7 @@ export function denseTown(): WorldCorridor {
       landUse.push({ layer: 'water', kind: 'lake', rings: [Float32Array.from(ring)] });
     }
   }
-  return {
+  const north: WorldCorridor = {
     routeId: 'dense-town',
     origin: { latitude: 0, longitude: 0, elevation: 60 },
     covered: () => true,
@@ -186,5 +217,19 @@ export function denseTown(): WorldCorridor {
     buildings: [],
     paths,
     streets,
+  };
+  if (heading === 'north') return north;
+  return {
+    ...north,
+    routeId: 'dense-town-east',
+    coveredBoxes: coveredBoxes.map((box) => ({
+      minX: -box.maxZ,
+      minZ: box.minX,
+      maxX: -box.minZ,
+      maxZ: box.maxX,
+    })),
+    landUse: landUse.map((feature) => ({ ...feature, rings: feature.rings.map(turned) })),
+    paths: paths.map((path) => ({ ...path, line: turned(path.line) })),
+    streets: streets.map((street) => ({ ...street, line: turned(street.line) })),
   };
 }

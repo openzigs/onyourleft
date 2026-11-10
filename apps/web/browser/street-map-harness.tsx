@@ -26,6 +26,10 @@
  * anywhere but a city centre, so what this page costs is an upper end rather
  * than a typical ride. It is arithmetic, and no map data from anywhere.
  *
+ * With `?town=east` (#2397) the route runs due east and the town is turned
+ * with it, so the rider's place moves east–west on the sheet's grid, which
+ * the north route never does.
+ *
  * ## What it publishes
  *
  * `window.__oylStreetMap.ride(frames, metresPerFrame, paced)` advances the
@@ -115,9 +119,11 @@ function tileGrade(): string | undefined {
   );
 }
 
-const PROFILE = denseTownRoute();
-const CORRIDOR = denseTown();
 const PARAMS = new URL(window.location.href).searchParams;
+/** #2397: which way the route runs through the town (see the module note). */
+const HEADING = PARAMS.get('town') === 'east' ? 'east' : 'north';
+const PROFILE = denseTownRoute(HEADING);
+const CORRIDOR = denseTown(HEADING);
 const STREET = PARAMS.get('map') !== 'outline';
 /** #2385: the compact route panel, and a gradient that swings (see the module note). */
 const COMPACT = PARAMS.get('route') === 'compact';
