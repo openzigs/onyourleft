@@ -19,6 +19,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilocalories,
   kilograms,
   metres,
   metresPerSecond,
@@ -39,6 +40,7 @@ describe('the constructors that reject what is not the quantity at all', () => {
     ['cadence', revolutionsPerMinute],
     ['heart rate', beatsPerMinute],
     ['duration', seconds],
+    ['energy in kilocalories', kilocalories],
   ] as const;
 
   it.each(magnitudes)('%s rejects NaN, which is what a truncated payload decodes to', (_, make) => {
@@ -65,6 +67,7 @@ describe('the constructors that reject what is not the quantity at all', () => {
   it('names the quantity in the message, so a decoder knows which field was bad', () => {
     expect(() => watts(-1)).toThrow(/power in watts/);
     expect(() => beatsPerMinute(-1)).toThrow(/heart rate in beats per minute/);
+    expect(() => kilocalories(-1)).toThrow(/energy in kilocalories/);
   });
 });
 
