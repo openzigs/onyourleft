@@ -45,6 +45,13 @@ export const NO_CALORIES_NO_READINGS = 'no power or heart rate';
 export const NO_CALORIES_SET_INPUTS =
   'set sex, year of birth and weight in Settings for a heart-rate estimate';
 
+/**
+ * The card's shorter word for {@link NO_CALORIES_SET_INPUTS}: the card's line
+ * shares the heading's, and the whole sentence is the ride page's, one tap
+ * away (`CaloriesLine`).
+ */
+export const NO_CALORIES_SET_INPUTS_SHORT = 'set your details in Settings';
+
 /** Said for a ride with power that stored no figure, which only a ride saved before #2433 is. */
 export const NO_CALORIES_SAVED_BEFORE = 'saved before calorie estimates';
 
@@ -53,15 +60,21 @@ export function caloriesValue(calories: ActivityCalories): string {
   return `≈ ${String(Math.round(calories.energy))}`;
 }
 
-/** Why a ride shows no figure, from what it recorded. */
-export function noCaloriesReason(recorded: {
-  readonly hasPower: boolean;
-  readonly hasHeartRate: boolean;
-}): string {
+/** Why a ride shows no figure, from what it recorded. `compact` is the card's wording. */
+export function noCaloriesReason(
+  recorded: {
+    readonly hasPower: boolean;
+    readonly hasHeartRate: boolean;
+  },
+  compact = false,
+): string {
   if (recorded.hasPower) {
     return NO_CALORIES_SAVED_BEFORE;
   }
-  return recorded.hasHeartRate ? NO_CALORIES_SET_INPUTS : NO_CALORIES_NO_READINGS;
+  if (!recorded.hasHeartRate) {
+    return NO_CALORIES_NO_READINGS;
+  }
+  return compact ? NO_CALORIES_SET_INPUTS_SHORT : NO_CALORIES_SET_INPUTS;
 }
 
 /**
@@ -77,7 +90,7 @@ function said(
     <>
       <span aria-hidden="true">—</span>
       <span className="oyl-visually-hidden">No figure</span>{' '}
-      <span className="oyl-muted">({noCaloriesReason(recorded)})</span>
+      <span className="oyl-muted">({noCaloriesReason(recorded, compact)})</span>
     </>
   ) : (
     <>
@@ -102,6 +115,13 @@ function said(
  * ride* clears the fold by under 10 px more than the browser gate's 50
  * (`rideview.browser.spec.ts` §"#1042"). A fifth fact is a third row, about
  * 80 px, which put that button under the fold; the heading's line had the room.
+ *
+ * ⚠️ **Measured on the CI runner, whose font is wider than a Mac's.** With
+ * *Calories* written out, the line wrapped under the heading there and cost
+ * 23.9 px (68.2 → 44.3 px clear). So the label is for assistive technology
+ * only — `≈ 612 kcal estimate from power` says what it is — the line is set
+ * tight, and a line that does wrap costs one small line. Its longest no-figure
+ * reason is {@link NO_CALORIES_SET_INPUTS_SHORT}.
  */
 export function CaloriesLine({
   calories,
@@ -114,7 +134,7 @@ export function CaloriesLine({
 }): JSX.Element {
   return (
     <p className="oyl-result__calories" data-oyl-calories="">
-      <span className="oyl-result__calories-label">{CALORIES_LABEL}</span>{' '}
+      <span className="oyl-visually-hidden">{CALORIES_LABEL}: </span>
       {said(calories, { hasPower, hasHeartRate }, true)}
     </p>
   );

@@ -3796,12 +3796,9 @@ a.oyl-button {
 }
 
 .oyl-result__calories {
-  margin: 0 0 var(--oyl-space-xs);
+  margin: 0;
   font-size: var(--oyl-font-size-sm);
-}
-
-.oyl-result__calories-label {
-  color: var(--oyl-color-ink-muted);
+  line-height: 1.2;
 }
 
 /*

@@ -37,6 +37,7 @@ import {
   NO_CALORIES_NO_READINGS,
   NO_CALORIES_SAVED_BEFORE,
   NO_CALORIES_SET_INPUTS,
+  NO_CALORIES_SET_INPUTS_SHORT,
 } from '../detail/CaloriesFact';
 import type { SavedRide } from '../ride/ride-result';
 import { RideResultCard } from '../ride/RideResultCard';
@@ -244,7 +245,7 @@ describe('a ride’s calorie estimate is saved with it (#2433)', () => {
       expect(text).toContain(CALORIES_BASIS_TEXT.power);
     }
     // The same words on both, less the label each screen sets its own way.
-    expect(card.replace(/^Calories\s*/, '')).toBe(page.replace(/^Calories\s*/, ''));
+    expect(card.replace(/^Calories:?\s*/, '')).toBe(page.replace(/^Calories:?\s*/, ''));
   });
 });
 
@@ -265,6 +266,17 @@ describe('a ride with no figure is a dash and a reason, never 0 kcal', () => {
       expect(text).toContain(NO_CALORIES_SAVED_BEFORE);
       expect(text).not.toContain('kcal');
     }
+  });
+
+  it('a heart-rate ride with no figure points the card at Settings, and the page says what to set', async () => {
+    await setInputs(undefined);
+    const finished = await save(series({ heartRate: 145 }));
+    const card = await openCard(cardFor(finished, 145));
+    const page = await openRidePage();
+    expect(card).toContain(NO_CALORIES_SET_INPUTS_SHORT);
+    expect(page).toContain(NO_CALORIES_SET_INPUTS);
+    // The card's label is for assistive technology; its words say the rest.
+    expect(card.startsWith('Calories:')).toBe(true);
   });
 
   it('a ride with neither channel says so on the card', async () => {
