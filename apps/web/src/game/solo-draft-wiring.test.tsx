@@ -446,6 +446,21 @@ describe('“Your best” after a drafted attempt — #2425, ADR 0066 D-5.1, D-5
     expect(field('Your best')).toBe('Finished ahead of you, with its draft');
   });
 
+  it('marks it all the same with the display preference off (R-13)', async () => {
+    // The owner's ruling R-13: the display preference hides the Draft field,
+    // and the draft is ridden and the attempt marked exactly as with it on.
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    const { draft } = await rideSolo({ ownGhost: true, frames: 300 });
+    expect(draft.every((text) => text === undefined)).toBe(true);
+    const best = field('Your best') ?? '';
+    expect(best).toMatch(/^(Beaten|Matched|Finished)/);
+    expect(best).toMatch(/, with its draft$/);
+    await endTheRide();
+    expect(handed).toHaveLength(1);
+    expect(handed[0]?.outcome).toBeDefined();
+    expect(handed[0]?.drafted).toBe(true);
+  });
+
   it('reads as before with the switch off', async () => {
     localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     await rideSolo({ ownGhost: true, frames: 300 });

@@ -263,6 +263,16 @@ function toggle(words: string): HTMLInputElement | undefined {
   );
 }
 
+/** The control a `<label>` with exactly this text names, as a screen reader finds it. */
+function labelled(words: string): HTMLInputElement {
+  const label = queryAll<HTMLLabelElement>(mounted?.container ?? document, 'label').find(
+    (candidate) => candidate.textContent === words,
+  );
+  const control = label?.control;
+  if (!(control instanceof HTMLInputElement)) throw new Error(`no control labelled “${words}”`);
+  return control;
+}
+
 interface Wire {
   readonly bytes: readonly number[];
   readonly frame: number;
@@ -334,11 +344,11 @@ async function rideWith(
   await settle();
   if (company === 'pacer') {
     await press(toggle('pacer'));
-    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+    const intensity = labelled('Pacer intensity, watts per kilogram');
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
     await act(async () => {
       setter?.set?.call(intensity, PACER_INTENSITY);
-      intensity?.dispatchEvent(new Event('input', { bubbles: true }));
+      intensity.dispatchEvent(new Event('input', { bubbles: true }));
       await Promise.resolve();
     });
   }
