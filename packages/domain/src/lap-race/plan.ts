@@ -235,7 +235,7 @@ export interface BotRacePlan {
  *
  * @param seed - the race's own seed, the one `createItemRace` took.
  * @param pace - the bot's own, from `pace.ts` §`botFieldPaces`: absent, the
- *   even pace at the tier's full power, #1960's plan as it was.
+ *   even pace at the tier's full power, a rouleur's plan (#2459).
  * @throws {LapRaceError} `seed-not-integer` for a seed that is not a safe
  *   whole number, and `pace-out-of-range` for a pace `pace.ts` §`checkBotPace`
  *   refuses.
@@ -260,7 +260,8 @@ export function botRacePlan(
     BOT_ARCHETYPE_SPRINT_FACTOR[archetype];
   const split = style === 'fast-start' || style === 'negative-split';
   const wPrimeJoules = botWPrimeJoules(tier, pace);
-  const surgeWatts = tierWatts * BOT_ARCHETYPE_PEAK_SHARE[archetype];
+  const surgeWatts =
+    tierWatts * Math.min(BOT_ARCHETYPE_PEAK_SHARE[archetype], BOT_PLAN_SURGE_CEILING);
   const floorWatts = tierWatts * PACING_FACTOR_FLOOR;
   return {
     tierWatts,

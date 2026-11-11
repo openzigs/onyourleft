@@ -36,7 +36,7 @@
  *
  * | Style | What the plan does with it |
  * |---|---|
- * | `even` | as #1960's plan: holds its own power, surges up climbs, sprints the close |
+ * | `even` | as a rouleur's plan (#1960's, shaped by #2459): holds its own power, surges up climbs, sprints the close |
  * | `fast-start` | its own power on the first lap, then {@link BOT_STYLE_EASING} under it: it fades |
  * | `negative-split` | {@link BOT_STYLE_EASING} under its own power until the last lap, then all of it |
  * | `climber` | as `even`; its archetype climbs hard (#2459) |
@@ -81,7 +81,7 @@ export interface BotPace {
   readonly ability: number;
 }
 
-/** The pace of a bot nothing has dealt one: #1960's plan, at its tier's full power. */
+/** The pace of a bot nothing has dealt one: a rouleur's plan (#2459), at its tier's full power. */
 export const BOT_EVEN_PACE: BotPace = Object.freeze({ style: 'even', ability: 1 });
 
 /**
