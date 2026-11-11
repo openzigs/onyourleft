@@ -62,7 +62,7 @@ import {
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 import { calorieRiderFor } from '../athlete/calorie-inputs';
-import { recordedRideCalories } from '../recording/finish';
+import { recordedRideCalories } from '../recording/totals';
 import { lapsToSave } from '../recording/laps';
 import type { TransferStore } from './store-port';
 
@@ -329,7 +329,7 @@ async function storeRide(
 ): Promise<ActivityId> {
   const id = options.newActivityId();
   // #2433: by the rule a recorded ride's figure is worked out by
-  // (`recording/finish.ts` §`recordedRideCalories`), from the decoded channels.
+  // (`recording/totals.ts` §`recordedRideCalories`), from the decoded channels.
   const calories = recordedRideCalories(ride, calorieRiderFor(options.athlete, ride.startedAt));
   const record: NewActivity = {
     id,

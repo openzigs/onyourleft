@@ -83,7 +83,7 @@ import {
 } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
-import { totalsStripReadings } from './totals-strip';
+import { TOTALS_CALORIES_KEY, totalsStripReadings } from './totals-strip';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -637,6 +637,9 @@ function fieldClass(reading: HudReading): string {
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
+    // #2434: the totals strip's widest, which spans two of its columns
+    // (`theme.css` §"THE CALORIE ESTIMATE ON THE STRIP").
+    ...(reading.key === TOTALS_CALORIES_KEY ? ['oyl-hud__field--calories'] : []),
     // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
     ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
     // #2077: and the rider's own effort, drawn where the ride so far is.

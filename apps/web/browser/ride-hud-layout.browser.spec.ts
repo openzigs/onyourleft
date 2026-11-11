@@ -327,16 +327,23 @@ for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
  *   tablets — and, on a tablet held upright (the owner's ruling of
  *   2026-11-09), on the actions panel in its column, beside the route panel;
  *   and given way everywhere else on the stage — the phones — said so;
- * - its five readings (six on a loop) in order, and on this harness, which
- *   records, the port's figures: `RIDE_TOTALS`' energy and climb, and its
+ * - its six readings (seven on a loop) in order, and on this harness, which
+ *   records, the port's figures: `RIDE_TOTALS`' energy, calorie estimate
+ *   (#2434) and climb, and its
  *   distance over the moving time as the average speed — so the strip is
  *   read through `GameView`, not built beside it;
  * - and the focus readout and the full tiers what they are without it.
  */
-const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Climbed'];
+const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Calories', 'Climbed'];
 
 /** `RIDE_TOTALS` and `MOVING_SECONDS` in `ride-harness.tsx`, as the strip shows them. */
-const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '4850 m' };
+const STRIP_FIGURES = {
+  'Avg speed': '20.0 km/h',
+  Energy: '15300 kJ',
+  // #2434: and the basis, on the line under the figure.
+  Calories: '≈ 18284 kcal estimate from power',
+  Climbed: '4850 m',
+};
 
 /**
  * Where the stage has room for the strip: the two landscape tablets, and the
@@ -419,6 +426,17 @@ async function stripCellFaults(page: Page): Promise<string[]> {
       };
     });
     const faults: string[] = [];
+    // #2434: and each label on one line. Four columns are 86 px wide at
+    // 1024×768 with a half gap, and at a full one *Avg speed* broke in two,
+    // which made the strip a line taller under the rider.
+    for (const cell of strip.children) {
+      const label = cell.querySelector('dt');
+      if (label === null) continue;
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const lines = new Set([...range.getClientRects()].map((each) => Math.round(each.top))).size;
+      if (lines > 1) faults.push(`${label.textContent ?? '?'}: label on ${String(lines)} lines`);
+    }
     for (const { name, cell, words } of cells) {
       if (words.left < cell.left - 1 || words.right > cell.right + 1) {
         faults.push(
@@ -488,6 +506,9 @@ for (const arrangement of ['full', 'focus'] as const) {
           expect(strip, how).toBeDefined();
           if (strip === undefined) continue;
           expect(stripPlaceFaults(seen, viewport), how).toEqual([]);
+          // #2434: a seventh reading narrows every cell, so each holds its
+          // words wherever the strip is drawn, not only upright.
+          expect(await stripCellFaults(page), how).toEqual([]);
           // Every reading on it on the stage and uncovered (`layoutFaults`
           // holds each item), with the port's figures.
           const names = seen.items.map((each) => each.name);
@@ -511,6 +532,7 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
       expect(seen.totals, how).toEqual(['Lap', ...STRIP_LABELS]);
       expect(seen.totalsValues[0], how).toBe('1');
       expect(stripPanel(seen), how).toBeDefined();
+      expect(await stripCellFaults(page), how).toEqual([]);
     }
   });
 
@@ -523,6 +545,34 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
       expect(stripPanel(seen), how).toBeDefined();
       expect(seen.primaryValuePixels, how).toBe(PRIMARY_PIXELS['extra-large']);
     }
+  });
+}
+
+/**
+ * #2434: with no estimate, *Calories* is a dash and the card's reason for it
+ * on the line the basis takes — the longest, *set your details in Settings*,
+ * as the harness's heart rate makes it — inside its cell, and the strip the
+ * height it is with an estimate, so it does not grow when one appears.
+ */
+for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.name))) {
+  test(`#2434 the totals strip with no calorie estimate says why, at its own height — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const estimated = await sharedRide(browser, viewport, '?lap=riding&totals=strip');
+    const withEstimate = stripPanel(await measure(estimated))?.box.height;
+    const page = await sharedRide(browser, viewport, '?lap=riding&totals=strip&calories=none');
+    for (const [how, seen] of await bothWays(page)) {
+      expect(sizeFaults(seen, viewport).faults, how).toEqual([]);
+      expect(seen.totals, how).toEqual(['Lap', ...STRIP_LABELS]);
+      expect(seen.totalsValues[STRIP_LABELS.indexOf('Calories') + 1], how).toBe(
+        '— kcal set your details in Settings',
+      );
+      expect(seen.totalsValues[STRIP_LABELS.indexOf('Energy') + 1], how).toBe('— kJ');
+      expect(await stripCellFaults(page), how).toEqual([]);
+    }
+    const seen = await measure(page);
+    expect(withEstimate).toBeDefined();
+    expect(stripPanel(seen)?.box.height).toBeCloseTo(withEstimate ?? Number.NaN, 0);
   });
 }
 

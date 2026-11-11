@@ -2,7 +2,8 @@
 
 /**
  * A ride's running totals — how far, how much climbing, what average power,
- * and since #2387 how much work and how fast on average — worked out ONE way,
+ * since #2387 how much work and how fast on average, and since #2434 what
+ * calorie estimate — worked out ONE way,
  * for the save and for the screen alike — #2076.
  *
  * ## Why one function
@@ -35,7 +36,10 @@ import {
   metres,
   metresPerSecond,
   recordedAscent,
+  rideCalories,
   watts,
+  type CalorieEstimate,
+  type CalorieRider,
   type Joules,
   type Metres,
   type MetresPerSecond,
@@ -59,6 +63,13 @@ export interface RideTotals {
    * @see rideEnergy
    */
   readonly energy?: Joules | undefined;
+  /**
+   * The calorie estimate so far, or `undefined` with nothing to estimate it
+   * from — #2434's *Calories*. {@link recordedRideCalories}, the function the
+   * saved ride's figure is worked out by, so the HUD's figure at the end is the
+   * saved one. Optional for {@link energy}'s reason.
+   */
+  readonly calories?: CalorieEstimate | undefined;
 }
 
 /**
@@ -141,6 +152,31 @@ export function rideEnergy(
 }
 
 /**
+ * A recorded ride's calorie estimate — #2433, and **the one place** a recorded
+ * ride's figure is worked out, so the figure saved with the ride
+ * (`finish.ts` §`rideToSave`) and the one the ride HUD shows ({@link rideTotals},
+ * #2434) are the same function over the same series.
+ *
+ * From the ride's work ({@link rideEnergy}) when it has a power reading, else
+ * from its heart-rate channel with the rider's inputs, else none —
+ * `@onyourleft/domain` §`rideCalories` holds the rules and the sources. The
+ * importer calls it too, over a decoded file's channels (`import-batch.ts`).
+ * Here rather than in `finish.ts` since #2434, because `finish.ts` imports this
+ * module and {@link rideTotals} needs it too.
+ */
+export function recordedRideCalories(
+  series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
+  rider: CalorieRider,
+): CalorieEstimate | undefined {
+  return rideCalories({
+    work: rideEnergy(series),
+    heartRate: series.channels.heartRate,
+    sampleInterval: series.sampleInterval,
+    rider,
+  });
+}
+
+/**
  * The ride's average speed — #2387: its distance over its MOVING time, as a
  * lap's is (`laps.ts` §`lapAverageSpeed`), so a pause does not slow it. The
  * distance is {@link RideTotals.distance} and the moving time the recorder's
@@ -178,15 +214,23 @@ export function rideClimbed(
   return metres(stated.reduce((sum, lap) => sum + (lap.ascent as number), 0));
 }
 
-/** All four, over one series and its laps. */
+/**
+ * All of them, over one series and its laps.
+ *
+ * `rider` is what the heart-rate calorie estimate needs to know
+ * (`athlete/calorie-inputs.ts` §`calorieRiderFor`); none, and a heart-rate
+ * ride has no *Calories* while a ride with power still does.
+ */
 export function rideTotals(
   series: RecordedSeries<StreamChannelValue>,
   laps: readonly Pick<RecordedCourseLap, 'ascent'>[],
+  rider: CalorieRider = {},
 ): RideTotals {
   return {
     distance: rideDistance(series),
     climbed: rideClimbed(series, laps),
     averagePower: rideAveragePower(series.channels.power),
     energy: rideEnergy(series),
+    calories: recordedRideCalories(series, rider),
   };
 }

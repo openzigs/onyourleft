@@ -9,9 +9,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
+  kilograms,
   metres,
   metresPerSecond,
   recordedAscent,
+  rideCalories,
   seconds,
   unixSeconds,
   watts,
@@ -26,6 +29,7 @@ import {
   rideDistance,
   rideEnergy,
   rideTotals,
+  recordedRideCalories,
 } from './totals';
 
 function series(
@@ -97,7 +101,7 @@ describe('the ride so far (#2076)', () => {
     expect(rideAverageSpeed(metres(9000), Number.NaN)).toBeUndefined();
   });
 
-  it('puts the four together', () => {
+  it('puts them together', () => {
     const ridden = series(
       { speed: [metresPerSecond(5), metresPerSecond(5)], power: [watts(150), watts(250)] },
       2,
@@ -107,6 +111,55 @@ describe('the ride so far (#2076)', () => {
       climbed: 3,
       averagePower: 200,
       energy: 400,
+      // #2434: 400 J of work at the assumed 20 % efficiency.
+      calories: { energy: 400 / 4184 / 0.2, basis: 'power' },
     });
+  });
+});
+
+describe('the ride’s calorie estimate so far (#2434)', () => {
+  const RIDER = { sex: 'male', ageYears: 40, mass: kilograms(80) } as const;
+  const strap = series(
+    { heartRate: [beatsPerMinute(140), undefined, beatsPerMinute(150), beatsPerMinute(160)] },
+    4,
+  );
+
+  it('is the saved ride’s function: the domain’s estimate over the series’ work and heart rate', () => {
+    const ridden = series({ power: [watts(200), undefined, watts(300)] }, 3);
+    expect(recordedRideCalories(ridden, {})).toEqual(
+      rideCalories({
+        work: rideEnergy(ridden),
+        heartRate: undefined,
+        sampleInterval: 1,
+        rider: {},
+      }),
+    );
+    expect(rideTotals(ridden, []).calories).toEqual(recordedRideCalories(ridden, {}));
+    expect(rideTotals(ridden, []).calories?.basis).toBe('power');
+  });
+
+  it('estimates a heart-rate ride with the rider it is given, and none without one', () => {
+    const withRider = rideTotals(strap, [], RIDER).calories;
+    expect(withRider?.basis).toBe('heart-rate');
+    expect(withRider).toEqual(recordedRideCalories(strap, RIDER));
+    expect(withRider?.energy).toBeGreaterThan(0);
+    // No rider is no figure, never nought.
+    expect(rideTotals(strap, []).calories).toBeUndefined();
+    expect(rideTotals(strap, [], { sex: 'male', ageYears: 40 }).calories).toBeUndefined();
+  });
+
+  it('has none with neither power nor heart rate', () => {
+    const bare = series({ speed: [metresPerSecond(5)] }, 1);
+    expect(rideTotals(bare, [], RIDER).calories).toBeUndefined();
+    expect(rideTotals(series({ power: [undefined, undefined] }, 2), []).calories).toBeUndefined();
+  });
+
+  it('rises with the work: 600 s at 200 W is 120 kJ, about 143 kcal at the assumed 20 %', () => {
+    const at = (count: number) =>
+      rideTotals(series({ power: Array.from({ length: count }, () => watts(200)) }, count), [])
+        .calories?.energy;
+    expect(at(600)).toBeCloseTo(120_000 / 4184 / 0.2, 6);
+    expect(Math.round(at(600) ?? Number.NaN)).toBe(143);
+    expect(at(300) ?? 0).toBeLessThan(at(600) ?? 0);
   });
 });

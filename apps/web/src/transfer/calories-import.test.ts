@@ -2,7 +2,7 @@
 
 /**
  * An imported ride gets its calorie estimate on import (#2433), by the rule a
- * recorded ride's is worked out by (`recording/finish.ts`
+ * recorded ride's is worked out by (`recording/totals.ts`
  * §`recordedRideCalories`), from the decoded channels and the importing
  * athlete's current inputs — and the figure is on the list row, read through
  * `listActivitySummaries` without decoding a stream.
@@ -19,7 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { calorieRiderFor } from '../athlete/calorie-inputs';
-import { recordedRideCalories } from '../recording/finish';
+import { recordedRideCalories } from '../recording/totals';
 import { webCryptoDigest } from './browser';
 import { corpusSource } from './corpus';
 import { importActivityFiles } from './import-batch';

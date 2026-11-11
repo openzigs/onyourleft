@@ -49,6 +49,10 @@ import { hudOf, startRace } from './lap-race-testing';
 import { northCorridor, northRoute } from './street-map-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
+import { rideTotals } from '../../recording/totals';
+import type { StreamChannelValue } from '@onyourleft/store';
+import { NO_READING } from './fields';
+import { NO_CALORIES_NO_READINGS, NO_CALORIES_SET_INPUTS_SHORT } from '../../detail/CaloriesFact';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -66,6 +70,7 @@ import {
   thresholdShare,
   unixSeconds,
   watts,
+  type RecordedSeries,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -1441,6 +1446,7 @@ describe('the totals strip — #2387', () => {
       'To go',
       'Avg speed',
       'Energy',
+      'Calories',
       'Climbed',
     ]);
     // 6 km in 600 s moving is 10 m/s; 127.2 kJ of work.
@@ -1466,6 +1472,7 @@ describe('the totals strip — #2387', () => {
       'To go',
       'Avg speed',
       'Energy',
+      'Calories',
       'Climbed',
     ]);
   });
@@ -1521,6 +1528,90 @@ describe('the totals strip — #2387', () => {
       />,
     );
     expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+  });
+
+  /** The recorder's totals after `count` seconds at `power`, as the controller works them out. */
+  const ridden = (count: number, power: number | undefined) => {
+    const series: RecordedSeries<StreamChannelValue> = {
+      startedAt: unixSeconds(1_800_000_000),
+      sampleInterval: seconds(1),
+      sampleCount: count,
+      channels: {
+        speed: Array.from({ length: count }, () => metresPerSecond(8)),
+        ...(power === undefined
+          ? {}
+          : { power: Array.from({ length: count }, () => watts(power)) }),
+      },
+      pauses: [],
+    };
+    return rideTotals(series, []);
+  };
+
+  it('#2434: rises with the work — after 600 s at 200 W, 120 kJ, it reads ≈ 143 kcal', async () => {
+    mounted = await mount(
+      <HudPanel {...base} movingSeconds={300} rideTotals={ridden(300, 200)} layout={strip} />,
+    );
+    // 60 kJ at the assumed 20 % efficiency: 60 000 / 4184 / 0.2 = 71.7 kcal.
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe('≈ 72 kcal estimate from power');
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} movingSeconds={600} rideTotals={ridden(600, 200)} layout={strip} />,
+    );
+    expect(valueIn('.oyl-hud__totals', 'Energy')).toBe('120 kJ');
+    // ⚠️ Not the issue's `≈ 120 kcal`, which is the 1 kJ = 1 kcal rule of
+    // thumb (23.9 %): the owner's ruling on #2430's question 2 is 20 %.
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe('≈ 143 kcal estimate from power');
+    // The basis is the phrase under the figure, the card's words.
+    const phrase = queryAll(mounted.container, '.oyl-hud__totals .oyl-hud__detail').map(
+      (each) => each.textContent,
+    );
+    expect(phrase).toEqual([' estimate from power']);
+  });
+
+  it('#2434: a ride with no power and no heart-rate estimate reads a dash and why, never 0 kcal', async () => {
+    const noStrap = { value: undefined, live: false };
+    mounted = await mount(
+      <HudPanel {...base} heartRate={noStrap} rideTotals={ridden(600, undefined)} layout={strip} />,
+    );
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe(
+      `${NO_READING} kcal ${NO_CALORIES_NO_READINGS}`,
+    );
+    expect(valueIn('.oyl-hud__totals', 'Calories')).not.toMatch(/\b0\b/);
+    // With a strap and no estimate, the rider has not set what it needs.
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} rideTotals={ridden(600, undefined)} layout={strip} />,
+    );
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe(
+      `${NO_READING} kcal ${NO_CALORIES_SET_INPUTS_SHORT}`,
+    );
+    // Before anything is recorded too.
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel {...base} heartRate={noStrap} rideTotals={undefined} layout={strip} />,
+    );
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe(
+      `${NO_READING} kcal ${NO_CALORIES_NO_READINGS}`,
+    );
+  });
+
+  it('#2434: never reports Sensor lost, with every sensor down', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        state={{ ...base.state, input: { power: watts(250), live: false } }}
+        cadence={{ value: undefined, live: false }}
+        heartRate={{ value: undefined, live: false }}
+        rideTotals={ridden(600, 200)}
+        layout={strip}
+      />,
+    );
+    // The tiers say it of the live sensors; the strip's totals are not theirs.
+    expect(mounted.container.textContent).toContain('Sensor lost');
+    expect(valueIn('.oyl-hud__totals', 'Calories')).toBe('≈ 143 kcal estimate from power');
+    expect(
+      mounted.container.querySelector('.oyl-hud__totals')?.textContent ?? 'no strip',
+    ).not.toContain('Sensor lost');
   });
 });
 
