@@ -585,6 +585,8 @@ interface RideResult {
   readonly steered: ReadonlyMap<number, number | undefined>;
   /** Every round `GameView` started on the ride. */
   readonly started: readonly unknown[];
+  /** The Score field's phrase after each frame, in order (#2454: "Crashed" while a crash is drawn). */
+  readonly scoreDetails: readonly (string | undefined)[];
 }
 
 /** The scripted ride, start to *End ride*, read and unmounted. */
@@ -598,9 +600,20 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   const drawn: SceneFrame[] = [];
   const steered = new Map<number, number | undefined>();
   startedRounds.length = 0;
-  await rideTheTrace({ delivery, trainer: trainerPort(writes), drawn, steered });
+  const scoreDetails: (string | undefined)[] = [];
+  await rideTheTrace({
+    delivery,
+    trainer: trainerPort(writes),
+    drawn,
+    steered,
+    onFrame: () => {
+      scoreDetails.push(field('Score')?.detail);
+      return Promise.resolve();
+    },
+  });
   const read = {
     steered,
+    scoreDetails,
     started: [...startedRounds],
     houses: field('Houses'),
     score: field('Score'),
@@ -899,6 +912,56 @@ describe('a Delivery round inside a game ride — #1816', () => {
     await pressThrow('left');
     for (let index = 0; index < 3; index += 1) await pump();
     expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
+  });
+});
+
+describe('a crash drawn inside a game ride — #2454', () => {
+  const DEGREE = Math.PI / 180;
+  /** The rider's drawn lean on each frame, in degrees either way. */
+  const riderLeans = (drawn: readonly SceneFrame[]): number[] =>
+    drawn.map(
+      (frame) =>
+        Math.abs(frame.markers.find((marker) => marker.kind === 'rider')?.lean ?? Number.NaN) /
+        DEGREE,
+    );
+  /** How many times the Score field's phrase turned to "Crashed". */
+  const crashesShown = (details: readonly (string | undefined)[]): number =>
+    details.filter((detail, index) => detail === 'Crashed' && details[index - 1] !== 'Crashed')
+      .length;
+
+  it(
+    'draws the rider going down and back up on the bike, and says “Crashed” on the HUD once a crash',
+    SHARED_RIDE,
+    async () => {
+      const round = await withRound();
+      const plain = await without();
+      const leans = riderLeans(round.drawn);
+      // Down: the bicycle on its side (75°), which no ride's own lean comes near (38.7° at most).
+      expect(Math.max(...leans)).toBeGreaterThan(70);
+      // Falling, not cut to the ground: a frame between upright and down.
+      expect(leans.some((lean) => lean > 45 && lean < 70)).toBe(true);
+      // Back up on the bike by the end of the ride, and never down on a ride with no round.
+      expect(leans.at(-1)).toBeLessThan(45);
+      expect(Math.max(...riderLeans(plain.drawn))).toBeLessThan(45);
+      // "Crashed" under the score, at least once and never more often than there were crashes.
+      expect(crashesShown(round.scoreDetails)).toBeGreaterThan(0);
+      expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
+      expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
+      expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
+    },
+  );
+
+  it('draws a still crash pose under reduced motion: down or up, never falling between', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const drawn: SceneFrame[] = [];
+    await rideTheTrace({ delivery: true, drawn });
+    const leans = riderLeans(drawn);
+    expect(Math.max(...leans)).toBeGreaterThan(74.9);
+    expect(leans.every((lean) => lean < 45 || lean > 74.9)).toBe(true);
   });
 });
 

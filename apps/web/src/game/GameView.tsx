@@ -256,6 +256,7 @@ import {
   type DeliveryRide,
 } from './delivery/ride-round';
 import { steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import { crashFrom, crashShare, crashSideFor, type DrawnCrash } from './delivery/crash-look';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
@@ -1784,6 +1785,14 @@ function GameScreen({
   const deliveryWaitingRef = useRef<(() => void) | undefined>(undefined);
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
+  /**
+   * #2454: the rider's latest crash in the round — when, by the frame clock,
+   * and which side they fall to — while it is drawn (`delivery/crash-look.ts`).
+   * A crash during one already drawn does not restart it: the rider is down.
+   */
+  const crashRef = useRef<DrawnCrash | undefined>(undefined);
+  /** #2454: how far into the crash pose the last drawn frame was, for the HUD's "Crashed". */
+  const crashShownRef = useRef<number | undefined>(undefined);
   /**
    * The lap race this ride runs, while it runs one — #1906. A ref for
    * {@link deliveryRef}'s reason. Set at the press and held for the ride;
@@ -3511,6 +3520,15 @@ function GameScreen({
         deliveryRef.current = stepped.ride;
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        // #2454: and drawn — the rider goes down where they are and gets back
+        // up. A drawing only: nothing here is read by the simulation above.
+        if (stepped.crashes > 0) {
+          crashRef.current = crashFrom(
+            crashRef.current,
+            at,
+            crashSideFor(stepped.ride.steer.offset),
+          );
+        }
         // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
         if (stepped.ride.onLevel) {
           owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
@@ -3591,6 +3609,14 @@ function GameScreen({
         const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
           inRoom: roomRef.current !== undefined,
         });
+        // #2454: how far into a crash the rider is drawn, while one is.
+        const crashed = crashRef.current;
+        const crashAt =
+          crashed === undefined || deliveryRef.current === undefined
+            ? undefined
+            : crashShare((at - crashed.atMs) / 1000, reducedMotionRef.current);
+        if (crashAt === undefined) crashRef.current = undefined;
+        crashShownRef.current = crashAt;
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3673,6 +3699,12 @@ function GameScreen({
                 raceBots: raceDrawn.raceBots,
                 ...(raceDrawn.riderHit === undefined ? {} : { riderHit: raceDrawn.riderHit }),
               }),
+          // #2454: the round's crash, drawn as a fall and a getting back up.
+          // Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          ...(crashAt === undefined || crashed === undefined
+            ? {}
+            : { riderCrash: { share: crashAt, side: crashed.side } }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
         // the wall clock between them, so a corridor that jumps turns the view
@@ -4390,6 +4422,8 @@ function GameScreen({
                 round: deliveryRef.current.round,
                 week: deliveryRef.current.week,
                 score: deliveryRef.current.score,
+                // #2454: "Crashed" on the HUD while a crash is drawn.
+                crashed: crashShownRef.current !== undefined,
                 // #2453: where the next house is, so the rider knows where to throw.
                 next: nextHouse(deliveryRef.current),
               },

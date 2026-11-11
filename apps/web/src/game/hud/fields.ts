@@ -412,6 +412,13 @@ export interface DeliveryHud {
    * ahead, from the rider, never where. `undefined` once none is expecting one.
    */
   readonly next: NextHouseHud | undefined;
+  /**
+   * Whether a crash is being drawn — #2454, `delivery/crash-look.ts`: the
+   * Score field says "Crashed" under it for as long as the rider is drawn
+   * down, once per crash. The live region's sentence is `delivery-announce.ts`
+   * §`deliveryEvents`', as before. Absent is not crashed.
+   */
+  readonly crashed?: boolean | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -1224,10 +1231,19 @@ function deliveryReadings(
       value: String(delivery.score),
       unit: '',
       stale: false,
-      detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+      detail:
+        delivery.crashed === true
+          ? CRASHED_TEXT
+          : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
     },
   ];
 }
+
+/**
+ * What the Score field says under the score while a crash is drawn — #2454,
+ * new rider-facing wording for the owner's approval.
+ */
+export const CRASHED_TEXT = 'Crashed';
 
 /** What the draft field is called (#787). */
 export const DRAFT_LABEL = 'Draft';
