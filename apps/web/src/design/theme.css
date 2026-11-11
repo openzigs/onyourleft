@@ -11992,9 +11992,13 @@ select.oyl-input {
  *   there by name, so it is in the same place on every ride: with no zone
  *   (no threshold set) and no pacer the cell between *W/kg* and it is empty
  *   rather than *Calories* moving left, as #94 asks.
- * - On the 4:3 tablet (1024×768) the third row's fourth track, under *Moving*
- *   and *Climbed*: the second row's moving-time track is *Climbed*'s
- *   (§"THE RIDE SO FAR AT ARM'S LENGTH") and the other four are 91 to 116 px.
+ * - On the 4:3 tablet (1024×768) the third row's third and fourth tracks,
+ *   under *Distance* and *Climbed*: the second row's moving-time track is
+ *   *Climbed*'s (§"THE RIDE SO FAR AT ARM'S LENGTH") and the other four are
+ *   91 to 116 px. Across two, and sized by them rather than sizing them: in
+ *   the moving time's track alone, the CI runner's wider unit font made that
+ *   track 3 px wider than the panel had room for (`ride.browser.spec.ts`
+ *   §"#1111").
  *   ⚠️ **What it costs, recorded as #419 asks: a plain ride there is a third
  *   row of the tier**, as a ride with a pacer, a ghost or the wind already
  *   was; the tier is no taller than such a ride's.
@@ -12009,6 +12013,12 @@ select.oyl-input {
  *   every rule that gives the ride so far way gives it way, hidden by clip
  *   and still read by a screen reader. The saved ride states it, on the ride
  *   result card and the ride's page.
+ * - ⚠️ **And on an upright tablet, in a lap race, it gives way** (below),
+ *   recorded as #419 asks: there it was a seventh reading in the tier's
+ *   second row, which put the race's *Item* in a third, and the race's
+ *   standings hung under the tier were over the leaning rider
+ *   (`lap-race-hud.browser.spec.ts` §"#1904", 800×1280). In a race a racer
+ *   rides against the field, as #1912 has it on a phone.
  *
  * The line under the figure — *estimate from power*, or with no figure the
  * card's reason for the dash (`detail/CaloriesFact.tsx`) — never sizes the
@@ -12044,7 +12054,24 @@ select.oyl-input {
 
 @media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
   .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
-    grid-area: 3 / 4;
+    grid-area: 3 / 3 / auto / span 2;
+    contain: inline-size;
+  }
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race)
+    > .oyl-hud__field--calories {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

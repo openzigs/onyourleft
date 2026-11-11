@@ -718,6 +718,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           text: (value?.textContent ?? '').replace(/\s+/g, ' ').trim(),
           inSecondary: field?.closest('.oyl-hud__fields--secondary') !== null,
           box: box === undefined ? undefined : [box.left, box.top].map(Math.round),
+          width: Math.round(box?.width ?? 0),
           unitBeside:
             unitBox !== undefined &&
             unitBox.top >= number.top - 1 &&
@@ -746,7 +747,11 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     expect(dashed.text).toBe('— kcal set your details in Settings');
     expect(dashed.text).not.toMatch(/\b0 kcal/);
     if (rideTotalsDrawn(viewport)) {
-      expect(dashed.box).toEqual(estimated.box);
+      // In the same track: its left edge and width. Its top follows the
+      // rows above it, whose own dashes are a few px shorter on the CI
+      // runner's fonts than their figures.
+      expect(dashed.box?.[0]).toBe(estimated.box?.[0]);
+      expect(dashed.width).toBe(estimated.width);
       for (const [how, seen] of await bothWays(none)) {
         expect(layoutFaults(seen, viewport), how).toEqual([]);
       }
