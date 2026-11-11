@@ -383,3 +383,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   two bullets and its team-tactics sentence, D-6 and D-7, which stays a record of what was accepted on
   2026-09-28. The cross-rider ghost and lap-race bots stay undrafted (ADR 0066 D-2 and D-3), and a
   room is unchanged.
+- **2026-11-11** — **Once [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
+  is Accepted with its D-3 answer (b), D-5's "Out" bullet is superseded by it for the lap-race bots
+  and the rider drafting them** ([#2457](https://github.com/openzigs/onyourleft/issues/2457)): the
+  2026-11-10 amendment above left lap-race bots undrafted, and ADR 0067 D-3 has every racer in a solo
+  lap race give and take a draft by D-3's model on effort distance, on the owner's R-7 acceptance of
+  that patent risk. **Unchanged, by name**: D-1 to D-4, D-5's other bullets, D-6, and D-7, which stays
+  a record of what was accepted on 2026-09-28. This entry only points there.

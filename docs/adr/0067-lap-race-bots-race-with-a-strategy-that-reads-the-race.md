@@ -5,7 +5,13 @@
   recommendations**, each marked so, from the planner's recommendations on
   [#2457](https://github.com/openzigs/onyourleft/issues/2457), and are **Proposed until the owner
   rules on them on this ADR's pull request**; D-8 lists each one. Accepting this ADR as written
-  accepts each recommendation. **Nothing is built by this ADR**: #2458 to #2464 build it
+  accepts each recommendation. **Nothing is built by this ADR**: #2458 to #2464 build it.
+  **Merge order (ADR 0013 D-2 makes Status part of the body, so it cannot be changed after merge)**:
+  the owner rules on D-8 first; then this branch changes the Status to Accepted and the *Proposed*
+  wording in `docs/architecture.md` and `docs/agents/adr-numbering.md`; only then does the pull
+  request merge. **It does not merge while this Status reads Proposed**, and the dated entries it
+  appends to ADR 0038, 0060, 0061 and 0066 say *"once ADR 0067 is Accepted"*, so they are true the
+  day they merge and after
 - **Date**: 2026-11-11
 - **Deciders**: **the owner**, on the ruling of 2026-11-10 on
   [#2455](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845), and on D-8 on
@@ -19,26 +25,34 @@
   **0057 and 0058 stay claimed** by [#1748](https://github.com/openzigs/onyourleft/issues/1748) and
   [#1752](https://github.com/openzigs/onyourleft/issues/1752)
 - **Supersedes**, by decision number, for **lap-race bots in a solo race** only:
-  - [ADR 0060](0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md) **D-9**: D-9.1 (bots
+  - [ADR 0060](0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md) **D-2.1's words
+    *"or when"*, narrowed (not reversed) by D-3.3 and D-6.1 under D-3's answer (b)**: where a bot
+    rides decides the rider's draft factor `k` and so when the next grade is sent (R-8). **D-9**: D-9.1 (bots
     do not vary their power with their race position), what was left of D-9.2 after ADR 0061, and
     D-9.3 (the patent reading). **D-14 Q4's answer, *"No"* to rubber-banding by rank, is kept as D-1
     here reads it**: no bot's capacity changes with its place;
   - [ADR 0061](0061-lap-race-bots-a-course-only-energy-plan-never-another-racer.md) **D-1** (power
-    never a function of any other racer), **D-2** (what the plan may read: replaced by D-2 here),
+    never a function of any other racer), **D-2** (what the plan may read: replaced by D-0 here),
     **D-3** (what it may never read), **D-4** (the dependency on solo races having no drafting), **D-6**
     (the patent reading), **D-8.1** (mean power within a tolerance of the tier: restated by D-1.3
     here), **D-8.5** (identical power as a function of the bot's own effort distance) and **D-8.6**
     (the sprint asserted on effort distance);
   - [ADR 0066](0066-the-bot-pacer-and-the-riders-own-ghost-give-a-draft-in-a-solo-ride.md) **D-2**
-    (lap-race bots stay undrafted), on D-3 here, and **D-6's last bullet**, that the switch *"has no
-    effect in … a lap race"*, on D-3.4 here.
+    (lap-race bots stay undrafted), on D-3 here, **D-1.5's** *"a lap race … unchanged"*, **D-4's**
+    sentence that the patent-risk acceptance does not reach lap-race bots (R-7), and **D-6's last
+    bullet**, that the switch *"has no effect in … a lap race"*, on D-3.4 here;
+  - [ADR 0038](0038-drafting-in-the-first-multiplayer-release.md) **D-5's "Out" bullet** for the
+    lap-race bots and the rider drafting them (its 2026-11-10 amendment left lap-race bots
+    undrafted), on D-3 here. **D-7 stays** as the record of what was accepted on 2026-09-28.
 
-  **Every other decision of those three ADRs is unchanged, by name**: ADR 0060 D-1 to D-8 and D-10
-  to D-14 (Q4 as read above); ADR 0061 D-5, D-7's answers (the surge ceiling and the −20 % floor of
-  Q2 (a), and Q3's reading of ADR 0060 D-4.3), D-8.2, D-8.3 and D-8.4; ADR 0066 D-1 and D-3 to D-8,
-  with D-6's switch extended as D-3.4 says. Each superseded ADR gains one dated `## Amendments`
-  entry pointing here ([ADR 0013](0013-adr-amendments.md)); no body is edited. **The ADR 0066 entry
-  stands only if the owner keeps D-3's answer (b)**: under (c) it is dropped from this pull request
+  **Every other decision of those four ADRs is unchanged, by name**: ADR 0060 D-1, D-2 (but for the
+  words above), D-3 to D-8 and D-10 to D-14 (Q4 as read above); ADR 0061 D-5, D-7's answers (the surge ceiling and the −20 % floor of
+  Q2 (a), and Q3's reading of ADR 0060 D-4.3), D-8.2, D-8.3 and D-8.4; ADR 0066 D-1 (but for D-1.5's lap-race clause), D-3, D-4 (but for its lap-race clause), D-5 (as
+  D-3.7 here reads it for a lap race), D-6 (its switch extended as D-3.4 says) to D-8; ADR 0038 D-1 to
+  D-4, D-5's other bullets and D-6 to D-7. Each superseded ADR gains one dated `## Amendments`
+  entry pointing here ([ADR 0013](0013-adr-amendments.md)); no body is edited. **The ADR 0066 and ADR 0038 entries,
+  the ADR 0060 D-2.1 sentence and the ADR 0061 D-4 clause stand only if the owner keeps D-3's answer
+  (b)**: D-3's last paragraph lists every edit (c) takes out of this pull request
 - **Relates to**: [ADR 0059](0059-delivery-a-parcel-round-game-mode.md) D-2 and ADR 0060 D-2 (no
   game event reaches the trainer), [ADR 0028](0028-racing-fairness.md) D-1 (one physics),
   [ADR 0038](0038-drafting-in-the-first-multiplayer-release.md) D-3 (the draft model),
@@ -132,7 +146,12 @@ What does not move is everything that is not strategy: **D-6 below**, the traine
    below 0 and never above its W′, sampled every tick**, and its power stays inside the bounds of
    ADR 0061 D-8.2 (kept): the named surge ceiling over its tier, never over
    `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM` (7) at `BOT_MASS_KILOGRAMS`, and never under
-   `PACING_FACTOR_FLOOR` (−20 %) of its tier.
+   `PACING_FACTOR_FLOOR` (−20 %) of its tier **while it rides in the open (`k` = 1)**. **In a draft
+   (`k` < 1) the floor does not apply** (R-10, the author's recommendation): a bot held at 80 % of a
+   tier behind a same-tier bot riding at its tier rides up past the wheel, because the draft saves
+   more than 20 %, so with the floor kept *"sit in, then kick"* works only behind a faster rider, and
+   the floor also limits W′ recovery. The surge ceiling, the 7 W/kg limit and the W′ balance still
+   bound it. If the owner rules that the floor still applies, D-1.3 reads as ADR 0061 D-8.2 has it.
 4. **ADR 0060 D-4.3 is read as ADR 0061 D-7 Q3 read it**: a bot's own plan, now its strategy, is
    its source of power, as a rider's legs are, not a rule acting on it.
 
@@ -163,7 +182,11 @@ is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 
 3. **A draft reaches the trainer only the way riding harder does** (ADR 0066 D-7): a multiplier on
    the rider's `C_D·A` in the game's simulation and nothing else. No draft term reaches any trainer
    write: no grade, no wind, no rolling resistance, no ERG target. The rider arrives at the next
-   grade sooner, and that is all the trainer feels.
+   grade sooner, and that is all the trainer feels. **This narrows ADR 0060 D-2.1's *"or when"***,
+   which the ADR 0060 amendment names: under (b), where a bot rides decides the rider's `k`, so it
+   decides *when* the grade at a given place is sent, though never *what* is sent. The owner is asked
+   about exactly this narrowing (R-8). The owner's scope note on #2457 (*"no bot or race event reaches
+   the trainer"*) is kept as to what is sent and in every other respect.
 4. **ADR 0066 D-6's switch reaches the lap race.** Its last bullet said the switch has no effect in a
    lap race, because there was no draft there. With it **off**, no racer in the lap race drafts,
    bots included, so the race keeps one physics and is today's race to the bit. **On by default**,
@@ -171,15 +194,34 @@ is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 
 5. **`lap-race-cannot-reach-trainer.test.ts` is unchanged**, every line of it.
 6. **`lap-race-wiring.test.tsx` is restated in #2461, and only as follows.** The test
    `sends the trainer the same writes, each grade at the same time, as an ordinary ride, a race with items off and one with the rider hit (D-2.1)`
-   is kept **as it is** for a race with D-3.4's switch off, so
-   today's assertion still holds byte for byte. #2461 adds **one** assertion beside it: with the
+   has its assertions kept as they are, with the switch set off: it does not set the switch today,
+   and the switch is on by default, so #2461 adds that setup step and today's assertion then holds
+   byte for byte. #2461 adds **one** assertion beside it: with the
    switch on, a race in which the rider sat in a bot's draft sends the trainer the same writes, each
    grade at the same time, as **an ordinary ride ridden at the same draft factor `k`, tick for tick**,
    as the race applied to the rider. Nothing else in that file changes.
+7. **The solo Draft field and the *"with its draft"* mark in a lap race** (ADR 0066 D-5, D-6) **and
+   the test that holds ADR 0066 D-2.** The author's recommendation (R-9): a lap race in which the
+   rider sat in a bot's draft **shows the solo Draft field and marks the ride drafted** (ADR 0066
+   D-5.6), subject to the same display preference (`draft-preference.ts`) as a solo ride; with D-3.4's
+   switch off there is no field and no mark. The mark records what the rider was ridden at. The test
+   `apps/web/src/game/solo-draft-wiring.test.tsx` › `no solo draft in a lap race — #2425, ADR 0066 D-2` › `drafts nobody behind the own ghost the chooser sends with a lap race`
+   holds the rule this ADR supersedes, so #2461 restates it (D-4): its assertions are kept as they
+   are, with the switch set off, and one assertion beside it holds the field and the mark with the
+   switch on and the rider behind a bot.
+8. **The patent risk is not covered by D-0.** The owner's ruling of 2026-11-10 sets the patent check
+   aside **for racing strategy**. ADR 0038 D-7 covers live riders in a room, and ADR 0066 D-4 extends
+   it to the solo pacer and the rider's own ghost and says in terms that it *"does not reach … lap-race
+   bots"*. **Nothing on record accepts the risk of drafting lap-race bots**, so R-7 asks the owner to.
+   As ADR 0066 D-4 says of itself, this is a risk decision, not a freedom-to-operate opinion (ADR
+   0007 D1), and nothing was searched for it.
 
-Under (c), D-3.1 to D-3.6 fall away, ADR 0066 D-2 and D-6 stand, and the ADR 0066 amendment is
-dropped. Under (a), D-3.1's *"and to the rider"* and D-3.6 fall away and ADR 0028 D-1 has to be
-answered first.
+Under (c), D-3.1 to D-3.8 fall away and **all of these are taken out of this pull request**: the ADR
+0066 amendment; the ADR 0038 amendment; the ADR 0060 D-2.1 sentence in its amendment; the ADR 0061
+amendment's D-4 clause (ADR 0061 D-4 then stands, as solo races still have no drafting); the
+mentions of ADR 0066 D-2 and D-6 as superseded in `docs/architecture.md` and
+`docs/agents/adr-numbering.md`; and R-7 to R-9. Under (a), D-3.1's *"and to the rider"* and D-3.6 fall
+away and ADR 0028 D-1 has to be answered first.
 
 ### D-4 — Which bot tests are replaced, by name (decision 4)
 
@@ -223,6 +265,12 @@ restated against what a tier now is, the tier's surge ceiling, rather than weake
 The wiring file's trainer-writes test (D-3.6) is not among them, and
 `lap-race-cannot-reach-trainer.test.ts` is untouched.
 
+**One more test holds a superseded rule, restated by #2461 and by nothing else**:
+`apps/web/src/game/solo-draft-wiring.test.tsx` › `no solo draft in a lap race — #2425, ADR 0066 D-2`
+› `drafts nobody behind the own ghost the chooser sends with a lap race`. It holds ADR 0066 D-2. It
+stays green until #2461 makes it false, and is then restated as D-3.7 says: its assertions kept as
+they are with the switch off, plus the field and the mark with it on (R-9).
+
 ### D-5 — Bots in rooms stay out; the arithmetic is room-portable (decision 5)
 
 **The author's recommendation.**
@@ -238,7 +286,7 @@ The wiring file's trainer-writes test (D-3.6) is not among them, and
 
 1. **The trainer (ADR 0059 D-2, ADR 0060 D-2).** No bot behaviour, item, race event or draft changes
    the trainer's resistance or ERG target, or when anything is sent to it, except as D-3.3 says a
-   draft does. `lap-race-cannot-reach-trainer.test.ts` stays green **unmodified**.
+   draft does (it narrows ADR 0060 D-2.1's *"or when"*, R-8). `lap-race-cannot-reach-trainer.test.ts` stays green **unmodified**.
 2. **Determinism.** Pure seeded functions only: no clock and no `Math.random`. Draws go through
    `packages/domain/src/lap-race/random.ts` with their own named salt. The same seed replays byte for
    byte, and every number is a named, exported constant.
@@ -270,6 +318,10 @@ Accepting this ADR as written accepts each recommendation.
 | **R-4** | The tests D-4 names, replaced by the changes it names, with the replacements it gives | **Yes** | D-4 |
 | **R-5** | No bots in rooms; room-portable arithmetic required now | **Yes** | D-5 |
 | **R-6** | A seeded skill error on the gaps and the finish distance | **Yes** | D-7 |
+| **R-7** | The owner accepts the patent risk of drafting in a lap race (bots, and the rider behind them), as ADR 0038 D-7 and ADR 0066 D-4 did for rooms, the pacer and the ghost; D-0 does not cover it | **Yes**, under (a) or (b); moot under (c) | D-3.8 |
+| **R-8** | ADR 0060 D-2.1's *"or when"* is narrowed: a bot's place decides the rider's `k` and so when a grade is sent; what is sent is unchanged | **Yes**, under (b); moot under (c) | D-3.3, D-6.1 |
+| **R-9** | A lap race in which the rider drafted a bot shows the solo Draft field and is marked drafted (ADR 0066 D-5), and `solo-draft-wiring.test.tsx`'s lap-race test is restated | **Yes**, under (b); moot under (c) | D-3.7, D-4 |
+| **R-10** | ADR 0061 D-8.2's −20 % floor stops applying while a bot is in a draft (`k` < 1) | **Yes** | D-1.3 |
 
 ---
 
@@ -302,7 +354,7 @@ Accepting this ADR as written accepts each recommendation.
 |---|---|
 | #2458 | D-2's form and clamp; D-5.2's arithmetic; replaces the two D-8.1 tests D-4 names, and restates the `apps/web` tests D-4 names and no others; the banking reserve removed |
 | #2459 | Archetypes change capacity at the start only (D-1.1); the skill axis is D-7's |
-| #2460, #2461 | D-3: one model, `k` on effort distance, the switch, D-3.6's restatement and no other |
+| #2460, #2461 | D-3: one model, `k` on effort distance, the switch, D-3.6's restatement and D-3.7's solo-draft-wiring restatement, and no other |
 | #2462, #2463 | Decide once per window (D-6.3); replace the rank tests D-4 names when they make them false |
 | #2464 | Asserts D-1.3's bounds and D-6.2's replay over its seeded fields |
 

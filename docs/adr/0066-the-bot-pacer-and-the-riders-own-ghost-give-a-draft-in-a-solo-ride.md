@@ -402,9 +402,11 @@ approved it.
 
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
-- **2026-11-11** — **D-2 (lap-race bots stay undrafted) and D-6's last bullet (the switch has no
-  effect in a lap race) are superseded by
-  [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md) D-3**: every racer in a
+- **2026-11-11** — **Once [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
+  is Accepted with its D-3 answer (b), D-2 (lap-race bots stay undrafted), D-1.5's lap-race clause,
+  D-4's sentence that the patent-risk acceptance does not reach lap-race bots, and D-6's last bullet
+  (the switch has no effect in a lap race) are superseded by its D-3** (the owner's R-7 accepts that
+  risk): every racer in a
   solo lap race gives and takes a draft by ADR 0038 D-3's model on effort distance, and this ADR's
   switch, off, turns it off for the whole race. D-7 (the trainer never feels a draft) is unchanged
   and binds the lap race. This entry only points there; nothing else in this ADR changes.
