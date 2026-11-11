@@ -33,7 +33,9 @@ import {
   LAP_RACE_ITEM_KEY,
   LAP_RACE_PLACE_KEY,
   LAP_RACE_STANDINGS_LINES,
+  BEHIND_CUE_SECONDS,
   PUDDLE_WARNING_METRES,
+  behindCue,
   botName,
   incomingHit,
   lapRaceReadings,
@@ -99,7 +101,8 @@ describe('the lap race’s fields (#1904)', () => {
       ['Place', '2', 'of 4'],
       ['Item', 'None', ''],
     ]);
-    expect(field(readings, LAP_RACE_PLACE_KEY)?.detail).toBe('Lap 1 of 3');
+    // bot-2 is a second behind, so the lap line names it (#2455 AC2).
+    expect(field(readings, LAP_RACE_PLACE_KEY)?.detail).toBe('Lap 1 of 3 · Steady bot 2 +1 s');
     // Through the HUD's own reading list, after every other field.
     const all = hudReadings({
       ...BASE_INPUT,
@@ -232,6 +235,86 @@ describe('the lap race’s fields (#1904)', () => {
     // No longer than the longest name before #2455, so the standings' line still fits.
     const longest = Math.max(...BOT_PACING_STYLES.map((style) => botName(style, 7).length));
     expect(longest).toBeLessThanOrEqual('Fierce bot 7'.length);
+  });
+});
+
+describe('the “behind you” cue on the Place field’s lap line (#2455 AC2)', () => {
+  /** The Place field's lap line, the rider at 100 m and the bots where `others` puts them. */
+  function lapLineAt(others: readonly number[], speed = 10): string | undefined {
+    const race = tick(startRace({ laps: 3 }), {
+      atMs: 1_000,
+      effortDistances: efforts(100, others),
+    });
+    return field(lapRaceReadings(hudOf(race, speed)), LAP_RACE_PLACE_KEY)?.detail;
+  }
+
+  it('names the next racer back and its gap while it is within the window', () => {
+    // bot-1 is 5 s ahead, bot-2 2 s behind, bot-3 9 s behind: the cue is bot-2's.
+    expect(lapLineAt([150, 80, 10])).toBe('Lap 1 of 3 · Steady bot 2 +2 s');
+    // With bot-2 dropped back past bot-3, the next racer back is bot-3.
+    expect(lapLineAt([150, 10, 80])).toBe('Lap 1 of 3 · Fierce bot 3 +2 s');
+    // A racer level with the rider but placed ahead of it by id is not behind it.
+    expect(lapLineAt([150, 10, 100])).toBe('Lap 1 of 3');
+  });
+
+  it('holds to the window in whole seconds, as the standings round the gap', () => {
+    expect(BEHIND_CUE_SECONDS).toBe(5);
+    expect(lapLineAt([150, 50, 10])).toBe('Lap 1 of 3 · Steady bot 2 +5 s');
+    // 5.4 s is +5 s on the standings, so it is inside the window.
+    expect(lapLineAt([150, 46, 10])).toBe('Lap 1 of 3 · Steady bot 2 +5 s');
+    // 5.6 s is +6 s on the standings: outside, so the lap line is the lap alone.
+    expect(lapLineAt([150, 44, 10])).toBe('Lap 1 of 3');
+  });
+
+  it('drops the cue when no one is in the window, the rider is last, or is at a standstill', () => {
+    expect(lapLineAt([150, 20, 10])).toBe('Lap 1 of 3');
+    expect(lapLineAt([150, 120, 110])).toBe('Lap 1 of 3');
+    expect(lapLineAt([150, 80, 10], 0)).toBe('Lap 1 of 3');
+  });
+
+  it('names no racer it was not told the name of, as a room’s lap race tells it none', () => {
+    const race = tick(startRace({ laps: 3 }), {
+      atMs: 1_000,
+      effortDistances: efforts(100, [150, 80, 10]),
+    });
+    expect(behindCue({ ...hudOf(race), entrants: {} })).toBeUndefined();
+    expect(
+      field(lapRaceReadings({ ...hudOf(race), entrants: {} }), LAP_RACE_PLACE_KEY)?.detail,
+    ).toBe('Lap 1 of 3');
+  });
+
+  it('gives a rider over the line Finished, never a cue', () => {
+    let race = startRace({ laps: 1, lap: 500 });
+    race = tick(race, { atMs: 60_000, effortDistances: efforts(505, [500, 300, 200]) });
+    expect(behindCue(hudOf(race))).toBeUndefined();
+    expect(field(lapRaceReadings(hudOf(race)), LAP_RACE_PLACE_KEY)?.detail).toBe('Finished');
+  });
+
+  it('reads the gap the standings write on the named racer’s line, across a field closing in', () => {
+    let shown = 0;
+    for (let back = 0; back <= 100; back += 1.5) {
+      for (const speed of [7, 10, 13.5]) {
+        const race = tick(startRace({ laps: 3 }), {
+          atMs: 1_000,
+          effortDistances: efforts(100, [150, 100 - back, 0]),
+        });
+        const hud = hudOf(race, speed);
+        const lines = lapRaceStandings(hud).lines;
+        const mine = lines.findIndex((line) => line.you);
+        const next = lines[mine + 1];
+        const cue = behindCue(hud);
+        const whole = next === undefined ? undefined : Number(next.gap.replace(/[^0-9]/gu, ''));
+        if (next === undefined || whole === undefined || whole > BEHIND_CUE_SECONDS) {
+          expect(cue, `${String(back)} m back at ${String(speed)} m/s`).toBeUndefined();
+        } else {
+          shown += 1;
+          expect(cue, `${String(back)} m back at ${String(speed)} m/s`).toBe(
+            `${next.who} ${next.gap}`,
+          );
+        }
+      }
+    }
+    expect(shown).toBeGreaterThan(10);
   });
 });
 

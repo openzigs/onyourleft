@@ -22,7 +22,10 @@
  *
  * *Place* — the rider's place and the field's size, with the lap under it
  * (`lap-text.ts` §`lapOfLaps`), and *Finished* under it once the rider is
- * over the line. *Item* — what the rider holds, or *None*, with a warning
+ * over the line. While the next racer back is within
+ * {@link BEHIND_CUE_SECONDS}, the lap line also names that racer and its gap,
+ * *Lap 2 of 3 · Tempo 4 +2 s* ({@link behindCue}, #2455 AC2): the chase
+ * camera looks forward only, so a bot about to pass is otherwise unseen. *Item* — what the rider holds, or *None*, with a warning
  * under it when a hit is coming ({@link incomingHit}) and *Cape on* while a
  * rain cape is. Two fields, because a phone's secondary tier has height for
  * two rows, and a Delivery round's two fields were measured to fit there
@@ -259,6 +262,39 @@ export function racePlace(
   return { place: index + 1, of: order.length };
 }
 
+/**
+ * How close, in whole seconds, the next racer back must be for the *Place*
+ * field's lap line to name it — #2455 AC2, the owner's ruling of 2026-11-10
+ * (design (a), "about 5 s"). Compared with the gap as the standings round it
+ * ({@link gapText}), so the cue never reads a number the standings do not.
+ */
+export const BEHIND_CUE_SECONDS = 5;
+
+/**
+ * The "behind you" cue, `Tempo 4 +2 s`: the next racer back in `standings`
+ * order and its gap, the very gap {@link lapRaceStandings} writes on its
+ * line, while it rounds to {@link BEHIND_CUE_SECONDS} or under. `undefined`
+ * for the last racer, a finished rider, a rider at a standstill (no gap to
+ * write), a racer further back, and **a racer the HUD was not told the name
+ * of**: a room's lap race names no entrant here (`GameView` §`roomLapRaceHud`)
+ * because its standings are the room's own, with the room's own gaps, and a
+ * cue that could not agree with them is not shown. Visual only: the HUD's fields are not a
+ * live region, and no sentence in `lap-race-announce.ts` reads it.
+ */
+export function behindCue(hud: LapRaceHud): string | undefined {
+  const { race, riderId } = hud;
+  const me = riderEntry(race, riderId);
+  if (me.racer.finishedAtMs !== null) return undefined;
+  const order = standings(race.racers.map((entry) => entry.racer));
+  const nextBack = order[order.indexOf(riderId) + 1];
+  const entry = race.racers.find((each) => each.racer.id === nextBack);
+  const named = nextBack === undefined ? undefined : entrant(hud, nextBack);
+  if (entry === undefined || named === undefined) return undefined;
+  const seconds = gapSeconds(hud, me, entry);
+  if (seconds === undefined || Math.round(seconds) > BEHIND_CUE_SECONDS) return undefined;
+  return `${named.name} ${gapText(seconds)}`;
+}
+
 /** The key of the lap race's place field — #1904. */
 export const LAP_RACE_PLACE_KEY = 'lap-race-place';
 
@@ -283,7 +319,7 @@ export function lapRaceReadings(hud: LapRaceHud | undefined): readonly HudReadin
     value: String(place),
     unit: `of ${String(of)}`,
     stale: false,
-    detail: finished ? LAP_RACE_TEXT.finished : lapOfLaps(me.racer.lapsDone, race.course.laps),
+    detail: finished ? LAP_RACE_TEXT.finished : lapLine(hud),
   };
   if (!race.itemsOn) return [placeReading];
   const warning = incomingHit(race, riderId);
@@ -307,6 +343,33 @@ export function lapRaceReadings(hud: LapRaceHud | undefined): readonly HudReadin
       ...(warning === undefined ? {} : { alert: true }),
     },
   ];
+}
+
+/** The *Place* field's lap line, with the {@link behindCue} after it while there is one. */
+function lapLine(hud: LapRaceHud): string {
+  const me = riderEntry(hud.race, hud.riderId);
+  const lap = lapOfLaps(me.racer.lapsDone, hud.race.course.laps);
+  const cue = behindCue(hud);
+  return cue === undefined ? lap : `${lap} · ${cue}`;
+}
+
+/**
+ * Another racer's time gap to the rider, in seconds, behind positive: two
+ * finished racers by their finish instants, else the drawn distance between
+ * them over the rider's speed; `undefined` at a standstill. The standings'
+ * gap and the {@link behindCue}'s both, so the two always agree.
+ */
+function gapSeconds(hud: LapRaceHud, me: LapRacer, entry: LapRacer): number | undefined {
+  const { course } = hud.race;
+  const line = course.lapLengthMetres * course.laps;
+  const theirs = entry.racer.finishedAtMs;
+  const mine = me.racer.finishedAtMs;
+  const speed = hud.speedMetresPerSecond;
+  return theirs !== null && mine !== null
+    ? (theirs - mine) / 1_000
+    : speed > 0 && Number.isFinite(speed)
+      ? (gapDistance(me, line) - gapDistance(entry, line)) / speed
+      : undefined;
 }
 
 /** The distance a racer is at for a gap: the line for a finished one, its drawn distance otherwise. */
@@ -341,7 +404,6 @@ export const LAP_RACE_STANDINGS_LINES = LAP_RACE_MOST_BOTS + 1;
 export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
   const { race, riderId } = hud;
   const me = riderEntry(race, riderId);
-  const line = race.course.lapLengthMetres * race.course.laps;
   const order = standings(race.racers.map((entry) => entry.racer));
   const index = new Map(race.racers.map((entry, at) => [entry.racer.id, at]));
   const lines = order.map((id, at): StandingsLine => {
@@ -350,15 +412,7 @@ export function lapRaceStandings(hud: LapRaceHud): RaceStandingsView {
     const finished = entry.racer.finishedAtMs !== null;
     let gap = '';
     if (!you) {
-      const theirs = entry.racer.finishedAtMs;
-      const mine = me.racer.finishedAtMs;
-      const speed = hud.speedMetresPerSecond;
-      const seconds =
-        theirs !== null && mine !== null
-          ? (theirs - mine) / 1_000
-          : speed > 0 && Number.isFinite(speed)
-            ? (gapDistance(me, line) - gapDistance(entry, line)) / speed
-            : undefined;
+      const seconds = gapSeconds(hud, me, entry);
       gap = seconds === undefined ? NO_READING : gapText(seconds);
     }
     return {

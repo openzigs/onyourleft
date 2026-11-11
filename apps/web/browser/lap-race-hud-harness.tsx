@@ -25,6 +25,11 @@
  * - `held-…`: the `warned` race with the rider holding each other item, so
  *   every item's name is laid out under the runner's fonts.
  *
+ * On every race stage a bot rides 10 m behind the rider, so the *Place*
+ * field's lap line carries the "behind you" cue (#2455 AC2). On the warned
+ * stages that bot is named the longest name a solo field deals,
+ * `Sprinter 7`, so the line is at its widest: *Lap 5 of 5 · Sprinter 7 +1 s*.
+ *
  * ⚠️ **Every item's HUD name is one word**, and the first cut's
  * *Crosswind gust* is why: on the CI runner's fonts *Crosswind* alone ran
  * past the *Item* field's value box at every corners layout (PR #1957's first
@@ -68,6 +73,7 @@ import {
 import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
+import { LAP_RACE_MOST_BOTS } from '../src/game/lap-race/choice';
 import type { GameState } from '../src/game/simulation';
 
 // The shipping stylesheet, which is the whole point.
@@ -99,6 +105,8 @@ export interface LapRaceStageMeasurement {
     readonly valueOverflows: boolean;
     readonly outlineStyle: string;
     readonly outlineWidth: number;
+    /** The phrase under the value (`HudReading.detail`), or `undefined` with none. */
+    readonly detail: string | undefined;
   }[];
   /** The race's standings panel, laid out at no size when it is visually hidden. */
   readonly standings: Box | undefined;
@@ -202,6 +210,9 @@ function raceAt(rider: number, botsAhead: number): ItemRaceState {
   return stepRace(start, { atMs: 600_000, effortDistances: efforts });
 }
 
+/** The bot behind the rider on the warned stages, named the longest a solo field names a bot. */
+const WIDEST_BEHIND = 'bot-11';
+
 function hudOf(race: ItemRaceState): LapRaceHud {
   return {
     race,
@@ -210,7 +221,10 @@ function hudOf(race: ItemRaceState): LapRaceHud {
       BOTS.map((id, index) => [
         id,
         {
-          name: botName(STYLES[index % STYLES.length] ?? 'even', index + 1),
+          name:
+            id === WIDEST_BEHIND
+              ? botName('sprinter', LAP_RACE_MOST_BOTS)
+              : botName(STYLES[index % STYLES.length] ?? 'even', index + 1),
           wattsPerKilogram: 3.5,
         },
       ]),
@@ -295,6 +309,7 @@ function measure(): readonly LapRaceStageMeasurement[] {
       secondary: secondary === null ? undefined : boxIn(secondary, origin),
       fields: [...stage.querySelectorAll('.oyl-hud__field')].map((field) => {
         const value = field.querySelector('.oyl-hud__value');
+        const detail = field.querySelector('.oyl-hud__detail');
         const style = window.getComputedStyle(field);
         return {
           label: textOf(field.querySelector('.oyl-hud__label') ?? field),
@@ -302,6 +317,7 @@ function measure(): readonly LapRaceStageMeasurement[] {
           valueOverflows: value === null ? true : value.scrollWidth > value.clientWidth,
           outlineStyle: style.outlineStyle,
           outlineWidth: Number.parseFloat(style.outlineWidth) || 0,
+          detail: detail === null ? undefined : textOf(detail),
         };
       }),
       standings: standings === null ? undefined : boxIn(standings, origin),
