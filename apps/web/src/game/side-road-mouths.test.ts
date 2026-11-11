@@ -174,9 +174,11 @@ const RIDE = Array.from({ length: 150 }, (_, index) => (PAIRS[0] as number) - 20
  * coverage on a slow runner it passed Vitest's 5 s default, as
  * `docs/agents/ci.md` §4c expects of such a case: it timed out in nightly run
  * 43008116660 (2026-11-11, an Intel Xeon 8370C), 5 666 ms by Vitest's own
- * count, the file's three cases 7 561 ms. Locally it takes 1.2 s, and 2.2 s
- * under coverage. Set to about three times the slowest figure; the figures
- * from the three CI readings of #2471 are in that issue.
+ * count, the file's three cases 7 561 ms. Three readings of this case under
+ * coverage on branch runs of that nightly (2026-11-11, runs 43013870648,
+ * 43013875285, 43013879406): 4 278 ms and 4 295 ms on an AMD EPYC 9V74, and
+ * 5 902 ms on an EPYC 7763. Locally it takes 1.2 s, and 2.2 s under coverage.
+ * 20 s is about three times the slowest of those, 5.9 s.
  */
 const SWEEP = { timeout: 20_000 } as const;
 
