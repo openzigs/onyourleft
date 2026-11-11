@@ -91,6 +91,8 @@ import {
 import { writeRealisticReport } from './realistic-report';
 import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
+import { readSoloDraftChoice } from './solo-draft-preference';
+import { draftedRide, soloDraftPercent, type SoloDraftSources } from './solo-draft';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
 import { deviceToday, NO_SEASON, seasonOn, type CalendarDay, type Season } from './season';
@@ -324,6 +326,7 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type Seconds,
   type TimeInZones,
   type Watts,
   type Wind,
@@ -1683,6 +1686,13 @@ function GameScreen({
    */
   const outcomeRef = useRef<GhostOutcome | undefined>(undefined);
   /**
+   * Whether the attempt {@link outcomeRef} settled was ridden in a draft —
+   * #2425, ADR 0066 D-5.1 and D-5.6: latched on the frame the outcome settles,
+   * from the simulation's own in-draft metres (`solo-draft.ts`
+   * §`draftedRide`), and reset with it at the start of a ride.
+   */
+  const outcomeDraftedRef = useRef(false);
+  /**
    * How far the rider's cranks have turned, in radians — #349.
    *
    * ⚠️ **A ref, for the reason {@link outcomeRef} is one and then some**: this
@@ -2063,6 +2073,7 @@ function GameScreen({
       // (ride-result.ts, ADR 0039 D-2.4): hand nothing, not what it settled.
       trainerPortRef.current?.gameRideEnded(
         ghostRiderRef.current === undefined ? outcomeRef.current : undefined,
+        outcomeDraftedRef.current,
       );
       // #785: the race this ride was in, as its room said it, kept with the
       // recording under the ride so it is saved with it on this device —
@@ -2316,6 +2327,7 @@ function GameScreen({
       // that is no longer loaded: the same false congratulation that module
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
+      outcomeDraftedRef.current = false;
       setNoticeChoice('auto');
       // #397: a new ride starts silent. The last ride's sentence is not this
       // one's, and a region carrying it at mount would announce it again.
@@ -2475,6 +2487,17 @@ function GameScreen({
         // odometer start the demo's group preset uses (#1647), so the world
         // drawn there is the one this ride would have drawn on arriving.
         ...startOf(simulated, profile.totalDistance),
+        // #2425, ADR 0066 D-1: a solo ride drafts the rider behind the pacer
+        // and their OWN ghost, with the device's switch on (D-6). Never in a
+        // room, whose `k` is the room's (D-1.5), never in a lap race (D-2),
+        // never behind another rider's ghost (D-3); with the switch off, or
+        // with nobody to give a draft, nothing is handed and the ride is
+        // today's to the bit.
+        ...soloDraftOf(
+          roomId === undefined && raceChoice === undefined && readSoloDraftChoice(deviceStorage()),
+          pacer !== undefined && raceChoice === undefined,
+          ghostRiderRef.current === undefined ? ghostRef.current : undefined,
+        ),
       });
       simulationRef.current = simulation;
       // #2078: a new ride, a new ring — its clock starts again from nought —
@@ -3101,11 +3124,18 @@ function GameScreen({
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
       // unit-tested turned out to be reachable by nobody.
+      const settledBefore = outcomeRef.current;
       outcomeRef.current = settleGhostOutcome(
         outcomeRef.current,
         ghostRef.current,
         simulation.state,
       );
+      // #2425, ADR 0066 D-5.6: the attempt just settled was drafted when the
+      // rider rode at least `DRAFTED_SHARE` of it in the draft — latched now,
+      // as the outcome is, and never re-read.
+      if (settledBefore === undefined && outcomeRef.current !== undefined) {
+        outcomeDraftedRef.current = draftedRide(simulation.state.soloDraft);
+      }
       // #2078: the last ten minutes of power and heart rate, one sample a
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a
@@ -4307,7 +4337,18 @@ function GameScreen({
         riderMass={props.riderMass}
         thresholdPower={thresholdPower}
         powerZoneTime={powerZoneTime}
-        chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
+        chases={chasedGaps(
+          state,
+          ghostRef.current,
+          outcomeRef.current,
+          ghostRiderRef.current,
+          outcomeDraftedRef.current,
+        )}
+        // #2425: a solo ride's draft, from the simulation's own `k` — only
+        // when the rider's display preference shows it (ADR 0066 D-6, R-13).
+        {...(state.soloDraft === undefined || !draftShownRef.current
+          ? {}
+          : { soloDraft: soloDraftPercent(state.soloDraft.k) })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={
@@ -4852,6 +4893,7 @@ function chasedGaps(
   ghost: GhostTrack | undefined,
   outcome: GhostOutcome | undefined,
   rider?: string,
+  drafted = false,
 ): readonly ChasedGap[] {
   const found: ChasedGap[] = [];
   const bot = state.bot;
@@ -4869,7 +4911,29 @@ function chasedGaps(
       // what turns the field from a gap into a result — `hud/fields.ts`
       // §`ChasedGap.outcome`.
       ...(outcome === undefined ? {} : { outcome }),
+      // #2425: and whether that settled attempt was ridden in a draft.
+      ...(outcome !== undefined && drafted ? { drafted } : {}),
     });
   }
   return found;
+}
+
+/**
+ * The solo draft a ride is handed — #2425, ADR 0066 D-1 — or nothing: with
+ * the switch off (`on` false), and with neither a pacer nor the rider's own
+ * ghost to give one. The ghost enters as its own `ghostDistanceAt`, a
+ * replay at the ride's racing clock and never a re-simulation (D-1.1).
+ */
+function soloDraftOf(
+  on: boolean,
+  pacer: boolean,
+  ownGhost: GhostTrack | undefined,
+): { readonly soloDraft?: SoloDraftSources } {
+  if (!on || (!pacer && ownGhost === undefined)) return {};
+  return {
+    soloDraft:
+      ownGhost === undefined
+        ? {}
+        : { ghostAt: (ridden: Seconds) => ghostDistanceAt(ownGhost, ridden) },
+  };
 }

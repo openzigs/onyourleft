@@ -1145,6 +1145,14 @@ function fontPixels(selector: string): number {
   return element === null ? 0 : Number.parseFloat(window.getComputedStyle(element).fontSize);
 }
 
+/** #2425: whether the tier holding `field` draws a solo ride's draft. */
+function soloDraftDrawn(field: Element): boolean {
+  const draft = field.parentElement?.querySelector(':scope > .oyl-hud__field--solo-draft');
+  if (draft == null) return false;
+  const box = draft.getBoundingClientRect();
+  return box.width * box.height > 1;
+}
+
 function measure(): StageMeasurement {
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
@@ -1160,7 +1168,13 @@ function measure(): StageMeasurement {
       strip ||
       ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
         field.classList.contains(name),
-      );
+      ) ||
+      // #2425: a solo ride's draft, away from a tablet (`theme.css` §"A SOLO
+      // RIDE'S DRAFT, ON A TABLET ONLY"), and the wind where that draft is
+      // DRAWN, which it gives way to on a tablet beside the pacer and the
+      // ghost (the same section).
+      field.classList.contains('oyl-hud__field--solo-draft') ||
+      (field.classList.contains('oyl-hud__field--wind') && soloDraftDrawn(field));
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);
       continue;

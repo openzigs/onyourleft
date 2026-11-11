@@ -128,7 +128,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         capacitor.config.ts ships apps/web/dist — see §4h.
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
-                        #92's advanceBot rather than a second integrator
+                        #92's advanceBot rather than a second integrator.
+                        Since #2425 (ADR 0066) a SOLO ride drafts the rider
+                        behind the pacer and their own ghost: per step,
+                        fieldDraftFactors over odometers only (never a drawn
+                        place), the ghost as a ghostDistanceAt handed in at
+                        setup, never re-simulated; neither the pacer nor the
+                        ghost takes a draft from the rider.
+                        solo-draft.ts holds the inputs and the 10 % "drafted"
+                        share; solo-draft-preference.ts the device
+                        switch, whose off is today's ride to the bit. Never in
+                        a room (the room's k) or a lap race (ADR 0061 D-4)
     src/game/camera.ts  the chase camera as ONE composition (#424) — height,
                         distance behind, look-ahead and lens, which were four
                         constants in two files with four gates stated against
@@ -1012,6 +1022,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         frames, and the release the same bytes. A new
                         drafting source (#2425, #2422) keeps it green
                         UNMODIFIED
+    src/game/solo-draft-cannot-reach-trainer.test.tsx
+                        #2425's runs of that gate, beside it: the same
+                        assertions on the production solo path (the picker's
+                        pacer or *Race your own*, the device switch on
+                        against off, `k` set per step by the simulation),
+                        and the drafted run rode further
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round

@@ -65,6 +65,7 @@ import {
   overlap,
   riderBox,
   type Viewport,
+  windGivesWayToTheDraft,
 } from './ride-stage';
 
 import type { StageItem, StageMeasurement } from './ride-harness';
@@ -252,6 +253,13 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
     }
     // On a phone the pacer, the ghost and the wind give way, still in the list.
     for (const name of GIVES_WAY) {
+      // #2425: a round is ridden alone, so from 50 rem tall on a tablet the
+      // wind gives way to the solo draft (`theme.css` §"the wind gives way to
+      // it"), and is still in the list.
+      if (name === 'reading: Wind' && tablet && windGivesWayToTheDraft(viewport)) {
+        expect(seen.givenWay, `${at}: ${name}`).toContain(name);
+        continue;
+      }
       const reading = named(seen.items, name);
       if (tablet) {
         expect(inside(reading.box, viewport), `${at}: ${describeItem(reading)}`).toBe(true);
@@ -276,6 +284,8 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       'Zone',
       'Pacer',
       'Your best',
+      // #2425: a solo ride's draft — a round is ridden alone — on a tablet only.
+      'Draft',
       'Wind',
       'Houses',
       // #2453: where the next house is, between the round's count and its score.

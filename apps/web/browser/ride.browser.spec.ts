@@ -142,6 +142,7 @@ import {
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
+  windGivesWayToTheDraft,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -260,6 +261,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Zone',
         'Pacer',
         'Your best',
+        // #2425: the pacer's and the ghost's draft (ADR 0066), on by default.
+        'Draft',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
@@ -268,8 +271,13 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // beside the strip, and since #2076 and #2077 the ride so far and the
       // rider's effort, where they are drawn. And since #2078 the recent
       // graph, where it is drawn.
-      // And since #2434 the calorie estimate.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 26 : 19);
+      // And since #2434 the calorie estimate. And since #2425 a solo ride's
+      // draft, drawn on a tablet only (`theme.css` §"A SOLO RIDE'S DRAFT, ON A
+      // TABLET ONLY"), so a phone draws as many as before, and a tablet from
+      // 50 rem tall draws it in the wind's place (§"the wind gives way to it").
+      expect(seen.items).toHaveLength(
+        rideTotalsDrawn(viewport) ? (windGivesWayToTheDraft(viewport) ? 26 : 27) : 19,
+      );
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -1060,11 +1068,27 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         expect.arrayContaining(['Distance', 'Climbed', 'Avg power', 'Calories']),
       );
       if (!rideTotalsDrawn(viewport)) {
-        // #2078: and the recent graph, not drawn on a phone's overlay either.
-        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS, 'the recent graph']);
+        // #2078: and the recent graph, not drawn on a phone's overlay either;
+        // and since #2425 a solo ride's draft, drawn on a tablet only.
+        expect(seen.givenWay, how).toEqual([
+          ...RIDE_TOTAL_READINGS,
+          'reading: Draft',
+          'the recent graph',
+        ]);
         continue;
       }
-      expect(seen.givenWay, how).toEqual([]);
+      // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
+      // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
+      const draftDrawn = viewport.width >= 800 && viewport.height >= 752;
+      // And from 50 rem tall the wind gives way to it (§"the wind gives way to
+      // it"), beside the pacer and the ghost.
+      expect(seen.givenWay, how).toEqual(
+        draftDrawn
+          ? windGivesWayToTheDraft(viewport)
+            ? ['reading: Wind']
+            : []
+          : ['reading: Draft'],
+      );
       const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
       if (panel === undefined) throw new Error(`${how}: no secondary panel`);
       // Stacked, the readings scroll: drawn, in their panel and over no other
@@ -1115,7 +1139,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       // Twelve readings since #2072's elapsed time and clock, and the rest as
       // above — the ride so far and the rider's effort (#2076, #2077), the
       // road ahead (#2075) and the recent graph (#2078), drawn where the HUD
-      // stacks. And since #2434 the calorie estimate.
+      // stacks. And since #2434 the calorie estimate. A solo ride's draft
+      // (#2425) is drawn on a tablet only.
       expect(seen.items).toHaveLength(26);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
@@ -1457,4 +1482,63 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
     }
   }
   return found;
+}
+
+/*
+ * #2425: the solo Draft field is the same height at any draft. Its number is
+ * one or two digits (0 to the gauge's 59), and on the CI runner a two-digit
+ * one put its unit and its number on two lines, so the tier grew a row
+ * between two loads of the same ride (`theme.css` §"its unit is a line of its
+ * own" until its unit became the `%` alone, so #2130's rule that a unit
+ * stays on its number's line holds). Read on
+ * the widest HUD at every viewport that draws the field: the number set to 59,
+ * the field's height and the tier's must not change, and the unit is on the
+ * number's line.
+ */
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#2425 the solo Draft field keeps its height at a two-digit draft — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const read = await page.evaluate(() => {
+      const field = document.querySelector<HTMLElement>(
+        '.oyl-hud__fields--secondary > .oyl-hud__field--solo-draft',
+      );
+      const panel = document.querySelector<HTMLElement>('.oyl-hud__fields--secondary');
+      const number = field?.querySelector('dd')?.firstChild;
+      const unit = field?.querySelector('.oyl-hud__unit');
+      if (field == null || panel == null || !(number instanceof Text) || unit == null) {
+        return undefined;
+      }
+      const drawn = field.getBoundingClientRect().width > 1;
+      const was = number.data;
+      const before = {
+        field: field.getBoundingClientRect().height,
+        panel: panel.getBoundingClientRect().height,
+      };
+      number.data = '59';
+      const range = document.createRange();
+      range.selectNodeContents(number);
+      const after = {
+        field: field.getBoundingClientRect().height,
+        panel: panel.getBoundingClientRect().height,
+        numberTop: range.getBoundingClientRect().top,
+        numberBottom: range.getBoundingClientRect().bottom,
+        unitMiddle: (unit.getBoundingClientRect().top + unit.getBoundingClientRect().bottom) / 2,
+      };
+      number.data = was;
+      return { drawn, was, before, after };
+    });
+    expect(read, 'the solo Draft field is in the document').toBeDefined();
+    if (read === undefined || !read.drawn) return;
+    console.log(
+      `#2425 the solo Draft field — ${viewport.name}: ${read.before.field.toFixed(1)} px at ${read.was}, ${read.after.field.toFixed(1)} px at 59; the tier ${read.before.panel.toFixed(1)} → ${read.after.panel.toFixed(1)} px`,
+    );
+    expect(read.after.field).toBeCloseTo(read.before.field, 1);
+    expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
+    // On the number's line (#2130): the unit's middle is within the number's
+    // line box, which a unit wrapped under the number is not.
+    expect(read.after.unitMiddle).toBeGreaterThan(read.after.numberTop);
+    expect(read.after.unitMiddle).toBeLessThan(read.after.numberBottom);
+  });
 }

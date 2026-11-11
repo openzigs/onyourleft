@@ -10570,6 +10570,36 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
   });
 
+  it('keeps whether the settled attempt was drafted beside the outcome it came with — #2425, ADR 0066 D-5.1', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('beaten', true);
+    // A later game ride with nothing settled leaves the drafted outcome as it was.
+    rig.controller.noteGameRideEnded(undefined, false);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide).toMatchObject({
+      gameOutcome: 'beaten',
+      gameOutcomeDrafted: true,
+    });
+
+    // A later settled outcome that was not drafted replaces both.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('level', true);
+    rig.controller.noteGameRideEnded('not-beaten');
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('not-beaten');
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcomeDrafted).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('keeps an earlier SETTLED outcome when a later game ride has none (#1049’s review)', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');

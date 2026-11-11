@@ -316,6 +316,16 @@ export const RIDE_TOTAL_READINGS = [
  * (`theme.css` §"THE RIDE SO FAR"). The owner's ruling of 2026-11-06 (#2034)
  * ties it to phones: a laptop's window under 47 rem tall draws it.
  */
+/**
+ * #2425 — whether the wind gives way to a solo ride's draft at this viewport,
+ * on the widest ride (a pacer, a ghost and the wind): on a tablet from 50 rem
+ * wide and 50 rem tall (`theme.css` §"the wind gives way to it"), where
+ * #2434's *Calories* leaves the tier's second row no seventh track.
+ */
+export function windGivesWayToTheDraft(viewport: Viewport): boolean {
+  return viewport.width >= 800 && viewport.height >= 800;
+}
+
 export function rideTotalsDrawn(viewport: Viewport): boolean {
   const corners = viewport.width >= 736 && viewport.height >= 360;
   const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
