@@ -397,3 +397,14 @@ approved it.
   mark is owed there before anything else ships.
 - **#2423's gate has to change to let #2425 pass.** Then a draft has reached the trainer, which D-7
   forbids, and the change is wrong rather than the gate.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-11** — **D-2 (lap-race bots stay undrafted) and D-6's last bullet (the switch has no
+  effect in a lap race) are superseded by
+  [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md) D-3**: every racer in a
+  solo lap race gives and takes a draft by ADR 0038 D-3's model on effort distance, and this ADR's
+  switch, off, turns it off for the whole race. D-7 (the trainer never feels a draft) is unchanged
+  and binds the lap race. This entry only points there; nothing else in this ADR changes.
