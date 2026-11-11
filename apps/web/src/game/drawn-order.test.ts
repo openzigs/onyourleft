@@ -303,6 +303,67 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
   );
 });
 
+/** Each rider's drawn place and combined lean as one odometer is swept through the other's, `step` metres a frame. */
+function overtaking(
+  where: Bend,
+  rider: { readonly at: number; readonly speed: number },
+  other: { readonly kind: Other['kind']; readonly speed: number },
+  step: number,
+): { readonly places: readonly number[]; readonly leans: readonly number[] }[] {
+  const places: number[][] = [[], []];
+  const leans: number[][] = [[], []];
+  for (let gap = -45; gap <= 45; gap += step) {
+    const odometer = rider.at + gap;
+    const markers = frame(where, { odometer: rider.at, speed: rider.speed }, [
+      { kind: other.kind, odometer, speed: other.speed },
+    ]);
+    markers.forEach((marker, index) => {
+      (places[index] as number[]).push(
+        drawnAlong(where.line, marker, index === 0 ? rider.at : odometer),
+      );
+      (leans[index] as number[]).push(Math.abs(combinedLean(marker.lean, marker.bodyLean)));
+    });
+  }
+  return places.map((each, index) => ({ places: each, leans: leans[index] as number[] }));
+}
+
+describe('nobody jumps as one rider passes another — #2427', () => {
+  const STEP = 0.05;
+  const cases = [
+    { rider: 30, other: 45, kind: 'bot' as const },
+    { rider: 45, other: 30, kind: 'bot' as const },
+    { rider: 20, other: 50, kind: 'remote' as const },
+    { rider: 50, other: 20, kind: 'ghost' as const },
+  ];
+  it.each(BENDS.flatMap((where) => cases.map((each) => ({ where, ...each }))))(
+    '$where.name: the $kind at $other km/h swept through the rider at $rider km/h moves no rider a jump in a frame, nor its lean',
+    ({ where, rider, other, kind }) => {
+      const at = (where.from + where.to) / 2;
+      const swept = overtaking(
+        where,
+        { at, speed: rider * KMH },
+        { kind, speed: other * KMH },
+        STEP,
+      );
+      for (const each of swept) {
+        for (let index = 1; index < each.places.length; index += 1) {
+          const place = Math.abs(
+            (each.places[index] as number) - (each.places[index - 1] as number),
+          );
+          const lean = Math.abs((each.leans[index] as number) - (each.leans[index - 1] as number));
+          // A frame is 5 cm of odometer: a few centimetres of place, a fraction of a degree of lean.
+          expect(
+            place,
+            `rider ${String(swept.indexOf(each))}’s place at step ${String(index)}: ${String(each.places[index - 1])} then ${String(each.places[index])}`,
+          ).toBeLessThan(0.25);
+          expect(lean, `lean at step ${String(index)}`).toBeLessThan((1 * Math.PI) / 180);
+        }
+      }
+    },
+    120_000,
+  );
+});
+
 describe('only the drawing changes — #2427', () => {
   it.each(BENDS)(
     '$name: the rider is drawn exactly where their own easing puts them, with or without anyone beside them',
@@ -380,7 +441,8 @@ describe('only the drawing changes — #2427', () => {
     expect(eased.trace).toEqual(plain.trace);
     // Drafted somewhere: the solo k was not 1 throughout.
     expect(eased.trace.some((value, index) => index % 6 === 3 && value < 1)).toBe(true);
-    // Non-vacuity: the two rides were DRAWN differently, so the easing and its order ran.
+    // Non-vacuity: the two rides were DRAWN differently, so the easing ran. (This does not
+    // show the ordering held anyone here: the sweeps above are what prove that.)
     expect(eased.drawn).not.toEqual(plain.drawn);
   }, 60_000);
 });

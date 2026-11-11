@@ -51,7 +51,7 @@ import {
   type LandClassMask,
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
-import { easedPlace, steadyTurnSpeed, type EasedPlace } from './bend-easing';
+import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -1478,6 +1478,14 @@ function ridersOnTheRoad(
 export const DRAWN_ORDER_SHARE = 0.25;
 
 /**
+ * The odometer gap past which a rider's drawn place is its own easing's and
+ * nothing else — #2427: `MAX_LAG_METRES / (1 - DRAWN_ORDER_SHARE)`, 40 m. At
+ * that gap the least drawn gap the order asks for (the share of the gap) is
+ * what the bounded lags leave anyway.
+ */
+const ORDER_REACH_METRES = MAX_LAG_METRES / (1 - DRAWN_ORDER_SHARE);
+
+/**
  * The riders of one eased frame, each drawn in its odometer's order — #2427.
  *
  * Each rider is eased by its own odometer and speed (`bend-easing.ts`), and
@@ -1489,21 +1497,22 @@ export const DRAWN_ORDER_SHARE = 0.25;
  * - **The rider is never moved.** The corridor and the chase camera are built
  *   round the rider's eased place (`drawnRider`), and a lone rider is exactly
  *   as before.
- * - **Ahead of the rider**, nearest first, each is drawn at least
- *   {@link DRAWN_ORDER_SHARE} of its odometer gap ahead of the one before it:
- *   moved ON where its own easing would put it behind that. Never past its
- *   odometer, because the one before is never past its own.
- * - **Behind the rider**, nearest first, each is drawn at least that share
- *   behind the one before it: held BACK where its easing would put it level or
- *   ahead. Never more than `MAX_LAG_METRES` behind its odometer, because the
- *   one before is not.
+ * - **Each other rider**, nearest the rider first, takes on the lag of the one
+ *   before it (the rider's, for the first) by a weight of 1 level with it,
+ *   fading to 0 at {@link ORDER_REACH_METRES}; the lag it is drawn by is the
+ *   blend of that and its own. With the lags at most `MAX_LAG_METRES` apart
+ *   that leaves each at least {@link DRAWN_ORDER_SHARE} of its odometer gap
+ *   ahead of (or behind) the one before it. Not a `min`/`max` with its own
+ *   easing: that switches from one rider's lag to the other's at the instant
+ *   their odometers cross, a 30 m jump in one frame.
  *
- * A rider moved is drawn no faster than its own drawn speed, the speed of
- * the one it is kept beside, or the steady-turn speed where it is drawn
- * (`bend-easing.ts` §`steadyTurnSpeed`), so it never leans past the easing's
- * 25° (without the last, held deeper into a bend than its own easing put it,
- * it leant 27.5° in `drawn-order.test.ts`). Its place is a `min`/`max` of
- * places that move smoothly, so nothing jumps between frames. Draws only: no
+ * A rider is drawn no faster than its own drawn speed or the
+ * steady-turn speed where it is drawn (`bend-easing.ts` §`steadyTurnSpeed`),
+ * so it never leans past the easing's 25° (without that, held deeper into a
+ * bend than its own easing put it, it leant 27.5° in `drawn-order.test.ts`).
+ * Its place is continuous in every odometer, overtakes included, because the
+ * blend's weight is, and so is the lean, which is read off that place and the
+ * speed capped there. Draws only: no
  * odometer, no `k` and no trainer write reads this.
  */
 function inOdometerOrder(riders: readonly Rider[], line: RacingLine): readonly Rider[] {
@@ -1517,22 +1526,25 @@ function inOdometerOrder(riders: readonly Rider[], line: RacingLine): readonly R
   const behind = others
     .filter((each) => each.rider.odometer < anchor.odometer)
     .sort((one, other) => other.rider.odometer - one.rider.odometer);
-  for (const [run, side] of [
-    [ahead, 1],
-    [behind, -1],
-  ] as const) {
+  for (const run of [ahead, behind]) {
     let before: Rider = anchor;
     for (const { rider, index } of run) {
-      const bound =
-        before.distance + side * DRAWN_ORDER_SHARE * Math.abs(rider.odometer - before.odometer);
-      const held = side * (bound - rider.distance) > 0;
-      const placed: Rider = held
-        ? {
-            ...rider,
-            distance: bound,
-            speed: Math.min(rider.speed, before.speed, steadyTurnSpeed(line, bound)),
-          }
-        : rider;
+      const gap = Math.abs(rider.odometer - before.odometer);
+      // The one before's lag, taken on by this rider by a weight of 1 level
+      // with it, fading to 0 at ORDER_REACH_METRES: continuous in both
+      // odometers, so no overtake jumps a place.
+      const weight = Math.max(0, 1 - gap / ORDER_REACH_METRES);
+      const lag =
+        (1 - weight) * (rider.odometer - rider.distance) +
+        weight * (before.odometer - before.distance);
+      const distance = rider.odometer - lag;
+      // Drawn no faster than the steady turn where it is drawn, so the lag it
+      // took on never leans it past the easing's 25°.
+      const placed: Rider = {
+        ...rider,
+        distance,
+        speed: Math.min(rider.speed, steadyTurnSpeed(line, distance)),
+      };
       kept[index] = placed;
       before = placed;
     }
