@@ -104,7 +104,9 @@ export function dampedSway(held: number, wanted: number, seconds: number): numbe
  * Metres across the road per metre ridden that a sway of `sway` metres a
  * second draws, at `speed` — the rate `scene.ts` §`Across.rate` carries, in
  * its sign: positive to the rider's right. Taken at no less than
- * {@link LANE_CHANGE_TURN_SPEED_FLOOR}.
+ * {@link LANE_CHANGE_TURN_SPEED_FLOOR}, so a rider at a standstill still
+ * yaws a little (about 11.5°) on a move while {@link laneChangeLean} is 0: a
+ * chosen simplicity, left for the tablet to judge (#2456 review).
  */
 export function laneChangeRate(sway: number, speed: number): number {
   return sway / Math.max(speed, LANE_CHANGE_TURN_SPEED_FLOOR);
