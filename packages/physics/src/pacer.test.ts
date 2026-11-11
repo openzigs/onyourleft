@@ -54,6 +54,7 @@ import {
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
+import { withDefaultCoefficients } from './coefficients';
 import * as botPacerModule from './pacer';
 import * as physicsPackage from './index';
 import {
@@ -64,6 +65,7 @@ import {
   createBotPacer,
   type BotCourse,
 } from './pacer';
+import { PhysicsError } from './physics-error';
 import { advance, START_OF_RIDE, type RideState } from './simulate';
 
 // Wraps the REAL `advance` in a spy: every assertion below runs the genuine
@@ -181,6 +183,27 @@ describe('the bot goes through the same physics as the rider', () => {
     expect(step?.grade).toBeCloseTo(5, 4);
     expect(conditions?.totalMass).toBe(75);
     expect(tick.power).toBe(321);
+  });
+
+  it('rides a draft as a multiplier on the bot’s C_D·A and nothing else, 1 alone to the bit (#2460)', () => {
+    vi.mocked(advance).mockClear();
+    advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321));
+    advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321), 1);
+    advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321), 0.6);
+    const [alone, one, drafted] = vi.mocked(advance).mock.calls.map((call) => call[2]);
+    expect(one).toEqual(alone);
+    const area = (coefficients: typeof alone): number => {
+      const full = withDefaultCoefficients(coefficients?.coefficients);
+      return full.dragCoefficient * full.frontalAreaSquareMetres;
+    };
+    expect(area(drafted)).toBeCloseTo(0.6 * area(alone), 12);
+    // Everything else the tick runs under is the course's own.
+    expect({ ...drafted, coefficients: undefined }).toEqual({ ...alone, coefficients: undefined });
+    for (const bad of [0, -0.1, 1.01, Number.NaN]) {
+      expect(() =>
+        advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321), bad),
+      ).toThrow(PhysicsError);
+    }
   });
 
   it('rides on whatever that tick returns, so it cannot be on separate maths', () => {

@@ -322,6 +322,14 @@ its decisions never do. A bot given no pace rides the even pace at its tier's fu
 plan as it was. `lap-race-bot.test.ts` holds every style to the tier's mean, ceiling and floor, the
 tiers to their order on dealt paces, and the lead-or-trail power trace for every style.
 
+Since #2460 the field can draft (ADR 0067 D-3). With `BotRaceStep.draft` on, `stepBotRace` calls
+`draft.ts` §`fieldDraftFactors` once a tick over every racer's **effort distance** as the race stood,
+the rider's included (`lapRaceDraftFactors`), and rides each bot's plan power through `advance` with
+its `C_D·A` times its `k` (`pacer.ts` §`advancePlannedBot`'s `dragFactor`). The power is the plan's
+either way: a sheltered bot goes faster for it. Drawn distance, which items move, never enters. With
+the switch off, the default, the race is the race before #2460 to the bit; `apps/web` passes ADR
+0066 D-6's switch in #2461, which also reads the rider's own `k` from the same call.
+
 ---
 
 ## 5. Determinism is enforced in ESLint, not in the typechecker
