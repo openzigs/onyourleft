@@ -161,9 +161,11 @@ export function nominalTcx(track: TrackSpecification | undefined, count: number)
  * writes — #1321. Two laps: a whole one ended by distance, with every figure
  * TCX has an element for, and a resting one ended by hand with no power. The
  * figures sit among the elements a Garmin export also writes and this package
- * does not read (`MaximumSpeed`, `Calories`, `LX/AvgSpeed`, `LX/MaxBikeCadence`),
- * so a reader that keyed on position, or on the last `<Value>` it saw, gets
- * them wrong — and a `<Cadence>` sits on the lap as well as on every point.
+ * does not read (`MaximumSpeed`, `LX/AvgSpeed`, `LX/MaxBikeCadence`), so a
+ * reader that keyed on position, or on the last `<Value>` it saw, gets them
+ * wrong — and a `<Cadence>` sits on the lap as well as on every point. Since
+ * #2435 each lap's `Calories` is read too: 12 on the first lap and 7 on the
+ * second, so a reader that kept one lap's figure for both is caught.
  */
 export function lapFiguresTcx(track: TrackSpecification, count: number): XmlFixture {
   const points = trackPoints(track, count);
@@ -181,7 +183,7 @@ export function lapFiguresTcx(track: TrackSpecification, count: number): XmlFixt
       `        <TotalTimeSeconds>${decimal(last.unixSeconds - first.unixSeconds, 1)}</TotalTimeSeconds>`,
       `        <DistanceMeters>${decimal(last.distanceMetres - first.distanceMetres, 1)}</DistanceMeters>`,
       '        <MaximumSpeed>9.9</MaximumSpeed>',
-      '        <Calories>12</Calories>',
+      `        <Calories>${whole ? '12' : '7'}</Calories>`,
       '        <AverageHeartRateBpm>',
       `          <Value>${String(mean(lap.map((point) => point.heartRate)))}</Value>`,
       '        </AverageHeartRateBpm>',
@@ -246,6 +248,74 @@ export function lapFiguresTcx(track: TrackSpecification, count: number): XmlFixt
     '</TrainingCenterDatabase>',
   ];
   return { text: document(lines), positions: points.map((point) => point.position) };
+}
+
+/**
+ * The `Calories` values TCX v2's `xsd:unsignedShort` does not admit, one a lap
+ * — #2435: a negative number, a fraction, and one past 65 535. Each lap also
+ * carries an average heart rate, a cadence and an average power, which must
+ * still read beside the dropped figure.
+ */
+export const MALFORMED_LAP_CALORIES = ['-5', '12.5', '70000'] as const;
+
+/**
+ * A TCX v2 activity of three laps whose `Calories` the schema does not admit —
+ * {@link MALFORMED_LAP_CALORIES}, one a lap — and whose other figures are
+ * sound. Indoor (no `<Position>`), two points a lap: the subject is the lap
+ * element, and a track would only be bytes.
+ */
+export function malformedLapCaloriesTcx(): XmlFixture {
+  const points = trackPoints(NO_TRACK_PLACEHOLDER, MALFORMED_LAP_CALORIES.length * 2);
+  const lapLines = (calories: string, index: number): readonly string[] => {
+    const lap = points.slice(index * 2, index * 2 + 2);
+    const first = lap[0];
+    const last = lap.at(-1);
+    if (!first || !last) throw new Error('a lap needs at least one point');
+    return [
+      `      <Lap StartTime="${isoInstant(first.unixSeconds)}">`,
+      `        <TotalTimeSeconds>${decimal(last.unixSeconds - first.unixSeconds, 1)}</TotalTimeSeconds>`,
+      `        <DistanceMeters>${decimal(last.distanceMetres - first.distanceMetres, 1)}</DistanceMeters>`,
+      `        <Calories>${calories}</Calories>`,
+      '        <AverageHeartRateBpm>',
+      `          <Value>${String(first.heartRate)}</Value>`,
+      '        </AverageHeartRateBpm>',
+      '        <Intensity>Active</Intensity>',
+      `        <Cadence>${String(first.cadence)}</Cadence>`,
+      '        <TriggerMethod>Manual</TriggerMethod>',
+      '        <Track>',
+      ...lap.flatMap((point) => [
+        '          <Trackpoint>',
+        `            <Time>${isoInstant(point.unixSeconds)}</Time>`,
+        '            <HeartRateBpm>',
+        `              <Value>${String(point.heartRate)}</Value>`,
+        '            </HeartRateBpm>',
+        `            <Cadence>${String(point.cadence)}</Cadence>`,
+        '          </Trackpoint>',
+      ]),
+      '        </Track>',
+      '        <Extensions>',
+      '          <ns3:LX>',
+      `            <ns3:AvgWatts>${String(first.power)}</ns3:AvgWatts>`,
+      '          </ns3:LX>',
+      '        </Extensions>',
+      '      </Lap>',
+    ];
+  };
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}" xmlns:ns3="${TCX_ACTIVITY_EXTENSION_NAMESPACE}">`,
+    '  <Activities>',
+    '    <Activity Sport="Biking">',
+    `      <Id>${isoInstant(RIDE_START_UNIX_SECONDS)}</Id>`,
+    ...MALFORMED_LAP_CALORIES.flatMap(lapLines),
+    `      <Creator xsi:type="Device_t" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`,
+    `        <Name>${CREATOR}</Name>`,
+    '      </Creator>',
+    '    </Activity>',
+    '  </Activities>',
+    '</TrainingCenterDatabase>',
+  ];
+  return { text: document(lines), positions: [] };
 }
 
 // Only ever used to generate the non-position channels of an indoor TCX; its

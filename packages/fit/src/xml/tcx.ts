@@ -33,6 +33,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilocalories,
   metres,
   metresPerSecond,
   revolutionsPerMinute,
@@ -87,6 +88,7 @@ interface PartialLap {
   averageCadence: TrackLap['averageCadence'];
   averagePower: TrackLap['averagePower'];
   maxPower: TrackLap['maxPower'];
+  calories: TrackLap['calories'];
   intensity: TrackLap['intensity'];
   triggerMethod: TrackLap['triggerMethod'];
   points: TrackPoint[];
@@ -249,6 +251,7 @@ export function decodeTcx(text: string): TrackDecodeResult {
           averageCadence: undefined,
           averagePower: undefined,
           maxPower: undefined,
+          calories: undefined,
           intensity: undefined,
           triggerMethod: undefined,
           points: [],
@@ -313,6 +316,7 @@ export function decodeTcx(text: string): TrackDecodeResult {
             averageCadence: lap.averageCadence,
             averagePower: lap.averagePower,
             maxPower: lap.maxPower,
+            calories: lap.calories,
             intensity: lap.intensity,
             triggerMethod: lap.triggerMethod,
           });
@@ -395,6 +399,9 @@ function readLapChild(
     case 'Cadence':
       lap.averageCadence = quantity(value, revolutionsPerMinute, 'Lap/Cadence', offset, faults);
       return true;
+    case 'Calories':
+      lap.calories = unsignedShort(value, 'Lap/Calories', offset, faults);
+      return true;
     case 'Intensity':
       lap.intensity = enumerated(value, TCX_INTENSITIES, 'Lap/Intensity', offset, faults);
       return true;
@@ -410,6 +417,40 @@ function readLapChild(
     default:
       return false;
   }
+}
+
+/** The largest value TCX v2's `xsd:unsignedShort` admits. */
+const UNSIGNED_SHORT_MAX = 65_535;
+
+/**
+ * A lap's `Calories` — #2435 — or nothing and a fault.
+ *
+ * The schema types it `xsd:unsignedShort`: a whole number from 0 to 65 535. A
+ * fraction, a negative number or one past the top is not a figure the schema
+ * admits, so it is dropped with a fault naming the element, and the lap's
+ * other figures still read. The fault names the constraint and never the
+ * value, as every fault this reader raises does.
+ */
+function unsignedShort(
+  value: string,
+  what: string,
+  offset: number,
+  faults: ActivityXmlError[],
+): TrackLap['calories'] {
+  const number = finiteNumber(value, what, offset, faults);
+  if (number === undefined) return undefined;
+  if (!Number.isInteger(number) || number < 0 || number > UNSIGNED_SHORT_MAX) {
+    faults.push(
+      new ActivityXmlError(
+        'invalid-value',
+        offset,
+        `${what} is not a whole number from 0 to ${String(UNSIGNED_SHORT_MAX)}, as TCX v2 ` +
+          'types it; the field is dropped',
+      ),
+    );
+    return undefined;
+  }
+  return kilocalories(number);
 }
 
 /** True when the element was one of a Trackpoint's own children. */
@@ -530,6 +571,13 @@ export function encodeTcx(activity: TrackActivity): string {
     if (lap.totalDistance !== undefined) {
       writer.leaf('DistanceMeters', decimal(lap.totalDistance, 1));
     }
+    // #2435. After `DistanceMeters` (and `MaximumSpeed`, which this writer
+    // never writes) and before the heart rate, in the schema's order. ⚠️ The
+    // schema makes `Calories` REQUIRED — `ActivityLap_t` gives it no
+    // `minOccurs="0"` — so a lap with no figure is schema-invalid. It is still
+    // omitted rather than written as `0` (epic #2430, question 9): nought
+    // would validate, and it would be a false figure every reader shows.
+    if (lap.calories !== undefined) writer.leaf('Calories', integer(lap.calories));
     // #1321. In the schema's order: the heart rate before `Intensity`, the
     // cadence between it and `TriggerMethod`, the power in the lap's own
     // `Extensions` after the track.
