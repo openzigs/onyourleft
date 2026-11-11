@@ -257,7 +257,12 @@ async function rideSolo(options: {
   /** Ride a rolling loop through the real trainer port, every write kept here. */
   readonly written?: SimulationParameters[];
   readonly frames: number;
-}): Promise<{ readonly draft: (string | undefined)[]; readonly heard: string[] }> {
+}): Promise<{
+  readonly draft: (string | undefined)[];
+  readonly heard: string[];
+  /** #2426: whether each frame's Draft field drew the shelter mark. */
+  readonly marked: boolean[];
+}> {
   mounted = await mount(
     <GameView
       port={pedallingPort(
@@ -294,6 +299,7 @@ async function rideSolo(options: {
   );
   const draft: (string | undefined)[] = [];
   const heard: string[] = [];
+  const marked: boolean[] = [];
   for (let frame = 0; frame < options.frames; frame += 1) {
     const next = pending.shift();
     if (next === undefined) break;
@@ -304,8 +310,13 @@ async function rideSolo(options: {
     });
     draft.push(field('Draft'));
     heard.push(spoken());
+    marked.push(
+      queryAll(mounted.container, 'dt')
+        .find((dt) => dt.textContent === 'Draft')
+        ?.querySelector('svg.oyl-hud__shelter') != null,
+    );
   }
-  return { draft, heard };
+  return { draft, heard, marked };
 }
 
 function unmountForReride(): void {
@@ -335,10 +346,27 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
     const { draft, heard } = await rideSolo({ pacer: true, frames: 160 });
     const readings = draft.map(percentOf);
     // Present from the first frame, on the gauge's own scale.
-    expect(draft.every((text) => /^\d+ % at most 59 %$/.test(text ?? ''))).toBe(true);
+    // #2426: "In the draft" before the scale while the rider is in it.
+    expect(draft.every((text) => /^\d+ % (In the draft )?at most 59 %$/.test(text ?? ''))).toBe(
+      true,
+    );
     expect(Math.max(...readings.map((value) => value ?? 0))).toBeGreaterThanOrEqual(10);
     expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
     // D-5.5: the solo draft has no spoken cue, entering or leaving.
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  it('marks the rider in the pacer’s draft with the shelter mark and the words, by the simulation’s own state — #2426', async () => {
+    const { draft, marked, heard } = await rideSolo({ pacer: true, frames: 160 });
+    expect(marked.some(Boolean), 'the pacer puts the rider in the draft').toBe(true);
+    draft.forEach((text, frame) => {
+      // The mark and the words always together, and never one without the other.
+      expect(text?.includes('In the draft') === true, `frame ${String(frame)}`).toBe(marked[frame]);
+      // The 10 % / 5 % state: marked never below 5 %, unmarked never above 10 % (rounded).
+      const percent = percentOf(text) ?? 0;
+      if (marked[frame] === true) expect(percent).toBeGreaterThanOrEqual(5);
+      else expect(percent).toBeLessThanOrEqual(10);
+    });
     expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
   });
 

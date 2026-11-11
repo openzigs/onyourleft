@@ -4348,7 +4348,11 @@ function GameScreen({
         // when the rider's display preference shows it (ADR 0066 D-6, R-13).
         {...(state.soloDraft === undefined || !draftShownRef.current
           ? {}
-          : { soloDraft: soloDraftPercent(state.soloDraft.k) })}
+          : {
+              soloDraft: soloDraftPercent(state.soloDraft.k),
+              // #2426: in the draft by the simulation's own `draftEvent` state.
+              soloInDraft: state.soloDraft.inDraft,
+            })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={
@@ -4372,6 +4376,8 @@ function GameScreen({
                 ...(roomFrameRef.current?.hud ?? { nearby: 0 }),
                 // #787: the draft field only when the rider's setting shows it.
                 draftShown: draftShownRef.current,
+                // #2426: the shelter mark, from the one state the spoken cue follows.
+                inDraft: inDraftRef.current,
               },
             })}
         standings={

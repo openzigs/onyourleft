@@ -1213,7 +1213,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         for and eight on one they did not** — the wind reading
                         is last and absent rather than nought in still air, on
                         the `NO_READING` precedent, and "nine" is safe only
-                        because the wind cannot change mid-ride
+                        because the wind cannot change mid-ride. Since #2426
+                        the Draft field (a room's or a solo ride's) shows the
+                        SHELTER MARK while the rider is in the draft: an arch
+                        over a filled pocket beside its label (`HudCore.tsx`
+                        §`ShelterMark`, `aria-hidden`), a solid outline, and
+                        "In the draft" on its line with the scale read after
+                        it, visually hidden. ⚠️ ONE state: `room-ride.ts`
+                        §`draftEvent`'s 10 % / 5 %, the room's from
+                        `GameView`'s `inDraftRef` and the solo one from the
+                        simulation, so the mark never flickers at 10 % and
+                        never disagrees with the room's spoken cue. Seen and
+                        not spoken (owner, #2421 item 3); never colour alone;
+                        no motion; nothing outside the Draft field changes,
+                        the power figure least of all (`draft.a11y.test.tsx`)
     src/game/audio-cues.ts
                         the ride's non-speech sounds (#400) — every rule about
                         them, against `audio-port.ts`: off by default, audio
