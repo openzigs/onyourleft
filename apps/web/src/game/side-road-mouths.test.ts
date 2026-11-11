@@ -169,25 +169,50 @@ const RIDE = Array.from({ length: 150 }, (_, index) => (PAIRS[0] as number) - 20
 );
 
 /**
- * The sweep below walks 150 frames and measures every item in each against
- * every mapped side road in it, so it is the file's one slow case, and under
- * coverage on a slow runner it passed Vitest's 5 s default, as
- * `docs/agents/ci.md` §4c expects of such a case: it timed out in nightly run
- * 43008116660 (2026-11-11, an Intel Xeon 8370C), 5 666 ms by Vitest's own
- * count, the file's three cases 7 561 ms. Three readings of this case under
- * coverage on branch runs of that nightly (2026-11-11, runs 43013870648,
- * 43013875285, 43013879406): 4 278 ms and 4 295 ms on an AMD EPYC 9V74, and
- * 5 902 ms on an EPYC 7763. Locally it takes 1.2 s, and 2.2 s under coverage.
- * 20 s is about three times the slowest of those, 5.9 s.
+ * An item seen with a mapped side road, measured against it once: in the
+ * frame where the two first stood together, against that frame's drawn road.
+ * Consecutive frames hold the same items, so of the 150 frames' 42 738 items
+ * 2 320 are distinct, and of their pairings with a road 13 094. Keyed by the
+ * item's kind and plan position, as the rider would tell two apart, in maps
+ * of numbers rather than a string built for every item in every frame. That
+ * string, and a half-metre walk of every structure's footprint however far
+ * off, were this case's time: 1.4 s locally, and up to 5.9 s under coverage on
+ * an EPYC 7763, past Vitest's 5 s (#2471). The ruling for #1688 is to make such
+ * a case cheaper and never to raise its timeout (`docs/agents/ci.md`).
  */
-const SWEEP = { timeout: 20_000 } as const;
+function pairsSeen(): { item: ScatterItem; road: SideRoad }[] {
+  const seen = new Map<number, Map<number, Map<string, Set<number>>>>();
+  const pairs: { item: ScatterItem; road: SideRoad }[] = [];
+  for (const { frame } of RIDE) {
+    const mapped = frame.sideRoads.filter((road) => road.junction.source === 'mapped');
+    if (mapped.length === 0) continue;
+    for (const item of frame.scatter) {
+      let atX = seen.get(item.x);
+      if (atX === undefined) seen.set(item.x, (atX = new Map<number, Map<string, Set<number>>>()));
+      let atZ = atX.get(item.z);
+      if (atZ === undefined) atX.set(item.z, (atZ = new Map<string, Set<number>>()));
+      let roads = atZ.get(item.kind);
+      if (roads === undefined) atZ.set(item.kind, (roads = new Set<number>()));
+      for (const road of mapped) {
+        if (roads.has(road.junction.along)) continue;
+        roads.add(road.junction.along);
+        pairs.push({ item, road });
+      }
+    }
+  }
+  return pairs;
+}
+
+/** The farthest any point of a structure's footprint stands from where the structure stands. */
+function footprintRadius(item: ScatterItem): number {
+  const footprint = STRUCTURE_FOOTPRINTS[item.kind as keyof typeof STRUCTURE_FOOTPRINTS];
+  return Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front));
+}
 
 describe('nothing drawn across a side road or a driveway at its mouth — #2428', () => {
-  it('draws no tree, shrub, rock or hedge onto a side street or a driveway', SWEEP, () => {
+  it('draws no tree, shrub, rock or hedge onto a side street or a driveway', () => {
     const across = new Set<string>();
     const kinds = new Set<string>();
-    // An item and a road are measured once, however many frames hold both.
-    const measured = new Set<string>();
     let driveways = 0;
     let streets = 0;
     for (const { frame } of RIDE) {
@@ -198,29 +223,32 @@ describe('nothing drawn across a side road or a driveway at its mouth — #2428'
       streets += mapped.filter((road) =>
         road.junction.arms.some((arm) => arm.widthClass === 'minor'),
       ).length;
-      for (const item of frame.scatter) {
-        const clearance = naturalClearance(item);
-        for (const road of mapped) {
-          const at = `${item.kind} at ${String(item.x)}, ${String(item.z)} by ${String(road.junction.along)}`;
-          if (measured.has(at)) continue;
-          measured.add(at);
-          if (clearance === undefined) {
-            if (structureToTarmac(item, road) < SIDE_ROAD_STRUCTURE_MARGIN_METRES - 0.01) {
-              across.add(at);
-            }
-            continue;
-          }
-          const off = toTarmac(road, item.x, item.z);
-          if (off < clearance + 0.5) kinds.add(item.kind);
-          if (off < clearance - 0.01)
-            across.add(`${at}: ${off.toFixed(2)} m off, ×${item.scale.toFixed(2)}`);
+    }
+    const pairs = pairsSeen();
+    for (const { item, road } of pairs) {
+      const at = `${item.kind} at ${String(item.x)}, ${String(item.z)} by ${String(road.junction.along)}`;
+      const off = toTarmac(road, item.x, item.z);
+      const clearance = naturalClearance(item);
+      if (clearance === undefined) {
+        // The distance to the tarmac changes by no more than the distance
+        // moved, so a footprint whose middle stands further off than its
+        // radius and the margin cannot reach it, and its half-metre walk
+        // would find the same.
+        if (off - footprintRadius(item) >= SIDE_ROAD_STRUCTURE_MARGIN_METRES) continue;
+        if (structureToTarmac(item, road) < SIDE_ROAD_STRUCTURE_MARGIN_METRES - 0.01) {
+          across.add(at);
         }
+        continue;
       }
+      if (off < clearance + 0.5) kinds.add(item.kind);
+      if (off < clearance - 0.01)
+        across.add(`${at}: ${off.toFixed(2)} m off, ×${item.scale.toFixed(2)}`);
     }
     // The fixture: both kinds of side road in view, and scenery standing near them.
     expect(driveways).toBeGreaterThan(0);
     expect(streets).toBeGreaterThan(0);
     expect(kinds.size).toBeGreaterThan(1);
+    expect(pairs.length).toBeGreaterThan(10_000);
     expect([...across]).toEqual([]);
   });
 
