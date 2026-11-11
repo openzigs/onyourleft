@@ -21,6 +21,8 @@ import {
   BOT_TACTIC_ATTACK_MS,
   BOT_TACTIC_COMMITMENT,
   BOT_TACTIC_DWELL_MS,
+  BOT_TACTIC_FOLLOW_SURGE,
+  BOT_TACTIC_RECOVER_CP_SHARE,
   BOT_TACTIC_LAUNCH_METRES,
   BOT_TACTIC_UTILITY,
   BOT_TACTIC_WBAL_FLOOR,
@@ -317,6 +319,48 @@ describe('a state is held for a dwell, and a close score does not flip it (#2462
     );
     expect(launch.tactic).toBe('kick');
   });
+
+  it('ends a chase, and a flyer that has run out, at once, not after the dwell', () => {
+    const chasing: TacticMemory = { tactic: 'chase', sinceMs: 0, window: 0 };
+    const spent = decideTactic(
+      view({ atMs: 1_000, gapAheadMetres: 60, energy: energyAt(SPRINTER, 0.1) }),
+      'sprinter',
+      'crafty',
+      chasing,
+      7,
+    );
+    expect(spent.tactic).not.toBe('chase');
+    const flying: TacticMemory = { tactic: 'flyer', sinceMs: 0, window: 0 };
+    const empty = decideTactic(
+      view({ atMs: 1_000, lapsLeft: 2, energy: energyAt(SPRINTER, 0.5, true) }),
+      'sprinter',
+      'crafty',
+      flying,
+      7,
+    );
+    expect(empty.tactic).not.toBe('flyer');
+  });
+
+  it('asks for CP on the wheel and a surge off it when following, and 0.85 of CP when recovering', () => {
+    const cp = SPRINTER.cpWatts;
+    const target = (tactic: BotTactic, changes: Partial<RaceView>): number =>
+      decideTactic(
+        view({ atMs: 500, ...changes }),
+        'sprinter',
+        'crafty',
+        { tactic, sinceMs: 0, window: 0 },
+        7,
+      ).targetWatts;
+    expect(target('follow', { gapAheadMetres: 3 })).toBeCloseTo(cp, 6);
+    expect(target('follow', { gapAheadMetres: 80 })).toBeCloseTo(
+      cp * (1 + BOT_TACTIC_FOLLOW_SURGE),
+      6,
+    );
+    expect(target('recover', { gapAheadMetres: null })).toBeCloseTo(
+      cp * BOT_TACTIC_RECOVER_CP_SHARE,
+      6,
+    );
+  });
 });
 
 describe('decided once per window, so the tick rate changes nothing (#2462, ADR 0067 D-6.3)', () => {
@@ -426,6 +470,11 @@ describe('it refuses a view that is not a race’s, and reaches nothing it shoul
       { gradeAheadPercent: Number.NaN },
       { lapsLeft: 1.5 },
       { rank: 0 },
+      { rank: 9 },
+      { fieldSize: 2.5 },
+      { gapAheadMetres: Number.NaN },
+      { gapBehindMetres: Number.NaN },
+      { riderWattsPerKilogram: Number.NaN },
     ]) {
       expect(
         codeOf(() => pick(view(bad))),

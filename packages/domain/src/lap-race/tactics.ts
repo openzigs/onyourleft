@@ -21,7 +21,7 @@
  * | `attack` | in a lull, more on a climb (a climber) or early (an attacker), for {@link BOT_TACTIC_ATTACK_MS} at most | {@link BOT_TACTIC_ATTACK_SURGE} over CP |
  * | `chase` | the racer ahead is out of draft reach and within {@link BOT_TACTIC_BRIDGE_METRES} | {@link BOT_TACTIC_CHASE_SURGE} over CP |
  * | `recover` | the bot reads its W′ under {@link BOT_TACTIC_RECOVER_SHARE} | {@link BOT_TACTIC_RECOVER_CP_SHARE} of CP |
- * | `flyer` | the last {@link BOT_TACTIC_FLYER_LAPS} laps, before the launch, with {@link BOT_TACTIC_FLYER_WBAL_SHARE} of W′ or more | {@link BOT_TACTIC_FLYER_SURGE} over CP, to empty |
+ * | `flyer` | the last {@link BOT_TACTIC_FLYER_LAPS} laps, before the launch, with {@link BOT_TACTIC_FLYER_WBAL_SHARE} of W′ or more | {@link BOT_TACTIC_FLYER_SURGE} over CP, until the bot reads its W′ under {@link BOT_TACTIC_FLYER_WBAL_SHARE} (then it sits in) |
  * | `kick` | from its launch distance, {@link BOT_TACTIC_LAUNCH_METRES} times its archetype's sprint factor | its peak |
  *
  * ⚠️ Every threshold is an amateur-coaching number to tune against #2464's
@@ -50,8 +50,8 @@
  * ## Pure, and nowhere near the trainer
  *
  * A function of the view, the archetype, the skill, its memory and the seed.
- * Scalars only, `+ − × ÷`, `Math.min`, `Math.max` and `Math.floor` (ADR 0067
- * D-5.2); it imports nothing from `apps/`, nothing platform-bound and nothing
+ * Scalars only, `+ − × ÷`, `Math.min`, `Math.max` (ADR 0067 D-5.2) and `Math.floor`
+ * (an addition to D-5.2's list: exact in IEEE 754); it imports nothing from `apps/`, nothing platform-bound and nothing
  * of the trainer (`tactics.test.ts` reads its imports). Wiring it into the race
  * is #2463.
  */
@@ -194,7 +194,7 @@ export const BOT_TACTIC_ATTACK_SURGE = 0.3;
 /** A chasing bot's surge over CP: **0.15**. */
 export const BOT_TACTIC_CHASE_SURGE = 0.15;
 
-/** A bot on a flyer rides this far over CP, to empty: **0.1**. */
+/** A bot on a flyer rides this far over CP: **0.1**. */
 export const BOT_TACTIC_FLYER_SURGE = 0.1;
 
 /** A recovering bot's target, as a share of CP: **0.85**. */
@@ -248,14 +248,24 @@ interface Read {
 }
 
 function checkView(view: RaceView): void {
-  const finite = [view.atMs, view.metresToLine, view.gradeAheadPercent, view.riderGapMetres];
+  const finite = [
+    view.atMs,
+    view.metresToLine,
+    view.gradeAheadPercent,
+    view.riderGapMetres,
+    view.gapBehindMetres,
+  ];
   if (
     finite.some((value) => !Number.isFinite(value)) ||
     view.atMs < 0 ||
     !Number.isSafeInteger(view.lapsLeft) ||
     view.lapsLeft < 0 ||
     !Number.isSafeInteger(view.rank) ||
-    view.rank < 1
+    view.rank < 1 ||
+    !Number.isSafeInteger(view.fieldSize) ||
+    view.rank > view.fieldSize ||
+    (view.gapAheadMetres !== null && !Number.isFinite(view.gapAheadMetres)) ||
+    (view.riderWattsPerKilogram !== null && !Number.isFinite(view.riderWattsPerKilogram))
   ) {
     throw new LapRaceError(
       'view-out-of-range',
