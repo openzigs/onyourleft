@@ -51,7 +51,7 @@ import {
   type LandClassMask,
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
-import { easedPlace, type EasedPlace } from './bend-easing';
+import { easedPlace, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -1419,7 +1419,7 @@ function ridersOnTheRoad(
   const rideClock: number = ghostClock(input.state);
   // #2427: eased, the drawn order is the odometers' order; and a room's rider
   // is on the corridor where it is drawn in that order (#1998's rule).
-  const ordered = (easing === undefined ? riders : inOdometerOrder(riders)).filter(
+  const ordered = (easing === undefined ? riders : inOdometerOrder(riders, easing)).filter(
     (rider) =>
       rider.kind !== 'remote' ||
       first === undefined ||
@@ -1498,12 +1498,15 @@ export const DRAWN_ORDER_SHARE = 0.25;
  *   ahead. Never more than `MAX_LAG_METRES` behind its odometer, because the
  *   one before is not.
  *
- * A rider moved takes the slower of its own drawn speed and the one it is
- * kept beside, so it never leans further than either. It is a `min`/`max` of
+ * A rider moved is drawn no faster than its own drawn speed, the speed of
+ * the one it is kept beside, or the steady-turn speed where it is drawn
+ * (`bend-easing.ts` §`steadyTurnSpeed`), so it never leans past the easing's
+ * 25° (without the last, held deeper into a bend than its own easing put it,
+ * it leant 27.5° in `drawn-order.test.ts`). Its place is a `min`/`max` of
  * places that move smoothly, so nothing jumps between frames. Draws only: no
  * odometer, no `k` and no trainer write reads this.
  */
-function inOdometerOrder(riders: readonly Rider[]): readonly Rider[] {
+function inOdometerOrder(riders: readonly Rider[], line: RacingLine): readonly Rider[] {
   const [anchor] = riders;
   if (anchor === undefined || riders.length < 2) return riders;
   const kept = [...riders];
@@ -1524,7 +1527,11 @@ function inOdometerOrder(riders: readonly Rider[]): readonly Rider[] {
         before.distance + side * DRAWN_ORDER_SHARE * Math.abs(rider.odometer - before.odometer);
       const held = side * (bound - rider.distance) > 0;
       const placed: Rider = held
-        ? { ...rider, distance: bound, speed: Math.min(rider.speed, before.speed) }
+        ? {
+            ...rider,
+            distance: bound,
+            speed: Math.min(rider.speed, before.speed, steadyTurnSpeed(line, bound)),
+          }
         : rider;
       kept[index] = placed;
       before = placed;

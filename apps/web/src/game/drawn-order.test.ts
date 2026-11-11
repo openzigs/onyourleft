@@ -26,7 +26,8 @@ import {
 } from '@onyourleft/domain';
 import { ridingConditions } from '@onyourleft/physics';
 
-import { easedPlace, MAX_LAG_METRES } from './bend-easing';
+import { EASED_LEAN_RADIANS, easedPlace, MAX_LAG_METRES } from './bend-easing';
+import { combinedLean } from './bicycle';
 import { drawnLine, drawnLineAt, type DrawnLine } from './drawn-line';
 import type { RiderMarker } from './port';
 import { hairpinRoute, plannerCornerRoute } from './route-fixtures-testing';
@@ -35,6 +36,9 @@ import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
 
 const KMH = 1 / 3.6;
+
+/** How far past the easing's 25° a rider held in order may lean: rounding only. */
+const LEAN_SLACK = 1e-9;
 
 /** The two bends the issue names, and the stretch of odometer that rides into, through and out of each. */
 interface Bend {
@@ -165,8 +169,13 @@ function through(
   riderSpeed: number,
   other: { readonly kind: Other['kind']; readonly gap: number; readonly speed: number },
   step: number,
-): { readonly at: number; readonly rider: number; readonly other: number }[] {
-  const frames: { at: number; rider: number; other: number }[] = [];
+): {
+  readonly at: number;
+  readonly rider: number;
+  readonly other: number;
+  readonly lean: number;
+}[] {
+  const frames: { at: number; rider: number; other: number; lean: number }[] = [];
   for (let at = where.from; at <= where.to; at += step) {
     const odometer = at + other.gap;
     const markers = frame(where, { odometer: at, speed: riderSpeed }, [
@@ -179,6 +188,8 @@ function through(
       at,
       rider: drawnAlong(where.line, own, at),
       other: drawnAlong(where.line, theirs, odometer),
+      // The other's combined lean, as the renderer is handed it.
+      lean: Math.abs(combinedLean(theirs.lean, theirs.bodyLean)),
     });
   }
   return frames;
@@ -227,6 +238,7 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
     (where) => {
       const kinds: readonly Other['kind'][] = ['bot', 'ghost', 'remote'];
       let checked = 0;
+      let leanest = { lean: 0, said: 'nobody leant' };
       for (const riderSpeed of SPEEDS) {
         for (const otherSpeed of SPEEDS) {
           for (const gap of GAPS) {
@@ -251,6 +263,7 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
                 const odometer = each.at + odometerGap;
                 expect(each.other, said).toBeLessThanOrEqual(odometer + 1e-6);
                 expect(each.other, said).toBeGreaterThanOrEqual(odometer - MAX_LAG_METRES - 1e-6);
+                if (each.lean > leanest.lean) leanest = { lean: each.lean, said };
                 checked += 1;
               }
             }
@@ -258,6 +271,10 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
         }
       }
       expect(checked).toBeGreaterThan(10_000);
+      // Held in order, a rider is drawn no faster than the steady-turn speed
+      // where it is held (`bend-easing.ts` §`steadyTurnSpeed`), so it leans no
+      // further than the easing's 25°. Without that cap it leant 27.5° here.
+      expect(leanest.lean, leanest.said).toBeLessThanOrEqual(EASED_LEAN_RADIANS + LEAN_SLACK);
     },
     300_000,
   );

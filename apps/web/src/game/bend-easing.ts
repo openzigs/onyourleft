@@ -223,6 +223,18 @@ export function easedPlace(line: RacingLine, distance: number, speed: number): E
 }
 
 /**
+ * The fastest a rider may be drawn at `distance` on `line` and lean no
+ * further than {@link EASED_LEAN_RADIANS}: the steady-turn speed of the
+ * tightest curvature the lean is read from there — #2427, for a rider
+ * `scene.ts` §`inOdometerOrder` draws at a place other than its own easing's.
+ * Unbounded on a straight.
+ */
+export function steadyTurnSpeed(line: RacingLine, distance: number): number {
+  const curvature = tightestNear(line, distance);
+  return curvature > 0 ? Math.sqrt(turningSquared() / curvature) : Number.POSITIVE_INFINITY;
+}
+
+/**
  * Where, inside the window, the lag can first be other than nought for a
  * rider at `distance` and `speed` — or `undefined` where no bend within reach
  * asks this speed to ease off. @see easedPlace, step 1
