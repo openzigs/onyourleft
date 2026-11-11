@@ -94,6 +94,8 @@ import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
   mappedJunctions,
+  onSideRoad,
+  sideRoadClearance,
   sideRoadsAt,
   type SideRoad,
 } from './cross-streets';
@@ -577,6 +579,14 @@ function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFr
 }
 
 /**
+ * What every frame's scenery asks of the side roads in view, remembered —
+ * #2439. Not a cache keyed on a route: its answers are keyed on the side
+ * roads themselves, and each frame drops those of every road it no longer
+ * sees, so a new route's first frame finds none to reuse.
+ */
+const SCENERY_CLEARANCE = sideRoadClearance(onSideRoad);
+
+/**
  * The scenery for exactly the stretch of road this frame drew.
  *
  * ⚠️ **The span comes from the corridor rather than from `VIEW_AHEAD_METRES` and
@@ -622,6 +632,7 @@ function scenery(
     ),
     sideRoads,
     BILLBOARD_FOOTPRINT,
+    SCENERY_CLEARANCE,
   );
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
@@ -645,7 +656,7 @@ function scenery(
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
-  const built = clearOfSideRoads(placed, sideRoads);
+  const built = clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE);
   // #1549: and off every mapped building's ground, by #1534's rule — whose
   // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
@@ -656,6 +667,7 @@ function scenery(
           input.mappedBuildings,
         ),
     sideRoads,
+    SCENERY_CLEARANCE,
   );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],

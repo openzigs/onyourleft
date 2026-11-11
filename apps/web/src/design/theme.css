@@ -7885,6 +7885,15 @@ select.oyl-input {
   letter-spacing: 0.06em;
 }
 
+/* #2420: the power field's view after its label, "(3 s)" or "(instant)". Not
+   in capitals, because "3 S" is not how a second is written, and never broken
+   inside itself. */
+.oyl-hud__label-qualifier {
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
 .oyl-hud__value {
   margin: 0;
   /* Deliberately far larger than anything else in this app. */

@@ -1121,30 +1121,185 @@ export const SIDE_ROAD_STRUCTURE_MARGIN_METRES = 0.5;
 const POINT: Footprint = { x: 0, back: 0, front: 0 };
 
 /**
+ * How {@link clearOfSideRoads} and {@link boardsClearOfSideRoads} ask
+ * whether something stands on a side road: {@link onSideRoad}'s question,
+ * answered either afresh every time ({@link UNCACHED_SIDE_ROAD_CLEARANCE}) or by a
+ * {@link sideRoadClearance}, which remembers each answer.
+ */
+export interface SideRoadClearance {
+  readonly on: typeof onSideRoad;
+}
+
+/**
+ * Every answer worked out afresh: what both filters did before #2439.
+ *
+ * @test-facing the comparison `side-road-clearance.test.ts` holds the cache
+ * against: the product always passes `scene.ts`'s cached clearance (#2439).
+ */
+export const UNCACHED_SIDE_ROAD_CLEARANCE: SideRoadClearance = { on: onSideRoad };
+
+/**
+ * The most answers one {@link sideRoadClearance} holds: **16 384** — #2439.
+ * Past it every answer is dropped and worked out again as it is next asked.
+ * Since the answers for the side roads that leave the view are dropped as they
+ * go, a ride's view is far below it: a frame of `side-road-clearance.test.ts`'s
+ * fixture, eleven side roads in view, asks 59, because only what stands
+ * within reach of a road's box is asked at all.
+ */
+export const SIDE_ROAD_CLEARANCE_MAX_ENTRIES = 16_384;
+
+/** One side road's box in plan and its widest half-width, for the cheap reject. */
+interface RoadBox {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+  readonly widestHalf: number;
+}
+
+function boxOf(road: SideRoad): RoadBox {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  const s = road.segments;
+  for (let at = 0; at + 1 < s.length; at += 2) {
+    const x = s[at] as number;
+    const z = s[at + 1] as number;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  let widestHalf = 0;
+  for (const half of road.halfWidths) if (half > widestHalf) widestHalf = half;
+  return { minX, maxX, minZ, maxZ, widestHalf };
+}
+
+/** What one side road in view has been asked, and its box. */
+interface RoadAnswers {
+  readonly box: RoadBox;
+  /** By footprint, then by margin, place and heading. */
+  readonly byFootprint: Map<Footprint, Map<string, boolean>>;
+}
+
+/**
+ * A clearance that works each answer out once per side road and reuses it —
+ * #2439. A frame rebuilds the same scatter and asks the same question of it
+ * against the same side roads (`sideRoadsAt` returns the same objects while
+ * the same junctions are in view), and {@link onSideRoad} samples a
+ * footprint every half-metre against every segment: about 11.7 ms of a
+ * tablet's 16.6 ms frame (#2419), for an answer that had not changed.
+ *
+ * - **The same answer as {@link onSideRoad}.** It is "on ANY of `roads`", so
+ *   it is kept per road: `test([road], …)` for each, `true` if any is. A road
+ *   whose box, widened by the footprint's reach, the margin and its widest
+ *   half-width, is further than that from where the thing stands cannot be
+ *   within the margin of it, and is passed over without asking.
+ * - **Keyed on what the answer depends on**: the road's identity, the
+ *   footprint's, the margin, and the place and heading. Nothing else goes in.
+ * - **Bounded, and released with the view.** Each call drops the answers of
+ *   every road not in `roads`, so a road that leaves the view takes its
+ *   answers with it and comes back to none; past
+ *   {@link SIDE_ROAD_CLEARANCE_MAX_ENTRIES} the lot is dropped.
+ *
+ * `test` is what works an answer out: {@link onSideRoad}, which `scene.ts`
+ * passes by name so that `side-road-clearance.test.ts` can count the calls a
+ * frame makes.
+ */
+export function sideRoadClearance(test: typeof onSideRoad): SideRoadClearance {
+  const answers = new Map<SideRoad, RoadAnswers>();
+  let entries = 0;
+  let held: readonly SideRoad[] | undefined;
+  const keep = (roads: readonly SideRoad[]): void => {
+    if (roads === held) return;
+    held = roads;
+    for (const [road, kept] of answers) {
+      if (roads.includes(road)) continue;
+      for (const byKey of kept.byFootprint.values()) entries -= byKey.size;
+      answers.delete(road);
+    }
+  };
+  return {
+    on(roads, at, footprint, margin) {
+      keep(roads);
+      const reach =
+        Math.hypot(footprint.x, Math.max(Math.abs(footprint.back), Math.abs(footprint.front))) +
+        margin;
+      let key: string | undefined;
+      for (const road of roads) {
+        let kept = answers.get(road);
+        if (kept === undefined) {
+          kept = { box: boxOf(road), byFootprint: new Map() };
+          answers.set(road, kept);
+        }
+        const { box } = kept;
+        // How far `at` is outside the box, along whichever axis it is furthest.
+        const outside = Math.max(
+          box.minX - at.x,
+          at.x - box.maxX,
+          box.minZ - at.z,
+          at.z - box.maxZ,
+        );
+        // A centimetre of slack for the segments' single precision.
+        if (outside > reach + box.widestHalf + 0.01) continue;
+        let byKey = kept.byFootprint.get(footprint);
+        if (byKey === undefined) {
+          byKey = new Map();
+          kept.byFootprint.set(footprint, byKey);
+        }
+        key ??= `${String(margin)} ${String(at.x)} ${String(at.z)} ${String(at.rotation)}`;
+        let answer = byKey.get(key);
+        if (answer === undefined) {
+          if (entries >= SIDE_ROAD_CLEARANCE_MAX_ENTRIES) {
+            for (const each of answers.values()) each.byFootprint.clear();
+            entries = 0;
+          }
+          answer = test([road], at, footprint, margin);
+          byKey.set(key, answer);
+          entries += 1;
+        }
+        if (answer) return true;
+      }
+      return false;
+    },
+  };
+}
+
+/**
  * `items`, less every one standing on a side road in view: a structure by
  * its whole footprint (`settlements.ts` §`STRUCTURE_FOOTPRINTS`), anything
  * else by where it stands, {@link SIDE_ROAD_SCENERY_MARGIN_METRES} clear.
- * The same array where there is no side road.
+ * The same array where there is no side road. `clearance` is required, so that a caller cannot fall back to the
+ * uncached path unseen; it is how each is
+ * asked — #2439: `scene.ts` hands every frame the same
+ * {@link sideRoadClearance}, and the same items are kept either way.
  */
 export function clearOfSideRoads(
   items: readonly ScatterItem[],
   roads: readonly SideRoad[],
+  clearance: SideRoadClearance,
 ): readonly ScatterItem[] {
   if (roads.length === 0) return items;
   return items.filter((item) => {
     const footprint = (STRUCTURE_FOOTPRINTS as Readonly<Record<string, Footprint>>)[item.kind];
     return footprint === undefined
-      ? !onSideRoad(roads, item, POINT, SIDE_ROAD_SCENERY_MARGIN_METRES)
-      : !onSideRoad(roads, item, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES);
+      ? !clearance.on(roads, item, POINT, SIDE_ROAD_SCENERY_MARGIN_METRES)
+      : !clearance.on(roads, item, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES);
   });
 }
 
-/** `boards`, less every one whose footprint stands on a side road in view. */
+/** `boards`, less every one whose footprint stands on a side road in view. `clearance` as {@link clearOfSideRoads}'s. */
 export function boardsClearOfSideRoads<
   Board extends { readonly x: number; readonly z: number; readonly rotation: number },
->(boards: readonly Board[], roads: readonly SideRoad[], footprint: Footprint): readonly Board[] {
+>(
+  boards: readonly Board[],
+  roads: readonly SideRoad[],
+  footprint: Footprint,
+  clearance: SideRoadClearance,
+): readonly Board[] {
   if (roads.length === 0) return boards;
   return boards.filter(
-    (board) => !onSideRoad(roads, board, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES),
+    (board) => !clearance.on(roads, board, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES),
   );
 }
