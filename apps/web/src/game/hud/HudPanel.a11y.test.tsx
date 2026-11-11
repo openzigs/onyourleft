@@ -382,9 +382,10 @@ describe('the position marker tracks the physics', () => {
 
     it('draws the marker where the sentence says it is', async () => {
       // The picture and the words out of one value (#94's third criterion,
-      // widened by #287's third). The marker's `x` is the fraction as a
-      // percentage of the viewBox, so reading both off the DOM is what catches
-      // a second percentage computed in the component.
+      // widened by #287's third). The marker's place is the fraction as a
+      // percentage of the strip — its `transform` since #2419, where it was
+      // its `x1` — so reading both off the DOM is what catches a second
+      // percentage computed in the component.
       const profile = circuit();
       const total: number = profile.totalDistance;
       const base = props({ profile });
@@ -401,7 +402,8 @@ describe('the position marker tracks the physics', () => {
       );
 
       const marker = document.querySelector('[data-testid="oyl-hud-position"]');
-      const x = Number(marker?.getAttribute('x1'));
+      const moved = marker?.closest<SVGSVGElement>('.oyl-hud__profile-marker')?.style.transform;
+      const x = Number(/^translateX\((-?[\d.]+)%\)$/.exec(moved ?? '')?.[1]);
       const said = document.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
       expect(said).toBe(`${String(Math.round(x))}% of lap 3`);
       expect(Number(marker?.getAttribute('data-position')) * 100).toBeCloseTo(x, 6);

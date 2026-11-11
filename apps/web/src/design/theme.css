@@ -7913,6 +7913,15 @@ select.oyl-input {
   letter-spacing: 0.06em;
 }
 
+/* #2420: the power field's view after its label, "(3 s)" or "(instant)". Not
+   in capitals, because "3 S" is not how a second is written, and never broken
+   inside itself. */
+.oyl-hud__label-qualifier {
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
 .oyl-hud__value {
   margin: 0;
   /* Deliberately far larger than anything else in this app. */
@@ -8031,6 +8040,49 @@ select.oyl-input {
   width: 100%;
   height: 2.5rem;
   display: block;
+}
+
+/*
+ * THE ROUTE PANEL'S LAYERS — #2419.
+ *
+ * The whole HUD is one compositor layer, and a real ride changes something in
+ * it on every frame: a field's value, the zone bar, the recent graph's heart
+ * rate, the trainer's line. On the owner's tablet those changes pulled the
+ * route panel's dearest artwork — the whole route's clip path over five
+ * patterns, and the road ahead's patterns — into a GPU raster every frame,
+ * and a real ride ran at 166 ms a frame with the panel on and 16.6 ms with it
+ * hidden. So that artwork is drawn on layers of its own (`will-change`), where
+ * a change elsewhere in the HUD cannot reach it:
+ *
+ * - the whole route's strip, which never changes on a ride;
+ * - the rider's marker over it, the box's size and moved by a `transform`
+ *   (`HudCore.tsx` §`ElevationStrip`), so moving it paints nothing; the box
+ *   clips it where the strip's own edges clipped it before;
+ * - the road ahead, which changes as the rider moves and then only itself.
+ *
+ * The street map's sheet and mark were already layers of their own (#2380).
+ * `route-panel.browser.spec.ts` counts each layer's paints on a ride that
+ * changes everything a real one does.
+ */
+.oyl-hud__profile-box {
+  position: relative;
+  overflow: hidden;
+}
+
+.oyl-hud__profile-svg,
+.oyl-hud__ahead-svg {
+  will-change: transform;
+}
+
+.oyl-hud__profile-marker {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  will-change: transform;
 }
 
 /* #2075: the whole route FILLED, and the rider's marker in its ink over a

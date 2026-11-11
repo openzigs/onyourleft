@@ -137,7 +137,12 @@ function panel(delivery: { round: Round; week: WeekProgress }, announcement: str
         onEnd={() => undefined}
         paused={false}
         announcement={announcement}
-        delivery={{ ...delivery, score: roundTally(delivery.round).score }}
+        // #2453: and the next house, a side and a distance, which is no place either.
+        delivery={{
+          ...delivery,
+          score: roundTally(delivery.round).score,
+          next: { side: 'left', metres: 40 },
+        }}
       />
     </main>
   );

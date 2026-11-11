@@ -160,7 +160,7 @@ import {
   type Round,
 } from '../src/game/delivery/round';
 import type { GhostOutcome } from '../src/game/ghost-outcome';
-import type { ChasedGap } from '../src/game/hud/fields';
+import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { RIDER_MARK_MINIMUM_PIXELS } from '../src/game/hud/plan';
 import { SoundControls } from '../src/game/SoundControls';
@@ -448,6 +448,14 @@ const STATE: GameState = {
   headwindMetresPerSecond: MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
 };
 
+/**
+ * #2420: power as \`GameView\` hands it to every ride — the 3 s average, the
+ * default — so the field is measured under the term a rider reads,
+ * *Power (3 s)*. The average is the state's own reading, so no number here
+ * changes.
+ */
+const SHOWN_POWER: ShownPower = { view: 'average', average: STATE.input.power };
+
 /** The bot, up the road — a live gap, which is the field's other shape. */
 const BOT_GAP: ChasedGap = {
   to: 'bot',
@@ -562,6 +570,7 @@ function Harness(): JSX.Element {
           >
             <HudPanel
               profile={PROFILE}
+              shownPower={SHOWN_POWER}
               state={STATE}
               cadence={{ value: 92, live: true }}
               heartRate={{ value: 168, live: true }}
@@ -589,6 +598,7 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
@@ -616,6 +626,7 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
@@ -633,7 +644,13 @@ function Harness(): JSX.Element {
             delivery={
               round === undefined
                 ? undefined
-                : { round, week: { day, houses: 12, score: 0 }, score: roundTally(round).score }
+                : {
+                    round,
+                    week: { day, houses: 12, score: 0 },
+                    score: roundTally(round).score,
+                    // #2453: the next house, so the layout cases measure its field too.
+                    next: { side: 'right', metres: 120 },
+                  }
             }
           />
         </section>
@@ -647,6 +664,7 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}

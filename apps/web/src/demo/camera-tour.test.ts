@@ -16,7 +16,7 @@ import { NO_LAND_CLASS } from '../game/land-class';
 import { groundOf } from '../game/people';
 import type { CameraPose, SceneFrame } from '../game/port';
 import { scatterSeed } from '../game/scatter';
-import { placedRiders, sceneFrame, type SceneInput } from '../game/scene';
+import { drawnPathOf, placedRiders, sceneFrame, type SceneInput } from '../game/scene';
 import { corridorOrigin, roadCorridor } from '../game/terrain';
 import {
   BLEND_SECONDS,
@@ -167,12 +167,12 @@ describe('the demo camera tour — #1649', () => {
       // Re-pinned by #1994: the chase camera looks at the road through a bend,
       // and every pose carries `targetAheadMetres`.
       expect(pins).toMatchInlineSnapshot(`
-      {
-        "climb": "86af9f3aac21f20efca50e8ff2049479605b6d7161c5e7939d27ce47de248762",
-        "group": "7d8b8d37c7435d01063dcd615116c2c97928e3943098875cf3024b51025578a3",
-        "sprint": "63e9e2ffd6cc7f57292a83cae0e53503798b7088bb7d8ef6190e98c44e6a318e",
-      }
-    `);
+        {
+          "climb": "3b9b3e75e806355b7edbe71fd87295785bc435436d8788745334604244770760",
+          "group": "b963b0237b8f475f8a1772e9ce3305edfddcdfc9948e7712676598f3facb79f4",
+          "sprint": "112a9b6ee0828bcc46b8567ceab2815b50af585efefd59412fdaaee75feb77d4",
+        }
+      `);
     },
   );
 
@@ -197,6 +197,8 @@ describe('the demo camera tour — #1649', () => {
           profile: player.profile,
           origin,
           riderLateral: placedRiders(input, frame.corridor)[0]?.lateral ?? Number.NaN,
+          // #2422: the path the frame drew the rider along, as `player.ts` hands it.
+          path: drawnPathOf(input),
           groundAt,
         };
         const pose = cameraAt(player.tour, 3, { riderDistance }, world);

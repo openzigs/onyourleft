@@ -934,6 +934,20 @@ export const MAPPED_BUILDING_REACH_METRES = 400;
 export const MAPPED_CHUNK_METRES = 100;
 
 /**
+ * How far up the route from the rider a refill ranks the mapped buildings
+ * by — #2429: **200 m**, two chunks. A refill draws the buildings nearest
+ * the road the rider is about to ride, not the nearest to where the rider
+ * stands, so at the end of its chunk the set still reaches a chunk ahead.
+ *
+ * Ranked from the rider alone, the nearest {@link MAPPED_BUILDING_MAX} of a
+ * dense town (`footprint-fixtures-testing.ts` §`rowTownFixture`) stood
+ * within about 45 m either way and behind as much as ahead, and were held
+ * for {@link MAPPED_CHUNK_METRES}: half of its buildings first drew within
+ * 10 m of the rider, and a tenth only once they were behind it.
+ */
+export const MAPPED_RANKED_AHEAD_METRES = 2 * MAPPED_CHUNK_METRES;
+
+/**
  * The most draw calls the mapped buildings may spend — #1549: **6**, whatever
  * their count. The belt is one mesh with at most this many groups, one a
  * surface; a building whose surfaces would open a seventh waits for a refill

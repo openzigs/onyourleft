@@ -38,6 +38,9 @@ import {
   DELIVERY_OBSTACLE_TRIANGLES,
   DELIVERY_PIECE_CAPACITY,
   DeliveryBelt,
+  MARKER_MOST_SCALE,
+  MARKER_TRUE_SIZE_WITHIN_METRES,
+  markerScaleAt,
   type DeliveryPieceKind,
 } from './three-renderer';
 import { PEAK_IRRADIANCE } from './world';
@@ -269,6 +272,65 @@ describe('Delivery’s belt — #1814', () => {
       expect(lowest, kind).toBeGreaterThan(RIDER_HEIGHT_METRES);
       expect(lowest, kind).toBeGreaterThan(nearReach);
     }
+    belt.dispose();
+  });
+
+  it('stands a house marker’s glowing diamond 0.9 m across on a 2.4 m post, above a hedge, a fence and a parked car — #2453', () => {
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('markers').geometry;
+    const position = geometry.getAttribute('position');
+    const glow = geometry.getAttribute('oylGlow');
+    const diamond = { xs: [] as number[], ys: [] as number[] };
+    for (let at = 0; at < position.count; at += 1) {
+      // The ring lies on the step; the diamond is the glowing part above it.
+      if (glow.getX(at) !== 1 || position.getY(at) < 1) continue;
+      diamond.xs.push(position.getX(at));
+      diamond.ys.push(position.getY(at));
+    }
+    const span = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+    // Until #2453, 0.4 m across from 1.52 m up: hidden by a garden hedge, and 2 pixels at 100 m.
+    expect(span(diamond.xs)).toBeGreaterThanOrEqual(0.9 - 1e-6);
+    expect(Math.min(...diamond.ys)).toBeGreaterThanOrEqual(2.4 - 1e-6);
+    belt.dispose();
+  });
+
+  it('draws a far house marker larger by its distance from the eye, its foot still on the step, and a near one at its true size — #2453', () => {
+    // The numbers are written here, not read from three-renderer.ts, so changing them there fails this.
+    expect(MARKER_TRUE_SIZE_WITHIN_METRES).toBe(20);
+    expect(MARKER_MOST_SCALE).toBe(6);
+    expect([0, 10, 20, 40, 100, 120, 400, Number.NaN].map(markerScaleAt)).toEqual([
+      1, 1, 1, 2, 5, 6, 6, 1,
+    ]);
+    const belt = new DeliveryBelt('stylised');
+    // Markers 10 m, 60 m, 100 m and 300 m north of an eye at the origin, 3 m to its side.
+    const markers = [10, 60, 100, 300].map((z) => ({ x: 3, y: 0.25, z, yaw: 0 }));
+    const view: DeliveryInView = {
+      parcels: markers,
+      markers,
+      obstacles: markers.map((marker) => ({ ...marker, kind: 'bin' as const })),
+    };
+    belt.update(view, { x: 0, z: 0 });
+    const drawn = belt.drawn('markers');
+    expect(drawn.map((each) => Number(each.scale.toFixed(3)))).toEqual([
+      1,
+      Number(markerScaleAt(Math.hypot(3, 60)).toFixed(3)),
+      Number(markerScaleAt(Math.hypot(3, 100)).toFixed(3)),
+      MARKER_MOST_SCALE,
+    ]);
+    // Its foot is where it was handed: scaled about the step, not moved.
+    drawn.forEach((each, index) => {
+      const marker = markers[index] as DeliveryPiece;
+      expect([each.x, each.y, each.z]).toEqual([marker.x, marker.y, marker.z]);
+    });
+    // Only the markers: a parcel in flight and an obstacle are the size they are.
+    for (const what of ['parcels', 'obstacles'] as const) {
+      expect(belt.drawn(what).map((each) => Number(each.scale.toFixed(6)))).toEqual([1, 1, 1, 1]);
+    }
+    // With no eye, every marker is its true size.
+    belt.update(view);
+    expect(belt.drawn('markers').map((each) => Number(each.scale.toFixed(6)))).toEqual([
+      1, 1, 1, 1,
+    ]);
     belt.dispose();
   });
 

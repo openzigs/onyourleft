@@ -67,6 +67,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       arrangement: 'full',
       totalsStrip: false,
       route: 'full',
+      power: 'average',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -86,8 +87,9 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       (each.textContent ?? '').trim(),
     );
     // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
-    // panels and (#2387) the strip.
-    expect(offered).toHaveLength(12);
+    // panels, (#2387) the strip and (#2420) two ways to show power — none of
+    // which hides it.
+    expect(offered).toHaveLength(14);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -109,6 +111,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       arrangement: 'focus',
       totalsStrip: false,
       route: 'full',
+      power: 'average',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -135,6 +138,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       arrangement: 'focus',
       totalsStrip: true,
       route: 'full',
+      power: 'average',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -163,6 +167,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       arrangement: 'full',
       totalsStrip: false,
       route: 'compact',
+      power: 'average',
     });
 
     // Turning the route off keeps the choice of how it is drawn, and hides it.
@@ -173,6 +178,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       arrangement: 'full',
       totalsStrip: false,
       route: 'compact',
+      power: 'average',
     });
 
     // And Settings, opened again, says the same.
@@ -184,6 +190,37 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     // And back.
     await press(choice('Height profile and map'));
     expect(readHudLayout(localStorage).route).toBe('full');
+  });
+
+  it('shows power as a 3-second average by default, and instant once chosen, kept on the device — #2420', async () => {
+    await settings();
+    // The 3 s average is the default.
+    expect(choice('3-second average').checked).toBe(true);
+    expect(choice('Instant').checked).toBe(false);
+    // One group, named for what it chooses.
+    const group = choice('Instant').closest('fieldset');
+    expect(group?.querySelector('legend')?.textContent).toBe('Power');
+    expect(group?.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+
+    await press(choice('Instant'));
+
+    // What the next ride reads.
+    expect(readHudLayout(localStorage)).toEqual({
+      hidden: [],
+      textSize: 'normal',
+      arrangement: 'full',
+      totalsStrip: false,
+      route: 'full',
+      power: 'instant',
+    });
+    // And Settings, opened again (a reload), says the same.
+    await settings();
+    expect(choice('Instant').checked).toBe(true);
+    expect(choice('3-second average').checked).toBe(false);
+
+    // And back.
+    await press(choice('3-second average'));
+    expect(readHudLayout(localStorage).power).toBe('average');
   });
 
   it('says so when the device will not keep the choice', async () => {

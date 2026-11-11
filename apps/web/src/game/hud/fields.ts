@@ -73,6 +73,7 @@ import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
+import type { HudPowerView } from './hud-layout-preference';
 import { lapRaceReadings, type LapRaceHud } from './lap-race-hud';
 import { planLap, planProgress } from './plan';
 
@@ -199,6 +200,16 @@ export interface HudReading {
    */
   readonly zone?:
     { readonly current: number | undefined; readonly shares: readonly number[] } | undefined;
+  /**
+   * Which way the value is taken — #2420, the power field's alone: `3 s` for
+   * the 3-second average and `instant` for the reading as it arrives, drawn
+   * after the label and inside its `dt`, so the term a screen reader
+   * announces is *Power (3 s)* as the eye reads it. Its own element because
+   * `theme.css` sets a label in capitals, and `3 S` is not a unit.
+   * Absent on every other field, and on the power field where no choice was
+   * handed in (the demo).
+   */
+  readonly qualifier?: string | undefined;
 }
 
 /**
@@ -356,6 +367,20 @@ export interface ChosenRider {
 }
 
 /**
+ * Where the next house on a Delivery round is from the rider — #2453, as
+ * `delivery/ride-round.ts` §`nextHouse` works it out: which side of the road,
+ * and how far ahead along it. Stated here rather than imported, so that the
+ * HUD, which the stage chooser reaches, reaches none of the round's modules
+ * (`stage-chooser-imports.test.ts`); `GameView` hands one to the other, so a
+ * shape that drifted would not typecheck.
+ */
+export interface NextHouseHud {
+  readonly side: 'left' | 'right';
+  /** Metres along the road to the house; nought once the rider is level with it. */
+  readonly metres: number;
+}
+
+/**
  * A Delivery round, on the HUD — #1812 (epic #1803, the owner's rulings DL2
  * and DL10 of 2026-10-27). The round as `delivery/round.ts` holds it and the
  * week it is ridden in: **counts only**, because a house is a position on the
@@ -374,6 +399,12 @@ export interface DeliveryHud {
    * ruling of 2026-10-28 on #1811 takes a crash off the round's score.
    */
   readonly score: number;
+  /**
+   * The next house still expecting a parcel — #2453, from
+   * `delivery/ride-round.ts` §`nextHouse`: which side of the road and how far
+   * ahead, from the rider, never where. `undefined` once none is expecting one.
+   */
+  readonly next: NextHouseHud | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -526,6 +557,56 @@ export interface HudInput {
    * it is shown, and says why it is not a field of its own.
    */
   readonly lapSeconds?: number | undefined;
+  /**
+   * How the rider chose to see power, and the 3 s average — #2420. `GameView`
+   * hands it in on every ride; absent (the demo), the power field is the raw
+   * reading under its plain label, as it was before #2420.
+   */
+  readonly shownPower?: ShownPower | undefined;
+}
+
+/**
+ * How the HUD shows power on this ride — #2420.
+ *
+ * ⚠️ **What the HUD shows, and only that.** The average is
+ * `power-average.ts`'s, taken from the readings the simulation was already
+ * advanced with; {@link GameState.input} stays the raw reading, and everything
+ * else the ride does reads that.
+ */
+export interface ShownPower {
+  readonly view: HudPowerView;
+  /**
+   * The 3 s average as of this frame, `undefined` while power is not live.
+   * Read only in the `average` view.
+   */
+  readonly average: number | undefined;
+}
+
+/** What the power field says of its view, after its label — #2420. */
+export const POWER_QUALIFIERS: Readonly<Record<HudPowerView, string>> = {
+  average: '3 s',
+  instant: 'instant',
+};
+
+/** The power a rider's effort fields show: the live flags are the sensor's own. */
+interface EffortPower {
+  readonly value: number | undefined;
+  readonly live: boolean;
+  readonly paired: boolean | undefined;
+}
+
+/**
+ * The power the HUD shows — #2420: the 3 s average in that view while power is
+ * live, and otherwise the raw reading. Live, stale and unpaired are the
+ * sensor's own in both, so a dropped meter is a dash whichever is chosen.
+ */
+function effortPower(state: GameState, shown: ShownPower | undefined): EffortPower {
+  const raw = state.input.power;
+  const averaged =
+    shown?.view === 'average' && state.input.live && shown.average !== undefined
+      ? shown.average
+      : raw;
+  return { value: averaged, live: state.input.live, paired: state.input.paired };
 }
 
 /**
@@ -592,8 +673,15 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   // appears or disappears mid-ride: `simulation.ts` §`SimulationSetup.wind`
   // records that the wind cannot be changed once the ride has started.
   const wind = windReading(state, units);
+  // #2420: the power the rider chose to see, for the field, W/kg and the zone.
+  const power = effortPower(state, input.shownPower);
   return [
-    reading('power', 'Power', state.input.power, 'W', state.input.live, 0, state.input.paired),
+    {
+      ...reading('power', 'Power', power.value, 'W', power.live, 0, power.paired),
+      ...(input.shownPower === undefined
+        ? {}
+        : { qualifier: POWER_QUALIFIERS[input.shownPower.view] }),
+    },
     reading(
       'cadence',
       'Cadence',
@@ -642,14 +730,14 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // gap: W/kg on every ride, the zone only where a threshold is set (its
     // presence is a choice made off the ride, never changed mid-ride, so a
     // ride with one and a ride without agree about every other field's place).
-    wattsPerKilogramReading(state, input.riderMass),
-    ...zoneReading(state, input.thresholdPower, input.powerZoneTime),
+    wattsPerKilogramReading(power, input.riderMass),
+    ...zoneReading(power, input.thresholdPower, input.powerZoneTime),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
-    ...deliveryReadings(input.delivery),
+    ...deliveryReadings(input.delivery, units),
     // #1904: a lap race's, last for the same reason. A ride runs one mode.
     ...lapRaceReadings(input.lapRace),
   ];
@@ -709,10 +797,10 @@ export function isEffortReading(reading: HudReading): boolean {
  * the physics falls back to (`athlete/mass.ts` §`riderMassFor`) — and a dash,
  * stale, where the power reading is, so a dropped meter is never a W/kg.
  */
-function wattsPerKilogramReading(state: GameState, mass: Kilograms | undefined): HudReading {
-  const power = state.input.power;
-  const live = state.input.live && power !== undefined && Number.isFinite(power);
-  const stale = state.input.paired !== false && !state.input.live;
+function wattsPerKilogramReading(effort: EffortPower, mass: Kilograms | undefined): HudReading {
+  const power = effort.value;
+  const live = effort.live && power !== undefined && Number.isFinite(power);
+  const stale = effort.paired !== false && !effort.live;
   if (mass === undefined || !(mass > 0) || !live) {
     return { key: WATTS_PER_KILOGRAM_KEY, label: 'W/kg', value: NO_READING, unit: '', stale };
   }
@@ -733,15 +821,15 @@ function wattsPerKilogramReading(state: GameState, mass: Kilograms | undefined):
  * `@onyourleft/domain` §`powerZones`, the seven the Analysis screen draws.
  */
 function zoneReading(
-  state: GameState,
+  effort: EffortPower,
   threshold: Watts | undefined,
   time: TimeInZones | undefined,
 ): readonly HudReading[] {
   if (threshold === undefined || !(threshold > 0)) {
     return [];
   }
-  const power = state.input.power;
-  const live = state.input.live && power !== undefined;
+  const power = effort.value;
+  const live = effort.live && power !== undefined;
   const zone = live ? zoneOf(powerZones(threshold), power) : undefined;
   const covered = time === undefined ? 0 : (time.covered as number);
   const shares =
@@ -754,7 +842,7 @@ function zoneReading(
       label: 'Zone',
       value: zone === undefined ? NO_READING : String(zone.index),
       unit: '',
-      stale: state.input.paired !== false && !state.input.live,
+      stale: effort.paired !== false && !effort.live,
       ...(zone === undefined ? {} : { detail: zone.name }),
       zone: { current: zone?.index, shares },
     },
@@ -1042,23 +1130,42 @@ export const DELIVERY_HOUSES_KEY = 'delivery-houses';
 /** The key of the Delivery round's score field — #1812. @see deliveryReadings */
 export const DELIVERY_SCORE_KEY = 'delivery-score';
 
+/** The key of the Delivery round's next-house field — #2453. @see deliveryReadings */
+export const DELIVERY_NEXT_KEY = 'delivery-next';
+
+/**
+ * The words of the next-house field — #2453. ⚠️ Proposed to the owner in the
+ * pull request (old → new); this project's own (DL1), naming no place.
+ */
+export const NEXT_HOUSE_TEXT = {
+  label: 'Next house',
+  left: 'on the left',
+  right: 'on the right',
+} as const;
+
 /** Whether a reading is one of a Delivery round's — #1812. */
 export function isDeliveryReading(reading: HudReading): boolean {
   return reading.key.startsWith('delivery-');
 }
 
 /**
- * The Delivery round's two fields — #1812: the houses still to deliver, with
+ * The Delivery round's fields — #1812: the houses still to deliver, with
  * the round's delivered and missed counts under them, and the round's score,
- * with the day of the week under it. Two fields rather than five, because on
- * a phone the secondary tier has height for two rows, and `theme.css`
- * §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind give way to
- * these as they do to a room's. Words are this project's own (DL1): a house
- * is counted, never named, and nothing here names a place (DL11, ADR 0055).
+ * with the day of the week under it; since #2453, between them, how far the
+ * next house is and which side of the road it stands on. Three fields rather
+ * than five, because on a phone the secondary tier has height for two rows,
+ * and `theme.css` §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind
+ * give way to these as they do to a room's. Words are this project's own
+ * (DL1): a house is counted, never named, and nothing here names a place
+ * (DL11, ADR 0055) — the next house is a side and a distance from the rider.
  */
-function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReading[] {
+function deliveryReadings(
+  delivery: DeliveryHud | undefined,
+  units: UnitSystem,
+): readonly HudReading[] {
   if (delivery === undefined) return [];
   const tally = roundTally(delivery.round);
+  const next = delivery.next;
   return [
     {
       key: DELIVERY_HOUSES_KEY,
@@ -1070,6 +1177,22 @@ function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReadin
       // breaks the phrase after the comma and never between "2" and "missed".
       detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
     },
+    next === undefined
+      ? {
+          key: DELIVERY_NEXT_KEY,
+          label: NEXT_HOUSE_TEXT.label,
+          value: NO_READING,
+          unit: smallDistanceUnit(units),
+          stale: false,
+        }
+      : {
+          ...measured(
+            DELIVERY_NEXT_KEY,
+            NEXT_HOUSE_TEXT.label,
+            formatSmallDistance(next.metres, units),
+          ),
+          detail: NEXT_HOUSE_TEXT[next.side],
+        },
     {
       key: DELIVERY_SCORE_KEY,
       label: 'Score',

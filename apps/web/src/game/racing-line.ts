@@ -152,7 +152,12 @@ import { distanceOnRoute, type GeographicPosition, type RouteProfile } from '@on
 import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
 
 import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES } from './bicycle';
-import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition } from './terrain';
+import {
+  ROAD_WIDTH_METRES,
+  corridorOrigin,
+  drawnRoadPosition,
+  localGroundPosition,
+} from './terrain';
 
 /**
  * How far inside each road edge the line's middle stays: **0.6 m** — half a
@@ -439,8 +444,52 @@ export function racingLine(profile: RouteProfile): RacingLine {
   if (known !== undefined) {
     return known;
   }
-  const found = solveLine(profile, GAUSS_NEWTON_STEPS);
+  const found = solveLine(profile, GAUSS_NEWTON_STEPS, 'route').line;
   computed.set(profile, found);
+  return found;
+}
+
+/**
+ * A line solved on the road AS IT IS DRAWN, and where it is — #2422.
+ * @see drawnRoadLine
+ */
+export interface DrawnRoadLine {
+  /** Its offsets are from the DRAWN road's centreline, and its curvature that of the points below. */
+  readonly line: RacingLine;
+  /** Where the line is at each profile sample, in local metres: the drawn road's point moved across by the offset. */
+  readonly xs: Float64Array;
+  readonly zs: Float64Array;
+}
+
+const computedOnDrawnRoad = new WeakMap<RouteProfile, DrawnRoadLine>();
+
+/**
+ * The line through a whole route, solved on the road as `terrain.ts` DRAWS it
+ * (§`drawnRoadPosition`: the route's centreline averaged over
+ * `BEND_SMOOTHING_METRES` either side) rather than on the route's own samples
+ * — #2422. Pure; cached per profile object, apart from {@link racingLine}'s.
+ *
+ * ⚠️ **Why a second solve.** {@link racingLine} is solved on the route's own
+ * samples, and the rider is drawn on the smoothed road: at a corner the route
+ * draws at one vertex the smoothed road already runs about 3.5 m inside the
+ * vertex, and the offsets solved against the vertex took the rider a further
+ * 2.9 m in. Drawn there, the rider's path was about three times as tight as
+ * the curvature the lean and the easing read, and where a GPS track wandered
+ * either side of the corner the offset curve folded back on itself. Solved on
+ * the drawn road, the line's points are ON the tarmac the rider is drawn on
+ * and its curvature is theirs. `drawn-line.ts` draws the rider through them.
+ *
+ * {@link racingLine} is unchanged, for a Delivery round and a lap race, where
+ * the drawn place is where the game meets the rider (`scene.ts` §`easingLine`),
+ * and for every digest held against it.
+ */
+export function drawnRoadLine(profile: RouteProfile): DrawnRoadLine {
+  const known = computedOnDrawnRoad.get(profile);
+  if (known !== undefined) {
+    return known;
+  }
+  const found = solveLine(profile, GAUSS_NEWTON_STEPS, 'drawn');
+  computedOnDrawnRoad.set(profile, found);
   return found;
 }
 
@@ -618,7 +667,7 @@ export function steadyTurnLean(speed: number, curvature: number): number {
  * {@link GAUSS_NEWTON_STEPS}; a test needs to take one more step and compare.
  */
 export function solvedLine(profile: RouteProfile, steps: number): RacingLine {
-  return solveLine(profile, steps);
+  return solveLine(profile, steps, 'route').line;
 }
 
 /** The line's curvature at a distance, linear between samples. */
@@ -696,24 +745,31 @@ interface PaddedRoad {
   readonly resolution: number;
 }
 
-/** The whole solve. @see racingLine */
-function solveLine(profile: RouteProfile, steps: number): RacingLine {
+/**
+ * The whole solve, on the route's own samples or on the drawn road's.
+ * @see racingLine, @see drawnRoadLine
+ */
+function solveLine(profile: RouteProfile, steps: number, on: 'route' | 'drawn'): DrawnRoadLine {
   const count = profile.positions.length;
   const offsets = new Float64Array(count);
   const curvatures = new Float64Array(count);
   // On a loop the last sample is the first place again, so the lap is one
   // sample shorter than the array and the last entry is copied at the end.
   const nodes = profile.loop ? count - 1 : count;
-  if (nodes < 5) {
-    return { profile, offsets, curvatures };
-  }
   const origin = corridorOrigin(profile);
   const xs = new Float64Array(nodes);
   const zs = new Float64Array(nodes);
   for (let index = 0; index < nodes; index += 1) {
-    const ground = localGroundPosition(origin, profile.positions[index] as GeographicPosition);
+    // #2422: the drawn road's point at this sample's distance, where asked.
+    const ground =
+      on === 'drawn'
+        ? drawnRoadPosition(profile, origin, index * profile.resolution)
+        : localGroundPosition(origin, profile.positions[index] as GeographicPosition);
     xs[index] = ground.x;
     zs[index] = ground.z;
+  }
+  if (nodes < 5) {
+    return { line: { profile, offsets, curvatures }, ...placed(xs, zs, undefined, offsets, count) };
   }
   const padding = profile.loop ? loopPaddingSamples(profile.resolution) : 0;
   const size = nodes + 2 * padding;
@@ -759,7 +815,34 @@ function solveLine(profile: RouteProfile, steps: number): RacingLine {
     offsets[count - 1] = offsets[0] as number;
     curvatures[count - 1] = curvatures[0] as number;
   }
-  return { profile, offsets, curvatures };
+  return {
+    line: { profile, offsets, curvatures },
+    ...placed(xs, zs, road.normals, offsets, count),
+  };
+}
+
+/**
+ * Where the line is at each of `count` samples: each road point moved across
+ * by its offset along its normal, and on a loop the last sample is the first.
+ * With no normals (a road too short to solve) the line is the road.
+ */
+function placed(
+  xs: Float64Array,
+  zs: Float64Array,
+  normals: Float64Array | undefined,
+  offsets: Float64Array,
+  count: number,
+): { readonly xs: Float64Array; readonly zs: Float64Array } {
+  const lineXs = new Float64Array(count);
+  const lineZs = new Float64Array(count);
+  const nodes = xs.length;
+  for (let index = 0; index < count; index += 1) {
+    const at = index < nodes ? index : index - nodes;
+    const across = offsets[index] as number;
+    lineXs[index] = (xs[at] as number) + across * (normals?.[at * 2] ?? 0);
+    lineZs[index] = (zs[at] as number) + across * (normals?.[at * 2 + 1] ?? 0);
+  }
+  return { xs: lineXs, zs: lineZs };
 }
 
 /**

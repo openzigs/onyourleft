@@ -15,11 +15,13 @@ import {
   CALORIES_KEY,
   CLOCK_KEY,
   DELIVERY_HOUSES_KEY,
+  DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
   ELAPSED_TIME_KEY,
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  POWER_QUALIFIERS,
   RIDE_CLOCK_LABEL,
   RIDE_TOTAL_KEYS,
   WATTS_PER_KILOGRAM_KEY,
@@ -34,6 +36,7 @@ import {
   profileReading,
   readingTier,
   trainerLine,
+  type DeliveryHud,
   type HudInput,
 } from './fields';
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
@@ -1463,7 +1466,12 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
 describe('a Delivery round on the HUD — #1812', () => {
   const base = baseInput();
   const round = recordMiss(recordDelivery(recordDelivery(startRound(8), 0), 1), 2);
-  const delivery = { round, week: { day: 3, houses: 8, score: 11 }, score: 2 };
+  const delivery: DeliveryHud = {
+    round,
+    week: { day: 3, houses: 8, score: 11 },
+    score: 2,
+    next: { side: 'right', metres: 84.6 },
+  };
 
   it('shows the houses left, with the delivered and missed counts, and the round’s score with its day', () => {
     const shown = hudReadings({ ...base, delivery }).filter(isDeliveryReading);
@@ -1475,6 +1483,14 @@ describe('a Delivery round on the HUD — #1812', () => {
         unit: 'left',
         stale: false,
         detail: '2\u00a0delivered, 1\u00a0missed',
+      },
+      {
+        key: DELIVERY_NEXT_KEY,
+        label: 'Next house',
+        value: '85',
+        unit: 'm',
+        stale: false,
+        detail: 'on the right',
       },
       {
         key: DELIVERY_SCORE_KEY,
@@ -1517,7 +1533,7 @@ describe('a Delivery round on the HUD — #1812', () => {
     const ordinary = hudReadings(windy).map((each) => each.key);
     expect(ordinary.at(-1)).toBe('wind');
     const keys = hudReadings({ ...windy, delivery }).map((each) => each.key);
-    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_NEXT_KEY, DELIVERY_SCORE_KEY]);
     for (const each of hudReadings({ ...base, delivery }).filter(isDeliveryReading)) {
       expect(readingTier(each)).toBe('secondary');
     }
@@ -1531,10 +1547,16 @@ describe('a Delivery round on the HUD — #1812', () => {
   it('shows a fresh round on day one as nothing delivered yet', () => {
     const fresh = hudReadings({
       ...base,
-      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK, score: 0 },
+      delivery: {
+        round: startRound(FRESH_WEEK.houses),
+        week: FRESH_WEEK,
+        score: 0,
+        next: { side: 'left', metres: 310 },
+      },
     }).filter(isDeliveryReading);
     expect(fresh.map((each) => [each.value, each.detail])).toEqual([
       ['8', '0\u00a0delivered, 0\u00a0missed'],
+      ['310', 'on the left'],
       ['0', 'Day 1 of 7'],
     ]);
   });
@@ -1548,7 +1570,35 @@ describe('a Delivery round on the HUD — #1812', () => {
     // #2071: the gradient is primary; on the phones that draw it in this
     // panel it takes the first cell, which `theme.css` holds for it, so the
     // panel has as many cells as before (§"THE GRADIENT, PRIMARY").
-    expect(shown).toEqual(['speed', 'remaining', DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    expect(shown).toEqual([
+      'speed',
+      'remaining',
+      DELIVERY_HOUSES_KEY,
+      DELIVERY_NEXT_KEY,
+      DELIVERY_SCORE_KEY,
+    ]);
+  });
+
+  it('says how far the next house is in the rider’s units and which side it stands, and a dash once none is left — #2453', () => {
+    const next = (hud: DeliveryHud, units?: 'metric' | 'imperial') =>
+      hudReadings({ ...base, delivery: hud, ...(units === undefined ? {} : { units }) }).find(
+        (each) => each.key === DELIVERY_NEXT_KEY,
+      );
+    expect(next(delivery)).toMatchObject({ label: 'Next house', value: '85', unit: 'm' });
+    expect(next({ ...delivery, next: { side: 'left', metres: 0 } })).toMatchObject({
+      value: '0',
+      detail: 'on the left',
+    });
+    // 84.6 m is 277.6 ft: the rider's units, through `units/format.ts`.
+    expect(next(delivery, 'imperial')).toMatchObject({ value: '278', unit: 'ft' });
+    const none = next({ ...delivery, next: undefined });
+    expect(none).toEqual({
+      key: DELIVERY_NEXT_KEY,
+      label: 'Next house',
+      value: NO_READING,
+      unit: 'm',
+      stale: false,
+    });
   });
 });
 
@@ -1879,5 +1929,87 @@ describe('the rider’s W/kg and power zone — #2077', () => {
     expect(zone?.value).toBe(NO_READING);
     expect(zone?.detail).toBeUndefined();
     expect(zone?.zone).toEqual({ current: undefined, shares: [] });
+  });
+});
+
+/**
+ * #2420: the power the rider chose to see — the 3 s average or the reading as
+ * it arrives — on the power field, W/kg and the zone. `power-average.ts` makes
+ * the average; `power-shown-wiring.test.tsx` holds the wiring, and that the
+ * ride itself reads the raw reading in both.
+ */
+describe('power as a 3 s average or instant — #2420', () => {
+  const riding = (power: number, live = true, paired = true): HudInput => {
+    const base = baseInput();
+    return { ...base, state: { ...base.state, input: { power: watts(power), live, paired } } };
+  };
+  const field = (input: HudInput, key: string) =>
+    hudReadings(input).find((each) => each.key === key);
+
+  it('shows the 3 s average, rounded, and says so after the label', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: '3 s', value: '252', unit: 'W' });
+    expect(power?.stale).toBe(false);
+  });
+
+  it('shows the reading as it arrives in the instant view, and says so', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'instant', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: 'instant', value: '312' });
+  });
+
+  it('is the raw reading under its plain label where no choice is handed in (the demo)', () => {
+    const power = field(riding(312), 'power');
+    expect(power?.value).toBe('312');
+    expect(power?.qualifier).toBeUndefined();
+  });
+
+  it('names each view in words', () => {
+    expect(POWER_QUALIFIERS).toEqual({ average: '3 s', instant: 'instant' });
+  });
+
+  it('is a dash, marked lost, when the meter drops in either view — never the average', () => {
+    for (const view of ['average', 'instant'] as const) {
+      const power = field({ ...riding(0, false), shownPower: { view, average: 240 } }, 'power');
+      expect([power?.value, power?.stale]).toEqual([NO_READING, true]);
+    }
+  });
+
+  it('is a bare dash with nothing paired, in either view', () => {
+    const power = field(
+      { ...riding(0, false, false), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect([power?.value, power?.stale]).toEqual([NO_READING, false]);
+  });
+
+  it('is the raw reading where the average has nothing yet', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect(power?.value).toBe('312');
+  });
+
+  it('takes W/kg and the zone from the same power the field shows', () => {
+    const effort = (view: 'average' | 'instant') =>
+      hudReadings({
+        ...riding(342),
+        riderMass: kilograms(72),
+        thresholdPower: watts(250),
+        shownPower: { view, average: 200 },
+      });
+    const pick = (readings: ReturnType<typeof hudReadings>, key: string) =>
+      readings.find((each) => each.key === key)?.value;
+    // 200 W over 72 kg is 2.8 and zone 3 of 250 W; 342 W is 4.8 and zone 6.
+    expect(pick(effort('average'), WATTS_PER_KILOGRAM_KEY)).toBe('2.8');
+    expect(pick(effort('average'), ZONE_KEY)).toBe('3');
+    expect(pick(effort('instant'), WATTS_PER_KILOGRAM_KEY)).toBe('4.8');
+    expect(pick(effort('instant'), ZONE_KEY)).toBe('6');
   });
 });

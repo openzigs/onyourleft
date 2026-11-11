@@ -34,7 +34,7 @@
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { seconds, watts } from '@onyourleft/domain';
+import { BOT_TIER_WATTS_PER_KILOGRAM, botFieldPaces, seconds, watts } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
@@ -49,6 +49,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
+import { botName } from './hud/lap-race-hud';
 import type { SteerIntent } from './lanes';
 import { LAP_RACE_ASSIST_STORAGE_KEY } from './lap-race/assist-preference';
 import { HIT_GLOW_MEAN } from './lap-race/in-view';
@@ -547,8 +548,10 @@ describe('a solo lap race inside a game ride — #1906', () => {
         ride.said.some((text) => /^(Hit by a crosswind gust|Rode through a puddle)/u.test(text)),
       ).toBe(true);
       expect(ride.said.some((text) => text.startsWith('Lap 1 of 2 done.'))).toBe(true);
-      // The standings name the bots by tier and give W/kg, the rider's own included, never watts.
-      expect(ride.standings).toContain('Hard bot 1');
+      // The standings name the bots by pace (#2455) and give W/kg, the rider's own included, never watts.
+      expect(ride.standings).toContain(
+        botName(botFieldPaces(script.seed, RACE.bots)[0]?.style ?? 'even', 1),
+      );
       const perKilogram = [...ride.standings.matchAll(/(\d+\.\d) W\/kg/gu)].map((each) =>
         Number(each[1]),
       );
@@ -713,15 +716,33 @@ describe('a solo lap race inside a game ride — #1906', () => {
     await rideTheTrace({ race: RACE, frames: 6 });
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
-    const standings = mounted?.container.querySelector('.oyl-hud__standings')?.textContent ?? '';
-    // One tier below the chosen 'hard'.
-    expect(standings).toContain('Brisk bot');
-    expect(standings).not.toContain('Hard bot');
+    // One tier below the chosen 'hard', read off the bots' figures (#2455: a
+    // bot is named by its pace, not its tier). A bot rides at most its own
+    // power plus what it has banked, and never under its tier's −20 % floor:
+    // Brisk's figures lie between 2.2 and 2.8 W/kg, where a Hard bot rides at
+    // least the Hard tier's floor, 2.9, and a bot assisted two tiers down, to
+    // Steady, at most 2.0.
+    const figures = queryAll<HTMLElement>(
+      mounted?.container ?? document,
+      '.oyl-hud__standings-line:not(.oyl-hud__standings-line--you)',
+    )
+      .map((line) => /(\d+\.\d) W\/kg/u.exec(line.textContent ?? '')?.[1])
+      .filter((figure): figure is string => figure !== undefined)
+      .map(Number);
+    expect(figures.length).toBeGreaterThanOrEqual(RACE.bots);
+    expect(Math.max(...figures)).toBeLessThanOrEqual(BOT_TIER_WATTS_PER_KILOGRAM.brisk);
+    // Brisk's own floor, the figure rounded to a tenth, rules out Steady.
+    expect(Math.min(...figures)).toBeGreaterThanOrEqual(
+      Math.floor(BOT_TIER_WATTS_PER_KILOGRAM.brisk * 0.8 * 10) / 10,
+    );
   });
 
   it('names every bot of a full field in the standings, on every frame, the rider last on the line (#2328)', async () => {
     expect(RACE.bots).toBe(LAP_RACE_MOST_BOTS);
-    const bots = Array.from({ length: RACE.bots }, (_, index) => `Hard bot ${String(index + 1)}`);
+    // #2455: each bot named by the pace the race's seed dealt it.
+    const bots = botFieldPaces(script.seed, RACE.bots).map((pace, index) =>
+      botName(pace.style, index + 1),
+    );
     /** The names on the standings' lines, as the rider reads them, frame by frame. */
     const read: string[][] = [];
     await rideTheTrace({
@@ -779,7 +800,9 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // Riding again, both are.
     await press('lane-left');
     await press('item');
-    for (let index = 0; index < 8; index += 1) await pump();
+    // Read as soon as it changes: a pick-up point a few frames on can hand the
+    // rider the same kind again, which would read as never used.
+    for (let index = 0; index < 8 && item() === holding; index += 1) await pump();
     expect(item()).not.toBe(holding);
     expect(lateral()).toBeLessThan((line ?? 0) - 1);
   });

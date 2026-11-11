@@ -239,7 +239,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // #2071: the gradient is the fourth primary reading.
-      expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+      expect(seen.primary).toEqual(['Power (3 s)', 'Cadence', 'Heart rate', 'Gradient']);
       // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
       // and since #1111 the moving time, beside the distance to go; and since
       // #2072 the elapsed time and the clock, beside the moving time.
@@ -484,7 +484,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           how,
         ).toEqual([]);
         // In the primary list in the document, wherever it is drawn.
-        expect(seen.primary, how).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+        expect(seen.primary, how).toEqual(['Power (3 s)', 'Cadence', 'Heart rate', 'Gradient']);
       }
     });
 

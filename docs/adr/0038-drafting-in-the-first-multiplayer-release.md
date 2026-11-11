@@ -373,3 +373,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     never watts; and the spoken cue's second switch, announcements, which is still off by default, so
     the cue is heard only by a rider who turned announcements on. The owner approved the gauge, its
     "at most 59 %" scale text and the spoken cue as written.
+- **2026-11-10** — **The first sentence of D-5's "Out" bullet is superseded for the bot pacer in a
+  solo ride and the rider's own ghost** by
+  [ADR 0066](0066-the-bot-pacer-and-the-riders-own-ghost-give-a-draft-in-a-solo-ride.md)
+  ([#2424](https://github.com/openzigs/onyourleft/issues/2424)), on the owner's ruling of 2026-11-09
+  on [#2421](https://github.com/openzigs/onyourleft/issues/2421#issuecomment-6755764419): both give
+  the rider a draft in a solo ride and take none, by D-3's model from odometer distances, and the
+  owner extended D-7's patent-risk acceptance to it. **Unchanged, by name**: D-1 to D-4, D-5's first
+  two bullets and its team-tactics sentence, D-6 and D-7, which stays a record of what was accepted on
+  2026-09-28. The cross-rider ghost and lap-race bots stay undrafted (ADR 0066 D-2 and D-3), and a
+  room is unchanged.

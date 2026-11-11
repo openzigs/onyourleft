@@ -1727,6 +1727,16 @@ function nearFieldProbe(
     profile,
     origin,
     state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+    // ⚠️ The camera BESIDE the road, a Delivery round's and a lap race's,
+    // since #2422 stood an ordinary ride's eye on the drawn path behind the
+    // rider. On this 300 m circuit the two eyes are centimetres apart, which
+    // is enough to lose the one signpost pass this control was found on: the
+    // drawn path's camera brings nothing to an 8 : 1 plane here, and the
+    // control below drew 0 pixels. What this probe tests is the RENDERER's
+    // cull, which is the same whichever camera stands the rig; the drawn
+    // path's camera is held clear at every device aspect by
+    // `near-field.test.ts` and `near-field-street.test.ts`.
+    uneased: true,
   });
   let chosen:
     { distance: number; pivot: number; cut: readonly string[]; camera: CameraPose } | undefined;
@@ -3833,6 +3843,15 @@ interface MappedTownMeasurement {
   readonly woodOff: readonly number[];
   readonly woodNoLand: readonly number[];
   readonly woodNoLandOff: readonly number[];
+  /**
+   * #2429: the front wall of the near-row house nearest 1 560 m, 25 m to the
+   * right, read from 1 495 m — the end of the chunk a refill at 1 400 m drew
+   * — with the town drawn and with `-mapped-buildings`, and whether it is in
+   * that frame. 65 m ahead of the rider and 160 m from where the refill was.
+   */
+  readonly aheadWall: readonly number[];
+  readonly aheadWallOff: readonly number[];
+  readonly aheadWallInFrame: boolean;
   /** The fastest of three refills of #1540's dense town, ms, in this browser. */
   readonly refillMs: number;
   /** The mean frame time with the town drawn, and with the lever off, ms. */
@@ -3856,6 +3875,9 @@ const NO_MAPPED_TOWN: MappedTownMeasurement = {
   woodOff: [],
   woodNoLand: [],
   woodNoLandOff: [],
+  aheadWall: [],
+  aheadWallOff: [],
+  aheadWallInFrame: false,
   refillMs: Number.NaN,
   frameMs: Number.NaN,
   frameMsOff: Number.NaN,
@@ -3962,11 +3984,11 @@ function mappedTownProbe(
   const town = mappedBuildingsOf(plans);
   const townNoLand = mappedBuildingsOf(plansNoLand);
   const start = atStartLine(profile);
-  const frameOf = (mask: typeof land, mapped: MappedBuildings): SceneFrame =>
+  const frameOf = (mask: typeof land, mapped: MappedBuildings, distance = 1_500): SceneFrame =>
     sceneFrame({
       profile,
       origin,
-      state: { ...start, ride: { ...start.ride, distance: metres(1_500) } },
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
       worldCorridor: corridor,
       landClass: mask,
       mappedBuildings: mapped,
@@ -3992,8 +4014,11 @@ function mappedTownProbe(
   // The same frame with no mapped buildings in it: what the calls are counted against.
   const bare: SceneFrame = { ...frame };
   delete (bare as { mappedBuildings?: unknown }).mappedBuildings;
-  const meanAt = (point: { readonly x: number; readonly y: number; readonly z: number }) => {
-    const centre = pixelFor(frame, canvas, point);
+  const meanAt = (
+    point: { readonly x: number; readonly y: number; readonly z: number },
+    drawn: SceneFrame = frame,
+  ) => {
+    const centre = pixelFor(drawn, canvas, point);
     const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
     const sums = [0, 0, 0];
     for (let at = 0; at < pixels.length; at += 4) {
@@ -4067,6 +4092,27 @@ function mappedTownProbe(
   view.render(noLand);
   const woodNoLand = meanAt(woodPoint);
 
+  // #2429: a house a chunk's ride from its refill. The town again is a new
+  // belt, so the frame at 1 400 m refills it there; 1 495 m is the same
+  // chunk, so it draws what that refill chose. With no scenery, so no tree
+  // stands in for the house or hides it.
+  view.render(bareOf(frameOf(land, town, 1_400)));
+  const late = bareOf(frameOf(land, town, 1_495));
+  const aheadTarget = besideRoad(profile, origin, 1_560, 25);
+  const aheadPlan = [...plans].sort(
+    (a, b) =>
+      Math.hypot(a.centroid.x - aheadTarget[0], a.centroid.z - aheadTarget[1]) -
+      Math.hypot(b.centroid.x - aheadTarget[0], b.centroid.z - aheadTarget[1]),
+  )[0];
+  const aheadPoint = aheadPlan === undefined ? undefined : frontWallOf(aheadPlan);
+  if (aheadPoint === undefined) return NO_MAPPED_TOWN;
+  view.render(late);
+  const aheadWall = meanAt(aheadPoint, late);
+  mappedBuildingsShownOf(view, false);
+  view.render(late);
+  const aheadWallOff = meanAt(aheadPoint, late);
+  mappedBuildingsShownOf(view, true);
+
   // #1549's CPU figure: a refill of #1540's dense town, the fastest of three.
   const dense = denseTownFixture();
   const denseTown = mappedBuildingsOf(
@@ -4102,6 +4148,12 @@ function mappedTownProbe(
     woodOff,
     woodNoLand,
     woodNoLandOff,
+    aheadWall,
+    aheadWallOff,
+    aheadWallInFrame: (() => {
+      const at = inTheFrame(late, canvas.width / canvas.height, aheadPoint);
+      return at.across > 0 && at.across < 1 && at.down > 0 && at.down < 1;
+    })(),
     refillMs,
     frameMs,
     frameMsOff,

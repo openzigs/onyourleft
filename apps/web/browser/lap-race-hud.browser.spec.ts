@@ -25,7 +25,12 @@
  *   hidden on a phone (ADR 0051 D-7);
  * - the warning is a SHAPE: the *Item* field is drawn with a dashed outline
  *   on the warned stages and with none on the start stage (SC 1.4.1);
- * - every item's name fits the *Item* field, one stage per item.
+ * - every item's name fits the *Item* field, one stage per item;
+ * - the "behind you" cue is on the *Place* field's lap line on every race
+ *   stage (#2455 AC2), at its widest on the warned ones — the last of the
+ *   most laps the chooser offers, the longest bot name, the window's edge:
+ *   `Lap 10 of 10 · Sprinter 7 +5 s` — so *Place* fitting its box, its panel
+ *   and its row is measured with it.
  *
  * ## The controls
  *
@@ -175,6 +180,10 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         const secondary = stage.secondary;
         expect(secondary, `${at}: no secondary panel`).toBeDefined();
         if (secondary === undefined) continue;
+        // #2455 AC2: the cue is laid out, so the fit below is the cue's.
+        expect(field(stage, 'Place').detail, `${at}: the behind-you cue`).toBe(
+          name === 'start' ? 'Lap 1 of 10 · Sprinter 5 +1 s' : 'Lap 10 of 10 · Sprinter 7 +5 s',
+        );
         for (const label of RACE_READINGS) {
           const reading = field(stage, label);
           expect(laidOut(reading.box), `${at}: ${label} laid out at no size`).toBe(true);

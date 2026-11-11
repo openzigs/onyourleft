@@ -1015,7 +1015,7 @@ describe('the rider’s HUD layout — #2079', () => {
       {
         room: undefined,
         standings: undefined,
-        delivery: { round: startRound(8), week: FRESH_WEEK, score: 0 },
+        delivery: { round: startRound(8), week: FRESH_WEEK, score: 0, next: undefined },
       },
     ],
     [
@@ -1354,7 +1354,7 @@ describe('the focus readout — #2383', () => {
     mounted = await mount(
       <HudPanel
         {...base}
-        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0 }}
+        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0, next: undefined }}
         layout={focus}
       />,
     );
@@ -1513,7 +1513,7 @@ describe('the totals strip — #2387', () => {
     mounted = await mount(
       <HudPanel
         {...base}
-        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0 }}
+        delivery={{ round: startRound(8), week: FRESH_WEEK, score: 0, next: undefined }}
         layout={strip}
       />,
     );

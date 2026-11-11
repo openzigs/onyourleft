@@ -127,8 +127,17 @@ export const STREET_MAP_MARGIN_METRES = 250;
  * 4.8 km either side of the rider. The rider is up to half of
  * {@link STREET_MAP_MARGIN_METRES} from the sheet's middle: 4.9 km, under this,
  * which holds a box to about 930 px wide. `street-map.browser.spec.ts` holds
- * the sheet over the box in three stacked viewports and the streets across it
- * at every viewport it measures.
+ * the sheet over the box in three stacked viewports, on a route running north
+ * and on one running east, where the rider is off that grid east–west, and
+ * the streets across it at every viewport it measures.
+ *
+ * ⚠️ **On a route running east–west the reach is paid in full** (#2397). Along
+ * a street grid running the sheet's long way, a dense town's sheet is 2.7
+ * times the path data of the same town crossed north–south: 295 KB of `d`
+ * against 111 KB (measured; `street-map.test.ts` bounds the east figure, under
+ * 310 KB at 20 km, and the north route only at 5 km, under 120 KB), built and
+ * rasterised once per 250 m. Whether the tablet holds its frames on that new sheet is
+ * #733's device check, not a number a runner can give.
  *
  * ⚠️ The region is this wide on every box, a tablet's too, rather than as
  * wide as the box measured: the sheet is rasterised once per 250 m, so its

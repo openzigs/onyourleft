@@ -670,7 +670,13 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
       className={fieldClass(reading)}
       data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
     >
-      <dt className="oyl-hud__label">{reading.label}</dt>
+      <dt className="oyl-hud__label">
+        {reading.label}
+        {reading.qualifier === undefined ? null : (
+          // #2420: the power field's view, in the term and out of its capitals.
+          <span className="oyl-hud__label-qualifier"> ({reading.qualifier})</span>
+        )}
+      </dt>
       <dd
         className={
           // #259. A word does not fit the slot a number fits — the class
@@ -1135,31 +1141,55 @@ function ElevationStrip(props: {
   return (
     <div className="oyl-hud__profile">
       <div className="oyl-hud__strips">
-        <svg
-          className="oyl-hud__profile-svg"
-          viewBox="0 0 100 24"
-          preserveAspectRatio="none"
-          role="img"
-          aria-label={props.reading.label}
-        >
-          {fill}
-          <line className="oyl-hud__profile-here-edge" x1={percent} y1={0} x2={percent} y2={24} />
-          <line
-            className="oyl-hud__profile-here"
-            x1={percent}
-            y1={0}
-            x2={percent}
-            y2={24}
-            data-testid="oyl-hud-position"
-            // ⚠️ **The contract this attribute carries changed in #287**: it is
-            // the fraction along the profile, WRAPPED on a `loop: true` route and
-            // clamped on any other, rather than always clamped. It is the same
-            // number the marker's `x` is drawn from and the same one the sentence
-            // below is rounded from, so a test reading it is reading what the
-            // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
-            data-position={String(props.reading.position)}
-          />
-        </svg>
+        {/*
+          #2419: the whole route's artwork and the rider's marker are TWO
+          layers in one box. The artwork never changes on a ride, and on its
+          own compositor layer (`theme.css` §"THE ROUTE PANEL'S LAYERS") a
+          change anywhere else in the HUD — a field's value, the zone bar, the
+          recent graph, the trainer's line — no longer pulls its clip path and
+          patterns into a raster: on the owner's tablet that held a real ride
+          at 166 ms a frame. The marker is the box's size and moved by a
+          `transform` alone, so moving it paints nothing either.
+        */}
+        <div className="oyl-hud__profile-box">
+          <svg
+            className="oyl-hud__profile-svg"
+            viewBox="0 0 100 24"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={props.reading.label}
+          >
+            {fill}
+          </svg>
+          <svg
+            className="oyl-hud__profile-marker"
+            viewBox="0 0 100 24"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            // The fraction along the strip, as a percentage of the marker's
+            // own width, which is the strip's: the place it was drawn at with
+            // `x1` before #2419, and the number the sentence below is rounded
+            // from.
+            style={{ transform: `translateX(${String(percent)}%)` }}
+          >
+            <line className="oyl-hud__profile-here-edge" x1={0} y1={0} x2={0} y2={24} />
+            <line
+              className="oyl-hud__profile-here"
+              x1={0}
+              y1={0}
+              x2={0}
+              y2={24}
+              data-testid="oyl-hud-position"
+              // ⚠️ **The contract this attribute carries changed in #287**: it is
+              // the fraction along the profile, WRAPPED on a `loop: true` route and
+              // clamped on any other, rather than always clamped. It is the same
+              // number the marker's place is drawn from and the same one the
+              // sentence below is rounded from, so a test reading it is reading
+              // what the rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
+              data-position={String(props.reading.position)}
+            />
+          </svg>
+        </div>
         <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.climb, props.units)} />
       </div>
       {/*
