@@ -735,6 +735,11 @@ describe('a marker slides along the road rather than snapping to a corridor poin
       profile: setup.profile,
       origin,
       state: { ...base, ride: { ...base.ride, distance: metres(107.3) } },
+      // ⚠️ The rider BESIDE the road on `racingLine` — a Delivery round's, a
+      // lap race's — whose camera stands straight back along the road. Since
+      // #2422 an ordinary ride's eye stands on the drawn path behind the
+      // rider, and `bend-easing.test.ts` holds that camera on its rider.
+      uneased: true,
     });
     const rider = frame.markers.find((each) => each.kind === 'rider');
 
@@ -821,6 +826,11 @@ describe('a marker that has a front — #349', () => {
       // wrong. Both are inside the built corridor, so neither is clamped.
       riderDistance: 380,
       botDistance: 420,
+      // ⚠️ The riders BESIDE the road on `racingLine`, which face their own
+      // road segment. Since #2422 an ordinary ride's riders face along the
+      // drawn path, which rounds this corner a few metres early;
+      // `bend-easing.test.ts` holds a marker's facing to that path.
+      uneased: true,
     });
 
     const rider = frame.markers.find((each) => each.kind === 'rider');

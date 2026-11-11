@@ -868,6 +868,10 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
     // two eyes would be one on every frame. Measured: up to 0.17 m off in the
     // 20 m hairpins, 0.11 m in the S-bends, 0.16 m on the planner's routes and
     // 0.73 m at the turnarounds; none on the level road, which never bends.
+    // ⚠️ Since #2422 the undamped camera stands on the drawn path, which turns
+    // smoothly, so there is less for the damping to trail: 0.42 m at the
+    // turnarounds, and over 0.1 m still in the hairpins and on the planner's
+    // route. The floors are below those, as before.
     const most = (name: string): number => {
       let off = 0;
       for (const { rig, undamped } of ride(name)) {
@@ -883,7 +887,7 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
       'a turnaround, the legs 4 m apart',
       'a left-hand turnaround, the legs 4 m apart',
     ]) {
-      expect(most(name), name).toBeGreaterThan(0.5);
+      expect(most(name), name).toBeGreaterThan(0.3);
     }
   }, 600_000);
 

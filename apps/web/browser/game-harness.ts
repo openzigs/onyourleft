@@ -1727,6 +1727,16 @@ function nearFieldProbe(
     profile,
     origin,
     state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+    // ⚠️ The camera BESIDE the road, a Delivery round's and a lap race's,
+    // since #2422 stood an ordinary ride's eye on the drawn path behind the
+    // rider. On this 300 m circuit the two eyes are centimetres apart, which
+    // is enough to lose the one signpost pass this control was found on: the
+    // drawn path's camera brings nothing to an 8 : 1 plane here, and the
+    // control below drew 0 pixels. What this probe tests is the RENDERER's
+    // cull, which is the same whichever camera stands the rig; the drawn
+    // path's camera is held clear at every device aspect by
+    // `near-field.test.ts` and `near-field-street.test.ts`.
+    uneased: true,
   });
   let chosen:
     { distance: number; pivot: number; cut: readonly string[]; camera: CameraPose } | undefined;

@@ -313,7 +313,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its odometer less a lag, at a speed whose lean on the
                         line is at most 25°, braking at 3 m/s² and picking up
                         at 1 m/s², and the lag is given back after the bend at
-                        up to 15 % over the rider's speed. ⚠️ **A drawing,
+                        up to 15 % over the rider's speed. ⚠️ Since #2422 the
+                        line it eases on is `drawn-line.ts`' (below), not
+                        `racingLine`, wherever it eases. ⚠️ **A drawing,
                         never physics**: the simulation, the trainer's grade,
                         recording, the HUD, the ghost's replay and the pacer's
                         gap stay on the odometer, and `bend-easing.test.ts`
@@ -325,6 +327,49 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         drawn place is where the game meets the rider; there
                         #546's 38.7° cap and its parked cranks still bind.
                         `SceneInput.uneased` is the control
+    src/game/drawn-line.ts
+                        the path an ordinary ride's riders are drawn along and
+                        its camera follows (#2422, after the owner's tablet
+                        ride of 2026-11-10 through a recorded route's 90°
+                        junction: slowed too much, leant too far, snapped round
+                        on the wrong line, camera jerked). Three causes,
+                        measured: `racingLine` is solved on the route's own
+                        samples but the rider was drawn on the smoothed road,
+                        3.5 m inside a one-vertex corner, so the drawn path was
+                        far tighter than the curvature the lean read and folded
+                        where GPS wandered; the drawn rider was paced by the
+                        ROUTE, so it crossed a corner's shorter path at 42 % of
+                        its speed over the ground (5–33 % through a jittered
+                        junction); and lean, speed limit and facing read three
+                        different curves. Now: `racing-line.ts`
+                        §`drawnRoadLine` solves the line on the DRAWN road; a
+                        chord-length cubic spline through its points is the
+                        path, held inside the line's limit every metre between
+                        samples; a rider at odometer `d` is drawn at the
+                        path's length averaged over 60 m either side
+                        (`DRAWN_PACE_WINDOW_METRES`); and `drawnLine` is a
+                        `RacingLine` whose curvature is the path's times that
+                        pace squared, so `leanAt` and `easedPlace` read
+                        `v²/(g·r)` of what is drawn. The camera's eye stands
+                        ON the path behind the rider, held in from the kerb
+                        past 2 m (`scene.ts` §`eyeOnDrawnPath`), and looks at
+                        the path ahead. `drawn-line.test.ts` rides 200 jittered
+                        junctions (1–5 m, one or two vertices) and the
+                        planner's corner at 25–45 km/h frame by frame: floor
+                        on the speed over the ground, lean ≤ 25°, the rider's
+                        and the camera's turn rate and its change, on the road.
+                        ⚠️ **Not in a Delivery round or a lap race, nor with
+                        `uneased`** (`scene.ts` §`easingLine`): those draw
+                        `racingLine` beside the road as before, and a lap
+                        race's frame is held identical to the `uneased` one.
+                        ⚠️ **Heights are read where a rider is DRAWN**
+                        (`drawnPlaceOf`, `scene.ts` §`drawnHeight`): read at
+                        the odometer a rider floated 0.3 m over a climbing
+                        junction. ⚠️ **Built while the rider chooses**
+                        (`GameView.tsx` §`DRAWN_LINE_WARM_DELAY_MS`), about
+                        0.17 s on a 100 km route, not in the first frame.
+                        ⚠️ **A drawing**: the trainer's grade stays on the
+                        odometer (`draft-cannot-reach-trainer.test.tsx`)
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
