@@ -947,11 +947,15 @@ const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
 /** Two notices drawn: *Keep the screen on* and the road notice. */
 const TWO_NOTICES = '?keepalive=failed&trainer=workout';
 
-/** #2076's three, which a laptop's window under 40 rem tall gives way to two notices. */
+/**
+ * #2076's three and #2434's *Calories*, which a laptop's window under 40 rem
+ * tall gives way to two notices.
+ */
 const RIDE_SO_FAR: readonly string[] = [
   'reading: Distance',
   'reading: Climbed',
   'reading: Avg power',
+  'reading: Calories',
 ];
 
 for (const viewport of LAPTOP_VIEWPORTS) {

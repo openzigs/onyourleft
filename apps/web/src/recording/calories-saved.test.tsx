@@ -44,8 +44,8 @@ import { RideResultCard } from '../ride/RideResultCard';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView, READING_RIDE_TEXT } from '../views/ActivityDetailView';
 
-import { recordedRideCalories, rideToSave, saveFinishedRide } from './finish';
-import { rideEnergy } from './totals';
+import { rideToSave, saveFinishedRide } from './finish';
+import { recordedRideCalories, rideEnergy } from './totals';
 
 const RIDE = activityId('ride-calories');
 /** 2026-06-01T08:00:00Z, so a rider born in 1985 is 41 at the ride. */

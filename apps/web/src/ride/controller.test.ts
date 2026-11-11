@@ -42,6 +42,7 @@ import {
   timeInZones,
   unixSeconds,
   watts,
+  type CalorieRider,
   type RouteProfile,
   type UnixSeconds,
   type Watts,
@@ -151,6 +152,10 @@ import {
 } from './controller';
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { lapSplits } from '../game/hud/lap-splits';
+import { CALORIES_KEY, hudReadings } from '../game/hud/fields';
+import { atStartLine } from '../game/simulation';
+import { caloriesValue } from '../detail/CaloriesFact';
+import type { RideTotals } from '../recording/totals';
 import { formatDuration } from '../format';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
@@ -10416,7 +10421,10 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await rig.controller.confirmStop();
 
     const record = written[0]!;
-    expect(asked).toHaveLength(1);
+    // Once as the recording starts, for the HUD's estimate (#2434), and once
+    // at the save, which is the read the figure is frozen with.
+    expect(asked).toHaveLength(2);
+    expect(new Set(asked).size).toBe(1);
     expect(record.averagePower).toBeUndefined();
     expect(record.calories?.basis).toBe('heart-rate');
     expect(record.calories!.energy).toBeGreaterThan(0);
@@ -14015,6 +14023,225 @@ describe('#2076 — the HUD’s ride so far is the saved ride’s', () => {
     expect(riding?.climbed).toBe(atTheEnd.climbed);
     expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeGreaterThanOrEqual(0);
     expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeLessThan(30);
+    rig.controller.dispose();
+  });
+});
+
+describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
+  const RIDER = { sex: 'male', ageYears: 40, mass: kilograms(80) } as const;
+
+  /** The ride-so-far tier's *Calories*, as the HUD draws it from these totals. */
+  const hudCalories = (totals: RideTotals | undefined): string | undefined => {
+    const profile = risingRoad();
+    const state = atStartLine(profile);
+    return hudReadings({
+      profile,
+      state,
+      cadence: { value: undefined, live: false },
+      heartRate: { value: undefined, live: false },
+      rideTotals: totals,
+      movingSeconds: 60,
+    }).find((reading) => reading.key === CALORIES_KEY)?.value;
+  };
+
+  const savedRide = async () => {
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    if (saved === undefined) throw new Error('the ride was not saved');
+    return saved;
+  };
+
+  it('on a ride with power: the HUD’s last Calories is the saved ride’s, read back from the store', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(200) });
+    await ride(rig, 8);
+    const riding = hud.rideTotals?.();
+    expect(riding?.calories?.basis).toBe('power');
+    expect(riding?.calories?.energy).toBeGreaterThan(0);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks.
+    expect(hud.rideTotals?.()).toBe(riding);
+    await ride(rig, 4);
+    expect(hud.rideTotals?.()?.calories?.energy).toBeGreaterThan(riding?.calories?.energy ?? 0);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    const saved = await savedRide();
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    expect(saved.calories?.basis).toBe('power');
+    expect(atTheEnd?.calories).toStrictEqual(saved.calories);
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    rig.controller.dispose();
+  });
+
+  it('on a strap-only ride: estimated once the rider is read, and the last figure is the saved one even when the inputs changed mid-ride', async () => {
+    let answer: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+      // At the save: the rider set new details in Settings during the ride.
+      Promise.resolve({ sex: 'female', ageYears: 30, mass: kilograms(60) }),
+    ];
+    const rig = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => riders.shift() ?? Promise.resolve({}) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 6);
+    // No rider yet: a heart-rate ride has no figure, and the HUD a dash.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    expect(hudCalories(hud.rideTotals?.())).toBe('—');
+
+    // The read lands: the estimate is there without another sample.
+    answer(RIDER);
+    await flushMicrotasks();
+    const riding = hud.rideTotals?.();
+    expect(riding?.calories?.basis).toBe('heart-rate');
+    expect(riding?.calories?.energy).toBeGreaterThan(0);
+
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    const saved = await savedRide();
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    expect(saved.calories?.basis).toBe('heart-rate');
+    expect(atTheEnd?.calories).toStrictEqual(saved.calories);
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    rig.controller.dispose();
+  });
+
+  it('a new ride starts with no rider, and a read that lands after its ride has gone is dropped', async () => {
+    let late: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      // The first ride's read at its start, which answers only after it is over.
+      new Promise((resolve) => {
+        late = resolve;
+      }),
+      // The first ride's save.
+      Promise.resolve(RIDER),
+    ];
+    const rig = benchWith({
+      rideSave: {
+        ...storeSavePort(),
+        // The second ride's read never answers.
+        calorieRider: () => riders.shift() ?? new Promise<CalorieRider>(() => undefined),
+      },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    // The first ride ended with the rider its save read.
+    expect(rig.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 4);
+    // Not the last ride's rider: this one's has not been read.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    late(RIDER);
+    await flushMicrotasks();
+    await ride(rig, 1);
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('reads the rider again on Resume, so details set while paused count from there', async () => {
+    const riders: CalorieRider[] = [{}, RIDER];
+    const rig = benchWith({
+      rideSave: {
+        ...storeSavePort(),
+        calorieRider: () => Promise.resolve(riders.shift() ?? RIDER),
+      },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await flushMicrotasks();
+    // Read at the start, with nothing set: no heart-rate figure.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    await rig.controller.pause();
+    await rig.controller.resume();
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.calories?.basis).toBe('heart-rate');
+    rig.controller.dispose();
+  });
+
+  it('a ride carried on after a crash starts with no rider, and reads its own', async () => {
+    const first = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => Promise.resolve(RIDER) },
+      devices: 'strap',
+    });
+    await first.controller.pair('heart-rate');
+    await first.controller.start();
+    // Long enough for a checkpoint to hold heart-rate samples.
+    await ride(first, 12);
+    await flushMicrotasks();
+    expect(first.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+    first.controller.dispose();
+    const id = recordingSessionId(first.sessionIds[0] ?? '');
+
+    let answer: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      // This controller's own ride, at its start and at its save.
+      Promise.resolve(RIDER),
+      Promise.resolve(RIDER),
+      // The ride carried on.
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    ];
+    const next = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => riders.shift() ?? Promise.resolve({}) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(next.controller);
+    await next.controller.pair('heart-rate');
+    await next.controller.start();
+    await ride(next, 2);
+    next.controller.armStop();
+    await next.controller.confirmStop();
+    expect(next.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+    expect(await next.controller.startNewRide()).toBe(true);
+
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    // Not the ride before's rider: this one's has not been read yet.
+    expect(hud.rideTotals?.()).toBeDefined();
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    answer(RIDER);
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.calories?.basis).toBe('heart-rate');
+    next.controller.dispose();
+  });
+
+  it('a read that fails costs a strap-only ride its figure on the HUD, never the ride', async () => {
+    const rig = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => Promise.reject(new Error('blocked')) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.distance).toBeDefined();
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
     rig.controller.dispose();
   });
 });

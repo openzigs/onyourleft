@@ -403,7 +403,12 @@ test.describe('a room ride’s HUD — #1356', () => {
           // far on the 4:3 one, where it gives way next (ruling 3).
           if (tablet) {
             const fourByThree = viewport.height < 800;
-            const rideSoFar = ['reading: Distance', 'reading: Climbed', 'reading: Avg power'];
+            const rideSoFar = [
+              'reading: Distance',
+              'reading: Climbed',
+              'reading: Avg power',
+              'reading: Calories',
+            ];
             for (const name of RIDE_TOTAL_READINGS) {
               if (fourByThree && rideSoFar.includes(name)) {
                 expect(seen.givenWay, how).toContain(name);
@@ -427,6 +432,7 @@ test.describe('a room ride’s HUD — #1356', () => {
             'Distance',
             'Climbed',
             'Avg power',
+            'Calories',
             // #2077: the rider's effort.
             'W/kg',
             'Zone',

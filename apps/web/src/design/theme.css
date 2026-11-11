@@ -12028,6 +12028,146 @@ select.oyl-input {
 }
 
 /*
+ * THE CALORIE ESTIMATE IN THE RIDE SO FAR — #2434, the owner's ruling of
+ * 2026-11-10: *Calories* is the ride so far's fourth reading, after *Avg
+ * power*, in the always-shown tier, so a rider sees it on the default HUD
+ * (and not in the optional totals strip). `≈ 9999 kcal`, its widest under ten
+ * hours (`ride-harness.tsx` §`RIDE_TOTALS`), is about 145 px at a tablet's
+ * 2.45 rem, the width of `9:59:59` there and wider than every other track,
+ * so it is set where it has that width: **in the moving time's own track**
+ * (§"THE MOVING TIME'S OWN WIDTH"), the only one cut from its content.
+ *
+ * - From 50 rem tall (1280×800, 800×1280, at every text size) the second
+ *   row's third track, under *Moving*. At the first row's six tracks there
+ *   were 9.5 px to spare at 1280×800, so no track could be widened for it,
+ *   and its natural place, the second row's first track, is 111 px. Placed
+ *   there by name, so it is in the same place on every ride: with no zone
+ *   (no threshold set) and no pacer the cell between *W/kg* and it is empty
+ *   rather than *Calories* moving left, as #94 asks.
+ * - On the 4:3 tablet (1024×768) the third row's third and fourth tracks,
+ *   under *Distance* and *Climbed*: the second row's moving-time track is
+ *   *Climbed*'s (§"THE RIDE SO FAR AT ARM'S LENGTH") and the other four are
+ *   91 to 116 px. Across two, and sized by them rather than sizing them: in
+ *   the moving time's track alone, the CI runner's wider unit font made that
+ *   track 3 px wider than the panel had room for (`ride.browser.spec.ts`
+ *   §"#1111").
+ *   ⚠️ **What it costs, recorded as #419 asks: a plain ride there is a third
+ *   row of the tier**, as a ride with a pacer, a ghost or the wind already
+ *   was; the tier is no taller than such a ride's.
+ * - In a laptop's window from 51 rem wide (four tracks at 1.5 rem, 98 px
+ *   for `≈ 9999 kcal`) the second row's third track, the moving time's:
+ *   where it lands in #94's order anyway, placed by name so it stays there.
+ *   Narrower (three tracks, below) the third row's first track, cut from its
+ *   content there.
+ * - ⚠️ **On a phone's overlay it gives way with the rest of the ride so far**
+ *   (§"THE RIDE SO FAR"), and on a tablet in a room's lap race, and on the
+ *   4:3 tablet in a room: it is `oyl-hud__field--total` (`HudCore.tsx`), so
+ *   every rule that gives the ride so far way gives it way, hidden by clip
+ *   and still read by a screen reader. The saved ride states it, on the ride
+ *   result card and the ride's page.
+ * - ⚠️ **And on an upright tablet, in a lap race, it gives way** (below),
+ *   recorded as #419 asks: there it was a seventh reading in the tier's
+ *   second row, which put the race's *Item* in a third, and the race's
+ *   standings hung under the tier were over the leaning rider
+ *   (`lap-race-hud.browser.spec.ts` §"#1904", 800×1280). In a race a racer
+ *   rides against the field, as #1912 has it on a phone.
+ * - ⚠️ **And on the 4:3 tablet at large and extra-large text, in a Delivery
+ *   round, it gives way** (below), recorded as #419 asks: with #2468's *Next
+ *   house* the round's readings already fill the tier's fourth row there, and
+ *   *Calories* across two tracks of the third pushed *Score* to a fifth: the
+ *   tier ran over the leaning rider and the round's controls off the actions
+ *   panel (`ride-hud-layout.browser.spec.ts` §"#2079"). In a round a rider
+ *   rides to the houses; the saved ride states the estimate.
+ *
+ * The line under the figure — *estimate from power*, or with no figure the
+ * card's reason for the dash (`detail/CaloriesFact.tsx`) — never sizes the
+ * track: it wraps inside the cell, so a reason the width of *set your details
+ * in Settings* does not push *Avg power* off the stage.
+ */
+.oyl-game--riding .oyl-hud__field--calories .oyl-hud__detail {
+  contain: inline-size;
+}
+
+/* ⚠️ **And the figure is given its widest width from the first second**, so
+   the track it shares is the same width with a dash, with `≈ 732` and with
+   `≈ 9999`, and no reading beside it moves as the estimate appears or gains
+   a digit (#94). Sized from what it holds, the moving time's track grew 8 px
+   when the figure appeared on the CI runner's fonts (the `≈` and the unit
+   are not Barlow's there), and every track left of it moved. `≈ 9999` is
+   3.04 em of the value's own size on a Mac, 3.15 here, and ` kcal` 25 px at
+   the unit's size, 1.875 rem here: 153.5 px at a tablet's 2.45 rem, 105.6 px
+   at a window's 1.5 rem. Where it is drawn on a corners layout only: a phone
+   gives it way, and a stacked tier's tracks are `auto-fit`. */
+@media (min-width: 46rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__field--calories .oyl-hud__value {
+    min-inline-size: calc(3.15em + 1.875rem);
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 50rem),
+  (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 2 / 3;
+  }
+}
+
+/* The middle corners layout (46 to 51 rem wide, over 30 rem and under 47 rem
+   tall: 736×560): three equal tracks of 98 px, and `≈ 9999 kcal` is 98 px,
+   so it broke over two lines, the tier's third row grew 25 px and the tier
+   was over the leaning rider (`ride.browser.spec.ts` §"#1169"). So the first
+   track, where it lands in #94's order, is cut from its content, and the
+   other two share what is left above their 5.5 rem floor. */
+@media (min-width: 46rem) and (width < 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: minmax(max-content, 1fr) repeat(2, minmax(5.5rem, 1fr));
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 3 / 1;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 3 / 3 / auto / span 2;
+    contain: inline-size;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding
+    .oyl-hud:is(.oyl-hud--text-large, .oyl-hud--text-extra-large)
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--delivery)
+    > .oyl-hud__field--calories {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(> .oyl-hud__field--lap-race)
+    > .oyl-hud__field--calories {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
  * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
  *
  * Two secondary readings after the ride so far, drawn where it is drawn and

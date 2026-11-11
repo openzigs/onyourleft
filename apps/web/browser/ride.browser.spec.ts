@@ -253,6 +253,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Distance',
         'Climbed',
         'Avg power',
+        // #2434: and the calorie estimate.
+        'Calories',
         // #2077: the rider's effort, after the ride so far.
         'W/kg',
         'Zone',
@@ -266,7 +268,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // beside the strip, and since #2076 and #2077 the ride so far and the
       // rider's effort, where they are drawn. And since #2078 the recent
       // graph, where it is drawn.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 25 : 19);
+      // And since #2434 the calorie estimate.
+      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 26 : 19);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -1005,7 +1008,8 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         (each.textContent ?? '').replace(/\s+/g, ' ').trim(),
       ),
     );
-    expect(values).toEqual(['199.9 km', '4850 m', '425 W']);
+    // #2434: and the calorie estimate, with its basis on the line under it.
+    expect(values).toEqual(['199.9 km', '4850 m', '425 W', '≈ 9999 kcal estimate from power']);
     // #2077: the zone of the harness's 342 W over the rider's own 250 W
     // threshold, its number and name, and this ride's time in all seven zones.
     const zone = await page.evaluate(() => {
@@ -1053,7 +1057,7 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
     });
     for (const [how, seen] of await bothWays(page)) {
       expect(seen.secondary, how).toEqual(
-        expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
+        expect.arrayContaining(['Distance', 'Climbed', 'Avg power', 'Calories']),
       );
       if (!rideTotalsDrawn(viewport)) {
         // #2078: and the recent graph, not drawn on a phone's overlay either.
@@ -1111,8 +1115,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       // Twelve readings since #2072's elapsed time and clock, and the rest as
       // above — the ride so far and the rider's effort (#2076, #2077), the
       // road ahead (#2075) and the recent graph (#2078), drawn where the HUD
-      // stacks.
-      expect(seen.items).toHaveLength(25);
+      // stacks. And since #2434 the calorie estimate.
+      expect(seen.items).toHaveLength(26);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
