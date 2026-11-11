@@ -248,6 +248,10 @@ export const JUNCTION_JITTERED_SAMPLES = 6;
  * after it; nought, the default, is level throughout. A grade that changes at
  * the corner is what makes a trainer's writes there depend on WHERE the grade
  * is read, which the easing must never move.
+ *
+ * `vertices`, since #2422's rework, is how many samples the turn is made at:
+ * one, the default, or two, half the turn at the corner's sample and half at
+ * the next — a junction a recorded track cuts across between two fixes.
  */
 export function jitteredJunctionRoute(
   degrees = 90,
@@ -255,6 +259,7 @@ export function jitteredJunctionRoute(
   jitter = 3,
   seed = 12_345,
   grade = 0,
+  vertices: 1 | 2 = 1,
 ): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
@@ -275,6 +280,12 @@ export function jitteredJunctionRoute(
     const past = Math.max(0, along - corner);
     let east = past * Math.sin(turn);
     let north = Math.min(along, corner) + past * Math.cos(turn);
+    if (vertices === 2 && past > 0) {
+      // Half the turn at the corner, for one sample, and the rest after it.
+      const first = Math.min(past, spacing);
+      east = first * Math.sin(turn / 2) + (past - first) * Math.sin(turn);
+      north = corner + first * Math.cos(turn / 2) + (past - first) * Math.cos(turn);
+    }
     const fromCorner = Math.round(Math.abs(along - corner) / spacing);
     if (fromCorner >= 1 && fromCorner <= JUNCTION_JITTERED_SAMPLES) {
       // Across this sample's own leg: east on the way in, the new leg's normal after.

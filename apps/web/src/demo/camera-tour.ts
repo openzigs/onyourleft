@@ -67,6 +67,7 @@ import {
 } from '../game/camera';
 import type { RigPoint } from '../game/camera';
 import { cameraRig } from '../game/camera';
+import type { DrawnLine } from '../game/drawn-line';
 import type { CameraPose } from '../game/port';
 import { cameraPose, chaseRider } from '../game/scene';
 import type { DrawnRide } from '../game/simulation';
@@ -115,6 +116,12 @@ export interface TourWorld {
   readonly origin: CorridorOrigin;
   /** How far across the road the lead is drawn (`scene.ts` §`placedRiders`). */
   readonly riderLateral: number;
+  /**
+   * The path the frame drew the lead along, where it drew them on one
+   * (`scene.ts` §`drawnPathOf`, #2422) — so the tour's chase shot stands on
+   * the rider the frame drew, as the frame's own camera does.
+   */
+  readonly path?: DrawnLine | undefined;
   /** The drawn ground's height at a point, local metres (`people.ts` §`groundOf`). */
   readonly groundAt: (x: number, z: number) => number;
 }
@@ -373,8 +380,14 @@ export function cameraAt(
   drawn: DrawnRide,
   world: TourWorld,
 ): CameraPose {
-  const chase = cameraPose(world.corridor, drawn.riderDistance, world.riderLateral);
-  const at = chaseRider(world.corridor, drawn.riderDistance, world.riderLateral);
+  const chase = cameraPose(
+    world.corridor,
+    drawn.riderDistance,
+    world.riderLateral,
+    world.riderLateral,
+    world.path,
+  );
+  const at = chaseRider(world.corridor, drawn.riderDistance, world.riderLateral, world.path);
   const { shot, startedAt, previous } = shotAt(tour, rideSeconds);
   const into = rideSeconds - startedAt;
   if (shot.into === 'blend' && previous !== undefined && into < BLEND_SECONDS) {
