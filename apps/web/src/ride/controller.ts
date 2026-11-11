@@ -2500,7 +2500,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * The rider the HUD's calorie estimate is worked out with — #2434. Read
    * through the save port's own reader (`RideSavePort.calorieRider`) as the
    * recording starts, resumes or is continued, and set to the rider the save
-   * read as it saves, so the strip's last figure is the saved one. Empty until
+   * read as it saves, so the HUD's last figure is the saved one. Empty until
    * the read lands, which costs a heart-rate ride its figure for that moment
    * and a ride with power nothing.
    */
@@ -3096,7 +3096,7 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /**
    * The rider the save reads (#2433), kept as the HUD's too — #2434 — so the
-   * totals strip's last *Calories* is worked out with the rider the saved
+   * HUD's last *Calories* is worked out with the rider the saved
    * figure was, even when the rider's inputs changed during the ride.
    */
   const savedRider = async (port: RideSavePort, current: Recorder): Promise<CalorieRider> => {

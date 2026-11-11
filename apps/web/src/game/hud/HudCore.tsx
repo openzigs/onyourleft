@@ -34,6 +34,7 @@ import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
+  CALORIES_KEY,
   CLOCK_KEY,
   GRADIENT_KEY,
   ELAPSED_TIME_KEY,
@@ -83,7 +84,7 @@ import {
 } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
-import { TOTALS_CALORIES_KEY, totalsStripReadings } from './totals-strip';
+import { totalsStripReadings } from './totals-strip';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -637,9 +638,6 @@ function fieldClass(reading: HudReading): string {
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
-    // #2434: the totals strip's widest, which spans two of its columns
-    // (`theme.css` §"THE CALORIE ESTIMATE ON THE STRIP").
-    ...(reading.key === TOTALS_CALORIES_KEY ? ['oyl-hud__field--calories'] : []),
     // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
     ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
     // #2077: and the rider's own effort, drawn where the ride so far is.
@@ -651,6 +649,9 @@ function fieldClass(reading: HudReading): string {
     // row's wide tracks there (the same section).
     ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
     ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
+    // #2434: and the calorie estimate, which `theme.css` places by name
+    // (§"THE CALORIE ESTIMATE IN THE RIDE SO FAR").
+    ...(reading.key === CALORIES_KEY ? ['oyl-hud__field--calories'] : []),
     // #2080: a room's draft by name, which gives way to a race's standings
     // with the swap in them at large text (`theme.css` §"A LOOP'S LAP SPLITS").
     ...(reading.key === 'room-draft' ? ['oyl-hud__field--draft'] : []),

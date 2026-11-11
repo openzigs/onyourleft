@@ -113,6 +113,7 @@ describe('the ride so far (#2076)', () => {
       energy: 400,
       // #2434: 400 J of work at the assumed 20 % efficiency.
       calories: { energy: 400 / 4184 / 0.2, basis: 'power' },
+      recordedHeartRate: false,
     });
   });
 });
@@ -161,5 +162,36 @@ describe('the ride’s calorie estimate so far (#2434)', () => {
     expect(at(600)).toBeCloseTo(120_000 / 4184 / 0.2, 6);
     expect(Math.round(at(600) ?? Number.NaN)).toBe(143);
     expect(at(300) ?? 0).toBeLessThan(at(600) ?? 0);
+  });
+
+  it('says whether the recording has heart rate, from the series and not a live strap', () => {
+    expect(rideTotals(strap, []).recordedHeartRate).toBe(true);
+    // A strap that dropped after one reading still recorded heart rate.
+    expect(
+      rideTotals(series({ heartRate: [beatsPerMinute(140), undefined, undefined] }, 3), [])
+        .recordedHeartRate,
+    ).toBe(true);
+    expect(rideTotals(series({ heartRate: [undefined, undefined] }, 2), []).recordedHeartRate).toBe(
+      false,
+    );
+    expect(rideTotals(series({ power: [watts(200)] }, 1), []).recordedHeartRate).toBe(false);
+  });
+
+  it('walks the power channel once a recompute, for the average, the work and the estimate', () => {
+    let walks = 0;
+    const readings = [watts(200), undefined, watts(300)];
+    const power = new Proxy(readings, {
+      get(target, key, receiver) {
+        if (key === Symbol.iterator) walks += 1;
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    const totals = rideTotals(series({ power }, 3), []);
+    expect(walks).toBe(1);
+    // And the figures are the ones each function works out on its own.
+    const plain = series({ power: readings }, 3);
+    expect(totals.averagePower).toBe(rideAveragePower(readings));
+    expect(totals.energy).toBe(rideEnergy(plain));
+    expect(totals.calories).toEqual(recordedRideCalories(plain, {}));
   });
 });

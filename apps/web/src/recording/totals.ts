@@ -70,6 +70,15 @@ export interface RideTotals {
    * saved one. Optional for {@link energy}'s reason.
    */
   readonly calories?: CalorieEstimate | undefined;
+  /**
+   * Whether the recorded series holds a heart-rate reading — what the reason
+   * under *Calories*' dash is worked out from (`detail/CaloriesFact.tsx`
+   * §`noCaloriesReason`), as the ride's page works it out from the saved
+   * ride's channels. The recording's, not the live strap's, so a strap that
+   * drops mid-ride does not change the reason (#2434's review). Optional for
+   * {@link energy}'s reason.
+   */
+  readonly recordedHeartRate?: boolean | undefined;
 }
 
 /**
@@ -104,21 +113,44 @@ export function rideDistance(series: RecordedSeries<StreamChannelValue>): Metres
 export function rideAveragePower(
   power: readonly (Watts | undefined)[] | undefined,
 ): Watts | undefined {
-  if (power === undefined) {
-    return undefined;
-  }
+  return power === undefined ? undefined : averageOf(powerSums(power, 0));
+}
+
+/**
+ * One walk of the power channel: the readings that exist added up, and each
+ * for its sample's length — the sums {@link rideAveragePower} and
+ * {@link rideEnergy} are worked out from, so {@link rideTotals} walks it once
+ * a recompute for both and for the calorie estimate (#2434's review).
+ */
+interface PowerSums {
+  readonly total: number;
+  readonly work: number;
+  readonly count: number;
+}
+
+function powerSums(power: readonly (Watts | undefined)[], sampleInterval: number): PowerSums {
   let total = 0;
+  let work = 0;
   let count = 0;
   for (const sample of power) {
     if (sample !== undefined) {
       total += sample;
+      work += sample * sampleInterval;
       count += 1;
     }
   }
+  return { total, work, count };
+}
+
+function averageOf(sums: PowerSums): Watts | undefined {
   // ⚠️ Divided by the readings that EXIST, not by the ride's length. A dropout
   // is missing data, not a stretch at zero watts, and averaging over the whole
   // series would make a ride with a flaky meter look easier than it was.
-  return count === 0 ? undefined : watts(Math.round(total / count));
+  return sums.count === 0 ? undefined : watts(Math.round(sums.total / sums.count));
+}
+
+function workOf(sums: PowerSums): Joules | undefined {
+  return sums.count === 0 ? undefined : joules(sums.work);
 }
 
 /**
@@ -137,18 +169,7 @@ export function rideEnergy(
   series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
 ): Joules | undefined {
   const power = series.channels.power;
-  if (power === undefined) {
-    return undefined;
-  }
-  let total = 0;
-  let count = 0;
-  for (const sample of power) {
-    if (sample !== undefined) {
-      total += sample * series.sampleInterval;
-      count += 1;
-    }
-  }
-  return count === 0 ? undefined : joules(total);
+  return power === undefined ? undefined : workOf(powerSums(power, series.sampleInterval));
 }
 
 /**
@@ -168,8 +189,17 @@ export function recordedRideCalories(
   series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
   rider: CalorieRider,
 ): CalorieEstimate | undefined {
+  return caloriesFrom(series, rider, rideEnergy(series));
+}
+
+/** {@link recordedRideCalories} with the ride's work already worked out. */
+function caloriesFrom(
+  series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
+  rider: CalorieRider,
+  work: Joules | undefined,
+): CalorieEstimate | undefined {
   return rideCalories({
-    work: rideEnergy(series),
+    work,
     heartRate: series.channels.heartRate,
     sampleInterval: series.sampleInterval,
     rider,
@@ -226,11 +256,15 @@ export function rideTotals(
   laps: readonly Pick<RecordedCourseLap, 'ascent'>[],
   rider: CalorieRider = {},
 ): RideTotals {
+  const power = series.channels.power;
+  const sums = power === undefined ? undefined : powerSums(power, series.sampleInterval);
+  const energy = sums === undefined ? undefined : workOf(sums);
   return {
     distance: rideDistance(series),
     climbed: rideClimbed(series, laps),
-    averagePower: rideAveragePower(series.channels.power),
-    energy: rideEnergy(series),
-    calories: recordedRideCalories(series, rider),
+    averagePower: sums === undefined ? undefined : averageOf(sums),
+    energy,
+    calories: caloriesFrom(series, rider, energy),
+    recordedHeartRate: series.channels.heartRate?.some((sample) => sample !== undefined) ?? false,
   };
 }

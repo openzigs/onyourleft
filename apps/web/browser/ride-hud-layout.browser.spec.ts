@@ -38,10 +38,13 @@ import {
   STACKED_VIEWPORTS,
   TABLET_VIEWPORTS,
   bothWays,
+  inside,
   layoutFaults,
   measure,
+  named,
   openRide,
   overlap,
+  rideTotalsDrawn,
   roomGivesWay,
   sharedRide,
   type Viewport,
@@ -327,23 +330,16 @@ for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
  *   tablets — and, on a tablet held upright (the owner's ruling of
  *   2026-11-09), on the actions panel in its column, beside the route panel;
  *   and given way everywhere else on the stage — the phones — said so;
- * - its six readings (seven on a loop) in order, and on this harness, which
- *   records, the port's figures: `RIDE_TOTALS`' energy, calorie estimate
- *   (#2434) and climb, and its
+ * - its five readings (six on a loop) in order, and on this harness, which
+ *   records, the port's figures: `RIDE_TOTALS`' energy and climb, and its
  *   distance over the moving time as the average speed — so the strip is
  *   read through `GameView`, not built beside it;
  * - and the focus readout and the full tiers what they are without it.
  */
-const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Calories', 'Climbed'];
+const STRIP_LABELS = ['Route', 'To go', 'Avg speed', 'Energy', 'Climbed'];
 
 /** `RIDE_TOTALS` and `MOVING_SECONDS` in `ride-harness.tsx`, as the strip shows them. */
-const STRIP_FIGURES = {
-  'Avg speed': '20.0 km/h',
-  Energy: '15300 kJ',
-  // #2434: and the basis, on the line under the figure.
-  Calories: '≈ 18284 kcal estimate from power',
-  Climbed: '4850 m',
-};
+const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '4850 m' };
 
 /**
  * Where the stage has room for the strip: the two landscape tablets, and the
@@ -426,17 +422,6 @@ async function stripCellFaults(page: Page): Promise<string[]> {
       };
     });
     const faults: string[] = [];
-    // #2434: and each label on one line. Four columns are 86 px wide at
-    // 1024×768 with a half gap, and at a full one *Avg speed* broke in two,
-    // which made the strip a line taller under the rider.
-    for (const cell of strip.children) {
-      const label = cell.querySelector('dt');
-      if (label === null) continue;
-      const range = document.createRange();
-      range.selectNodeContents(label);
-      const lines = new Set([...range.getClientRects()].map((each) => Math.round(each.top))).size;
-      if (lines > 1) faults.push(`${label.textContent ?? '?'}: label on ${String(lines)} lines`);
-    }
     for (const { name, cell, words } of cells) {
       if (words.left < cell.left - 1 || words.right > cell.right + 1) {
         faults.push(
@@ -506,8 +491,8 @@ for (const arrangement of ['full', 'focus'] as const) {
           expect(strip, how).toBeDefined();
           if (strip === undefined) continue;
           expect(stripPlaceFaults(seen, viewport), how).toEqual([]);
-          // #2434: a seventh reading narrows every cell, so each holds its
-          // words wherever the strip is drawn, not only upright.
+          // Each cell holds its words wherever the strip is drawn, not only
+          // upright: at 1280×800 #2387's one row had no per-cell check.
           expect(await stripCellFaults(page), how).toEqual([]);
           // Every reading on it on the stage and uncovered (`layoutFaults`
           // holds each item), with the port's figures.
@@ -545,34 +530,6 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
       expect(stripPanel(seen), how).toBeDefined();
       expect(seen.primaryValuePixels, how).toBe(PRIMARY_PIXELS['extra-large']);
     }
-  });
-}
-
-/**
- * #2434: with no estimate, *Calories* is a dash and the card's reason for it
- * on the line the basis takes — the longest, *set your details in Settings*,
- * as the harness's heart rate makes it — inside its cell, and the strip the
- * height it is with an estimate, so it does not grow when one appears.
- */
-for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.name))) {
-  test(`#2434 the totals strip with no calorie estimate says why, at its own height — ${viewport.name}`, async ({
-    browser,
-  }) => {
-    const estimated = await sharedRide(browser, viewport, '?lap=riding&totals=strip');
-    const withEstimate = stripPanel(await measure(estimated))?.box.height;
-    const page = await sharedRide(browser, viewport, '?lap=riding&totals=strip&calories=none');
-    for (const [how, seen] of await bothWays(page)) {
-      expect(sizeFaults(seen, viewport).faults, how).toEqual([]);
-      expect(seen.totals, how).toEqual(['Lap', ...STRIP_LABELS]);
-      expect(seen.totalsValues[STRIP_LABELS.indexOf('Calories') + 1], how).toBe(
-        '— kcal set your details in Settings',
-      );
-      expect(seen.totalsValues[STRIP_LABELS.indexOf('Energy') + 1], how).toBe('— kJ');
-      expect(await stripCellFaults(page), how).toEqual([]);
-    }
-    const seen = await measure(page);
-    expect(withEstimate).toBeDefined();
-    expect(stripPanel(seen)?.box.height).toBeCloseTo(withEstimate ?? Number.NaN, 0);
   });
 }
 
@@ -724,6 +681,75 @@ for (const viewport of STACKED_VIEWPORTS.filter((each) => each.height > 300)) {
         strip !== undefined && overlap(strip.box, other.box),
         `the strip over ${other.name}`,
       ).toBe(false);
+    }
+  });
+}
+
+/**
+ * #2434, the owner's ruling of 2026-11-10: *Calories* on the HUD every ride
+ * shows, with no setting changed — in the always-shown "ride so far" tier,
+ * after *Avg power*, and NOT in the totals strip (`theme.css` §"THE CALORIE
+ * ESTIMATE IN THE RIDE SO FAR"):
+ * - where the ride so far is drawn (every tablet), on the stage, uncovered
+ *   and inside the secondary panel, with the harness's widest figure and its
+ *   basis, `≈ 9999 kcal estimate from power`, its unit on its number's line;
+ * - where the ride so far gives way (a phone's overlay), given way with it,
+ *   and still in the list a screen reader reads, in #94's order;
+ * - and with no estimate, the dash and the card's reason in the same place,
+ *   so the reading does not move when an estimate appears.
+ */
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#2434 Calories is in the ride so far on the default HUD — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const cell = async (at: Page) =>
+      at.evaluate(() => {
+        const field = document.querySelector('.oyl-hud__field--calories');
+        const value = field?.querySelector('dd');
+        const unit = value?.querySelector('.oyl-hud__unit');
+        const digits = document.createRange();
+        if (value?.firstChild) digits.setStartBefore(value.firstChild);
+        if (unit) digits.setEndBefore(unit);
+        const number = digits.getBoundingClientRect();
+        const unitBox = unit?.getClientRects()[0];
+        const box = field?.getBoundingClientRect();
+        return {
+          text: (value?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          inSecondary: field?.closest('.oyl-hud__fields--secondary') !== null,
+          box: box === undefined ? undefined : [box.left, box.top].map(Math.round),
+          unitBeside:
+            unitBox !== undefined &&
+            unitBox.top >= number.top - 1 &&
+            unitBox.bottom <= number.bottom + 1,
+        };
+      });
+    for (const [how, seen] of await bothWays(page)) {
+      const at = seen.secondary.indexOf('Avg power');
+      expect(seen.secondary.slice(at, at + 2), how).toEqual(['Avg power', 'Calories']);
+      expect(seen.totals, how).toEqual([]);
+      if (rideTotalsDrawn(viewport)) {
+        const reading = named(seen.items, 'reading: Calories');
+        expect(inside(reading.box, viewport) && reading.onTop, how).toBe(true);
+        expect(layoutFaults(seen, viewport), how).toEqual([]);
+      } else {
+        expect(seen.givenWay, how).toContain('reading: Calories');
+      }
+    }
+    const estimated = await cell(page);
+    expect(estimated.text).toBe('≈ 9999 kcal estimate from power');
+    expect(estimated.inSecondary).toBe(true);
+    if (rideTotalsDrawn(viewport)) expect(estimated.unitBeside).toBe(true);
+
+    const none = await sharedRide(browser, viewport, '?calories=none');
+    const dashed = await cell(none);
+    expect(dashed.text).toBe('— kcal set your details in Settings');
+    expect(dashed.text).not.toMatch(/\b0 kcal/);
+    if (rideTotalsDrawn(viewport)) {
+      expect(dashed.box).toEqual(estimated.box);
+      for (const [how, seen] of await bothWays(none)) {
+        expect(layoutFaults(seen, viewport), how).toEqual([]);
+      }
     }
   });
 }

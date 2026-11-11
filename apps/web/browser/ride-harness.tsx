@@ -76,12 +76,12 @@ import {
   altitudeMetres,
   beatsPerMinute,
   buildGhostTrack,
-  caloriesFromWork,
   degreesLatitude,
   degreesLongitude,
   expandWorkout,
   geographicPosition,
   joules,
+  kilocalories,
   kilograms,
   metres,
   routeProfile,
@@ -679,28 +679,37 @@ const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
  * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
  * the same object every read, as `useSyncExternalStore` requires. #2387: and
  * the work of 425 W for ten hours, `15300 kJ`, the totals strip's widest.
- * #2434: and the calorie estimate from that work at the assumed efficiency,
- * `≈ 18284 kcal`, by the rule the recorder works it out with
- * (`recording/totals.ts` §`recordedRideCalories`), the strip's widest cell.
+ * #2434: and the calorie estimate at its widest in the ride so far, four
+ * digits, `≈ 9999 kcal`, ten hours at 232 W: a fifth digit needs over
+ * 8.37 MJ of work at the assumed 20 % (`theme.css` §"THE CALORIE ESTIMATE
+ * IN THE RIDE SO FAR" says what one costs). Not the estimate of this
+ * object's `15300 kJ`, which is the strip's widest *Energy* and would be
+ * `≈ 18284`: each figure here is its own field's widest.
  */
 const RIDE_TOTALS: RideTotals = {
   distance: metres(199_900),
   climbed: metres(4850),
   averagePower: watts(425),
   energy: joules(15_300_000),
-  calories: { energy: caloriesFromWork(joules(15_300_000)), basis: 'power' },
+  calories: { energy: kilocalories(9_999), basis: 'power' },
 };
 
 /**
  * `ride.html?calories=none` — #2434: the ride so far with no calorie estimate
- * (and no work, as a ride with no power has), beside the harness's heart rate,
- * so *Calories* is a dash with the longest reason the strip gives for one:
- * *set your details in Settings*.
+ * (and no work, as a ride with no power has) on a recording with heart rate,
+ * so *Calories* is a dash with the longest reason it gives for one: *set your
+ * details in Settings*.
  */
 const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') === 'none';
 
 const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
-  ? { ...RIDE_TOTALS, energy: undefined, averagePower: undefined, calories: undefined }
+  ? {
+      ...RIDE_TOTALS,
+      energy: undefined,
+      averagePower: undefined,
+      calories: undefined,
+      recordedHeartRate: true,
+    }
   : RIDE_TOTALS;
 
 /** #2077: some time in each of the seven power zones, the same object every read. */

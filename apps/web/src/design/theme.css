@@ -11976,6 +11976,79 @@ select.oyl-input {
 }
 
 /*
+ * THE CALORIE ESTIMATE IN THE RIDE SO FAR — #2434, the owner's ruling of
+ * 2026-11-10: *Calories* is the ride so far's fourth reading, after *Avg
+ * power*, in the always-shown tier, so a rider sees it on the default HUD
+ * (and not in the optional totals strip). `≈ 9999 kcal`, its widest under ten
+ * hours (`ride-harness.tsx` §`RIDE_TOTALS`), is about 145 px at a tablet's
+ * 2.45 rem, the width of `9:59:59` there and wider than every other track,
+ * so it is set where it has that width: **in the moving time's own track**
+ * (§"THE MOVING TIME'S OWN WIDTH"), the only one cut from its content.
+ *
+ * - From 50 rem tall (1280×800, 800×1280, at every text size) the second
+ *   row's third track, under *Moving*. At the first row's six tracks there
+ *   were 9.5 px to spare at 1280×800, so no track could be widened for it,
+ *   and its natural place, the second row's first track, is 111 px. Placed
+ *   there by name, so it is in the same place on every ride: with no zone
+ *   (no threshold set) and no pacer the cell between *W/kg* and it is empty
+ *   rather than *Calories* moving left, as #94 asks.
+ * - On the 4:3 tablet (1024×768) the third row's fourth track, under *Moving*
+ *   and *Climbed*: the second row's moving-time track is *Climbed*'s
+ *   (§"THE RIDE SO FAR AT ARM'S LENGTH") and the other four are 91 to 116 px.
+ *   ⚠️ **What it costs, recorded as #419 asks: a plain ride there is a third
+ *   row of the tier**, as a ride with a pacer, a ghost or the wind already
+ *   was; the tier is no taller than such a ride's.
+ * - In a laptop's window from 51 rem wide (four tracks at 1.5 rem, 98 px
+ *   for `≈ 9999 kcal`) the second row's third track, the moving time's:
+ *   where it lands in #94's order anyway, placed by name so it stays there.
+ *   Narrower (three tracks, below) the third row's first track, cut from its
+ *   content there.
+ * - ⚠️ **On a phone's overlay it gives way with the rest of the ride so far**
+ *   (§"THE RIDE SO FAR"), and on a tablet in a room's lap race, and on the
+ *   4:3 tablet in a room: it is `oyl-hud__field--total` (`HudCore.tsx`), so
+ *   every rule that gives the ride so far way gives it way, hidden by clip
+ *   and still read by a screen reader. The saved ride states it, on the ride
+ *   result card and the ride's page.
+ *
+ * The line under the figure — *estimate from power*, or with no figure the
+ * card's reason for the dash (`detail/CaloriesFact.tsx`) — never sizes the
+ * track: it wraps inside the cell, so a reason the width of *set your details
+ * in Settings* does not push *Avg power* off the stage.
+ */
+.oyl-game--riding .oyl-hud__field--calories .oyl-hud__detail {
+  contain: inline-size;
+}
+
+@media (min-width: 46rem) and (min-height: 50rem),
+  (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 2 / 3;
+  }
+}
+
+/* The middle corners layout (46 to 51 rem wide, over 30 rem and under 47 rem
+   tall: 736×560): three equal tracks of 98 px, and `≈ 9999 kcal` is 98 px,
+   so it broke over two lines, the tier's third row grew 25 px and the tier
+   was over the leaning rider (`ride.browser.spec.ts` §"#1169"). So the first
+   track, where it lands in #94's order, is cut from its content, and the
+   other two share what is left above their 5.5 rem floor. */
+@media (min-width: 46rem) and (width < 51rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: minmax(max-content, 1fr) repeat(2, minmax(5.5rem, 1fr));
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 3 / 1;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {
+    grid-area: 3 / 4;
+  }
+}
+
+/*
  * THE RIDER'S EFFORT — #2077: *W/kg* and the zone indicator.
  *
  * Two secondary readings after the ride so far, drawn where it is drawn and
@@ -13268,11 +13341,10 @@ select.oyl-input {
  *
  * The rider's choice in Settings → Ride HUD (`hud-layout-preference.ts`
  * §"The totals strip"): the whole ride's totals — the lap, the route's
- * length, the distance to go, the average speed, the energy, the calorie
- * estimate (#2434) and the climb (`totals-strip.ts`) — in one thin panel
- * along the bottom of the road. The same fields as the tiers', so a value, a
- * unit and a dash are drawn as they are there, smaller than a secondary
- * reading: they are read now and then.
+ * length, the distance to go, the average speed, the energy and the climb
+ * (`totals-strip.ts`) — in one thin panel along the bottom of the road. The
+ * same fields as the tiers', so a value, a unit and a dash are drawn as they
+ * are there, smaller than a secondary reading: they are read now and then.
  *
  * WHERE IT IS DRAWN. Along the bottom, between the route panel and the
  * actions panel and under the rider, placed by `grid-row` and `position:
@@ -13284,13 +13356,12 @@ select.oyl-input {
  * needs the width between the two bottom panels and a fifth of the height
  * under the rider:
  *
- * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): 624 px
- *   between the panels at 1280. One row of six, 59 px tall and 94 px under
- *   the leaning rider's box, until #2434 made it two rows of four columns
- *   (§"THE CALORIE ESTIMATE ON THE STRIP").
- * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): two rows,
- *   368 px between the panels; 104 px tall and 43 px under the rider in
- *   three columns, and since #2434 four columns and 117 px tall.
+ * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
+ *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
+ *   leaning rider's box.
+ * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
+ *   under the rider.
  * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
  *   68 rem tall or more):
  *   on the actions panel, in its column, by the rule after these
@@ -13340,14 +13411,7 @@ select.oyl-input {
     bottom: 0;
     left: calc(18rem + var(--oyl-space-md));
     right: calc(20rem + var(--oyl-space-md));
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    column-gap: var(--oyl-space-sm);
-  }
-
-  /* #2434: *Calories* across two columns (§"THE CALORIE ESTIMATE ON THE
-     STRIP"). */
-  .oyl-game--riding .oyl-hud__totals .oyl-hud__field--calories {
-    grid-column: span 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   /* The tablet's own sizes are set on every value there (§"#2130"); the
@@ -13357,41 +13421,13 @@ select.oyl-input {
   }
 }
 
-/* ==========================================================================
- * THE CALORIE ESTIMATE ON THE STRIP — #2434.
- *
- * *Calories* is the strip's widest cell: `≈ 18284 kcal`, the estimate from
- * the harness's widest work (`ride-harness.tsx` §`RIDE_TOTALS`), is 97 px at
- * the strip's 1.25 rem, where `15300 kJ` is under 75. So wherever the strip
- * is drawn on the stage it is FOUR columns and *Calories* spans two of them:
- * on a loop *Lap*, *Route*, *To go* and *Avg speed* over *Energy*,
- * *Calories* and *Climbed*, and with no lap the same less one, so it is two
- * rows on every ride, at every place it is drawn. Measured
- * (`ride-hud-layout.browser.spec.ts` §"#2387", whose cell check holds every
- * cell's drawn words inside it wherever the strip is drawn):
- *
- * - **Three columns** put a loop's seven readings in three rows, 148 px
- *   tall, and at 1024×768 its top was 1 px over the leaning rider.
- * - **One row** at 1280×800, as #2387 drew it, left a cell 88 px wide with
- *   no lap and 73 with one: the estimate printed over *Climbed*.
- * - **A wrapping row**, cells as wide as their words, fitted, but a cell
- *   whose figure grew a digit mid-ride moved to the next row, which #94's
- *   rule forbids: a reading, once placed, does not move.
- *
- * Four fixed columns hold every cell where it is, with a half gap between
- * them: at a full one, 80 px cells at 1024×768 broke *Avg speed*'s label
- * over two lines. With a half gap a cell is 86 px there and the spanned one
- * 180, and 92 and 192 upright.
- *
- * **The line under the estimate.** The figure's basis — *estimate from
- * power* — on a line of its own under it, the result card's words
- * (`detail/CaloriesFact.tsx`), and with no figure the card's reason for the
- * dash in its place, so the line is always there and the strip never grows
- * mid-ride as an estimate appears. The spanned cell has the width for its
- * longest, *set your details in Settings*. It makes the strip 117 px tall
- * at all three sizes, 13 px more than two rows of one line: by the figures
- * above, about 30 px under the leaning rider at 1024×768 and 89 upright.
- * ========================================================================== */
+@media (min-width: 78rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__totals {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+  }
+}
 
 /* ==========================================================================
  * THE TOTALS STRIP ON A TABLET HELD UPRIGHT — the owner's ruling of
@@ -13449,13 +13485,7 @@ select.oyl-input {
     display: grid;
     grid-area: actions;
     align-self: end;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    column-gap: var(--oyl-space-sm);
-  }
-
-  /* #2434: as on a landscape tablet (§"THE CALORIE ESTIMATE ON THE STRIP"). */
-  .oyl-game--riding .oyl-hud__totals .oyl-hud__field--calories {
-    grid-column: span 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   /* The tablet's own sizes are set on every value here too (§"#2130"). */

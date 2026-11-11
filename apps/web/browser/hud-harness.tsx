@@ -138,6 +138,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradeAt,
+  kilocalories,
   kilograms,
   metres,
   metresPerSecond,
@@ -512,12 +513,14 @@ const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 /**
  * #2076: the ride so far on every panel, at the widest figures a ride under
  * ten hours plausibly reaches — `199.9 km`, `4850 m` and `425 W` — so where
- * the three are drawn they are measured at their widest.
+ * the three are drawn they are measured at their widest. #2434: and the
+ * calorie estimate's, `≈ 9999 kcal` (`ride-harness.tsx` §`RIDE_TOTALS`).
  */
 const RIDE_TOTALS: RideTotals = {
   distance: metres(199_900),
   climbed: metres(4850),
   averagePower: watts(425),
+  calories: { energy: kilocalories(9_999), basis: 'power' },
 };
 
 /**

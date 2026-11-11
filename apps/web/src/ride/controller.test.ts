@@ -152,7 +152,7 @@ import {
 } from './controller';
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { lapSplits } from '../game/hud/lap-splits';
-import { totalsStripReadings } from '../game/hud/totals-strip';
+import { CALORIES_KEY, hudReadings } from '../game/hud/fields';
 import { atStartLine } from '../game/simulation';
 import { caloriesValue } from '../detail/CaloriesFact';
 import type { RideTotals } from '../recording/totals';
@@ -14030,21 +14030,18 @@ describe('#2076 — the HUD’s ride so far is the saved ride’s', () => {
 describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
   const RIDER = { sex: 'male', ageYears: 40, mass: kilograms(80) } as const;
 
-  /** The strip's *Calories*, as the HUD draws it from these totals. */
-  const stripCalories = (totals: RideTotals | undefined): string | undefined => {
+  /** The ride-so-far tier's *Calories*, as the HUD draws it from these totals. */
+  const hudCalories = (totals: RideTotals | undefined): string | undefined => {
     const profile = risingRoad();
     const state = atStartLine(profile);
-    return totalsStripReadings(
-      {
-        profile,
-        state,
-        cadence: { value: undefined, live: false },
-        heartRate: { value: undefined, live: false },
-        rideTotals: totals,
-        movingSeconds: 60,
-      },
-      [],
-    ).find((reading) => reading.key === 'totals-calories')?.value;
+    return hudReadings({
+      profile,
+      state,
+      cadence: { value: undefined, live: false },
+      heartRate: { value: undefined, live: false },
+      rideTotals: totals,
+      movingSeconds: 60,
+    }).find((reading) => reading.key === CALORIES_KEY)?.value;
   };
 
   const savedRide = async () => {
@@ -14055,7 +14052,7 @@ describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
     return saved;
   };
 
-  it('on a ride with power: the strip’s last Calories is the saved ride’s, read back from the store', async () => {
+  it('on a ride with power: the HUD’s last Calories is the saved ride’s, read back from the store', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     const hud = gameTrainerPortOver(rig.controller);
     await rig.controller.pair('trainer');
@@ -14077,7 +14074,7 @@ describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
     const atTheEnd = rig.controller.getSnapshot().totals;
     expect(saved.calories?.basis).toBe('power');
     expect(atTheEnd?.calories).toStrictEqual(saved.calories);
-    expect(stripCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
     rig.controller.dispose();
   });
 
@@ -14098,9 +14095,9 @@ describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
     await rig.controller.pair('heart-rate');
     await rig.controller.start();
     await ride(rig, 6);
-    // No rider yet: a heart-rate ride has no figure, and the strip a dash.
+    // No rider yet: a heart-rate ride has no figure, and the HUD a dash.
     expect(hud.rideTotals?.()?.calories).toBeUndefined();
-    expect(stripCalories(hud.rideTotals?.())).toBe('—');
+    expect(hudCalories(hud.rideTotals?.())).toBe('—');
 
     // The read lands: the estimate is there without another sample.
     answer(RIDER);
@@ -14118,7 +14115,7 @@ describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
     const atTheEnd = rig.controller.getSnapshot().totals;
     expect(saved.calories?.basis).toBe('heart-rate');
     expect(atTheEnd?.calories).toStrictEqual(saved.calories);
-    expect(stripCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
     rig.controller.dispose();
   });
 
