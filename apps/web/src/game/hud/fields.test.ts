@@ -1200,10 +1200,9 @@ describe('the room on the HUD — #783', () => {
     const solo = (percent: number) =>
       hudReadings({ ...baseInput(), soloDraft: percent }).find((r) => r.key === 'solo-draft');
     // #2425, #2130: the solo field's unit is the `%` alone, so it stays on
-    // its number's line in the tier's narrowest track; "of drag" opens the
-    // line under it.
+    // its number's line in the tier's narrowest track.
     expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '%' });
-    expect(solo(33.6)?.detail).toBe('of drag, at most 59 %');
+    expect(solo(33.6)?.detail).toBe('at most 59 %');
     expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
     expect(solo(0)).toMatchObject({ value: '0' });
     // Absent with no solo draft handed in, and every other field where it was.

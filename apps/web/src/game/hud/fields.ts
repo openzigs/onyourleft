@@ -1264,16 +1264,16 @@ function draftField(draft: RoomHud['draft'], key = 'room-draft'): HudReading {
   const percent = Math.max(0, Math.min(100, Math.round(draft)));
   // #2425: the solo field is the tablet tier's narrowest track, where
   // `59 % of drag` does not fit beside its number on the CI runner's
-  // rendering, and #2130 keeps every unit on its number's line. So a solo
-  // draft's unit is the `%` alone and "of drag" opens the line under it.
+  // rendering, and #2130 keeps every unit on its number's line. A longer line
+  // under it wraps at 1024×768 and pushes the notices under the map credit
+  // (`ride-attribution.browser.spec.ts` §"#1552"). So a solo draft's unit is
+  // the `%` alone, and the line under it is the gauge's scale as a room's is.
   const solo = key === SOLO_DRAFT_KEY;
   return {
     ...base,
     value: String(percent),
     unit: solo ? '%' : '% of drag',
-    detail: solo
-      ? `of drag, ${draftScaleText(DRAFT_FULL_SCALE_PERCENT)}`
-      : draftScaleText(DRAFT_FULL_SCALE_PERCENT),
+    detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
     gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
   };
 }

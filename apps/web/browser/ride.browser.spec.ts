@@ -1489,8 +1489,8 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
  * one or two digits (0 to the gauge's 59), and on the CI runner a two-digit
  * one put its unit and its number on two lines, so the tier grew a row
  * between two loads of the same ride (`theme.css` §"its unit is a line of its
- * own" until its unit became the `%` alone, with "of drag" on the line under
- * it, so #2130's rule that a unit stays on its number's line holds). Read on
+ * own" until its unit became the `%` alone, so #2130's rule that a unit
+ * stays on its number's line holds). Read on
  * the widest HUD at every viewport that draws the field: the number set to 59,
  * the field's height and the tier's must not change, and the unit is on the
  * number's line.
@@ -1522,9 +1522,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const after = {
         field: field.getBoundingClientRect().height,
         panel: panel.getBoundingClientRect().height,
-        numberMiddle:
-          (range.getBoundingClientRect().top + range.getBoundingClientRect().bottom) / 2,
-        unitTop: unit.getBoundingClientRect().top,
+        numberTop: range.getBoundingClientRect().top,
+        numberBottom: range.getBoundingClientRect().bottom,
+        unitMiddle: (unit.getBoundingClientRect().top + unit.getBoundingClientRect().bottom) / 2,
       };
       number.data = was;
       return { drawn, was, before, after };
@@ -1536,8 +1536,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     );
     expect(read.after.field).toBeCloseTo(read.before.field, 1);
     expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
-    // On the number's line (#2130): its top above the middle of that line,
-    // which a unit wrapped under the number is not.
-    expect(read.after.unitTop).toBeLessThan(read.after.numberMiddle);
+    // On the number's line (#2130): the unit's middle is within the number's
+    // line box, which a unit wrapped under the number is not.
+    expect(read.after.unitMiddle).toBeGreaterThan(read.after.numberTop);
+    expect(read.after.unitMiddle).toBeLessThan(read.after.numberBottom);
   });
 }
