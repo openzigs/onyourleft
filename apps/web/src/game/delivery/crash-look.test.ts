@@ -85,15 +85,25 @@ describe('the crash’s timeline — crashShare', () => {
 
 describe('a crash while one is drawn — crashFrom', () => {
   it('keeps the crash being drawn, so a rider already down does not jump up to fall again', () => {
-    const first = crashFrom(undefined, 1_000, 1);
+    const first = crashFrom(undefined, 1_000, 1, false);
     expect(first).toEqual({ atMs: 1_000, side: 1 });
-    expect(crashFrom(first, 1_000 + 500, -1)).toBe(first);
-    expect(crashFrom(first, 1_000 + CRASH_SECONDS * 1000 - 1, -1)).toBe(first);
+    expect(crashFrom(first, 1_000 + 500, -1, false)).toBe(first);
+    expect(crashFrom(first, 1_000 + CRASH_SECONDS * 1000 - 1, -1, false)).toBe(first);
     // Once it is over, the next is drawn from its own start.
-    expect(crashFrom(first, 1_000 + CRASH_SECONDS * 1000, -1)).toEqual({
+    expect(crashFrom(first, 1_000 + CRASH_SECONDS * 1000, -1, false)).toEqual({
       atMs: 1_000 + CRASH_SECONDS * 1000,
       side: -1,
     });
+  });
+
+  it('ends a crash under reduced motion where its pose ends, so the next one just after is drawn', () => {
+    const first = crashFrom(undefined, 1_000, 1, true);
+    const justAfter = 1_000 + CRASH_RISE_AT_SECONDS * 1000 + 1;
+    // The pose is over by then…
+    expect(crashShare((justAfter - first.atMs) / 1000, true)).toBeUndefined();
+    // …and so the crash: the next is drawn from its own start, not swallowed by the first.
+    expect(crashFrom(first, justAfter, -1, true)).toEqual({ atMs: justAfter, side: -1 });
+    expect(crashFrom(first, justAfter - 2, -1, true)).toBe(first);
   });
 });
 

@@ -2713,6 +2713,10 @@ function GameScreen({
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current = undefined;
+      // #2454's review: a ride ended while down starts the next one upright.
+      crashRef.current = undefined;
+      crashShownRef.current = undefined;
+      crashClockRef.current = 0;
       deliveryWaitingRef.current = undefined;
       setNoRound(undefined);
       setTownLoading(false);
@@ -3535,6 +3539,7 @@ function GameScreen({
             crashRef.current,
             crashClock,
             crashSideFor(stepped.ride.steer.offset),
+            reducedMotionRef.current,
           );
         }
         // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.

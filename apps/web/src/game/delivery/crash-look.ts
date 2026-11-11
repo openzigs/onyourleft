@@ -98,7 +98,7 @@ export interface DrawnCrash {
 
 /**
  * The crash to draw once another happens at `atMs`, falling to `side`: that
- * one, unless `drawing` is still being drawn — a rider already down does not
+ * one, unless `drawing` is still being drawn under `reducedMotion` — a rider already down does not
  * jump back up to fall again, so a second obstacle hit while down is drawn as
  * the first. Its point and its sentence are the round's, as before.
  */
@@ -106,8 +106,16 @@ export function crashFrom(
   drawing: DrawnCrash | undefined,
   atMs: number,
   side: CrashSide,
+  reducedMotion: boolean,
 ): DrawnCrash {
-  if (drawing !== undefined && (atMs - drawing.atMs) / 1000 < CRASH_SECONDS) return drawing;
+  // #2454's review: over when {@link crashShare} says it is, reduced motion's
+  // shorter crash included, so a crash after the pose has ended is drawn.
+  if (
+    drawing !== undefined &&
+    crashShare((atMs - drawing.atMs) / 1000, reducedMotion) !== undefined
+  ) {
+    return drawing;
+  }
   return { atMs, side };
 }
 

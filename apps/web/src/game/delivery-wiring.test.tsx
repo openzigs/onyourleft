@@ -1030,6 +1030,57 @@ describe('a crash drawn inside a game ride — #2454', () => {
   );
 
   it(
+    'starts the next ride upright, with no “Crashed”, after a ride ended while down',
+    SHARED_RIDE,
+    async () => {
+      const drawn: SceneFrame[] = [];
+      const sights: Sight[] = [];
+      stubSeed(script.seed);
+      mounted = await mount(
+        <GameView
+          port={port()}
+          renderer={() => Promise.resolve(capturingRenderer(drawn))}
+          now={() => nowMs}
+          delivery
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      const watch = watching(drawn, sights);
+      for (let index = 0; index < FRAMES; index += 1) {
+        await pump();
+        await watch(index);
+        if ((sights.at(-1)?.lean ?? 0) > 70) break;
+        const side = script.throws.get(index);
+        if (side !== undefined) await pressThrow(side);
+        const intent = STEERS.get(index);
+        if (intent !== undefined) await pressSteer(intent);
+      }
+      // Down, and the ride ended there.
+      expect(sights.at(-1)?.lean).toBeGreaterThan(70);
+      expect(sights.at(-1)?.detail).toBe('Crashed');
+      await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
+      // The ended loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+      pending = [];
+      nowMs += 60_000;
+      stubSeed(script.seed);
+      await clickThrough(buttonStarting('Ride '));
+      const next: Sight[] = [];
+      const watchNext = watching(drawn, next);
+      for (let index = 0; index < 5; index += 1) {
+        await pump();
+        await watchNext(index);
+      }
+      expect(next.length).toBeGreaterThan(2);
+      for (const sight of next) {
+        expect(sight.lean).toBeLessThan(45);
+        expect(sight.detail).not.toBe('Crashed');
+      }
+    },
+  );
+
+  it(
     'says “Crashed” on the HUD while the world is still being prepared, and stops once it is over',
     SHARED_RIDE,
     async () => {
