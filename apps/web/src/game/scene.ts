@@ -119,10 +119,12 @@ import type { WorldCorridor } from './world-data/corridor';
 import {
   clearOfDriveways,
   clearOfMappedBuildings,
+  MAPPED_AHEAD_STEP_METRES,
   mappedChunk,
   type MappedBuildings,
   type MappedBuildingsInView,
 } from './mapped-buildings';
+import { MAPPED_RANKED_AHEAD_METRES } from './realistic-budget';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -707,14 +709,40 @@ function scenery(
   };
 }
 
-/** The mapped buildings, with the rider's chunk and drawn place. @see SceneFrame.mappedBuildings */
+/**
+ * The mapped buildings, with the rider's chunk and drawn place, and since
+ * #2429 the road ahead a refill ranks them by. @see SceneFrame.mappedBuildings
+ */
 function mappedInView(
   buildings: MappedBuildings,
   corridor: RoadCorridor,
   riderDistance: number,
 ): MappedBuildingsInView {
   const here = placeOnCorridor(corridor, riderDistance);
-  return { buildings, chunk: mappedChunk(riderDistance), x: here.x, z: here.z };
+  return {
+    buildings,
+    chunk: mappedChunk(riderDistance),
+    x: here.x,
+    z: here.z,
+    ahead: routeAhead(corridor, riderDistance),
+  };
+}
+
+/**
+ * The drawn road from `riderDistance` {@link MAPPED_RANKED_AHEAD_METRES} on,
+ * a point every {@link MAPPED_AHEAD_STEP_METRES}, as `x, z` pairs — #2429.
+ * Read off the corridor, so it is the road this frame drew; past the end of a
+ * point-to-point route its points stand on the last one.
+ */
+function routeAhead(corridor: RoadCorridor, riderDistance: number): Float32Array {
+  const steps = Math.round(MAPPED_RANKED_AHEAD_METRES / MAPPED_AHEAD_STEP_METRES);
+  const ahead = new Float32Array((steps + 1) * 2);
+  for (let step = 0; step <= steps; step += 1) {
+    const at = placeOnCorridor(corridor, riderDistance + step * MAPPED_AHEAD_STEP_METRES);
+    ahead[step * 2] = at.x;
+    ahead[step * 2 + 1] = at.z;
+  }
+  return ahead;
 }
 
 /**

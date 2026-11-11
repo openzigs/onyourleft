@@ -520,3 +520,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   unchanged: D-2 and D-3.5, because a level reads no corridor from the archive and writes nothing
   to `worldCorridors`; and D-3.6's corridor key, to which ADR 0065 D-6.5 adds a ride on a level,
   in the realistic world where Delivery runs. This entry is a pointer and changes nothing here.
+
+- **2026-11-10** — **PROPOSED, pending the owner's approval: "nearest" in D-5.6 is measured from the
+  road ahead.** D-5.6's *"the nearest come first, within the cap"* measured from the rider. #2429
+  (the owner saw buildings appear only beside the bike) ranks the mapped buildings, and the
+  procedural structures that compete with them for the cap, by their distance to the next
+  `MAPPED_RANKED_AHEAD_METRES` of road ahead (`realistic-budget.ts`). The near and far level of a
+  building is still measured from the rider. The guarantee is narrower than "every building in the
+  draw distance": the 36-building cap makes that unreachable, so what holds is every front-row
+  building (centre within 30 m of the road) up to 100 m ahead.

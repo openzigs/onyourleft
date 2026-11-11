@@ -355,6 +355,7 @@ import {
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
+  rankFrom,
   roleTriangles,
   selectMappedBuildings,
   surfaceOfRole,
@@ -19729,6 +19730,8 @@ export class MappedBuildingBelt {
     triangleBudget: number,
     chunk?: number,
     rivals: RivalStructures = NO_RIVALS,
+    /** #2429: the road ahead the buildings are ranked by. @see selectMappedBuildings */
+    ahead?: Float32Array,
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
@@ -19742,6 +19745,7 @@ export class MappedBuildingBelt {
       MAPPED_BUILDING_DRAW_CALLS,
       rivals,
       this.#houses?.triangles,
+      ahead,
     );
     const surfaces = selection.surfaces;
     let end = 0;
@@ -20565,7 +20569,9 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * allocates nothing.
  *
  * **The frame's procedural structures and the mapped buildings are ranked
- * together, by distance from the rider, under the one cap** — #1586, ADR 0054
+ * together, under the one cap** — the buildings by the road ahead since #2429,
+ * the structures' rivals likewise, though the structure belts still choose
+ * WHICH structures in frame order, nearest the rider — #1586, ADR 0054
  * D-5.6's "the nearest come first, within the cap" (the owner's lane
  * direction). Until #1586 every procedural structure was taken first, so a
  * town's edge with 36 field boundaries ahead drew none of its buildings.
@@ -20594,7 +20600,8 @@ export function refillMappedBuildings(
   let at = 0;
   for (const item of scatter) {
     if (!isStructureKind(item.kind)) continue;
-    rivalDistances[at] = Math.hypot(item.x - view.x, item.z - view.z);
+    // #2429: by the road ahead, as the buildings it is ranked against are.
+    rivalDistances[at] = rankFrom(view.ahead, view.x, view.z, item.x, item.z);
     at += 1;
   }
   rivalDistances.subarray(0, count).sort();
@@ -20608,6 +20615,7 @@ export function refillMappedBuildings(
       count,
       triangles: structure,
     },
+    view.ahead,
   );
   return items - Math.ceil(stats.triangles / structure);
 }
@@ -20977,7 +20985,7 @@ class RealisticDrawing {
    *
    * On a frame whose chunk changed (or whose rung did) the belt refills inside
    * the rung's structure term, the frame's procedural structures and the
-   * mapped buildings ranked together by distance from the rider (#1586,
+   * mapped buildings ranked together by the road ahead (#1586, #2429,
    * {@link refillMappedBuildings}) — every structure item and billboard in the
    * frame counted at `REALISTIC_TRIANGLES.structure`, which is what the
    * structure term prices each at. Until the next refill the procedural structures keep to
