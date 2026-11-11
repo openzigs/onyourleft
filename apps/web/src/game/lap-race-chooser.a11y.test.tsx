@@ -17,7 +17,12 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BOT_TIER_WATTS_PER_KILOGRAM, BOT_TIERS, watts } from '@onyourleft/domain';
+import {
+  BOT_PLAN_SURGE_CEILING,
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  BOT_TIERS,
+  watts,
+} from '@onyourleft/domain';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import {
@@ -274,7 +279,7 @@ describe('#1907 — the lap race in the chooser', () => {
     const group = tierRadio(BOT_TIER_TEXT.steady)?.closest('fieldset');
     expect(group?.querySelector('legend')?.textContent).toBe(LAP_RACE_CHOICE_TEXT.tier);
     expect(described(tierRadio(BOT_TIER_TEXT.hard) as HTMLInputElement)).toBe(
-      `${BOT_TIERS.map((tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`).join(', ')} watts per kilogram, on average over a race, each bot at or a little under it.`,
+      `${BOT_TIERS.map((tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`).join(', ')} watts per kilogram: what each bot can hold for a whole race, at or a little under it.`,
     );
     // #2329: why a bot's figure in the race moves round its tier, in words,
     // right after the tiers and outside each chip's description.
@@ -283,9 +288,10 @@ describe('#1907 — the lap race in the chooser', () => {
     )?.nextElementSibling;
     expect(explained?.tagName).toBe('P');
     expect(explained?.textContent).toBe(
-      'The figure beside a bot in the race moves around that: a bot saves a little on the flat ' +
-        'and more downhill, then spends it on climbs and in the final sprint. Each bot paces ' +
-        'the race its own way, and its name says how.',
+      'The figure beside a bot in the race moves around that: a bot holds it on the flat, eases ' +
+        'downhill and goes harder on climbs and in the final sprint, and one that goes too hard ' +
+        'for too long fades back to it until it recovers. Each bot paces the race its own way, ' +
+        'and its name says how.',
     );
     for (const tier of BOT_TIERS) expect(tierRadio(BOT_TIER_TEXT[tier])).toBeDefined();
     expect(tierRadio(BOT_TIER_TEXT[DEFAULT_LAP_RACE_CHOICE.tier])?.checked).toBe(true);
@@ -393,8 +399,10 @@ describe('#1907 — the lap race in the chooser', () => {
     expect(fields[0]).toMatch(/^Place\d of 4/u);
     expect(fields[0]).toContain('Lap 1 of 2');
     // Its standings name three bots, each by its pace (#2455), and each of the
-    // tier chosen: off the line, with an empty reserve, no Steady bot rides
-    // over Steady's 2.0 W/kg, where a Brisk one never rides under 2.2.
+    // tier chosen. Since #2458 a bot starts with its whole W′ and goes harder
+    // up the opening climb, so its figure is read against its tier's surge
+    // ceiling: no Steady bot rides over Steady's 3.0 W/kg, where Brisk bots
+    // on the same climb ride over it. That they are climbing is checked too.
     const standings = document.querySelector('.oyl-hud__standings')?.textContent ?? '';
     const styles = Object.values(BOT_STYLE_TEXT).join('|');
     for (const number of [1, 2, 3])
@@ -408,7 +416,10 @@ describe('#1907 — the lap race in the chooser', () => {
       .filter((figure): figure is string => figure !== undefined)
       .map(Number);
     expect(figures).toHaveLength(3);
-    expect(Math.max(...figures)).toBeLessThanOrEqual(BOT_TIER_WATTS_PER_KILOGRAM.steady);
+    expect(Math.max(...figures)).toBeLessThanOrEqual(
+      BOT_TIER_WATTS_PER_KILOGRAM.steady * BOT_PLAN_SURGE_CEILING + 1e-9,
+    );
+    expect(Math.max(...figures)).toBeGreaterThan(BOT_TIER_WATTS_PER_KILOGRAM.steady);
     // Its frames: three bots drawn, and no pick-up point or puddle, for no
     // items are in it.
     const frame = drawn.at(-1);

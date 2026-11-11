@@ -104,9 +104,9 @@ export {
   strategicBotDecision,
 } from './strategy';
 
-// The bots' race plan (#1960, ADR 0061): a course-only energy budget that
-// sets a bot's power from its tier, the road, the effort distance it has left
-// and its own reserve, and never from any other racer.
+// The bots' race plan (#1960, ADR 0061): sets a bot's power from its tier, the
+// road, the effort distance it has left and its own W′ balance (#2458, ADR
+// 0067 D-2), a capacity fixed at the start that no rank or gap changes.
 // Each bot's own pace (#2455): an ability at or under its tier and a pacing
 // style read off the course, dealt from the race's seed before the start.
 export type { BotPace, BotPacingStyle } from './pace';
@@ -125,13 +125,23 @@ export {
 
 export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
 export {
-  BOT_PLAN_BANKING,
-  BOT_PLAN_FLAT_GRADE_PERCENT,
-  BOT_PLAN_MEAN_TOLERANCE,
   BOT_PLAN_SURGE_CEILING,
   BOT_SPRINT_LONGEST_METRES,
   BOT_SPRINT_SHORTEST_METRES,
-  BOT_TIER_BUDGET_JOULES,
+  BOT_WPRIME_JOULES,
   botPlanStep,
   botRacePlan,
+  botWPrimeJoules,
 } from './plan';
+
+// Each bot's W′ balance (#2458, ADR 0067 D-2): the discrete differential form,
+// in `+ − × ÷` only, so it stays bit-identical across x86 and ARM.
+export type { BotCapacity, BotEnergy } from './wbal';
+export {
+  BOT_CEILING_WATTS,
+  BOT_WBAL_REENTRY_FRACTION,
+  BOT_WBAL_TICK_TOLERANCE,
+  fullBotEnergy,
+  spendableWatts,
+  stepWbal,
+} from './wbal';

@@ -11,8 +11,10 @@
  * ## The rule (ADR 0061 D-1)
  *
  * A bot's power is a function of its tier, the road, the distance it has left
- * and its own energy budget, **and never of any other racer**. What
- * {@link botPlanStep} reads is the whole of D-2:
+ * and its own W′ balance, **and never of any other racer**. What
+ * {@link botPlanStep} reads is the whole of D-2. ⚠️ ADR 0067 D-0 has since
+ * lifted that rule: a bot's strategy may read the race. This plan does not
+ * yet; #2462 and #2463 add what does, and nothing here changes a capacity:
  *
  * | Input | Where it comes from |
  * |---|---|
@@ -21,7 +23,7 @@
  * | the race's seed | {@link botRacePlan}: where the closing sprint opens, the same for every bot in the race |
  * | the grade | {@link BotPlanInput.grade}: the road under the bot, read at its own effort distance |
  * | the distance left | the race length less {@link BotPlanInput.effortDistance} |
- * | its own reserve | what this step returned last tick |
+ * | its own W′ balance | what this step returned last tick (#2458) |
  *
  * ⚠️ **What it never reads (D-3)**: any other racer, the bot's own place or
  * rank, its own `raceOffset` or drawn distance, and the race's lap counter.
@@ -32,40 +34,41 @@
  * D-2: the sprint opens up to B (10 m) early or late against the line the
  * rider sees, and its tests assert it on effort distance.
  *
- * ## The reserve: a W′-style account, exact by construction
+ * ## Its capacity, and the W′ balance that spends it (#2458, ADR 0067 D-1, D-2)
  *
- * The reserve is work above the tier's power, in joules, in the critical-power
- * style of `analysis/critical-power.ts`: the tier's power plays CP, and the
- * reserve plays W′. **Every joule ridden above the tier comes out of it and
- * every joule ridden below goes into it**, one for one:
+ * Since #2458 a bot has a **capacity** fixed at the start, from its tier, its
+ * pace and nothing else: a critical power (CP), its own power below; a W′,
+ * {@link BOT_WPRIME_JOULES} for its tier; and a peak, the surge ceiling. The
+ * plan spends W′ through `wbal.ts`'s balance, in the discrete differential
+ * form:
  *
- * - **It starts empty**, and holds at most the tier's
- *   {@link BOT_TIER_BUDGET_JOULES}.
- * - **Above the tier** (a climb, the sprint) the bot spends no more than it
- *   holds: with an empty reserve it rides at its tier, never over it (D-2).
- * - **Below the tier** (a descent, or {@link BOT_PLAN_BANKING} under it on the
- *   flat, blending up to a climb's ask over {@link BOT_PLAN_FLAT_GRADE_PERCENT})
- *   the bot eases only while the reserve has room, and only by as much as
- *   fills it. With a full reserve it holds its tier.
+ * - **It starts full.** There is no banking: #1960's reserve started empty and
+ *   was filled by riding 5 % under the tier, which
+ *   made an attack free once banked. W′ is the bot's from the gun.
+ * - **Above CP** (a climb, the sprint) the bot spends W′ one joule for one,
+ *   never more than the balance holds in a tick.
+ * - **Below CP** (a descent, an eased lap) it recovers, more slowly as the
+ *   balance fills, and never past W′.
+ * - **At 0 it is exhausted**: it rides no more than CP until it has recovered
+ *   `wbal.ts` §`BOT_WBAL_REENTRY_FRACTION` of W′. A bot that spends its
+ *   matches fades.
  *
- * So a race's surplus over the tier is the reserve at the start less the
- * reserve at the end: **a bot's time-weighted mean power is its tier's power
- * less its unspent reserve over the race's time, and never more than its
- * tier's.** The closing sprint spends what is left, which is why the mean
- * lands within {@link BOT_PLAN_MEAN_TOLERANCE} of the tier. The plan reshapes a
- * bot's effort; it does not raise it, so a rider well ahead of a tier stays
- * ahead (ADR 0061, *What this costs*).
+ * Nothing about the race changes the capacity (ADR 0067 D-1.2): no rank, gap
+ * or other racer reaches CP, W′ or the peak. What a bot's mean power comes to
+ * is what its plan spent of a fixed capacity, so ADR 0061 D-8.1's mean
+ * tolerance is gone, restated against capacity (ADR 0067 D-1.3): the balance
+ * stays in `[0, W′]` every tick, and the power inside the bounds below.
  *
  * ## Each bot's own pace (#2455)
  *
  * Since #2455 a plan also takes the bot's pace (`pace.ts`): an ability at or a
  * little under its tier, and a pacing style read off the course. The account
- * above is then booked against **the bot's own power** where it is, its
- * tier's times its ability, and eased by its style outside its hard part,
- * rather than against the tier's: what is "above" and "below" is above and
- * below its own. Its own power is never over its tier's, so an empty reserve
- * still rides no more than the tier (ADR 0061 D-2), and the mean is still
- * never above it. The bounds below stay the tier's. A pace is drawn from the
+ * above is then booked against **the bot's own power**, its tier's times its
+ * ability, which is its CP: what is "above" and "below" is above and below
+ * its own. Outside its hard part its style eases it under its own, so it
+ * recovers there. Its own power is never over its tier's, so an exhausted bot
+ * still rides no more than the tier (ADR 0061 D-2). The bounds below stay the
+ * tier's. A pace is drawn from the
  * race's seed before the start and reads nothing of the race (D-1, D-3). With
  * no pace given, a plan is #1960's, at the tier's full power.
  *
@@ -79,12 +82,12 @@
  * ## Past the race length
  *
  * With no distance left the bot holds its last segment, the sprint, under the
- * same reserve rule: an empty reserve rides at the tier (D-2). Nothing here
+ * same balance rule: an exhausted bot rides at its CP (D-2). Nothing here
  * reads when its drawn distance finishes.
  *
  * ## Pure, seeded, and from no recorded ride
  *
- * Both functions are pure: the same tier, course, seed, reserve and input give
+ * Both functions are pure: the same tier, course, seed, balance and input give
  * the same power. The one random number is the sprint's opening, drawn from
  * the race's own seed through `random.ts` and keyed apart from the race's item
  * draws. Nothing here imports `ghost/` or `recording/` (`bots.test.ts` scans
@@ -112,6 +115,7 @@ import {
 } from './pace';
 import { nextUnit, raceRandom } from './random';
 import type { RaceCourse } from './race';
+import { spendableWatts, stepWbal, type BotCapacity, type BotEnergy } from './wbal';
 
 /**
  * The most a bot's plan lifts its power over its tier's, as a multiplier:
@@ -123,74 +127,47 @@ import type { RaceCourse } from './race';
  * 8 % and −6 % references are. It keeps `fierce` (4.4 W/kg) at 6.6 W/kg, under
  * the 7 W/kg bound (`plan.test.ts` holds every tier to it, so a stronger tier
  * or a higher ceiling that passed it would go red), and a surge is still
- * bounded by the reserve behind it. If
+ * bounded by the W′ balance behind it. If
  * riders read a surge as rubber-banding, this is the knob (ADR 0061, *What
  * would make this ADR wrong*).
  */
 export const BOT_PLAN_SURGE_CEILING = 1.5;
 
 /**
- * How far under its tier a bot rides on the flat while its reserve has room:
- * **5 %**. Where the reserve for a climb or the sprint comes from on a course
- * with no descent.
- */
-export const BOT_PLAN_BANKING = 0.05;
-
-/**
- * How far up from the flat, in percent of grade, a bot blends from banking to
- * climbing: **1 %**. At 0 % and below it banks ({@link BOT_PLAN_BANKING}); at
- * this grade and above it asks what a climb asks; between, it asks a straight
- * line between the two.
+ * Each tier's W′ at the start of a race, in joules: **10, 14, 18 and 22 kJ**,
+ * two-thirds of a hundred seconds of the tier's power each, so every tier can
+ * attack for the same time and the tiers keep their order (ADR 0061 D-8.3).
+ * Replaces #1960's `BOT_TIER_BUDGET_JOULES`, which was a reserve to be banked
+ * rather than a capacity to spend (#2458).
  *
- * Without it the ask stepped by about 5 % of the tier at 0 %, banking on any
- * grade of 0 or below and spending on any above, so on an interpolated route
- * profile's near-flat ground a bot's power flicked between −5 % and +3 % from
- * tick to tick (#2140's review). A feel number, as #92's references are; it
- * changes no joule of the account, so the mean's guarantee holds as before.
+ * ⚠️ **Tuning inputs for the owner's approval** (#2458). The literature puts a
+ * trained rider's W′ at roughly 15 to 25 kJ, but that range was not confirmed
+ * from a primary source; `steady`, at 2 W/kg, is an untrained rider's tier and
+ * sits under it. A `climber` or a `sprinter` holds `pace.ts`
+ * §`BOT_STYLE_BUDGET_FACTOR` times its tier's (#2455).
  */
-export const BOT_PLAN_FLAT_GRADE_PERCENT = 1;
-
-/**
- * Each tier's reserve when full, in joules: **twenty seconds of a full
- * surge**, {@link BOT_PLAN_SURGE_CEILING} less one, times the tier's power at
- * `BOT_MASS_KILOGRAMS`. The budget per tier #1960 names.
- *
- * A stronger tier holds a larger reserve, in proportion, so every tier can
- * surge for the same time and the tier order is the tiers' powers' order.
- * Smaller than a trained rider's W′ on purpose: the mean's shortfall is at
- * most the unspent reserve over the race's time, and a lap race is minutes.
- */
-export const BOT_TIER_BUDGET_JOULES: Readonly<Record<BotTier, number>> = {
-  steady: 1_500,
-  brisk: 2_100,
-  hard: 2_700,
-  fierce: 3_300,
+export const BOT_WPRIME_JOULES: Readonly<Record<BotTier, number>> = {
+  steady: 10_000,
+  brisk: 14_000,
+  hard: 18_000,
+  fierce: 22_000,
 };
+
+/**
+ * A bot's W′, joules: {@link BOT_WPRIME_JOULES} for its tier, times `pace.ts`
+ * §`BOT_STYLE_BUDGET_FACTOR` for a `climber` or a `sprinter` (#2455). What its
+ * balance starts the race at, and the capacity its plan holds it to.
+ */
+export function botWPrimeJoules(tier: BotTier, pace: BotPace = BOT_EVEN_PACE): number {
+  const larger = pace.style === 'climber' || pace.style === 'sprinter';
+  return BOT_WPRIME_JOULES[tier] * (larger ? BOT_STYLE_BUDGET_FACTOR : 1);
+}
 
 /** The nearest the line the closing sprint opens, in metres of effort distance left. */
 export const BOT_SPRINT_SHORTEST_METRES = 200;
 
 /** The furthest from the line the closing sprint opens, in metres of effort distance left. */
 export const BOT_SPRINT_LONGEST_METRES = 300;
-
-/**
- * How far a bot's time-weighted mean power over a race may stray from its
- * tier's W/kg at `BOT_MASS_KILOGRAMS`: **10 %**, as a fraction of the tier's
- * power. ADR 0061 D-8.1's stated tolerance, whose value ADR 0061 leaves to the
- * code's pull requests to propose and the owner to approve.
- *
- * ⚠️ **5 % until #2455**, proposed by #1960's pull request when every bot of a
- * tier rode the tier's full power. #2455's pull request proposes 10 % for the
- * owner's approval: a bot's own ability now lies up to `pace.ts`
- * §`BOT_ABILITY_SPREAD` (6 %) under its tier, and a `fast-start` or
- * `negative-split` bot rides `pace.ts` §`BOT_STYLE_EASING` (4 %) under its own
- * for most of a race: together about 8.7 % before any reserve is left unspent.
- *
- * By the header's account the mean is never above the tier, and falls short of
- * it by the bot's own shortfall and the reserve left unspent at the line over
- * the race's time.
- */
-export const BOT_PLAN_MEAN_TOLERANCE = 0.1;
 
 /** Keys the sprint's draw apart from the race's item draws on the same seed. */
 const SPRINT_DRAW_KEY = 0x5f1d_0961;
@@ -224,8 +201,14 @@ export interface BotRacePlan {
   readonly surgeWatts: number;
   /** The least it rides, watts: `PACING_FACTOR_FLOOR` of the tier. */
   readonly floorWatts: number;
-  /** Its reserve when full, joules: {@link BOT_TIER_BUDGET_JOULES} for the tier. */
-  readonly budgetJoules: number;
+  /** Its W′, joules: {@link BOT_WPRIME_JOULES} for the tier, or more for its style. */
+  readonly wPrimeJoules: number;
+  /**
+   * Its capacity, fixed for the race (ADR 0067 D-1.1): its CP is
+   * {@link ownWatts}, its W′ {@link wPrimeJoules}, its peak {@link surgeWatts}
+   * and its floor {@link floorWatts}.
+   */
+  readonly capacity: BotCapacity;
   /** The race's length, metres of effort distance: the lap length times the laps. */
   readonly raceMetres: number;
   /** How much effort distance is left when its sprint opens, metres. */
@@ -272,7 +255,9 @@ export function botRacePlan(
       drawn * (BOT_SPRINT_LONGEST_METRES - BOT_SPRINT_SHORTEST_METRES)) *
     (style === 'sprinter' ? BOT_SPRINTER_SPRINT_FACTOR : 1);
   const split = style === 'fast-start' || style === 'negative-split';
-  const reserved = style === 'climber' || style === 'sprinter';
+  const wPrimeJoules = botWPrimeJoules(tier, pace);
+  const surgeWatts = tierWatts * BOT_PLAN_SURGE_CEILING;
+  const floorWatts = tierWatts * PACING_FACTOR_FLOOR;
   return {
     tierWatts,
     ownWatts,
@@ -285,18 +270,19 @@ export function botRacePlan(
         : style === 'sprinter'
           ? BOT_SPRINTER_GRADE_PERCENT
           : PACING_CLIMB_REFERENCE_GRADE_PERCENT,
-    surgeWatts: tierWatts * BOT_PLAN_SURGE_CEILING,
-    floorWatts: tierWatts * PACING_FACTOR_FLOOR,
-    budgetJoules: BOT_TIER_BUDGET_JOULES[tier] * (reserved ? BOT_STYLE_BUDGET_FACTOR : 1),
+    surgeWatts,
+    floorWatts,
+    wPrimeJoules,
+    capacity: { cpWatts: ownWatts, wPrimeJoules, peakWatts: surgeWatts, floorWatts },
     raceMetres,
     sprintMetres: Math.min(sprint, raceMetres),
   };
 }
 
 /**
- * What the bot rides as its own at this effort distance, watts: its own power
- * in its hard part, its eased power outside it. The level its reserve is
- * booked against (#2455).
+ * What the bot rides as its own at this effort distance, watts: its own power,
+ * its CP, in its hard part, and its eased power outside it, where it recovers
+ * (#2455, #2458).
  */
 function ownPowerAt(plan: BotRacePlan, effortDistance: number): number {
   return effortDistance >= plan.hardFromMetres && effortDistance < plan.hardToMetres
@@ -314,11 +300,11 @@ export interface BotPlanInput {
   readonly elapsed: number;
 }
 
-/** What the plan rides this tick, and the reserve after it. */
+/** What the plan rides this tick, and the W′ balance after it. */
 export interface BotPlanStep {
   readonly power: Watts;
-  /** Joules left in the reserve once this tick's power is ridden. */
-  readonly reserve: number;
+  /** The bot's W′ balance once this tick's power is ridden (#2458). */
+  readonly energy: BotEnergy;
 }
 
 /**
@@ -331,43 +317,40 @@ function climbPower(plan: BotRacePlan, own: number, grade: number): number {
 }
 
 /**
- * What the course asks for at this grade, banking included, before the reserve
- * has its say. Continuous in the grade: see {@link BOT_PLAN_FLAT_GRADE_PERCENT}.
+ * What the course asks for at this grade, before the W′ balance has its say:
+ * its own power on the flat, more up a climb, and less down a descent as #92's
+ * rule eases, never under the tier's −20 % floor. Continuous in the grade, with
+ * no step at 0 % (#2140), because there is no banking on either side of it.
  */
 function coursePower(plan: BotRacePlan, own: number, grade: number): number {
-  const banked = own * (1 - BOT_PLAN_BANKING);
-  if (!Number.isFinite(grade)) return banked;
-  if (grade >= BOT_PLAN_FLAT_GRADE_PERCENT) return climbPower(plan, own, grade);
-  if (grade > 0) {
-    // Near-flat and rising: from banking at 0 % to the climb's ask at the
-    // band's edge, so the power has no step anywhere along the grade.
-    const along = grade / BOT_PLAN_FLAT_GRADE_PERCENT;
-    return banked + along * (climbPower(plan, own, BOT_PLAN_FLAT_GRADE_PERCENT) - banked);
-  }
-  // Flat and downhill the bot banks, and eases further as #92's rule does,
-  // never under the TIER's −20 % floor, whatever its own power (D-8.2).
-  return Math.max(plan.floorWatts, Math.min(banked, own * pacingFactor(grade)));
+  if (!Number.isFinite(grade)) return own;
+  if (grade >= 0) return climbPower(plan, own, grade);
+  return Math.max(plan.floorWatts, own * pacingFactor(grade));
 }
 
 /**
- * One tick of a bot's plan: the power to ride, and the reserve after riding it.
+ * One tick of a bot's plan: the power to ride, and the W′ balance after riding
+ * it.
  *
  * The bot asks for its sprint power when the effort distance it has left is
  * the plan's sprint or less (and past the race length), and otherwise for what
- * the grade asks: more up a climb, less down a descent, and
- * {@link BOT_PLAN_BANKING} under its tier on the flat while its reserve has
- * room, blended into a climb's ask over the first
- * {@link BOT_PLAN_FLAT_GRADE_PERCENT} of rise. The reserve then decides how much of that it may have (see the
- * header).
+ * the grade asks: more up a climb, its own on the flat, less down a descent.
+ * `wbal.ts` §`spendableWatts` then decides how much of that it may have: no
+ * more above its CP than its balance pays for, its CP alone while it is
+ * exhausted, and inside the tier's floor, the surge ceiling and 7 W/kg.
  *
- * @param reserve - joules in the bot's reserve: 0 at the start, then what the
- *   last step returned.
+ * @param energy - the bot's W′ balance: full at the start (`wbal.ts`
+ *   §`fullBotEnergy` of the plan's capacity), then what the last step returned.
  * @throws {LapRaceError} `effort-distance-not-finite`; `elapsed-out-of-range`
  *   for a tick that is not a finite number of seconds of at least zero; and
- *   `reserve-out-of-range` for a reserve that is not between nought and the
- *   plan's budget.
+ *   `wbal-out-of-range` for a balance that is not between nought and the
+ *   plan's W′.
  */
-export function botPlanStep(plan: BotRacePlan, reserve: number, input: BotPlanInput): BotPlanStep {
+export function botPlanStep(
+  plan: BotRacePlan,
+  energy: BotEnergy,
+  input: BotPlanInput,
+): BotPlanStep {
   const { effortDistance, elapsed } = input;
   if (!Number.isFinite(effortDistance)) {
     throw new LapRaceError(
@@ -375,35 +358,11 @@ export function botPlanStep(plan: BotRacePlan, reserve: number, input: BotPlanIn
       'effortDistance must be a finite number of metres',
     );
   }
-  if (!Number.isFinite(elapsed) || elapsed < 0) {
-    throw new LapRaceError(
-      'elapsed-out-of-range',
-      'elapsed must be a finite number of seconds of at least zero',
-    );
-  }
-  if (!Number.isFinite(reserve) || reserve < 0 || reserve > plan.budgetJoules) {
-    throw new LapRaceError(
-      'reserve-out-of-range',
-      'reserve must be a number of joules from zero to the plan budget',
-    );
-  }
-  // #2455: the bot's own power here, never over its tier's, is what the
-  // reserve is booked against; for the even pace at full ability it is the tier's.
+  // #2455: the bot's own power here, never over its tier's; its CP in its
+  // hard part, and eased under it outside, where it recovers.
   const own = ownPowerAt(plan, effortDistance);
   const sprinting = plan.raceMetres - effortDistance <= plan.sprintMetres;
   const wanted = sprinting ? plan.surgeWatts : coursePower(plan, own, input.grade);
-  let power: number;
-  if (wanted > own) {
-    // Spend: never more than the reserve holds, so an empty one rides its own
-    // power, which is never over its tier's.
-    if (reserve <= 0) power = own;
-    else power = elapsed > 0 ? Math.min(wanted, own + reserve / elapsed) : wanted;
-  } else {
-    // Refill: ease only while there is room, and only by as much as fills it.
-    const room = plan.budgetJoules - reserve;
-    if (room <= 0) power = own;
-    else power = elapsed > 0 ? Math.max(wanted, own - room / elapsed) : wanted;
-  }
-  const after = reserve - (power - own) * elapsed;
-  return { power: watts(power), reserve: Math.min(plan.budgetJoules, Math.max(0, after)) };
+  const power = spendableWatts(plan.capacity, energy, wanted, elapsed);
+  return { power: watts(power), energy: stepWbal(plan.capacity, energy, power, elapsed) };
 }

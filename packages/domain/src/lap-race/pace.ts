@@ -39,8 +39,8 @@
  * | `even` | as #1960's plan: holds its own power, surges up climbs, sprints the close |
  * | `fast-start` | its own power on the first lap, then {@link BOT_STYLE_EASING} under it: it fades |
  * | `negative-split` | {@link BOT_STYLE_EASING} under its own power until the last lap, then all of it |
- * | `climber` | asks a full surge from {@link BOT_CLIMBER_GRADE_PERCENT}, and holds a larger reserve |
- * | `sprinter` | asks half a climb's surge, banks a larger reserve, and opens a longer kick |
+ * | `climber` | asks a full surge from {@link BOT_CLIMBER_GRADE_PERCENT}, and holds a larger W′ |
+ * | `sprinter` | asks half a climb's surge, holds a larger W′, and opens a longer kick |
  *
  * A race of one lap has no first or last lap to speak of: there the first and
  * the last third stand in for them. The plan reads which part of the race the
@@ -100,7 +100,7 @@ export const BOT_CLIMBER_GRADE_PERCENT = 4;
 /** The grade at which a `sprinter` asks its full surge: **16 %**, so half a climb's ask at 8 %. */
 export const BOT_SPRINTER_GRADE_PERCENT = 16;
 
-/** How much larger a `climber`'s or a `sprinter`'s reserve is than its tier's: **1.5 times**. */
+/** How much larger a `climber`'s or a `sprinter`'s W′ is than its tier's: **1.5 times** (#2458). */
 export const BOT_STYLE_BUDGET_FACTOR = 1.5;
 
 /** How much further out a `sprinter` opens its closing sprint: **1.5 times**, 300 m to 450 m. */
