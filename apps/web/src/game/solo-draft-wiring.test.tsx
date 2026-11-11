@@ -335,7 +335,7 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
     const { draft, heard } = await rideSolo({ pacer: true, frames: 160 });
     const readings = draft.map(percentOf);
     // Present from the first frame, on the gauge's own scale.
-    expect(draft.every((text) => /^\d+ % of drag at most 59 %$/.test(text ?? ''))).toBe(true);
+    expect(draft.every((text) => /^\d+ % of drag, at most 59 %$/.test(text ?? ''))).toBe(true);
     expect(Math.max(...readings.map((value) => value ?? 0))).toBeGreaterThanOrEqual(10);
     expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
     // D-5.5: the solo draft has no spoken cue, entering or leaving.

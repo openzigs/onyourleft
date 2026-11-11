@@ -1489,9 +1489,11 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
  * one or two digits (0 to the gauge's 59), and on the CI runner a two-digit
  * one put its unit and its number on two lines, so the tier grew a row
  * between two loads of the same ride (`theme.css` §"its unit is a line of its
- * own"). Read on the widest HUD at every viewport that draws the field: the
- * number set to 59, the field's height and the tier's must not change, and
- * the unit is under the number, not beside it.
+ * own" until its unit became the `%` alone, with "of drag" on the line under
+ * it, so #2130's rule that a unit stays on its number's line holds). Read on
+ * the widest HUD at every viewport that draws the field: the number set to 59,
+ * the field's height and the tier's must not change, and the unit is on the
+ * number's line.
  */
 for (const viewport of OVERLAY_VIEWPORTS) {
   test(`#2425 the solo Draft field keeps its height at a two-digit draft — ${viewport.name}`, async ({
@@ -1534,8 +1536,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     );
     expect(read.after.field).toBeCloseTo(read.before.field, 1);
     expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
-    // Under the number: its top below the middle of the number's line, which
-    // a unit beside the number (on the same line) is not.
-    expect(read.after.unitTop).toBeGreaterThan(read.after.numberMiddle);
+    // On the number's line (#2130): its top above the middle of that line,
+    // which a unit wrapped under the number is not.
+    expect(read.after.unitTop).toBeLessThan(read.after.numberMiddle);
   });
 }
