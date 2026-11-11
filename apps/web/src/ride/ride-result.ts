@@ -44,7 +44,7 @@ import {
   type Seconds,
   type Watts,
 } from '@onyourleft/domain';
-import type { ActivityId } from '@onyourleft/store';
+import type { ActivityCalories, ActivityId } from '@onyourleft/store';
 
 import { CHART_POINTS, downsample, traceMean } from '../detail/series';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
@@ -62,6 +62,11 @@ export interface SavedRide {
   readonly averagePower: Watts | undefined;
   /** `undefined` for a ride with no heart rate reading at all. */
   readonly averageHeartRate: BeatsPerMinute | undefined;
+  /**
+   * The calorie estimate the save wrote — #2433. `undefined` for a ride with
+   * no figure, which the card shows as a dash and a reason, never `0 kcal`.
+   */
+  readonly calories?: ActivityCalories | undefined;
   /**
    * How the last trainer-game ride ridden during this recording ended against
    * the rider's own best, once settled — or `undefined`: no game ride, no

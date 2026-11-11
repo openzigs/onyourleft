@@ -185,7 +185,9 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'round’s worst case drawn inside `DELIVERY_VILLAGE_DRAW_CALLS`. Cost, in a world a rider ' +
       'chooses, read off a page that ships in no build. Still required: that an ordinary ' +
       'frame is never held to it (`realistic-budget-village.test.ts`), and the belt’s three ' +
-      'calls whatever the count in both worlds’ materials (`delivery.browser.spec.ts`).',
+      'calls whatever the count in both worlds’ materials (`delivery.browser.spec.ts`). Since ' +
+      '#2453 the same load also reads one house marker and one pick-up point from 100 m in ' +
+      'the realistic world; the stylised world’s reading of both is required, in its own describe.',
   },
   {
     spec: 'realistic-lap-race.browser.spec.ts',

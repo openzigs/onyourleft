@@ -107,6 +107,22 @@ export {
 // The bots' race plan (#1960, ADR 0061): a course-only energy budget that
 // sets a bot's power from its tier, the road, the effort distance it has left
 // and its own reserve, and never from any other racer.
+// Each bot's own pace (#2455): an ability at or under its tier and a pacing
+// style read off the course, dealt from the race's seed before the start.
+export type { BotPace, BotPacingStyle } from './pace';
+export {
+  BOT_ABILITY_SPREAD,
+  BOT_CLIMBER_GRADE_PERCENT,
+  BOT_EVEN_PACE,
+  BOT_PACING_STYLES,
+  BOT_SPRINTER_GRADE_PERCENT,
+  BOT_SPRINTER_SPRINT_FACTOR,
+  BOT_STYLE_BUDGET_FACTOR,
+  BOT_STYLE_EASING,
+  botFieldPaces,
+  checkBotPace,
+} from './pace';
+
 export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
 export {
   BOT_PLAN_BANKING,

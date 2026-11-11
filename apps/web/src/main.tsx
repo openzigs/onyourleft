@@ -73,7 +73,7 @@ import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
-import type { GhostTrack } from '@onyourleft/domain';
+import type { GhostTrack, UnixSeconds } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
@@ -164,6 +164,7 @@ import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
+import { calorieRiderFor } from './athlete/calorie-inputs';
 import type { WorkoutGoalsPort } from './workout-goals/workout-goals-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import {
@@ -400,6 +401,10 @@ async function buildPlatform(
       // Stored on the activity so the fitness chart can aggregate to the day
       // the rider actually rode rather than to the day the reader is in.
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // #2433: the rider's calorie inputs, read from the athlete row as the
+      // ride is saved, so the figure is frozen with what they were then.
+      calorieRider: async (startedAt: UnixSeconds) =>
+        calorieRiderFor(await localStore().getAthlete(LOCAL_ATHLETE), startedAt),
     },
   };
 

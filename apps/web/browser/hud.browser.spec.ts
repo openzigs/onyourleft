@@ -1083,7 +1083,8 @@ for (const viewport of [
       });
     });
     expect(primary.map((each) => each.label)).toEqual([
-      'Power',
+      // #2420: the 3 s average, as every ride hands it in.
+      'Power (3 s)',
       'Cadence',
       'Heart rate',
       'Gradient',

@@ -58,6 +58,7 @@
 import {
   expandWorkout,
   holdEligible,
+  type CalorieRider,
   type HeartRateHoldContext,
   type WorkoutTimeline,
   powerZones,
@@ -1013,6 +1014,14 @@ export interface RideSavePort {
   readonly newLapId: () => LapId;
   /** The IANA zone the ride was ridden in. Stored, never inferred later. */
   readonly timeZone: string;
+  /**
+   * The rider as the heart-rate calorie estimate needs them, read from the
+   * athlete row as the ride is saved — #2433, `athlete/calorie-inputs.ts`
+   * §`calorieRiderFor`. Read at save, not at start-up, so the inputs a rider
+   * set in Settings during the ride are the ones the ride is frozen with.
+   * Absent, or a read that fails, and a ride with power still gets its figure.
+   */
+  readonly calorieRider?: ((startedAt: UnixSeconds) => Promise<CalorieRider>) | undefined;
 }
 
 /** Where a finished ride got to. */
@@ -3024,6 +3033,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     outcomeInGame: GhostOutcome | undefined,
     workoutFinished: boolean | undefined,
     replans: readonly ReplanRecord[],
+    rider: CalorieRider,
   ): FinishedRide | undefined => {
     const series = current.session.series();
     return rideToSave({
@@ -3055,7 +3065,27 @@ export function createRideController(options: RideControllerOptions): RideContro
       // #1326: the store marks this checkpoint saved in the ride's own
       // transaction, so a crash after the save cannot offer the ride again.
       recordingSession: current.sessionId,
+      // #2433: the rider the calorie estimate is frozen with.
+      rider,
     });
+  };
+
+  /**
+   * The rider the ride's calorie estimate is worked out with — #2433. A port
+   * with no reader, a recording with no start, and a read that fails all give
+   * none, which costs a heart-rate ride its figure and never costs the save.
+   */
+  const calorieRiderOf = async (port: RideSavePort, current: Recorder): Promise<CalorieRider> => {
+    const startedAt = current.session.startedAt;
+    if (port.calorieRider === undefined || startedAt === undefined) {
+      return {};
+    }
+    try {
+      return await port.calorieRider(startedAt);
+    } catch {
+      // A throw before the promise and a rejection after it are the same loss.
+      return {};
+    }
   };
 
   /**
@@ -3093,6 +3123,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       outcomeInGame,
       workoutFinished,
       replans,
+      await calorieRiderOf(port, current),
     );
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -3112,6 +3143,9 @@ export function createRideController(options: RideControllerOptions): RideContro
             // The figure the ride's page states, from the channel the save
             // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
             averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
+            // #2433: the estimate the save WROTE, so the card and the ride's
+            // page show the same figure.
+            calories: finished.activity.calories,
             gameOutcome: outcomeInGame,
             // #2425: only beside the outcome it was latched with.
             ...(outcomeInGame !== undefined && gameOutcomeDrafted
@@ -3237,7 +3271,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     const outcome = await saveFinishedRide(
       port.store,
       // #1328: with the re-plan record its checkpoint carried.
-      finishedRideOf(port, found, undefined, undefined, undefined, found.replans),
+      finishedRideOf(
+        port,
+        found,
+        undefined,
+        undefined,
+        undefined,
+        found.replans,
+        await calorieRiderOf(port, found),
+      ),
     );
     if (outcome.status === 'empty') {
       return 'nothing';

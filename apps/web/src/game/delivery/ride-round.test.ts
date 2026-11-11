@@ -32,6 +32,7 @@ import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
   type DeliveryRide,
@@ -474,6 +475,62 @@ describe('a round ridden, step by step — #1816', () => {
         'a Delivery ride step runs a whole number of ticks, 0 or more',
       );
     }
+  });
+});
+
+describe('the next house, for the HUD — #2453', () => {
+  it('is the first house on the round, on its own side, the road between it and the rider away', () => {
+    const ride = withoutObstacles(started());
+    const [first] = ride.targets;
+    if (first === undefined) throw new Error('the town gave no house');
+    expect(nextHouse(ride)).toEqual({
+      side: first.side === 1 ? 'right' : 'left',
+      metres: first.distance - ride.along,
+    });
+    // Both sides are said as the side the throw goes to.
+    const sides = new Set(ride.targets.map((target) => target.side));
+    expect(sides.size).toBeGreaterThan(1);
+    for (const target of ride.targets) {
+      const alone = { ...ride, targets: [target] };
+      expect(nextHouse(alone)?.side).toBe(
+        ride.throwTargets.find((each) => each.position === target.position)?.side,
+      );
+    }
+    // Ridden part of the way, it is that much nearer.
+    const nearer = rideTo(ride, first.distance - 30).ride;
+    expect(nextHouse(nearer)?.metres).toBeCloseTo(30, 6);
+  });
+
+  it('moves on to the next house once one is delivered, read off the round the throw changed', () => {
+    const ride = withoutObstacles(started());
+    const first = ride.throwTargets[0] as ThrowTarget;
+    const aimed = rideTo(ride, throwPoint(first));
+    const thrown = rideTo(aimed.ride, aimed.ride.along + SPEED * 1.5, first.side);
+    expect(thrown.ride.round.houses[first.position]).toBe('delivered');
+    const second = ride.targets[1] as DeliveryTarget;
+    expect(nextHouse(thrown.ride)).toEqual({
+      side: second.side === 1 ? 'right' : 'left',
+      metres: second.distance - thrown.ride.along,
+    });
+  });
+
+  it('stays on a house just passed, at nought, until its window closes and it is missed', () => {
+    const ride = withoutObstacles(started());
+    const first = ride.targets[0] as DeliveryTarget;
+    const atClose = rideTo(ride, first.distance + THROW_WINDOW_AFTER_METRES).ride;
+    expect(nextHouse(atClose)?.metres).toBe(0);
+    const past = rideTo(atClose, first.distance + THROW_WINDOW_AFTER_METRES + 0.2).ride;
+    expect(past.round.houses[first.position]).toBe('missed');
+    const second = ride.targets[1] as DeliveryTarget;
+    expect(nextHouse(past)?.metres).toBeCloseTo(second.distance - past.along, 6);
+  });
+
+  it('is none once no house on the round expects a parcel', () => {
+    const ride = withoutObstacles(started());
+    const last = ride.targets.at(-1) as DeliveryTarget;
+    const ended = rideTo(ride, last.distance + THROW_WINDOW_AFTER_METRES + 0.2).ride;
+    expect(roundTally(ended.round).expecting).toBe(0);
+    expect(nextHouse(ended)).toBeUndefined();
   });
 });
 

@@ -212,7 +212,7 @@ describe('a ground blob under every drawn mapped building — #1657', () => {
     // #1581's mixed town: oblongs and Ls turned off the road, so a blob's
     // long and short halves, and its yaw, are each a claim.
     const start = atStartLine(mixed.profile);
-    const frame = sceneFrame({
+    const built = sceneFrame({
       profile: mixed.profile,
       origin: mixed.origin,
       state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
@@ -221,6 +221,15 @@ describe('a ground blob under every drawn mapped building — #1657', () => {
       mappedBuildings: mixedBuildings,
       structureItems: REALISTIC_STRUCTURE_ITEMS,
     });
+    // Ranked from where the rider stands, as before #2429 ranked them by the
+    // road ahead: so some drawn buildings stand behind the ground the frame
+    // built, which the last claim below needs.
+    const view = built.mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    const frame = {
+      ...built,
+      mappedBuildings: { buildings: view.buildings, chunk: view.chunk, x: view.x, z: view.z },
+    };
     const buildings = mixedBuildings;
     const grounding = kept(new GroundBlobBelt());
     const mapped = kept(new MappedBuildingBelt(buildings, textures));

@@ -109,6 +109,7 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
+import { drawnLine } from './drawn-line';
 import { dampedHeading, turnedPose, type GroundHeading } from './camera';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -249,6 +250,7 @@ import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
   type DeliveryRide,
@@ -311,9 +313,12 @@ import {
 } from './hud/recent-trace';
 import {
   DEFAULT_HUD_LAYOUT,
+  powerView,
   readHudLayout,
   type HudLayoutPreference,
+  type HudPowerView,
 } from './hud/hud-layout-preference';
+import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
   pacerGap,
@@ -1038,6 +1043,15 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  * asked for. Keyed on the choice, so changing it is a new screen and a ride
  * in progress is never switched between a real rider and a simulated one.
  */
+
+/**
+ * How long the rider's choice of route must settle before `GameView` builds
+ * its drawn path (`drawn-line.ts`), in milliseconds: **250** — #2422's review.
+ * Chosen: long enough that stepping through the picker builds nothing, short
+ * enough that it is built before a rider who has chosen reaches Ride.
+ */
+export const DRAWN_LINE_WARM_DELAY_MS = 250;
+
 export function GameView(props: GameViewProps): JSX.Element {
   // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
   // for the same simulated ride as the address switch, for one route.
@@ -1293,6 +1307,14 @@ function GameScreen({
   const [state, setState] = useState<GameState | undefined>(undefined);
   /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
   const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
+  /**
+   * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
+   * raw reading. Read by the HUD and the announcer, and by nothing else. A new
+   * ride's clock starts again from nought, and a clock that goes back starts the
+   * average again (`power-average.ts`), so no watt of the last ride is in the
+   * next.
+   */
+  const powerAverageRef = useRef<PowerAverage>(createPowerAverage());
   const [recentTrace, setRecentTrace] = useState<
     { readonly samples: readonly TraceSample[]; readonly written: number } | undefined
   >(undefined);
@@ -1911,6 +1933,12 @@ function GameScreen({
   const draftShownRef = useRef(false);
   /** #2079: the HUD's panels and text size, read as each ride begins. */
   const [hudLayout, setHudLayout] = useState<HudLayoutPreference>(DEFAULT_HUD_LAYOUT);
+  /**
+   * #2420: the rider's power view, for the announcer — the owner's ruling of
+   * 2026-11-09 is that spoken power follows the 3 s / instant choice. A ref,
+   * set where {@link hudLayout} is, because the loop reads it every frame.
+   */
+  const powerViewRef = useRef<HudPowerView>(powerView(DEFAULT_HUD_LAYOUT));
   /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
   const inDraftRef = useRef(false);
   /**
@@ -2162,6 +2190,23 @@ function GameScreen({
     };
   }, [port, corridorRoute, choosing, level]);
 
+  // #2422's review: the path an ordinary ride's riders and camera are drawn
+  // along (`drawn-line.ts`) is built once per route, about 0.2 s on a 100 km
+  // route on a laptop and more on a tablet. Built here, a moment after the
+  // rider's choice settles, it is waiting for the ride's first frame rather
+  // than stalling it; flicking through the picker builds nothing. Cached
+  // against the profile object, which is the one `start` rides.
+  useEffect(() => {
+    if (corridorRoute === undefined || !choosing) return;
+    const profile = corridorRoute.profile;
+    const timer = window.setTimeout(() => {
+      drawnLine(profile);
+    }, DRAWN_LINE_WARM_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [corridorRoute, choosing]);
+
   // #2294: with a Delivery round chosen, every saved route's houses for a
   // round, counted on this device through the same corridor port, one route
   // at a time, while the rider chooses — and abandoned, as the read above
@@ -2291,7 +2336,9 @@ function GameScreen({
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
       draftShownRef.current = readDraftReadingChoice(deviceStorage());
       // #2079: the rider's panels and text size, as Settings left them.
-      setHudLayout(readHudLayout(deviceStorage()));
+      const layout = readHudLayout(deviceStorage());
+      setHudLayout(layout);
+      powerViewRef.current = powerView(layout);
       // #551: a link already lost when the ride starts is on the HUD's line,
       // and is not news — only a link that goes DURING this ride is said.
       sideLostRef.current = sideCameraLost(
@@ -3093,6 +3140,14 @@ function GameScreen({
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a
       // second, and a reading that is not live is a gap, never a zero.
+      // #2420: the HUD's 3 s power, from the reading the simulation was just
+      // advanced with, on the ride's clock. AFTER `advanceTo`, and nothing it
+      // says goes back: the physics, the trainer and the recording keep the
+      // raw reading in either view (`power-average.ts`).
+      powerAverageRef.current.observe(
+        simulation.state.elapsed,
+        sensors.rider.live ? sensors.rider.power : undefined,
+      );
       const traceSecond = sampleSecond(recentTraceRef.current.second, simulation.state.elapsed);
       if (traceSecond !== undefined) {
         const trace = recentTraceRef.current;
@@ -3113,12 +3168,15 @@ function GameScreen({
       // no frame runs while the game is paused, so nothing announces then,
       // and the pause is counted on resume), from the same
       // readings the HUD renders. Pure: its carry-over lives in the ref.
+      // #2420: spoken power is the power the HUD shows, 3 s or instant as the
+      // rider chose (owner ruling, 2026-11-09), from the same average.
       const readings = hudReadings({
         state: simulation.state,
         profile: chosen.profile,
         cadence: sensors.cadence,
         heartRate: sensors.heartRate,
         units: unitsRef.current,
+        shownPower: { view: powerViewRef.current, average: powerAverageRef.current.average },
       });
       // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
       const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
@@ -4268,6 +4326,11 @@ function GameScreen({
         recent={recentTrace}
         // #2079: the rider's panels and text size.
         layout={hudLayout}
+        // #2420: power as a 3 s average or instant, as the rider chose.
+        shownPower={{
+          view: powerView(hudLayout),
+          average: powerAverageRef.current.average,
+        }}
         // #2077: the rider's W/kg from the weight the physics rides (`undefined`
         // when none is set, never the default), and the zone indicator from
         // their own threshold and the recorder's time in each zone.
@@ -4327,6 +4390,8 @@ function GameScreen({
                 round: deliveryRef.current.round,
                 week: deliveryRef.current.week,
                 score: deliveryRef.current.score,
+                // #2453: where the next house is, so the rider knows where to throw.
+                next: nextHouse(deliveryRef.current),
               },
               throwing: throwPortRef.current,
               steering: steerPortRef.current,

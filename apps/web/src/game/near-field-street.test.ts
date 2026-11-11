@@ -1161,10 +1161,12 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // it always had: 23 people and 282 mapped buildings until then. Re-pinned
       // again by #545 when the rides took `GameView`'s damped camera rather
       // than `sceneFrame`'s undamped one (`chase-camera-testing.ts`): 22 and
-      // 289 on the undamped camera.
+      // 289 on the undamped camera. Re-pinned by #2422, whose camera stands on
+      // the drawn path the rider rides, its eye held in from the kerb: 21 and
+      // 298 until then. The cull drops every one of them (above).
       expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
-        person: 21,
-        'mapped building': 298,
+        person: 25,
+        'mapped building': 442,
       });
     },
     ALL_RIDES_TIMEOUT,

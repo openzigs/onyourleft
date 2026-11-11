@@ -51,6 +51,7 @@
 
 import { useEffect, useId, useState, type JSX } from 'react';
 
+import { CaloriesLine } from '../detail/CaloriesFact';
 import { Button, ButtonLink } from '../design/Button';
 import { Reading } from '../design/Reading';
 import {
@@ -126,9 +127,18 @@ export function RideResultCard({
 
   return (
     <div className="oyl-result" role="group" aria-labelledby={headingId} data-oyl-result-card="">
-      <h3 id={headingId} className="oyl-result__heading">
-        Ride saved
-      </h3>
+      {/* #2433: the estimate the save wrote, as the ride's page shows it, on
+        the heading's line — `CaloriesFact.tsx` §`CaloriesLine` says why. */}
+      <div className="oyl-result__head">
+        <h3 id={headingId} className="oyl-result__heading">
+          Ride saved
+        </h3>
+        <CaloriesLine
+          calories={result.calories}
+          hasPower={result.averagePower !== undefined}
+          hasHeartRate={result.averageHeartRate !== undefined}
+        />
+      </div>
       <dl className="oyl-result__facts">
         {/* #1437's review: the moving time, named as on Home and History —
             Home's "Last ride" pattern, the time alone. History's "of …

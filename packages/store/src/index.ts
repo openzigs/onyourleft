@@ -27,6 +27,8 @@ export type {
 // --- Records ----------------------------------------------------------------
 
 export type {
+  ActivityCalories,
+  ActivityCaloriesBasis,
   ActivityRecord,
   ActivitySummary,
   RideFacts,
@@ -74,6 +76,7 @@ export type {
   WorldCorridorTileState,
 } from './records';
 export {
+  ACTIVITY_CALORIES_BASES,
   CAMERA_FRAME_SOURCES,
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
   isBirthYear,

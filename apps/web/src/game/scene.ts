@@ -62,6 +62,8 @@ import type {
   WaterFrame,
 } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import { FOLIAGE_SWAY_METRES } from './foliage-light';
+import { sceneryPlanRadius } from './near-field';
 import {
   LINE_LIMIT_METRES,
   leanAt,
@@ -72,7 +74,17 @@ import {
 } from './racing-line';
 import { ghostClock, type GameState } from './simulation';
 import {
+  drawnLine,
+  drawnLineAt,
+  drawnPlaceOf,
+  isDrawnLine,
+  type DrawnLine,
+  type DrawnPoint,
+} from './drawn-line';
+import {
   ROAD_WIDTH_METRES,
+  corridorOrigin,
+  drawnRoadFrame,
   roadCorridor,
   type CorridorOrigin,
   type CorridorPoint,
@@ -91,6 +103,9 @@ import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
   mappedJunctions,
+  onSideRoad,
+  SIDE_ROAD_SCENERY_MARGIN_METRES,
+  sideRoadClearance,
   sideRoadsAt,
   type SideRoad,
 } from './cross-streets';
@@ -112,11 +127,14 @@ import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
+  clearOfDriveways,
   clearOfMappedBuildings,
+  MAPPED_AHEAD_STEP_METRES,
   mappedChunk,
   type MappedBuildings,
   type MappedBuildingsInView,
 } from './mapped-buildings';
+import { MAPPED_RANKED_AHEAD_METRES } from './realistic-budget';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -464,6 +482,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     (riders[0] as PlacedRider).lateral,
     // #2396: the eye moved off a parked car, where a Delivery round says so.
     input.cameraLateral,
+    // #2422: on the path the rider is drawn along, where they are drawn on one.
+    drawnPathOf(input),
   );
   // #458. Built from the corridor just built, so the ground's innermost
   // column is the road's outermost one — `landform.ts` says why that is the
@@ -572,6 +592,39 @@ function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFr
 }
 
 /**
+ * What every frame's scenery asks of the side roads in view, remembered —
+ * #2439. Not a cache keyed on a route: its answers are keyed on the side
+ * roads themselves, and each frame drops those of every road it no longer
+ * sees, so a new route's first frame finds none to reuse.
+ */
+const SCENERY_CLEARANCE = sideRoadClearance(onSideRoad);
+
+/**
+ * How far off a side road's edge a tree, shrub or rock stands, in metres —
+ * #2428: its whole drawn reach at its scale, the larger of the two worlds'
+ * (`near-field.ts` §`sceneryReach`: one arrangement draws both, ADR 0026
+ * D-3), with the realistic foliage's sway ({@link FOLIAGE_SWAY_METRES}), and
+ * never less than `cross-streets.ts` §`SIDE_ROAD_SCENERY_MARGIN_METRES`.
+ *
+ * Measured as a point 1.5 m clear, a fir at the top of its scale reaches
+ * 5.1 m, 3.6 m across the side road: more than a driveway's whole 3.5 m.
+ * That is the likeliest of what the owner saw drawn across crossings and
+ * driveways (2026-11-09); a shrub's reach is 1.54 m at its largest, so it
+ * keeps the 1.5 m and a little more.
+ */
+export function sideRoadNaturalMargin(item: ScatterItem): number {
+  // A radius, not the box's half-width: foliage at a diagonal of the box
+  // stands up to √2 times that from the trunk (as `near-field.ts` §`intrudes`
+  // reasons). A rock does not sway.
+  const reach = Math.max(
+    sceneryPlanRadius(item.kind, 'realistic'),
+    sceneryPlanRadius(item.kind, 'stylised'),
+  );
+  const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
+}
+
+/**
  * The scenery for exactly the stretch of road this frame drew.
  *
  * ⚠️ **The span comes from the corridor rather than from `VIEW_AHEAD_METRES` and
@@ -617,6 +670,7 @@ function scenery(
     ),
     sideRoads,
     BILLBOARD_FOOTPRINT,
+    SCENERY_CLEARANCE,
   );
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
@@ -640,7 +694,12 @@ function scenery(
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
-  const built = clearOfSideRoads(placed, sideRoads);
+  // #2428: and none across a mapped building's driveway, a roadside hedge
+  // row the likeliest.
+  const built = clearOfDriveways(
+    clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
+    input.mappedBuildings,
+  );
   // #1549: and off every mapped building's ground, by #1534's rule — whose
   // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
@@ -649,8 +708,12 @@ function scenery(
       : clearOfMappedBuildings(
           clearOfSettlements(natural, footprints, land),
           input.mappedBuildings,
+          // #2428: off a driveway by its drawn reach, as off a side road.
+          sideRoadNaturalMargin,
         ),
     sideRoads,
+    SCENERY_CLEARANCE,
+    sideRoadNaturalMargin,
   );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
@@ -658,14 +721,40 @@ function scenery(
   };
 }
 
-/** The mapped buildings, with the rider's chunk and drawn place. @see SceneFrame.mappedBuildings */
+/**
+ * The mapped buildings, with the rider's chunk and drawn place, and since
+ * #2429 the road ahead a refill ranks them by. @see SceneFrame.mappedBuildings
+ */
 function mappedInView(
   buildings: MappedBuildings,
   corridor: RoadCorridor,
   riderDistance: number,
 ): MappedBuildingsInView {
   const here = placeOnCorridor(corridor, riderDistance);
-  return { buildings, chunk: mappedChunk(riderDistance), x: here.x, z: here.z };
+  return {
+    buildings,
+    chunk: mappedChunk(riderDistance),
+    x: here.x,
+    z: here.z,
+    ahead: routeAhead(corridor, riderDistance),
+  };
+}
+
+/**
+ * The drawn road from `riderDistance` {@link MAPPED_RANKED_AHEAD_METRES} on,
+ * a point every {@link MAPPED_AHEAD_STEP_METRES}, as `x, z` pairs — #2429.
+ * Read off the corridor, so it is the road this frame drew; past the end of a
+ * point-to-point route its points stand on the last one.
+ */
+function routeAhead(corridor: RoadCorridor, riderDistance: number): Float32Array {
+  const steps = Math.round(MAPPED_RANKED_AHEAD_METRES / MAPPED_AHEAD_STEP_METRES);
+  const ahead = new Float32Array((steps + 1) * 2);
+  for (let step = 0; step <= steps; step += 1) {
+    const at = placeOnCorridor(corridor, riderDistance + step * MAPPED_AHEAD_STEP_METRES);
+    ahead[step * 2] = at.x;
+    ahead[step * 2 + 1] = at.z;
+  }
+  return ahead;
 }
 
 /**
@@ -751,17 +840,30 @@ export function cameraPose(
   atDistance: number,
   lateralMetres: number,
   eyeLateralMetres: number = lateralMetres,
+  path?: DrawnLine,
 ): CameraPose {
-  const rider = chaseRider(corridor, atDistance, lateralMetres);
+  const rider = chaseRider(corridor, atDistance, lateralMetres, path);
   const { tangent } = rider;
   // #2396: the eye stands behind the rider, or across the road from there
   // where a Delivery round moves it off a parked car (`SceneInput.cameraLateral`).
   // The target below stays on the rider's line either way.
   const behind =
     eyeLateralMetres === lateralMetres ? rider : chaseRider(corridor, atDistance, eyeLateralMetres);
-  const eyeX = behind.x - tangent.headingX * CAMERA_BEHIND_METRES;
-  const eyeZ = behind.z - tangent.headingZ * CAMERA_BEHIND_METRES;
-  const target = roadTarget(corridor, atDistance, lateralMetres, tangent, eyeX, eyeZ);
+  // #2422: on a drawn path the eye stands ON it, the chase distance back —
+  // on the tarmac the rider has just ridden — held a little in from the kerb
+  // (@see eyeOnDrawnPath).
+  const eyeOnPath =
+    path === undefined ? undefined : eyeOnDrawnPath(path, atDistance - CAMERA_BEHIND_METRES);
+  const eyeX = eyeOnPath?.x ?? behind.x - tangent.headingX * CAMERA_BEHIND_METRES;
+  const eyeZ = eyeOnPath?.z ?? behind.z - tangent.headingZ * CAMERA_BEHIND_METRES;
+  // The axis the rider is kept near is the eye's line to them: the tangent,
+  // except where the eye stands on a drawn path behind them.
+  const toRider = Math.hypot(rider.x - eyeX, rider.z - eyeZ);
+  const axis =
+    eyeOnPath === undefined || !(toRider > 1e-6)
+      ? tangent
+      : { headingX: (rider.x - eyeX) / toRider, headingZ: (rider.z - eyeZ) / toRider };
+  const target = roadTarget(corridor, atDistance, lateralMetres, axis, eyeX, eyeZ, path);
   const dx = target.x - eyeX;
   const dz = target.z - eyeZ;
   const range = Math.hypot(dx, dz);
@@ -784,6 +886,11 @@ export function cameraPose(
     // behind the rider and 400 m ahead, so both reads are inside it everywhere
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
+    // ⚠️ At the odometer's place, on a drawn path too — #2422's review. It
+    // sets only the camera's pitch and draws nothing, and read where the
+    // pacing puts the eye it moved the eye's height by the shift times the
+    // grade, which `landform.test.ts`' far-leg rays on a 140–150° climb to a
+    // level far leg, at a third of a metre of margin, could not take.
     eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
     targetRoadY: target.y,
   };
@@ -803,6 +910,7 @@ export function chaseRider(
   corridor: RoadCorridor,
   atDistance: number,
   lateralMetres: number,
+  path?: DrawnLine,
 ): {
   readonly x: number;
   readonly y: number;
@@ -810,6 +918,23 @@ export function chaseRider(
   readonly tangent: { readonly headingX: number; readonly headingZ: number };
 } {
   const here = placeOnCorridor(corridor, atDistance);
+  if (path !== undefined) {
+    // #2422: the rider's own place on the drawn path, and the path's own
+    // direction — continuous, where the corridor's steps at every point —
+    // moved off it, along its normal, by whatever keeps level riders apart,
+    // exactly as `markerAt` moves the rider's marker.
+    const on = drawnLineAt(path, clampedTo(corridor, atDistance));
+    const aside = lateralMetres - lineOffsetAt(path, atDistance);
+    const x = on.x - on.headingZ * aside;
+    const z = on.z + on.headingX * aside;
+    return {
+      x,
+      // At the road's height where they are drawn, not at the odometer's.
+      y: drawnHeight(corridor, path, atDistance, { x, z }),
+      z,
+      tangent: on,
+    };
+  }
   const tangent = headingAt(corridor, here.index);
   return {
     x: here.x - tangent.headingZ * lateralMetres,
@@ -845,6 +970,7 @@ function roadTarget(
   tangent: { readonly headingX: number; readonly headingZ: number },
   eyeX: number,
   eyeZ: number,
+  path?: DrawnLine,
 ): RoadTarget {
   const at = (reach: number): RoadTarget => {
     const placed = placeOnCorridor(corridor, atDistance + reach);
@@ -854,6 +980,17 @@ function roadTarget(
     const from = corridor.centre[placed.index] as CorridorPoint;
     const to = corridor.centre[placed.index + 1];
     const pastTheEnd = to === undefined || Math.hypot(to.x - from.x, to.z - from.z) < 1e-6;
+    if (path !== undefined) {
+      // #2422: ON the drawn path, the line the rider will ride, which is
+      // smooth where the road's own centreline wanders with the track.
+      const ahead = drawnLineAt(path, clampedTo(corridor, atDistance + reach));
+      return {
+        x: ahead.x,
+        y: drawnHeight(corridor, path, atDistance + reach, ahead),
+        z: ahead.z,
+        pastTheEnd,
+      };
+    }
     const across = pastTheEnd ? tangent : headingAt(corridor, placed.index);
     return {
       x: placed.x - across.headingZ * lateralMetres,
@@ -1034,7 +1171,10 @@ const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = {
 export function placedRiders(input: SceneInput, corridor: RoadCorridor): readonly PlacedRider[] {
   // #499. Computed once per route and cached against the profile object
   // (`racing-line.ts` §`racingLine`), so this is the first frame's cost only.
-  const line = input.centreline === true ? undefined : racingLine(input.profile);
+  // #2422: the drawn path's line wherever the riders are eased, which is the
+  // line they are drawn on; `racingLine` where they are not.
+  const line =
+    input.centreline === true ? undefined : (easingLine(input) ?? racingLine(input.profile));
   return ridersOnTheRoad(corridor, input, drawnRider(input), line);
 }
 
@@ -1051,10 +1191,19 @@ export function placedRiders(input: SceneInput, corridor: RoadCorridor): readonl
  * and none when {@link SceneInput.uneased} asks for the riders as they were
  * before #1998.
  */
-function easingLine(input: SceneInput): RacingLine | undefined {
+function easingLine(input: SceneInput): DrawnLine | undefined {
   if (input.centreline === true || input.uneased === true) return undefined;
   if (input.steeredLateral !== undefined || input.raceBots !== undefined) return undefined;
-  return racingLine(input.profile);
+  return drawnLine(input.profile);
+}
+
+/**
+ * The path the riders are drawn along and the camera follows — #2422
+ * (`drawn-line.ts`) — wherever they are eased, and none where they are drawn
+ * beside the road as before. @see easingLine
+ */
+export function drawnPathOf(input: SceneInput): DrawnLine | undefined {
+  return easingLine(input);
 }
 
 /**
@@ -1260,7 +1409,7 @@ function ridersOnTheRoad(
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
-    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, {
+    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
       rideSeconds: rideClock,
@@ -1542,9 +1691,38 @@ function markerAt(
   kind: RiderMarker['kind'],
   across: Across,
   roll: RiderRoll,
+  line: RacingLine | undefined,
   motion: Pick<RiderMarker, 'pedalling' | 'rideSeconds' | 'riding'>,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
+  if (line !== undefined && isDrawnLine(line)) {
+    // #2422: ON the drawn path, facing along it, and moved off it only by
+    // what keeps level riders apart (@see lateralOf), along the path's own
+    // normal. The rider alone is exactly on it.
+    // Clamped to the corridor, as `placeOnCorridor` clamps: a bot far up the
+    // road is drawn at its far end, "somewhere up there".
+    const on = drawnLineAt(line, clampedTo(corridor, atDistance));
+    const aside = across.metres - lineOffsetAt(line, atDistance);
+    const facing = turnedBy(on, facingTurn(Math.atan(across.rate - lineSlopeAt(line, atDistance))));
+    const x = on.x - on.headingZ * aside;
+    const z = on.z + on.headingX * aside;
+    return {
+      kind,
+      x,
+      // #2422's review: at the road's height WHERE it is drawn. The pacing
+      // puts it a few metres along the road from its odometer in a corner,
+      // and read at the odometer it floated 0.3 m over a climbing junction.
+      y: drawnHeight(corridor, line, atDistance, { x, z }),
+      z,
+      headingX: facing.headingX,
+      headingZ: facing.headingZ,
+      lean: roll.bicycle,
+      bodyLean: roll.body,
+      pedalling: motion.pedalling,
+      rideSeconds: motion.rideSeconds,
+      riding: motion.riding,
+    };
+  }
   // ⚠️ The road's heading at **this** marker's own distance, not the
   // camera's — #349. @see RiderMarker.headingX
   const road = headingAt(corridor, at.index);
@@ -1579,6 +1757,120 @@ function markerAt(
     pedalling: motion.pedalling,
     rideSeconds: motion.rideSeconds,
     riding: motion.riding,
+  };
+}
+
+/**
+ * How far from the drawn road's centreline the chase camera's eye stands
+ * unheld on a drawn path, and how much further it may go, in metres: **2.0**
+ * and **0.5** — #2422. @see eyeOnDrawnPath
+ */
+const EYE_HELD_FROM_METRES = 2;
+const EYE_HELD_ROOM_METRES = 0.5;
+
+/**
+ * Where the chase camera's eye stands on a drawn path — #2422: the path's own
+ * place at `atDistance`, which is the chase distance behind the rider, moved
+ * in toward the centreline where the path is near the kerb, by a smooth
+ * saturation `from + room · tanh((|offset| − from) / room)` beyond
+ * {@link EYE_HELD_FROM_METRES}, so it is never more than 2.5 m out and has no
+ * kink where it starts to be held. Before the start of a point-to-point route
+ * — the first few metres of a ride — it stands straight back from the path's
+ * first place, as it stood straight back from the rider before.
+ *
+ * ⚠️ **Why on the path, and why held.** Before #2422 the eye stood straight
+ * back along the ROAD from the rider, and stepped sideways at every corridor
+ * point the road turns at: through a jittered junction the camera turned at
+ * its 90°/s cap (`drawn-line.test.ts`). On the path it turns with the rider.
+ * But the line takes the rider to 2.9 m from the centre at a bend's apex, and
+ * an eye there, 0.6 m from the edge of the carriageway, put a lamp post on the
+ * pavement of a planner's bend inside a 6 : 1 frame's near plane
+ * (`near-field-street.test.ts`). Wherever the line is nearer the centre than
+ * 2 m — every straight, where it holds 1.75 m — the eye is exactly on the path.
+ */
+function eyeOnDrawnPath(path: DrawnLine, atDistance: number): DrawnPoint {
+  const before = path.profile.loop ? 0 : Math.min(0, atDistance);
+  const start = drawnLineAt(path, atDistance - before);
+  const on = {
+    ...start,
+    x: start.x + start.headingX * before,
+    z: start.z + start.headingZ * before,
+  };
+  const road = drawnRoadFrame(path.profile, corridorOrigin(path.profile), atDistance - before);
+  if (road === undefined) return on;
+  const offset = (on.x - road.x) * road.normalX + (on.z - road.z) * road.normalZ;
+  const out = Math.abs(offset) - EYE_HELD_FROM_METRES;
+  if (!(out > 0)) return on;
+  const held =
+    Math.sign(offset) *
+    (EYE_HELD_FROM_METRES + EYE_HELD_ROOM_METRES * Math.tanh(out / EYE_HELD_ROOM_METRES));
+  return {
+    ...on,
+    x: on.x + (held - offset) * road.normalX,
+    z: on.z + (held - offset) * road.normalZ,
+  };
+}
+
+/**
+ * The road's height directly under a point drawn on `path` for drawn odometer
+ * `atDistance` — #2422's review. From where along the road the path says it is
+ * (@see drawnPlaceOf), the place is moved along the corridor by how far the
+ * point is ahead of the corridor's point there, {@link HEIGHT_STEPS} times, so
+ * the height is the corridor's at the point nearest it in plan: the pacing
+ * moves a rider metres along the road within one profile sample at a corner,
+ * which no table of samples follows closely enough.
+ */
+function drawnHeight(
+  corridor: RoadCorridor,
+  path: DrawnLine,
+  atDistance: number,
+  point: { readonly x: number; readonly z: number },
+): number {
+  const estimate = drawnPlaceOf(path, atDistance);
+  let along = clampedTo(corridor, estimate);
+  for (let step = 0; step < HEIGHT_STEPS; step += 1) {
+    const here = placeOnCorridor(corridor, along);
+    const road = headingAt(corridor, here.index);
+    const moved = along + (point.x - here.x) * road.headingX + (point.z - here.z) * road.headingZ;
+    // Never far from where the path says it is, so a sharp bend's other leg,
+    // nearer in plan, is never the road read.
+    along = clampedTo(
+      corridor,
+      Math.min(estimate + HEIGHT_REACH_METRES, Math.max(estimate - HEIGHT_REACH_METRES, moved)),
+    );
+  }
+  return placeOnCorridor(corridor, along).y;
+}
+
+/** How many steps along the corridor {@link drawnHeight} takes: **4**. */
+const HEIGHT_STEPS = 4;
+
+/**
+ * The most {@link drawnHeight} moves from the path's own place, in metres:
+ * **4**. The pacing's shift between two samples is a few metres through a
+ * corner, which a table of samples cannot follow closely enough, and more
+ * than that is the other leg of a sharp bend.
+ */
+const HEIGHT_REACH_METRES = 4;
+
+/** An odometer reading held inside the corridor's first and last points, as {@link placeOnCorridor} holds a place. */
+function clampedTo(corridor: RoadCorridor, atDistance: number): number {
+  const first = corridor.centre[0];
+  const last = corridor.centre[corridor.centre.length - 1];
+  if (first === undefined || last === undefined) return atDistance;
+  return Math.min(last.along, Math.max(first.along, atDistance));
+}
+
+/** A heading turned by `turn` radians toward its normal `(−headingZ, headingX)`. */
+function turnedBy(
+  heading: Pick<DrawnPoint, 'headingX' | 'headingZ'>,
+  turn: number,
+): { readonly headingX: number; readonly headingZ: number } {
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
+  return {
+    headingX: heading.headingX * cos - heading.headingZ * sin,
+    headingZ: heading.headingZ * cos + heading.headingX * sin,
   };
 }
 

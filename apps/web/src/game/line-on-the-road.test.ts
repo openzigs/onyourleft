@@ -35,6 +35,7 @@ import {
   pedallingShare,
 } from './bicycle';
 import { easedPlace } from './bend-easing';
+import { drawnLine, drawnLineAt } from './drawn-line';
 import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
@@ -55,13 +56,37 @@ import {
 } from './route-fixtures-testing';
 import {
   FACING_TURN_LIMIT_RADIANS,
-  drawnRiderDistance,
+  drawnRiderDistance as productDrawnRiderDistance,
   facingTurn,
-  placedRiders,
-  sceneFrame,
+  placedRiders as productPlacedRiders,
+  sceneFrame as productSceneFrame,
+  type SceneInput,
 } from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
+
+/**
+ * ⚠️ **The line BESIDE the road, which since #2422 is not an ordinary ride's.**
+ * An ordinary ride is drawn on `drawn-line.ts`' path (`scene.ts`
+ * §`easingLine`), held by `drawn-line.test.ts` and `bend-easing.test.ts`. What
+ * this file holds — the rider at `racingLine`'s offset across the road at
+ * their own distance — is how a Delivery round, a lap race and the
+ * `uneased: true` control draw, so every frame here is built with
+ * `uneased: true` unless a test asks otherwise. The three below are
+ * `scene.ts`' own, with that one default.
+ */
+function sceneFrame(input: SceneInput): ReturnType<typeof productSceneFrame> {
+  return productSceneFrame({ uneased: true, ...input });
+}
+function placedRiders(
+  input: SceneInput,
+  corridor: RoadCorridor,
+): ReturnType<typeof productPlacedRiders> {
+  return productPlacedRiders({ uneased: true, ...input }, corridor);
+}
+function drawnRiderDistance(input: SceneInput): number {
+  return productDrawnRiderDistance({ uneased: true, ...input });
+}
 
 const RADIUS = 20;
 const hairpin = hairpinRoute(RADIUS);
@@ -208,14 +233,18 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     const botAt = APEX + 40;
     const frame = frameOf(hairpin, stateAt(hairpin, APEX - 40, 6, { distance: botAt, speed: 11 }), {
       botDistance: botAt,
+      // An ordinary ride, eased (#1998) and drawn on the drawn path (#2422).
+      uneased: false,
     });
     const bot = markerOf(frame, 'bot');
-    const line = racingLine(hairpin);
+    const line = drawnLine(hairpin);
     // #1998: at the place and speed its OWN odometer and speed are eased to,
     // by the one rule the rider is — eased back here, coming out of the bend.
     const place = easedPlace(line, botAt, 11);
     expect(place.distance).toBeLessThan(botAt - 1);
-    expect(across(frame, bot, place.distance)).toBeCloseTo(lineOffsetAt(line, place.distance), 6);
+    const on = drawnLineAt(line, place.distance);
+    expect(bot.x).toBeCloseTo(on.x, 6);
+    expect(bot.z).toBeCloseTo(on.z, 6);
     expect(combinedLean(bot.lean, bot.bodyLean)).toBeCloseTo(
       leanAt(line, place.distance, place.speed),
       12,
@@ -232,12 +261,18 @@ describe('the bot and the ghost ride it too, at their own speeds — #499', () =
     const ghost = buildGhostTrack({ elapsedSeconds: [0, 200], distanceMetres: [0, 2_000] });
     const clock = (APEX + 20) / 10;
     const ghostAt = clock * 10;
-    const frame = frameOf(hairpin, stateAt(hairpin, APEX - 100, 5, undefined, clock), { ghost });
+    const frame = frameOf(hairpin, stateAt(hairpin, APEX - 100, 5, undefined, clock), {
+      ghost,
+      // An ordinary ride, eased (#1998) and drawn on the drawn path (#2422).
+      uneased: false,
+    });
     const drawn = markerOf(frame, 'ghost');
-    const line = racingLine(hairpin);
+    const line = drawnLine(hairpin);
     // #1998: eased from its own odometer and replayed speed, as the rider is.
     const place = easedPlace(line, ghostAt, 10);
-    expect(across(frame, drawn, place.distance)).toBeCloseTo(lineOffsetAt(line, place.distance), 6);
+    const on = drawnLineAt(line, place.distance);
+    expect(drawn.x).toBeCloseTo(on.x, 6);
+    expect(drawn.z).toBeCloseTo(on.z, 6);
     expect(combinedLean(drawn.lean, drawn.bodyLean)).toBeCloseTo(
       leanAt(line, place.distance, place.speed),
       9,

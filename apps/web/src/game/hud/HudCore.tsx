@@ -670,7 +670,13 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
       className={fieldClass(reading)}
       data-grade-band={reading.grade === undefined ? undefined : bandOf(reading)}
     >
-      <dt className="oyl-hud__label">{reading.label}</dt>
+      <dt className="oyl-hud__label">
+        {reading.label}
+        {reading.qualifier === undefined ? null : (
+          // #2420: the power field's view, in the term and out of its capitals.
+          <span className="oyl-hud__label-qualifier"> ({reading.qualifier})</span>
+        )}
+      </dt>
       <dd
         className={
           // #259. A word does not fit the slot a number fits — the class

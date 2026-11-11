@@ -38,7 +38,9 @@ export type LapRaceErrorCode =
   /** A bot plan's tick that is not a finite number of seconds of at least zero (#1960). */
   | 'elapsed-out-of-range'
   /** A bot's reserve that is not between nought and its plan's budget (#1960). */
-  | 'reserve-out-of-range';
+  | 'reserve-out-of-range'
+  /** A bot's pace with a style the model does not name, or an ability outside its band (#2455). */
+  | 'pace-out-of-range';
 
 /** Raised by the lap-race model. @see LapRaceErrorCode */
 export class LapRaceError extends Error {

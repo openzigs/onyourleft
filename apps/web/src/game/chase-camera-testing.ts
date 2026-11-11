@@ -26,7 +26,13 @@
 
 import { dampedHeading, turnedPose, type GroundHeading } from './camera';
 import type { CameraPose } from './port';
-import { cameraPose, drawnRiderDistance, placedRiders, type SceneInput } from './scene';
+import {
+  cameraPose,
+  drawnPathOf,
+  drawnRiderDistance,
+  placedRiders,
+  type SceneInput,
+} from './scene';
 import { roadCorridor } from './terrain';
 
 /**
@@ -52,7 +58,7 @@ export function undampedCamera(input: SceneInput): CameraPose {
   const riderDistance = drawnRiderDistance(input);
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
   const lateral = placedRiders(input, corridor)[0]?.lateral ?? 0;
-  return cameraPose(corridor, riderDistance, lateral);
+  return cameraPose(corridor, riderDistance, lateral, lateral, drawnPathOf(input));
 }
 
 /**

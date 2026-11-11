@@ -26,6 +26,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilograms,
   metres,
   metresPerSecond,
   powerZones,
@@ -42,6 +43,7 @@ import {
   unixSeconds,
   watts,
   type RouteProfile,
+  type UnixSeconds,
   type Watts,
   type WorkoutBlock,
   REPLAN_MOVE_INTERVAL_SECONDS,
@@ -8645,6 +8647,34 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       ).toEqual([activityId('ride-1')]);
       expect(await held()).toEqual([]);
     });
+
+    // #2433's review: the rider the port reads is part of what the recovered
+    // ride is saved with, so a strap-only ride keeps its heart-rate estimate.
+    it('keeps a strap-only ride’s heart-rate estimate, with the rider the port reads (#2433)', async () => {
+      const first = benchWith({ devices: 'strap' });
+      await first.controller.pair('heart-rate');
+      await first.controller.start();
+      await ride(first, 10);
+      first.controller.dispose();
+      const id = first.sessionIds[0]!;
+      const port = keepingPort(async (owner, ride, at) =>
+        harness.write(async (store) => store.moveActivityToRecentlyDeleted(owner, ride, at)),
+      );
+      const next = benchWith({
+        rideSave: {
+          ...port,
+          calorieRider: () => Promise.resolve({ sex: 'male', ageYears: 40, mass: kilograms(80) }),
+        },
+        devices: 'strap',
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(true);
+      next.controller.dispose();
+
+      const [kept] = await held();
+      expect(kept?.summary.calories?.basis).toBe('heart-rate');
+      expect(kept?.summary.calories?.energy).toBeGreaterThan(0);
+    });
   });
 
   /**
@@ -10339,8 +10369,11 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
       averagePower: record.averagePower,
       // The bench's trainer reports no heart rate, so there is none to state.
       averageHeartRate: undefined,
+      // #2433: the estimate the save wrote, from the trainer's power.
+      calories: record.calories,
       gameOutcome: undefined,
     });
+    expect(record.calories?.basis).toBe('power');
     rig.controller.dispose();
 
     const { port: refusing } = savePort({
@@ -10355,6 +10388,69 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(failing.controller.getSnapshot().saveState).toBe('failed');
     expect(failing.controller.getSnapshot().savedRide).toBeUndefined();
     failing.controller.dispose();
+  });
+
+  it('#2433: a strap-only ride is estimated with the rider the port reads at save, and the card states it', async () => {
+    const written: NewActivity[] = [];
+    const asked: UnixSeconds[] = [];
+    const { port } = savePort({
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
+      },
+    });
+    const rig = benchWith({
+      rideSave: {
+        ...port,
+        calorieRider: (startedAt) => {
+          asked.push(startedAt);
+          return Promise.resolve({ sex: 'male', ageYears: 40, mass: kilograms(80) });
+        },
+      },
+      devices: 'strap',
+    });
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const record = written[0]!;
+    expect(asked).toHaveLength(1);
+    expect(record.averagePower).toBeUndefined();
+    expect(record.calories?.basis).toBe('heart-rate');
+    expect(record.calories!.energy).toBeGreaterThan(0);
+    expect(rig.controller.getSnapshot().savedRide?.calories).toStrictEqual(record.calories);
+    rig.controller.dispose();
+  });
+
+  it('#2433: a rider read that fails costs a strap-only ride its figure, never the save', async () => {
+    const written: NewActivity[] = [];
+    const { port } = savePort({
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
+      },
+    });
+    const rig = benchWith({
+      rideSave: {
+        ...port,
+        calorieRider: () => {
+          throw new Error('blocked, before any promise');
+        },
+      },
+      devices: 'strap',
+    });
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(written[0]).toBeDefined();
+    expect(written[0]).not.toHaveProperty('calories');
+    rig.controller.dispose();
   });
 
   it('states the mean of the heart rate the ride actually recorded', async () => {

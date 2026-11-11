@@ -53,6 +53,16 @@
  * ({@link HUD_PANELS}' `route`) sees no route panel in either. While a
  * workout runs its strip holds the panel, and the panel is drawn full.
  *
+ * ## Power — #2420
+ *
+ * A 3-second average or instant ({@link HUD_POWER_VIEWS}). **The average** is
+ * the default, as on a head unit (`power-average.ts` says why), and **instant**
+ * is the reading as it arrives, as the HUD drew it before #2420. It changes
+ * what the HUD SHOWS — the power field, the W/kg and the zone beside it, and
+ * the focus readout's power, which is the same reading — and nothing else: the
+ * simulation, the trainer, the recording, the totals, the zone time and the
+ * recent graph read the raw readings in both.
+ *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
  */
@@ -83,6 +93,12 @@ export const HUD_ROUTE_VIEWS = ['full', 'compact'] as const;
 /** One of {@link HUD_ROUTE_VIEWS}. */
 export type HudRouteView = (typeof HUD_ROUTE_VIEWS)[number];
 
+/** How the HUD shows power, the default first — #2420. */
+export const HUD_POWER_VIEWS = ['average', 'instant'] as const;
+
+/** One of {@link HUD_POWER_VIEWS}. */
+export type HudPowerView = (typeof HUD_POWER_VIEWS)[number];
+
 /** What the rider chose. */
 export interface HudLayoutPreference {
   /** The panels turned off. Empty by default: every panel is shown. */
@@ -103,6 +119,11 @@ export interface HudLayoutPreference {
    * #2385 reads as the route panel it always drew.
    */
   readonly route?: HudRouteView;
+  /**
+   * A 3 s average or instant — #2420. Absent is `average`, so a preference
+   * kept before #2420 reads as the new default.
+   */
+  readonly power?: HudPowerView;
 }
 
 export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
@@ -111,6 +132,7 @@ export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
   arrangement: 'full',
   totalsStrip: false,
   route: 'full',
+  power: 'average',
 };
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
@@ -130,6 +152,10 @@ function isArrangement(value: unknown): value is HudArrangement {
 
 function isRouteView(value: unknown): value is HudRouteView {
   return typeof value === 'string' && (HUD_ROUTE_VIEWS as readonly string[]).includes(value);
+}
+
+function isPowerView(value: unknown): value is HudPowerView {
+  return typeof value === 'string' && (HUD_POWER_VIEWS as readonly string[]).includes(value);
 }
 
 /**
@@ -155,6 +181,7 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
     // Only a stored `true` turns it on: anything else is the default, off.
     totalsStrip: row['totalsStrip'] === true,
     route: isRouteView(row['route']) ? row['route'] : 'full',
+    power: isPowerView(row['power']) ? row['power'] : 'average',
   };
 }
 
@@ -196,4 +223,9 @@ export function focusArrangement(preference: HudLayoutPreference): boolean {
  */
 export function compactRoute(preference: HudLayoutPreference): boolean {
   return preference.route === 'compact';
+}
+
+/** How the HUD shows power under this preference — #2420. Absent or unknown is the average. */
+export function powerView(preference: HudLayoutPreference): HudPowerView {
+  return preference.power === 'instant' ? 'instant' : 'average';
 }

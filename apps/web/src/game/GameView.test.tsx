@@ -2666,7 +2666,8 @@ describe('the HUD the rider chose — #2079', () => {
       'Clock',
     ]);
     // …while power, the controls and the notices' cell are the HUD's still.
-    expect(hudField('Power')).not.toBe('');
+    // #2420: power is the 3 s average, and its term says so.
+    expect(hudField('Power (3 s)')).not.toBe('');
     expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
   });
 
@@ -2677,7 +2678,8 @@ describe('the HUD the rider chose — #2079', () => {
     expect(hud.classList).toContain('oyl-hud--focus');
     expect(hud.querySelector('.oyl-hud__fields--primary')).toBeNull();
     expect(queryAll(hud, '.oyl-hud__focus dt').map((dt) => dt.textContent)).toEqual([
-      'Power',
+      // #2420: the 3 s average, the full HUD's own power reading.
+      'Power (3 s)',
       'Cadence',
       'Heart rate',
       'Speed',
@@ -2688,7 +2690,7 @@ describe('the HUD the rider chose — #2079', () => {
     ]);
     // The ride's clock runs from the first second, and power is live.
     expect(hudField('Ride')).toMatch(/^0:00:\d\d$/);
-    expect(hudField('Power')).not.toMatch(/^—/);
+    expect(hudField('Power (3 s)')).not.toMatch(/^—/);
     // The controls are the HUD's still.
     expect(queryAll(hud, 'button').some((button) => button.textContent === 'Pause')).toBe(true);
   });

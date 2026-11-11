@@ -25,7 +25,7 @@
  *
  * At those viewports and stages: no HUD panel a rider can see is over the
  * leaning rider's box (`ride-stage.ts` §`riderBox`); every panel is whole,
- * on the stage and over no other panel; *Houses* and *Score* are laid out at
+ * on the stage and over no other panel; *Houses*, *Next house* (#2453) and *Score* are laid out at
  * a size, uncovered, and over neither the actions panel nor *Pause* nor *End
  * ride*; the three throw buttons are whole and uncovered; and on a phone the
  * pacer's, the ghost's and the wind's readings give way (laid out at no size,
@@ -72,7 +72,7 @@ import type { StageItem, StageMeasurement } from './ride-harness';
 const DELIVERY_ROUND = '?delivery=round';
 
 /** What a round adds to the secondary tier, and what gives way to it on a phone. */
-const DELIVERY_READINGS = ['reading: Houses', 'reading: Score'] as const;
+const DELIVERY_READINGS = ['reading: Houses', 'reading: Next house', 'reading: Score'] as const;
 const GIVES_WAY = ['reading: Pacer', 'reading: Your best', 'reading: Wind'] as const;
 
 /** The three throw buttons, `hud/ThrowControl.tsx` §`THROW_BUTTONS`. */
@@ -279,6 +279,8 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       'Draft',
       'Wind',
       'Houses',
+      // #2453: where the next house is, between the round's count and its score.
+      'Next house',
       'Score',
     ]);
     if (!tablet) {

@@ -3941,6 +3941,27 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(town.refillMs).toBeLessThanOrEqual(4);
   });
 
+  test('#2429 a mapped house 65 m ahead is drawn at the end of the chunk its refill was 160 m behind', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedTown: town } = await realisticTown(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `wall ${rgb(town.aheadWall)} drawn, ${rgb(town.aheadWallOff)} without`;
+    testInfo.annotations.push({ type: 'a mapped house ahead', description: measured });
+    console.log(`a mapped house ahead — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    expect(town.aheadWallInFrame).toBe(true);
+    expect(town.aheadWall).toHaveLength(3);
+    expect(town.aheadWallOff).toHaveLength(3);
+    // The house is what is there: ranked from where the rider stood at the
+    // refill, the nearest 36 stood within about 45 m of 1 400 m, and the
+    // wall read the same with the buildings on and off. Measured locally
+    // (a Mac, SwiftShader, 2026-11-10): 24 apart drawn, 0 apart with the
+    // refill ranked from the rider — so 10, clear of both.
+    expect(apart(town.aheadWall, town.aheadWallOff)).toBeGreaterThan(10);
+  });
+
   test('#1581 a mapped house has windows: its upper window reads darker than its wall, and alike with the facade off', async ({
     harnessRun,
   }, testInfo) => {
