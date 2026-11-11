@@ -226,6 +226,9 @@ describe('the rider in the draft — #2426, the shelter mark and the words', () 
     expect(field('Draft')).toBe('Draft 22 % at most 59 %');
   });
 
+  // jsdom loads no theme.css, so the forced stylesheet below recolours nothing
+  // the test can see: this is a DOM-difference test (the glyph and the words
+  // are there in one state and not the other), not a rendering of a grey HUD.
   it('is not colour alone: with every colour forced to one, the two states still differ in shape and words — SC 1.4.1', async () => {
     const flat = document.createElement('style');
     flat.textContent =
@@ -288,6 +291,9 @@ describe('the rider in the draft — #2426, the shelter mark and the words', () 
     expect(declared('.oyl-hud__field--sheltered', 'outline')).toEqual([
       '3px solid var(--oyl-color-hud-shelter)',
     ]);
+    // Outside the box: an inset ring would be drawn over the field's content.
+    // `hud.browser.spec.ts` measures the same thing in a real engine.
+    expect(declared('.oyl-hud__field--sheltered', 'outline-offset')).toEqual(['0']);
     expect(declared('.oyl-hud__panel', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
     for (const theme of THEMES) {
       const palette = paletteColours(theme);

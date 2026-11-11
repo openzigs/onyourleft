@@ -3297,6 +3297,11 @@ function GameScreen({
         const drafted = draftEvent(inDraftRef.current, roomNow?.hud.draft);
         inDraftRef.current = drafted.inDraft;
         if (drafted.event !== undefined) events.push(drafted.event);
+      } else if (room?.status().kind !== 'joined') {
+        // #2426: the shelter mark follows the same state, so it goes with the
+        // room. A lost room applies no draft (`RoomSession.draftFactor()` is 1),
+        // and the last frame's draft is not one the rider is in now.
+        inDraftRef.current = false;
       }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);

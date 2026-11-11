@@ -8034,7 +8034,12 @@ select.oyl-input {
  */
 .oyl-hud__field--sheltered {
   outline: 3px solid var(--oyl-color-hud-shelter);
-  outline-offset: -3px;
+  /* ⚠️ Outside the field's box, never inside it: `.oyl-hud__field` has no
+     padding, so an inset ring is drawn over the label, the number, the line
+     under it and the gauge's edges (measured in the browser, #2426 review).
+     The grid's gap (`--oyl-space-sm`) is wider than the ring, so it touches no
+     neighbour. */
+  outline-offset: 0;
 }
 
 .oyl-hud__field--sheltered .oyl-hud__detail {

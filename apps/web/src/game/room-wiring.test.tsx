@@ -584,6 +584,20 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
   });
 
+  it('takes the mark away while the room is lost, since the simulation applies no draft then — #2426', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    await frames(1, 4, 12);
+    expect(drawn()).toEqual({ marked: true, outlined: true, line: 'In the draft' });
+    room.closeFromServer(1006);
+    await pump(4);
+    expect(drawn().marked).toBe(false);
+    expect(drawn().outlined).toBe(false);
+    expect(field('Draft')).not.toContain('In the draft');
+  });
+
   it('is not marked from 7 % rising from below: the mark waits for 10 % — #2426', async () => {
     room = new ScriptedRoom();
     await rideInRoom(room);
