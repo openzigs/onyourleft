@@ -113,6 +113,7 @@ import {
 import { curveRows, onRideDurations } from '../detail/curve';
 import type { PickKind } from '../detail/TraceChart';
 import type { SharedTrack } from '../detail/privacy';
+import { CaloriesFact } from '../detail/CaloriesFact';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
@@ -1015,6 +1016,24 @@ export function ActivityDetailView({
         </div>
 
         <div>
+          {/*
+        #2433: the estimate stored when the ride was saved, as the result card
+        shows it, read off the record so a later change of weight or age in
+        Settings does not move it. At the head of the second group rather than
+        in the figures above, which is the top of the second column on a
+        tablet: on a phone the figures already end 33 px above the fold on the
+        CI runner's font (`controls-first.browser.spec.ts`, populated
+        390×844), and any row added to them put the page's first control under
+        it. `CaloriesFact.tsx` §`CaloriesFact` has the measurements.
+      */}
+          <dl className="oyl-ride-summary">
+            <CaloriesFact
+              calories={activity.calories}
+              hasPower={activity.averagePower !== undefined}
+              hasHeartRate={available.includes('heartRate')}
+            />
+          </dl>
+
           {/*
         #1319: a ride with a workout lists its blocks, under their own
         heading after the laps — two tables, never one (WorkoutBlocksTable).

@@ -61,6 +61,9 @@
 
 import {
   localDay,
+  rideCalories,
+  type CalorieEstimate,
+  type CalorieRider,
   type RecordedSeries,
   type ReplanRecord,
   type Seconds,
@@ -83,7 +86,7 @@ import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
 import { lapsToSave } from './laps';
-import { rideAveragePower, rideDistance } from './totals';
+import { rideAveragePower, rideDistance, rideEnergy } from './totals';
 import { workoutBlocksToSave } from './workout-blocks';
 
 /**
@@ -151,6 +154,35 @@ export interface RideToSaveInput {
    * cannot leave the ride offered for saving a second time.
    */
   readonly recordingSession?: RecordingSessionId | undefined;
+  /**
+   * What the heart-rate calorie estimate needs to know about the rider, as
+   * `athlete/calorie-inputs.ts` §`calorieRiderFor` makes it from the athlete
+   * row at the ride's start — #2433. Absent or empty, a ride with power still
+   * gets its figure and a heart-rate ride gets none.
+   */
+  readonly rider?: CalorieRider | undefined;
+}
+
+/**
+ * A recorded ride's calorie estimate — #2433, and **the one place** a recorded
+ * ride's figure is worked out, so the figure saved with the ride and the one
+ * #2434's ride HUD shows are the same function over the same series.
+ *
+ * From the ride's work (`totals.ts` §`rideEnergy`) when it has a power
+ * reading, else from its heart-rate channel with the rider's inputs, else
+ * none — `@onyourleft/domain` §`rideCalories` holds the rules and the sources.
+ * The importer calls it too, over a decoded file's channels (`import-batch.ts`).
+ */
+export function recordedRideCalories(
+  series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
+  rider: CalorieRider,
+): CalorieEstimate | undefined {
+  return rideCalories({
+    work: rideEnergy(series),
+    heartRate: series.channels.heartRate,
+    sampleInterval: series.sampleInterval,
+    rider,
+  });
 }
 
 /**
@@ -185,6 +217,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
   const startedAt = series.startedAt;
   const power = series.channels.power;
   const average = rideAveragePower(power);
+  const calories = recordedRideCalories(series, input.rider ?? {});
 
   const activity: NewActivity = {
     id: input.id,
@@ -197,6 +230,10 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     distance: rideDistance(series),
     hasPosition: series.channels.latitude !== undefined,
     ...(average === undefined ? {} : { averagePower: average }),
+    // #2433: worked out once, here, while the samples are in hand — and frozen,
+    // so a later change of weight or age in Settings does not rewrite it. No
+    // figure is no key, never `0 kcal`.
+    ...(calories === undefined ? {} : { calories }),
     // Computed here because the samples are in hand, which is the importer's
     // reason too: the fitness chart's own criterion forbids decoding streams to
     // draw it, so the threshold-independent half has to be stored at write

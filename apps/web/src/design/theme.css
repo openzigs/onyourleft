@@ -3783,6 +3783,25 @@ a.oyl-button {
 }
 
 /*
+ * #2433: the heading and the ride's calorie estimate share one line, which
+ * wraps where it must. The estimate is the card's own, at the small size, so
+ * it costs the card no row on a 4:3 tablet (`CaloriesFact.tsx` §`CaloriesLine`).
+ */
+.oyl-result__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--oyl-space-md);
+}
+
+.oyl-result__calories {
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.2;
+}
+
+/*
  * 10rem tracks since #1083, as `.oyl-home__facts`' since #1052. They were 9rem
  * (144 px), sized from a Mac's `10:23:45` at `xxl` (137 px); the CI runner's
  * Linux font draws it 153 px, so any card whose two tracks came out between
@@ -5714,6 +5733,15 @@ select.oyl-input {
 .oyl-ride-summary dd {
   font-size: var(--oyl-font-size-lg);
   margin: 0;
+}
+
+/* #2433: the calorie estimate takes the row, so its words stay on one line. */
+.oyl-ride-summary__wide {
+  grid-column: 1 / -1;
+}
+
+.oyl-ride-summary__wide .oyl-muted {
+  font-size: var(--oyl-font-size-sm);
 }
 
 /*

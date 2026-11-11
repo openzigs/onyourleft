@@ -4376,6 +4376,7 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     hasPosition,
     routeId,
     averagePower,
+    calories,
     effortWeightedPower,
     effortWeightedHeartRate,
     loadCoveredTime,
@@ -4398,6 +4399,8 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     // list row; dropped here, it offered "A free ride" to every rider.
     ...(routeId === undefined ? {} : { routeId }),
     ...(averagePower === undefined ? {} : { averagePower }),
+    // #2433: the ride's calorie estimate, on the list row as `averagePower` is.
+    ...(calories === undefined ? {} : { calories }),
     // The load summary #77's list readers are built on — see the ⚠️ above.
     ...(effortWeightedPower === undefined ? {} : { effortWeightedPower }),
     ...(effortWeightedHeartRate === undefined ? {} : { effortWeightedHeartRate }),

@@ -122,7 +122,9 @@ export function rideAveragePower(
  * a dash, never `0 kJ` — when there is no reading at all: a ride nobody
  * measured the power of did not do nought joules of work.
  */
-export function rideEnergy(series: RecordedSeries<StreamChannelValue>): Joules | undefined {
+export function rideEnergy(
+  series: Pick<RecordedSeries<StreamChannelValue>, 'channels' | 'sampleInterval'>,
+): Joules | undefined {
   const power = series.channels.power;
   if (power === undefined) {
     return undefined;

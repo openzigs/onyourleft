@@ -46,6 +46,7 @@ import {
   lapId,
   type ActivityId,
   type AthleteId,
+  type AthleteRecord,
   type NewActivity,
   type NewLap,
   type RecordedCourseLap,
@@ -60,6 +61,8 @@ import {
 } from './read-activity-file';
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
+import { calorieRiderFor } from '../athlete/calorie-inputs';
+import { recordedRideCalories } from '../recording/finish';
 import { lapsToSave } from '../recording/laps';
 import type { TransferStore } from './store-port';
 
@@ -164,6 +167,14 @@ export interface ImportBatchOptions {
    * available; `UTC` would assert a place the ride was not.
    */
   readonly timeZone: string;
+  /**
+   * The importing athlete's row, read once before the batch, for the
+   * heart-rate calorie estimate of a ride with no power — #2433. Its current
+   * sex, year of birth and weight are what an imported ride is estimated with,
+   * and the figure is then frozen with the ride. Absent, a ride with power
+   * still gets its figure and a heart-rate ride gets none.
+   */
+  readonly athlete?: AthleteRecord | undefined;
   /** Aborting stops the loop between files. Nothing already written is undone. */
   readonly signal?: AbortSignal | undefined;
   readonly onProgress?: ((progress: ImportProgress) => void) | undefined;
@@ -317,6 +328,9 @@ async function storeRide(
   sha256: string,
 ): Promise<ActivityId> {
   const id = options.newActivityId();
+  // #2433: by the rule a recorded ride's figure is worked out by
+  // (`recording/finish.ts` §`recordedRideCalories`), from the decoded channels.
+  const calories = recordedRideCalories(ride, calorieRiderFor(options.athlete, ride.startedAt));
   const record: NewActivity = {
     id,
     athleteId: options.athleteId,
@@ -328,6 +342,7 @@ async function storeRide(
     distance: ride.distance,
     hasPosition: ride.hasPosition,
     ...(ride.averagePower === undefined ? {} : { averagePower: ride.averagePower }),
+    ...(calories === undefined ? {} : { calories }),
     // The threshold-independent half of this ride's load (#77), computed here
     // because the samples are already in hand — the importer has just decoded
     // them and is about to write them. Doing it later would mean decoding the

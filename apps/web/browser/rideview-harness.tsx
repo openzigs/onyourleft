@@ -71,6 +71,7 @@ import { flushSync } from 'react-dom';
 import {
   beatsPerMinute,
   expandWorkout,
+  kilocalories,
   metres,
   seconds,
   thresholdShare,
@@ -640,6 +641,9 @@ const SAVED_RIDE = {
   distance: metres(123_456),
   averagePower: watts(1_234),
   averageHeartRate: beatsPerMinute(188),
+  // #2433: a five-digit estimate, at its fullest. A ten-hour ride at 1234 W
+  // is about 46 MJ of work, which at the assumed efficiency is 55 000 kcal.
+  calories: { energy: kilocalories(55_123), basis: 'power' as const },
   gameOutcome: 'not-beaten' as const,
 };
 
