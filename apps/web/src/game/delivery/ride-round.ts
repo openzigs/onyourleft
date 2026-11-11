@@ -440,6 +440,39 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
 }
 
 /**
+ * Where the next house on the round is from the rider — #2453: which side of
+ * the road, and how far ahead along it, so the HUD can say where to throw
+ * without the rider having to spot the house's marker. A side and a distance
+ * from the rider, never a place (DL11).
+ */
+export interface NextHouse {
+  readonly side: ThrowSide;
+  /** Metres along the road from the rider to the house; nought once the rider is level with it or past. */
+  readonly metres: number;
+}
+
+/**
+ * The next house still expecting a parcel, in route order, from where the
+ * rider is after the last step that ran — #2453. A house the rider has just
+ * passed stays the next one, at nought metres, until its window closes behind
+ * them and the round counts it missed (`throw.ts`
+ * §`THROW_WINDOW_AFTER_METRES`): it can still be delivered to. `undefined`
+ * when no house on the round is still expecting one.
+ */
+export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
+  let next: DeliveryTarget | undefined;
+  for (const target of ride.targets) {
+    if (ride.round.houses[target.position] !== 'expecting') continue;
+    if (next === undefined || target.distance < next.distance) next = target;
+  }
+  if (next === undefined) return undefined;
+  return {
+    side: next.side === 1 ? 'right' : 'left',
+    metres: Math.max(0, next.distance - ride.along),
+  };
+}
+
+/**
  * Keep the week's counts for the next ride, from the round's end — counts
  * only (DL11, `delivery-progress.ts`). `false` when the device refused, and
  * when the round was a built-in level's, which keeps nothing of the week

@@ -641,7 +641,13 @@ function Harness(): JSX.Element {
             delivery={
               round === undefined
                 ? undefined
-                : { round, week: { day, houses: 12, score: 0 }, score: roundTally(round).score }
+                : {
+                    round,
+                    week: { day, houses: 12, score: 0 },
+                    score: roundTally(round).score,
+                    // #2453: the next house, so the layout cases measure its field too.
+                    next: { side: 'right', metres: 120 },
+                  }
             }
           />
         </section>
