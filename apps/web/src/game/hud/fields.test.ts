@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CALORIES_KEY,
   CLOCK_KEY,
   DELIVERY_HOUSES_KEY,
   DELIVERY_NEXT_KEY,
@@ -49,6 +50,8 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  joules,
+  kilocalories,
   kilograms,
   metres,
   metresPerSecond,
@@ -1073,6 +1076,8 @@ describe('which readings are drawn large (#423)', () => {
       'distance',
       'climbed',
       'averagePower',
+      // #2434: and the calorie estimate, the ride so far's last.
+      'calories',
       // #2077: the rider's W/kg (this ride has no threshold, so no zone).
       'wattsPerKilogram',
       'gap-bot',
@@ -1725,14 +1730,15 @@ describe('the ride so far — #2076', () => {
   const shown = (input: Partial<HudInput>) =>
     hudReadings({ ...baseInput(), ...input }).filter(isRideTotalReading);
 
-  it('shows the three after the times and before every gap, in this order', () => {
+  it('shows the three, and since #2434 Calories, after the times and before every gap, in this order', () => {
     const keys = hudReadings({ ...baseInput(), rideTotals: totals }).map((each) => each.key);
     const at = keys.indexOf('distance');
-    expect(keys.slice(at, at + 3)).toEqual(['distance', 'climbed', 'averagePower']);
+    expect(keys.slice(at, at + 4)).toEqual(['distance', 'climbed', 'averagePower', 'calories']);
     expect(keys[at - 1]).toBe(ELAPSED_TIME_KEY);
-    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower']);
+    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower', 'calories']);
     // Secondary, every one: a reading added here lands in the cheaper tier.
     expect(shown({ rideTotals: totals }).map(readingTier)).toEqual([
+      'secondary',
       'secondary',
       'secondary',
       'secondary',
@@ -1744,6 +1750,15 @@ describe('the ride so far — #2076', () => {
       { key: 'distance', label: 'Distance', value: '12.3', unit: 'km', stale: false },
       { key: 'climbed', label: 'Climbed', value: '213', unit: 'm', stale: false },
       { key: 'averagePower', label: 'Avg power', value: '187', unit: 'W', stale: false },
+      // #2434: these totals carry no estimate, and no work or heart rate.
+      {
+        key: 'calories',
+        label: 'Calories',
+        value: NO_READING,
+        unit: 'kcal',
+        detail: 'no power or heart rate',
+        stale: false,
+      },
     ]);
     expect(
       shown({ rideTotals: totals, units: 'imperial' }).map((each) => [each.value, each.unit]),
@@ -1751,11 +1766,13 @@ describe('the ride so far — #2076', () => {
       ['7.7', 'mi'],
       ['698', 'ft'],
       ['187', 'W'],
+      [NO_READING, 'kcal'],
     ]);
   });
 
   it('shows a dash for each with nothing recorded, and never a zero', () => {
     expect(shown({}).map((each) => [each.value, each.stale])).toEqual([
+      [NO_READING, false],
       [NO_READING, false],
       [NO_READING, false],
       [NO_READING, false],
@@ -1768,6 +1785,7 @@ describe('the ride so far — #2076', () => {
       '5.0',
       NO_READING,
       NO_READING,
+      NO_READING,
     ]);
   });
 
@@ -1775,6 +1793,88 @@ describe('the ride so far — #2076', () => {
     for (const reading of shown({ rideTotals: totals })) {
       expect(reading.label).not.toMatch(/\b(NP|TSS|IF|CTL|ATL|TSB)\b/);
     }
+  });
+});
+
+/**
+ * #2434: *Calories* in the ride so far — the owner's ruling of 2026-11-10: the
+ * always-shown tier, so it is on the default HUD. The figure is the
+ * recorder's (`recording/totals.ts` §`recordedRideCalories`), and that it
+ * equals the saved ride's is `ride/controller.test.ts` §"#2434"; this is the
+ * format, in the ride result card's words (`detail/CaloriesFact.tsx`).
+ */
+describe('the calorie estimate in the ride so far — #2434', () => {
+  const calories = (rideTotals: HudInput['rideTotals']) =>
+    hudReadings({ ...baseInput(), rideTotals }).find((each) => each.key === CALORIES_KEY);
+  const ridden = { distance: metres(6000), climbed: undefined, averagePower: undefined };
+
+  it('is drawn on the default HUD, in the ride so far, secondary, never stale', () => {
+    const reading = calories(undefined);
+    expect(reading).toBeDefined();
+    expect(reading && isRideTotalReading(reading)).toBe(true);
+    expect(reading && readingTier(reading)).toBe('secondary');
+    expect(reading?.stale).toBe(false);
+  });
+
+  it('shows ≈ and whole kilocalories, with the basis as its phrase', () => {
+    expect(
+      calories({
+        ...ridden,
+        energy: joules(120_000),
+        calories: { energy: kilocalories(143.4), basis: 'power' },
+      }),
+    ).toEqual({
+      key: 'calories',
+      label: 'Calories',
+      value: '≈ 143',
+      unit: 'kcal',
+      detail: 'estimate from power',
+      stale: false,
+    });
+    expect(
+      calories({ ...ridden, calories: { energy: kilocalories(612.6), basis: 'heart-rate' } }),
+    ).toMatchObject({ value: '≈ 613', detail: 'estimate from heart rate' });
+  });
+
+  it('is a dash and the card’s reason with no estimate, never 0 kcal', () => {
+    // Nothing recorded yet, or a ride with neither channel.
+    expect(calories(undefined)).toMatchObject({
+      value: NO_READING,
+      detail: 'no power or heart rate',
+    });
+    expect(calories({ ...ridden, recordedHeartRate: false })).toMatchObject({
+      value: NO_READING,
+      detail: 'no power or heart rate',
+    });
+    // A recording with heart rate and no estimate: the rider's details are not set.
+    expect(calories({ ...ridden, recordedHeartRate: true })).toMatchObject({
+      value: NO_READING,
+      detail: 'set your details in Settings',
+    });
+    for (const each of [undefined, ridden, { ...ridden, recordedHeartRate: true }]) {
+      expect(calories(each)?.value).not.toMatch(/\b0\b/);
+    }
+  });
+
+  it('takes the reason from the recording, not the live strap', () => {
+    // A strap that dropped: no live heart rate, a recording that has it.
+    const dropped = {
+      ...baseInput(),
+      heartRate: { value: undefined, live: false, paired: true },
+      rideTotals: { ...ridden, recordedHeartRate: true },
+    };
+    expect(hudReadings(dropped).find((each) => each.key === CALORIES_KEY)?.detail).toBe(
+      'set your details in Settings',
+    );
+    // A strap live now, on a recording that has none yet.
+    const live = {
+      ...baseInput(),
+      heartRate: { value: 140, live: true },
+      rideTotals: { ...ridden, recordedHeartRate: false },
+    };
+    expect(hudReadings(live).find((each) => each.key === CALORIES_KEY)?.detail).toBe(
+      'no power or heart rate',
+    );
   });
 });
 
@@ -1800,7 +1900,8 @@ describe('the rider’s W/kg and power zone — #2077', () => {
       riderMass: kilograms(75),
       thresholdPower: watts(250),
     }).map((each) => each.key);
-    const at = keys.indexOf('averagePower');
+    const at = keys.indexOf(CALORIES_KEY);
+    expect(keys[at - 1]).toBe('averagePower');
     expect(keys.slice(at + 1, at + 3)).toEqual([WATTS_PER_KILOGRAM_KEY, ZONE_KEY]);
     expect(
       effort({ ...riding(300), riderMass: kilograms(75), thresholdPower: watts(250) }).map(

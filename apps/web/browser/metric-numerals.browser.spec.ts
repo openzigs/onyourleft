@@ -315,6 +315,8 @@ const WIDEST_ORDINARY_VALUES: Readonly<Record<string, string>> = {
   'To go': '99.99',
   Moving: '9:59:59',
   Elapsed: '9:59:59',
+  // #2434: the calorie estimate's widest under ten hours (`ride-harness.tsx`).
+  Calories: '≈ 9999',
 };
 
 /**

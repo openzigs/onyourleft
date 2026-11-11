@@ -38,10 +38,13 @@ import {
   STACKED_VIEWPORTS,
   TABLET_VIEWPORTS,
   bothWays,
+  inside,
   layoutFaults,
   measure,
+  named,
   openRide,
   overlap,
+  rideTotalsDrawn,
   roomGivesWay,
   sharedRide,
   type Viewport,
@@ -490,6 +493,9 @@ for (const arrangement of ['full', 'focus'] as const) {
           expect(strip, how).toBeDefined();
           if (strip === undefined) continue;
           expect(stripPlaceFaults(seen, viewport), how).toEqual([]);
+          // Each cell holds its words wherever the strip is drawn, not only
+          // upright: at 1280×800 #2387's one row had no per-cell check.
+          expect(await stripCellFaults(page), how).toEqual([]);
           // Every reading on it on the stage and uncovered (`layoutFaults`
           // holds each item), with the port's figures.
           const names = seen.items.map((each) => each.name);
@@ -513,6 +519,7 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
       expect(seen.totals, how).toEqual(['Lap', ...STRIP_LABELS]);
       expect(seen.totalsValues[0], how).toBe('1');
       expect(stripPanel(seen), how).toBeDefined();
+      expect(await stripCellFaults(page), how).toEqual([]);
     }
   });
 
@@ -676,6 +683,89 @@ for (const viewport of STACKED_VIEWPORTS.filter((each) => each.height > 300)) {
         strip !== undefined && overlap(strip.box, other.box),
         `the strip over ${other.name}`,
       ).toBe(false);
+    }
+  });
+}
+
+/**
+ * #2434, the owner's ruling of 2026-11-10: *Calories* on the HUD every ride
+ * shows, with no setting changed — in the always-shown "ride so far" tier,
+ * after *Avg power*, and NOT in the totals strip (`theme.css` §"THE CALORIE
+ * ESTIMATE IN THE RIDE SO FAR"):
+ * - where the ride so far is drawn (every tablet), on the stage, uncovered
+ *   and inside the secondary panel, with the harness's widest figure and its
+ *   basis, `≈ 9999 kcal estimate from power`, its unit on its number's line;
+ * - where the ride so far gives way (a phone's overlay), given way with it,
+ *   and still in the list a screen reader reads, in #94's order;
+ * - and with no estimate, the dash and the card's reason in the same place,
+ *   so the reading does not move when an estimate appears.
+ */
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#2434 Calories is in the ride so far on the default HUD — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const cell = async (at: Page) =>
+      at.evaluate(() => {
+        const field = document.querySelector('.oyl-hud__field--calories');
+        const value = field?.querySelector('dd');
+        const unit = value?.querySelector('.oyl-hud__unit');
+        const digits = document.createRange();
+        if (value?.firstChild) digits.setStartBefore(value.firstChild);
+        if (unit) digits.setEndBefore(unit);
+        const number = digits.getBoundingClientRect();
+        const unitBox = unit?.getClientRects()[0];
+        const box = field?.getBoundingClientRect();
+        return {
+          text: (value?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          inSecondary: field?.closest('.oyl-hud__fields--secondary') !== null,
+          box: box === undefined ? undefined : [box.left, box.top].map(Math.round),
+          width: Math.round(box?.width ?? 0),
+          // Every secondary reading's left edge, so a track that changed
+          // width with the estimate shows as a reading that moved.
+          lefts: [
+            ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
+          ].map((each) => Math.round(each.getBoundingClientRect().left)),
+          unitBeside:
+            unitBox !== undefined &&
+            unitBox.top >= number.top - 1 &&
+            unitBox.bottom <= number.bottom + 1,
+        };
+      });
+    for (const [how, seen] of await bothWays(page)) {
+      const at = seen.secondary.indexOf('Avg power');
+      expect(seen.secondary.slice(at, at + 2), how).toEqual(['Avg power', 'Calories']);
+      expect(seen.totals, how).toEqual([]);
+      if (rideTotalsDrawn(viewport)) {
+        const reading = named(seen.items, 'reading: Calories');
+        expect(inside(reading.box, viewport) && reading.onTop, how).toBe(true);
+        expect(layoutFaults(seen, viewport), how).toEqual([]);
+      } else {
+        expect(seen.givenWay, how).toContain('reading: Calories');
+      }
+    }
+    const estimated = await cell(page);
+    expect(estimated.text).toBe('≈ 9999 kcal estimate from power');
+    expect(estimated.inSecondary).toBe(true);
+    if (rideTotalsDrawn(viewport)) expect(estimated.unitBeside).toBe(true);
+
+    const none = await sharedRide(browser, viewport, '?calories=none');
+    const dashed = await cell(none);
+    expect(dashed.text).toBe('— kcal set your details in Settings');
+    expect(dashed.text).not.toMatch(/\b0 kcal/);
+    if (rideTotalsDrawn(viewport)) {
+      // In the same track: its left edge and width — on the CI runner's
+      // fonts the moving time's track grew 8 px with the figure until the
+      // figure was given its widest width (`theme.css` §"THE CALORIE
+      // ESTIMATE IN THE RIDE SO FAR"). Its top follows the rows above it,
+      // whose own dashes are a few px shorter there than their figures.
+      expect(dashed.box?.[0]).toBe(estimated.box?.[0]);
+      expect(dashed.width).toBe(estimated.width);
+      // And no reading beside it moved as the estimate appeared (#94).
+      expect(dashed.lefts).toEqual(estimated.lefts);
+      for (const [how, seen] of await bothWays(none)) {
+        expect(layoutFaults(seen, viewport), how).toEqual([]);
+      }
     }
   });
 }

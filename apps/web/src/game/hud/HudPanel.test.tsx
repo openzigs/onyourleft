@@ -49,8 +49,13 @@ import { hudOf, startRace } from './lap-race-testing';
 import { northCorridor, northRoute } from './street-map-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
+import { rideTotals } from '../../recording/totals';
+import type { StreamChannelValue } from '@onyourleft/store';
+import { NO_READING } from './fields';
+import { NO_CALORIES_NO_READINGS, NO_CALORIES_SET_INPUTS_SHORT } from '../../detail/CaloriesFact';
 import {
   altitudeMetres,
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
   expandWorkout,
@@ -66,6 +71,7 @@ import {
   thresholdShare,
   unixSeconds,
   watts,
+  type RecordedSeries,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -264,18 +270,28 @@ describe('the HUD is four panels (#423)', () => {
       'Distance',
       'Climbed',
       'Avg power',
+      // #2434: the calorie estimate, the ride so far's last.
+      'Calories',
       // #2077: the rider's W/kg (no threshold here, so no zone).
       'W/kg',
       'Pacer',
     ]);
     // #2076: marked, so a phone's overlay can leave them out (`theme.css`
     // §"THE RIDE SO FAR").
-    expect(labelsIn('.oyl-hud__field--total')).toEqual(['Distance', 'Climbed', 'Avg power']);
+    expect(labelsIn('.oyl-hud__field--total')).toEqual([
+      'Distance',
+      'Climbed',
+      'Avg power',
+      'Calories',
+    ]);
     // And *Avg power* by name, which the 4:3 tablet sets in its narrowest
     // track (`theme.css` §"THE RIDE SO FAR AT ARM'S LENGTH").
     expect(labelsIn('.oyl-hud__field--average-power')).toEqual(['Avg power']);
     expect(labelsIn('.oyl-hud__field--distance')).toEqual(['Distance']);
     expect(labelsIn('.oyl-hud__field--climbed')).toEqual(['Climbed']);
+    // #2434: and *Calories* by name (`theme.css` §"THE CALORIE ESTIMATE IN
+    // THE RIDE SO FAR").
+    expect(labelsIn('.oyl-hud__field--calories')).toEqual(['Calories']);
     // Document order is the order a screen reader meets them in, and it is
     // the order `hudReadings` returns: primary first.
     expect(labelsIn('.oyl-hud')).toEqual([
@@ -299,6 +315,7 @@ describe('the HUD is four panels (#423)', () => {
       'Distance',
       'Climbed',
       'Avg power',
+      'Calories',
       'W/kg',
       'Pacer',
       'Following',
@@ -1521,6 +1538,150 @@ describe('the totals strip — #2387', () => {
       />,
     );
     expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+  });
+});
+
+/**
+ * #2434: *Calories* on the HUD every ride shows — the owner's ruling of
+ * 2026-11-10: in the always-shown "ride so far" tier with *Speed*, *To go*,
+ * *Moving*, *Distance*, *Climbed* and *Avg power*, so a rider sees it without
+ * changing a setting, and NOT in the optional totals strip. Read off the
+ * rendered HUD with no layout given, which is `DEFAULT_HUD_LAYOUT`, over the
+ * totals the controller works out (`recording/totals.ts` §`rideTotals`).
+ */
+describe('the calorie estimate on the default HUD — #2434', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: {
+      ...atStartLine(profile),
+      elapsed: seconds(30),
+      ride: { speed: metresPerSecond(8), distance: metres(400) },
+      input: { power: watts(250), live: true },
+    },
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+    elapsedSeconds: 754,
+    movingSeconds: 600,
+  };
+  /** The recorder's totals after `count` seconds at `power`, with a strap's readings or not. */
+  const ridden = (count: number, power: number | undefined, strap = false) => {
+    const series: RecordedSeries<StreamChannelValue> = {
+      startedAt: unixSeconds(1_800_000_000),
+      sampleInterval: seconds(1),
+      sampleCount: count,
+      channels: {
+        speed: Array.from({ length: count }, () => metresPerSecond(8)),
+        ...(power === undefined
+          ? {}
+          : { power: Array.from({ length: count }, () => watts(power)) }),
+        ...(strap ? { heartRate: Array.from({ length: count }, () => beatsPerMinute(140)) } : {}),
+      },
+      pauses: [],
+    };
+    return rideTotals(series, []);
+  };
+  const tier = '.oyl-hud__fields--secondary';
+  const labelsIn = (selector: string): (string | null)[] =>
+    queryAll(mounted?.container ?? document, `${selector} dt`).map((each) => each.textContent);
+  const valueIn = (selector: string, label: string): string => {
+    const field = queryAll(mounted?.container ?? document, `${selector} .oyl-hud__field`).find(
+      (each) => each.querySelector('dt')?.textContent === label,
+    );
+    return field?.querySelector('dd')?.textContent ?? '';
+  };
+
+  it('is in the always-shown ride-so-far tier, after Avg power, and not in the totals strip', async () => {
+    mounted = await mount(<HudPanel {...base} rideTotals={ridden(600, 200)} />);
+    const labels = labelsIn(tier);
+    for (const shown of ['Speed', 'To go', 'Moving', 'Distance', 'Climbed', 'Avg power']) {
+      expect(labels).toContain(shown);
+    }
+    expect(labels.slice(labels.indexOf('Distance'), labels.indexOf('Distance') + 4)).toEqual([
+      'Distance',
+      'Climbed',
+      'Avg power',
+      'Calories',
+    ]);
+    // The default HUD draws no strip, and the rider changed no setting.
+    expect(mounted.container.querySelector('.oyl-hud__totals')).toBeNull();
+    // With the strip chosen, the tier keeps it and the strip does not gain it.
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        rideTotals={ridden(600, 200)}
+        layout={{ hidden: [], textSize: 'normal', totalsStrip: true }}
+      />,
+    );
+    expect(labelsIn(tier)).toContain('Calories');
+    expect(labelsIn('.oyl-hud__totals')).not.toContain('Calories');
+    expect(labelsIn('.oyl-hud__totals')).toEqual([
+      'Route',
+      'To go',
+      'Avg speed',
+      'Energy',
+      'Climbed',
+    ]);
+  });
+
+  it('rises with the work — after 600 s at 200 W, 120 kJ, it reads ≈ 143 kcal', async () => {
+    mounted = await mount(<HudPanel {...base} movingSeconds={300} rideTotals={ridden(300, 200)} />);
+    // 60 kJ at the assumed 20 % efficiency: 60 000 / 4184 / 0.2 = 71.7 kcal.
+    expect(valueIn(tier, 'Calories')).toBe('≈ 72 kcal estimate from power');
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} rideTotals={ridden(600, 200)} />);
+    // ⚠️ Not the issue's `≈ 120 kcal`, which is the 1 kJ = 1 kcal rule of
+    // thumb (23.9 %): the owner's ruling on #2430's question 2 is 20 %.
+    expect(valueIn(tier, 'Calories')).toBe('≈ 143 kcal estimate from power');
+    // The basis is the phrase under the figure, the card's words.
+    const field = queryAll(mounted.container, `${tier} .oyl-hud__field--calories`);
+    expect(field.map((each) => each.querySelector('.oyl-hud__detail')?.textContent)).toEqual([
+      ' estimate from power',
+    ]);
+  });
+
+  it('reads a dash and why with no estimate, never 0 kcal, from what the ride recorded', async () => {
+    mounted = await mount(<HudPanel {...base} rideTotals={ridden(600, undefined)} />);
+    // A strap is live, but the recording has no heart rate: nothing to estimate from.
+    expect(valueIn(tier, 'Calories')).toBe(`${NO_READING} kcal ${NO_CALORIES_NO_READINGS}`);
+    expect(valueIn(tier, 'Calories')).not.toMatch(/\b0\b/);
+    mounted.unmount();
+    // A recording with heart rate and no rider details, with the strap now lost.
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        heartRate={{ value: undefined, live: false }}
+        rideTotals={ridden(600, undefined, true)}
+      />,
+    );
+    expect(valueIn(tier, 'Calories')).toBe(`${NO_READING} kcal ${NO_CALORIES_SET_INPUTS_SHORT}`);
+    // Before anything is recorded too.
+    mounted.unmount();
+    mounted = await mount(<HudPanel {...base} rideTotals={undefined} />);
+    expect(valueIn(tier, 'Calories')).toBe(`${NO_READING} kcal ${NO_CALORIES_NO_READINGS}`);
+  });
+
+  it('never reports Sensor lost, with every sensor down', async () => {
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        state={{ ...base.state, input: { power: watts(250), live: false } }}
+        cadence={{ value: undefined, live: false }}
+        heartRate={{ value: undefined, live: false }}
+        rideTotals={ridden(600, 200)}
+      />,
+    );
+    // The tiers say it of the live sensors; the estimate is not theirs.
+    expect(mounted.container.textContent).toContain('Sensor lost');
+    expect(valueIn(tier, 'Calories')).toBe('≈ 143 kcal estimate from power');
+    const field = mounted.container.querySelector('.oyl-hud__field--calories');
+    expect(field?.classList.contains('oyl-hud__field--stale')).toBe(false);
+    expect(field?.textContent ?? 'no field').not.toContain('Sensor lost');
   });
 });
 

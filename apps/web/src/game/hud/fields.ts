@@ -51,6 +51,13 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
+import {
+  CALORIES_BASIS_TEXT,
+  CALORIES_LABEL,
+  CALORIES_UNIT,
+  caloriesValue,
+  noCaloriesReason,
+} from '../../detail/CaloriesFact';
 import { formatDuration, formatTimeOfDay } from '../../format';
 import type { RideTotals } from '../../recording/totals';
 import {
@@ -861,11 +868,15 @@ function zoneReading(
   ];
 }
 
-/** The keys of the ride-so-far fields — #2076. @see rideTotalReadings */
+/** The key of the calorie estimate's field — #2434. @see caloriesReading */
+export const CALORIES_KEY = 'calories';
+
+/** The keys of the ride-so-far fields — #2076, and #2434's *Calories*. @see rideTotalReadings */
 export const RIDE_TOTAL_KEYS: ReadonlySet<string> = new Set([
   'distance',
   'climbed',
   'averagePower',
+  CALORIES_KEY,
 ]);
 
 /** Whether a reading is one of the ride-so-far fields — #2076. */
@@ -874,7 +885,8 @@ export function isRideTotalReading(reading: HudReading): boolean {
 }
 
 /**
- * *Distance*, *Climbed* and *Avg power* — the ride so far, #2076.
+ * *Distance*, *Climbed*, *Avg power* and *Calories* — the ride so far, #2076,
+ * and since #2434 the calorie estimate ({@link caloriesReading}).
  *
  * Formats of the recorder's figures ({@link HudInput.rideTotals}) and nothing
  * else: the distance to one decimal in the rider's unit as a ride's distance
@@ -913,7 +925,51 @@ function rideTotalReadings(
           unit: 'W',
           stale: false,
         };
-  return [distance, climbed, power];
+  return [distance, climbed, power, caloriesReading(totals)];
+}
+
+/**
+ * *Calories* — #2434, the owner's ruling of 2026-11-10: in the ride so far,
+ * the always-shown tier, so a rider sees it on the default HUD without
+ * changing a setting (and not in the optional totals strip).
+ *
+ * The recorder's estimate ({@link RideTotals.calories}, `recording/totals.ts`
+ * §`recordedRideCalories`): the function and the series the saved ride's
+ * figure is worked out from, so the HUD's last figure is the one the ride is
+ * saved with (#2076's rule). In the words of the ride's result card and page
+ * (`detail/CaloriesFact.tsx`): `≈` and whole kilocalories, so it looks like
+ * the estimate it is, with the basis — *estimate from power* or *from heart
+ * rate* — as its phrase. A dash with nothing to estimate from, never
+ * `0 kcal`, and the card's reason for it as the phrase, worked out from what
+ * the RECORDING holds (`RideTotals.recordedHeartRate`), not from the live
+ * strap. Never stale: it is not a sensor's, so no *Sensor lost* is said. Not
+ * spoken: `announce.ts` names what it says, and this is not among them.
+ */
+function caloriesReading(totals: RideTotals | undefined): HudReading {
+  const calories = totals?.calories;
+  return calories === undefined
+    ? {
+        key: CALORIES_KEY,
+        label: CALORIES_LABEL,
+        value: NO_READING,
+        unit: CALORIES_UNIT,
+        detail: noCaloriesReason(
+          {
+            hasPower: totals?.energy !== undefined,
+            hasHeartRate: totals?.recordedHeartRate === true,
+          },
+          true,
+        ),
+        stale: false,
+      }
+    : {
+        key: CALORIES_KEY,
+        label: CALORIES_LABEL,
+        value: caloriesValue(calories),
+        unit: CALORIES_UNIT,
+        detail: CALORIES_BASIS_TEXT[calories.basis],
+        stale: false,
+      };
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */

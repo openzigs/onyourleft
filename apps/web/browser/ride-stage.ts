@@ -303,6 +303,8 @@ export const RIDE_TOTAL_READINGS = [
   'reading: Distance',
   'reading: Climbed',
   'reading: Avg power',
+  // #2434: the calorie estimate, the ride so far's last.
+  'reading: Calories',
   'reading: W/kg',
   'reading: Zone',
 ] as const;

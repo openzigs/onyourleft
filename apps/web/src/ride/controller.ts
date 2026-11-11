@@ -2507,9 +2507,22 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
+   * The rider the HUD's calorie estimate is worked out with — #2434. Read
+   * through the save port's own reader (`RideSavePort.calorieRider`) as the
+   * recording starts, resumes or is continued, and set to the rider the save
+   * read as it saves, so the HUD's last figure is the saved one. Empty until
+   * the read lands, which costs a heart-rate ride its figure for that moment
+   * and a ride with power nothing.
+   */
+  let liveRider: CalorieRider = {};
+
+  /**
    * #2076: the ride's totals, worked out again only when the recording has
-   * moved on — a new sample, or a lap kept or advanced. A snapshot is built
-   * for every reading and every tick, and the series is the whole ride.
+   * moved on — a new sample, or a lap kept or advanced — or, since #2434, the
+   * rider the calorie estimate is worked out with has been read again. A
+   * snapshot is built for every reading and every tick, and the series is the
+   * whole ride, so this is what holds the totals to once a sample: once a
+   * second.
    */
   let totalsMemo:
     | {
@@ -2517,6 +2530,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         readonly samples: number;
         readonly laps: readonly RecordedCourseLap[];
         readonly open: RecordedCourseLap | undefined;
+        readonly rider: CalorieRider;
         readonly totals: RideTotals;
       }
     | undefined;
@@ -2529,7 +2543,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       totalsMemo?.recorder !== current ||
       totalsMemo.samples !== samples ||
       totalsMemo.laps !== laps ||
-      totalsMemo.open !== open
+      totalsMemo.open !== open ||
+      totalsMemo.rider !== liveRider
     ) {
       const ridden = open === undefined ? laps : [...laps, open];
       totalsMemo = {
@@ -2537,7 +2552,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         samples,
         laps,
         open,
-        totals: rideTotals(current.session.series(), ridden),
+        rider: liveRider,
+        totals: rideTotals(current.session.series(), ridden, liveRider),
       };
     }
     return totalsMemo.totals;
@@ -3089,6 +3105,37 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
+   * The rider the save reads (#2433), kept as the HUD's too — #2434 — so the
+   * HUD's last *Calories* is worked out with the rider the saved
+   * figure was, even when the rider's inputs changed during the ride.
+   */
+  const savedRider = async (port: RideSavePort, current: Recorder): Promise<CalorieRider> => {
+    const rider = await calorieRiderOf(port, current);
+    if (recorder === current) {
+      liveRider = rider;
+    }
+    return rider;
+  };
+
+  /**
+   * Read the rider for the HUD's calorie estimate again — #2434. Never
+   * awaited by the transition that asks for it: a slow athlete read must not
+   * hold up Start. An answer that lands after the recording has gone is
+   * dropped.
+   */
+  const refreshLiveRider = async (current: Recorder): Promise<void> => {
+    const port = options.rideSave;
+    if (port === undefined) {
+      return;
+    }
+    const rider = await calorieRiderOf(port, current);
+    if (recorder === current && !disposed) {
+      liveRider = rider;
+      changed();
+    }
+  };
+
+  /**
    * Turn the finished recording into an activity, then let the checkpoint go.
    *
    * ⚠️ **The discard is last and is conditional, and that ordering is the whole
@@ -3123,7 +3170,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       outcomeInGame,
       workoutFinished,
       replans,
-      await calorieRiderOf(port, current),
+      await savedRider(port, current),
     );
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -3953,11 +4000,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       });
       phase = 'recording';
       clock = now();
+      liveRider = {};
       await recorder.start(clock);
       // #1318: the first lap taken by hand begins with the recording — or,
       // with a course already under it, where that course ends.
       manualFrom = courseUnder ? undefined : markOf(recorder);
       changed();
+      // #2434: once the recording has a start, which the rider's age is at.
+      void refreshLiveRider(recorder);
     },
 
     async pause(): Promise<void> {
@@ -3976,6 +4026,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       phase = 'recording';
       await recording().resume(now());
       changed();
+      // #2434: a rider who paused to set their details in Settings sees the
+      // estimate they give from here on.
+      void refreshLiveRider(recording());
     },
 
     noteGameRideEnded(outcome: GhostOutcome | undefined, drafted = false): void {
@@ -4392,7 +4445,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       savedRide = undefined;
       recoverable = [];
       unreadable = [];
+      liveRider = {};
       changed();
+      // #2434: the HUD's estimate for the ride carried on.
+      void refreshLiveRider(found);
       return true;
     },
 

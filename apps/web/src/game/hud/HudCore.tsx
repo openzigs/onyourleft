@@ -34,6 +34,7 @@ import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
+  CALORIES_KEY,
   CLOCK_KEY,
   GRADIENT_KEY,
   ELAPSED_TIME_KEY,
@@ -649,6 +650,9 @@ function fieldClass(reading: HudReading): string {
     // row's wide tracks there (the same section).
     ...(reading.key === 'distance' ? ['oyl-hud__field--distance'] : []),
     ...(reading.key === 'climbed' ? ['oyl-hud__field--climbed'] : []),
+    // #2434: and the calorie estimate, which `theme.css` places by name
+    // (§"THE CALORIE ESTIMATE IN THE RIDE SO FAR").
+    ...(reading.key === CALORIES_KEY ? ['oyl-hud__field--calories'] : []),
     // #2080: a room's draft by name, which gives way to a race's standings
     // with the swap in them at large text (`theme.css` §"A LOOP'S LAP SPLITS").
     ...(reading.key === 'room-draft' ? ['oyl-hud__field--draft'] : []),

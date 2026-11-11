@@ -211,6 +211,15 @@ for (const viewport of OVERLAY_VIEWPORTS) {
             `${at}: ${label} ${isTablet(viewport) ? 'gave way' : 'did not give way'}`,
           ).toBe(isTablet(viewport));
         }
+        // #2434: Calories is drawn on a landscape tablet and gives way upright,
+        // where it put *Item* in a third row and the standings over the rider
+        // (`theme.css` §"THE CALORIE ESTIMATE IN THE RIDE SO FAR"); on a phone
+        // it gives way with the ride so far.
+        const landscapeTablet = isTablet(viewport) && viewport.width > viewport.height;
+        expect(
+          laidOut(field(stage, 'Calories').box),
+          `${at}: Calories ${landscapeTablet ? 'gave way' : 'did not give way'}`,
+        ).toBe(landscapeTablet);
         if (!isTablet(viewport)) {
           expect(rows(stage), `${at}: the race put a row in the secondary panel`).toBe(rows(none));
         }

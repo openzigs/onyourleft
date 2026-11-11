@@ -81,6 +81,7 @@ import {
   expandWorkout,
   geographicPosition,
   joules,
+  kilocalories,
   kilograms,
   metres,
   routeProfile,
@@ -678,13 +679,38 @@ const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
  * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
  * the same object every read, as `useSyncExternalStore` requires. #2387: and
  * the work of 425 W for ten hours, `15300 kJ`, the totals strip's widest.
+ * #2434: and the calorie estimate at its widest in the ride so far, four
+ * digits, `≈ 9999 kcal`, ten hours at 232 W: a fifth digit needs over
+ * 8.37 MJ of work at the assumed 20 % (`theme.css` §"THE CALORIE ESTIMATE
+ * IN THE RIDE SO FAR" says what one costs). Not the estimate of this
+ * object's `15300 kJ`, which is the strip's widest *Energy* and would be
+ * `≈ 18284`: each figure here is its own field's widest.
  */
 const RIDE_TOTALS: RideTotals = {
   distance: metres(199_900),
   climbed: metres(4850),
   averagePower: watts(425),
   energy: joules(15_300_000),
+  calories: { energy: kilocalories(9_999), basis: 'power' },
 };
+
+/**
+ * `ride.html?calories=none` — #2434: the ride so far with no calorie estimate
+ * (and no work, as a ride with no power has) on a recording with heart rate,
+ * so *Calories* is a dash with the longest reason it gives for one: *set your
+ * details in Settings*.
+ */
+const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') === 'none';
+
+const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
+  ? {
+      ...RIDE_TOTALS,
+      energy: undefined,
+      averagePower: undefined,
+      calories: undefined,
+      recordedHeartRate: true,
+    }
+  : RIDE_TOTALS;
 
 /** #2077: some time in each of the seven power zones, the same object every read. */
 const ZONE_TIME: TimeInZones = {
@@ -1021,7 +1047,7 @@ const TRAINER: GameTrainerPort = {
   rideElapsedSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
   // #2076: the ride so far at its widest plausible figures, so where the
   // three are drawn they are laid out and measured at their widest.
-  rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS),
+  rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS_NOW),
   // #2077: time in every one of the seven zones, so the bar is drawn whole.
   ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
   // #2381: the press records, unless the page asks for the refusal.
