@@ -1,21 +1,20 @@
 # ADR 0067: Lap-race bots race with a strategy that reads the race — superseding ADR 0060 D-9 and ADR 0061's course-only rule
 
-- **Status**: **Proposed, 2026-11-11.** **The owner's ruling of 2026-11-10 is not open**: it is
-  quoted in Context and D-0 records it, and nothing here re-argues it. **D-1 to D-7 are the author's
-  recommendations**, each marked so, from the planner's recommendations on
-  [#2457](https://github.com/openzigs/onyourleft/issues/2457), and are **Proposed until the owner
-  rules on them on this ADR's pull request**; D-8 lists each one. Accepting this ADR as written
-  accepts each recommendation. **Nothing is built by this ADR**: #2458 to #2464 build it.
-  **Merge order (ADR 0013 D-2 makes Status part of the body, so it cannot be changed after merge)**:
-  the owner rules on D-8 first; then this branch changes the Status to Accepted and the *Proposed*
-  wording in `docs/architecture.md` and `docs/agents/adr-numbering.md`; only then does the pull
-  request merge. **It does not merge while this Status reads Proposed**, and the dated entries it
-  appends to ADR 0038, 0060, 0061 and 0066 say *"once ADR 0067 is Accepted"*, so they are true the
-  day they merge and after
+- **Status**: **Accepted, 2026-11-11**, on the owner's
+  [ruling of 2026-11-11](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)
+  on this ADR's pull request (#2476). **The owner's ruling of 2026-11-10 was never open**: it is
+  quoted in Context and D-0 records it, and nothing here re-argues it. **D-1 to D-7** were drafted
+  as the author's recommendations, from the planner's recommendations on
+  [#2457](https://github.com/openzigs/onyourleft/issues/2457); the owner ruled on each of them as
+  D-8 records: **(b) for R-3** (every racer drafts, the rider included), and **R-1, R-2 and R-4 to
+  R-10 accepted as recommended**. **Nothing is built by this ADR**: #2458 to #2464 build it. The
+  dated entries this ADR appends to ADR 0038, 0060, 0061 and 0066 say *"once ADR 0067 is
+  Accepted"*, which it is
 - **Date**: 2026-11-11
 - **Deciders**: **the owner**, on the ruling of 2026-11-10 on
-  [#2455](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845), and on D-8 on
-  this ADR's pull request. **The author** drafted the rest for that approval
+  [#2455](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845), and on D-8 in
+  the [ruling of 2026-11-11](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)
+  on this ADR's pull request. **The author** drafted the rest for that approval
 - **Issue**: [#2457](https://github.com/openzigs/onyourleft/issues/2457), phase 0 of the plan whose
   sub-issues are #2458 to #2464, under the lap-race epic
   [#1894](https://github.com/openzigs/onyourleft/issues/1894)
@@ -51,8 +50,8 @@
   D-3.7 here reads it for a lap race), D-6 (its switch extended as D-3.4 says) to D-8; ADR 0038 D-1 to
   D-4, D-5's other bullets and D-6 to D-7. Each superseded ADR gains one dated `## Amendments`
   entry pointing here ([ADR 0013](0013-adr-amendments.md)); no body is edited. **The ADR 0066 and ADR 0038 entries,
-  the ADR 0060 D-2.1 sentence and the ADR 0061 D-4 clause stand only if the owner keeps D-3's answer
-  (b)**: D-3's last paragraph lists every edit (c) takes out of this pull request
+  the ADR 0060 D-2.1 sentence and the ADR 0061 D-4 clause stand because the owner chose D-3's answer
+  (b)** (R-3, 2026-11-11); D-3's last paragraph lists what (c) would have taken out
 - **Relates to**: [ADR 0059](0059-delivery-a-parcel-round-game-mode.md) D-2 and ADR 0060 D-2 (no
   game event reaches the trainer), [ADR 0028](0028-racing-fairness.md) D-1 (one physics),
   [ADR 0038](0038-drafting-in-the-first-multiplayer-release.md) D-3 (the draft model),
@@ -132,7 +131,7 @@ What does not move is everything that is not strategy: **D-6 below**, the traine
 
 ### D-1 — Capacity is fixed; strategy only spends it (decision 1)
 
-**The author's recommendation: yes.**
+**The author's recommendation, accepted by the owner on 2026-11-11 (R-1).**
 
 1. **A bot's capacity is fixed at the start** from its tier, its archetype and pace (#2455, #2459)
    and the race's seed: its critical power (CP), its W′ and its sprint peak. **Strategy decides when
@@ -147,17 +146,18 @@ What does not move is everything that is not strategy: **D-6 below**, the traine
    ADR 0061 D-8.2 (kept): the named surge ceiling over its tier, never over
    `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM` (7) at `BOT_MASS_KILOGRAMS`, and never under
    `PACING_FACTOR_FLOOR` (−20 %) of its tier **while it rides in the open (`k` = 1)**. **In a draft
-   (`k` < 1) the floor does not apply** (R-10, the author's recommendation): a bot held at 80 % of a
+   (`k` < 1) the floor does not apply** (R-10, the author's recommendation, accepted by the owner on
+   2026-11-11): a bot held at 80 % of a
    tier behind a same-tier bot riding at its tier rides up past the wheel, because the draft saves
    more than 20 %, so with the floor kept *"sit in, then kick"* works only behind a faster rider, and
    the floor also limits W′ recovery. The surge ceiling, the 7 W/kg limit and the W′ balance still
-   bound it. If the owner rules that the floor still applies, D-1.3 reads as ADR 0061 D-8.2 has it.
+   bound it.
 4. **ADR 0060 D-4.3 is read as ADR 0061 D-7 Q3 read it**: a bot's own plan, now its strategy, is
    its source of power, as a rider's legs are, not a rule acting on it.
 
 ### D-2 — The power model: W′ balance in the discrete differential form (decision 2)
 
-**The author's recommendation.** Each bot carries a W′ balance in the discrete differential
+**The author's recommendation, accepted by the owner on 2026-11-11 (R-2).** Each bot carries a W′ balance in the discrete differential
 (Froncioni, Skiba and Clarke) form, the GoldenCheetah default, **replacing the banking reserve of
 #1960** rather than sitting beside it ([#2458](https://github.com/openzigs/onyourleft/issues/2458)).
 Per tick of length `dt` at power `P`: above CP, `wbal −= (P − CP)·dt`; at or below it,
@@ -171,8 +171,9 @@ proposes each tier's W′ as named constants for the owner's approval.
 **The options**: (a) bots draft each other only; (b) full drafting, the rider included; (c) none,
 as today.
 
-**The author's recommendation: (b).** *"Sit in, then kick"* means nothing without a draft, and (a)
-is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 against.
+**The owner's answer, 2026-11-11: (b)** (R-3), as the author recommended. *"Sit in, then kick"*
+means nothing without a draft, and (a) is a race whose physics differs by racer, which ADR 0066 D-2
+cites ADR 0028 D-1 against.
 
 1. **One model for every racer**: ADR 0038 D-3's `k` from distances, unchanged, applied to every
    bot and to the rider alike ([#2460](https://github.com/openzigs/onyourleft/issues/2460) for the
@@ -184,8 +185,8 @@ is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 
    write: no grade, no wind, no rolling resistance, no ERG target. The rider arrives at the next
    grade sooner, and that is all the trainer feels. **This narrows ADR 0060 D-2.1's *"or when"***,
    which the ADR 0060 amendment names: under (b), where a bot rides decides the rider's `k`, so it
-   decides *when* the grade at a given place is sent, though never *what* is sent. The owner is asked
-   about exactly this narrowing (R-8). The owner's scope note on #2457 (*"no bot or race event reaches
+   decides *when* the grade at a given place is sent, though never *what* is sent. The owner accepted
+   exactly this narrowing on 2026-11-11 (R-8). The owner's scope note on #2457 (*"no bot or race event reaches
    the trainer"*) is kept as to what is sent and in every other respect.
 4. **ADR 0066 D-6's switch reaches the lap race.** Its last bullet said the switch has no effect in a
    lap race, because there was no draft there. With it **off**, no racer in the lap race drafts,
@@ -201,7 +202,8 @@ is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 
    grade at the same time, as **an ordinary ride ridden at the same draft factor `k`, tick for tick**,
    as the race applied to the rider. Nothing else in that file changes.
 7. **The solo Draft field and the *"with its draft"* mark in a lap race** (ADR 0066 D-5, D-6) **and
-   the test that holds ADR 0066 D-2.** The author's recommendation (R-9): a lap race in which the
+   the test that holds ADR 0066 D-2.** The author's recommendation, accepted by the owner on
+   2026-11-11 (R-9): a lap race in which the
    rider sat in a bot's draft **shows the solo Draft field and marks the ride drafted** (ADR 0066
    D-5.6), subject to the same display preference (`draft-preference.ts`) as a solo ride; with D-3.4's
    switch off there is no field and no mark. The mark records what the rider was ridden at. The test
@@ -212,16 +214,17 @@ is a race whose physics differs by racer, which ADR 0066 D-2 cites ADR 0028 D-1 
 8. **The patent risk is not covered by D-0.** The owner's ruling of 2026-11-10 sets the patent check
    aside **for racing strategy**. ADR 0038 D-7 covers live riders in a room, and ADR 0066 D-4 extends
    it to the solo pacer and the rider's own ghost and says in terms that it *"does not reach … lap-race
-   bots"*. **Nothing on record accepts the risk of drafting lap-race bots**, so R-7 asks the owner to.
-   As ADR 0066 D-4 says of itself, this is a risk decision, not a freedom-to-operate opinion (ADR
-   0007 D1), and nothing was searched for it.
+   bots"*. **Nothing on record accepted the risk of drafting lap-race bots**, so R-7 asked the owner
+   to, and **the owner accepted it on 2026-11-11**: the risk of drafting in a lap race, bots and the
+   rider behind them. As ADR 0066 D-4 says of itself, this is a risk decision, not a
+   freedom-to-operate opinion (ADR 0007 D1), and nothing was searched for it.
 
-Under (c), D-3.1 to D-3.8 fall away and **all of these are taken out of this pull request**: the ADR
-0066 amendment; the ADR 0038 amendment; the ADR 0060 D-2.1 sentence in its amendment; the ADR 0061
-amendment's D-4 clause (ADR 0061 D-4 then stands, as solo races still have no drafting); the
-mentions of ADR 0066 D-2 and D-6 as superseded in `docs/architecture.md` and
-`docs/agents/adr-numbering.md`; and R-7 to R-9. Under (a), D-3.1's *"and to the rider"* and D-3.6 fall
-away and ADR 0028 D-1 has to be answered first.
+The answers not chosen, for the record: under (c), D-3.1 to D-3.8 would have fallen away and the
+ADR 0066 amendment, the ADR 0038 amendment, the ADR 0060 D-2.1 sentence in its amendment, the ADR
+0061 amendment's D-4 clause, the mentions of ADR 0066 D-2 and D-6 as superseded in
+`docs/architecture.md` and `docs/agents/adr-numbering.md`, and R-7 to R-9 would have been taken out
+of this pull request. Under (a), D-3.1's *"and to the rider"* and D-3.6 would have fallen away and
+ADR 0028 D-1 would have had to be answered first. **The owner chose (b), so all of them stand.**
 
 ### D-4 — Which bot tests are replaced, by name (decision 4)
 
@@ -273,7 +276,7 @@ they are with the switch off, plus the field and the mark with it on (R-9).
 
 ### D-5 — Bots in rooms stay out; the arithmetic is room-portable (decision 5)
 
-**The author's recommendation.**
+**The author's recommendation, accepted by the owner on 2026-11-11 (R-5).**
 
 1. **No bots in rooms.** ADR 0060 D-8 and D-14 Q3 are kept. This ADR is for the solo race.
 2. **Room portability is a requirement now**, so that a later room ADR does not reopen the model:
@@ -301,27 +304,30 @@ they are with the switch off, plus the field and the mark with it on (R-9).
 
 ### D-7 — Bots are fallible (decision 6)
 
-**The author's recommendation.** A tactics **skill** axis (#2459) makes a bot misjudge the gaps and
+**The author's recommendation, accepted by the owner on 2026-11-11 (R-6).** A tactics **skill** axis (#2459) makes a bot misjudge the gaps and
 the distance to the finish by a seeded error drawn once per decision window, so the field is **not
 perfectly coordinated**: a naive bot goes too early or too late, a crafty one closer to right. The
 error changes what a bot reads, never its capacity (D-1).
 
-### D-8 — What the owner is asked to rule on this pull request
+### D-8 — What the owner ruled on this pull request
 
-Accepting this ADR as written accepts each recommendation.
+The owner ruled on every item on 2026-11-11, in the
+[ruling comment on #2476](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920):
+**(b) for R-3**, and **R-1, R-2 and R-4 to R-10 accepted as recommended**. What reaches the trainer
+is still only what riding harder or easier does; no race event sets resistance or an ERG target.
 
-| # | Question | Recommended | Where |
-|---|---|---|---|
-| **R-1** | Capacity fixed from tier, archetype and seed; strategy spends it; no capacity change by rank | **Yes** | D-1 |
-| **R-2** | The power model: the discrete differential W′ balance, replacing the banking reserve | **Yes** | D-2 |
-| **R-3** | Drafting in the solo lap race: (a) bots only, (b) every racer, the rider included, (c) none | **(b)**, with ADR 0066 D-6's switch reaching the lap race and the wiring test restated as D-3.6 says | D-3 |
-| **R-4** | The tests D-4 names, replaced by the changes it names, with the replacements it gives | **Yes** | D-4 |
-| **R-5** | No bots in rooms; room-portable arithmetic required now | **Yes** | D-5 |
-| **R-6** | A seeded skill error on the gaps and the finish distance | **Yes** | D-7 |
-| **R-7** | The owner accepts the patent risk of drafting in a lap race (bots, and the rider behind them), as ADR 0038 D-7 and ADR 0066 D-4 did for rooms, the pacer and the ghost; D-0 does not cover it | **Yes**, under (a) or (b); moot under (c) | D-3.8 |
-| **R-8** | ADR 0060 D-2.1's *"or when"* is narrowed: a bot's place decides the rider's `k` and so when a grade is sent; what is sent is unchanged | **Yes**, under (b); moot under (c) | D-3.3, D-6.1 |
-| **R-9** | A lap race in which the rider drafted a bot shows the solo Draft field and is marked drafted (ADR 0066 D-5), and `solo-draft-wiring.test.tsx`'s lap-race test is restated | **Yes**, under (b); moot under (c) | D-3.7, D-4 |
-| **R-10** | ADR 0061 D-8.2's −20 % floor stops applying while a bot is in a draft (`k` < 1) | **Yes** | D-1.3 |
+| # | Question | Recommended | Ruled, 2026-11-11 | Where |
+|---|---|---|---|---|
+| **R-1** | Capacity fixed from tier, archetype and seed; strategy spends it; no capacity change by rank | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-1 |
+| **R-2** | The power model: the discrete differential W′ balance, replacing the banking reserve | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-2 |
+| **R-3** | Drafting in the solo lap race: (a) bots only, (b) every racer, the rider included, (c) none | **(b)**, with ADR 0066 D-6's switch reaching the lap race and the wiring test restated as D-3.6 says | **(b)**, every racer, the rider included; ADR 0066 D-6's switch reaches the lap race and the wiring test is restated as D-3.6 says ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-3 |
+| **R-4** | The tests D-4 names, replaced by the changes it names, with the replacements it gives | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-4 |
+| **R-5** | No bots in rooms; room-portable arithmetic required now | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-5 |
+| **R-6** | A seeded skill error on the gaps and the finish distance | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-7 |
+| **R-7** | The owner accepts the patent risk of drafting in a lap race (bots, and the rider behind them), as ADR 0038 D-7 and ADR 0066 D-4 did for rooms, the pacer and the ghost; D-0 does not cover it | **Yes**, under (a) or (b); moot under (c) | **Accepted**: the owner accepts that risk ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-3.8 |
+| **R-8** | ADR 0060 D-2.1's *"or when"* is narrowed: a bot's place decides the rider's `k` and so when a grade is sent; what is sent is unchanged | **Yes**, under (b); moot under (c) | **Accepted**: narrowed as stated; what is sent is unchanged ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-3.3, D-6.1 |
+| **R-9** | A lap race in which the rider drafted a bot shows the solo Draft field and is marked drafted (ADR 0066 D-5), and `solo-draft-wiring.test.tsx`'s lap-race test is restated | **Yes**, under (b); moot under (c) | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-3.7, D-4 |
+| **R-10** | ADR 0061 D-8.2's −20 % floor stops applying while a bot is in a draft (`k` < 1) | **Yes** | **Accepted** as recommended ([ruling](https://github.com/openzigs/onyourleft/pull/2476#issuecomment-6803711920)) | D-1.3 |
 
 ---
 
