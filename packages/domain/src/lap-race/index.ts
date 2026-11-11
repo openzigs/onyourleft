@@ -112,16 +112,35 @@ export {
 export type { BotPace, BotPacingStyle } from './pace';
 export {
   BOT_ABILITY_SPREAD,
-  BOT_CLIMBER_GRADE_PERCENT,
   BOT_EVEN_PACE,
   BOT_PACING_STYLES,
-  BOT_SPRINTER_GRADE_PERCENT,
-  BOT_SPRINTER_SPRINT_FACTOR,
-  BOT_STYLE_BUDGET_FACTOR,
   BOT_STYLE_EASING,
   botFieldPaces,
   checkBotPace,
 } from './pace';
+
+// Each bot's rider archetype, a power profile within its tier read off its
+// pacing style, and the tactics skill's misjudgement of the race (#2459, ADR
+// 0067 D-1.1 and D-7). Capacity at the start only; nothing reads the race.
+export type { BotArchetype, BotAttackPropensity, BotMisjudgement } from './archetype';
+export {
+  BOT_ARCHETYPE_ATTACK_PROPENSITY,
+  BOT_ARCHETYPE_CLIMB_GRADE_PERCENT,
+  BOT_ARCHETYPE_CP_SHARE,
+  BOT_ARCHETYPE_PEAK_SHARE,
+  BOT_ARCHETYPE_RECOVERY_FACTOR,
+  BOT_ARCHETYPE_SPRINT_FACTOR,
+  BOT_ARCHETYPE_WPRIME_FACTOR,
+  BOT_ARCHETYPES,
+  BOT_STYLE_ARCHETYPE,
+  BOT_TACTICS_MISJUDGE_GAP_METRES,
+  BOT_TACTICS_MISJUDGE_LINE_METRES,
+  BOT_TACTICS_MISJUDGE_WBAL_SHARE,
+  BOT_TACTICS_WINDOW_MS,
+  botArchetype,
+  botFieldArchetypes,
+  botTacticsMisjudgement,
+} from './archetype';
 
 export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
 export {

@@ -10,7 +10,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
-import { botFieldPaces, botFieldPersonalities, kilograms } from '@onyourleft/domain';
+import {
+  botArchetype,
+  botFieldArchetypes,
+  botFieldPaces,
+  botFieldPersonalities,
+  kilograms,
+} from '@onyourleft/domain';
 
 import { botName, lapRaceStandings } from '../hud/lap-race-hud';
 
@@ -99,6 +105,26 @@ describe('a lap race in a ride — #1906', () => {
       dealt.map((pace, index) => botName(pace.style, index + 1)),
     );
     expect(Object.values(ride.names).some((name) => name.startsWith('Steady'))).toBe(false);
+  });
+
+  it('names no two bots of a field alike, over 100 seeds, each by a style that is its archetype’s (#2459)', () => {
+    for (let seed = 0; seed < 100; seed += 1) {
+      vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+        <T extends ArrayBufferView>(array: T): T => {
+          (array as unknown as Uint32Array)[0] = seed;
+          return array;
+        },
+      );
+      const ride = started();
+      const names = Object.values(ride.names);
+      expect(names, String(seed)).toHaveLength(LAP_RACE_MOST_BOTS);
+      expect(new Set(names).size, String(seed)).toBe(LAP_RACE_MOST_BOTS);
+      // A bot the standings call a climber races as one: its name and its archetype agree.
+      expect(ride.bots.map((bot) => botArchetype(bot.pace.style))).toEqual(
+        botFieldArchetypes(seed, LAP_RACE_MOST_BOTS),
+      );
+      vi.restoreAllMocks();
+    }
   });
 
   it('deals its bots a mixed field from the race’s seed (#1959), at one skill, on the chosen tier', () => {

@@ -322,6 +322,12 @@ its decisions never do. A bot given no pace rides the even pace at its tier's fu
 plan as it was. `lap-race-bot.test.ts` holds every style to the tier's mean, ceiling and floor, the
 tiers to their order on dealt paces, and the lead-or-trail power trace for every style.
 
+Since #2459 a pace's style carries a rider archetype (`@onyourleft/domain` §`archetype.ts`): a power
+profile within the tier, its CP share, W′, peak, recovery, climbing and kick, which the race plan's
+capacity is set from. `lap-race-bot.test.ts` holds a sprinter to beating a rouleur of its tier in a
+flat final 200 m from level, and a climber to beating a sprinter on the hilly loop, each in more than
+half of 100 seeds.
+
 ---
 
 ## 5. Determinism is enforced in ESLint, not in the typechecker

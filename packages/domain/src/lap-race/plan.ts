@@ -38,7 +38,9 @@
  *
  * Since #2458 a bot has a **capacity** fixed at the start, from its tier, its
  * pace and nothing else: a critical power (CP), its own power below; a W′,
- * {@link BOT_WPRIME_JOULES} for its tier; and a peak, the surge ceiling. The
+ * {@link BOT_WPRIME_JOULES} for its tier; and a peak, at or under the surge
+ * ceiling. Since #2459 each is its archetype's share of the tier
+ * (`archetype.ts`), and its recovery its archetype's rate. The
  * plan spends W′ through `wbal.ts`'s balance, in the discrete differential
  * form:
  *
@@ -94,25 +96,21 @@
  * every lap-race module), and a plan is scalars only (`plan.test.ts`).
  */
 
-import {
-  BOT_MASS_KILOGRAMS,
-  PACING_CLIMB_REFERENCE_GRADE_PERCENT,
-  PACING_FACTOR_FLOOR,
-  pacingFactor,
-} from '../pacer/pacing';
+import { BOT_MASS_KILOGRAMS, PACING_FACTOR_FLOOR, pacingFactor } from '../pacer/pacing';
 import { watts, type GradePercent, type Watts } from '../quantities';
 import { BOT_TIER_WATTS_PER_KILOGRAM, type BotTier } from './bots';
 import { LapRaceError } from './errors';
 import {
-  BOT_CLIMBER_GRADE_PERCENT,
-  BOT_EVEN_PACE,
-  BOT_SPRINTER_GRADE_PERCENT,
-  BOT_SPRINTER_SPRINT_FACTOR,
-  BOT_STYLE_BUDGET_FACTOR,
-  BOT_STYLE_EASING,
-  checkBotPace,
-  type BotPace,
-} from './pace';
+  BOT_ARCHETYPE_CLIMB_GRADE_PERCENT,
+  BOT_ARCHETYPE_CP_SHARE,
+  BOT_ARCHETYPE_PEAK_SHARE,
+  BOT_ARCHETYPE_RECOVERY_FACTOR,
+  BOT_ARCHETYPE_SPRINT_FACTOR,
+  BOT_ARCHETYPE_WPRIME_FACTOR,
+  botArchetype,
+  type BotArchetype,
+} from './archetype';
+import { BOT_EVEN_PACE, BOT_STYLE_EASING, checkBotPace, type BotPace } from './pace';
 import { nextUnit, raceRandom } from './random';
 import type { RaceCourse } from './race';
 import { spendableWatts, stepWbal, type BotCapacity, type BotEnergy } from './wbal';
@@ -143,8 +141,8 @@ export const BOT_PLAN_SURGE_CEILING = 1.5;
  * ⚠️ **Tuning inputs for the owner's approval** (#2458). The literature puts a
  * trained rider's W′ at roughly 15 to 25 kJ, but that range was not confirmed
  * from a primary source; `steady`, at 2 W/kg, is an untrained rider's tier and
- * sits under it. A `climber` or a `sprinter` holds `pace.ts`
- * §`BOT_STYLE_BUDGET_FACTOR` times its tier's (#2455).
+ * sits under it. Each archetype holds `archetype.ts`
+ * §`BOT_ARCHETYPE_WPRIME_FACTOR` times its tier's (#2459).
  */
 export const BOT_WPRIME_JOULES: Readonly<Record<BotTier, number>> = {
   steady: 10_000,
@@ -154,13 +152,12 @@ export const BOT_WPRIME_JOULES: Readonly<Record<BotTier, number>> = {
 };
 
 /**
- * A bot's W′, joules: {@link BOT_WPRIME_JOULES} for its tier, times `pace.ts`
- * §`BOT_STYLE_BUDGET_FACTOR` for a `climber` or a `sprinter` (#2455). What its
+ * A bot's W′, joules: {@link BOT_WPRIME_JOULES} for its tier, times its
+ * archetype's `archetype.ts` §`BOT_ARCHETYPE_WPRIME_FACTOR` (#2459). What its
  * balance starts the race at, and the capacity its plan holds it to.
  */
 export function botWPrimeJoules(tier: BotTier, pace: BotPace = BOT_EVEN_PACE): number {
-  const larger = pace.style === 'climber' || pace.style === 'sprinter';
-  return BOT_WPRIME_JOULES[tier] * (larger ? BOT_STYLE_BUDGET_FACTOR : 1);
+  return BOT_WPRIME_JOULES[tier] * BOT_ARCHETYPE_WPRIME_FACTOR[botArchetype(pace.style)];
 }
 
 /** The nearest the line the closing sprint opens, in metres of effort distance left. */
@@ -180,9 +177,12 @@ const SPRINT_DRAW_KEY = 0x5f1d_0961;
 export interface BotRacePlan {
   /** The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the bounds are set from. */
   readonly tierWatts: number;
+  /** Its rider archetype (#2459): its pace's style's, `archetype.ts` §`BOT_STYLE_ARCHETYPE`. */
+  readonly archetype: BotArchetype;
   /**
-   * The bot's own power, watts: its tier's times its pace's ability (#2455),
-   * so never over {@link tierWatts}. What it rides as its own in its hard part.
+   * The bot's own power, watts: its tier's times its pace's ability (#2455)
+   * times its archetype's CP share (#2459), so never over {@link tierWatts}.
+   * What it rides as its own in its hard part.
    */
   readonly ownWatts: number;
   /**
@@ -195,18 +195,21 @@ export interface BotRacePlan {
   readonly hardFromMetres: number;
   /** Where its hard part closes, metres of effort distance: unbounded for one that never closes. */
   readonly hardToMetres: number;
-  /** The grade at which a climb asks for the full surge, percent: 8 %, or its style's. */
+  /** The grade at which a climb asks for its full peak, percent: its archetype's. */
   readonly climbGradePercent: number;
-  /** The most it rides, watts: {@link BOT_PLAN_SURGE_CEILING} of the tier. */
+  /**
+   * The most it rides, watts: its archetype's peak share of the tier (#2459),
+   * never over {@link BOT_PLAN_SURGE_CEILING} of it.
+   */
   readonly surgeWatts: number;
   /** The least it rides, watts: `PACING_FACTOR_FLOOR` of the tier. */
   readonly floorWatts: number;
-  /** Its W′, joules: {@link BOT_WPRIME_JOULES} for the tier, or more for its style. */
+  /** Its W′, joules: {@link BOT_WPRIME_JOULES} for the tier, times its archetype's factor. */
   readonly wPrimeJoules: number;
   /**
    * Its capacity, fixed for the race (ADR 0067 D-1.1): its CP is
-   * {@link ownWatts}, its W′ {@link wPrimeJoules}, its peak {@link surgeWatts}
-   * and its floor {@link floorWatts}.
+   * {@link ownWatts}, its W′ {@link wPrimeJoules}, its peak {@link surgeWatts},
+   * its floor {@link floorWatts} and its archetype's recovery.
    */
   readonly capacity: BotCapacity;
   /** The race's length, metres of effort distance: the lap length times the laps. */
@@ -223,8 +226,8 @@ export interface BotRacePlan {
  * {@link BOT_SPRINT_LONGEST_METRES} from the line, drawn from the seed alone,
  * so every bot of one style in a race opens it at the same distance left and
  * two bots of one tier and one pace ride one power trace (#1959's skill
- * test); a `sprinter` opens it `pace.ts` §`BOT_SPRINTER_SPRINT_FACTOR` further
- * out. A race shorter than that is a sprint from the start.
+ * test); a bot opens it its archetype's `archetype.ts`
+ * §`BOT_ARCHETYPE_SPRINT_FACTOR` further out, a sprinter's 1.5 times. A race shorter than that is a sprint from the start.
  *
  * A style's hard part is the first lap (`fast-start`) or the last
  * (`negative-split`), and in a race of one lap the first or the last third
@@ -246,34 +249,37 @@ export function botRacePlan(
   const drawn = nextUnit({ state: (raceRandom(seed).state ^ SPRINT_DRAW_KEY) >>> 0 }).value;
   checkBotPace(pace);
   const { style } = pace;
+  const archetype = botArchetype(style);
   const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
-  const ownWatts = tierWatts * pace.ability;
+  const ownWatts = tierWatts * pace.ability * BOT_ARCHETYPE_CP_SHARE[archetype];
   const raceMetres = course.lapLengthMetres * course.laps;
   const hardMetres = course.laps >= 2 ? course.lapLengthMetres : raceMetres / 3;
   const sprint =
     (BOT_SPRINT_SHORTEST_METRES +
       drawn * (BOT_SPRINT_LONGEST_METRES - BOT_SPRINT_SHORTEST_METRES)) *
-    (style === 'sprinter' ? BOT_SPRINTER_SPRINT_FACTOR : 1);
+    BOT_ARCHETYPE_SPRINT_FACTOR[archetype];
   const split = style === 'fast-start' || style === 'negative-split';
   const wPrimeJoules = botWPrimeJoules(tier, pace);
-  const surgeWatts = tierWatts * BOT_PLAN_SURGE_CEILING;
+  const surgeWatts = tierWatts * BOT_ARCHETYPE_PEAK_SHARE[archetype];
   const floorWatts = tierWatts * PACING_FACTOR_FLOOR;
   return {
     tierWatts,
+    archetype,
     ownWatts,
     easedWatts: split ? ownWatts * (1 - BOT_STYLE_EASING) : ownWatts,
     hardFromMetres: style === 'negative-split' ? raceMetres - hardMetres : 0,
     hardToMetres: style === 'fast-start' ? hardMetres : Number.POSITIVE_INFINITY,
-    climbGradePercent:
-      style === 'climber'
-        ? BOT_CLIMBER_GRADE_PERCENT
-        : style === 'sprinter'
-          ? BOT_SPRINTER_GRADE_PERCENT
-          : PACING_CLIMB_REFERENCE_GRADE_PERCENT,
+    climbGradePercent: BOT_ARCHETYPE_CLIMB_GRADE_PERCENT[archetype],
     surgeWatts,
     floorWatts,
     wPrimeJoules,
-    capacity: { cpWatts: ownWatts, wPrimeJoules, peakWatts: surgeWatts, floorWatts },
+    capacity: {
+      cpWatts: ownWatts,
+      wPrimeJoules,
+      peakWatts: surgeWatts,
+      floorWatts,
+      recoveryFactor: BOT_ARCHETYPE_RECOVERY_FACTOR[archetype],
+    },
     raceMetres,
     sprintMetres: Math.min(sprint, raceMetres),
   };
@@ -308,8 +314,8 @@ export interface BotPlanStep {
 }
 
 /**
- * What a climb asks for at this grade: from the bot's own power at 0 % to the
- * surge ceiling at its plan's climb grade (8 %, or its style's).
+ * What a climb asks for at this grade: from the bot's own power at 0 % to its
+ * peak at its archetype's climb grade.
  */
 function climbPower(plan: BotRacePlan, own: number, grade: number): number {
   const climb = Math.min(grade / plan.climbGradePercent, 1);

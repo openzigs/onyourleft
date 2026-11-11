@@ -27,7 +27,9 @@
  * balance has recovered past {@link BOT_WBAL_REENTRY_FRACTION} of W′.
  *
  * Recovery slows as the balance fills, because of the `(W′ − wbal)/W′` term,
- * so it never overshoots W′. It also depends on how far under CP the bot
+ * so it never overshoots W′. Since #2459 the recovery term is times the
+ * capacity's `recoveryFactor`, its archetype's rate (1 where none is named):
+ * a rouleur recovers faster than the form's own rate. It also depends on how far under CP the bot
  * rides: a bot at CP neither spends nor recovers.
  *
  * ## Only `+ − × ÷` (ADR 0067 D-5.2)
@@ -61,6 +63,12 @@ export interface BotCapacity {
   readonly peakWatts: number;
   /** The least it ever rides: #92's −20 % floor of its tier (ADR 0061 D-8.2). */
   readonly floorWatts: number;
+  /**
+   * How fast it recovers under CP, as a multiple of the form's own rate: its
+   * archetype's (`archetype.ts` §`BOT_ARCHETYPE_RECOVERY_FACTOR`, #2459).
+   * Absent, 1.
+   */
+  readonly recoveryFactor?: number;
 }
 
 /** What is left of a bot's W′, and whether it has run out. */
@@ -110,6 +118,11 @@ export function fullBotEnergy(capacity: BotCapacity): BotEnergy {
   return { wbalJoules: capacity.wPrimeJoules, exhausted: false };
 }
 
+/** A capacity's recovery rate: 1 where none is named. */
+function recoveryOf(capacity: BotCapacity): number {
+  return capacity.recoveryFactor ?? 1;
+}
+
 function checkCapacity(capacity: BotCapacity): void {
   const { cpWatts, wPrimeJoules } = capacity;
   if (
@@ -118,11 +131,13 @@ function checkCapacity(capacity: BotCapacity): void {
     !Number.isFinite(wPrimeJoules) ||
     wPrimeJoules <= 0 ||
     !Number.isFinite(capacity.peakWatts) ||
-    !Number.isFinite(capacity.floorWatts)
+    !Number.isFinite(capacity.floorWatts) ||
+    !(recoveryOf(capacity) > 0) ||
+    !Number.isFinite(recoveryOf(capacity))
   ) {
     throw new LapRaceError(
       'capacity-out-of-range',
-      'a capacity has a finite critical power and a finite W prime, each above zero, and a finite peak and floor',
+      'a capacity has a finite critical power, W prime and recovery, each above zero, and a finite peak and floor',
     );
   }
 }
@@ -177,7 +192,8 @@ export function stepWbal(
         ? 0
         : spent
       : wbalJoules +
-        ((cpWatts - powerWatts) * dtSeconds * (wPrimeJoules - wbalJoules)) / wPrimeJoules;
+        (recoveryOf(capacity) * (cpWatts - powerWatts) * dtSeconds * (wPrimeJoules - wbalJoules)) /
+          wPrimeJoules;
   const clamped = Math.min(wPrimeJoules, Math.max(0, after));
   const exhausted =
     clamped <= 0 || (energy.exhausted && clamped <= wPrimeJoules * BOT_WBAL_REENTRY_FRACTION);
