@@ -12702,8 +12702,15 @@ select.oyl-input {
    19 px into the route panel at 490 (`ride-notices.browser.spec.ts`
    §"#2381"). The three totals are the tier's middle row, and on the ride
    that puts up *Not recording* they have nothing to show: nothing is being
-   recorded. The graph has given way already (the rule above). */
-@media (min-width: 46rem) and (height > 30rem) and (height < 50rem) {
+   recorded. The graph has given way already (the rule above).
+   ⚠️ **And on the owner's 1280×800 tablet too, since #2425** (at 50 rem, so
+   `<=`). #2425's solo Draft field is a sixth reading on the secondary
+   tier's second row, and with #2420's wider *Power (3 s)* label that tier
+   was three rows on the CI runner's fonts: the cell ran `[8,231 → 360,470]`,
+   16 px into the route panel at 454 (run 42953222937). On a Mac's fonts the
+   tier is two rows and the cell ends at 379. With the totals gone, nine
+   readings are two rows on both. */
+@media (min-width: 46rem) and (height > 30rem) and (height <= 50rem) {
   .oyl-game--riding
     .oyl-hud:has(
       > .oyl-hud__notices
