@@ -332,7 +332,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         holds a ride's distance, speed and grades identical
                         eased or not. Stateless — the lag a rider holding this
                         speed would have here — so a pacer or ghost level with
-                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        the rider AT THEIR SPEED is drawn level. ⚠️ Since
+                        #2427 riders at different speeds are drawn in their
+                        odometers' order (ADR 0038 D-3.4): `scene.ts`
+                        §`inOdometerOrder` keeps each a quarter of its
+                        odometer gap from the next, out from the rider, who
+                        is never moved (`drawn-order.test.ts`). Without it a
+                        faster rider just ahead, lagging more, was drawn up
+                        to 30 m behind the one it shelters. ⚠️ Not in a Delivery round
                         or a lap race (`scene.ts` §`easingLine`), where the
                         drawn place is where the game meets the rider; there
                         #546's 38.7° cap and its parked cranks still bind.

@@ -50,8 +50,15 @@
  * this one function of where they are and how fast, so a bot or a ghost at the
  * rider's distance and speed is drawn exactly where the rider is; and no
  * rider is drawn more than {@link MAX_LAG_METRES} behind their odometer, so
- * riders at different speeds are never drawn further out of order than that,
- * and "To go" and the finish are never further out than that.
+ * "To go" and the finish are never further out than that. ⚠️ **Riders at
+ * different speeds are drawn in their odometers' order** — #2427, ADR 0038
+ * D-3.4's *"a rider drawn behind another is behind them"*: the lag grows with
+ * the speed, so a faster rider a few metres ahead could lag a slower one behind
+ * by more than the gap and be drawn behind the rider it gives a draft to.
+ * `scene.ts` §`inOdometerOrder` keeps each rider at least a quarter of their
+ * odometer gap from the next, from the rider (who is never moved) outward; a
+ * drawn gap is still never more than {@link MAX_LAG_METRES} from the odometer
+ * gap, and nobody is drawn past their odometer or more than that behind it.
  *
  * ## Stateless, like the lean
  *

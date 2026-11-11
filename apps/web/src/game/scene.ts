@@ -1241,6 +1241,12 @@ export interface PlacedRider {
 interface Rider {
   readonly kind: RiderMarker['kind'];
   readonly distance: number;
+  /**
+   * Its own odometer — #2427: where the room and the solo draft hold it, which
+   * {@link distance} is eased from and the drawn order is kept to
+   * (§`inOdometerOrder`).
+   */
+  readonly odometer: number;
   /** How fast it is DRAWN — eased for a bend, and above its own speed while it gives the lag back (#1998). */
   readonly speed: number;
   /**
@@ -1286,8 +1292,10 @@ function ridersOnTheRoad(
   line: RacingLine | undefined,
 ): readonly PlacedRider[] {
   // #1998: every rider is eased by the one rule the rider is, from their own
-  // odometer and speed, so a pacer or a ghost level with the rider is drawn
-  // level with them. Each one's cranks still turn from their own odometer.
+  // odometer and speed, so a pacer or a ghost level with the rider AND AT THEIR
+  // SPEED is drawn level with them. #2427: at different speeds their lags
+  // differ, and the drawn order is then kept to the odometers' by
+  // `inOdometerOrder` below. Each one's cranks still turn from their own odometer.
   const easing = easingLine(input);
   const ease = (distance: number, speed: number): EasedPlace =>
     easing === undefined ? { distance, speed } : easedPlace(easing, distance, speed);
@@ -1300,6 +1308,7 @@ function ridersOnTheRoad(
     {
       kind: 'rider',
       distance: drawn.distance,
+      odometer: input.riderDistance ?? input.state.ride.distance,
       speed: drawn.speed,
       ownSpeed: input.state.ride.speed,
       crankAngle: input.crankAngle,
@@ -1319,6 +1328,7 @@ function ridersOnTheRoad(
     riders.push({
       kind: 'bot',
       distance: place.distance,
+      odometer: input.botDistance,
       speed: place.speed,
       ownSpeed: bot?.state.speed ?? 0,
       crankAngle: pedalling(input.botDistance),
@@ -1348,6 +1358,7 @@ function ridersOnTheRoad(
     riders.push({
       kind: 'ghost',
       distance: place.distance,
+      odometer: at,
       speed: place.speed,
       ownSpeed: speed,
       crankAngle: pedalling(at),
@@ -1368,10 +1379,12 @@ function ridersOnTheRoad(
     // which is the cost of a frame in a crowded room.
     if (remote.distanceMetres < first.along) continue;
     const place = ease(remote.distanceMetres, remote.speedMetresPerSecond);
-    if (place.distance < first.along || place.distance > last.along) continue;
+    // #2427: whether it is on the corridor is decided where it is drawn IN
+    // ORDER, below, which may be a little further back or on than `place`.
     riders.push({
       kind: 'remote',
       distance: place.distance,
+      odometer: remote.distanceMetres,
       speed: place.speed,
       ownSpeed: remote.speedMetresPerSecond,
       // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
@@ -1392,6 +1405,7 @@ function ridersOnTheRoad(
     riders.push({
       kind: 'bot',
       distance: bot.distanceMetres,
+      odometer: bot.distanceMetres,
       speed: bot.speedMetresPerSecond,
       ownSpeed: bot.speedMetresPerSecond,
       crankAngle: pedalling(bot.distanceMetres),
@@ -1403,8 +1417,17 @@ function ridersOnTheRoad(
   // #625: the ride's own clock, which a held or paused ride holds — never a
   // wall clock. @see RiderMarker.rideSeconds
   const rideClock: number = ghostClock(input.state);
-  return riders.map((rider) => {
-    const across = line === undefined ? STRAIGHT_DOWN_THE_MIDDLE : lateralOf(rider, riders, line);
+  // #2427: eased, the drawn order is the odometers' order; and a room's rider
+  // is on the corridor where it is drawn in that order (#1998's rule).
+  const ordered = (easing === undefined ? riders : inOdometerOrder(riders)).filter(
+    (rider) =>
+      rider.kind !== 'remote' ||
+      first === undefined ||
+      last === undefined ||
+      (rider.distance >= first.along && rider.distance <= last.along),
+  );
+  return ordered.map((rider) => {
+    const across = line === undefined ? STRAIGHT_DOWN_THE_MIDDLE : lateralOf(rider, ordered, line);
     const lateral = across.metres;
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
@@ -1438,6 +1461,76 @@ function ridersOnTheRoad(
       lateral,
     };
   });
+}
+
+/**
+ * The least share of their odometer gap two riders are drawn apart by where
+ * keeping their drawn order holds one of them — #2427: **a quarter**. Chosen,
+ * and stated as a choice: more than nought, so a rider behind is drawn behind
+ * (ADR 0038 D-3.4) and not level; small enough that riders at one speed are
+ * never held by it: their drawn gap is at least 0.499 of their odometer gap on
+ * a 10 m hairpin and 0.559 on a 120° corner drawn at one sample, at 20 to
+ * 50 km/h and gaps to 30 m (measured for #2427); and a quarter of the draft's 30 m
+ * reach (7.5 m) is still three bicycle lengths. ⚠️ With the lag bounded at
+ * `MAX_LAG_METRES` (30 m) the drawn gap is never less than the odometer gap
+ * less 30 m, so this holds nobody more than 40 m (30 / 0.75) from another.
+ */
+export const DRAWN_ORDER_SHARE = 0.25;
+
+/**
+ * The riders of one eased frame, each drawn in its odometer's order — #2427.
+ *
+ * Each rider is eased by its own odometer and speed (`bend-easing.ts`), and
+ * the lag grows with the speed, so through a bend a rider a few metres ahead
+ * and faster can lag the one behind by more than the gap between them: drawn
+ * BEHIND the rider whose draft they give, which ADR 0038 D-3.4's *"a rider
+ * drawn behind another is behind them"* forbids. So, from the rider out:
+ *
+ * - **The rider is never moved.** The corridor and the chase camera are built
+ *   round the rider's eased place (`drawnRider`), and a lone rider is exactly
+ *   as before.
+ * - **Ahead of the rider**, nearest first, each is drawn at least
+ *   {@link DRAWN_ORDER_SHARE} of its odometer gap ahead of the one before it:
+ *   moved ON where its own easing would put it behind that. Never past its
+ *   odometer, because the one before is never past its own.
+ * - **Behind the rider**, nearest first, each is drawn at least that share
+ *   behind the one before it: held BACK where its easing would put it level or
+ *   ahead. Never more than `MAX_LAG_METRES` behind its odometer, because the
+ *   one before is not.
+ *
+ * A rider moved takes the slower of its own drawn speed and the one it is
+ * kept beside, so it never leans further than either. It is a `min`/`max` of
+ * places that move smoothly, so nothing jumps between frames. Draws only: no
+ * odometer, no `k` and no trainer write reads this.
+ */
+function inOdometerOrder(riders: readonly Rider[]): readonly Rider[] {
+  const [anchor] = riders;
+  if (anchor === undefined || riders.length < 2) return riders;
+  const kept = [...riders];
+  const others = kept.map((rider, index) => ({ rider, index })).slice(1);
+  const ahead = others
+    .filter((each) => each.rider.odometer >= anchor.odometer)
+    .sort((one, other) => one.rider.odometer - other.rider.odometer);
+  const behind = others
+    .filter((each) => each.rider.odometer < anchor.odometer)
+    .sort((one, other) => other.rider.odometer - one.rider.odometer);
+  for (const [run, side] of [
+    [ahead, 1],
+    [behind, -1],
+  ] as const) {
+    let before: Rider = anchor;
+    for (const { rider, index } of run) {
+      const bound =
+        before.distance + side * DRAWN_ORDER_SHARE * Math.abs(rider.odometer - before.odometer);
+      const held = side * (bound - rider.distance) > 0;
+      const placed: Rider = held
+        ? { ...rider, distance: bound, speed: Math.min(rider.speed, before.speed) }
+        : rider;
+      kept[index] = placed;
+      before = placed;
+    }
+  }
+  return kept;
 }
 
 /**
