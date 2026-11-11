@@ -142,6 +142,7 @@ import {
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
+  soloDraftDrawn,
   windGivesWayToTheDraft,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
@@ -1079,7 +1080,7 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
       }
       // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
       // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
-      const draftDrawn = viewport.width >= 800 && viewport.height >= 752;
+      const draftDrawn = soloDraftDrawn(viewport);
       // And from 50 rem tall the wind gives way to it (§"the wind gives way to
       // it"), beside the pacer and the ghost.
       expect(seen.givenWay, how).toEqual(
@@ -1490,13 +1491,14 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
  * one put its unit and its number on two lines, so the tier grew a row
  * between two loads of the same ride (`theme.css` §"its unit is a line of its
  * own" until its unit became the `%` alone, so #2130's rule that a unit
- * stays on its number's line holds). Read on
- * the widest HUD at every viewport that draws the field: the number set to 59,
- * the field's height and the tier's must not change, and the unit is on the
- * number's line.
+ * stays on its number's line holds). Read on the widest HUD at every viewport
+ * that DRAWS the field (a tablet, `soloDraftDrawn`): the number set to 0 and
+ * then to 59, whatever the live draft is, the field's height and the tier's
+ * must not change, and the unit is on the number's line at both. #2472: and
+ * where the field should be drawn and is not, it fails rather than passes.
  */
-for (const viewport of OVERLAY_VIEWPORTS) {
-  test(`#2425 the solo Draft field keeps its height at a two-digit draft — ${viewport.name}`, async ({
+for (const viewport of OVERLAY_VIEWPORTS.filter(soloDraftDrawn)) {
+  test(`#2425 the solo Draft field keeps its height from one digit to two — ${viewport.name}`, async ({
     browser,
   }) => {
     const page = await sharedRide(browser, viewport);
@@ -1510,35 +1512,67 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       if (field == null || panel == null || !(number instanceof Text) || unit == null) {
         return undefined;
       }
-      const drawn = field.getBoundingClientRect().width > 1;
       const was = number.data;
-      const before = {
-        field: field.getBoundingClientRect().height,
-        panel: panel.getBoundingClientRect().height,
+      const at = (digits: string) => {
+        number.data = digits;
+        const range = document.createRange();
+        range.selectNodeContents(number);
+        const unitBox = unit.getBoundingClientRect();
+        return {
+          width: field.getBoundingClientRect().width,
+          field: field.getBoundingClientRect().height,
+          panel: panel.getBoundingClientRect().height,
+          numberTop: range.getBoundingClientRect().top,
+          numberBottom: range.getBoundingClientRect().bottom,
+          unitMiddle: (unitBox.top + unitBox.bottom) / 2,
+        };
       };
-      number.data = '59';
-      const range = document.createRange();
-      range.selectNodeContents(number);
-      const after = {
-        field: field.getBoundingClientRect().height,
-        panel: panel.getBoundingClientRect().height,
-        numberTop: range.getBoundingClientRect().top,
-        numberBottom: range.getBoundingClientRect().bottom,
-        unitMiddle: (unit.getBoundingClientRect().top + unit.getBoundingClientRect().bottom) / 2,
-      };
+      const one = at('0');
+      const two = at('59');
       number.data = was;
-      return { drawn, was, before, after };
+      return { one, two };
     });
     expect(read, 'the solo Draft field is in the document').toBeDefined();
-    if (read === undefined || !read.drawn) return;
+    if (read === undefined) throw new Error('no solo Draft field');
+    // Drawn here, not given way by clip: a field squeezed to a pixel would
+    // keep its height at any number and prove nothing.
+    expect(read.one.width, 'the solo Draft field is drawn on a tablet').toBeGreaterThan(1);
     console.log(
-      `#2425 the solo Draft field — ${viewport.name}: ${read.before.field.toFixed(1)} px at ${read.was}, ${read.after.field.toFixed(1)} px at 59; the tier ${read.before.panel.toFixed(1)} → ${read.after.panel.toFixed(1)} px`,
+      `#2425 the solo Draft field — ${viewport.name}: ${read.one.field.toFixed(1)} px at 0, ${read.two.field.toFixed(1)} px at 59; the tier ${read.one.panel.toFixed(1)} → ${read.two.panel.toFixed(1)} px`,
     );
-    expect(read.after.field).toBeCloseTo(read.before.field, 1);
-    expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
-    // On the number's line (#2130): the unit's middle is within the number's
-    // line box, which a unit wrapped under the number is not.
-    expect(read.after.unitMiddle).toBeGreaterThan(read.after.numberTop);
-    expect(read.after.unitMiddle).toBeLessThan(read.after.numberBottom);
+    expect(read.two.field).toBeCloseTo(read.one.field, 1);
+    expect(read.two.panel).toBeCloseTo(read.one.panel, 1);
+    // On the number's line (#2130) at both: the unit's middle is within the
+    // number's line box, which a unit wrapped under the number is not.
+    for (const each of [read.one, read.two]) {
+      expect(each.unitMiddle).toBeGreaterThan(each.numberTop);
+      expect(each.unitMiddle).toBeLessThan(each.numberBottom);
+    }
+  });
+}
+
+/*
+ * #2472: the wind gives way to a solo ride's draft on a tablet from 50 rem
+ * tall only beside BOTH the pacer and the ghost (`theme.css` §"the wind gives
+ * way to it"), where the row runs out of tracks. With the pacer and the wind
+ * and no ghost the row has room, and the wind is drawn beside the draft.
+ * Pinned, because widening that rule's `:has` broke no other test.
+ */
+for (const viewport of OVERLAY_VIEWPORTS.filter(windGivesWayToTheDraft)) {
+  test(`#2472 a solo ride with the pacer and no ghost keeps its wind beside the draft — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, '?ghost=none');
+    const seen = await measure(page);
+    const names = seen.items.map((each) => each.name);
+    // The ride it says it is: the pacer and the draft drawn, and no ghost's gap.
+    expect(names).toEqual(expect.arrayContaining(['reading: Pacer', 'reading: Draft']));
+    expect(
+      names.filter((name) => name.startsWith('reading: Your')),
+      'no ghost',
+    ).toEqual([]);
+    expect(seen.givenWay).not.toContain('reading: Wind');
+    const wind = named(seen.items, 'reading: Wind');
+    expect(wind.box.width * wind.box.height, 'the wind is drawn').toBeGreaterThan(1);
   });
 }

@@ -102,6 +102,39 @@ describe('the draft on the HUD — #787', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('reads a solo ride’s Draft field as a share of drag, drawing the `%` alone — #2472', async () => {
+    const profile = route();
+    mounted = await mount(
+      <main>
+        <h1>Ride</h1>
+        <HudPanel
+          profile={profile}
+          state={atStartLine(profile)}
+          cadence={{ value: 88, live: true }}
+          heartRate={{ value: 150, live: true }}
+          onPause={() => undefined}
+          onEnd={() => undefined}
+          paused={false}
+          announcement=""
+          soloDraft={34}
+        />
+      </main>,
+    );
+    // As a screen reader hears it: the unit, then what it is a share of.
+    expect(field('Draft')).toBe('Draft 34 % of drag at most 59 %');
+    // As it is drawn: "of drag" is visually hidden inside the unit, and the
+    // unit's drawn text is the `%` alone (#2425, #2130).
+    const unit = [...document.querySelectorAll('.oyl-hud__field')]
+      .find((each) => text(each.querySelector('dt')) === 'Draft')
+      ?.querySelector('.oyl-hud__unit');
+    const hidden = unit?.querySelector('.oyl-visually-hidden');
+    expect(text(hidden)).toBe('of drag');
+    const drawn = unit?.cloneNode(true) as Element | undefined;
+    drawn?.querySelector('.oyl-visually-hidden')?.remove();
+    expect(text(drawn)).toBe('%');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('says Off in a room made with drafting off', async () => {
     await hud({ nearby: 1, draft: 'off', draftShown: true });
     expect(field('Draft')).toBe('Draft Off');
@@ -219,11 +252,11 @@ describe('the rider in the draft — #2426, the shelter mark and the words', () 
   it('marks a solo ride’s Draft field the same way, from the simulation’s state', async () => {
     await hud(undefined, { soloDraft: 22, soloInDraft: true });
     expect(draftBox()?.querySelector('svg.oyl-hud__shelter')).not.toBeNull();
-    expect(field('Draft')).toBe('Draft 22 % In the draft at most 59 %');
+    expect(field('Draft')).toBe('Draft 22 % of drag In the draft at most 59 %');
     mounted?.unmount();
     await hud(undefined, { soloDraft: 22, soloInDraft: false });
     expect(draftBox()?.querySelector('svg.oyl-hud__shelter')).toBeNull();
-    expect(field('Draft')).toBe('Draft 22 % at most 59 %');
+    expect(field('Draft')).toBe('Draft 22 % of drag at most 59 %');
   });
 
   // jsdom loads no theme.css, so the forced stylesheet below recolours nothing
