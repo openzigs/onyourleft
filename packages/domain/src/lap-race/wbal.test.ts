@@ -223,6 +223,12 @@ describe('it refuses what is not a balance', () => {
       'capacity-out-of-range',
     );
     expect(codeOf(() => spendableWatts(CAPACITY, full, Number.NaN, 1))).toBe('power-not-finite');
+    expect(codeOf(() => spendableWatts({ ...CAPACITY, peakWatts: Number.NaN }, full, CP, 1))).toBe(
+      'capacity-out-of-range',
+    );
+    expect(codeOf(() => stepWbal({ ...CAPACITY, floorWatts: Number.NaN }, full, CP, 1))).toBe(
+      'capacity-out-of-range',
+    );
     expect(codeOf(() => spendableWatts(CAPACITY, full, CP, -1))).toBe('elapsed-out-of-range');
     expect(
       codeOf(() => spendableWatts(CAPACITY, { wbalJoules: -1, exhausted: false }, CP, 1)),
@@ -236,5 +242,35 @@ describe('it refuses what is not a balance', () => {
     }
     expect(message).toContain('W prime balance');
     expect(message).not.toContain('123');
+  });
+});
+
+describe('exhaustion latches on an off-round capacity at the game tick (review of #2482)', () => {
+  it('holding the surge ceiling at 0.05 s, a hard bot at ability 0.99 runs out and stays capped until the re-entry threshold', () => {
+    const cp = 270 * 0.99;
+    const capacity: BotCapacity = {
+      cpWatts: cp,
+      wPrimeJoules: W_PRIME,
+      peakWatts: 1.8 * cp,
+      floorWatts: 0.8 * cp,
+    };
+    let energy = fullBotEnergy(capacity);
+    for (let tick = 0; tick < 20 * 200 && !energy.exhausted; tick += 1) {
+      energy = stepWbal(
+        capacity,
+        energy,
+        spendableWatts(capacity, energy, capacity.peakWatts, 0.05),
+        0.05,
+      );
+    }
+    expect(energy.exhausted).toBe(true);
+    expect(energy.wbalJoules).toBe(0);
+    for (let tick = 0; tick < 20 * 600; tick += 1) {
+      const ridden = spendableWatts(capacity, energy, capacity.peakWatts, 0.05);
+      if (energy.exhausted) expect(ridden).toBeLessThanOrEqual(cp);
+      else expect(energy.wbalJoules).toBeGreaterThan(W_PRIME * BOT_WBAL_REENTRY_FRACTION);
+      energy = stepWbal(capacity, energy, ridden, 0.05);
+      if (!energy.exhausted) break;
+    }
   });
 });

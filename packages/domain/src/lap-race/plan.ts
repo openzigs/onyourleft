@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lap-race bots' race plan: a course-only energy budget — #1960,
+ * The lap-race bots' race plan: a course-only energy plan, spent from a W′ balance — #1960,
  * [ADR 0061](../../../../docs/adr/0061-lap-race-bots-a-course-only-energy-plan-never-another-racer.md).
  *
  * Before #1960 a bot held its tier's W/kg, shaped by #92's grade pacing
  * (`pacer/pacing.ts`). With a plan it **surges on climbs, eases on descents
- * and sprints the closing distance**, and its average stays at its tier.
+ * and sprints the closing distance**, spending a W′ balance that runs out (ADR 0067 D-1.3 lifted the mean-power tolerance).
  *
  * ## The rule (ADR 0061 D-1)
  *

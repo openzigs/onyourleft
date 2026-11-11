@@ -91,6 +91,14 @@ export const BOT_WBAL_REENTRY_FRACTION = 0.2;
 export const BOT_WBAL_TICK_TOLERANCE = 0.005;
 
 /**
+ * A balance this close to empty, joules, is empty: **a millijoule**.
+ * `spendableWatts` caps a bot's power at what the balance pays for, so the
+ * float subtraction in `stepWbal` leaves a residue of about 1e-12 J instead of
+ * an exact 0, and a bot on that residue must still latch `exhausted`.
+ */
+export const BOT_WBAL_EMPTY_JOULES = 1e-3;
+
+/**
  * The most a bot's power may ever be, watts, whatever its capacity: 7 W/kg,
  * `MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM`, at `BOT_MASS_KILOGRAMS`, 75 kg
  * (ADR 0061 D-8.2, kept by ADR 0067 D-1.3).
@@ -108,11 +116,13 @@ function checkCapacity(capacity: BotCapacity): void {
     !Number.isFinite(cpWatts) ||
     cpWatts <= 0 ||
     !Number.isFinite(wPrimeJoules) ||
-    wPrimeJoules <= 0
+    wPrimeJoules <= 0 ||
+    !Number.isFinite(capacity.peakWatts) ||
+    !Number.isFinite(capacity.floorWatts)
   ) {
     throw new LapRaceError(
       'capacity-out-of-range',
-      'a capacity has a finite critical power and a finite W prime, each above zero',
+      'a capacity has a finite critical power and a finite W prime, each above zero, and a finite peak and floor',
     );
   }
 }
@@ -160,9 +170,12 @@ export function stepWbal(
   }
   const { cpWatts, wPrimeJoules } = capacity;
   const { wbalJoules } = energy;
+  const spent = powerWatts > cpWatts ? wbalJoules - (powerWatts - cpWatts) * dtSeconds : undefined;
   const after =
-    powerWatts > cpWatts
-      ? wbalJoules - (powerWatts - cpWatts) * dtSeconds
+    spent !== undefined
+      ? spent <= BOT_WBAL_EMPTY_JOULES
+        ? 0
+        : spent
       : wbalJoules +
         ((cpWatts - powerWatts) * dtSeconds * (wPrimeJoules - wbalJoules)) / wPrimeJoules;
   const clamped = Math.min(wPrimeJoules, Math.max(0, after));
