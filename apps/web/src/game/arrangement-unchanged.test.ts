@@ -344,10 +344,15 @@ describe('the arrangement a route produces — #341', () => {
     );
     // ⚠️ #2101 moved its heights, as above, and nothing else: `01218942`
     // until then, the plan digest and the counts unmoved.
-    expect(digest(wooded.map(serialise))).toBe('f3e6a32b');
-    expect(digest(wooded.map(serialisePlan))).toBe('37f179e3');
-    expect(natural.length).toBe(6968);
-    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1021);
+    // ⚠️ #2428 moved this control, and it was `f3e6a32b` / `37f179e3`, 6 968
+    // natural items in 1 021 places until then: a tree is kept off a side road
+    // by its drawn reach as a radius (`scene.ts` §`sideRoadNaturalMargin`), so
+    // with the ground left wooded one tree beside a village's crossroads is
+    // cleared, in eight frames. The sweep above is unmoved.
+    expect(digest(wooded.map(serialise))).toBe('53189e8b');
+    expect(digest(wooded.map(serialisePlan))).toBe('d5ae6e37');
+    expect(natural.length).toBe(6960);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1020);
     expect(wooded.length - natural.length).toBe(1901);
   });
 

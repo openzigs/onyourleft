@@ -62,6 +62,8 @@ import type {
   WaterFrame,
 } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import { FOLIAGE_SWAY_METRES } from './foliage-light';
+import { sceneryPlanRadius } from './near-field';
 import {
   LINE_LIMIT_METRES,
   leanAt,
@@ -92,6 +94,7 @@ import {
   clearOfSideRoads,
   mappedJunctions,
   onSideRoad,
+  SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
   type SideRoad,
@@ -114,6 +117,7 @@ import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
+  clearOfDriveways,
   clearOfMappedBuildings,
   mappedChunk,
   type MappedBuildings,
@@ -582,6 +586,31 @@ function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFr
 const SCENERY_CLEARANCE = sideRoadClearance(onSideRoad);
 
 /**
+ * How far off a side road's edge a tree, shrub or rock stands, in metres —
+ * #2428: its whole drawn reach at its scale, the larger of the two worlds'
+ * (`near-field.ts` §`sceneryReach`: one arrangement draws both, ADR 0026
+ * D-3), with the realistic foliage's sway ({@link FOLIAGE_SWAY_METRES}), and
+ * never less than `cross-streets.ts` §`SIDE_ROAD_SCENERY_MARGIN_METRES`.
+ *
+ * Measured as a point 1.5 m clear, a fir at the top of its scale reaches
+ * 5.1 m, 3.6 m across the side road: more than a driveway's whole 3.5 m.
+ * That is the likeliest of what the owner saw drawn across crossings and
+ * driveways (2026-11-09); a shrub's reach is 1.54 m at its largest, so it
+ * keeps the 1.5 m and a little more.
+ */
+export function sideRoadNaturalMargin(item: ScatterItem): number {
+  // A radius, not the box's half-width: foliage at a diagonal of the box
+  // stands up to √2 times that from the trunk (as `near-field.ts` §`intrudes`
+  // reasons). A rock does not sway.
+  const reach = Math.max(
+    sceneryPlanRadius(item.kind, 'realistic'),
+    sceneryPlanRadius(item.kind, 'stylised'),
+  );
+  const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
+}
+
+/**
  * The scenery for exactly the stretch of road this frame drew.
  *
  * ⚠️ **The span comes from the corridor rather than from `VIEW_AHEAD_METRES` and
@@ -651,7 +680,12 @@ function scenery(
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
-  const built = clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE);
+  // #2428: and none across a mapped building's driveway, a roadside hedge
+  // row the likeliest.
+  const built = clearOfDriveways(
+    clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
+    input.mappedBuildings,
+  );
   // #1549: and off every mapped building's ground, by #1534's rule — whose
   // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
@@ -660,9 +694,12 @@ function scenery(
       : clearOfMappedBuildings(
           clearOfSettlements(natural, footprints, land),
           input.mappedBuildings,
+          // #2428: off a driveway by its drawn reach, as off a side road.
+          sideRoadNaturalMargin,
         ),
     sideRoads,
     SCENERY_CLEARANCE,
+    sideRoadNaturalMargin,
   );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
