@@ -179,6 +179,12 @@ const RIDE = Array.from({ length: 150 }, (_, index) => (PAIRS[0] as number) - 20
  * off, were this case's time: 1.4 s locally, and up to 5.9 s under coverage on
  * an EPYC 7763, past Vitest's 5 s (#2471). The ruling for #1688 is to make such
  * a case cheaper and never to raise its timeout (`docs/agents/ci.md`).
+ * Now 78 ms locally and 128 ms under coverage. Three readings under coverage,
+ * nightly *Tests under coverage (1 of 2)* dispatched on this branch at
+ * 7baeb1e2 (2026-11-11): run 43023515350 on an AMD EPYC 9V74, under Vitest's
+ * 300 ms slow-case line so not listed, the file 1 577 ms; run 43023589076 on
+ * an EPYC 7763, 315 ms, the file 2 099 ms; run 43027926530 on an EPYC 7763,
+ * 321 ms, the file 2 727 ms.
  */
 function pairsSeen(): { item: ScatterItem; road: SideRoad }[] {
   const seen = new Map<number, Map<number, Map<string, Set<number>>>>();
