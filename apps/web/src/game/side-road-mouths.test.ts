@@ -168,8 +168,20 @@ const RIDE = Array.from({ length: 150 }, (_, index) => (PAIRS[0] as number) - 20
   (distance) => ({ distance, frame: frameAt(distance, STREETS) }),
 );
 
+/**
+ * The sweep below walks 150 frames and measures every item in each against
+ * every mapped side road in it, so it is the file's one slow case, and under
+ * coverage on a slow runner it passed Vitest's 5 s default, as
+ * `docs/agents/ci.md` §4c expects of such a case: it timed out in nightly run
+ * 43008116660 (2026-11-11, an Intel Xeon 8370C), 5 666 ms by Vitest's own
+ * count, the file's three cases 7 561 ms. Locally it takes 1.2 s, and 2.2 s
+ * under coverage. Set to about three times the slowest figure; the figures
+ * from the three CI readings of #2471 are in that issue.
+ */
+const SWEEP = { timeout: 20_000 } as const;
+
 describe('nothing drawn across a side road or a driveway at its mouth — #2428', () => {
-  it('draws no tree, shrub, rock or hedge onto a side street or a driveway', () => {
+  it('draws no tree, shrub, rock or hedge onto a side street or a driveway', SWEEP, () => {
     const across = new Set<string>();
     const kinds = new Set<string>();
     // An item and a road are measured once, however many frames hold both.
