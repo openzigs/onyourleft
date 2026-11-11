@@ -380,8 +380,8 @@ describe('one ground beside a road ridden twice — #1996', () => {
         // #2422's rework stands an ordinary ride's camera on the drawn path,
         // and from there one point of 826 in view, 12 m after the turn and
         // 32 m ahead, has the two grounds 0.434 m apart. The ground is not
-        // #2422's and is unchanged; the follow-up that holds it 0.5 m clear in
-        // both cameras' view is in PR #2445's body.
+        // #2422's and is unchanged. #2469 holds it 0.5 m clear in both
+        // cameras' view; its acceptance criterion removes this `uneased`.
         const frame = frameAt(offsetRoute, middle + offset, { uneased: true });
         const ground = groundOf(frame);
         for (const point of inView(frame.camera, 100)) {

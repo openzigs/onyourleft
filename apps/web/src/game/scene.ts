@@ -71,7 +71,14 @@ import {
   type RacingLine,
 } from './racing-line';
 import { ghostClock, type GameState } from './simulation';
-import { drawnLine, drawnLineAt, isDrawnLine, type DrawnLine, type DrawnPoint } from './drawn-line';
+import {
+  drawnLine,
+  drawnLineAt,
+  drawnPlaceOf,
+  isDrawnLine,
+  type DrawnLine,
+  type DrawnPoint,
+} from './drawn-line';
 import {
   ROAD_WIDTH_METRES,
   corridorOrigin,
@@ -814,6 +821,11 @@ export function cameraPose(
     // behind the rider and 400 m ahead, so both reads are inside it everywhere
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
+    // ⚠️ At the odometer's place, on a drawn path too — #2422's review. It
+    // sets only the camera's pitch and draws nothing, and read where the
+    // pacing puts the eye it moved the eye's height by the shift times the
+    // grade, which `landform.test.ts`' far-leg rays on a 140–150° climb to a
+    // level far leg, at a third of a metre of margin, could not take.
     eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
     targetRoadY: target.y,
   };
@@ -848,10 +860,13 @@ export function chaseRider(
     // exactly as `markerAt` moves the rider's marker.
     const on = drawnLineAt(path, clampedTo(corridor, atDistance));
     const aside = lateralMetres - lineOffsetAt(path, atDistance);
+    const x = on.x - on.headingZ * aside;
+    const z = on.z + on.headingX * aside;
     return {
-      x: on.x - on.headingZ * aside,
-      y: here.y,
-      z: on.z + on.headingX * aside,
+      x,
+      // At the road's height where they are drawn, not at the odometer's.
+      y: drawnHeight(corridor, path, atDistance, { x, z }),
+      z,
       tangent: on,
     };
   }
@@ -904,7 +919,12 @@ function roadTarget(
       // #2422: ON the drawn path, the line the rider will ride, which is
       // smooth where the road's own centreline wanders with the track.
       const ahead = drawnLineAt(path, clampedTo(corridor, atDistance + reach));
-      return { x: ahead.x, y: placed.y, z: ahead.z, pastTheEnd };
+      return {
+        x: ahead.x,
+        y: drawnHeight(corridor, path, atDistance + reach, ahead),
+        z: ahead.z,
+        pastTheEnd,
+      };
     }
     const across = pastTheEnd ? tangent : headingAt(corridor, placed.index);
     return {
@@ -1619,11 +1639,16 @@ function markerAt(
     const on = drawnLineAt(line, clampedTo(corridor, atDistance));
     const aside = across.metres - lineOffsetAt(line, atDistance);
     const facing = turnedBy(on, facingTurn(Math.atan(across.rate - lineSlopeAt(line, atDistance))));
+    const x = on.x - on.headingZ * aside;
+    const z = on.z + on.headingX * aside;
     return {
       kind,
-      x: on.x - on.headingZ * aside,
-      y: at.y,
-      z: on.z + on.headingX * aside,
+      x,
+      // #2422's review: at the road's height WHERE it is drawn. The pacing
+      // puts it a few metres along the road from its odometer in a corner,
+      // and read at the odometer it floated 0.3 m over a climbing junction.
+      y: drawnHeight(corridor, line, atDistance, { x, z }),
+      z,
       headingX: facing.headingX,
       headingZ: facing.headingZ,
       lean: roll.bicycle,
@@ -1720,6 +1745,48 @@ function eyeOnDrawnPath(path: DrawnLine, atDistance: number): DrawnPoint {
     z: on.z + (held - offset) * road.normalZ,
   };
 }
+
+/**
+ * The road's height directly under a point drawn on `path` for drawn odometer
+ * `atDistance` — #2422's review. From where along the road the path says it is
+ * (@see drawnPlaceOf), the place is moved along the corridor by how far the
+ * point is ahead of the corridor's point there, {@link HEIGHT_STEPS} times, so
+ * the height is the corridor's at the point nearest it in plan: the pacing
+ * moves a rider metres along the road within one profile sample at a corner,
+ * which no table of samples follows closely enough.
+ */
+function drawnHeight(
+  corridor: RoadCorridor,
+  path: DrawnLine,
+  atDistance: number,
+  point: { readonly x: number; readonly z: number },
+): number {
+  const estimate = drawnPlaceOf(path, atDistance);
+  let along = clampedTo(corridor, estimate);
+  for (let step = 0; step < HEIGHT_STEPS; step += 1) {
+    const here = placeOnCorridor(corridor, along);
+    const road = headingAt(corridor, here.index);
+    const moved = along + (point.x - here.x) * road.headingX + (point.z - here.z) * road.headingZ;
+    // Never far from where the path says it is, so a sharp bend's other leg,
+    // nearer in plan, is never the road read.
+    along = clampedTo(
+      corridor,
+      Math.min(estimate + HEIGHT_REACH_METRES, Math.max(estimate - HEIGHT_REACH_METRES, moved)),
+    );
+  }
+  return placeOnCorridor(corridor, along).y;
+}
+
+/** How many steps along the corridor {@link drawnHeight} takes: **4**. */
+const HEIGHT_STEPS = 4;
+
+/**
+ * The most {@link drawnHeight} moves from the path's own place, in metres:
+ * **4**. The pacing's shift between two samples is a few metres through a
+ * corner, which a table of samples cannot follow closely enough, and more
+ * than that is the other leg of a sharp bend.
+ */
+const HEIGHT_REACH_METRES = 4;
 
 /** An odometer reading held inside the corridor's first and last points, as {@link placeOnCorridor} holds a place. */
 function clampedTo(corridor: RoadCorridor, atDistance: number): number {

@@ -30,13 +30,20 @@ import { describe, expect, it } from 'vitest';
 
 import { metres, metresPerSecond, type RouteProfile } from '@onyourleft/domain';
 
+import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
+
 import { EASED_LEAN_RADIANS } from './bend-easing';
 import { RIDER_HALF_WIDTH_METRES, combinedLean } from './bicycle';
 import { dampedHeading, type GroundHeading } from './camera';
 import { DRAWN_PACE_WINDOW_METRES, drawnLine, drawnLineAt } from './drawn-line';
 import { LINE_LIMIT_METRES, racingLine } from './racing-line';
 import { distanceToDrawnRoad } from './road-grid';
-import { circuitRoute, jitteredJunctionRoute, plannerCornerRoute } from './route-fixtures-testing';
+import {
+  circuitRoute,
+  hairpinRoute,
+  jitteredJunctionRoute,
+  plannerCornerRoute,
+} from './route-fixtures-testing';
 import {
   cameraPose,
   drawnPathOf,
@@ -46,7 +53,7 @@ import {
   type SceneInput,
 } from './scene';
 import { atStartLine } from './simulation';
-import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
 
 const DEGREES = Math.PI / 180;
 
@@ -177,18 +184,45 @@ const SPEEDS = [25, 30, 35, 45] as const;
 const SEEDS = Array.from({ length: 40 }, (_, index) => (index + 1) * 7_919);
 
 /**
- * The floor under the drawn speed, as a share of the UN-JITTERED junction's
- * own slowest drawn speed at the same odometer speed: **0.8** for a track that
- * wanders up to 3 m, **0.65** for 4 and 5 m. Chosen from a measurement on
- * 2026-11-10: the worst of the 200 seeds at any of the four speeds was 0.84
- * and 0.72 of it. A track that wanders 5 m draws a road that itself bends
- * round about 12 m either side of the corner, and a rider held to a 25° lean
- * rides that slower. On #2445's head the slowest over the ground was 5–33 %
- * of the ODOMETER's speed through these junctions, and 30–42 % through the
- * planner's corner.
+ * The floor under the drawn speed through a JITTERED junction, as a share of
+ * the un-jittered junction's own slowest drawn speed at the same odometer
+ * speed — #2422's criterion is **0.9**, "jitter cannot deepen the slow-down by
+ * more than 10 %", and it is held where it is met:
+ *
+ * | Jitter | 25–35 km/h | 45 km/h |
+ * |--:|--:|--:|
+ * | 1–3 m | **0.9** (the criterion) | 0.8 |
+ * | 4–5 m | 0.75 | 0.65 |
+ *
+ * ⚠️ **Below the criterion at 45 km/h, and at 4–5 m**, measured on 2026-11-11
+ * over the 200 seeds (worst share): at 45 km/h 0.93, 0.88 and 0.84 for 1, 2
+ * and 3 m; at 4 and 5 m 0.89 and 0.80 at 35 km/h, 0.81 and 0.73 at 45. A
+ * track that wanders that far draws a road that itself bends round about 12 m
+ * either side of the corner, and a rider held to a 25° lean rides that slower.
+ * The PR body states the deviation for the owner's ruling. On #2445's head the
+ * slowest over the ground was 5–33 % of the ODOMETER's speed here.
  */
-function floorShare(jitter: number): number {
-  return jitter <= 3 ? 0.8 : 0.65;
+function floorShare(jitter: number, kmh: number): number {
+  if (jitter <= 3) return kmh <= 35 ? 0.9 : 0.8;
+  return kmh <= 35 ? 0.75 : 0.65;
+}
+
+/**
+ * The speed a 25° lean takes a rider round a clean corner's tightest place on
+ * the drawn line, in odometer metres a second: `√(g·tan 25° / κ)` with `κ` the
+ * line's largest curvature within 100 m of the corner — the line the easing
+ * reads, so this is the speed it eases to there.
+ */
+function steadyTurnSpeed(profile: RouteProfile, corner: number): number {
+  const line = drawnLine(profile);
+  const resolution: number = profile.resolution;
+  let peak = 0;
+  line.curvatures.forEach((curvature, index) => {
+    if (Math.abs(index * resolution - corner) <= 100) peak = Math.max(peak, Math.abs(curvature));
+  });
+  return Math.sqrt(
+    (STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED * Math.tan(EASED_LEAN_RADIANS)) / peak,
+  );
 }
 
 /**
@@ -205,7 +239,7 @@ const MOST_CAMERA_TURN = 65 * DEGREES;
 /**
  * How much the turn rate may change from one 60 fps frame to the next, as a
  * rate of change: **150°/s²** for the rider and **500°/s²** for the camera,
- * whose damping catches up with a bend as it starts. Measured at most 71 and
+ * whose damping catches up with a bend as it starts. Measured at most 74 and
  * 436. On #2445's head the rider's was 2 900–6 500°/s², the rider stepping
  * round the corner, and the camera's 456–1 559.
  */
@@ -220,8 +254,10 @@ const MOST_CAMERA_JERK = 500 * DEGREES;
 const LEAN_ROUNDING = 0.01 * DEGREES;
 
 /** Asserts every bound on one ride against the un-jittered junction's slowest. */
-function expectSmooth(ridden: Ridden, floor: number, label: string): void {
-  expect(ridden.turned, `${label}: turned through the corner`).toBeGreaterThan(80 * DEGREES);
+function expectSmooth(ridden: Ridden, floor: number, label: string, turnsAtLeast = 80): void {
+  expect(ridden.turned, `${label}: turned through the corner`).toBeGreaterThan(
+    turnsAtLeast * DEGREES,
+  );
   expect(ridden.slowest, `${label}: the slowest the rider is drawn moving`).toBeGreaterThanOrEqual(
     floor,
   );
@@ -245,13 +281,23 @@ describe('a 90° junction an imported course draws, ridden frame by frame — #2
   const clean = jitteredJunctionRoute(90, 'right', 0);
 
   for (const kmh of SPEEDS) {
-    it(`at ${kmh} km/h: the un-jittered junction and a planner's corner, all five bounds`, () => {
-      const own = ride(clean, kmh);
-      // The un-jittered junction is eased only where 25° asks it to be: never
-      // below 90 % of the odometer's speed or of the speed a 25° lean takes it
-      // round its own tightest radius, whichever is less.
-      expectSmooth(own, 0.8 * (kmh / 3.6), `un-jittered at ${kmh}`);
-      expectSmooth(ride(plannerCornerRoute(90), kmh), 0.9 * own.slowest, `planner at ${kmh}`);
+    it(`at ${kmh} km/h: the un-jittered junction and a planner's 60° and 120° corners, all five bounds`, () => {
+      // A clean corner is eased only where 25° asks it to be: never below
+      // 90 % of the odometer's speed or of the speed a 25° lean takes it round
+      // the line's tightest place, whichever is less — #2422's own bound.
+      // ⚠️ `plannerCornerRoute(90)` is NOT here: resampled to the profile's
+      // 10 m it is the same road as the un-jittered junction, to the bit
+      // (#2422's review measured identical figures), so it added nothing.
+      // A gentler and a sharper corner, each at one sample of a 25 m course,
+      // are what a planner draws that a junction does not.
+      for (const [name, profile] of [
+        ['un-jittered junction', clean],
+        ['planner 60°', plannerCornerRoute(60)],
+        ['planner 120°', plannerCornerRoute(120)],
+      ] as const) {
+        const floor = 0.9 * Math.min(kmh / 3.6, steadyTurnSpeed(profile, CORNER));
+        expectSmooth(ride(profile, kmh), floor, `${name} at ${kmh}`, name.includes('60') ? 50 : 80);
+      }
     });
 
     for (let jitter = 1; jitter <= 5; jitter += 1) {
@@ -261,7 +307,7 @@ describe('a 90° junction an imported course draws, ridden frame by frame — #2
           timeout: 120_000,
         },
         () => {
-          const floor = floorShare(jitter) * ride(clean, kmh).slowest;
+          const floor = floorShare(jitter, kmh) * ride(clean, kmh).slowest;
           for (const [index, seed] of SEEDS.entries()) {
             const hand = index % 2 === 0 ? 'right' : 'left';
             const vertices = index % 4 < 2 ? 1 : 2;
@@ -275,6 +321,87 @@ describe('a 90° junction an imported course draws, ridden frame by frame — #2
         },
       );
     }
+  }
+});
+
+/**
+ * The road's height directly under a point, read off the frame's own corridor:
+ * the corridor's centreline point nearest it in plan, its height interpolated
+ * along that piece. The ribbon is level across its width (`terrain.ts`
+ * §`ribbonNormals`), so the centreline's height is the road's under a rider
+ * anywhere across it.
+ */
+function roadHeightUnder(corridor: RoadCorridor, x: number, z: number): number {
+  let best = Number.POSITIVE_INFINITY;
+  let height = Number.NaN;
+  const centre = corridor.centre;
+  for (let index = 0; index + 1 < centre.length; index += 1) {
+    const from = centre[index];
+    const to = centre[index + 1];
+    if (from === undefined || to === undefined) continue;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const span = dx * dx + dz * dz;
+    const t =
+      span > 0 ? Math.max(0, Math.min(1, ((x - from.x) * dx + (z - from.z) * dz) / span)) : 0;
+    const apart = Math.hypot(from.x + dx * t - x, from.z + dz * t - z);
+    if (apart < best) {
+      best = apart;
+      height = from.y + (to.y - from.y) * t;
+    }
+  }
+  return height;
+}
+
+/**
+ * How far above or below the road under it the rider is drawn, at most,
+ * through a corner: **7 cm** — #2422's review. Measured on 2026-11-11: at most
+ * 6.4 cm on the three climbs below, at the inside of the jittered junction's
+ * and the planner's apex, and the drawing from before #2422 (`uneased`)
+ * measures the same 6.4 cm there. That is this reference's own rounding: the
+ * ribbon's rows fan round the inside of a sharp bend (`terrain.ts`
+ * §`ribbonNormals`), so its height at a point 2.9 m in is not exactly the
+ * centreline's at the nearest point. Read at the odometer rather than where
+ * the pacing drew it, the rider floated **0.30 m** over the 8 % jittered
+ * junction, 0.24 m over the planner's corner and 0.17 m round the hairpin.
+ */
+const ON_THE_TARMAC_METRES = 0.07;
+
+describe('the rider is drawn ON the road through a climbing corner — #2422’s review', () => {
+  for (const [name, route] of [
+    [
+      'an 8 % climb through a jittered junction',
+      () => jitteredJunctionRoute(90, 'right', 3, 12_345, 0.08),
+    ],
+    ['an 8 % climb through a planner’s corner', () => plannerCornerRoute(90, 'right', 0.08)],
+    ['a 4 % climb round an 8 m hairpin', () => hairpinRoute(8)],
+  ] as const) {
+    it(`${name}: the wheels on the tarmac where the rider is drawn`, () => {
+      const profile = route();
+      const origin = corridorOrigin(profile);
+      const start = atStartLine(profile);
+      const corner = name.includes('hairpin') ? 400 : CORNER;
+      let worst = 0;
+      for (let odometer = corner - 60; odometer <= corner + 90; odometer += 0.5) {
+        const input: SceneInput = {
+          profile,
+          origin,
+          state: {
+            ...start,
+            ride: { speed: metresPerSecond(25 / 3.6), distance: metres(odometer) },
+          },
+        };
+        const drawnAt = drawnRiderDistance(input);
+        const corridor = roadCorridor(profile, origin, drawnAt);
+        const rider = placedRiders(input, corridor)[0];
+        if (rider === undefined) throw new Error('no rider in the frame');
+        const marker = rider.marker;
+        worst = Math.max(worst, Math.abs(marker.y - roadHeightUnder(corridor, marker.x, marker.z)));
+      }
+      expect(worst, `${name}: the most the wheels are off the road`).toBeLessThanOrEqual(
+        ON_THE_TARMAC_METRES,
+      );
+    });
   }
 });
 

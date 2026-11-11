@@ -107,6 +107,7 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
+import { drawnLine } from './drawn-line';
 import { dampedHeading, turnedPose, type GroundHeading } from './camera';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -1038,6 +1039,15 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  * asked for. Keyed on the choice, so changing it is a new screen and a ride
  * in progress is never switched between a real rider and a simulated one.
  */
+
+/**
+ * How long the rider's choice of route must settle before `GameView` builds
+ * its drawn path (`drawn-line.ts`), in milliseconds: **250** — #2422's review.
+ * Chosen: long enough that stepping through the picker builds nothing, short
+ * enough that it is built before a rider who has chosen reaches Ride.
+ */
+export const DRAWN_LINE_WARM_DELAY_MS = 250;
+
 export function GameView(props: GameViewProps): JSX.Element {
   // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
   // for the same simulated ride as the address switch, for one route.
@@ -2167,6 +2177,23 @@ function GameScreen({
       controller.abort();
     };
   }, [port, corridorRoute, choosing, level]);
+
+  // #2422's review: the path an ordinary ride's riders and camera are drawn
+  // along (`drawn-line.ts`) is built once per route, about 0.2 s on a 100 km
+  // route on a laptop and more on a tablet. Built here, a moment after the
+  // rider's choice settles, it is waiting for the ride's first frame rather
+  // than stalling it; flicking through the picker builds nothing. Cached
+  // against the profile object, which is the one `start` rides.
+  useEffect(() => {
+    if (corridorRoute === undefined || !choosing) return;
+    const profile = corridorRoute.profile;
+    const timer = window.setTimeout(() => {
+      drawnLine(profile);
+    }, DRAWN_LINE_WARM_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [corridorRoute, choosing]);
 
   // #2294: with a Delivery round chosen, every saved route's houses for a
   // round, counted on this device through the same corridor port, one route

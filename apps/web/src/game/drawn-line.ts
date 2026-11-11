@@ -119,9 +119,27 @@ export interface DrawnLine extends RacingLine {
   /** The path's second derivatives at each sample, per metre of odometer squared. */
   readonly bendXs: Float64Array;
   readonly bendZs: Float64Array;
+  /**
+   * How far along the ROAD each sample's place on the path is from the
+   * sample's own odometer, in metres — the pacing's shift, a few metres
+   * through a corner and nought on a straight. @see drawnPlaceOf
+   */
+  readonly shifts: Float64Array;
 }
 
 const computed = new WeakMap<RouteProfile, DrawnLine>();
+
+/**
+ * Whether {@link drawnLine} has already been built for `profile` — #2422's
+ * review: `GameView` builds it while the rider chooses (§`DRAWN_LINE_WARM_DELAY_MS`),
+ * so the ride's first frame does not.
+ *
+ * @test-facing the product only ever calls {@link drawnLine}; a test needs to
+ * know whether that call will build or find the line.
+ */
+export function drawnLineBuilt(profile: RouteProfile): boolean {
+  return computed.has(profile);
+}
 
 /** Whether a line is a {@link DrawnLine}, which riders are placed ON rather than beside the road. */
 export function isDrawnLine(line: RacingLine): line is DrawnLine {
@@ -147,6 +165,24 @@ export function drawnLine(profile: RouteProfile): DrawnLine {
  * runs: the spline through {@link DrawnLine.xs}, wrapped on a loop and held at
  * the ends of a line.
  */
+/**
+ * The odometer of the ROAD beside where a rider at drawn odometer `distance`
+ * is drawn on the path — #2422's review: the pacing puts the path's place a
+ * few metres along the road from `distance` through a corner, and a height,
+ * a grade or anything else read off the road for the rider is read here, or a
+ * rider on a climbing corner is drawn a third of a metre above the tarmac.
+ * Unwrapped, as `distance` is: the shift is added to it.
+ */
+export function drawnPlaceOf(line: DrawnLine, distance: number): number {
+  const count = line.shifts.length;
+  if (count < 2) return distance;
+  const raw = distanceOnRoute(line.profile, distance) / (line.profile.resolution as number);
+  const index = Math.max(0, Math.min(Math.floor(raw), count - 2));
+  const fraction = Math.max(0, Math.min(1, raw - index));
+  const low = line.shifts[index] as number;
+  return distance + low + ((line.shifts[index + 1] as number) - low) * fraction;
+}
+
 export function drawnLineAt(line: DrawnLine, distance: number): DrawnPoint {
   const count = line.xs.length;
   const resolution: number = line.profile.resolution;
@@ -200,6 +236,7 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
       ...solved.line,
       xs: solved.xs,
       zs: solved.zs,
+      shifts: new Float64Array(count),
       bendXs: new Float64Array(count),
       bendZs: new Float64Array(count),
     };
@@ -252,8 +289,23 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
     return sum / (to - from);
   };
 
+  // The odometer a length along the path is level with: the inverse of
+  // `lengthAt`, linear between samples as it is.
+  const odometerAt = (length: number): number => {
+    let low = 0;
+    let high = size - 1;
+    while (high - low > 1) {
+      const middle = (low + high) >> 1;
+      if ((chord[middle] as number) <= length) low = middle;
+      else high = middle;
+    }
+    const span = (chord[low + 1] as number) - (chord[low] as number);
+    const fraction = span > 0 ? (length - (chord[low] as number)) / span : 0;
+    return (low - pad + fraction) * resolution;
+  };
   const xs = new Float64Array(count);
   const zs = new Float64Array(count);
+  const shifts = new Float64Array(count);
   for (let sample = 0; sample < count; sample += 1) {
     const odometer = Math.min(total, sample * resolution);
     const half = loop
@@ -261,17 +313,27 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
       : Math.min(DRAWN_PACE_WINDOW_METRES, odometer, total - odometer);
     const paced = half > 0 ? meanLength(odometer - half, odometer + half) : lengthAt(odometer);
     const at = chordSplineAt(px, pz, bendX, bendZ, chord, paced);
+    // Where along the road the paced place is, near enough for `scene.ts`
+    // §`drawnHeight` to find the road under it from there.
+    shifts[sample] = odometerAt(paced) - odometer;
     xs[sample] = at.x;
     zs[sample] = at.z;
   }
   if (loop) {
     xs[count - 1] = xs[0] as number;
     zs[count - 1] = zs[0] as number;
+    shifts[count - 1] = shifts[0] as number;
   }
 
   // 3. Held on the road between samples, not only at them.
   const origin = corridorOrigin(profile);
   const road = (odometer: number): RoadFrame => roadFrameAt(profile, origin, odometer);
+  // The road at each sample, read once: the hold reads it every round and
+  // the offsets read it again.
+  const atSamples: RoadFrame[] = [];
+  for (let sample = 0; sample < count; sample += 1) {
+    atSamples.push(road(Math.min(total, sample * resolution)));
+  }
   const knots = new Float64Array(count);
   for (let sample = 0; sample < count; sample += 1) knots[sample] = sample * resolution;
   const bendsOf = (values: Float64Array): Float64Array =>
@@ -279,7 +341,7 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
   let bendXs = bendsOf(xs);
   let bendZs = bendsOf(zs);
   for (let round = 0; round < HOLD_ROUNDS; round += 1) {
-    if (!heldOnTheRoad(xs, zs, bendXs, bendZs, resolution, total, loop, road)) break;
+    if (!heldOnTheRoad(xs, zs, bendXs, bendZs, resolution, total, loop, road, atSamples)) break;
     bendXs = bendsOf(xs);
     bendZs = bendsOf(zs);
   }
@@ -289,7 +351,7 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
   const offsets = new Float64Array(count);
   const curvatures = new Float64Array(count);
   for (let sample = 0; sample < count; sample += 1) {
-    const frame = road(Math.min(total, sample * resolution));
+    const frame = atSamples[sample] as RoadFrame;
     offsets[sample] =
       ((xs[sample] as number) - frame.x) * frame.normalX +
       ((zs[sample] as number) - frame.z) * frame.normalZ;
@@ -311,7 +373,7 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
     curvatures[0] = 0;
     curvatures[count - 1] = 0;
   }
-  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs };
+  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts };
 }
 
 /**
@@ -319,6 +381,16 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
  * fixture measured needed at most three.
  */
 const HOLD_ROUNDS = 6;
+
+/**
+ * How far inside the limit both ends of a stretch must be for
+ * {@link heldOnTheRoad} not to read it: **1 m** — #2422's review, for the
+ * first frame's cost. The most the path was measured bowing past the line
+ * between two samples is 0.65 m, over 200 jittered junctions; the line holds
+ * 1.75 m from the centre on a straight, 1.15 m inside the limit, so a
+ * straight is never read.
+ */
+const HOLD_SCAN_MARGIN_METRES = 1;
 
 /** How often {@link heldOnTheRoad} reads the path between two samples: every metre or so. */
 const HOLD_STEPS_PER_SAMPLE = 10;
@@ -371,11 +443,28 @@ function heldOnTheRoad(
   total: number,
   loop: boolean,
   road: (odometer: number) => RoadFrame,
+  atSamples: readonly RoadFrame[],
 ): boolean {
   const count = xs.length;
   const moves = new Float64Array(count * 2);
   let moved = false;
+  // How far each sample is from the centreline: a stretch whose two ends are
+  // both well inside the limit cannot bow past it, and is not read.
+  const out = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const frame = atSamples[index] as RoadFrame;
+    out[index] = Math.abs(
+      ((xs[index] as number) - frame.x) * frame.normalX +
+        ((zs[index] as number) - frame.z) * frame.normalZ,
+    );
+  }
   for (let index = 0; index < count - 1; index += 1) {
+    if (
+      (out[index] as number) < LINE_LIMIT_METRES - HOLD_SCAN_MARGIN_METRES &&
+      (out[index + 1] as number) < LINE_LIMIT_METRES - HOLD_SCAN_MARGIN_METRES
+    ) {
+      continue;
+    }
     let over = 0;
     let overNormalX = 0;
     let overNormalZ = 0;

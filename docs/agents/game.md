@@ -362,6 +362,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `uneased`** (`scene.ts` §`easingLine`): those draw
                         `racingLine` beside the road as before, and a lap
                         race's frame is held identical to the `uneased` one.
+                        ⚠️ **Heights are read where a rider is DRAWN**
+                        (`drawnPlaceOf`, `scene.ts` §`drawnHeight`): read at
+                        the odometer a rider floated 0.3 m over a climbing
+                        junction. ⚠️ **Built while the rider chooses**
+                        (`GameView.tsx` §`DRAWN_LINE_WARM_DELAY_MS`), about
+                        0.17 s on a 100 km route, not in the first frame.
                         ⚠️ **A drawing**: the trainer's grade stays on the
                         odometer (`draft-cannot-reach-trainer.test.tsx`)
     src/game/racing-line.ts
