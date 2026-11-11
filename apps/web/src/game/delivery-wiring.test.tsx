@@ -1578,8 +1578,17 @@ describe('offered in the chooser, with the short round and the no-round fallback
   });
 
   it('starts a ride with the round on once it is chosen: its houses on the HUD', async () => {
+    startedRounds.length = 0;
     await chooseAndRide({ choose: true, frames: 5 });
     expect(field('Houses')).toEqual({ value: '3', detail: '0\u00a0delivered, 0\u00a0missed' });
+    // #2453: and where the first house is \u2014 its side, and the road to it, fewer
+    // metres than it stood from the press now that the rider has moved off.
+    const first = (startedRounds[0] as DeliveryRide | undefined)?.targets[0];
+    if (first === undefined) throw new Error('the ride started no round');
+    const next = field('Next house');
+    expect(next?.detail).toBe(first.side === 1 ? 'on the right' : 'on the left');
+    expect(Number(next?.value)).toBeGreaterThan(0);
+    expect(Number(next?.value)).toBeLessThanOrEqual(Math.round(first.distance));
     expect(field('Score')?.detail).toBe(`Day ${String(WEEK.day)} of 7`);
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).not.toBeNull();
     for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {

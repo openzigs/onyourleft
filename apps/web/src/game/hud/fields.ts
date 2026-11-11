@@ -360,6 +360,20 @@ export interface ChosenRider {
 }
 
 /**
+ * Where the next house on a Delivery round is from the rider — #2453, as
+ * `delivery/ride-round.ts` §`nextHouse` works it out: which side of the road,
+ * and how far ahead along it. Stated here rather than imported, so that the
+ * HUD, which the stage chooser reaches, reaches none of the round's modules
+ * (`stage-chooser-imports.test.ts`); `GameView` hands one to the other, so a
+ * shape that drifted would not typecheck.
+ */
+export interface NextHouseHud {
+  readonly side: 'left' | 'right';
+  /** Metres along the road to the house; nought once the rider is level with it. */
+  readonly metres: number;
+}
+
+/**
  * A Delivery round, on the HUD — #1812 (epic #1803, the owner's rulings DL2
  * and DL10 of 2026-10-27). The round as `delivery/round.ts` holds it and the
  * week it is ridden in: **counts only**, because a house is a position on the
@@ -378,6 +392,12 @@ export interface DeliveryHud {
    * ruling of 2026-10-28 on #1811 takes a crash off the round's score.
    */
   readonly score: number;
+  /**
+   * The next house still expecting a parcel — #2453, from
+   * `delivery/ride-round.ts` §`nextHouse`: which side of the road and how far
+   * ahead, from the rider, never where. `undefined` once none is expecting one.
+   */
+  readonly next: NextHouseHud | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -710,7 +730,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
-    ...deliveryReadings(input.delivery),
+    ...deliveryReadings(input.delivery, units),
     // #1904: a lap race's, last for the same reason. A ride runs one mode.
     ...lapRaceReadings(input.lapRace),
   ];
@@ -1054,23 +1074,42 @@ export const DELIVERY_HOUSES_KEY = 'delivery-houses';
 /** The key of the Delivery round's score field — #1812. @see deliveryReadings */
 export const DELIVERY_SCORE_KEY = 'delivery-score';
 
+/** The key of the Delivery round's next-house field — #2453. @see deliveryReadings */
+export const DELIVERY_NEXT_KEY = 'delivery-next';
+
+/**
+ * The words of the next-house field — #2453. ⚠️ Proposed to the owner in the
+ * pull request (old → new); this project's own (DL1), naming no place.
+ */
+export const NEXT_HOUSE_TEXT = {
+  label: 'Next house',
+  left: 'on the left',
+  right: 'on the right',
+} as const;
+
 /** Whether a reading is one of a Delivery round's — #1812. */
 export function isDeliveryReading(reading: HudReading): boolean {
   return reading.key.startsWith('delivery-');
 }
 
 /**
- * The Delivery round's two fields — #1812: the houses still to deliver, with
+ * The Delivery round's fields — #1812: the houses still to deliver, with
  * the round's delivered and missed counts under them, and the round's score,
- * with the day of the week under it. Two fields rather than five, because on
- * a phone the secondary tier has height for two rows, and `theme.css`
- * §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind give way to
- * these as they do to a room's. Words are this project's own (DL1): a house
- * is counted, never named, and nothing here names a place (DL11, ADR 0055).
+ * with the day of the week under it; since #2453, between them, how far the
+ * next house is and which side of the road it stands on. Three fields rather
+ * than five, because on a phone the secondary tier has height for two rows,
+ * and `theme.css` §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind
+ * give way to these as they do to a room's. Words are this project's own
+ * (DL1): a house is counted, never named, and nothing here names a place
+ * (DL11, ADR 0055) — the next house is a side and a distance from the rider.
  */
-function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReading[] {
+function deliveryReadings(
+  delivery: DeliveryHud | undefined,
+  units: UnitSystem,
+): readonly HudReading[] {
   if (delivery === undefined) return [];
   const tally = roundTally(delivery.round);
+  const next = delivery.next;
   return [
     {
       key: DELIVERY_HOUSES_KEY,
@@ -1082,6 +1121,22 @@ function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReadin
       // breaks the phrase after the comma and never between "2" and "missed".
       detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
     },
+    next === undefined
+      ? {
+          key: DELIVERY_NEXT_KEY,
+          label: NEXT_HOUSE_TEXT.label,
+          value: NO_READING,
+          unit: smallDistanceUnit(units),
+          stale: false,
+        }
+      : {
+          ...measured(
+            DELIVERY_NEXT_KEY,
+            NEXT_HOUSE_TEXT.label,
+            formatSmallDistance(next.metres, units),
+          ),
+          detail: NEXT_HOUSE_TEXT[next.side],
+        },
     {
       key: DELIVERY_SCORE_KEY,
       label: 'Score',

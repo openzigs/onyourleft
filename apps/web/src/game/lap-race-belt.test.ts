@@ -267,7 +267,7 @@ describe('the lap race’s belt — #1902', () => {
     belt.dispose();
   });
 
-  it('flies each pick-up point’s glowing flags facing the rider, high and off the carriageway (#1969)', () => {
+  it('flies each pick-up point’s glowing flags facing the rider, high and off the carriageway (#1969), and large (#2453)', () => {
     // The distance the browser gate reads a pick-up point from is the HUD's puddle warning.
     expect(PICK_UP_SEEN_FROM_METRES).toBe(PUDDLE_WARNING_METRES);
     const belt = new LapRaceBelt('stylised');
@@ -301,6 +301,12 @@ describe('the lap race’s belt — #1902', () => {
         Math.min(...flag.xs.map(Math.abs)),
         `flag ${String(side)} off the road`,
       ).toBeGreaterThan(half);
+      // #2453: large enough to read from 100 m, and high enough that a parked
+      // car, a hedge or a passing rider does not hide it. #1969's were 1.5 m
+      // by 1.2 m from 1.8 m up: 115 pixels of a 1280×800 frame from 100 m.
+      expect(span(flag.xs), `flag ${String(side)} across, #2453`).toBeGreaterThanOrEqual(3.4);
+      expect(span(flag.ys), `flag ${String(side)} tall, #2453`).toBeGreaterThanOrEqual(2.4);
+      expect(Math.min(...flag.ys), `flag ${String(side)} foot, #2453`).toBeGreaterThanOrEqual(3);
     }
     belt.dispose();
   });

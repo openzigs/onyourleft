@@ -70,7 +70,13 @@ function route(): ReturnType<typeof routeProfile> {
 const PROFILE = route();
 
 /** The HUD's round, with the score a ride with no crash in it has: its deliveries. */
-function panel(delivery: Omit<DeliveryHud, 'score'> | undefined, announcement = ''): JSX.Element {
+/** #2453: the next house the panel is handed unless a case says otherwise. */
+const NEXT: DeliveryHud['next'] = { side: 'right', metres: 85 };
+
+function panel(
+  delivery: (Omit<DeliveryHud, 'score' | 'next'> & Partial<Pick<DeliveryHud, 'next'>>) | undefined,
+  announcement = '',
+): JSX.Element {
   return (
     <main>
       <h1>Ride</h1>
@@ -86,7 +92,7 @@ function panel(delivery: Omit<DeliveryHud, 'score'> | undefined, announcement = 
         delivery={
           delivery === undefined
             ? undefined
-            : { ...delivery, score: roundTally(delivery.round).score }
+            : { next: NEXT, ...delivery, score: roundTally(delivery.round).score }
         }
       />
     </main>
@@ -150,6 +156,18 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('says how far the next house is and which side it stands, follows it, and dashes it once none is left — #2453', async () => {
+    const round = startRound(6);
+    mounted = await mount(panel({ round, week: WEEK }));
+    expect(field('Next house')).toBe('Next house 85 m on the right');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    await mounted.rerender(panel({ round, week: WEEK, next: { side: 'left', metres: 12.4 } }));
+    expect(field('Next house')).toBe('Next house 12 m on the left');
+    await mounted.rerender(panel({ round, week: WEEK, next: undefined }));
+    expect(field('Next house')).toBe('Next house — m');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('changes the rendered counts when a parcel lands — the text, not only the state', async () => {
     const round = startRound(6);
     mounted = await mount(panel({ round, week: WEEK }));
@@ -171,7 +189,7 @@ describe('a Delivery round on the HUD — #1812', () => {
     mounted.unmount();
     // The same HUD with a round: the round's two fields, last, and nothing else changed.
     mounted = await mount(panel({ round: startRound(6), week: WEEK }));
-    expect(labels()).toEqual([...ordinary.labels, 'Houses', 'Score']);
+    expect(labels()).toEqual([...ordinary.labels, 'Houses', 'Next house', 'Score']);
     for (const each of document.querySelectorAll('.oyl-hud__field--delivery')) {
       each.remove();
     }

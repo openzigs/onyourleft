@@ -247,6 +247,7 @@ import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
   type DeliveryRide,
@@ -4321,6 +4322,8 @@ function GameScreen({
                 round: deliveryRef.current.round,
                 week: deliveryRef.current.week,
                 score: deliveryRef.current.score,
+                // #2453: where the next house is, so the rider knows where to throw.
+                next: nextHouse(deliveryRef.current),
               },
               throwing: throwPortRef.current,
               steering: steerPortRef.current,

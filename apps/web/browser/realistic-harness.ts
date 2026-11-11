@@ -152,6 +152,7 @@ import {
 import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
 import { RACE_HIT, lapRaceAhead, raceBotsAhead } from './realistic/lap-race';
+import { changedPixels, oneMarkerAhead, onePickUpAhead, type Sighting } from './realistic/sighting';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
@@ -286,6 +287,16 @@ function textureSummary(): TextureSummary {
 declare global {
   interface Window {
     __oylRealisticEarly?: EarlyRecord;
+    /**
+     * #2453: what ONE Delivery house marker or ONE lap-race pick-up point
+     * `aheadMetres` up the road changes on the page's last frame, drawn again
+     * without it and with it. Absent until the first frame. @see realistic/sighting.ts
+     */
+    __oylRealisticSighting?: (
+      piece: 'marker' | 'pick-up',
+      aheadMetres: number,
+      photograph?: boolean,
+    ) => Sighting & { readonly photo?: string };
     __oylRealistic?: {
       readonly ready: boolean;
       /**
@@ -864,6 +875,32 @@ async function run(): Promise<void> {
           : { race: raceDrawnOf(view, drawn) }),
       });
     }
+  };
+  // #2453: the last frame drawn again, without one piece and with it, read
+  // back between the two renders of this one call, so no other frame comes
+  // between them. The frame's own round or race is taken off both.
+  window.__oylRealisticSighting = (piece, aheadMetres, photograph = false) => {
+    if (drawn === undefined || gl === null) throw new Error('no frame has been drawn yet');
+    const bare: SceneFrame = { ...drawn, delivery: undefined, lapRace: undefined };
+    const riderAlong = config.at ?? Number.NaN;
+    if (!Number.isFinite(riderAlong)) throw new Error('a sighting needs the held frame of ?at=');
+    const width = gl.drawingBufferWidth;
+    const height = gl.drawingBufferHeight;
+    const read = (): Uint8Array => {
+      const pixels = new Uint8Array(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return pixels;
+    };
+    view.render(bare);
+    const without = read();
+    view.render(
+      piece === 'marker'
+        ? { ...bare, delivery: oneMarkerAhead(bare, riderAlong, aheadMetres) }
+        : { ...bare, lapRace: onePickUpAhead(bare, riderAlong, aheadMetres) },
+    );
+    const seen = changedPixels(without, read(), width, height);
+    // The frame with the piece, as a PNG, before the next frame draws over it.
+    return photograph ? { ...seen, photo: canvas.toDataURL('image/png') } : seen;
   };
   const safeStep = guarded(step, fail);
   const tick = (now: number): void => {

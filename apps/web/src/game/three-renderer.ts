@@ -10966,6 +10966,8 @@ export interface DrawnDeliveryPiece {
   readonly kind: DeliveryObstacleKind | undefined;
   /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
+  /** How large it was drawn: the instance matrix's scale. Above 1 only for a far marker (#2453). */
+  readonly scale: number;
 }
 
 /**
@@ -11253,21 +11255,64 @@ function parcelShape(): BufferGeometry {
   ]);
 }
 
+/**
+ * A house marker's sizes at its true size, metres — #2453: a white post
+ * `post` tall, so its head clears a garden hedge, a front fence and a parked
+ * car, with a glowing amber diamond `diamond` across standing on it, and a
+ * glowing ring on the step. Until #2453 the post was 1.5 m and the diamond
+ * 0.4 m across: from 100 m up the road on the owner's 1280×800 tablet that
+ * changed 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
+ * §"#2453").
+ */
+const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
+
+/** How much taller than wide the marker's diamond is. */
+const MARKER_DIAMOND_STRETCH = 1.4;
+
 /** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
 function markerShape(): BufferGeometry {
+  const { post, postThick, diamond, ring } = MARKER_METRES;
+  const half = diamond / 2;
   return deliveryShape([
-    { made: deliveryBox(0.05, 1.5, 0.05, 0, 0.75, 0), colour: DELIVERY_PAINT.post },
+    { made: deliveryBox(postThick, post, postThick, 0, post / 2, 0), colour: DELIVERY_PAINT.post },
     {
-      made: new OctahedronGeometry(0.2, 0).scale(1, 1.4, 1).translate(0, 1.8, 0),
+      made: new OctahedronGeometry(half, 0)
+        .scale(1, MARKER_DIAMOND_STRETCH, 1)
+        .translate(0, post + half * MARKER_DIAMOND_STRETCH, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
     },
     {
-      made: new TorusGeometry(0.4, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      made: new TorusGeometry(ring, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
     },
   ]);
+}
+
+/**
+ * Within how far of the camera a house marker is drawn at its true size,
+ * metres — #2453: **20**. Further off it is drawn larger, in proportion to
+ * its distance, so that on the screen it stays the size it is at 20 m: a
+ * marker 100 m up the road stands five times its true size on its step and
+ * reads as one 20 m away does. Its foot stays on the step. A waypoint is
+ * drawn so; a house marker is the rider's waypoint. A drawing only: nothing
+ * is caught, thrown or scored by it (`delivery/throw.ts` reads the target).
+ */
+export const MARKER_TRUE_SIZE_WITHIN_METRES = 20;
+
+/**
+ * The most a house marker is enlarged — #2453: **6**, its size at 120 m. A
+ * marker further off is drawn at six times and shrinks with distance from
+ * there, so one at the corridor's far end (`terrain.ts`
+ * §`VIEW_AHEAD_METRES`) is not a tower in the sky.
+ */
+export const MARKER_MOST_SCALE = 6;
+
+/** How large a marker `metres` from the camera is drawn — #2453. @see MARKER_TRUE_SIZE_WITHIN_METRES */
+export function markerScaleAt(metres: number): number {
+  if (!Number.isFinite(metres)) return 1;
+  return Math.min(MARKER_MOST_SCALE, Math.max(1, metres / MARKER_TRUE_SIZE_WITHIN_METRES));
 }
 
 /** Where a parked car's wheels stand along it, metres from its middle, and their radius. */
@@ -11539,6 +11584,9 @@ const DELIVERY_MATRIX = new Matrix4();
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no colour. */
 const DELIVERY_PAINT_COLOUR = new Color();
 
+/** Reused by {@link DeliveryBelt.update}, so a far marker's scale allocates nothing. */
+const DELIVERY_SCALE = new Vector3();
+
 /**
  * Delivery's parcels in flight, the markers on the houses still on the round
  * and the obstacles — #1814, resting on the owner's ruling DL6b (epic #1803,
@@ -11625,10 +11673,15 @@ export class DeliveryBelt {
     this.#meshes.obstacles.material = this.#obstacleMaterials[shading];
   }
 
-  /** This frame's pieces, or none: a frame with no Delivery round draws nothing of it. */
-  update(view: DeliveryInView | undefined): void {
+  /**
+   * This frame's pieces, or none: a frame with no Delivery round draws nothing
+   * of it. `eye` is the camera's: since #2453 a marker further from it than
+   * {@link MARKER_TRUE_SIZE_WITHIN_METRES} is drawn larger
+   * ({@link markerScaleAt}). Without one, every marker is its true size.
+   */
+  update(view: DeliveryInView | undefined, eye?: { readonly x: number; readonly z: number }): void {
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
-    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES);
+    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
     this.#place(this.#meshes.obstacles, obstacles);
     const kinds = this.#kinds.array as Float32Array;
@@ -11650,11 +11703,21 @@ export class DeliveryBelt {
     }
   }
 
-  #place(mesh: InstancedMesh, pieces: readonly DeliveryPiece[]): void {
+  /** `pieces` into `mesh`'s instances, scaled by their distance from `eye` when one is given (#2453). */
+  #place(
+    mesh: InstancedMesh,
+    pieces: readonly DeliveryPiece[],
+    eye?: { readonly x: number; readonly z: number },
+  ): void {
     const count = Math.min(pieces.length, DELIVERY_PIECE_CAPACITY);
     for (let at = 0; at < count; at += 1) {
       const piece = pieces[at] as DeliveryPiece;
-      DELIVERY_MATRIX.makeRotationY(piece.yaw).setPosition(piece.x, piece.y, piece.z);
+      DELIVERY_MATRIX.makeRotationY(piece.yaw);
+      if (eye !== undefined) {
+        const far = Math.hypot(piece.x - eye.x, piece.z - eye.z);
+        DELIVERY_MATRIX.scale(DELIVERY_SCALE.setScalar(markerScaleAt(far)));
+      }
+      DELIVERY_MATRIX.setPosition(piece.x, piece.y, piece.z);
       mesh.setMatrixAt(at, DELIVERY_MATRIX);
     }
     mesh.count = count;
@@ -11683,6 +11746,11 @@ export class DeliveryBelt {
         z: matrices[at * 16 + 14] as number,
         kind,
         paint,
+        scale: Math.hypot(
+          matrices[at * 16] as number,
+          matrices[at * 16 + 1] as number,
+          matrices[at * 16 + 2] as number,
+        ),
       });
     }
     return drawn;
@@ -11858,9 +11926,17 @@ const LAP_RACE_PAINT = {
  * there was: a thin teal line. Each flag flies OUTWARD from its post, over
  * the verge, so no flag is ever over the carriageway a rider and the chase
  * camera ride through.
+ *
+ * ⚠️ **#2453: more than twice as wide, twice as tall, on posts 2.4 m
+ * taller.** #1969's 1.5 m × 1.2 m flags on 3 m posts read from 50 m and not
+ * from 100 m: there one pick-up point changed 115 pixels of the owner's
+ * 1280×800 tablet frame, a teal fleck, in either world
+ * (`browser/realistic-delivery.browser.spec.ts` §"#2453"). Now each flag is
+ * 3.4 m × 2.4 m, its foot 3 m up, above a parked car, a hedge and a
+ * passing rider's head, so the roadside does not hide it.
  */
-const PICK_UP_POST_METRES = { height: 3, offRoad: 0.3, thick: 0.1 } as const;
-const PICK_UP_FLAG_METRES = { width: 1.5, height: 1.2, thick: 0.04 } as const;
+const PICK_UP_POST_METRES = { height: 5.4, offRoad: 0.3, thick: 0.14 } as const;
+const PICK_UP_FLAG_METRES = { width: 3.4, height: 2.4, thick: 0.04 } as const;
 
 /**
  * The distance a pick-up point is to be recognisable from — #1969: the
@@ -22655,8 +22731,9 @@ class ThreeGameView implements GameView {
     // #1541: and who walks them, in the realistic world only.
     // #1835: and none the near plane would cut, at a frame wide enough to.
     this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
-    // #1814: and a Delivery round's pieces, on a frame that carries one.
-    this.#updateDelivery(frame.delivery);
+    // #1814: and a Delivery round's pieces, on a frame that carries one;
+    // #2453: its far markers enlarged by their distance from the eye.
+    this.#updateDelivery(frame.delivery, rig.eye);
     // #1902: and a lap race's pieces and its racers' hit effects, likewise.
     this.#updateLapRace(frame.lapRace, frame.markers);
     this.#updateMarkers(
@@ -22674,13 +22751,16 @@ class ThreeGameView implements GameView {
    * carries a round, in the world this view draws and at its rung's shading,
    * and handed every frame after. A frame with no round hides it.
    */
-  #updateDelivery(view: DeliveryInView | undefined): void {
+  #updateDelivery(
+    view: DeliveryInView | undefined,
+    eye: { readonly x: number; readonly z: number },
+  ): void {
     if (view !== undefined && this.#delivery === undefined) {
       this.#delivery = new DeliveryBelt(this.#drawing);
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
-    this.#delivery?.update(view);
+    this.#delivery?.update(view, eye);
   }
 
   /**
