@@ -210,6 +210,19 @@ These are **behaviour tests, not safety gates**: they hold rules this ADR revers
 `packages/domain/src/lap-race/plan.test.ts`'s tests of the banking reserve go with the reserve in
 #2458, replaced by #2458's own W′ balance tests (its acceptance criteria).
 
+**Read through the HUD, in `apps/web`, #2458 restates these and nothing else in their files.** A
+bot that starts with its whole W′ goes over its tier on the opening climb, which a bot with an
+empty reserve never did. These tests read that old fact as the tier's signature, so each one is
+restated against what a tier now is, the tier's surge ceiling, rather than weakened:
+
+- `apps/web/src/game/lap-race-wiring.test.tsx` › `starts the race with the device’s assisted setting: items off and gentler bots (#1905)`: the bots' figures are held at or under Brisk's surge ceiling and over Steady's, rather than at or under Brisk's tier.
+- `apps/web/src/game/lap-race-wiring.test.tsx` › `takes no lane or item press while the ride is paused, and the next ones once it rides again`: the held item is read without the puddle warning under it, which follows the bots and changes while the rider waits. The assertions are unchanged.
+- `apps/web/src/game/lap-race-chooser.a11y.test.tsx` › `starts the race chosen: its laps, field, tier and items read back off the running race`: the figures are held at or under Steady's surge ceiling and over Steady's tier.
+- `apps/web/src/game/lap-race/bot-figure.test.ts` (#2329): its clauses follow the chooser's words for a tier, which #2458 rewrites, and the mean-power clause goes with ADR 0061 D-8.1.
+
+The wiring file's trainer-writes test (D-3.6) is not among them, and
+`lap-race-cannot-reach-trainer.test.ts` is untouched.
+
 ### D-5 — Bots in rooms stay out; the arithmetic is room-portable (decision 5)
 
 **The author's recommendation.**
@@ -287,7 +300,7 @@ Accepting this ADR as written accepts each recommendation.
 
 | Issue | Constraint |
 |---|---|
-| #2458 | D-2's form and clamp; D-5.2's arithmetic; replaces the two D-8.1 tests D-4 names; the banking reserve removed |
+| #2458 | D-2's form and clamp; D-5.2's arithmetic; replaces the two D-8.1 tests D-4 names, and restates the `apps/web` tests D-4 names and no others; the banking reserve removed |
 | #2459 | Archetypes change capacity at the start only (D-1.1); the skill axis is D-7's |
 | #2460, #2461 | D-3: one model, `k` on effort distance, the switch, D-3.6's restatement and no other |
 | #2462, #2463 | Decide once per window (D-6.3); replace the rank tests D-4 names when they make them false |
