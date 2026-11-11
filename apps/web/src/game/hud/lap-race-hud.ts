@@ -81,6 +81,7 @@ import {
 import {
   STANDINGS_TEXT,
   gapText,
+  wholeSeconds,
   windowedStandings,
   type RaceStandingsView,
   type StandingsLine,
@@ -266,7 +267,8 @@ export function racePlace(
  * How close, in whole seconds, the next racer back must be for the *Place*
  * field's lap line to name it — #2455 AC2, the owner's ruling of 2026-11-10
  * (design (a), "about 5 s"). Compared with the gap as the standings round it
- * ({@link gapText}), so the cue never reads a number the standings do not.
+ * (`room-ride.ts` §`wholeSeconds`, which {@link gapText} rounds by), so the
+ * cue never reads a number the standings do not.
  */
 export const BEHIND_CUE_SECONDS = 5;
 
@@ -291,7 +293,7 @@ export function behindCue(hud: LapRaceHud): string | undefined {
   const named = nextBack === undefined ? undefined : entrant(hud, nextBack);
   if (entry === undefined || named === undefined) return undefined;
   const seconds = gapSeconds(hud, me, entry);
-  if (seconds === undefined || Math.round(seconds) > BEHIND_CUE_SECONDS) return undefined;
+  if (seconds === undefined || wholeSeconds(seconds) > BEHIND_CUE_SECONDS) return undefined;
   return `${named.name} ${gapText(seconds)}`;
 }
 

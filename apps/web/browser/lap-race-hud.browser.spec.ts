@@ -27,8 +27,10 @@
  *   on the warned stages and with none on the start stage (SC 1.4.1);
  * - every item's name fits the *Item* field, one stage per item;
  * - the "behind you" cue is on the *Place* field's lap line on every race
- *   stage (#2455 AC2), at its widest, `Sprinter 7`, on the warned ones, so
- *   *Place* fitting its box, its panel and its row is measured with it.
+ *   stage (#2455 AC2), at its widest on the warned ones — the last of the
+ *   most laps the chooser offers, the longest bot name, the window's edge:
+ *   `Lap 10 of 10 · Sprinter 7 +5 s` — so *Place* fitting its box, its panel
+ *   and its row is measured with it.
  *
  * ## The controls
  *
@@ -180,7 +182,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         if (secondary === undefined) continue;
         // #2455 AC2: the cue is laid out, so the fit below is the cue's.
         expect(field(stage, 'Place').detail, `${at}: the behind-you cue`).toBe(
-          name === 'start' ? 'Lap 1 of 5 · Sprinter 5 +1 s' : 'Lap 5 of 5 · Sprinter 7 +1 s',
+          name === 'start' ? 'Lap 1 of 10 · Sprinter 5 +1 s' : 'Lap 10 of 10 · Sprinter 7 +5 s',
         );
         for (const label of RACE_READINGS) {
           const reading = field(stage, label);
