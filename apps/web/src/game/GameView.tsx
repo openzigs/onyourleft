@@ -1791,8 +1791,15 @@ function GameScreen({
    * A crash during one already drawn does not restart it: the rider is down.
    */
   const crashRef = useRef<DrawnCrash | undefined>(undefined);
-  /** #2454: how far into the crash pose the last drawn frame was, for the HUD's "Crashed". */
+  /** #2454: how far into the crash pose the last frame was, for the HUD's "Crashed". */
   const crashShownRef = useRef<number | undefined>(undefined);
+  /**
+   * #2454's review: the clock a crash is timed on, in ms — the frames the loop
+   * ran and nothing else, so a pause, when it does not run, does not use up a
+   * crash the rider is down in. The frame clock and the ride's `elapsed` both
+   * count the pause.
+   */
+  const crashClockRef = useRef(0);
   /**
    * The lap race this ride runs, while it runs one — #1906. A ref for
    * {@link deliveryRef}'s reason. Set at the press and held for the ride;
@@ -3506,6 +3513,7 @@ function GameScreen({
       // trainer is sent (DL5): the gradient above samples the simulation alone, and
       // is sampled BEFORE this, so a fault in the round cannot stop the loop
       // short of this frame's grade write.
+      const crashClock = (crashClockRef.current += Math.max(0, at - lastFrameAt));
       const delivery = deliveryRef.current;
       if (delivery !== undefined && stepsRun > 0) {
         // The rider's steering is stepped in it, and its offset is where the
@@ -3525,7 +3533,7 @@ function GameScreen({
         if (stepped.crashes > 0) {
           crashRef.current = crashFrom(
             crashRef.current,
-            at,
+            crashClock,
             crashSideFor(stepped.ride.steer.offset),
           );
         }
@@ -3542,6 +3550,15 @@ function GameScreen({
         }
         deliveryOwedRef.current = owed;
       }
+      // #2454: how far into a crash the rider is, while one is — on every frame,
+      // drawn or not, as the HUD's "Crashed" reads it.
+      const crashed = crashRef.current;
+      const crashAt =
+        crashed === undefined || deliveryRef.current === undefined
+          ? undefined
+          : crashShare((crashClock - crashed.atMs) / 1000, reducedMotionRef.current);
+      if (crashAt === undefined) crashRef.current = undefined;
+      crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
       // as the round above: AFTER the grade is sampled, from the simulation's
       // odometer, which is the rider's effort distance (ADR 0060 D-3.1). It
@@ -3609,14 +3626,6 @@ function GameScreen({
         const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
           inRoom: roomRef.current !== undefined,
         });
-        // #2454: how far into a crash the rider is drawn, while one is.
-        const crashed = crashRef.current;
-        const crashAt =
-          crashed === undefined || deliveryRef.current === undefined
-            ? undefined
-            : crashShare((at - crashed.atMs) / 1000, reducedMotionRef.current);
-        if (crashAt === undefined) crashRef.current = undefined;
-        crashShownRef.current = crashAt;
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,

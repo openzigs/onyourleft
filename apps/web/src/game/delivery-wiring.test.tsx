@@ -924,6 +924,29 @@ describe('a crash drawn inside a game ride — #2454', () => {
         Math.abs(frame.markers.find((marker) => marker.kind === 'rider')?.lean ?? Number.NaN) /
         DEGREE,
     );
+  /** Each frame drawn on a pump, by its rider's lean, with the Score field's phrase after it. */
+  interface Sight {
+    readonly lean: number;
+    readonly detail: string | undefined;
+  }
+  /** An `onFrame` that records a {@link Sight} for every pump that drew a frame into `drawn`. */
+  const watching = (
+    drawn: readonly SceneFrame[],
+    sights: Sight[],
+    then?: (index: number) => Promise<void>,
+  ): ((index: number) => Promise<void>) => {
+    let seen = drawn.length;
+    return async (index) => {
+      if (drawn.length > seen) {
+        sights.push({
+          lean: riderLeans(drawn.slice(-1))[0] ?? Number.NaN,
+          detail: field('Score')?.detail,
+        });
+      }
+      seen = drawn.length;
+      await then?.(index);
+    };
+  };
   /** How many times the Score field's phrase turned to "Crashed". */
   const crashesShown = (details: readonly (string | undefined)[]): number =>
     details.filter((detail, index) => detail === 'Crashed' && details[index - 1] !== 'Crashed')
@@ -958,11 +981,92 @@ describe('a crash drawn inside a game ride — #2454', () => {
       removeEventListener: () => undefined,
     }));
     const drawn: SceneFrame[] = [];
-    await rideTheTrace({ delivery: true, drawn });
+    const sights: Sight[] = [];
+    await rideTheTrace({ delivery: true, drawn, onFrame: watching(drawn, sights) });
     const leans = riderLeans(drawn);
     expect(Math.max(...leans)).toBeGreaterThan(74.9);
     expect(leans.every((lean) => lean < 45 || lean > 74.9)).toBe(true);
+    // #2454's review: "Crashed" for exactly as long as the rider is drawn down — never upright.
+    expect(sights.some((sight) => sight.detail === 'Crashed')).toBe(true);
+    for (const sight of sights) expect(sight.detail === 'Crashed').toBe(sight.lean > 74.9);
   });
+
+  it(
+    'keeps a rider who paused while down still down on resume, and gets them back up after',
+    SHARED_RIDE,
+    async () => {
+      const drawn: SceneFrame[] = [];
+      const sights: Sight[] = [];
+      let resumedAt: number | undefined;
+      await rideTheTrace({
+        delivery: true,
+        drawn,
+        onFrame: watching(drawn, sights, async () => {
+          const down = sights.at(-1);
+          if (resumedAt !== undefined || down === undefined || down.lean < 70) return;
+          // Down: pause for longer than a whole crash, and ride on.
+          await clickThrough(buttonStarting('Pause'));
+          // The paused loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+          pending = [];
+          nowMs += 3_000;
+          await clickThrough(buttonStarting('Resume'));
+          resumedAt = sights.length;
+        }),
+      });
+      expect(resumedAt).toBeDefined();
+      const after = sights.slice(resumedAt);
+      // Still down on the first frame after the pause, and "Crashed" says so…
+      expect(after[0]?.lean).toBeGreaterThan(70);
+      expect(after[0]?.detail).toBe('Crashed');
+      // …then on the way up, still "Crashed", and back on the bike within the
+      // crash's 1.5 s, with "Crashed" gone.
+      const up = after.findIndex((sight) => sight.detail !== 'Crashed');
+      expect(up).toBeGreaterThan(1);
+      expect(up).toBeLessThanOrEqual(8);
+      expect(after.slice(1, up).some((sight) => sight.lean < 70)).toBe(true);
+      expect(after[up]?.lean).toBeLessThan(45);
+      expect(after[up]?.detail).toMatch(/^Day \d of 7$/u);
+    },
+  );
+
+  it(
+    'says “Crashed” on the HUD while the world is still being prepared, and stops once it is over',
+    SHARED_RIDE,
+    async () => {
+      const details: (string | undefined)[] = [];
+      stubSeed(script.seed);
+      mounted = await mount(
+        <GameView
+          port={port()}
+          renderer={() => {
+            const plain = capturingRenderer([]);
+            return Promise.resolve({
+              ...plain,
+              create: (canvas, settings) => ({
+                ...plain.create(canvas, settings),
+                // A view that never finishes preparing: the world is never drawn.
+                prepare: () => new Promise<void>(() => undefined),
+              }),
+            });
+          }}
+          now={() => nowMs}
+          delivery
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < FRAMES; index += 1) {
+        await pump();
+        details.push(field('Score')?.detail);
+        const side = script.throws.get(index);
+        if (side !== undefined) await pressThrow(side);
+        const intent = STEERS.get(index);
+        if (intent !== undefined) await pressSteer(intent);
+      }
+      expect(crashesShown(details)).toBeGreaterThan(0);
+      expect(details.at(-1)).toMatch(/^Day \d of 7$/u);
+    },
+  );
 });
 
 describe('lane steering inside a game ride — #1853', () => {

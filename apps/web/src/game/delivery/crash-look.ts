@@ -36,7 +36,8 @@
  *
  * No fall and no rise: {@link crashShare} is a still crash pose, the bicycle
  * on its side, from the crash until the rise would have begun, and then the
- * rider upright again — no animation between.
+ * crash is over and the rider is drawn upright as the ride draws them — no
+ * animation between, and the HUD's "Crashed" ends with the pose.
  *
  * ## A drawing, never physics
  *
@@ -67,11 +68,14 @@ export const CRASH_LEAN_RADIANS = (75 * Math.PI) / 180;
  * How far into the crash pose the rider is drawn, `seconds` after a crash: 0
  * on the bike as the ride draws them, 1 on the ground. `undefined` before the
  * crash (a negative or non-finite time) and once {@link CRASH_SECONDS} have
- * passed: the crash is over and the ride is drawn as it is.
+ * passed — under reduced motion once {@link CRASH_RISE_AT_SECONDS} have: the
+ * crash is over and the ride is drawn as it is.
  */
 export function crashShare(seconds: number, reducedMotion: boolean): number | undefined {
   if (!Number.isFinite(seconds) || seconds < 0 || seconds >= CRASH_SECONDS) return undefined;
-  if (reducedMotion) return seconds < CRASH_RISE_AT_SECONDS ? 1 : 0;
+  // #2454's review: over at the rise under reduced motion, not a still upright
+  // pose until CRASH_SECONDS, so the HUD's "Crashed" ends as the rider is up.
+  if (reducedMotion) return seconds < CRASH_RISE_AT_SECONDS ? 1 : undefined;
   if (seconds < CRASH_FALL_SECONDS) return (seconds / CRASH_FALL_SECONDS) ** 2;
   if (seconds < CRASH_RISE_AT_SECONDS) return 1;
   const risen = (seconds - CRASH_RISE_AT_SECONDS) / CRASH_RISE_SECONDS;
@@ -82,7 +86,11 @@ export function crashShare(seconds: number, reducedMotion: boolean): number | un
 /** Which way a crashed rider falls: to the rider's right (`1`) or left (`-1`). */
 export type CrashSide = 1 | -1;
 
-/** A crash being drawn: when it happened, by the frame clock, and which way the rider falls. */
+/**
+ * A crash being drawn: when it happened, by `GameView`'s crash clock — the
+ * frames the loop ran, so a pause does not use it up — and which way the rider
+ * falls.
+ */
 export interface DrawnCrash {
   readonly atMs: number;
   readonly side: CrashSide;

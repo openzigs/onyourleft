@@ -66,10 +66,12 @@ describe('the crash’s timeline — crashShare', () => {
 
   it('is a still crash pose under reduced motion: down or up, never between', () => {
     const shares = timeline(true);
-    expect(shares.every((share) => share === undefined || share === 0 || share === 1)).toBe(true);
+    expect(shares.every((share) => share === undefined || share === 1)).toBe(true);
     expect(crashShare(0, true)).toBe(1);
     expect(crashShare(CRASH_RISE_AT_SECONDS - 1e-6, true)).toBe(1);
-    expect(crashShare(CRASH_RISE_AT_SECONDS, true)).toBe(0);
+    // Over as the rider is up: never an upright pose that the HUD still calls "Crashed".
+    expect(crashShare(CRASH_RISE_AT_SECONDS, true)).toBeUndefined();
+    expect(crashShare((CRASH_RISE_AT_SECONDS + CRASH_SECONDS) / 2, true)).toBeUndefined();
     expect(crashShare(CRASH_SECONDS, true)).toBeUndefined();
   });
 
