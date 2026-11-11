@@ -17,8 +17,8 @@ It has the same authority as the root file. Where the text below says "this file
   bots racing with a strategy that reads the race, on the owner's ruling of 2026-11-10 on
   [#2455](https://github.com/openzigs/onyourleft/issues/2455) that there can be no rule on racing
   strategy. It is **Accepted** (2026-11-11): the owner ruled on its D-8 on its pull request, (b)
-  for R-3 and the rest as recommended. It supersedes ADR 0060 D-9 and ADR 0061 D-1 to D-4, D-6, D-8.1, D-8.5 and D-8.6, and, only
-  under its D-3 answer (b), ADR 0066 D-1.5's and D-4's lap-race clauses, D-2 and D-6's last bullet, and
+  for R-3 and the rest as recommended. It supersedes ADR 0060 D-9 and ADR 0061 D-1 to D-4, D-6, D-8.1, D-8.5 and D-8.6, and, under
+  its D-3 answer (b), which the owner chose, ADR 0066 D-1.5's and D-4's lap-race clauses, D-2 and D-6's last bullet, and
   ADR 0038 D-5's "Out" bullet, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed
   decision to a new ADR. It took the next free number after 0066; **0057 and 0058 stay claimed** by
   #1748 and #1752. **The next free number is 0068.** A reviewer who remembers this file offering
