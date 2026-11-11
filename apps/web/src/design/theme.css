@@ -9687,6 +9687,57 @@ select.oyl-input {
   display: block;
 }
 
+/* ⚠️ **And on a tablet from 50 rem tall, beside the pacer and the ghost, the
+   wind gives way to it** — #2425, recorded as #419 asks. There #2434's
+   *Calories* is the second row's third track (§"THE CALORIE ESTIMATE IN THE
+   RIDE SO FAR"), and with *W/kg*, *Zone*, the pacer's gap, the ghost's gap,
+   the draft and the wind that row was seven readings in six tracks: the wind
+   went to a third row, and on the widest ride at 1280×800 the notices under
+   the tier ran into the route panel (`ride-notices.browser.spec.ts` §"#2381")
+   and the tier over the leaning rider upright at large text
+   (`ride-hud-layout.browser.spec.ts` §"#2079"). The wind is the one a rider
+   set before the ride and that does not change while they ride; the draft
+   changes with every wheel they sit on. Hidden by clip, still read by a
+   screen reader in its place; the wind is ridden all the same. With either
+   the pacer or the ghost alone the row is six and the wind stays.
+   ⚠️ **And there the field's "at most 59 %" line gives way too**, with or
+   without the wind. In the second row's fifth or sixth track (100 or 83 px)
+   the field is five lines (label, number, unit, that line, the gauge), 100 px
+   against the row's 84. On the CI
+   runner's rendering that put the notices under the tier into the route
+   panel at 1280×800 (`ride-notices.browser.spec.ts` §"#2381"), measured in
+   the Playwright 1.63 Linux image. The gauge still draws the scale, its end
+   mark the 59 %, and a screen reader still reads the line. */
+@media (min-width: 50rem) and (min-height: 50rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--solo-draft .oyl-hud__detail {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__fields--secondary:has(
+      > .oyl-hud__field--gives-way ~ .oyl-hud__field--gives-way ~ .oyl-hud__field--solo-draft
+    )
+    > .oyl-hud__field--wind {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 /*
  * A ROOM RIDE ON A PHONE — #1356.
  *

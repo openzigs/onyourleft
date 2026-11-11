@@ -142,6 +142,7 @@ import {
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
+  windGivesWayToTheDraft,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
@@ -272,8 +273,11 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // graph, where it is drawn.
       // And since #2434 the calorie estimate. And since #2425 a solo ride's
       // draft, drawn on a tablet only (`theme.css` §"A SOLO RIDE'S DRAFT, ON A
-      // TABLET ONLY"), so a phone draws as many as before.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 27 : 19);
+      // TABLET ONLY"), so a phone draws as many as before, and a tablet from
+      // 50 rem tall draws it in the wind's place (§"the wind gives way to it").
+      expect(seen.items).toHaveLength(
+        rideTotalsDrawn(viewport) ? (windGivesWayToTheDraft(viewport) ? 26 : 27) : 19,
+      );
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -1076,7 +1080,15 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
       // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
       // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
       const draftDrawn = viewport.width >= 800 && viewport.height >= 752;
-      expect(seen.givenWay, how).toEqual(draftDrawn ? [] : ['reading: Draft']);
+      // And from 50 rem tall the wind gives way to it (§"the wind gives way to
+      // it"), beside the pacer and the ghost.
+      expect(seen.givenWay, how).toEqual(
+        draftDrawn
+          ? windGivesWayToTheDraft(viewport)
+            ? ['reading: Wind']
+            : []
+          : ['reading: Draft'],
+      );
       const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
       if (panel === undefined) throw new Error(`${how}: no secondary panel`);
       // Stacked, the readings scroll: drawn, in their panel and over no other

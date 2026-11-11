@@ -659,6 +659,9 @@ function fieldClass(reading: HudReading): string {
     // #2425: a solo ride's draft, drawn on a tablet only (`theme.css`
     // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY").
     ...(reading.key === SOLO_DRAFT_KEY ? ['oyl-hud__field--solo-draft'] : []),
+    // And the wind by name, which gives way to it on a tablet when the pacer
+    // and the ghost are drawn too (the same section).
+    ...(reading.key === 'wind' ? ['oyl-hud__field--wind'] : []),
   ].join(' ');
 }
 
