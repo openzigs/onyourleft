@@ -11,11 +11,13 @@
  * `@onyourleft/domain` §`plan.ts`), and the plan saves a little on the flat
  * and more downhill and spends it on climbs and in the sprint. Rounding alone
  * cannot make 2.6: the flat's saving is 2.66, written 2.7. So 2.6 is a bot
- * riding downhill.
+ * riding downhill. That held at full ability only.
  *
  * Since #2455 each bot also rides its own ability, at or a little under its
  * tier, so those figures are now its own: the race here pins a seed that
  * deals its one bot the even pace and reads the figures against its own W/kg.
+ * In a live race a Brisk bot at ability 0.94 reads 2.6 on the flat once its
+ * reserve is full, so 2.6 no longer means downhill there.
  *
  * Each case holds one clause of what the chooser now says
  * (`StageChooser.tsx` §`LAP_RACE_CHOICE_TEXT.tierLive`), so a change to the

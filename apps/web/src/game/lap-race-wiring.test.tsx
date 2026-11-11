@@ -717,9 +717,11 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
     // One tier below the chosen 'hard', read off the bots' figures (#2455: a
-    // bot is named by its pace, not its tier). Off the line a bot's reserve is
-    // empty, so it rides at most its own power, never over Brisk's 2.8 W/kg,
-    // where a Hard bot rides at least the Hard tier's −20 % floor, 2.9 W/kg.
+    // bot is named by its pace, not its tier). A bot rides at most its own
+    // power plus what it has banked, and never under its tier's −20 % floor:
+    // Brisk's figures lie between 2.2 and 2.8 W/kg, where a Hard bot rides at
+    // least the Hard tier's floor, 2.9, and a bot assisted two tiers down, to
+    // Steady, at most 2.0.
     const figures = queryAll<HTMLElement>(
       mounted?.container ?? document,
       '.oyl-hud__standings-line:not(.oyl-hud__standings-line--you)',
@@ -729,6 +731,10 @@ describe('a solo lap race inside a game ride — #1906', () => {
       .map(Number);
     expect(figures.length).toBeGreaterThanOrEqual(RACE.bots);
     expect(Math.max(...figures)).toBeLessThanOrEqual(BOT_TIER_WATTS_PER_KILOGRAM.brisk);
+    // Brisk's own floor, the figure rounded to a tenth, rules out Steady.
+    expect(Math.min(...figures)).toBeGreaterThanOrEqual(
+      Math.floor(BOT_TIER_WATTS_PER_KILOGRAM.brisk * 0.8 * 10) / 10,
+    );
   });
 
   it('names every bot of a full field in the standings, on every frame, the rider last on the line (#2328)', async () => {
