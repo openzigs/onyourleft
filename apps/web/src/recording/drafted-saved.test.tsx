@@ -24,7 +24,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DRAFTED_RIDE_TEXT } from '../game/solo-draft';
+import { DRAFTED_RIDE_NOTE, DRAFTED_RIDE_TEXT } from '../game/solo-draft';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView, READING_RIDE_TEXT } from '../views/ActivityDetailView';
@@ -121,7 +121,11 @@ describe('a drafted ride is kept as one on the device — #2451, ADR 0066 D-5.3'
     expect(read?.rideFacts?.drafted).toBe(true);
     expect(read?.rideFacts?.draftSpans).toStrictEqual(spans);
 
-    expect(await ridePage()).toContain(`Draft${DRAFTED_RIDE_TEXT}`);
+    expect(await ridePage()).toContain(`Draft${DRAFTED_RIDE_TEXT} ${DRAFTED_RIDE_NOTE}`);
+    // The owner's words of 2026-11-11 (#2487), so a constant reworded is red here.
+    expect(`${DRAFTED_RIDE_TEXT} ${DRAFTED_RIDE_NOTE}`).toBe(
+      'Drafted 10 %+ behind the pacer or your ghost',
+    );
     expect(await historyCard()).toMatch(/· drafted$/);
   });
 

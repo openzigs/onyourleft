@@ -144,7 +144,7 @@ import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
-import { DRAFTED_RIDE_TEXT } from '../game/solo-draft';
+import { DRAFTED_RIDE_NOTE, DRAFTED_RIDE_TEXT } from '../game/solo-draft';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { raceFactTerm, raceFactText } from '../rooms/race-result';
@@ -871,7 +871,10 @@ export function ActivityDetailView({
             {activity.rideFacts?.drafted === true ? (
               <div>
                 <dt>Draft</dt>
-                <dd>{DRAFTED_RIDE_TEXT}</dd>
+                <dd>
+                  {DRAFTED_RIDE_TEXT}{' '}
+                  <span className="oyl-ride-summary__note oyl-muted">{DRAFTED_RIDE_NOTE}</span>
+                </dd>
               </div>
             ) : null}
           </dl>

@@ -5745,6 +5745,16 @@ select.oyl-input {
 }
 
 /*
+ * #2451: a value's secondary line, under it at the small size — the Draft
+ * row's "10 %+ behind the pacer or your ghost". `.oyl-muted`, the pair the
+ * Calories row's basis already uses on the page, so no new contrast pair.
+ */
+.oyl-ride-summary__note {
+  display: block;
+  font-size: var(--oyl-font-size-sm);
+}
+
+/*
  * A trace.
  *
  * The height is fixed and the width fills its container; `preserveAspectRatio`
