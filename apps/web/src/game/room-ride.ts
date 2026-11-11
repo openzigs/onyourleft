@@ -200,9 +200,18 @@ export const STANDINGS_TEXT = {
       : `You are ${String(place)} of ${String(of)}.`,
 } as const;
 
+/**
+ * A gap's size in whole seconds, as {@link gapText} writes it — shared with
+ * `hud/lap-race-hud.ts` §`behindCue`, whose window must round the way the
+ * list does (#2455 AC2).
+ */
+export function wholeSeconds(seconds: number): number {
+  return Math.round(Math.abs(seconds));
+}
+
 /** A gap as the list says it: "+12 s", "−1:05", "0 s". */
 export function gapText(seconds: number): string {
-  const whole = Math.round(Math.abs(seconds));
+  const whole = wholeSeconds(seconds);
   if (whole === 0) return '0 s';
   const sign = seconds > 0 ? '+' : '\u2212';
   if (whole < 60) return `${sign}${String(whole)} s`;

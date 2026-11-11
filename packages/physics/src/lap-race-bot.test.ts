@@ -11,6 +11,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type {
+  BotPace,
   BotStrategy,
   BotTier,
   GhostSamples,
@@ -22,7 +23,10 @@ import type {
 } from '@onyourleft/domain';
 import {
   altitudeMetres,
+  BOT_ABILITY_SPREAD,
   BOT_MASS_KILOGRAMS,
+  BOT_PACING_STYLES,
+  botFieldPaces,
   BOT_PERSONALITIES,
   BOT_PLAN_BANKING,
   BOT_PLAN_MEAN_TOLERANCE,
@@ -91,6 +95,8 @@ interface Entrant {
   readonly id: string;
   readonly tier: BotTier;
   readonly strategy?: BotStrategy;
+  /** Its pace when the test sets one (#2455); the even pace at full ability otherwise. */
+  readonly pace?: BotPace;
 }
 
 function conditions(profile: RouteProfile): LapRaceBotConditions {
@@ -118,7 +124,7 @@ function race(
     startMs: 0,
   });
   let bots: readonly LapRaceBot[] = field.map((bot) =>
-    lapRaceBot(bot.id, bot.tier, bot.strategy ?? STRATEGY),
+    lapRaceBot(bot.id, bot.tier, bot.strategy ?? STRATEGY, bot.pace),
   );
   const races = [state];
   const all = [bots];
@@ -222,15 +228,18 @@ describe('the travel it hands the bot decision', () => {
 describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 0007 D4)', () => {
   it('takes no activity, stream or ghost type anywhere in its public signatures', () => {
     expectTypeOf(lapRaceBot).parameters.toEqualTypeOf<
-      [id: string, tier: BotTier, strategy: BotStrategy]
+      [id: string, tier: BotTier, strategy: BotStrategy, pace?: BotPace]
     >();
     expectTypeOf(stepBotRace).parameters.toEqualTypeOf<
       [race: ItemRaceState, bots: readonly LapRaceBot[], step: BotRaceStep]
     >();
     expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<'elapsed' | 'conditions' | 'seed' | 'rider'>();
     expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<
-      'id' | 'tier' | 'strategy' | 'memory' | 'reserve' | 'ride' | 'power'
+      'id' | 'tier' | 'strategy' | 'pace' | 'memory' | 'reserve' | 'ride' | 'power'
     >();
+    // #2455: a pace is a style key and a number, with nowhere for a recorded ride.
+    expectTypeOf<keyof BotPace>().toEqualTypeOf<'style' | 'ability'>();
+    expectTypeOf<BotPace['ability']>().toEqualTypeOf<number>();
     expectTypeOf<keyof LapRaceBotConditions>().toEqualTypeOf<
       | 'profile'
       | 'airDensityKilogramsPerCubicMetre'
@@ -278,8 +287,10 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     // Every name, held to a list: a ghost or recording export is none of these.
     expect(fromDomain).toEqual(
       [
+        'BOT_EVEN_PACE',
         'BOT_MEMORY_AT_START',
         'BotMemory',
+        'BotPace',
         'BotStrategy',
         'BotTier',
         'ItemRaceState',
@@ -357,6 +368,38 @@ describe('no rubber-banding (ADR 0060 D-9)', () => {
     // The road is hilly, so the trace is not one number repeated.
     expect(new Set(leading.power.slice(0, ticks)).size).toBeGreaterThan(10);
     expect(trailing.power.slice(0, ticks)).toEqual(leading.power.slice(0, ticks));
+  });
+
+  it('holds for every pace: a paced bot reads back one power trace leading or trailing (#2455)', () => {
+    for (const style of BOT_PACING_STYLES) {
+      const pace: BotPace = { style, ability: 1 - BOT_ABILITY_SPREAD / 2 };
+      const trace = (rivals: BotTier): { readonly power: number[]; readonly place: number } => {
+        const run = race(
+          HILLY,
+          [
+            { id: 'bot', tier: 'hard', pace },
+            // The rivals ride other paces too, so nothing about them is the bot's.
+            { id: 'r1', tier: rivals, pace: { style: 'sprinter', ability: 1 } },
+            { id: 'r2', tier: rivals, pace: { style: 'fast-start', ability: 0.95 } },
+          ],
+          7,
+          true,
+          300,
+        );
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        return {
+          power: run.bots.map((bots) => bots.find((bot) => bot.id === 'bot')?.power ?? -1),
+          place: standings(last.racers.map((entry) => entry.racer)).indexOf('bot'),
+        };
+      };
+      const leading = trace('steady');
+      const trailing = trace('fierce');
+      expect(leading.place, style).toBe(0);
+      expect(trailing.place, style).toBe(2);
+      const ticks = Math.min(leading.power.length, trailing.power.length);
+      expect(ticks, style).toBeGreaterThan(100);
+      expect(trailing.power.slice(0, ticks), style).toEqual(leading.power.slice(0, ticks));
+    }
   });
 });
 
@@ -666,5 +709,118 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
     expect(inside).toBeCloseTo(plan.surgeWatts, 9);
     expect(powerAt(opens + 5, -10)).toBe(inside);
     expect(powerAt(opens + 5, 10)).toBe(inside);
+  });
+});
+
+/** Seven bots of one tier, each its pace from the field's deal on `seed`. */
+function dealtField(tier: BotTier, seed: number): Entrant[] {
+  return botFieldPaces(seed, 7).map((pace, index) => ({
+    id: `bot-${String(index + 1)}`,
+    tier,
+    pace,
+  }));
+}
+
+/** Each racer's drawn distance at a tick, by id. */
+function positionsAt(run: Run, tick: number): ReadonlyMap<string, number> {
+  const state = run.races[Math.min(tick, run.races.length - 1)] as ItemRaceState;
+  return new Map(
+    state.racers.map((entry) => [
+      entry.racer.id,
+      entry.racer.effortDistance + entry.racer.raceOffset,
+    ]),
+  );
+}
+
+describe('each bot its own pace (#2455)', () => {
+  it(
+    'holds every style’s mean to its tier at either end of the band, inside the bounds of D-8.2',
+    { timeout: 60_000 },
+    () => {
+      for (const profile of [FLAT, HILLY]) {
+        for (const ability of [1, 1 - BOT_ABILITY_SPREAD]) {
+          const field: Entrant[] = BOT_PACING_STYLES.map((style) => ({
+            id: style,
+            tier: 'brisk',
+            pace: { style, ability },
+          }));
+          const run = race(profile, field, 4, true);
+          for (const { id, tier, pace } of field) {
+            const ticks = ticksOf(run, id, profile);
+            const ridden = ticks.power.slice(0, ticks.finished);
+            const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+            const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), 4, pace);
+            const label = `${id} at ${String(ability)}, ${profile === FLAT ? 'flat' : 'hilly'}`;
+            expect(ticks.finished, label).toBeGreaterThan(100);
+            // D-8.1: never above the tier, and within the tolerance under it.
+            expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
+            expect(mean(ridden), label).toBeGreaterThanOrEqual(
+              tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
+            );
+            // D-8.2: the tier's surge ceiling and its −20 % floor, whatever the pace.
+            expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+            expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
+              tierWatts * PACING_FACTOR_FLOOR - 1e-9,
+            );
+          }
+        }
+      }
+    },
+  );
+
+  it(
+    'keeps the tiers in order with every bot on a pace the field dealt it, every seed of 100',
+    { timeout: 60_000 },
+    () => {
+      for (let seed = 1; seed <= 100; seed += 1) {
+        const paces = botFieldPaces(seed, ALL_TIERS.length);
+        const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
+        const run = race(HILLY, field, seed, false);
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+          'f',
+          'h',
+          'b',
+          's',
+        ]);
+      }
+    },
+  );
+
+  it('spreads a field of one tier into a race: apart at the line, and the order changes on the way', () => {
+    const order = (at: ReadonlyMap<string, number>): string[] =>
+      [...at.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+    let crossed = 0;
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const run = race(HILLY, dealtField('brisk', seed), seed, false);
+      const label = `seed ${String(seed)}`;
+      // The tick the first bot crosses the line, and where the field is then.
+      const line = run.races.findIndex((state) =>
+        state.racers.some((entry) => entry.racer.finishedAtMs !== null),
+      );
+      expect(line, label).toBeGreaterThan(0);
+      const atLine = positionsAt(run, line - 1);
+      const spread = [...atLine.values()];
+      // Seven different places on the road, and the first and the last tens of metres apart.
+      expect(new Set(spread).size, label).toBe(7);
+      expect(Math.max(...spread) - Math.min(...spread), label).toBeGreaterThan(20);
+      // The field's order at the end of the first lap, against the line's.
+      const lap = run.races.findIndex((state) =>
+        state.racers.every((entry) => entry.racer.effortDistance >= HILLY.totalDistance),
+      );
+      expect(lap, label).toBeGreaterThan(0);
+      if (order(positionsAt(run, lap)).join() !== order(atLine).join()) crossed += 1;
+    }
+    // The paces cross: in most of these races someone passes someone after the first lap.
+    expect(crossed).toBeGreaterThanOrEqual(3);
+  });
+
+  it('rides a field as one stacked group without paces: what #2455 reported', () => {
+    // The yardstick the spread is measured against: seven bots of one tier on
+    // no pace finish together, to the millisecond.
+    const field = dealtField('brisk', 1).map(({ id, tier }) => ({ id, tier }));
+    const run = race(HILLY, field, 1, false);
+    const last = run.races[run.races.length - 1] as ItemRaceState;
+    expect(new Set(last.racers.map((entry) => entry.racer.finishedAtMs)).size).toBe(1);
   });
 });

@@ -315,6 +315,13 @@ its last call grow with its speed (`packages/domain/src/lap-race/strategy.ts`). 
 chosen apart from its tier and is never read on the way to its power: a crafty and a naive bot of
 one tier ride one power trace, and the crafty one finishes ahead more often than not.
 
+Since #2455 a bot also carries a `BotPace` (`@onyourleft/domain` §`pace.ts`): its ability at or
+under its tier and its pacing style off the course, dealt from the race's seed at the start. Its
+race plan reads it (`botRacePlan`'s fourth argument), so a field of one tier spreads into a race;
+its decisions never do. A bot given no pace rides the even pace at its tier's full power, #1960's
+plan as it was. `lap-race-bot.test.ts` holds every style to the tier's mean, ceiling and floor, the
+tiers to their order on dealt paces, and the lead-or-trail power trace for every style.
+
 ---
 
 ## 5. Determinism is enforced in ESLint, not in the typechecker

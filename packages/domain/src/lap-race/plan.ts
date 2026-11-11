@@ -56,6 +56,19 @@
  * bot's effort; it does not raise it, so a rider well ahead of a tier stays
  * ahead (ADR 0061, *What this costs*).
  *
+ * ## Each bot's own pace (#2455)
+ *
+ * Since #2455 a plan also takes the bot's pace (`pace.ts`): an ability at or a
+ * little under its tier, and a pacing style read off the course. The account
+ * above is then booked against **the bot's own power** where it is, its
+ * tier's times its ability, and eased by its style outside its hard part,
+ * rather than against the tier's: what is "above" and "below" is above and
+ * below its own. Its own power is never over its tier's, so an empty reserve
+ * still rides no more than the tier (ADR 0061 D-2), and the mean is still
+ * never above it. The bounds below stay the tier's. A pace is drawn from the
+ * race's seed before the start and reads nothing of the race (D-1, D-3). With
+ * no pace given, a plan is #1960's, at the tier's full power.
+ *
  * ## The bounds (D-8.2, the owner's Q2 answer (a))
  *
  * Above, a bot rides at most {@link BOT_PLAN_SURGE_CEILING} times its tier's
@@ -87,6 +100,16 @@ import {
 import { watts, type GradePercent, type Watts } from '../quantities';
 import { BOT_TIER_WATTS_PER_KILOGRAM, type BotTier } from './bots';
 import { LapRaceError } from './errors';
+import {
+  BOT_CLIMBER_GRADE_PERCENT,
+  BOT_EVEN_PACE,
+  BOT_SPRINTER_GRADE_PERCENT,
+  BOT_SPRINTER_SPRINT_FACTOR,
+  BOT_STYLE_BUDGET_FACTOR,
+  BOT_STYLE_EASING,
+  checkBotPace,
+  type BotPace,
+} from './pace';
 import { nextUnit, raceRandom } from './random';
 import type { RaceCourse } from './race';
 
@@ -152,26 +175,51 @@ export const BOT_SPRINT_LONGEST_METRES = 300;
 
 /**
  * How far a bot's time-weighted mean power over a race may stray from its
- * tier's W/kg at `BOT_MASS_KILOGRAMS`: **5 %**, as a fraction of the tier's
- * power. ADR 0061 D-8.1's stated tolerance, proposed by #1960's pull request
- * for the owner's approval.
+ * tier's W/kg at `BOT_MASS_KILOGRAMS`: **10 %**, as a fraction of the tier's
+ * power. ADR 0061 D-8.1's stated tolerance, whose value ADR 0061 leaves to the
+ * code's pull requests to propose and the owner to approve.
+ *
+ * ⚠️ **5 % until #2455**, proposed by #1960's pull request when every bot of a
+ * tier rode the tier's full power. #2455's pull request proposes 10 % for the
+ * owner's approval: a bot's own ability now lies up to `pace.ts`
+ * §`BOT_ABILITY_SPREAD` (6 %) under its tier, and a `fast-start` or
+ * `negative-split` bot rides `pace.ts` §`BOT_STYLE_EASING` (4 %) under its own
+ * for most of a race: together about 8.7 % before any reserve is left unspent.
  *
  * By the header's account the mean is never above the tier, and falls short of
- * it by the reserve left unspent at the line over the race's time.
+ * it by the bot's own shortfall and the reserve left unspent at the line over
+ * the race's time.
  */
-export const BOT_PLAN_MEAN_TOLERANCE = 0.05;
+export const BOT_PLAN_MEAN_TOLERANCE = 0.1;
 
 /** Keys the sprint's draw apart from the race's item draws on the same seed. */
 const SPRINT_DRAW_KEY = 0x5f1d_0961;
 
 /**
- * One bot's plan for one race, fixed from its tier, the course and the race's
- * seed before the start (ADR 0061 D-2.2). Scalars only: there is nowhere in it
- * for a recorded ride, a rider or another racer.
+ * One bot's plan for one race, fixed from its tier, its pace, the course and
+ * the race's seed before the start (ADR 0061 D-2.2). Scalars only: there is
+ * nowhere in it for a recorded ride, a rider or another racer.
  */
 export interface BotRacePlan {
-  /** The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the plan averages to. */
+  /** The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the bounds are set from. */
   readonly tierWatts: number;
+  /**
+   * The bot's own power, watts: its tier's times its pace's ability (#2455),
+   * so never over {@link tierWatts}. What it rides as its own in its hard part.
+   */
+  readonly ownWatts: number;
+  /**
+   * What it rides as its own outside its hard part, watts: {@link ownWatts},
+   * or `pace.ts` §`BOT_STYLE_EASING` under it for a `fast-start` after its
+   * first lap and a `negative-split` before its last.
+   */
+  readonly easedWatts: number;
+  /** Where its hard part opens, metres of effort distance. */
+  readonly hardFromMetres: number;
+  /** Where its hard part closes, metres of effort distance: unbounded for one that never closes. */
+  readonly hardToMetres: number;
+  /** The grade at which a climb asks for the full surge, percent: 8 %, or its style's. */
+  readonly climbGradePercent: number;
   /** The most it rides, watts: {@link BOT_PLAN_SURGE_CEILING} of the tier. */
   readonly surgeWatts: number;
   /** The least it rides, watts: `PACING_FACTOR_FLOOR` of the tier. */
@@ -185,33 +233,75 @@ export interface BotRacePlan {
 }
 
 /**
- * A bot's plan for a race: its tier, the course and the race's seed, and
- * nothing else.
+ * A bot's plan for a race: its tier, its pace (#2455), the course and the
+ * race's seed, and nothing else.
  *
  * The sprint opens between {@link BOT_SPRINT_SHORTEST_METRES} and
  * {@link BOT_SPRINT_LONGEST_METRES} from the line, drawn from the seed alone,
- * so every bot in a race opens it at the same distance left and two bots of
- * one tier ride one power trace (#1959's skill test). A race shorter than that
- * is a sprint from the start.
+ * so every bot of one style in a race opens it at the same distance left and
+ * two bots of one tier and one pace ride one power trace (#1959's skill
+ * test); a `sprinter` opens it `pace.ts` §`BOT_SPRINTER_SPRINT_FACTOR` further
+ * out. A race shorter than that is a sprint from the start.
+ *
+ * A style's hard part is the first lap (`fast-start`) or the last
+ * (`negative-split`), and in a race of one lap the first or the last third
+ * of it. Every other style is all hard part.
  *
  * @param seed - the race's own seed, the one `createItemRace` took.
+ * @param pace - the bot's own, from `pace.ts` §`botFieldPaces`: absent, the
+ *   even pace at the tier's full power, #1960's plan as it was.
  * @throws {LapRaceError} `seed-not-integer` for a seed that is not a safe
- *   whole number.
+ *   whole number, and `pace-out-of-range` for a pace `pace.ts` §`checkBotPace`
+ *   refuses.
  */
-export function botRacePlan(tier: BotTier, course: RaceCourse, seed: number): BotRacePlan {
+export function botRacePlan(
+  tier: BotTier,
+  course: RaceCourse,
+  seed: number,
+  pace: BotPace = BOT_EVEN_PACE,
+): BotRacePlan {
   const drawn = nextUnit({ state: (raceRandom(seed).state ^ SPRINT_DRAW_KEY) >>> 0 }).value;
+  checkBotPace(pace);
+  const { style } = pace;
   const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+  const ownWatts = tierWatts * pace.ability;
   const raceMetres = course.lapLengthMetres * course.laps;
+  const hardMetres = course.laps >= 2 ? course.lapLengthMetres : raceMetres / 3;
   const sprint =
-    BOT_SPRINT_SHORTEST_METRES + drawn * (BOT_SPRINT_LONGEST_METRES - BOT_SPRINT_SHORTEST_METRES);
+    (BOT_SPRINT_SHORTEST_METRES +
+      drawn * (BOT_SPRINT_LONGEST_METRES - BOT_SPRINT_SHORTEST_METRES)) *
+    (style === 'sprinter' ? BOT_SPRINTER_SPRINT_FACTOR : 1);
+  const split = style === 'fast-start' || style === 'negative-split';
+  const reserved = style === 'climber' || style === 'sprinter';
   return {
     tierWatts,
+    ownWatts,
+    easedWatts: split ? ownWatts * (1 - BOT_STYLE_EASING) : ownWatts,
+    hardFromMetres: style === 'negative-split' ? raceMetres - hardMetres : 0,
+    hardToMetres: style === 'fast-start' ? hardMetres : Number.POSITIVE_INFINITY,
+    climbGradePercent:
+      style === 'climber'
+        ? BOT_CLIMBER_GRADE_PERCENT
+        : style === 'sprinter'
+          ? BOT_SPRINTER_GRADE_PERCENT
+          : PACING_CLIMB_REFERENCE_GRADE_PERCENT,
     surgeWatts: tierWatts * BOT_PLAN_SURGE_CEILING,
     floorWatts: tierWatts * PACING_FACTOR_FLOOR,
-    budgetJoules: BOT_TIER_BUDGET_JOULES[tier],
+    budgetJoules: BOT_TIER_BUDGET_JOULES[tier] * (reserved ? BOT_STYLE_BUDGET_FACTOR : 1),
     raceMetres,
     sprintMetres: Math.min(sprint, raceMetres),
   };
+}
+
+/**
+ * What the bot rides as its own at this effort distance, watts: its own power
+ * in its hard part, its eased power outside it. The level its reserve is
+ * booked against (#2455).
+ */
+function ownPowerAt(plan: BotRacePlan, effortDistance: number): number {
+  return effortDistance >= plan.hardFromMetres && effortDistance < plan.hardToMetres
+    ? plan.ownWatts
+    : plan.easedWatts;
 }
 
 /** What one step of the plan reads from the bot's own ride. */
@@ -231,29 +321,32 @@ export interface BotPlanStep {
   readonly reserve: number;
 }
 
-/** What a climb asks for at this grade: from the tier at 0 % to the surge ceiling at 8 %. */
-function climbPower(plan: BotRacePlan, grade: number): number {
-  const climb = Math.min(grade / PACING_CLIMB_REFERENCE_GRADE_PERCENT, 1);
-  return plan.tierWatts + climb * (plan.surgeWatts - plan.tierWatts);
+/**
+ * What a climb asks for at this grade: from the bot's own power at 0 % to the
+ * surge ceiling at its plan's climb grade (8 %, or its style's).
+ */
+function climbPower(plan: BotRacePlan, own: number, grade: number): number {
+  const climb = Math.min(grade / plan.climbGradePercent, 1);
+  return own + climb * (plan.surgeWatts - own);
 }
 
 /**
  * What the course asks for at this grade, banking included, before the reserve
  * has its say. Continuous in the grade: see {@link BOT_PLAN_FLAT_GRADE_PERCENT}.
  */
-function coursePower(plan: BotRacePlan, grade: number): number {
-  const banked = plan.tierWatts * (1 - BOT_PLAN_BANKING);
+function coursePower(plan: BotRacePlan, own: number, grade: number): number {
+  const banked = own * (1 - BOT_PLAN_BANKING);
   if (!Number.isFinite(grade)) return banked;
-  if (grade >= BOT_PLAN_FLAT_GRADE_PERCENT) return climbPower(plan, grade);
+  if (grade >= BOT_PLAN_FLAT_GRADE_PERCENT) return climbPower(plan, own, grade);
   if (grade > 0) {
     // Near-flat and rising: from banking at 0 % to the climb's ask at the
     // band's edge, so the power has no step anywhere along the grade.
     const along = grade / BOT_PLAN_FLAT_GRADE_PERCENT;
-    return banked + along * (climbPower(plan, BOT_PLAN_FLAT_GRADE_PERCENT) - banked);
+    return banked + along * (climbPower(plan, own, BOT_PLAN_FLAT_GRADE_PERCENT) - banked);
   }
   // Flat and downhill the bot banks, and eases further as #92's rule does,
-  // to the same −20 % floor.
-  return Math.min(banked, plan.tierWatts * pacingFactor(grade));
+  // never under the TIER's −20 % floor, whatever its own power (D-8.2).
+  return Math.max(plan.floorWatts, Math.min(banked, own * pacingFactor(grade)));
 }
 
 /**
@@ -294,20 +387,23 @@ export function botPlanStep(plan: BotRacePlan, reserve: number, input: BotPlanIn
       'reserve must be a number of joules from zero to the plan budget',
     );
   }
-  const { tierWatts } = plan;
+  // #2455: the bot's own power here, never over its tier's, is what the
+  // reserve is booked against; for the even pace at full ability it is the tier's.
+  const own = ownPowerAt(plan, effortDistance);
   const sprinting = plan.raceMetres - effortDistance <= plan.sprintMetres;
-  const wanted = sprinting ? plan.surgeWatts : coursePower(plan, input.grade);
+  const wanted = sprinting ? plan.surgeWatts : coursePower(plan, own, input.grade);
   let power: number;
-  if (wanted > tierWatts) {
-    // Spend: never more than the reserve holds, so an empty one rides the tier.
-    if (reserve <= 0) power = tierWatts;
-    else power = elapsed > 0 ? Math.min(wanted, tierWatts + reserve / elapsed) : wanted;
+  if (wanted > own) {
+    // Spend: never more than the reserve holds, so an empty one rides its own
+    // power, which is never over its tier's.
+    if (reserve <= 0) power = own;
+    else power = elapsed > 0 ? Math.min(wanted, own + reserve / elapsed) : wanted;
   } else {
     // Refill: ease only while there is room, and only by as much as fills it.
     const room = plan.budgetJoules - reserve;
-    if (room <= 0) power = tierWatts;
-    else power = elapsed > 0 ? Math.max(wanted, tierWatts - room / elapsed) : wanted;
+    if (room <= 0) power = own;
+    else power = elapsed > 0 ? Math.max(wanted, own - room / elapsed) : wanted;
   }
-  const after = reserve - (power - tierWatts) * elapsed;
+  const after = reserve - (power - own) * elapsed;
   return { power: watts(power), reserve: Math.min(plan.budgetJoules, Math.max(0, after)) };
 }

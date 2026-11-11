@@ -1068,6 +1068,30 @@ describe('a lap race’s bots on the road — #1902', () => {
     expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider', 'bot', 'bot']);
   });
 
+  it('draws a bot on every frame it is in view, from far ahead until it is behind the camera (#2455)', () => {
+    // #2455's check: the owner saw the field vanish once the rider led. A bot
+    // in front of the camera's eye is drawn on every frame, wherever it is on
+    // the road the frame built; it leaves the frame only once it is behind the
+    // eye, where the forward-looking chase camera shows nothing.
+    const eye = RIDER - CAMERA_BEHIND_METRES;
+    const built = sceneFrame(input({})).corridor;
+    const first = built.centre[0]?.along ?? Number.NaN;
+    let drawnBehindEye = 0;
+    for (let distanceMetres = RIDER + 120; distanceMetres >= first - 10; distanceMetres -= 0.25) {
+      const frame = sceneFrame(
+        input({ raceBots: [{ distanceMetres, speedMetresPerSecond: 9, lateralMetres: 1.75 }] }),
+      );
+      const bots = frame.markers.filter((marker) => marker.racer === true);
+      if (distanceMetres >= eye) {
+        expect(bots, `a bot at ${String(distanceMetres)} m`).toHaveLength(1);
+      }
+      if (distanceMetres < eye && bots.length === 1) drawnBehindEye += 1;
+      if (distanceMetres < first) expect(bots, `a bot at ${String(distanceMetres)} m`).toEqual([]);
+    }
+    // Behind the eye it is still placed for as long as the road runs back, out of sight.
+    expect(drawnBehindEye).toBeGreaterThan(0);
+  });
+
   it('marks a race’s bots as racers and the pacer as none, for the realistic world’s split (#1971)', () => {
     const frame = sceneFrame(
       input({

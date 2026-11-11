@@ -25,6 +25,16 @@
  * - `held-…`: the `warned` race with the rider holding each other item, so
  *   every item's name is laid out under the runner's fonts.
  *
+ * The race is the longest the chooser starts, {@link LAP_RACE_MOST_LAPS}
+ * laps, and on every race stage a bot rides behind the rider, so the *Place*
+ * field's lap line carries the "behind you" cue (#2455 AC2). On the warned
+ * stages the line is at its widest — the last lap of ten, the bot named the
+ * longest a solo field deals, `Sprinter 7`, at the window's edge, `+5 s`:
+ * *Lap 10 of 10 · Sprinter 7 +5 s*. That bot is also the one holding the
+ * gust, so it must be inside `GUST_REACH_METRES` (30 m): it rides 28 m back
+ * and the race's gap is read at {@link WARNED_SPEED} (28 m / 6 m/s, 4.7 s,
+ * written `+5 s`), where the HUD's own speed reading stays the state's.
+ *
  * ⚠️ **Every item's HUD name is one word**, and the first cut's
  * *Crosswind gust* is why: on the CI runner's fonts *Crosswind* alone ran
  * past the *Item* field's value box at every corners layout (PR #1957's first
@@ -43,6 +53,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
 import {
+  BOT_PACING_STYLES,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   altitudeMetres,
   createItemRace,
@@ -67,6 +78,7 @@ import {
 import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
+import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from '../src/game/lap-race/choice';
 import type { GameState } from '../src/game/simulation';
 
 // The shipping stylesheet, which is the whole point.
@@ -98,6 +110,8 @@ export interface LapRaceStageMeasurement {
     readonly valueOverflows: boolean;
     readonly outlineStyle: string;
     readonly outlineWidth: number;
+    /** The phrase under the value (`HudReading.detail`), or `undefined` with none. */
+    readonly detail: string | undefined;
   }[];
   /** The race's standings panel, laid out at no size when it is visually hidden. */
   readonly standings: Box | undefined;
@@ -175,7 +189,7 @@ const STAGE_IN_FLOW = { position: 'relative', inset: 'auto', height: '100vh' } a
 
 const RIDER = 'rider';
 const BOTS = Array.from({ length: 11 }, (_, index) => `bot-${String(index + 1).padStart(2, '0')}`);
-const TIERS = ['steady', 'brisk', 'hard', 'fierce'] as const;
+const STYLES = BOT_PACING_STYLES;
 
 function holding(race: ItemRaceState, id: string, kind: ItemKind): ItemRaceState {
   return {
@@ -184,10 +198,14 @@ function holding(race: ItemRaceState, id: string, kind: ItemKind): ItemRaceState
   };
 }
 
-/** A race of twelve, five laps of 2 km, ridden to `rider` metres with the bots spread round it. */
-function raceAt(rider: number, botsAhead: number): ItemRaceState {
+/**
+ * A race of twelve, {@link LAP_RACE_MOST_LAPS} laps of 2 km, ridden to `rider`
+ * metres with the bots spread round it: the first bot behind `behind` metres
+ * back, the rest 40 m apart behind it.
+ */
+function raceAt(rider: number, botsAhead: number, behind: number): ItemRaceState {
   const start = createItemRace({
-    course: raceCourse(2_000, 5),
+    course: raceCourse(2_000, LAP_RACE_MOST_LAPS),
     seed: 1_904,
     itemsOn: true,
     racerIds: [RIDER, ...BOTS],
@@ -196,12 +214,21 @@ function raceAt(rider: number, botsAhead: number): ItemRaceState {
   const efforts: Record<string, number> = { [RIDER]: rider };
   BOTS.forEach((id, index) => {
     efforts[id] =
-      index < botsAhead ? rider + 40 * (index + 1) : rider - 10 - 40 * (index - botsAhead);
+      index < botsAhead ? rider + 40 * (index + 1) : rider - behind - 40 * (index - botsAhead);
   });
   return stepRace(start, { atMs: 600_000, effortDistances: efforts });
 }
 
-function hudOf(race: ItemRaceState): LapRaceHud {
+/** The bot behind the rider on the warned stages, named the longest a solo field names a bot. */
+const WIDEST_BEHIND = 'bot-11';
+
+/** The rider's speed the warned stages' race gaps are read at: see the module note. */
+const WARNED_SPEED = 6;
+
+/** The warned stages' race: the rider on the last lap, 11th of 12, the gust holder 28 m back. */
+const LAST_LAP = 2_000 * (LAP_RACE_MOST_LAPS - 1) + 100;
+
+function hudOf(race: ItemRaceState, speedMetresPerSecond = 12.5): LapRaceHud {
   return {
     race,
     riderId: RIDER,
@@ -209,33 +236,46 @@ function hudOf(race: ItemRaceState): LapRaceHud {
       BOTS.map((id, index) => [
         id,
         {
-          name: botName(TIERS[index % TIERS.length] ?? 'steady', index + 1),
+          name:
+            id === WIDEST_BEHIND
+              ? botName('sprinter', LAP_RACE_MOST_BOTS)
+              : botName(STYLES[index % STYLES.length] ?? 'even', index + 1),
           wattsPerKilogram: 3.5,
         },
       ]),
     ),
     riderWattsPerKilogram: 4.1,
-    speedMetresPerSecond: 12.5,
+    speedMetresPerSecond,
   };
 }
 
-const STAGES: readonly { readonly stage: string; readonly race: ItemRaceState | undefined }[] = [
+const STAGES: readonly {
+  readonly stage: string;
+  readonly race: ItemRaceState | undefined;
+  readonly speed?: number;
+}[] = [
   { stage: 'none', race: undefined },
-  { stage: 'start', race: raceAt(300, 4) },
+  { stage: 'start', race: raceAt(300, 4, 10) },
   {
     stage: 'warned',
-    race: holding(holding(raceAt(8_100, 10), RIDER, 'crosswind-gust'), 'bot-11', 'crosswind-gust'),
+    race: holding(
+      holding(raceAt(LAST_LAP, 10, 28), RIDER, 'crosswind-gust'),
+      'bot-11',
+      'crosswind-gust',
+    ),
+    speed: WARNED_SPEED,
   },
   ...(['tailwind', 'tow', 'puddle', 'rain-cape'] as const).map((kind) => ({
     stage: `held-${kind}`,
-    race: holding(holding(raceAt(8_100, 10), RIDER, kind), 'bot-11', 'crosswind-gust'),
+    race: holding(holding(raceAt(LAST_LAP, 10, 28), RIDER, kind), 'bot-11', 'crosswind-gust'),
+    speed: WARNED_SPEED,
   })),
 ];
 
 function Harness(): JSX.Element {
   return (
     <div>
-      {STAGES.map(({ stage, race }) => (
+      {STAGES.map(({ stage, race, speed }) => (
         <section
           key={stage}
           className="oyl-game oyl-game--riding"
@@ -258,7 +298,10 @@ function Harness(): JSX.Element {
             trainer={{ gradePercent: -12.5, writes: 1_234 }}
             {...(race === undefined
               ? {}
-              : { lapRace: hudOf(race), standings: lapRaceStandings(hudOf(race)) })}
+              : {
+                  lapRace: hudOf(race, speed),
+                  standings: lapRaceStandings(hudOf(race, speed)),
+                })}
           />
         </section>
       ))}
@@ -294,6 +337,7 @@ function measure(): readonly LapRaceStageMeasurement[] {
       secondary: secondary === null ? undefined : boxIn(secondary, origin),
       fields: [...stage.querySelectorAll('.oyl-hud__field')].map((field) => {
         const value = field.querySelector('.oyl-hud__value');
+        const detail = field.querySelector('.oyl-hud__detail');
         const style = window.getComputedStyle(field);
         return {
           label: textOf(field.querySelector('.oyl-hud__label') ?? field),
@@ -301,6 +345,7 @@ function measure(): readonly LapRaceStageMeasurement[] {
           valueOverflows: value === null ? true : value.scrollWidth > value.clientWidth,
           outlineStyle: style.outlineStyle,
           outlineWidth: Number.parseFloat(style.outlineWidth) || 0,
+          detail: detail === null ? undefined : textOf(detail),
         };
       }),
       standings: standings === null ? undefined : boxIn(standings, origin),
