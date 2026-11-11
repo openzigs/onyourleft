@@ -8,7 +8,13 @@
  * rider finds a ride on — its page and the history — after a reload.
  */
 
-import { seconds, unixSeconds, watts, type RecordedSeries } from '@onyourleft/domain';
+import {
+  metresPerSecond,
+  seconds,
+  unixSeconds,
+  watts,
+  type RecordedSeries,
+} from '@onyourleft/domain';
 import { activityId, openActivityStore, type StreamChannelValue } from '@onyourleft/store';
 import {
   ATHLETE_A,
@@ -49,10 +55,10 @@ const series: RecordedSeries<StreamChannelValue> = {
   sampleCount: SAMPLES,
   channels: {
     power: Array.from({ length: SAMPLES }, () => watts(200)),
-    speed: Array.from({ length: SAMPLES }, () => 9 as StreamChannelValue),
+    speed: Array.from({ length: SAMPLES }, () => metresPerSecond(9)),
   },
   pauses: [],
-} as RecordedSeries<StreamChannelValue>;
+};
 
 /** Save a ride through `finish.ts`, as the ride controller does. */
 async function save(draft: Parameters<typeof rideToSave>[0]['draft']): Promise<void> {
