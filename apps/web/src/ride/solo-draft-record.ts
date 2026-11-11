@@ -14,6 +14,10 @@
  *   §`draftedRide`) over the metres ridden WHILE RECORDING, summed over every
  *   game ride the recording holds: a game ride's metres before the recording
  *   began, or while it was paused, are not the saved ride's.
+ * - **Edges are per frame.** The game hands over a reading once per rendered
+ *   frame, so a draft entered and left within a stall or a backgrounded tab
+ *   leaves no span and an edge lands on the next frame. The metres are exact
+ *   (they come from cumulative counters); only span edges are frame-grained.
  * - **The spans** are when, on the recording's own clock, the rider was in the
  *   draft: what marks a segment effort found in the ride later, by the share
  *   of its own distance inside them (`segments/backfill.ts`).

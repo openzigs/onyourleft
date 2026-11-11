@@ -10642,6 +10642,29 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
   });
 
+  it('counts no draft metres and opens no span while the recording is paused — #2451 review', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 0, riddenMetres: 100 });
+    await rig.controller.pause();
+    // Road ridden in the draft while paused is not the saved ride's.
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 400, riddenMetres: 500 });
+    await rig.controller.resume();
+    await ride(rig, 1);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 400, riddenMetres: 600 });
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.drafted).toBeUndefined();
+    expect(read?.rideFacts?.draftSpans).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('keeps an earlier SETTLED outcome when a later game ride has none (#1049’s review)', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');
