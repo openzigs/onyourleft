@@ -269,11 +269,10 @@ test.describe('a ride whose recording could not start says so — #2381', () => 
             if (toggle !== undefined) {
               expect(inside(toggle.box, viewport) && toggle.onTop, describeItem(toggle)).toBe(true);
             }
-            // At most 50 rem tall (the 4:3 tablet, and since #2425 the owner's
-            // 1280×800), three drawn notices: the ride so far gives way
-            // (`theme.css` §"#2381"), or on the CI runner's fonts the cell ran
-            // 19 px into the route panel at 1024×768, and 16 px at 1280×800.
-            if (viewport.height <= 800) {
+            // Under 50 rem tall (the 4:3 tablet), three drawn notices: the ride
+            // so far gives way (`theme.css` §"#2381"), or on the CI runner's
+            // fonts the cell ran 19 px into the route panel.
+            if (viewport.height < 800) {
               const totals = await page.evaluate(() =>
                 [...document.querySelectorAll('.oyl-hud__field--total')].map((each) => {
                   const box = each.getBoundingClientRect();

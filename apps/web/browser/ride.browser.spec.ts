@@ -1466,3 +1466,59 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
   }
   return found;
 }
+
+/*
+ * #2425: the solo Draft field is the same height at any draft. Its number is
+ * one or two digits (0 to the gauge's 59), and on the CI runner a two-digit
+ * one put its unit and its number on two lines, so the tier grew a row
+ * between two loads of the same ride (`theme.css` §"its unit is a line of its
+ * own"). Read on the widest HUD at every viewport that draws the field: the
+ * number set to 59, the field's height and the tier's must not change, and
+ * the unit is under the number, not beside it.
+ */
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#2425 the solo Draft field keeps its height at a two-digit draft — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const read = await page.evaluate(() => {
+      const field = document.querySelector<HTMLElement>(
+        '.oyl-hud__fields--secondary > .oyl-hud__field--solo-draft',
+      );
+      const panel = document.querySelector<HTMLElement>('.oyl-hud__fields--secondary');
+      const number = field?.querySelector('dd')?.firstChild;
+      const unit = field?.querySelector('.oyl-hud__unit');
+      if (field == null || panel == null || !(number instanceof Text) || unit == null) {
+        return undefined;
+      }
+      const drawn = field.getBoundingClientRect().width > 1;
+      const was = number.data;
+      const before = {
+        field: field.getBoundingClientRect().height,
+        panel: panel.getBoundingClientRect().height,
+      };
+      number.data = '59';
+      const range = document.createRange();
+      range.selectNodeContents(number);
+      const after = {
+        field: field.getBoundingClientRect().height,
+        panel: panel.getBoundingClientRect().height,
+        numberMiddle:
+          (range.getBoundingClientRect().top + range.getBoundingClientRect().bottom) / 2,
+        unitTop: unit.getBoundingClientRect().top,
+      };
+      number.data = was;
+      return { drawn, was, before, after };
+    });
+    expect(read, 'the solo Draft field is in the document').toBeDefined();
+    if (read === undefined || !read.drawn) return;
+    console.log(
+      `#2425 the solo Draft field — ${viewport.name}: ${read.before.field.toFixed(1)} px at ${read.was}, ${read.after.field.toFixed(1)} px at 59; the tier ${read.before.panel.toFixed(1)} → ${read.after.panel.toFixed(1)} px`,
+    );
+    expect(read.after.field).toBeCloseTo(read.before.field, 1);
+    expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
+    // Under the number: its top below the middle of the number's line, which
+    // a unit beside the number (on the same line) is not.
+    expect(read.after.unitTop).toBeGreaterThan(read.after.numberMiddle);
+  });
+}

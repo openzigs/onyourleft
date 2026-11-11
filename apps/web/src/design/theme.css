@@ -9672,6 +9672,21 @@ select.oyl-input {
   }
 }
 
+/* ⚠️ **And where it is drawn, its unit is a line of its own** — #2425. The
+   field is the fifth track of the tablet's tier, at its 6.25 rem floor (100 px
+   at 1280×800), and with a two-digit draft `12 % of drag` did not fit beside
+   its number on the CI runner: the unit took a line under it and the number
+   another, 41 px more, and that put the tier a row taller than the same ride
+   at `0 %` (`ride-workout.browser.spec.ts` §"#1307" at `paused`, run
+   42957503946) and the notices 16 px into the route panel
+   (`ride-notices.browser.spec.ts` §"#2381", run 42953222937). On a Mac's
+   rendering the unit already wrapped whole. Under the number always, so the
+   field is the same height at any draft: `ride.browser.spec.ts` §"#2425 the
+   solo Draft field" holds it at the widest, 59. */
+.oyl-hud__fields--secondary > .oyl-hud__field--solo-draft .oyl-hud__unit {
+  display: block;
+}
+
 /*
  * A ROOM RIDE ON A PHONE — #1356.
  *
@@ -12702,15 +12717,8 @@ select.oyl-input {
    19 px into the route panel at 490 (`ride-notices.browser.spec.ts`
    §"#2381"). The three totals are the tier's middle row, and on the ride
    that puts up *Not recording* they have nothing to show: nothing is being
-   recorded. The graph has given way already (the rule above).
-   ⚠️ **And on the owner's 1280×800 tablet too, since #2425** (at 50 rem, so
-   `<=`). #2425's solo Draft field is a sixth reading on the secondary
-   tier's second row, and with #2420's wider *Power (3 s)* label that tier
-   was three rows on the CI runner's fonts: the cell ran `[8,231 → 360,470]`,
-   16 px into the route panel at 454 (run 42953222937). On a Mac's fonts the
-   tier is two rows and the cell ends at 379. With the totals gone, nine
-   readings are two rows on both. */
-@media (min-width: 46rem) and (height > 30rem) and (height <= 50rem) {
+   recorded. The graph has given way already (the rule above). */
+@media (min-width: 46rem) and (height > 30rem) and (height < 50rem) {
   .oyl-game--riding
     .oyl-hud:has(
       > .oyl-hud__notices
