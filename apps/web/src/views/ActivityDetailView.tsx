@@ -144,6 +144,7 @@ import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
+import { DRAFTED_RIDE_TEXT } from '../game/solo-draft';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { raceFactTerm, raceFactText } from '../rooms/race-result';
@@ -865,6 +866,14 @@ export function ActivityDetailView({
                 ))}
               </div>
             )}
+            {/* #2451, ADR 0066 D-5.3: a drafted ride says so, kept with the
+            ride on this device. No row for a ride that was not. */}
+            {activity.rideFacts?.drafted === true ? (
+              <div>
+                <dt>Draft</dt>
+                <dd>{DRAFTED_RIDE_TEXT}</dd>
+              </div>
+            ) : null}
           </dl>
 
           <h3>Traces</h3>
