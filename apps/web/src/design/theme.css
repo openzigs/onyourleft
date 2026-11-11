@@ -12029,6 +12029,22 @@ select.oyl-input {
   contain: inline-size;
 }
 
+/* ⚠️ **And the figure is given its widest width from the first second**, so
+   the track it shares is the same width with a dash, with `≈ 732` and with
+   `≈ 9999`, and no reading beside it moves as the estimate appears or gains
+   a digit (#94). Sized from what it holds, the moving time's track grew 8 px
+   when the figure appeared on the CI runner's fonts (the `≈` and the unit
+   are not Barlow's there), and every track left of it moved. `≈ 9999` is
+   3.04 em of the value's own size on a Mac, 3.15 here, and ` kcal` 25 px at
+   the unit's size, 1.875 rem here: 153.5 px at a tablet's 2.45 rem, 105.6 px
+   at a window's 1.5 rem. Where it is drawn on a corners layout only: a phone
+   gives it way, and a stacked tier's tracks are `auto-fit`. */
+@media (min-width: 46rem) and (height > 30rem) {
+  .oyl-game--riding .oyl-hud__field--calories .oyl-hud__value {
+    min-inline-size: calc(3.15em + 1.875rem);
+  }
+}
+
 @media (min-width: 46rem) and (min-height: 50rem),
   (min-width: 51rem) and (height > 30rem) and (height < 47rem) {
   .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--calories {

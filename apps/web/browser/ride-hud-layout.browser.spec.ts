@@ -719,6 +719,11 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           inSecondary: field?.closest('.oyl-hud__fields--secondary') !== null,
           box: box === undefined ? undefined : [box.left, box.top].map(Math.round),
           width: Math.round(box?.width ?? 0),
+          // Every secondary reading's left edge, so a track that changed
+          // width with the estimate shows as a reading that moved.
+          lefts: [
+            ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
+          ].map((each) => Math.round(each.getBoundingClientRect().left)),
           unitBeside:
             unitBox !== undefined &&
             unitBox.top >= number.top - 1 &&
@@ -747,11 +752,15 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     expect(dashed.text).toBe('— kcal set your details in Settings');
     expect(dashed.text).not.toMatch(/\b0 kcal/);
     if (rideTotalsDrawn(viewport)) {
-      // In the same track: its left edge and width. Its top follows the
-      // rows above it, whose own dashes are a few px shorter on the CI
-      // runner's fonts than their figures.
+      // In the same track: its left edge and width — on the CI runner's
+      // fonts the moving time's track grew 8 px with the figure until the
+      // figure was given its widest width (`theme.css` §"THE CALORIE
+      // ESTIMATE IN THE RIDE SO FAR"). Its top follows the rows above it,
+      // whose own dashes are a few px shorter there than their figures.
       expect(dashed.box?.[0]).toBe(estimated.box?.[0]);
       expect(dashed.width).toBe(estimated.width);
+      // And no reading beside it moved as the estimate appeared (#94).
+      expect(dashed.lefts).toEqual(estimated.lefts);
       for (const [how, seen] of await bothWays(none)) {
         expect(layoutFaults(seen, viewport), how).toEqual([]);
       }
