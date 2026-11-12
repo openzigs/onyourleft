@@ -231,7 +231,7 @@ export interface RoadsideFacts {
   readonly images: number;
 }
 
-interface AccessorJson {
+export interface AccessorJson {
   readonly bufferView?: number;
   readonly byteOffset?: number;
   readonly componentType: number;
@@ -240,10 +240,16 @@ interface AccessorJson {
   readonly type: string;
 }
 
-const COMPONENTS: Readonly<Record<string, number>> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+const COMPONENTS: Readonly<Record<string, number>> = {
+  SCALAR: 1,
+  VEC2: 2,
+  VEC3: 3,
+  VEC4: 4,
+  MAT4: 16,
+};
 
 /** One accessor's values, as numbers — a normalized integer as its fraction. glTF 2.0 §3.6. */
-function accessorValues(
+export function accessorValues(
   json: {
     readonly accessors?: readonly AccessorJson[];
     readonly bufferViews?: readonly {
