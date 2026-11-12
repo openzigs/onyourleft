@@ -209,7 +209,6 @@ describe('a slower rider behind a faster one is drawn behind them through a bend
         ).toBeGreaterThan(0);
       }
     },
-    60_000,
   );
 
   it.each(BENDS)(
@@ -223,7 +222,6 @@ describe('a slower rider behind a faster one is drawn behind them through a bend
         ).toBeGreaterThan(0);
       }
     },
-    60_000,
   );
 });
 
@@ -276,7 +274,6 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
       // further than the easing's 25°. Without that cap it leant 27.5° here.
       expect(leanest.lean, leanest.said).toBeLessThanOrEqual(EASED_LEAN_RADIANS + LEAN_SLACK);
     },
-    300_000,
   );
 
   it.each(BENDS)(
@@ -299,7 +296,6 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
         expect(drawn[1], `at ${String(at)} m`).toBeLessThan(drawn[2] as number);
       }
     },
-    60_000,
   );
 });
 
@@ -360,7 +356,6 @@ describe('nobody jumps as one rider passes another — #2427', () => {
         }
       }
     },
-    120_000,
   );
 });
 
@@ -383,7 +378,6 @@ describe('only the drawing changes — #2427', () => {
         expect(drawnAlong(where.line, beside, at)).toBeCloseTo(own, 3);
       }
     },
-    60_000,
   );
 
   it('holds nobody apart who is far from everyone: more than 40 m apart, each is drawn by its own easing', () => {
@@ -412,8 +406,11 @@ describe('only the drawing changes — #2427', () => {
       const origin = corridorOrigin(route);
       const trace: number[] = [];
       const drawn: number[] = [];
-      // Advanced and drawn in the order `GameView`'s loop does it, a frame every 200 ms.
-      for (let now = 0; now <= 120_000; now += 200) {
+      // Advanced and drawn in the order `GameView`'s loop does it, a frame every 300 ms.
+      // 90 s is enough: at 260 W up the 4 % the rider is past 510 m by then, beyond the
+      // hairpin's end and 50 m more (the bound read below), and the drawing is what
+      // costs here, so fewer frames over less straight road keep the case cheap (#1688).
+      for (let now = 0; now <= 90_000; now += 300) {
         simulation.advanceTo(now, { power: watts(260), live: true });
         const state = simulation.state;
         const frame = sceneFrame({
@@ -444,5 +441,5 @@ describe('only the drawing changes — #2427', () => {
     // Non-vacuity: the two rides were DRAWN differently, so the easing ran. (This does not
     // show the ordering held anyone here: the sweeps above are what prove that.)
     expect(eased.drawn).not.toEqual(plain.drawn);
-  }, 60_000);
+  });
 });
