@@ -63,6 +63,16 @@
  * simulation, the trainer, the recording, the totals, the zone time and the
  * recent graph read the raw readings in both.
  *
+ * ## A Delivery round — #2514
+ *
+ * The game strip or everything ({@link HUD_DELIVERY_VIEWS}). **The game
+ * strip** is the default: on a ride running a Delivery round the HUD draws
+ * only what the round needs — power, speed and the round's own fields — and
+ * no route panel and no lap table, so the roadsides where the houses stand are
+ * clear (`HudCore.tsx` §`deliveryGame`). **Everything** is the HUD the round
+ * drew before #2514. It changes only a ride with a round; the notices and the
+ * controls are drawn in both.
+ *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
  */
@@ -99,6 +109,12 @@ export const HUD_POWER_VIEWS = ['average', 'instant'] as const;
 /** One of {@link HUD_POWER_VIEWS}. */
 export type HudPowerView = (typeof HUD_POWER_VIEWS)[number];
 
+/** How the HUD is drawn while a Delivery round runs, the default first — #2514. */
+export const HUD_DELIVERY_VIEWS = ['game', 'everything'] as const;
+
+/** One of {@link HUD_DELIVERY_VIEWS}. */
+export type HudDeliveryView = (typeof HUD_DELIVERY_VIEWS)[number];
+
 /** What the rider chose. */
 export interface HudLayoutPreference {
   /** The panels turned off. Empty by default: every panel is shown. */
@@ -124,6 +140,11 @@ export interface HudLayoutPreference {
    * kept before #2420 reads as the new default.
    */
   readonly power?: HudPowerView;
+  /**
+   * The game strip or everything, on a ride running a Delivery round —
+   * #2514. Absent is `game`, the new default.
+   */
+  readonly delivery?: HudDeliveryView;
 }
 
 export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
@@ -133,6 +154,7 @@ export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
   totalsStrip: false,
   route: 'full',
   power: 'average',
+  delivery: 'game',
 };
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
@@ -156,6 +178,10 @@ function isRouteView(value: unknown): value is HudRouteView {
 
 function isPowerView(value: unknown): value is HudPowerView {
   return typeof value === 'string' && (HUD_POWER_VIEWS as readonly string[]).includes(value);
+}
+
+function isDeliveryView(value: unknown): value is HudDeliveryView {
+  return typeof value === 'string' && (HUD_DELIVERY_VIEWS as readonly string[]).includes(value);
 }
 
 /**
@@ -182,6 +208,7 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
     totalsStrip: row['totalsStrip'] === true,
     route: isRouteView(row['route']) ? row['route'] : 'full',
     power: isPowerView(row['power']) ? row['power'] : 'average',
+    delivery: isDeliveryView(row['delivery']) ? row['delivery'] : 'game',
   };
 }
 
@@ -228,4 +255,9 @@ export function compactRoute(preference: HudLayoutPreference): boolean {
 /** How the HUD shows power under this preference — #2420. Absent or unknown is the average. */
 export function powerView(preference: HudLayoutPreference): HudPowerView {
   return preference.power === 'instant' ? 'instant' : 'average';
+}
+
+/** Whether a ride running a Delivery round draws everything rather than the game strip — #2514. */
+export function deliveryEverything(preference: HudLayoutPreference): boolean {
+  return preference.delivery === 'everything';
 }

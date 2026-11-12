@@ -66,7 +66,7 @@ import { useTimeOfDay } from '../../design/time-of-day';
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
 import type { ControllerPort } from '../delivery/controller-port';
 import type { LaneInputPort } from '../delivery/lane-input-port';
-import { HudCore } from './HudCore';
+import { HudCore, deliveryGame } from './HudCore';
 import { SIMULATED_MOVING_SENTENCE } from '../simulated-rider';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
@@ -413,8 +413,11 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
   }, [racePanel]);
   const standingsShown =
     standings !== undefined && panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings');
+  // #2514: a Delivery round's game strip draws no lap table. @see deliveryGame
   const splitsShown =
-    laps !== undefined && planLap(props.profile, props.state.ride.distance) !== undefined;
+    laps !== undefined &&
+    planLap(props.profile, props.state.ride.distance) !== undefined &&
+    !deliveryGame(props.layout ?? DEFAULT_HUD_LAYOUT, props.delivery);
   const swap = (to: 'standings' | 'laps'): ReactNode =>
     standingsShown && splitsShown ? (
       <button

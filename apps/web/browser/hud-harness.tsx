@@ -162,6 +162,10 @@ import {
 import type { GhostOutcome } from '../src/game/ghost-outcome';
 import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
+import {
+  DEFAULT_HUD_LAYOUT,
+  type HudLayoutPreference,
+} from '../src/game/hud/hud-layout-preference';
 import { RIDER_MARK_MINIMUM_PIXELS } from '../src/game/hud/plan';
 import { SoundControls } from '../src/game/SoundControls';
 import type { GameState } from '../src/game/simulation';
@@ -394,6 +398,8 @@ declare global {
   }
 }
 
+/** #2514: a Delivery round's HUD as it was drawn before the game strip. */
+const DELIVERY_EVERYTHING: HudLayoutPreference = { ...DEFAULT_HUD_LAYOUT, delivery: 'everything' };
 const errors: string[] = [];
 
 /**
@@ -648,6 +654,9 @@ function Harness(): JSX.Element {
             onPause={() => undefined}
             onEnd={() => undefined}
             announcement=""
+            // #2514: the round's fields beside every other reading, as #1812
+            // measures them: the HUD drawn as Everything, not the game strip.
+            layout={DELIVERY_EVERYTHING}
             delivery={
               round === undefined
                 ? undefined

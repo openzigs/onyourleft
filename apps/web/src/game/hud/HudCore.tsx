@@ -80,9 +80,11 @@ import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
   DEFAULT_HUD_LAYOUT,
   compactRoute,
+  deliveryEverything,
   focusArrangement,
   panelShown,
   totalsStripChosen,
+  type HudLayoutPreference,
 } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
@@ -240,6 +242,29 @@ function keptWithReadingsHidden(reading: HudReading): boolean {
   );
 }
 
+/**
+ * The readings a Delivery round's game strip draws — #2514: power and speed,
+ * and the round's own (`isDeliveryReading`). Everything else a ride reads is
+ * left out of the strip, and comes back with *Everything* in Settings.
+ */
+const DELIVERY_STRIP_KEYS: ReadonlySet<string> = new Set(['power', 'speed']);
+
+/**
+ * Whether a ride's HUD is a Delivery round's game strip — #2514, the owner's
+ * report from the tablet: the houses and their markers stand at the road's
+ * edges, where the route panel, the lap table and the wide reading panels
+ * were. On a ride running a round, unless the rider chose *Everything*
+ * (`hud-layout-preference.ts` §`HUD_DELIVERY_VIEWS`): the strip's readings
+ * only ({@link DELIVERY_STRIP_KEYS}), no route panel and no lap table
+ * (`HudPanel.tsx`). The notices and the ride controls are drawn as on any ride.
+ */
+export function deliveryGame(
+  layout: HudLayoutPreference,
+  delivery: HudCoreProps['delivery'],
+): boolean {
+  return delivery !== undefined && !deliveryEverything(layout);
+}
+
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
@@ -255,8 +280,11 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // #2385: the route panel as a tile, where the rider chose it and the
   // figure is the route's map. @see HudCoreProps.routeTile
   const compact = compactRoute(layout) && props.routeTile === true;
+  // #2514: a Delivery round's game strip. @see deliveryGame
+  const game = deliveryGame(layout, props.delivery);
   const readings = all.filter(
     (reading) =>
+      !(game && !isDeliveryReading(reading) && !DELIVERY_STRIP_KEYS.has(reading.key)) &&
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
       !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
       !(props.withoutTotals === true && isRideTotalReading(reading)) &&
@@ -282,6 +310,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // is mounted for exactly one game ride, so a lock never outlives the ride.
   const hud = useRef<HTMLElement>(null);
   const [touchLocked, setTouchLocked] = useState(false);
+  // #2514: whether a gamepad is in use, which the throw buttons give way to.
+  const [padInUse, setPadInUse] = useState(false);
   useTouchLock(hud, touchLocked);
   // #2349: while the end-of-ride question is open it stands where Pause and
   // End ride do, and when it closes with the ride still on (Keep riding),
@@ -303,6 +333,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
         ...(focus ? ['oyl-hud--focus'] : []),
+        ...(game ? ['oyl-hud--delivery-game'] : []),
       ].join(' ')}
       aria-label="Ride metrics"
       data-oyl-hud-text={layout.textSize}
@@ -338,8 +369,9 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         #2079: the route panel holds the strip and the plan, and the recent
         graph; each may be turned off, and with both off there is no panel.
       */}
-      {!panelShown(layout, 'route') &&
-      (props.recent === undefined || !panelShown(layout, 'graph')) ? null : (
+      {game ||
+      (!panelShown(layout, 'route') &&
+        (props.recent === undefined || !panelShown(layout, 'graph'))) ? null : (
         <div
           className={`oyl-hud__panel oyl-hud__route${compact ? ' oyl-hud__route--compact' : ''}`}
           data-oyl-route-view={compact ? 'compact' : 'full'}
@@ -469,8 +501,17 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           touch lock refuses a tap on them as on Pause: none is exempt
           (ADR 0059 D-5). What the lock does to them is why it is handed in.
         */}
+        {/*
+          #2514: its buttons not drawn while a pad or a paired controller
+          throws for the rider, so the corner gives the road its room back;
+          Pause and End ride stay, and a key still throws.
+        */}
         {props.throwing === undefined || asking ? null : (
-          <ThrowControl port={props.throwing} touchLocked={touchLocked} />
+          <ThrowControl
+            port={props.throwing}
+            touchLocked={touchLocked}
+            buttonless={padInUse || props.controller !== undefined}
+          />
         )}
         {/*
           #1901: a lap race's item use, where the throws stand on a round.
@@ -492,7 +533,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.throwing === undefined &&
         props.steering === undefined &&
         props.items === undefined ? null : (
-          <GamepadIntents throwing={props.throwing} steering={props.steering} items={props.items} />
+          <GamepadIntents
+            throwing={props.throwing}
+            steering={props.steering}
+            items={props.items}
+            onPadInUse={setPadInUse}
+          />
         )}
         {/* #1827: a paired steering controller's lane changes, lanes and throws, to a round's ports. Nothing drawn. */}
         {props.controller === undefined ||
