@@ -378,16 +378,28 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
 });
 
 describe('the trainer never feels a solo draft — #2425, ADR 0066 D-1, through the real GameView', () => {
+  /**
+   * #2510, #1688: eight seconds a ride, not thirty. The pacer's draft is over
+   * 30 % from the fourth frame and stays there past the thirty-second, and the
+   * trainer is written once a second, so each ride makes eight or more writes
+   * and every drafted one after the first is made in the draft. At 120 frames
+   * a ride the case passed Vitest's 5 s under coverage on the nightly runner;
+   * its last forty drafted frames were out of the draft anyway.
+   */
+  const FRAMES = 32;
+
   it('writes the same kinds of parameter drafted and undrafted: a grade, no draft term', async () => {
     const drafted: SimulationParameters[] = [];
-    const { draft } = await rideSolo({ pacer: true, written: drafted, frames: 120 });
+    const { draft } = await rideSolo({ pacer: true, written: drafted, frames: FRAMES });
+    // In the draft from the fourth frame on, so every write after the first was made in it.
+    expect(draft.slice(3).every((text) => (percentOf(text) ?? 0) >= 10)).toBe(true);
     expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
     expect(drafted.length).toBeGreaterThan(5);
     await endTheRide();
     unmountForReride();
     localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     const alone: SimulationParameters[] = [];
-    await rideSolo({ pacer: true, written: alone, frames: 120 });
+    await rideSolo({ pacer: true, written: alone, frames: FRAMES });
     expect(alone.length).toBeGreaterThan(5);
     const shape = (written: SimulationParameters[]) =>
       written.map((parameters) => Object.keys(parameters).sort().join());
