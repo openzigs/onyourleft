@@ -108,8 +108,8 @@ export const LANE_OFFSETS_METRES: readonly number[] = Object.freeze([-1.75, 0, 1
  */
 export const LANE_CHANGE_SECONDS = 0.4;
 
-/** How fast a steered rider moves across the road, in metres a second. */
-const SIDEWAYS_METRES_PER_SECOND =
+/** How fast a steered rider moves across the road, in metres a second: 4.375. */
+export const SIDEWAYS_METRES_PER_SECOND =
   ((LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number)) / LANE_CHANGE_SECONDS;
 
 /** Where every key is the field's own: it types, or moves a value. As `throw-input.ts`'. */
@@ -216,6 +216,18 @@ export function stepSteer(state: SteerState, seconds: number): SteerState {
   const gap = target - state.offset;
   const offset = Math.abs(gap) <= most ? target : state.offset + Math.sign(gap) * most;
   return offset === state.offset ? state : { ...state, offset };
+}
+
+/**
+ * How fast {@link stepSteer} is moving the rider across the road, in metres a
+ * second, positive to the right — #2456: {@link SIDEWAYS_METRES_PER_SECOND}
+ * toward the lane steered to, and nought once they are in it. What the drawn
+ * bicycle's turn and lean into a lane change are damped toward
+ * (`lane-change-lean.ts` §`dampedSway`); nothing else reads it.
+ */
+export function sidewaysSpeedOf(state: SteerState): number {
+  const gap = (LANE_OFFSETS_METRES[state.lane] as number) - state.offset;
+  return gap === 0 ? 0 : Math.sign(gap) * SIDEWAYS_METRES_PER_SECOND;
 }
 
 /**

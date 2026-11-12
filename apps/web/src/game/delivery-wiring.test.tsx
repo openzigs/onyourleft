@@ -159,6 +159,13 @@ const steeredInputs = vi.hoisted((): (number | undefined)[] => []);
  * §`SceneInput.cameraLateral` is optional the unsafe way round too.
  */
 const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
+/**
+ * The `steeredSway` of every input `GameView` built a frame from, in order —
+ * #2456, read back for `steeredLateral`'s reason: `scene.ts`
+ * §`SceneInput.steeredSway` is optional the unsafe way round too, and a ride
+ * that forgot it draws a lane change as a slide.
+ */
+const swayInputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -166,6 +173,7 @@ vi.mock('./scene', async (importOriginal) => {
     sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
       steeredInputs.push(args[0].steeredLateral);
       cameraInputs.push(args[0].cameraLateral);
+      swayInputs.push(args[0].steeredSway);
       return actual.sceneFrame(...args);
     },
   };
@@ -322,11 +330,11 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
  * callback, so another `requestAnimationFrame` consumer (the HUD's gamepad
  * poll, #1821) cannot spend one of the ride's frames.
  */
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const due = pending;
   if (due.length === 0) throw new Error('the ride asked for no frame');
   pending = [];
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     for (const callback of due) callback(nowMs);
     await Promise.resolve();
@@ -972,6 +980,36 @@ describe('lane steering inside a game ride — #1853', () => {
     await pressSteer('lane-left');
     for (let index = 0; index < 5; index += 1) await pump();
     expect(steeredInputs.at(-1)).toBeLessThan(before as number);
+  });
+
+  it('draws a lane change swaying toward the move, and still again once the rider is in the lane (#2456)', async () => {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 20; index += 1) await pump();
+    // In a lane, nothing sways.
+    expect(swayInputs.at(-1)).toBe(0);
+    const before = steeredInputs.at(-1) as number;
+    // Toward the middle, from whichever lane the round started in.
+    const intent: SteerIntent = before > 0 ? 'lane-left' : 'lane-right';
+    const side = intent === 'lane-left' ? -1 : 1;
+    await pressSteer(intent);
+    const pressed = swayInputs.length;
+    // A 60 Hz screen, a second of it: the move, and the sway settling after it.
+    for (let index = 0; index < 60; index += 1) await pump(1000 / 60);
+    const swayed = swayInputs.slice(pressed).map((each) => (each ?? Number.NaN) * side);
+    expect(Math.max(...swayed)).toBeGreaterThan(1);
+    expect(Math.min(...swayed)).toBeGreaterThanOrEqual(0);
+    expect(swayInputs.at(-1)).toBe(0);
+    expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[1]);
   });
 });
 
@@ -2137,6 +2175,8 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
   async function rideLevel(
     obstacles: 'normal' | 'none',
     level: LevelFile = LEVEL,
+    /** #1688: each frame's length; the ride is the same 66 s in fewer frames. */
+    frameMs = FRAME_MS,
   ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
@@ -2181,7 +2221,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     );
     await settle();
     await clickThrough(buttonStarting('Ride '));
-    for (let index = 0; index < FRAMES; index += 1) await pump();
+    for (let index = 0; index < (FRAMES * FRAME_MS) / frameMs; index += 1) await pump(frameMs);
     await settle();
     const ridden = { writes, offered: [...offered], said: [...said], started: [...startedRounds] };
     mounted.unmount();
@@ -2211,25 +2251,26 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     },
   );
 
-  it(
-    'sends the same writes at the same times, and says the same words in the same order, in rain and at dusk as in clear daylight — #2366',
-    { timeout: 30_000 },
-    async () => {
-      const clear = await rideLevel('normal');
-      const wet = await rideLevel('normal', WET_LEVEL);
-      // Not vacuous: the wet ride's round was in rain and at dusk, its markers hidden until nearer.
-      const [round] = wet.started as (DeliveryRide | undefined)[];
-      expect(round?.weather).toStrictEqual({ rain: true, dusk: true });
-      expect(round?.revealMetres).toBeGreaterThan(0);
-      const [clearRound] = clear.started as (DeliveryRide | undefined)[];
-      expect(clearRound?.revealMetres).toBeUndefined();
-      expect(clear.writes.length).toBeGreaterThan(20);
-      expect(wet.writes).toStrictEqual(clear.writes);
-      // The live region's words, text and order, are a clear round's.
-      expect(clear.said.length).toBeGreaterThan(0);
-      expect(wet.said).toStrictEqual(clear.said);
-    },
-  );
+  // #1688's ruling: cheaper, never a longer timeout. Both rides are the
+  // level's same 66 s in frames of 1 s, not 330 of 200 ms: the simulation's
+  // steps are fixed at 0.05 s whatever the frame. On this Mac, Node 26, in
+  // its block, two runs each at load averages of 16 to 28: 2.4–4.2 s →
+  // 0.52–0.78 s without coverage, 4.5–5.1 s → 1.1–1.7 s with `--coverage`.
+  it('sends the same writes at the same times, and says the same words in the same order, in rain and at dusk as in clear daylight — #2366', async () => {
+    const clear = await rideLevel('normal', LEVEL, 1_000);
+    const wet = await rideLevel('normal', WET_LEVEL, 1_000);
+    // Not vacuous: the wet ride's round was in rain and at dusk, its markers hidden until nearer.
+    const [round] = wet.started as (DeliveryRide | undefined)[];
+    expect(round?.weather).toStrictEqual({ rain: true, dusk: true });
+    expect(round?.revealMetres).toBeGreaterThan(0);
+    const [clearRound] = clear.started as (DeliveryRide | undefined)[];
+    expect(clearRound?.revealMetres).toBeUndefined();
+    expect(clear.writes.length).toBeGreaterThan(20);
+    expect(wet.writes).toStrictEqual(clear.writes);
+    // The live region's words, text and order, are a clear round's.
+    expect(clear.said.length).toBeGreaterThan(0);
+    expect(wet.said).toStrictEqual(clear.said);
+  });
 
   it(
     'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',
