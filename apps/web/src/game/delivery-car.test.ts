@@ -472,9 +472,7 @@ describe('the belt’s programs fit WebGL’s vertex attributes — PR #2548', (
       for (const shading of ['lit', 'flat'] as const) {
         belt.setShading(shading);
         for (const what of ['parcels', 'markers', 'obstacles'] as const) {
-          counted[`${name} ${shading} ${what}`] = vertexSlots(
-            belt.meshOf(what) as unknown as SlotMesh,
-          );
+          counted[`${name} ${shading} ${what}`] = vertexSlots(belt.meshOf(what));
         }
       }
       belt.dispose();
