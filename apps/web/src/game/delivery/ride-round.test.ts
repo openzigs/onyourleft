@@ -54,6 +54,7 @@ import {
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
   TARGET_CATCH_RADIUS_METRES,
   THROW_WINDOW_AFTER_METRES,
+  THROW_WINDOW_BEFORE_METRES,
   type ThrowTarget,
 } from './throw';
 
@@ -479,13 +480,15 @@ describe('a round ridden, step by step — #1816', () => {
 });
 
 describe('the next house, for the HUD — #2453', () => {
-  it('is the first house on the round, on its own side, the road between it and the rider away', () => {
+  it('is the first house on the round, on its own side, the road between the rider and its throw point away — #2513', () => {
     const ride = withoutObstacles(started());
     const [first] = ride.targets;
     if (first === undefined) throw new Error('the town gave no house');
+    // #2513: to where the window opens, 20 m before the house, never to the house.
+    expect(THROW_WINDOW_BEFORE_METRES).toBe(20);
     expect(nextHouse(ride)).toEqual({
       side: first.side === 1 ? 'right' : 'left',
-      metres: first.distance - ride.along,
+      metres: first.distance - THROW_WINDOW_BEFORE_METRES - ride.along,
     });
     // Both sides are said as the side the throw goes to.
     const sides = new Set(ride.targets.map((target) => target.side));
@@ -496,9 +499,28 @@ describe('the next house, for the HUD — #2453', () => {
         ride.throwTargets.find((each) => each.position === target.position)?.side,
       );
     }
-    // Ridden part of the way, it is that much nearer.
+    // Ridden to 30 m before the house, its throw point is 10 m on.
     const nearer = rideTo(ride, first.distance - 30).ride;
-    expect(nextHouse(nearer)?.metres).toBeCloseTo(30, 6);
+    expect(nextHouse(nearer)?.metres).toBeCloseTo(30 - THROW_WINDOW_BEFORE_METRES, 6);
+  });
+
+  it('reaches nought where the house’s window opens, and stays there through the window — #2513', () => {
+    const ride = withoutObstacles(started());
+    const first = ride.targets[0] as DeliveryTarget;
+    const opens = first.distance - THROW_WINDOW_BEFORE_METRES;
+    // Just short of the window: still a distance, however small.
+    const short = rideTo(ride, opens - 0.5).ride;
+    expect(nextHouse(short)?.metres).toBeCloseTo(0.5, 6);
+    // At its opening edge, half way through and level with the house: nought,
+    // on the house's side, for the HUD to say to throw.
+    for (const along of [opens, opens + THROW_WINDOW_BEFORE_METRES / 2, first.distance]) {
+      const inside = rideTo(ride, along).ride;
+      expect(inside.round.houses[first.position]).toBe('expecting');
+      expect(nextHouse(inside)).toEqual({
+        side: first.side === 1 ? 'right' : 'left',
+        metres: 0,
+      });
+    }
   });
 
   it('moves on to the next house once one is delivered, read off the round the throw changed', () => {
@@ -510,7 +532,7 @@ describe('the next house, for the HUD — #2453', () => {
     const second = ride.targets[1] as DeliveryTarget;
     expect(nextHouse(thrown.ride)).toEqual({
       side: second.side === 1 ? 'right' : 'left',
-      metres: second.distance - thrown.ride.along,
+      metres: Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - thrown.ride.along),
     });
   });
 
@@ -522,7 +544,10 @@ describe('the next house, for the HUD — #2453', () => {
     const past = rideTo(atClose, first.distance + THROW_WINDOW_AFTER_METRES + 0.2).ride;
     expect(past.round.houses[first.position]).toBe('missed');
     const second = ride.targets[1] as DeliveryTarget;
-    expect(nextHouse(past)?.metres).toBeCloseTo(second.distance - past.along, 6);
+    expect(nextHouse(past)?.metres).toBeCloseTo(
+      Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - past.along),
+      6,
+    );
   });
 
   it('is none once no house on the round expects a parcel', () => {

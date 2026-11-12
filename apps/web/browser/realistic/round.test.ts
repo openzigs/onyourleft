@@ -15,6 +15,7 @@ import {
   startDeliveryRide,
   type DeliveryRide,
 } from '../../src/game/delivery/ride-round';
+import { THROW_WINDOW_BEFORE_METRES } from '../../src/game/delivery/throw';
 import { MAPPED_CHUNK_METRES } from '../../src/game/realistic-budget';
 
 import { planOfTarget, rideHeldAt, roundSamples, sideOfRoad } from './round';
@@ -62,13 +63,14 @@ describe('the samples a round is sighted at — #2513', () => {
 });
 
 describe('the ride held before one house — #2513', () => {
-  it('is the next house on the HUD, the lead away, on the house’s own side', () => {
+  it('is the next house on the HUD, its throw point the lead less the window away, on the house’s own side', () => {
     const ride = round();
     for (const target of ride.targets) {
       const held = rideHeldAt(ride, target.position, target.distance - 40);
+      // #2513: the HUD counts to where the window opens, 20 m before the house.
       expect(nextHouse(held)).toEqual({
         side: target.side === 1 ? 'right' : 'left',
-        metres: expect.closeTo(40, 9) as number,
+        metres: expect.closeTo(40 - THROW_WINDOW_BEFORE_METRES, 9) as number,
       });
       // Only the houses before it are taken off the round.
       expect(held.round.houses.filter((house) => house === 'delivered')).toHaveLength(

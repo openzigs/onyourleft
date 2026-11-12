@@ -168,6 +168,25 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('says “Throw now, on the right” inside the house’s window, as a screen reader reads it, and audits clean — #2513', async () => {
+    const round = startRound(6);
+    mounted = await mount(panel({ round, week: WEEK, next: { side: 'right', metres: 3 } }));
+    expect(field('Next house')).toBe('Next house 3 m on the right');
+    await mounted.rerender(panel({ round, week: WEEK, next: { side: 'right', metres: 0 } }));
+    expect(field('Next house')).toBe('Next house Throw now, on the right');
+    // Set as a word (#259), so it fits its track as the outcome words do.
+    const value = [...document.querySelectorAll('.oyl-hud__field')]
+      .find((each) => text(each.querySelector('dt')) === 'Next house')
+      ?.querySelector('.oyl-hud__value');
+    expect(value?.classList.contains('oyl-hud__value--word')).toBe(true);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    await mounted.rerender(panel({ round, week: WEEK, next: { side: 'left', metres: 0 } }));
+    expect(field('Next house')).toBe('Next house Throw now, on the left');
+    // The one live region says nothing of it: the field is read where it stands.
+    expect(text(region())).toBe('');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('changes the rendered counts when a parcel lands — the text, not only the state', async () => {
     const round = startRound(6);
     mounted = await mount(panel({ round, week: WEEK }));

@@ -62,7 +62,8 @@
  * {@link ROUND_LEADS_METRES} before each house in turn, in route order. At
  * every one the frame must have DRAWN the house — selected by the mapped
  * buildings' refill and not hidden — and a marker on its front step, both on
- * the side of the road the HUD names, and the HUD must say the lead. The
+ * the side of the road the HUD names, and the HUD must say the road to the house's throw point,
+ * the lead less {@link THROW_WINDOW_BEFORE_METRES}, or nought inside its window. The
  * shipped levels are not drawn here: a frame of one is a Produced Work of its
  * file (ADR 0065 D-7.5), so the fixture stands in for them. The stylised
  * world draws no mapped building at all, which is what the tablet's round met
@@ -239,7 +240,11 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     expect(new Set(sighted.map((each) => each.hud?.side)).size).toBe(2);
     for (const each of sighted) {
       const where = `house ${String(each.position)}, ${String(each.lead)} m before it`;
-      expect(each.hud?.metres, `${where}: the HUD's distance`).toBeCloseTo(each.lead, 6);
+      // To the throw point, 20 m before the house, and nought inside its window (#2513's fix).
+      expect(each.hud?.metres, `${where}: the HUD's distance`).toBeCloseTo(
+        Math.max(0, each.lead - THROW_WINDOW_BEFORE_METRES),
+        6,
+      );
       expect(each.plan, `${where}: its plan`).toBeGreaterThanOrEqual(0);
       expect(each.houseDrawn, `${where}: the house drawn`).toBe(true);
       expect(each.houseSide, `${where}: the house's side`).toBe(each.hud?.side);

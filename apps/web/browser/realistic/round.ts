@@ -51,7 +51,7 @@ export interface RoundSample {
 
 /** What the page read back at one {@link RoundSample}. */
 export interface RoundSighting extends RoundSample {
-  /** The side the HUD names, and how far it says the house is: `nextHouse`'s. */
+  /** The side the HUD names, and how far it says the house's throw point is (#2513): `nextHouse`'s. */
   readonly hud: { readonly side: 'left' | 'right'; readonly metres: number } | undefined;
   /** The house's plan, by its front step; `-1` when no plan has it. */
   readonly plan: number;
