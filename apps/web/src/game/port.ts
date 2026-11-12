@@ -553,8 +553,20 @@ export interface DeliveryObstaclePiece extends DeliveryPiece {
  */
 export interface DeliveryInView {
   readonly parcels: readonly DeliveryPiece[];
-  readonly markers: readonly DeliveryPiece[];
+  readonly markers: readonly DeliveryMarkerPiece[];
   readonly obstacles: readonly DeliveryObstaclePiece[];
+}
+
+/**
+ * Which marker a house wears — #2365: a doorstep's, a mailbox's at the kerb,
+ * or a house that must not get a parcel's. Told apart by shape, never by
+ * colour alone (ADR 0065 D-10.5).
+ */
+export type DeliveryMarkerKind = 'house' | 'mailbox' | 'no-delivery';
+
+/** A house's marker, and which (#2365). Absent, a doorstep's. */
+export interface DeliveryMarkerPiece extends DeliveryPiece {
+  readonly kind?: DeliveryMarkerKind;
 }
 
 /** What {@link SceneFrame.terrain} carries. */

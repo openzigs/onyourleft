@@ -11,6 +11,7 @@ import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   DELIVERY_TICK_SECONDS,
   type Landing,
+  MAILBOX_CATCH_RADIUS_METRES,
   NO_PARCELS,
   PARCEL_FLIGHT_SECONDS,
   PARCEL_FLIGHT_TICKS,
@@ -447,5 +448,74 @@ describe('the assist setting’s wider windows — #1813, DL10', () => {
     const rider: Rider = { along: from, speed: (100 - from) / secondsToReach(deep) };
     const { landings } = throwAndFly(rider, 'right', targets, startRound(1), 1, true);
     expect(landings.map((landing) => landing.kind)).toEqual(['wasted']);
+  });
+});
+
+describe('a mailbox, and a house that must not get a parcel — #2365, ADR 0065 D-10.3', () => {
+  /** A house 100 m along on the left, 0.6 m off the kerb: a mailbox's depth. */
+  const HOUSE: ThrowTarget = { position: 0, along: 100, side: 'left', clear: 0.6 };
+  const MAILBOX: ThrowTarget = { ...HOUSE, mailbox: true };
+
+  /** One parcel thrown left at a standstill from `from`, so it comes down at `from` along. */
+  function thrownFrom(
+    from: number,
+    target: ThrowTarget,
+    widerWindows = false,
+    noDelivery: readonly ThrowTarget[] = [],
+  ): { landings: Landing[]; round: Round } {
+    let state = NO_PARCELS;
+    let round = startRound(1);
+    const landings: Landing[] = [];
+    for (let tick = 0; tick <= PARCEL_FLIGHT_TICKS; tick += 1) {
+      const step = stepThrows(state, {
+        rider: { along: from, speed: 0 },
+        targets: noDelivery.length > 0 ? [] : [target],
+        round,
+        ...(tick === 0 ? { throwTo: 'left' as const } : {}),
+        widerWindows,
+        noDelivery,
+      });
+      state = step.state;
+      round = step.round;
+      landings.push(...step.landings);
+    }
+    return { landings, round };
+  }
+
+  it('misses a mailbox with a throw a doorstep there would catch, and delivers one inside its own catch', () => {
+    // 1 m short: inside a doorstep's 1.5 m, outside a mailbox's 0.6 m.
+    const short = HOUSE.along - 1;
+    expect(1).toBeLessThan(TARGET_CATCH_RADIUS_METRES);
+    expect(1).toBeGreaterThan(MAILBOX_CATCH_RADIUS_METRES);
+    expect(thrownFrom(short, HOUSE).landings.map((landing) => landing.kind)).toEqual(['delivery']);
+    expect(thrownFrom(short, MAILBOX).landings.map((landing) => landing.kind)).toEqual(['wasted']);
+    expect(thrownFrom(short, MAILBOX).round.houses).toEqual(['expecting']);
+    // 0.3 m short: inside the mailbox's catch, a delivery like a doorstep's.
+    const near = thrownFrom(HOUSE.along - 0.3, MAILBOX);
+    expect(near.landings.map((landing) => landing.kind)).toEqual(['delivery']);
+    expect(near.round.houses).toEqual(['delivered']);
+  });
+
+  it('gives a mailbox a doorstep’s catch with the assist’s wider windows', () => {
+    const short = HOUSE.along - 1;
+    expect(thrownFrom(short, MAILBOX, true).landings.map((landing) => landing.kind)).toEqual([
+      'delivery',
+    ]);
+    // And as far as a doorstep's assisted catch, not beyond it.
+    const wide = HOUSE.along - TARGET_CATCH_RADIUS_METRES * ASSISTED_THROW_SCALE - 0.2;
+    expect(thrownFrom(wide, MAILBOX, true).landings.map((landing) => landing.kind)).toEqual([
+      'wasted',
+    ]);
+  });
+
+  it('lands a parcel at a house that must not get one as a no-delivery, recording nothing on the round', () => {
+    const { landings, round } = thrownFrom(HOUSE.along - 0.5, HOUSE, false, [HOUSE]);
+    expect(landings).toHaveLength(1);
+    expect(landings[0]).toMatchObject({ kind: 'no-delivery', house: 0, side: 'left' });
+    expect(round.houses).toEqual(['expecting']);
+    // A throw it does not reach is wasted, as anywhere else.
+    expect(
+      thrownFrom(HOUSE.along - 5, HOUSE, false, [HOUSE]).landings.map((landing) => landing.kind),
+    ).toEqual(['wasted']);
   });
 });

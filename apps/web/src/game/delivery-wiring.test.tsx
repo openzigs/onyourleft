@@ -77,7 +77,7 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/ass
 import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
-import { parseLevelFile } from './delivery/levels/level-file';
+import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
@@ -131,6 +131,8 @@ vi.mock('./hud/announce', async (importOriginal) => {
 const roundFaults = vi.hoisted(() => ({ on: false }));
 /** Every round `GameView` started, as `startDeliveryRide` returned it (#1853). */
 const startedRounds = vi.hoisted((): unknown[] => []);
+/** #2365: parcels a house that must not get one caught, over every step `GameView` ran. */
+const noDeliveries = vi.hoisted(() => ({ count: 0 }));
 vi.mock('./delivery/ride-round', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./delivery/ride-round')>();
   return {
@@ -142,7 +144,9 @@ vi.mock('./delivery/ride-round', async (importOriginal) => {
     },
     stepDeliveryRide: (...args: Parameters<typeof actual.stepDeliveryRide>) => {
       if (roundFaults.on) throw new RangeError('the round faulted');
-      return actual.stepDeliveryRide(...args);
+      const stepped = actual.stepDeliveryRide(...args);
+      noDeliveries.count += stepped.noDeliveries;
+      return stepped;
     },
   };
 });
@@ -2116,8 +2120,83 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     throw new Error('no seed put the unsteered rider into a parked car');
   })();
 
+  /**
+   * #2365: the fixture level with half its houses mailboxes and half to get
+   * no parcel, and no hazard, read through the app's reader.
+   */
+  const SKIP_LEVEL = parseLevelFile(
+    {
+      ...JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            'delivery/levels/fixtures/fixture-level.json',
+          ),
+          'utf8',
+        ),
+      ),
+      round: {
+        ...LEVEL.round,
+        hazardsPerKilometre: { static: 0, moving: 0 },
+        mailboxShare: 0.5,
+        noDeliveryShare: 0.5,
+      },
+    },
+    'fixture-level',
+  );
+
+  /**
+   * #2365: after which frame to press a throw at each house on `SKIP_LEVEL`
+   * that must not get a parcel, under the ride's seed: the frame a shadow of
+   * the ride is nearest the place a parcel lands on it from.
+   */
+  function skipThrowScript(seed: number): ReadonlyMap<number, ThrowSide> {
+    stubSeed(seed);
+    const round = startDeliveryRide({
+      buildings: LEVEL_BUILDINGS,
+      profile: LEVEL_PROFILE,
+      origin: corridorOrigin(LEVEL_PROFILE),
+      riderDistance: 0,
+      lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
+      storage: undefined,
+      level: { ...SKIP_LEVEL.round, lengthMetres: SKIP_LEVEL.lengthMetres },
+    });
+    vi.restoreAllMocks();
+    if (round === undefined) throw new Error('the level gave no round');
+    const simulation = new GameSimulation({
+      profile: LEVEL_PROFILE,
+      conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
+    });
+    const shadow: { along: number; speed: number }[] = [];
+    for (let frame = 1; frame <= FRAMES; frame += 1) {
+      const at = START_MS + frame * FRAME_MS;
+      simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
+      shadow.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
+    }
+    const throws = new Map<number, ThrowSide>();
+    for (const house of round.throwNoDelivery) {
+      const across = CARRIAGEWAY_HALF_WIDTH_METRES + house.clear;
+      let best = -1;
+      let bestGap = Infinity;
+      shadow.forEach((frame, index) => {
+        const from = house.along - frame.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+        const gap = Math.abs(frame.along - from);
+        if (gap < bestGap) {
+          best = index;
+          bestGap = gap;
+        }
+      });
+      if (bestGap < 2) throws.set(best, house.side);
+    }
+    return throws;
+  }
+
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
-  async function rideLevel(obstacles: 'normal' | 'none'): Promise<{
+  async function rideLevel(
+    obstacles: 'normal' | 'none',
+    level: LevelFile = LEVEL,
+    throwsAt: ReadonlyMap<number, ThrowSide> = new Map(),
+  ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
     readonly started: readonly unknown[];
@@ -2135,7 +2214,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     const writes: Write[] = [];
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
-      loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+      loadDeliveryLevel: (id) => Promise.resolve(id === level.id ? level : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({
         rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
@@ -2159,7 +2238,11 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     );
     await settle();
     await clickThrough(buttonStarting('Ride '));
-    for (let index = 0; index < FRAMES; index += 1) await pump();
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      const side = throwsAt.get(index);
+      if (side !== undefined) await pressThrow(side);
+    }
     await settle();
     const ridden = { writes, offered: [...offered], started: [...startedRounds] };
     mounted.unmount();
@@ -2186,6 +2269,24 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
       expect(without.offered).not.toContain('delivery-crash');
       expect(without.writes.length).toBeGreaterThan(20);
       expect(withCars.writes).toStrictEqual(without.writes);
+    },
+  );
+
+  it(
+    'sends the same writes at the same times with parcels thrown at houses that must not get one as with none thrown â€” #2365',
+    { timeout: 30_000 },
+    async () => {
+      const script = skipThrowScript(CRASHING_SEED);
+      expect(script.size).toBeGreaterThan(0);
+      const without = await rideLevel('none', SKIP_LEVEL);
+      noDeliveries.count = 0;
+      const thrown = await rideLevel('none', SKIP_LEVEL, script);
+      // Non-vacuity: the round had such houses, and a parcel thrown came down on one.
+      const [round] = thrown.started as (DeliveryRide | undefined)[];
+      expect(round?.noDeliveryTargets.length).toBeGreaterThan(0);
+      expect(noDeliveries.count).toBeGreaterThan(0);
+      expect(without.writes.length).toBeGreaterThan(20);
+      expect(thrown.writes).toStrictEqual(without.writes);
     },
   );
 

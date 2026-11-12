@@ -280,10 +280,12 @@ describe('Delivery’s belt — #1814', () => {
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const glow = geometry.getAttribute('oylGlow');
+    // #2365: a doorstep's marker, kind 0; a mailbox's and a no-delivery sign are their own.
+    const kinds = geometry.getAttribute('oylPieceKind');
     const diamond = { xs: [] as number[], ys: [] as number[] };
     for (let at = 0; at < position.count; at += 1) {
       // The ring lies on the step; the diamond is the glowing part above it.
-      if (glow.getX(at) !== 1 || position.getY(at) < 1) continue;
+      if (kinds.getX(at) !== 0 || glow.getX(at) !== 1 || position.getY(at) < 1) continue;
       diamond.xs.push(position.getX(at));
       diamond.ys.push(position.getY(at));
     }
@@ -291,6 +293,53 @@ describe('Delivery’s belt — #1814', () => {
     // Until #2453, 0.4 m across from 1.52 m up: hidden by a garden hedge, and 2 pixels at 100 m.
     expect(span(diamond.xs)).toBeGreaterThanOrEqual(0.9 - 1e-6);
     expect(Math.min(...diamond.ys)).toBeGreaterThanOrEqual(2.4 - 1e-6);
+    belt.dispose();
+  });
+
+  it('draws a mailbox and a house that must not get a parcel as markers of their own shapes, in the markers’ one mesh — #2365', () => {
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('markers').geometry;
+    const position = geometry.getAttribute('position');
+    const glow = geometry.getAttribute('oylGlow');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    /** The highest vertex of marker kind `kind`, and whether any of its glowing parts lies on the step. */
+    const shapeOf = (kind: number): { top: number; ringOnStep: boolean; vertices: number } => {
+      let top = -Infinity;
+      let ringOnStep = false;
+      let vertices = 0;
+      for (let at = 0; at < position.count; at += 1) {
+        if (kinds.getX(at) !== kind) continue;
+        vertices += 1;
+        top = Math.max(top, position.getY(at));
+        if (glow.getX(at) === 1 && position.getY(at) < 0.2) ringOnStep = true;
+      }
+      return { top, ringOnStep, vertices };
+    };
+    const [house, mailbox, skip] = [0, 1, 2].map(shapeOf);
+    // Each its own shape: a mailbox lower than a doorstep's marker, a no-delivery sign with no ring on the step.
+    expect(house?.ringOnStep).toBe(true);
+    expect(mailbox?.vertices).toBeGreaterThan(0);
+    expect(mailbox?.top).toBeLessThan((house?.top ?? 0) - 1);
+    expect(mailbox?.ringOnStep).toBe(true);
+    expect(skip?.vertices).toBeGreaterThan(0);
+    expect(skip?.ringOnStep).toBe(false);
+    expect(skip?.top).toBeGreaterThan(2.4);
+    // Drawn as the frame asks, in the one mesh, each instance its kind.
+    belt.update({
+      parcels: [],
+      markers: [
+        { x: 0, y: 0, z: 5, yaw: 0 },
+        { x: 0, y: 0, z: 10, yaw: 0, kind: 'mailbox' },
+        { x: 0, y: 0, z: 15, yaw: 0, kind: 'no-delivery' },
+      ],
+      obstacles: [],
+    });
+    expect(belt.drawn('markers').map((each) => each.kind)).toEqual([
+      'house',
+      'mailbox',
+      'no-delivery',
+    ]);
+    expect(belt.meshOf('markers').count).toBe(3);
     belt.dispose();
   });
 
@@ -419,9 +468,15 @@ describe('Delivery’s belt — #1814', () => {
         );
         expect(collapse).toBeGreaterThan(shader.vertexShader.indexOf('#include <begin_vertex>'));
         expect(material.customProgramCacheKey()).toContain('oyl-delivery-kinds');
-        // The parcels' and markers' programs are not taught it: they carry no kind.
-        const plain = belt.meshOf('markers').material as unknown as Compilable;
+        // The parcels' program is not taught it: a parcel carries no kind. The
+        // markers' is, since #2365: a doorstep's, a mailbox's and a no-delivery sign.
+        const plain = belt.meshOf('parcels').material as unknown as Compilable;
         expect(compiled(plain).vertexShader).not.toContain('oylObstacleKind');
+        belt.setShading(shading);
+        const markers = belt.meshOf('markers').material as unknown as Compilable;
+        expect(compiled(markers).vertexShader).toContain(
+          'transformed *= 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) );',
+        );
       }
       belt.dispose();
     });

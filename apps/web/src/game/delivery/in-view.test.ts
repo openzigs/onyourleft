@@ -100,15 +100,45 @@ describe('a Delivery frame’s pieces — #1814', () => {
     let round = startRound(3);
     const before = deliveryInView(input({ targets, round }));
     expect(before.markers).toEqual(
-      targets.map((target) => ({ x: target.x, y: target.y, z: target.z, yaw: target.yaw })),
+      targets.map((target) => ({
+        x: target.x,
+        y: target.y,
+        z: target.z,
+        yaw: target.yaw,
+        kind: 'house',
+      })),
     );
 
     round = recordDelivery(round, 0);
     round = recordMiss(round, 2);
     const after = deliveryInView(input({ targets, round }));
     expect(after.markers).toEqual([
-      { x: targets[1]?.x, y: targets[1]?.y, z: targets[1]?.z, yaw: targets[1]?.yaw },
+      {
+        x: targets[1]?.x,
+        y: targets[1]?.y,
+        z: targets[1]?.z,
+        yaw: targets[1]?.yaw,
+        kind: 'house',
+      },
     ]);
+  });
+
+  it('marks a mailbox with its own marker at the kerb, and a house that must not get a parcel with its sign — #2365', () => {
+    const targets = [targetAt(0, 520), { ...targetAt(1, 580), mailbox: true, x: 4.1 }];
+    const skip = { ...targetAt(0, 640), x: 6.5 };
+    const view = deliveryInView(input({ targets, round: startRound(2), noDelivery: [skip] }));
+    expect(view.markers.map((marker) => [marker.kind, marker.x, marker.z])).toEqual([
+      ['house', targets[0]?.x, targets[0]?.z],
+      ['mailbox', 4.1, targets[1]?.z],
+      ['no-delivery', 6.5, skip.z],
+    ]);
+    // A delivered or missed house loses its marker; one that gets no parcel keeps its sign.
+    const settled = recordMiss(recordDelivery(startRound(2), 0), 1);
+    expect(
+      deliveryInView(input({ targets, round: settled, noDelivery: [skip] })).markers.map(
+        (marker) => marker.kind,
+      ),
+    ).toEqual(['no-delivery']);
   });
 
   it('draws nothing off the frame’s corridor: no house, parcel or obstacle past either end', () => {

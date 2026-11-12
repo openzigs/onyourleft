@@ -298,6 +298,7 @@ import {
   oweCrash,
   oweObstacleAhead,
   oweNoRound,
+  oweSkipHouse,
   oweRoundChange,
   oweRoundOver,
   TOO_FEW_HOUSES_TEXT,
@@ -3519,6 +3520,8 @@ function GameScreen({
         // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
         if (stepped.ride.onLevel) {
           owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
+          // #2365, ADR 0065 D-10.5: a house ahead that must not get a parcel, in words.
+          owed = oweSkipHouse(owed, stepped.ride.noDeliveryTargets, stepped.ride.along);
         }
         const ended = stepped.ride.outcome;
         if (ended !== undefined && delivery.outcome === undefined) {
@@ -3715,6 +3718,7 @@ function GameScreen({
                   throws: round.throws,
                   obstacles: round.obstacles,
                   obstacleState: round.obstacleState,
+                  noDelivery: round.noDeliveryTargets,
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                 }),
               };

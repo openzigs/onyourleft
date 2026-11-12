@@ -337,6 +337,8 @@ describe('priority is an ORDER, not a politeness', () => {
       'not-recording',
       // #2362: a hazard ahead on a level, by the owner's ruling of 2026-11-08.
       'delivery-obstacle-ahead',
+      // #2365: a house ahead that must not get a parcel, for the same reason (ADR 0065 D-10.5).
+      'delivery-skip-house',
     ]);
     // #1312, third pass: a lap's summary is NOT one of them.
     expect(ALWAYS_SPOKEN).not.toContain('lap-ended');

@@ -63,7 +63,12 @@
  * one into a string.
  */
 
-import type { DeliveryInView, DeliveryObstaclePiece, DeliveryPiece } from '../port';
+import type {
+  DeliveryInView,
+  DeliveryMarkerPiece,
+  DeliveryObstaclePiece,
+  DeliveryPiece,
+} from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
 import { obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
@@ -104,6 +109,11 @@ export interface DeliveryDrawInput {
   /** The round's obstacles, as #1811 placed them, and where each stands. */
   readonly obstacles: readonly Obstacle[];
   readonly obstacleState: ObstacleState;
+  /**
+   * The houses on a level that must not get a parcel (#2365): each wears its
+   * own marker for the whole round. None unless given.
+   */
+  readonly noDelivery?: readonly DeliveryTarget[];
   /**
    * How far the frame is past the last simulation step, in ticks: `0` to `1`.
    * The pieces move between ticks with it, so a parcel does not step at 20 Hz
@@ -171,11 +181,18 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const { centre } = input.corridor;
   const sinceStep = Math.min(1, Math.max(0, input.sinceStep ?? 0));
 
-  const markers: DeliveryPiece[] = [];
+  const markers: DeliveryMarkerPiece[] = [];
   for (const target of input.targets) {
     if (input.round.houses[target.position] !== 'expecting') continue;
     if (onCorridor(centre, target.distance) === undefined) continue;
-    markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw });
+    // #2365: a mailbox wears its own marker, at the kerb where it stands.
+    const kind = target.mailbox === true ? 'mailbox' : 'house';
+    markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw, kind });
+  }
+  // #2365: a house that must not get a parcel wears its sign for the whole round.
+  for (const house of input.noDelivery ?? []) {
+    if (onCorridor(centre, house.distance) === undefined) continue;
+    markers.push({ x: house.x, y: house.y, z: house.z, yaw: house.yaw, kind: 'no-delivery' });
   }
 
   const parcels: DeliveryPiece[] = [];

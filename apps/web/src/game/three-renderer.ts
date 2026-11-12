@@ -659,6 +659,8 @@ import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from '
 import type {
   CameraPose,
   DeliveryInView,
+  DeliveryMarkerKind,
+  DeliveryMarkerPiece,
   DeliveryObstacleKind,
   DeliveryObstaclePiece,
   DeliveryPiece,
@@ -10963,8 +10965,11 @@ export interface DrawnDeliveryPiece {
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
-  readonly kind: DeliveryObstacleKind | undefined;
+  /**
+   * Which of the roster, for an obstacle; which marker, for a marker (#2365);
+   * `undefined` for a parcel.
+   */
+  readonly kind: DeliveryObstacleKind | DeliveryMarkerKind | undefined;
   /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
   /** How large it was drawn: the instance matrix's scale. Above 1 only for a far marker (#2453). */
@@ -11191,6 +11196,32 @@ const DELIVERY_PAINT = {
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
   hazard: 0xe8432f,
+  // #2365: a mailbox's slate box, this project's own.
+  mailbox: 0x3d5a73,
+} as const;
+
+/**
+ * The markers a house wears, in order: a marker's kind is its index in both
+ * attributes ({@link withObstacleKinds}) — #2365.
+ */
+const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox', 'no-delivery'];
+
+/**
+ * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
+ * project's own. A mailbox: a box `box` long on a `post` post at the kerb,
+ * a glowing diamond `diamond` across over it, and a ring `ring` round its
+ * foot, all smaller than a doorstep's, as its catch is. A house that must
+ * not get a parcel: a `signPost` post with a glowing red ring `sign` across
+ * crossed by a bar, standing upright and facing the road, and **no** ring on
+ * the step, so it reads as a refusal by its shape and not only its colour.
+ */
+const OTHER_MARKER_METRES = {
+  post: 1.0,
+  box: 0.45,
+  diamond: 0.45,
+  ring: 0.28,
+  signPost: 2.4,
+  sign: 0.8,
 } as const;
 
 /**
@@ -11270,23 +11301,87 @@ const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
-/** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
+/**
+ * The markers, every kind in one geometry, each standing on its spot at the
+ * origin (#2365, {@link DELIVERY_MARKER_ORDER}, each vertex marked with its
+ * kind as the obstacles' are, {@link withObstacleKinds}): a doorstep's post, a
+ * diamond at its head and a ring on the step; a mailbox's box on a short post
+ * with a smaller diamond and ring; and a no-delivery sign, a crossed ring on a
+ * post with no ring on the step ({@link OTHER_MARKER_METRES}).
+ */
 function markerShape(): BufferGeometry {
   const { post, postThick, diamond, ring } = MARKER_METRES;
   const half = diamond / 2;
+  const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
+  const other = OTHER_MARKER_METRES;
+  const box = other.box;
+  const mailboxHalf = other.diamond / 2;
   return deliveryShape([
-    { made: deliveryBox(postThick, post, postThick, 0, post / 2, 0), colour: DELIVERY_PAINT.post },
+    {
+      made: deliveryBox(postThick, post, postThick, 0, post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('house'),
+    },
     {
       made: new OctahedronGeometry(half, 0)
         .scale(1, MARKER_DIAMOND_STRETCH, 1)
         .translate(0, post + half * MARKER_DIAMOND_STRETCH, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
     },
     {
       made: new TorusGeometry(ring, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
+    },
+    // #2365: a mailbox at the kerb.
+    {
+      made: deliveryBox(postThick, other.post, postThick, 0, other.post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('mailbox'),
+    },
+    {
+      made: deliveryBox(box * 0.6, box * 0.6, box, 0, other.post + box * 0.3, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind: kind('mailbox'),
+    },
+    {
+      made: new OctahedronGeometry(mailboxHalf, 0)
+        .scale(1, MARKER_DIAMOND_STRETCH, 1)
+        .translate(0, other.post + box * 0.6 + 0.1 + mailboxHalf * MARKER_DIAMOND_STRETCH, 0),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+      kind: kind('mailbox'),
+    },
+    {
+      made: new TorusGeometry(other.ring, 0.03, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+      kind: kind('mailbox'),
+    },
+    // #2365: a house that must not get a parcel: a crossed ring, upright, facing the road.
+    {
+      made: deliveryBox(postThick, other.signPost, postThick, 0, other.signPost / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('no-delivery'),
+    },
+    {
+      made: new TorusGeometry(other.sign / 2, 0.06, 4, 16)
+        .rotateY(Math.PI / 2)
+        .translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
+    },
+    {
+      made: deliveryBox(0.06, other.sign * 0.9, 0.06, 0, 0, 0)
+        .rotateX(Math.PI / 4)
+        .translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
     },
   ]);
 }
@@ -11618,6 +11713,18 @@ export class DeliveryBelt {
   readonly #meshes: Readonly<Record<DeliveryPieceKind, InstancedMesh>>;
   readonly #materials: { readonly lit: Material; readonly flat: Material };
   readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
+  /** The markers' materials (#2365), taught their kinds as the obstacles' are. */
+  readonly #markerMaterials: { readonly lit: Material; readonly flat: Material };
+  /** Each marker instance's kind (#2365), by its index in {@link DELIVERY_MARKER_ORDER}. */
+  readonly #markerKinds = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY),
+    1,
+  );
+  /** The paint attribute the kind splice declares; a marker wears none, so it stays nought. */
+  readonly #markerPaints = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY * 3),
+    3,
+  );
   /** Each obstacle instance's kind, by its index in the roster. */
   readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
   /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
@@ -11633,6 +11740,16 @@ export class DeliveryBelt {
       lit,
       flat: obstacle.flat === obstacle.lit ? lit : withObstacleKinds(obstacle.flat),
     };
+    const marker = decorationMaterials(world);
+    const markerLit = withObstacleKinds(marker.lit);
+    this.#markerMaterials = {
+      lit: markerLit,
+      flat: marker.flat === marker.lit ? markerLit : withObstacleKinds(marker.flat),
+    };
+    const markers = markerShape();
+    this.#markerKinds.setUsage(DynamicDrawUsage);
+    markers.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#markerKinds);
+    markers.setAttribute(DELIVERY_OBSTACLE_PAINT_ATTRIBUTE, this.#markerPaints);
     const obstacles = obstacleShape();
     this.#kinds.setUsage(DynamicDrawUsage);
     obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
@@ -11648,7 +11765,7 @@ export class DeliveryBelt {
     };
     this.#meshes = {
       parcels: made(parcelShape(), this.#materials.lit),
-      markers: made(markerShape(), this.#materials.lit),
+      markers: made(markers, this.#markerMaterials.lit),
       obstacles: made(obstacles, this.#obstacleMaterials.lit),
     };
   }
@@ -11670,7 +11787,7 @@ export class DeliveryBelt {
   /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#meshes.parcels.material = this.#materials[shading];
-    this.#meshes.markers.material = this.#materials[shading];
+    this.#meshes.markers.material = this.#markerMaterials[shading];
     this.#meshes.obstacles.material = this.#obstacleMaterials[shading];
   }
 
@@ -11682,7 +11799,14 @@ export class DeliveryBelt {
    */
   update(view: DeliveryInView | undefined, eye?: { readonly x: number; readonly z: number }): void {
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
-    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
+    const markers: readonly DeliveryMarkerPiece[] = view?.markers ?? NO_DELIVERY_PIECES;
+    this.#place(this.#meshes.markers, markers, eye);
+    // #2365: each marker's kind, a doorstep's unless it says otherwise.
+    const markerKinds = this.#markerKinds.array as Float32Array;
+    for (let at = 0; at < this.#meshes.markers.count; at += 1) {
+      markerKinds[at] = DELIVERY_MARKER_ORDER.indexOf(markers[at]?.kind ?? 'house');
+    }
+    if (this.#meshes.markers.count > 0) this.#markerKinds.needsUpdate = true;
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
     this.#place(this.#meshes.obstacles, obstacles);
     const kinds = this.#kinds.array as Float32Array;
@@ -11737,9 +11861,15 @@ export class DeliveryBelt {
     if (!mesh.visible) return [];
     const matrices = mesh.instanceMatrix.array;
     const kinds = this.#kinds.array;
+    const markerKinds = this.#markerKinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
-      const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
+      const kind =
+        what === 'obstacles'
+          ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number]
+          : what === 'markers'
+            ? DELIVERY_MARKER_ORDER[markerKinds[at] as number]
+            : undefined;
       const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
@@ -11764,7 +11894,7 @@ export class DeliveryBelt {
       mesh.geometry.dispose();
       mesh.dispose();
     }
-    for (const materials of [this.#materials, this.#obstacleMaterials]) {
+    for (const materials of [this.#materials, this.#obstacleMaterials, this.#markerMaterials]) {
       materials.lit.dispose();
       if (materials.flat !== materials.lit) materials.flat.dispose();
     }

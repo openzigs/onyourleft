@@ -141,12 +141,15 @@ const LEVEL = ((): LevelFile => {
       ),
       'utf8',
     ),
-  ) as { buildings: { rings: number[][] }[] };
+  ) as { buildings: { rings: number[][] }[]; round: Record<string, unknown> };
   for (const building of raw.buildings) {
     building.rings = building.rings.map((ring) =>
       ring.map((value, at) => Math.round((value + (at % 2 === 0 ? 0.4683 : 0.3719)) * 1e4) / 1e4),
     );
   }
+  // #2365: with mailboxes and houses that must not get a parcel among its houses,
+  // so the scan looks for those too (ADR 0065 D-4.2).
+  raw.round = { ...raw.round, mailboxShare: 0.5, noDeliveryShare: 0.5 };
   return parseLevelFile(raw, 'fixture-level');
 })();
 
@@ -295,7 +298,8 @@ function throwScript(
     shadow.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
   }
   const throws = new Map<number, ThrowSide>();
-  for (const target of round.throwTargets) {
+  // #2365: a throw at each house that must not get a parcel too, so one costs a point on the ride.
+  for (const target of [...round.throwTargets, ...round.throwNoDelivery]) {
     const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
     let best = 0;
     let bestGap = Infinity;
@@ -463,7 +467,8 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
   mounted?.unmount();
   mounted = undefined;
   globalThis.location.hash = '';
-  return { harness, targets: round.targets, drawn, houses };
+  // #2365: the houses that must not get a parcel are the round's houses too, for the scan.
+  return { harness, targets: [...round.targets, ...round.noDeliveryTargets], drawn, houses };
 }
 
 let ridden: Promise<Ridden> | undefined;
@@ -1113,6 +1118,7 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
     RIDE,
     async () => {
       const ride = await theLevelRide();
+      // #2365: the houses to deliver to and those that must not get a parcel, together.
       expect(ride.targets).toHaveLength(LEVEL.round.houses);
       // The houses in view on the ride's first frame are the targets the scan looks for.
       const drawnMarkers = ride.drawn[0]?.delivery?.markers ?? [];
@@ -1145,8 +1151,13 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
       ...tracesInValue('its streams', streams, markers),
       ...tracesInValue('its laps', laps, markers),
     ]).toStrictEqual([]);
-    // No index into the level's buildings: the ride names no house, by place or by number.
-    expect(jsonOf([activity, laps])).not.toMatch(/house|target|seed|building/i);
+    // No index into the level's buildings: the ride names no house, by place or by number,
+    // and no mailbox or house that got no parcel (#2365).
+    expect(jsonOf([activity, laps])).not.toMatch(/house|target|seed|building|mailbox|delivery/i);
+    // The round had both kinds in it, so there was something to leave out.
+    const round = theRound(ON_LEVEL);
+    expect(round.noDeliveryTargets.length).toBeGreaterThan(0);
+    expect(round.targets.some((target) => target.mailbox === true)).toBe(true);
     expect(jsonOf([streams, laps])).not.toContain(LEVEL_KEY);
   });
 
