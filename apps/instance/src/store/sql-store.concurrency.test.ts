@@ -281,19 +281,26 @@ describe('the #867 rules hold between two connections on one file (#889)', () =>
     },
   );
 
-  it(
-    // Under WAL the race surfaces as SQLITE_BUSY (counted in `errors`), not as
-    // a lost update; either one satisfies the control.
-    'is a test that can fail: with DEFERRED transactions the same races go wrong (the control)',
-    { timeout: 60_000 },
-    async () => {
-      for (const operation of ['revoke', 'rename'] as const) {
-        const { errors, after } = await racers(operation, true);
-        const broken = after.filter((athlete) =>
-          operation === 'revoke' ? athlete.liveKeys !== 1 : athlete.renames !== 3,
-        );
-        expect(errors.length + broken.length, operation).toBeGreaterThan(0);
-      }
+  /**
+   * Under WAL the race surfaces as SQLITE_BUSY (counted in `errors`), not as
+   * a lost update; either one satisfies the control.
+   *
+   * One case a race (#2554). Both races were one case, run one after the
+   * other: 8.2 s under coverage on a loaded machine, against 0.54–0.55 s on
+   * the nightly coverage job (43207158376, 43008116660, EPYC 9V74). Each race
+   * migrates a file, seeds sixty athletes and starts two threads that each
+   * load the store, so a case each halves what one case waits for on a
+   * loaded runner. Each keeps its own race whole: the same sixty athletes,
+   * the same barrier, and the same requirement that it go wrong somewhere.
+   */
+  it.each(['revoke', 'rename'] as const)(
+    'is a test that can fail: with DEFERRED transactions the %s race goes wrong (the control)',
+    async (operation) => {
+      const { errors, after } = await racers(operation, true);
+      const broken = after.filter((athlete) =>
+        operation === 'revoke' ? athlete.liveKeys !== 1 : athlete.renames !== 3,
+      );
+      expect(errors.length + broken.length, operation).toBeGreaterThan(0);
     },
   );
 });
