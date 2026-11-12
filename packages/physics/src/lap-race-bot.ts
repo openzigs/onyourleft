@@ -52,7 +52,22 @@
  * O(bots) a tick: one sort of the racers still racing, one map by id, one
  * `fieldDraftFactors` call with the draft on, and per bot one view and one
  * `decideTactic` call. The view takes the place of the plan, which until
- * #2463 was rebuilt for every bot on every tick.
+ * #2463 was rebuilt for every bot on every tick. Since #2542 the view also
+ * reads the wheel ahead: at most three steady-state power sums per bot (what
+ * holds the wheel's speed for the bot and for the wheel, and one more to read
+ * the rider's speed back to the tick's start), never a search or a second
+ * integration.
+ *
+ * ## The wheel ahead (#2542)
+ *
+ * A bot sitting in or following holds the wheel ahead 0.3 to 1 m back
+ * (`tactics.ts` §`decideTactic`). What it needs to know of the wheel is read
+ * here, through the one physics: how fast it closes on it; the power that
+ * rides with it ({@link readWheel}); and how hard the racer ahead rides. The
+ * rider's speed is how far this tick's inputs move them, read back to the
+ * tick's start. The target that comes back is ridden as it is, with no floor
+ * in a draft (ADR 0067 D-1.3, R-10) and, sitting in, no harder than the plan
+ * itself rides the road there.
  *
  * ## The draft (#2460, ADR 0067 D-3)
  *
@@ -101,6 +116,8 @@ import {
   decideTactic,
   distanceOnRoute,
   gradeAt,
+  metres,
+  metresPerSecond,
   stepRace,
   strategicBotDecision,
   TACTIC_MEMORY_AT_START,
@@ -108,7 +125,13 @@ import {
 } from '@onyourleft/domain';
 
 import { fieldDraftFactors } from './draft';
-import { advancePlannedBot, BOT_AT_START_LINE, botDemand, type BotCourse } from './pacer';
+import {
+  advancePlannedBot,
+  BOT_AT_START_LINE,
+  botDemand,
+  botHoldWatts,
+  type BotCourse,
+} from './pacer';
 import type { RideState } from './simulate';
 
 /** One bot in a race: an id, a tier, a strategy, a pace, and where its own power has taken it. */
@@ -177,6 +200,66 @@ export interface BotRaceStep {
  * number for #2464's harness and the owner.
  */
 export const BOT_GRADE_AHEAD_METRES = 50;
+
+/** The racer ahead of a bot, as {@link readWheel} reads it (#2542). */
+interface Wheel {
+  /** Where it is and how fast: the rider's speed is what this tick's inputs moved them. */
+  readonly ride: RideState;
+  /** The road and the mass it rides at: a bot's own, or the reading bot's for the rider. */
+  readonly course: BotCourse;
+  /** Its power, watts at a bot's mass, or `null` where it cannot be read. */
+  readonly power: number | null;
+  /** Its own draft multiplier. */
+  readonly k: number;
+  /**
+   * Whether its speed is the tick's average rather than the speed at its
+   * start: the rider's, from how far this tick's inputs moved them.
+   */
+  readonly averaged: boolean;
+}
+
+/** What a bot that leads reads of the wheel ahead: none. */
+const NO_WHEEL: Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'aheadEffortWatts'> =
+  Object.freeze({ closingMetresPerSecond: 0, holdWatts: null, aheadEffortWatts: null });
+
+/**
+ * What a bot reads of the wheel ahead (#2542), through the one physics:
+ *
+ * - how fast it closes on it;
+ * - what rides with it: the power that holds its speed in the bot's own draft
+ *   on the road under the bot, plus what the racer ahead puts into speeding
+ *   up, or less what it gives up slowing down (its power less what its speed
+ *   costs it on its own road, in its own draft). A wheel slowing onto a climb
+ *   at a steady power asks the bot for less, not for what that speed would
+ *   cost up the climb;
+ * - how hard it rides, as if in the open: its power over its own `k`.
+ *
+ * With its power unread, the bot rides what holds its speed. The rider's speed
+ * is the tick's average, half a tick ahead of the bots' own: it is read back
+ * to the tick's start at the rate its power and the road give it, so a bot
+ * does not see a rider slowing onto a climb half a tick early, every tick.
+ */
+function readWheel(
+  own: RideState,
+  course: BotCourse,
+  k: number,
+  ahead: Wheel,
+  elapsed: number,
+): Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'aheadEffortWatts'> {
+  let speed: number = ahead.ride.speed;
+  if (ahead.averaged && ahead.power !== null && speed > 0) {
+    const spare = ahead.power - botHoldWatts(ahead.ride, ahead.course, speed, ahead.k);
+    const rate = spare / (ahead.course.plan.massKilograms * speed);
+    speed = Math.max(0, speed - (rate * elapsed) / 2);
+  }
+  const surplus =
+    ahead.power === null ? 0 : ahead.power - botHoldWatts(ahead.ride, ahead.course, speed, ahead.k);
+  return {
+    closingMetresPerSecond: own.speed - speed,
+    holdWatts: botHoldWatts(own, course, speed, k) + surplus,
+    aheadEffortWatts: ahead.power === null ? null : ahead.power / ahead.k,
+  };
+}
 
 /**
  * Every racer's draft multiplier `k`, by id, from the field's **effort
@@ -261,6 +344,13 @@ export function stepBotRace(
   const field = new Map(bots.map((bot) => [bot.id, bot]));
   const rider = race.racers.find((entry) => !field.has(entry.racer.id))?.racer;
   const riderPerKilogram = step.riderWattsPerKilogram ?? null;
+  // #2542: the rider's speed this tick, from where the race had them to where
+  // their inputs put them; unknown without an effort distance for them.
+  const riderTo = rider === undefined ? undefined : step.rider?.effortDistances[rider.id];
+  const riderSpeed =
+    rider === undefined || riderTo === undefined || !(step.elapsed > 0)
+      ? undefined
+      : (riderTo - rider.effortDistance) / step.elapsed;
   const raceMetres = race.course.lapLengthMetres * race.course.laps;
   const moved = bots.map((bot, seat): LapRaceBot => {
     // How far the bot will ride this tick, near enough: what its puddle
@@ -287,6 +377,38 @@ export function stepBotRace(
       const ahead = racing[at - 1];
       const behind = racing[at + 1];
       const aheadBot = ahead === undefined ? undefined : field.get(ahead.id);
+      // #2542: the wheel ahead, the rider's or a bot's, as this bot reads it.
+      const k = factors?.[bot.id] ?? 1;
+      const wheel =
+        ahead === undefined
+          ? NO_WHEEL
+          : readWheel(
+              bot.ride,
+              course,
+              k,
+              {
+                ride:
+                  aheadBot === undefined
+                    ? {
+                        distance: metres(ahead.effortDistance),
+                        speed: metresPerSecond(Math.max(0, riderSpeed ?? bot.ride.speed)),
+                      }
+                    : aheadBot.ride,
+                course:
+                  aheadBot === undefined
+                    ? course
+                    : { ...step.conditions, plan: botTierPlan(aheadBot.tier) },
+                power:
+                  aheadBot === undefined
+                    ? riderPerKilogram === null || riderSpeed === undefined
+                      ? null
+                      : riderPerKilogram * BOT_MASS_KILOGRAMS
+                    : aheadBot.power,
+                k: factors?.[ahead.id] ?? 1,
+                averaged: aheadBot === undefined && riderSpeed !== undefined,
+              },
+              step.elapsed,
+            );
       const view: RaceView = {
         atMs: race.atMs,
         botIndex: seat,
@@ -315,6 +437,8 @@ export function stepBotRace(
           step.conditions.profile,
           distanceOnRoute(step.conditions.profile, bot.ride.distance + BOT_GRADE_AHEAD_METRES),
         ),
+        ...wheel,
+        draftFactor: k,
         energy: bot.energy,
         capacity: plan.capacity,
       };
@@ -326,7 +450,12 @@ export function stepBotRace(
         step.seed,
       );
       tactics = decided.memory;
-      tactic = { targetWatts: decided.targetWatts, kick: decided.tactic === 'kick' };
+      tactic = {
+        targetWatts: decided.targetWatts,
+        kick: decided.tactic === 'kick',
+        ...(decided.wheel ? { wheel: decided.tactic === 'follow' ? 'follow' : 'sit-in' } : {}),
+        drafted: k < 1,
+      };
     }
     // The plan reads the bot's own odometer, its effort distance, and the
     // grade under it there: never the race's view of where the bot is.

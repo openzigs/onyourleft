@@ -308,7 +308,11 @@ the rider's inputs. A bot's inputs are a tier, the plan, the course and a seed. 
 signatures take no activity, stream or ghost type, which a type-level test holds. Since #2463 its
 power reads the race (ADR 0067 D-0): each tick `stepBotRace` builds each racing bot's
 `RaceView` on effort distance and asks `@onyourleft/domain` §`decideTactic`, whose target sets the
-level `botPlanStep` shapes to the road, and whose kick opens the sprint. Its **capacity** never
+level `botPlanStep` shapes to the road, and whose kick opens the sprint. Since #2542 a bot sitting
+in or following holds the wheel ahead 0.3 to 1 m back: the view carries what holding it costs, the
+power that holds the wheel's speed in the bot's own draft on the road under it (`pacer.ts`
+§`botHoldWatts`, through `powerRequired`) plus what the wheel puts into speeding up, and the
+target that comes back is ridden as it is. Its **capacity** never
 reads the race (D-1.2): the plan is built once, at the bot's first tick, and kept on the bot, and
 `lap-race-bot.test.ts` replays each bot's W′ balance from its own power on that one capacity,
 leading and trailing. No item's offset or drawn lap reaches the view. `lap-race-bot.test.ts` replaces

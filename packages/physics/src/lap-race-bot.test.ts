@@ -377,6 +377,8 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'decideTactic',
         'distanceOnRoute',
         'gradeAt',
+        'metres',
+        'metresPerSecond',
         'stepRace',
         'strategicBotDecision',
       ].sort(),
@@ -1036,13 +1038,16 @@ describe('each bot its own pace (#2455)', () => {
     expect(crossed).toBeGreaterThanOrEqual(3);
   });
 
-  it('rides a field as one stacked group without paces: what #2455 reported', () => {
+  it('rides a field without paces as one group: what #2455 reported, now on each other’s wheels (#2542)', () => {
     // The yardstick the spread is measured against: seven bots of one tier on
-    // no pace finish together, to the millisecond.
+    // no pace finish together. Until #2542 they finished to the millisecond,
+    // stacked on one spot; sitting in, each now holds the wheel ahead, so the
+    // group is a line and crosses the line within a tick.
     const field = dealtField('brisk', 1).map(({ id, tier }) => ({ id, tier }));
     const run = race(HILLY, field, 1, false);
     const last = run.races[run.races.length - 1] as ItemRaceState;
-    expect(new Set(last.racers.map((entry) => entry.racer.finishedAtMs)).size).toBe(1);
+    const finished = last.racers.map((entry) => entry.racer.finishedAtMs as number);
+    expect(Math.max(...finished) - Math.min(...finished)).toBeLessThanOrEqual(1_000);
   });
 });
 
