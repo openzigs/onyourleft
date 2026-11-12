@@ -620,12 +620,18 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     // The operator's command, run in this process rather than spawned: the
     // same `room-open` without a second Node starting, which took 0.3 to 5.4 s
     // of this case locally (#2551). The instance below is still its own process.
-    expect(
-      await runCommand(
-        ['room-open', 'race-1', '--kind', 'race', '--length', '2', '--countdown', '0'],
-        { database: path },
-      ),
-    ).toBe(0);
+    // It reports as JSON on stdout; keep that out of the run's output.
+    const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(
+        await runCommand(
+          ['room-open', 'race-1', '--kind', 'race', '--length', '2', '--countdown', '0'],
+          { database: path },
+        ),
+      ).toBe(0);
+    } finally {
+      report.mockRestore();
+    }
     // The operating system's choice, never a random one: #954.
     const port = await freeLoopbackPort();
     const child = spawn(process.execPath, [MAIN], {
@@ -648,7 +654,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       for (let i = 0; ; i += 1) {
         const ready = await fetch(`${url}/ready`).catch(() => undefined);
         if (ready?.status === 200) break;
-        if (i > 200) throw new Error('the instance did not become ready');
+        if (i > 60) throw new Error('the instance did not become ready');
         await new Promise((done) => setTimeout(done, 50));
       }
       ann = await signIn(url, 'Ann');
@@ -664,7 +670,11 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
         await ticket(url, bob.sessionToken, 'race-1'),
       );
       clients.push(annSocket, bobSocket);
-      await until(() => bobSocket.messages.length > 0 && annSocket.messages.length > 0, 'welcomes');
+      await until(
+        () => bobSocket.messages.length > 0 && annSocket.messages.length > 0,
+        'welcomes',
+        1_000,
+      );
       const started = await fetch(`${url}/v1/rooms/race-1/start`, {
         method: 'POST',
         headers: { authorization: `Bearer ${ann.sessionToken}` },
@@ -672,8 +682,9 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       expect(started.status).toBe(200);
       // Ann rides; Bob does not. The course is 2 m (#2551): a room sends a frame
       // a second, and Ann at 800 W has ridden 2.8 m by the first, so she
-      // has finished one frame after the start. At 40 m it took six frames:
-      // 6 s of the case locally, which took 7.5 s on CI under coverage.
+      // has finished one frame after the start: a longer course costs a
+      // second of the case per frame. The phases below are bounded inside
+      // the case's own 5 s so that a slow one fails by name.
       let sequence = 0;
       const pedal = setInterval(() => {
         sequence += 1;
@@ -689,6 +700,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
                 m.riders[0].decimetres >= 20,
             ),
           'Ann across the line',
+          2_500,
         );
       } finally {
         clearInterval(pedal);
@@ -697,7 +709,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       const store = openServingStore(path);
       try {
         for (let i = 0; (await store.listRoomResults('race-1')).length === 0; i += 1) {
-          if (i > 100) throw new Error('no result was written');
+          if (i > 20) throw new Error('no result was written');
           await new Promise((done) => setTimeout(done, 50));
         }
       } finally {
