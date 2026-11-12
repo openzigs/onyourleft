@@ -124,7 +124,7 @@ export const OBSTACLE_AHEAD_METRES = OBSTACLE_SIGHT_METRES;
  * How far ahead a moving hazard is said, metres — #2364: `obstacles.ts`
  * §`MOVING_HAZARD_SIGHT_METRES`, 90 m, the distance it is set going at, so it
  * is said as it starts to move and at least `MOVING_HAZARD_WARNING_SECONDS`
- * before it can touch the rider at any avoidable speed (`obstacles.test.ts`).
+ * before it can touch the rider at any avoidable speed (`moving-hazards.test.ts`).
  */
 export const MOVING_HAZARD_AHEAD_METRES = MOVING_HAZARD_SIGHT_METRES;
 

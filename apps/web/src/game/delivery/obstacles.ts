@@ -96,7 +96,7 @@
  * the whole road and is dodged by timing, as a bin is; a car pulling out stops
  * in its kerb lane ({@link LaneObstacle}), and another rider rides out into
  * theirs and then toward the rider ({@link obstacleAlong}), each dodged by
- * changing lane. `obstacles.test.ts` sweeps every one at every avoidable speed
+ * changing lane. `moving-hazards.test.ts` sweeps every one at every avoidable speed
  * and lane.
  *
  * ## A level's obstacles: parked cars and bins, standing (#2362, ADR 0065 D-10.1)
@@ -136,7 +136,7 @@
  * `throw.ts` §`DELIVERY_TICK_SECONDS`, the simulation's own step, and sweeps
  * the rider back over the road it covered on that tick at its speed, so no
  * speed carries it through an obstacle between two ticks. An obstacle moves
- * at most a tenth of a metre a tick, far less than its own width and the
+ * at most a quarter of a metre a tick (an oncoming rider along the road; a dog 0.15 m), far less than its own length and the
  * rider's, so its own position is taken at the tick's end.
  *
  * ⚠️ **The bicycle's size is written here, not imported**, and the test pins
@@ -273,7 +273,7 @@ export const MOVING_HAZARD_KINDS: readonly ObstacleKind[] = Object.freeze([
  * {@link OBSTACLE_SIGHT_METRES}, because a rider coming the other way closes
  * on the rider at both their speeds. At the fastest avoidable speed the
  * warning comes at least {@link MOVING_HAZARD_WARNING_SECONDS} before any
- * contact, and `obstacles.test.ts` sweeps that. This project's own number.
+ * contact, and `moving-hazards.test.ts` sweeps that. This project's own number.
  */
 export const MOVING_HAZARD_SIGHT_METRES = 90;
 
@@ -283,7 +283,7 @@ export const MOVING_HAZARD_SIGHT_METRES = 90;
  * to {@link AVOIDABLE_FASTEST_METRES_PER_SECOND} and in any lane: **4 s**, ten
  * lane changes (`lanes.ts` §`LANE_CHANGE_SECONDS`). This project's own number.
  *
- * @test-facing the bound `obstacles.test.ts` sweeps every placed moving
+ * @test-facing the bound `moving-hazards.test.ts` sweeps every placed moving
  * hazard's warning against; placement is built to meet it and does not read it
  */
 export const MOVING_HAZARD_WARNING_SECONDS = 4;
