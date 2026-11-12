@@ -152,6 +152,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   type CompressedTexture,
   ConeGeometry,
@@ -11276,6 +11277,20 @@ const HAZARD_MARKER_HEIGHT_METRES = 0.36;
 const HAZARD_MARKER_REACH_METRES = 0.2;
 
 /**
+ * A car pulling out's hazard marker, in metres — #2506, the owner's ruling of
+ * 2026-11-12: the small kinds' 0.36 m marker, 2.7 m up, was 8 to 10 pixels
+ * from the chase camera at 20 m on the tablet's 1280×800, too small to read.
+ * A car is 1.8 m wide, so its marker may be wider than the cone's reach
+ * allows the small kinds': **1.2 m tall and 1.2 m across**, its middle
+ * **3.2 m** up, so its bottom (2.6 m) stays over the camera's near reach
+ * as {@link HAZARD_MARKER_MIDDLE_METRES} argues, and its top stands well above
+ * any parked car in front of it. The same four-sided pyramid, the same 8
+ * triangles: it is larger and costs nothing more. `delivery-belt.test.ts`
+ * holds its projected height on that frame from 20 m.
+ */
+const CAR_HAZARD_MARKER = { middle: 3.2, height: 1.2, reach: 0.6 } as const;
+
+/**
  * The kinds that carry {@link obstacleHazardMarker}: those narrower than the
  * rider's shoulders' reach, and since #2506 a car pulling out, which moves:
  * every moving hazard carries one, and a parked car does not.
@@ -11305,10 +11320,17 @@ const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = [
  * the street does not have. **On a car pulling out** (#2506): it moves into
  * the road, and with no marker it was drawn as an ordinary parked car.
  */
-function obstacleHazardMarker(): BufferGeometry {
-  return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
-    .rotateX(Math.PI)
-    .translate(0, HAZARD_MARKER_MIDDLE_METRES, 0);
+function obstacleHazardMarker(kind: DeliveryObstacleKind): BufferGeometry {
+  // #2506: a car pulling out's is larger (CAR_HAZARD_MARKER).
+  const { middle, height, reach } =
+    kind === 'car-pulling-out'
+      ? CAR_HAZARD_MARKER
+      : {
+          middle: HAZARD_MARKER_MIDDLE_METRES,
+          height: HAZARD_MARKER_HEIGHT_METRES,
+          reach: HAZARD_MARKER_REACH_METRES,
+        };
+  return new ConeGeometry(reach, height, 4, 1).rotateX(Math.PI).translate(0, middle, 0);
 }
 
 /** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
@@ -11516,8 +11538,19 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
     ]);
     for (const along of [rear, front]) {
       const x = side * (halfWidth - 0.14);
+      // #2506, trimmed to fit the village frame's 205 000 triangles: the rim
+      // is one disc on the tyre's outside face, a hair proud of it and facing
+      // out, 8 triangles (it was a closed 8-sided cylinder, 32, whose wall
+      // sat inside the tyre and whose inner face looked under the car). The
+      // tyre stays round in 12: one in 10 has no corner straight down and,
+      // fitted to the road, sinks the car (round 6's finding).
       parts.push([deliveryWheel(radius, 0.22, x, radius, along, 12), DELIVERY_PAINT.black]);
-      parts.push([deliveryWheel(0.2, 0.23, x, radius, along, 8), DELIVERY_PAINT.carRim]);
+      parts.push([
+        new CircleGeometry(0.2, 8)
+          .rotateY((side * Math.PI) / 2)
+          .translate(x + side * 0.115, radius, along),
+        DELIVERY_PAINT.carRim,
+      ]);
     }
   }
   // The grille, the bumpers' dark strips and the number plates, front and back,
@@ -11605,7 +11638,7 @@ function obstacleShape(): BufferGeometry {
   // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
   for (const kind of HAZARD_MARKED_KINDS) {
     parts.push({
-      made: obstacleHazardMarker(),
+      made: obstacleHazardMarker(kind),
       colour: DELIVERY_PAINT.hazard,
       glows: true,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
@@ -11710,7 +11743,12 @@ function obstacleShape(): BufferGeometry {
  * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
  * the bin, the trolley and the cone; since #2364 **1 758**, adding a dog's 72
  * and another rider's 124, each with its marker's 8; since #2506 **1 770**, a
- * car pulling out's marker's 8 and its two indicators' 4, one quad each. A car pulling out's
+ * car pulling out's marker's 8 and its two indicators' 4, one quad each; then
+ * **1 674**, the owner's ruling of 2026-11-12 that the village frame stay
+ * under `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (it was
+ * 206 318 at 1 770, 20 obstacles each submitting all of these): each of the
+ * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
+ * A car pulling out's
  * body is the parked car's, drawn by its instance too ({@link
  * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
@@ -11720,7 +11758,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_770;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_674;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

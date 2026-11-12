@@ -14,7 +14,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
-import { CAMERA_ABOVE_METRES, MAXIMUM_FIELD_OF_VIEW_DEGREES, NEAR_PLANE_METRES } from './camera';
+import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
+  cameraRig,
+  MAXIMUM_FIELD_OF_VIEW_DEGREES,
+  NEAR_PLANE_METRES,
+  projectToFrame,
+} from './camera';
 import { deliveryInView } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
@@ -359,6 +366,50 @@ describe('Delivery’s belt — #1814', () => {
       expect(lamps.some((lamp) => lamp.x < -0.4)).toBe(true);
       expect(lamps.some((lamp) => lamp.x > 0.4)).toBe(true);
     }
+    belt.dispose();
+  });
+
+  it('draws a car pulling out’s hazard marker at least 24 px tall on a 1280×800 frame from the chase camera 20 m behind it, and the small kinds’ marker is not — #2506', () => {
+    // The owner's ruling of 2026-11-12: the marker was 8 to 10 px from 20 m.
+    // The product's camera (camera.ts §cameraRig, §projectToFrame) on a level
+    // straight, the rider at the origin heading +z, the car in their lane.
+    const width = 1280;
+    const height = 800;
+    const rig = cameraRig({
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+    });
+    const belt = new DeliveryBelt('stylised');
+    /** The marker's projected height in pixels, `kind`'s instance `metres` ahead of the rider. */
+    const pixelsTall = (kind: DeliveryObstacleKind, metres: number): number => {
+      const marker = drawnBy(belt, kind).filter((vertex) => vertex.glows && isHazardRed(vertex));
+      expect(marker.length, kind).toBeGreaterThan(0);
+      const tops = marker.map((vertex) => {
+        const seen = projectToFrame(rig, width / height, {
+          x: vertex.x,
+          y: vertex.y,
+          z: vertex.z + metres,
+        });
+        if (seen === undefined) throw new Error(`${kind}'s marker is not in front of the eye`);
+        // In the frame, not off its edge.
+        expect(seen.top).toBeGreaterThan(0);
+        expect(seen.left).toBeGreaterThan(0);
+        expect(seen.left).toBeLessThan(1);
+        return seen.top * height;
+      });
+      return Math.max(...tops) - Math.min(...tops);
+    };
+    expect(pixelsTall('car-pulling-out', 20)).toBeGreaterThanOrEqual(24);
+    expect(pixelsTall('car-pulling-out', 12)).toBeGreaterThanOrEqual(36);
+    // The control: the small kinds' marker, the size the owner could not read,
+    // is under the floor, so the floor tells the two apart.
+    expect(pixelsTall('bin', 20)).toBeLessThan(12);
     belt.dispose();
   });
 
@@ -814,8 +865,11 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // markers, 1 546. #2364 adds a dog (72) and another rider (124), each with
     // a marker, 1 758, and raises this bound from 1 600 to 1 800 for the
     // owner's approval in its pull request. #2506 adds a car pulling out's
-    // marker (8) and two one-quad indicators (4), 1 770, inside that bound. A change past this is for the owner and
-    // the tablet (#733), not a quiet drift.
+    // marker (8) and two one-quad indicators (4), 1 770, inside that bound,
+    // and then, on the owner's ruling of 2026-11-12 that the village frame
+    // stay under 205 000 triangles, trims the car's rims to one outward disc
+    // each (32 to 8), 1 674; its tyres stay round in 12 (above). A change
+    // past this is for the owner and the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
     expect(position.count / 3).toBe(DELIVERY_OBSTACLE_TRIANGLES);
