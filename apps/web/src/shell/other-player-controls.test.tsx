@@ -10,7 +10,7 @@
  * send. Whether the rider's app then obeys is spike 0034 §7's device rows.
  */
 
-import { act } from 'react';
+import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -57,8 +57,31 @@ vi.mock('./lazy/more', () => ({
   ),
 }));
 
+const { standInGroup } = vi.hoisted(() => ({
+  /**
+   * The ride group's module with every named export a view rendering one
+   * paragraph (not a landmark: `AppShell` already wraps a view in its own
+   * `<main>`), so a view added to the group later is stood in unasked, as
+   * `header-mute.test.tsx` does. `then` is left undefined: the module is
+   * awaited by `import()`.
+   */
+  standInGroup: (): object =>
+    new Proxy(
+      {},
+      {
+        has: (_target, name) => typeof name === 'string' && name !== 'then',
+        get: (_target, name) =>
+          typeof name === 'string' && name !== 'then'
+            ? function StandInView(): ReactElement {
+                return <p>{name}</p>;
+              }
+            : undefined,
+      },
+    ),
+}));
+
 /**
- * The ride routes' views, reduced to a landmark each, for the same reason as
+ * The ride routes' views, reduced to one paragraph each, for the same reason as
  * the side camera above: whether the controls show on a ride route is
  * `AppShell`'s guard (`otherPlayerMayShow`), read off the route, and the real
  * `RideView` and `GameView` would only be the cost of loading them. #2525's
@@ -68,11 +91,7 @@ vi.mock('./lazy/more', () => ({
  * average of 14 to 17, with a 20 s timeout; now 6 to 84 ms, and 6 to 119 ms
  * under --coverage, at 15 to 17.
  */
-vi.mock('./lazy/ride', () => ({
-  RideView: () => <main>The ride</main>,
-  GameView: () => <main>The game</main>,
-  WorkoutsView: () => <main>Workouts</main>,
-}));
+vi.mock('./lazy/ride', () => standInGroup());
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
