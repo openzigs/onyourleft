@@ -1853,7 +1853,7 @@ describe('the realistic rider moves like a rider — #625', () => {
     );
     expect(moved).toBeGreaterThan(0.04);
     expect(worst).toBeLessThan(0.01);
-  }, 120_000);
+  });
 });
 
 /**
