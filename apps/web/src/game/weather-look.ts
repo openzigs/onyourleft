@@ -222,7 +222,7 @@ export function sceneryShadeIn(
  * tree's impostor, whose relight is a ratio and so keeps its daytime
  * brightness under any sun, and the rain's streaks, which are unlit.
  */
-export function sceneLightIn(
+export function sunShareIn(
   day: SunStyle,
   drawn: SunStyle,
   weather?: DeliveryWeatherFrame,

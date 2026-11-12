@@ -319,13 +319,13 @@ describe('the realistic plants and hedges go down at dusk with the ground — PR
     for (const shape of [wood.broadleaf, wood.conifer]) {
       const impostor = impostorOf(shape);
       expect(impostor.fragmentShader).toContain(
-        'gl_FragColor.rgb *= oylWeatherShade * oylImpostorLight;',
+        'gl_FragColor.rgb *= oylWeatherShade * oylImpostorSun;',
       );
-      expect(impostor.fragmentShader.indexOf('oylWeatherShade * oylImpostorLight')).toBeLessThan(
+      expect(impostor.fragmentShader.indexOf('oylWeatherShade * oylImpostorSun')).toBeLessThan(
         impostor.fragmentShader.indexOf('#include <tonemapping_fragment>'),
       );
       expect(bound.has(impostor.uniforms['oylWeatherShade'])).toBe(true);
-      expect(impostor.uniforms['oylImpostorLight']?.value).toBeDefined();
+      expect(impostor.uniforms['oylImpostorSun']?.value).toBeDefined();
     }
   });
 

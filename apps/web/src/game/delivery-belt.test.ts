@@ -396,15 +396,15 @@ describe('Delivery’s belt — #1814', () => {
         return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
       },
     );
-    belt.setRainLight([1, 1, 1]);
+    belt.setRainShare([1, 1, 1]);
     belt.rainColour().forEach((channel, at) => expect(channel).toBeCloseTo(paint[at] ?? 0, 6));
     const dusk = [0.3, 0.16, 0.12] as const;
-    belt.setRainLight(dusk);
+    belt.setRainShare(dusk);
     belt
       .rainColour()
       .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
     // Each frame from the paint, never from the last frame's colour.
-    belt.setRainLight(dusk);
+    belt.setRainShare(dusk);
     belt
       .rainColour()
       .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));

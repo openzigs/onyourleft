@@ -26,7 +26,7 @@ import {
   RAIN_ROAD_TINT,
   RAIN_SKY_GREY,
   roadTintIn,
-  sceneLightIn,
+  sunShareIn,
   sceneryShadeIn,
   sunColourIn,
   weatheredWorld,
@@ -219,7 +219,7 @@ describe('the scenery goes down at dusk with the ground it stands on — PR #252
 
 describe('what the lamps do not reach is lit by the frame’s share of the route’s light — PR #2522', () => {
   const lightIn = (weather?: { dusk: boolean; rain: boolean }) =>
-    sceneLightIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather);
+    sunShareIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather);
 
   it('gives the whole of it in clear daylight', () => {
     expect(lightIn()).toEqual([1, 1, 1]);
@@ -259,6 +259,6 @@ describe('what the lamps do not reach is lit by the frame’s share of the route
 
   it('gives all of it for a route with no light to share', () => {
     const dark = { ...DAY.sun, ambient: 0, direct: 0 };
-    expect(sceneLightIn(dark, dark)).toEqual([1, 1, 1]);
+    expect(sunShareIn(dark, dark)).toEqual([1, 1, 1]);
   });
 });

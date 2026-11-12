@@ -728,7 +728,7 @@ import {
 } from './waterways';
 import {
   roadTintIn,
-  sceneLightIn,
+  sunShareIn,
   sceneryShadeIn,
   sunColourIn,
   weatheredWorld,
@@ -8997,10 +8997,10 @@ const FOLIAGE = {
   oylWeatherShade: { value: new Vector3(1, 1, 1) },
   /**
    * PR #2522: how much of the route's own light the frame's sun gives, linear
-   * (`weather-look.ts` §`sceneLightIn`) — read by the impostors alone, whose
+   * (`weather-look.ts` §`sunShareIn`) — read by the impostors alone, whose
    * relight is a ratio and so never dims with the sun the meshes are lit by.
    */
-  oylImpostorLight: { value: new Vector3(1, 1, 1) },
+  oylImpostorSun: { value: new Vector3(1, 1, 1) },
 };
 
 /** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
@@ -11820,9 +11820,9 @@ export const RAIN_TRIANGLES = RAIN_STREAKS * 2 * 2 * 2;
 /**
  * The rain's paint, sRGB, and how opaque a streak is. PR #2522: the paint in
  * the route's own light; each frame it is multiplied by how much of that
- * light the frame's sun gives (`weather-look.ts` §`sceneLightIn`), so a
+ * light the frame's sun gives (`weather-look.ts` §`sunShareIn`), so a
  * streak is lit with the scene — greyer in daytime rain, dim and warm at dusk
- * — where an unlit one glowed white whatever the light. @see DeliveryBelt.setRainLight
+ * — where an unlit one glowed white whatever the light. @see DeliveryBelt.setRainShare
  */
 export const RAIN_COLOUR = 0xb4c4d2;
 const RAIN_OPACITY = 0.55;
@@ -11990,11 +11990,11 @@ export class DeliveryBelt {
   }
 
   /**
-   * Lights the rain with the scene — PR #2522: its paint
+   * Gives the rain the scene's light — PR #2522: its paint
    * ({@link RAIN_COLOUR}, linear) times `light`, linear, each channel. A colour
    * write and no draw call.
    */
-  setRainLight(light: readonly [number, number, number]): void {
+  setRainShare(light: readonly [number, number, number]): void {
     const material = this.#rain.material;
     material.color.setHex(RAIN_COLOUR);
     material.color.setRGB(
@@ -12838,7 +12838,7 @@ function impostorMaterial(
       uniform float oylSunDirect;
       uniform float oylImpostorLit;
       uniform vec3 oylWeatherShade;
-      uniform vec3 oylImpostorLight;
+      uniform vec3 oylImpostorSun;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
@@ -12890,7 +12890,7 @@ function impostorMaterial(
         ${IMPOSTOR_TINT_LINE}
         // PR #2522: the weather's shade, as the tree's meshes wear it, and the
         // sun's dimming, which the ratio above takes out and the meshes keep.
-        gl_FragColor.rgb *= oylWeatherShade * oylImpostorLight;
+        gl_FragColor.rgb *= oylWeatherShade * oylImpostorSun;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -12905,7 +12905,7 @@ function impostorMaterial(
   material.uniforms['oylSunDirect'] = FOLIAGE.oylSunDirect;
   material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
   material.uniforms['oylWeatherShade'] = FOLIAGE.oylWeatherShade;
-  material.uniforms['oylImpostorLight'] = FOLIAGE.oylImpostorLight;
+  material.uniforms['oylImpostorSun'] = FOLIAGE.oylImpostorSun;
   material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
   material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
   material.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
@@ -22643,7 +22643,7 @@ export interface DeliveryWeatherReadback {
   /** The realistic vegetation's and hedges' shade, the uniform they read. */
   readonly foliageShade: readonly [number, number, number];
   /** The realistic impostors' share of the route's light, the uniform they read. */
-  readonly impostorLight: readonly [number, number, number];
+  readonly impostorSun: readonly [number, number, number];
   /** The rain's colour, its material's; absent before a frame carried a round. */
   readonly rainColour: readonly [number, number, number] | undefined;
   /** The nearest any streak stands to the camera across the ground, metres; absent with no rain drawn. */
@@ -22951,8 +22951,8 @@ class ThreeGameView implements GameView {
   #drawing: QualitySettings['world'] = 'stylised';
   /** This frame's Delivery weather, if its round has any — #2508. @see render */
   #weather: DeliveryWeatherFrame | undefined;
-  /** PR #2522: this frame's share of the route's light, linear. @see sceneLightIn */
-  #sceneLight: readonly [number, number, number] = [1, 1, 1];
+  /** PR #2522: this frame's share of the route's light, linear. @see sunShareIn */
+  #sunShare: readonly [number, number, number] = [1, 1, 1];
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -23067,7 +23067,7 @@ class ThreeGameView implements GameView {
     // and what the lamps do not reach — the far impostors and the rain — is
     // lit by the share of the route's light the frame's sun gives.
     const shade = sceneryShadeIn(given.world, this.#weather);
-    this.#sceneLight = sceneLightIn(given.world.sun, frame.world.sun, this.#weather);
+    this.#sunShare = sunShareIn(given.world.sun, frame.world.sun, this.#weather);
     this.#scatter.setShade(shade);
     this.#stage(frame);
     // #619 lever 2: this view's rung, written into the one uniform every
@@ -23090,7 +23090,7 @@ class ThreeGameView implements GameView {
       FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
       // PR #2522: and the weather's shade and light, for the plants and the hedges.
       FOLIAGE.oylWeatherShade.value.set(...shade);
-      FOLIAGE.oylImpostorLight.value.set(...this.#sceneLight);
+      FOLIAGE.oylImpostorSun.value.set(...this.#sunShare);
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -23248,7 +23248,7 @@ class ThreeGameView implements GameView {
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
-    this.#delivery?.setRainLight(this.#sceneLight);
+    this.#delivery?.setRainShare(this.#sunShare);
     this.#delivery?.update(view, eye, seconds);
     // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
     if (this.#renderer !== undefined && this.#drawing === 'realistic') {
@@ -23288,7 +23288,7 @@ class ThreeGameView implements GameView {
       ground: this.#terrain.colour(),
       sceneryShade: this.#scatter.shade(),
       foliageShade: FOLIAGE.oylWeatherShade.value.toArray(),
-      impostorLight: FOLIAGE.oylImpostorLight.value.toArray(),
+      impostorSun: FOLIAGE.oylImpostorSun.value.toArray(),
       rainColour: this.#delivery?.rainColour(),
       rainClearance:
         this.#delivery?.rainShown() === true

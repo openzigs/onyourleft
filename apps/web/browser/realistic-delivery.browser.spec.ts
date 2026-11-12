@@ -206,7 +206,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     // ground — darker, and warm — and no streak stood by the camera.
     const back = level.page.weather?.readback;
     console.log(`PR #2522 realistic weather readback: ${JSON.stringify(back)}`);
-    for (const shade of [back?.foliageShade, back?.impostorLight]) {
+    for (const shade of [back?.foliageShade, back?.impostorSun]) {
       expect(shade?.[0] ?? Infinity).toBeLessThan(0.6);
       expect(shade?.[0] ?? 0).toBeGreaterThan((shade?.[2] ?? Infinity) * 1.2);
     }
