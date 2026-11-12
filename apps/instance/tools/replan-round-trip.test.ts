@@ -203,7 +203,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     // And no two jobs sent it the same ride: a model server that keeps its
     // last prompt would otherwise skip evaluating the input every time.
     expect(JSON.stringify(model?.requests[2])).not.toBe(JSON.stringify(model?.requests[0]));
-  }, 60_000);
+  });
 
   it('measures the same job in plaintext against an instance with no keys, sealing nothing', async () => {
     const url = await instance([...TWO_STEPS, ...TWO_STEPS], false);
@@ -213,18 +213,18 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     expect(run?.steps).toHaveLength(2);
     expect([run?.sealMs, run?.openMs]).toEqual([0, 0]);
     expect(run?.serverMs).not.toBeNull();
-  }, 60_000);
+  });
 
   it('cannot be run in plaintext against an instance that holds keys', async () => {
     const url = await instance(TWO_STEPS, true);
     await expect(measure(options(url, 'plaintext'))).rejects.toThrow('sealed_required');
     expect(model?.paths).toEqual([]);
-  }, 60_000);
+  });
 
   it('says an instance with no keys cannot be measured sealed', async () => {
     const url = await instance(TWO_STEPS, false);
     await expect(measure(options(url, 'sealed'))).rejects.toThrow('serves no encryption key');
-  }, 60_000);
+  });
 
   it('takes a new account before one athlete’s twelve starts an hour run out', async () => {
     const url = await instance(
@@ -263,7 +263,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     expect(cold.coldTotalMs?.n).toBe(2);
     const none = await measure(options(url, 'plaintext', { runs: 0, coldRuns: 2 }));
     expect([none.warmUp, none.cold, none.coldTotalMs]).toEqual([null, [], null]);
-  }, 60_000);
+  });
 
   it('reports no cold figure for a run whose unload failed, and marks that run not unloaded — #1271', async () => {
     const url = await instance(
@@ -298,7 +298,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     );
     expect(failing.cold.map((run) => run.unloaded)).toEqual([false]);
     expect([failing.coldTotalMs, failing.coldFirstStepMs]).toEqual([null, null]);
-  }, 60_000);
+  });
 
   it('records a run that outlived its time as timed-out, cancels it, and leaves it out of the figures', async () => {
     const url = await instance([{ kind: 'slow', milliseconds: 5_000, then: TEXT }], false);
@@ -316,7 +316,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     await running?.analysisJobs()?.idle();
     // The cancel closed the model call in flight; the server sees the socket close a moment later.
     await vi.waitFor(() => expect(model?.closedEarly).toBe(1));
-  }, 60_000);
+  });
 
   it('records a run whose stream was cut as connection-lost, and goes on to the next run', async () => {
     const url = await instance([TEXT, TEXT, TEXT], false);
@@ -361,7 +361,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
       vi.restoreAllMocks();
     }
     await running?.analysisJobs()?.idle();
-  }, 60_000);
+  });
 
   it('stops on a stream that is refused, which is a fault and not a lost connection', async () => {
     const url = await instance([TEXT, TEXT], false);
@@ -380,7 +380,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
       vi.restoreAllMocks();
     }
     await running?.analysisJobs()?.idle();
-  }, 60_000);
+  });
 
   it('keeps a job that failed out of the figures, under its own reason', async () => {
     const url = await instance(
@@ -390,7 +390,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     const report = await measure(options(url, 'plaintext'));
     expect(Object.keys(report.statuses)).toEqual([expect.stringMatching(/^failed:model-/)]);
     expect(report.summary.totalMs).toBeNull();
-  }, 60_000);
+  });
 });
 
 /** Where the hosted service is said to be. Nothing listens there: {@link hostedService} stands in. */
@@ -486,6 +486,14 @@ async function catching(): Promise<{ url: string; requests: string[] }> {
  */
 const FIRST_OF_THE_CLEAN_UP = 11;
 
+/**
+ * The bound of a wait inside an interrupted run's case, which has Vitest's
+ * 5 s (#2550's review, F3): under the case's budget, so a wait that never
+ * ends, or an interruption that waited for the 20 s run in flight, fails on
+ * its own assertion rather than as "Test timed out in 5000ms".
+ */
+const WAIT_MS = 3_000;
+
 describe('the round-trip measurement of a hosted model, on a key of the measurer’s own — #1235', () => {
   it('measures a hosted job to its decrypted result, on the hosted server with the key, and says the key nowhere', async () => {
     const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
@@ -514,7 +522,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect(lines.join('\n')).not.toContain(MARKER);
     // Afterwards the account holds neither: read back through GET /v1/analysis/hosted.
     expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
-  }, 60_000);
+  });
 
   it('says which source a local measurement ran on, and nothing of a hosted one', async () => {
     const url = await instance([TEXT, TEXT], true);
@@ -524,7 +532,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect(report.hosted).toBeUndefined();
     // No account was sent a key, so none is cleared.
     expect(lines).toHaveLength(2);
-  }, 60_000);
+  });
 
   it('clears the key and the consent when the run throws', async () => {
     const service = await hostedService(Array.from({ length: 12 }, () => TEXT));
@@ -544,7 +552,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect(service.authorizations).toHaveLength(12);
     expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
     expect(lines.join('\n')).not.toContain(MARKER);
-  }, 60_000);
+  });
 
   it('clears every account it took, not only the last', async () => {
     const service = await hostedService(Array.from({ length: 3 }, () => TEXT));
@@ -568,7 +576,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
       'warm 2',
       'account 2: the hosted key and consent are cleared',
     ]);
-  }, 60_000);
+  });
 
   it('tries an account’s clean-up again when its first attempt is lost, and reads it back cleared — #1270', async () => {
     const service = await hostedService([TEXT, TEXT]);
@@ -582,14 +590,13 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect(report.statuses).toEqual({ succeeded: 1 });
     expect(report.hosted?.cleared).toBe(true);
     expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
-  }, 60_000);
+  });
 
   it('stops when interrupted, without waiting for the run in flight, and clears the key first — #1270', async () => {
     const service = await hostedService([{ kind: 'slow', milliseconds: 20_000, then: TEXT }]);
     const url = await instance([], true, service.fetch);
     const lines: string[] = [];
     const stop = new AbortController();
-    const began = performance.now();
     const measuring = measure(
       options(url, 'sealed', {
         hosted: HOSTED,
@@ -598,14 +605,17 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
       }),
     ).catch((error: unknown) => error);
     // Interrupted once the hosted service has the warm-up's request.
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: WAIT_MS });
+    // Timed from the interruption, not the start, so the wait above is not
+    // counted against it.
+    const interrupted = performance.now();
     stop.abort();
     const failure = await measuring;
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe(INTERRUPTED);
-    expect(performance.now() - began).toBeLessThan(15_000);
+    expect(performance.now() - interrupted).toBeLessThan(WAIT_MS);
     expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
-  }, 60_000);
+  });
 
   it('waits for an account being cleared when interrupted, and does not report it cleared early — #1270', async () => {
     const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
@@ -627,13 +637,13 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
         log: (line) => lines.push(line),
       }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(held).toBe(true), { timeout: 30_000 });
+    await vi.waitFor(() => expect(held).toBe(true), { timeout: WAIT_MS });
     stop.abort();
     const failure = await measuring;
     expect((failure as Error).message).toBe(INTERRUPTED);
     // The clear that was in flight finished, and said so, before the tool answered.
     expect(lines).toContain('account 1: the hosted key and consent are cleared');
-  }, 60_000);
+  });
 
   it('says to revoke the key when interrupted and an account cannot be read back as cleared — #1270', async () => {
     const service = await hostedService([{ kind: 'slow', milliseconds: 20_000, then: TEXT }]);
@@ -645,13 +655,13 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     const measuring = measure(
       options(url, 'sealed', { hosted: HOSTED, signal: stop.signal }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: WAIT_MS });
     // The instance cannot be reached from the interruption on.
     down = true;
     stop.abort();
     const failure = await measuring;
     expect((failure as Error).message).toBe(KEY_NOT_CLEARED);
-  }, 60_000);
+  });
 
   it('takes no account and sends no key when interrupted before it begins — #1270', async () => {
     const service = await hostedService([]);
@@ -678,7 +688,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     }
     expect(lines).toEqual([]);
     expect(service.authorizations).toEqual([]);
-  }, 60_000);
+  });
 
   it('follows no redirect while a hosted key is in play: of the key, nor of the key it is sealed to — #1270', async () => {
     const service = await hostedService([]);
@@ -703,7 +713,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     }
     expect(elsewhere.requests).toEqual([]);
     expect(service.authorizations).toEqual([]);
-  }, 60_000);
+  });
 
   it('stops on a set-up the instance refuses, naming the step, the code and the field — and clears what it may have left', async () => {
     const service = await hostedService([]);
@@ -721,7 +731,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     );
     expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
     expect(service.authorizations).toEqual([]);
-  }, 60_000);
+  });
 
   it('files a hosted job the service refused under its own reason, never as a lost connection', async () => {
     const service = await hostedService([
@@ -738,7 +748,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect(report.hosted?.cleared).toBe(true);
     expect(JSON.stringify(report)).not.toContain(MARKER);
     expect(lines.join('\n')).not.toContain(MARKER);
-  }, 60_000);
+  });
 
   it('says so, in the report and aloud, when an account cannot be read back as cleared', async () => {
     const service = await hostedService([TEXT, TEXT]);
@@ -769,7 +779,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     } finally {
       vi.restoreAllMocks();
     }
-  }, 60_000);
+  });
 
   it('refuses a hosted model in plaintext, before anything is sent', async () => {
     const service = await hostedService([]);
@@ -783,7 +793,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     } finally {
       vi.restoreAllMocks();
     }
-  }, 60_000);
+  });
 
   it('refuses a hosted model through plain http: to another machine, before anything is sent', async () => {
     // Rejecting, so that nothing leaves this machine even when the refusal is broken.
@@ -954,7 +964,7 @@ describe('the hosted options of the command — #1235', () => {
     expect(ran.status).toBe(2);
     expect(ran.stderr).toContain('OYL_MEASURE_HOSTED_KEY is not set');
     expect(ran.stdout).toBe('');
-  }, 60_000);
+  });
 
   it('the command hands the variable’s key to the measurement, which refuses plaintext without printing it', () => {
     const ran = command(
@@ -964,7 +974,7 @@ describe('the hosted options of the command — #1235', () => {
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain('sealed transport only');
     expect(`${ran.stdout}${ran.stderr}`).not.toContain(MARKER);
-  }, 60_000);
+  });
 });
 
 describe('the command, run hosted against an instance — #1235', () => {
@@ -1019,7 +1029,7 @@ describe('the command, run hosted against an instance — #1235', () => {
     });
     expect(service.authorizations).toEqual([`Bearer ${MARKER_KEY}`, `Bearer ${MARKER_KEY}`]);
     expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
-  }, 60_000);
+  });
 
   it('exits 3, its last line on stderr saying to revoke the key, when an account could not be read back as cleared', async () => {
     const service = await hostedService([TEXT, TEXT]);
@@ -1032,7 +1042,7 @@ describe('the command, run hosted against an instance — #1235', () => {
     expect(ran.err.trimEnd().split('\n').at(-1)).toBe(KEY_NOT_CLEARED);
     expect(ran.status).toBe(3);
     expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
-  }, 60_000);
+  });
 
   it('clears every account on Ctrl-C and exits 130, without waiting for the run in flight — #1270', async () => {
     const service = await hostedService([{ kind: 'slow', milliseconds: 30_000, then: TEXT }]);
@@ -1053,7 +1063,7 @@ describe('the command, run hosted against an instance — #1235', () => {
     expect(ran.status).toBe(130);
     expect(ran.out).toBe('');
     expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
-  }, 60_000);
+  });
 
   it('refuses a --url or --hosted-url that is not a URL, by name and without the value — #1270', () => {
     const pasted = 'sk-PASTEDVALUE5R8W';
@@ -1077,7 +1087,7 @@ describe('the command, run hosted against an instance — #1235', () => {
       expect(ran.stderr).toContain(`${option} is not a URL`);
       expect(`${ran.stdout}${ran.stderr}`).not.toContain('PASTEDVALUE');
     }
-  }, 60_000);
+  });
 });
 
 describe('the command’s --unload, run by this machine’s own shell — #1287', () => {
@@ -1131,7 +1141,7 @@ describe('the command’s --unload, run by this machine’s own shell — #1287'
     expect(report.cold.map((run) => run.unloaded)).toEqual([true, true]);
     expect(report.coldTotalMs).not.toBeNull();
     expect(done.err).not.toContain('so this run is not counted cold');
-  }, 60_000);
+  });
 
   it('reports no cold figure when the unload command fails, and says so — #1271', async () => {
     const url = await instance(
@@ -1153,7 +1163,7 @@ describe('the command’s --unload, run by this machine’s own shell — #1287'
     };
     expect(report.cold.map((run) => run.unloaded)).toEqual([false, false]);
     expect([report.coldTotalMs, report.coldFirstStepMs]).toEqual([null, null]);
-  }, 60_000);
+  });
 });
 
 describe('the options the command does not have — #1235', () => {
@@ -1212,5 +1222,5 @@ describe('the options the command does not have — #1235', () => {
     expect(ran.status).toBe(2);
     expect(ran.stderr).toContain('--hosted-key is not an option');
     expect(`${ran.stdout}${ran.stderr}`).not.toContain(MARKER);
-  }, 60_000);
+  });
 });
