@@ -16,6 +16,7 @@ import { roadCorridor } from '../terrain';
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery-progress';
 import { deliveryTown } from './delivery-town-testing';
+import { LEVEL_PROGRESS_STORAGE_KEY, NO_LEVEL_FINISHED, readLevelProgress } from './level-progress';
 import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
@@ -32,6 +33,7 @@ import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  keepLevelFinished,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -43,6 +45,7 @@ import {
   FIRST_DAY_HOUSES,
   FRESH_WEEK,
   roundTally,
+  type RoundOutcome,
   type WeekProgress,
 } from './round';
 import type { DeliveryTarget } from './targets';
@@ -849,6 +852,7 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     houses: FIRST_DAY_HOUSES + 2,
     hazardsPerKilometre: { static: 4, moving: 0 },
     lengthMetres: 3000,
+    id: 'test-level',
   } as const;
 
   function onLevel(storage = storageOf()): DeliveryRide {
@@ -918,5 +922,55 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     // The week's own round is kept, as before.
     const own = started(storage);
     expect(keepDeliveryWeek(storage, endDeliveryRide(own), own)).toBe(true);
+  });
+
+  describe('keeps the level finished when its round reaches its end — #2363, ADR 0065 D-9', () => {
+    /** The round ridden to its own end: past every house's window, with every house settled. */
+    function finished(ride: DeliveryRide): DeliveryRide {
+      const end = rideTo(ride, town.profile.totalDistance - 1).ride;
+      expect(end.outcome).toBeDefined();
+      return end;
+    }
+
+    it('keeps its id, read back from the device, and the week as it was (D-9.2, D-9.3)', () => {
+      const week: WeekProgress = { day: 4, houses: FIRST_DAY_HOUSES, score: 6 };
+      const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+      const weekBefore = readDeliveryProgress(storage);
+      const ride = finished(withoutObstacles(onLevel(storage)));
+      expect(ride.levelId).toBe(LEVEL.id);
+      expect(keepDeliveryWeek(storage, ride.outcome as RoundOutcome, ride)).toBe(false);
+      expect(keepLevelFinished(storage, ride)).toBe(true);
+      expect(readLevelProgress(storage)).toStrictEqual({ finished: [LEVEL.id] });
+      expect(readDeliveryProgress(storage)).toStrictEqual(weekBefore);
+      expect(readDeliveryProgress(storage)).toStrictEqual(week);
+    });
+
+    it('counts a round ridden with the assisted setting on (D-9.1, the owner’s answer to Q2)', () => {
+      const assist: DeliveryAssist = { obstacles: 'fewer', widerWindows: true, noFail: true };
+      const storage = storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist });
+      const ride = finished(withoutObstacles(onLevel(storage)));
+      expect(ride.widerWindows).toBe(true);
+      expect(ride.round.assisted).toBe(true);
+      expect(keepLevelFinished(storage, ride)).toBe(true);
+      expect(readLevelProgress(storage).finished).toStrictEqual([LEVEL.id]);
+    });
+
+    it('finishes nothing on a ride ended before the round’s end', () => {
+      const storage = storageOf();
+      const ride = rideTo(withoutObstacles(onLevel(storage)), 10).ride;
+      expect(ride.outcome).toBeUndefined();
+      endDeliveryRide(ride);
+      expect(keepLevelFinished(storage, ride)).toBe(false);
+      expect(readLevelProgress(storage)).toStrictEqual(NO_LEVEL_FINISHED);
+      expect(storage.items.has(LEVEL_PROGRESS_STORAGE_KEY)).toBe(false);
+    });
+
+    it('finishes no level on a rider’s own route', () => {
+      const storage = storageOf();
+      const own = finished(withoutObstacles(started(storage)));
+      expect(own.levelId).toBeUndefined();
+      expect(keepLevelFinished(storage, own)).toBe(false);
+      expect(storage.items.has(LEVEL_PROGRESS_STORAGE_KEY)).toBe(false);
+    });
   });
 });
