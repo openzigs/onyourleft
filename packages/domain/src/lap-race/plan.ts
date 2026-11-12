@@ -313,10 +313,11 @@ export interface BotPlanTactic {
    * Which wheel the target holds (#2542), shaped to the road and the draft
    * already, so the plan rides it as it is, its style and the grade adding
    * nothing: `'sit-in'`, never past what the plan itself rides here, so a
-   * wheel that attacks is let go; `'follow'`, as far as W′ pays. Absent, it
-   * holds none.
+   * wheel that attacks is let go; `'follow'`, as far as W′ pays; `'recover'`
+   * (#2543), never past the recovering target the tactic has already held it
+   * to. Absent, it holds none.
    */
-  readonly wheel?: 'sit-in' | 'follow';
+  readonly wheel?: 'sit-in' | 'follow' | 'recover';
   /**
    * Whether the bot rides in a draft this tick, `k` < 1 (#2542). On a wheel in
    * a draft the floor does not apply (ADR 0067 D-1.3, R-10). Absent, it does not.

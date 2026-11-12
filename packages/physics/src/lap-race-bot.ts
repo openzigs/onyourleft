@@ -69,6 +69,10 @@
  * in a draft (ADR 0067 D-1.3, R-10) and, sitting in, no harder than the plan
  * itself rides the road there.
  *
+ * Since #2543 the wheel is the racer ahead's, or, where that racer has lost
+ * its own wheel and the one in front of it is in reach, that one's: a bot
+ * comes round a fader rather than go backwards with it.
+ *
  * ## The draft (#2460, ADR 0067 D-3)
  *
  * With {@link BotRaceStep.draft} on, the field drafts: ADR 0038's model,
@@ -109,6 +113,8 @@ import {
   BOT_MASS_KILOGRAMS,
   BOT_MEMORY_AT_START,
   BOT_TACTIC_MOVE_SHARE,
+  BOT_TACTIC_WHEEL_LOST_METRES,
+  BOT_TACTIC_WHEEL_METRES,
   botPlanStep,
   botRacePlan,
   botTierPlan,
@@ -211,6 +217,8 @@ interface Wheel {
   readonly power: number | null;
   /** Its own draft multiplier. */
   readonly k: number;
+  /** Its pace (#2543): a bot's CP, the rider's power over their `k`, or `null` unread. */
+  readonly pace: number | null;
   /**
    * Whether its speed is the tick's average rather than the speed at its
    * start: the rider's, from how far this tick's inputs moved them.
@@ -218,9 +226,40 @@ interface Wheel {
   readonly averaged: boolean;
 }
 
+/** A racer in the race as it stood. */
+type Racer = ItemRaceState['racers'][number]['racer'];
+
+/**
+ * Whether `ahead` has lost the wheel of `before`, the racer in front of it
+ * (#2543): more than `tactics.ts` §`BOT_TACTIC_WHEEL_LOST_METRES` behind it and
+ * no faster, so it is not closing back on. A bot behind it comes round it to
+ * `before`. A speed that cannot be read (the rider with no effort distance this
+ * tick) loses nothing.
+ */
+function lostItsWheel(
+  ahead: Racer,
+  before: Racer,
+  speedOf: (racer: Racer) => number | undefined,
+): boolean {
+  const aheadSpeed = speedOf(ahead);
+  const beforeSpeed = speedOf(before);
+  return (
+    before.effortDistance - ahead.effortDistance > BOT_TACTIC_WHEEL_LOST_METRES &&
+    aheadSpeed !== undefined &&
+    beforeSpeed !== undefined &&
+    aheadSpeed <= beforeSpeed
+  );
+}
+
 /** What a bot that leads reads of the wheel ahead: none. */
-const NO_WHEEL: Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'aheadEffortWatts'> =
-  Object.freeze({ closingMetresPerSecond: 0, holdWatts: null, aheadEffortWatts: null });
+const NO_WHEEL: WheelRead = Object.freeze({
+  closingMetresPerSecond: 0,
+  holdWatts: null,
+  wheelPaceWatts: null,
+});
+
+/** The view's fields on the wheel a bot holds. */
+type WheelRead = Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'wheelPaceWatts'>;
 
 /**
  * What a bot reads of the wheel ahead (#2542), through the one physics:
@@ -232,7 +271,7 @@ const NO_WHEEL: Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'aheadEf
  *   costs it on its own road, in its own draft). A wheel slowing onto a climb
  *   at a steady power asks the bot for less, not for what that speed would
  *   cost up the climb;
- * - how hard it rides, as if in the open: its power over its own `k`.
+ * - its pace: a bot's CP, or the rider's power over their own `k` (#2543).
  *
  * With its power unread, the bot rides what holds its speed. The rider's speed
  * is the tick's average, half a tick ahead of the bots' own: it is read back
@@ -245,7 +284,7 @@ function readWheel(
   k: number,
   ahead: Wheel,
   elapsed: number,
-): Pick<RaceView, 'closingMetresPerSecond' | 'holdWatts' | 'aheadEffortWatts'> {
+): WheelRead {
   let speed: number = ahead.ride.speed;
   if (ahead.averaged && ahead.power !== null && speed > 0) {
     const spare = ahead.power - botHoldWatts(ahead.ride, ahead.course, speed, ahead.k);
@@ -257,7 +296,7 @@ function readWheel(
   return {
     closingMetresPerSecond: own.speed - speed,
     holdWatts: botHoldWatts(own, course, speed, k) + surplus,
-    aheadEffortWatts: ahead.power === null ? null : ahead.power / ahead.k,
+    wheelPaceWatts: ahead.pace,
   };
 }
 
@@ -352,6 +391,39 @@ export function stepBotRace(
       ? undefined
       : (riderTo - rider.effortDistance) / step.elapsed;
   const raceMetres = race.course.lapLengthMetres * race.course.laps;
+  /** A racer's speed as the bots read it: a bot's own, the rider's this tick, or unknown. */
+  const speedOf = (racer: Racer): number | undefined =>
+    field.get(racer.id)?.ride.speed ?? (racer.id === rider?.id ? riderSpeed : undefined);
+  /**
+   * A racer as a wheel (#2542): where it is, how fast, at what mass and power,
+   * and its `k`. The rider rides at the reading bot's mass: the W/kg they ride.
+   */
+  const wheelOf = (racer: Racer, reader: BotCourse): Wheel => {
+    const wheelBot = field.get(racer.id);
+    const k = factors?.[racer.id] ?? 1;
+    if (wheelBot !== undefined) {
+      return {
+        ride: wheelBot.ride,
+        course: { ...step.conditions, plan: botTierPlan(wheelBot.tier) },
+        power: wheelBot.power,
+        k,
+        pace: wheelBot.plan?.capacity.cpWatts ?? null,
+        averaged: false,
+      };
+    }
+    const speed = riderSpeed ?? 0;
+    return {
+      ride: { distance: metres(racer.effortDistance), speed: metresPerSecond(Math.max(0, speed)) },
+      course: reader,
+      power:
+        riderPerKilogram === null || riderSpeed === undefined
+          ? null
+          : riderPerKilogram * BOT_MASS_KILOGRAMS,
+      k,
+      pace: riderPerKilogram === null ? null : (riderPerKilogram * BOT_MASS_KILOGRAMS) / k,
+      averaged: riderSpeed !== undefined,
+    };
+  };
   const moved = bots.map((bot, seat): LapRaceBot => {
     // How far the bot will ride this tick, near enough: what its puddle
     // look-ahead and its last call grow with.
@@ -377,38 +449,22 @@ export function stepBotRace(
       const ahead = racing[at - 1];
       const behind = racing[at + 1];
       const aheadBot = ahead === undefined ? undefined : field.get(ahead.id);
-      // #2542: the wheel ahead, the rider's or a bot's, as this bot reads it.
+      // #2542: the wheel it holds, the rider's or a bot's, as this bot reads
+      // it. #2543: the racer ahead's, or, where that one has lost its own
+      // wheel and the one before it is in reach, that one's: it comes round.
       const k = factors?.[bot.id] ?? 1;
+      const before = racing[at - 2];
+      const target =
+        ahead !== undefined &&
+        before !== undefined &&
+        before.effortDistance - own.effortDistance <= BOT_TACTIC_WHEEL_METRES &&
+        lostItsWheel(ahead, before, speedOf)
+          ? before
+          : ahead;
       const wheel =
-        ahead === undefined
+        target === undefined
           ? NO_WHEEL
-          : readWheel(
-              bot.ride,
-              course,
-              k,
-              {
-                ride:
-                  aheadBot === undefined
-                    ? {
-                        distance: metres(ahead.effortDistance),
-                        speed: metresPerSecond(Math.max(0, riderSpeed ?? bot.ride.speed)),
-                      }
-                    : aheadBot.ride,
-                course:
-                  aheadBot === undefined
-                    ? course
-                    : { ...step.conditions, plan: botTierPlan(aheadBot.tier) },
-                power:
-                  aheadBot === undefined
-                    ? riderPerKilogram === null || riderSpeed === undefined
-                      ? null
-                      : riderPerKilogram * BOT_MASS_KILOGRAMS
-                    : aheadBot.power,
-                k: factors?.[ahead.id] ?? 1,
-                averaged: aheadBot === undefined && riderSpeed !== undefined,
-              },
-              step.elapsed,
-            );
+          : readWheel(bot.ride, course, k, wheelOf(target, course), step.elapsed);
       const view: RaceView = {
         atMs: race.atMs,
         botIndex: seat,
@@ -437,6 +493,7 @@ export function stepBotRace(
           step.conditions.profile,
           distanceOnRoute(step.conditions.profile, bot.ride.distance + BOT_GRADE_AHEAD_METRES),
         ),
+        wheelGapMetres: target === undefined ? null : target.effortDistance - own.effortDistance,
         ...wheel,
         draftFactor: k,
         energy: bot.energy,
@@ -453,7 +510,7 @@ export function stepBotRace(
       tactic = {
         targetWatts: decided.targetWatts,
         kick: decided.tactic === 'kick',
-        ...(decided.wheel ? { wheel: decided.tactic === 'follow' ? 'follow' : 'sit-in' } : {}),
+        ...(decided.wheel ? { wheel: decided.tactic as NonNullable<BotPlanTactic['wheel']> } : {}),
         drafted: k < 1,
       };
     }

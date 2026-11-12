@@ -369,7 +369,11 @@ describe('its tactics set the level, and the kick opens the sprint (#2463, ADR 0
 });
 
 describe('a wheel’s target is ridden as it is (#2542, ADR 0067 D-1.3)', () => {
-  const wheel = (share: number, held: 'sit-in' | 'follow', drafted = true): BotPlanTactic => ({
+  const wheel = (
+    share: number,
+    held: NonNullable<BotPlanTactic['wheel']>,
+    drafted = true,
+  ): BotPlanTactic => ({
     targetWatts: TIER * share,
     kick: false,
     wheel: held,
@@ -387,6 +391,8 @@ describe('a wheel’s target is ridden as it is (#2542, ADR 0067 D-1.3)', () => 
     for (const grade of [-4, 0, 4]) {
       expect(ride(grade, wheel(0.7, 'follow')), String(grade)).toBeCloseTo(TIER * 0.7, 9);
       expect(ride(grade, wheel(1.2, 'follow')), String(grade)).toBeCloseTo(TIER * 1.2, 9);
+      // #2543: a recovering bot's wheel too, held to its target by its tactic already.
+      expect(ride(grade, wheel(0.6, 'recover')), String(grade)).toBeCloseTo(TIER * 0.6, 9);
     }
   });
 

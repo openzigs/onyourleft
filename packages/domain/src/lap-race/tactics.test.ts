@@ -32,6 +32,7 @@ import {
   BOT_TACTIC_WHEEL_FURTHEST_METRES,
   BOT_TACTIC_WHEEL_GAP_GAIN,
   BOT_TACTIC_WHEEL_GAP_METRES,
+  BOT_TACTIC_WHEEL_LOST_METRES,
   BOT_TACTIC_WHEEL_METRES,
   BOT_TACTIC_WHEEL_NEAREST_METRES,
   BOT_TACTIC_WHEEL_PACE_SHARE,
@@ -80,9 +81,10 @@ function view(changes: Partial<RaceView> = {}): RaceView {
     gradeAheadPercent: 0,
     // #2542: on a wheel 3 m back, as fast as it, which costs it 0.7 of its CP
     // in the draft, the racer ahead riding at its CP.
+    wheelGapMetres: changes.gapAheadMetres === undefined ? 3 : changes.gapAheadMetres,
     closingMetresPerSecond: 0,
     holdWatts: capacity.cpWatts * 0.7,
-    aheadEffortWatts: capacity.cpWatts,
+    wheelPaceWatts: capacity.cpWatts,
     draftFactor: 0.65,
     energy: energyAt(capacity, 1),
     capacity,
@@ -463,14 +465,14 @@ describe('sit-in and follow hold a wheel 0.3–1 m back (#2542)', () => {
     expect(past.targetWatts).toBeCloseTo(cp, 9);
     const slow = target({
       gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES,
-      aheadEffortWatts: cp * BOT_TACTIC_WHEEL_PACE_SHARE - 1,
+      wheelPaceWatts: cp * BOT_TACTIC_WHEEL_PACE_SHARE - 1,
     });
     expect(slow.wheel).toBe(false);
     expect(slow.targetWatts).toBeCloseTo(cp, 9);
     expect(
       target({
         gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES,
-        aheadEffortWatts: cp * BOT_TACTIC_WHEEL_PACE_SHARE,
+        wheelPaceWatts: cp * BOT_TACTIC_WHEEL_PACE_SHARE,
       }).wheel,
     ).toBe(true);
     // A wheel nobody worked the hold out for is none.
@@ -479,9 +481,9 @@ describe('sit-in and follow hold a wheel 0.3–1 m back (#2542)', () => {
     );
     // The rider with no live power: a wheel all the same.
     expect(
-      target({ gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES, aheadEffortWatts: null }).wheel,
+      target({ gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES, wheelPaceWatts: null }).wheel,
     ).toBe(true);
-    const leading = target({ gapAheadMetres: null, holdWatts: null, aheadEffortWatts: null });
+    const leading = target({ gapAheadMetres: null, holdWatts: null, wheelPaceWatts: null });
     expect(leading.wheel).toBe(false);
     expect(leading.targetWatts).toBeCloseTo(cp, 9);
     // Following off the wheel still surges.
@@ -492,7 +494,7 @@ describe('sit-in and follow hold a wheel 0.3–1 m back (#2542)', () => {
   });
 
   it('holds no wheel in any other state', () => {
-    for (const tactic of ['attack', 'chase', 'recover', 'flyer', 'kick'] as const) {
+    for (const tactic of ['attack', 'chase', 'flyer', 'kick'] as const) {
       expect(target({ gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES }, tactic).wheel, tactic).toBe(
         false,
       );
@@ -516,6 +518,46 @@ describe('sit-in and follow hold a wheel 0.3–1 m back (#2542)', () => {
         tactic,
       ).toBe(cp);
     }
+  });
+});
+
+describe('faders slip back, and the wheel can be the one in front (#2543)', () => {
+  const cp = SPRINTER.cpWatts;
+  const hold = 0.7 * cp;
+  const at = (changes: Partial<RaceView>, tactic: BotTactic = 'sit-in'): TacticDecision =>
+    decideTactic(
+      view({ atMs: 500, holdWatts: hold, ...changes }),
+      'sprinter',
+      'crafty',
+      { tactic, sinceMs: 0, window: 0 },
+      7,
+    );
+
+  it('recovering, holds a wheel no harder than its recovering target', () => {
+    const recover = (holdWatts: number): TacticDecision =>
+      at({ gapAheadMetres: BOT_TACTIC_WHEEL_GAP_METRES, holdWatts }, 'recover');
+    expect(recover(0.6 * cp).wheel).toBe(true);
+    expect(recover(0.6 * cp).targetWatts).toBeCloseTo(0.6 * cp, 9);
+    // A wheel that asks more: it slips back.
+    expect(recover(1.1 * cp).targetWatts).toBeCloseTo(cp * BOT_TACTIC_RECOVER_CP_SHARE, 9);
+    // With no wheel, its target as before.
+    expect(
+      at({ gapAheadMetres: null, wheelGapMetres: null, holdWatts: null }, 'recover').targetWatts,
+    ).toBeCloseTo(cp * BOT_TACTIC_RECOVER_CP_SHARE, 9);
+  });
+
+  it('steers on the gap to the wheel it holds, which may be the one in front of the racer ahead', () => {
+    // The racer ahead 1 m back has lost its wheel: the bot holds the one 4 m up.
+    const round = at({ gapAheadMetres: 1, wheelGapMetres: 4 });
+    expect(round.targetWatts).toBeCloseTo(hold + cp * BOT_TACTIC_WHEEL_SURGE, 9);
+    expect(
+      at({ gapAheadMetres: 4, wheelGapMetres: BOT_TACTIC_WHEEL_GAP_METRES }).targetWatts,
+    ).toBeCloseTo(hold, 9);
+    // A wheel past the reach is none, whatever the racer ahead.
+    expect(at({ gapAheadMetres: 1, wheelGapMetres: BOT_TACTIC_WHEEL_METRES + 1 }).wheel).toBe(
+      false,
+    );
+    expect(BOT_TACTIC_WHEEL_LOST_METRES).toBe(2 * BOT_TACTIC_WHEEL_FURTHEST_METRES);
   });
 });
 
@@ -637,8 +679,9 @@ describe('it refuses a view that is not a race’s, and reaches nothing it shoul
       { riderWattsPerKilogram: Number.NaN },
       { closingMetresPerSecond: Number.NaN },
       { holdWatts: Number.POSITIVE_INFINITY },
-      { aheadEffortWatts: Number.NaN },
+      { wheelPaceWatts: Number.NaN },
       { draftFactor: 0 },
+      { wheelGapMetres: Number.NaN },
       { draftFactor: 1.01 },
     ]) {
       expect(

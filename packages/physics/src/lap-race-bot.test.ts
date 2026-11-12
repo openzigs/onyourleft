@@ -356,6 +356,8 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'BOT_MASS_KILOGRAMS',
         'BOT_MEMORY_AT_START',
         'BOT_TACTIC_MOVE_SHARE',
+        'BOT_TACTIC_WHEEL_LOST_METRES',
+        'BOT_TACTIC_WHEEL_METRES',
         'BotEnergy',
         'BotMemory',
         'BotPace',
@@ -1040,14 +1042,19 @@ describe('each bot its own pace (#2455)', () => {
 
   it('rides a field without paces as one group: what #2455 reported, now on each other’s wheels (#2542)', () => {
     // The yardstick the spread is measured against: seven bots of one tier on
-    // no pace finish together. Until #2542 they finished to the millisecond,
-    // stacked on one spot; sitting in, each now holds the wheel ahead, so the
-    // group is a line and crosses the line within a tick.
+    // no pace ride together. Until #2542 they rode stacked on one spot to the
+    // millisecond; sitting in, each now holds the wheel ahead, so the group is
+    // a line: seven places on the road, and a few metres from first to last
+    // when the leader ends the first lap, before the late moves string it out.
     const field = dealtField('brisk', 1).map(({ id, tier }) => ({ id, tier }));
     const run = race(HILLY, field, 1, false);
-    const last = run.races[run.races.length - 1] as ItemRaceState;
-    const finished = last.racers.map((entry) => entry.racer.finishedAtMs as number);
-    expect(Math.max(...finished) - Math.min(...finished)).toBeLessThanOrEqual(1_000);
+    const lap = run.races.findIndex((state) =>
+      state.racers.some((entry) => entry.racer.effortDistance >= HILLY.totalDistance),
+    );
+    expect(lap).toBeGreaterThan(0);
+    const there = [...positionsAt(run, lap).values()];
+    expect(new Set(there).size).toBe(7);
+    expect(Math.max(...there) - Math.min(...there)).toBeLessThan(10);
   });
 });
 
@@ -1201,8 +1208,12 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
       ['leader', 102],
       ['follower', 100],
     ]);
+    // Both attacking, the state held for the window: neither holds a wheel, so
+    // each rides its plan's power whatever the draft (since #2542 a follower
+    // sitting in holds the wheel, and its power is the draft's business).
     const at = (bot: LapRaceBot, distance: number): LapRaceBot => ({
       ...bot,
+      tactics: { tactic: 'attack', sinceMs: 0, window: 0 },
       ride: { speed: metresPerSecond(10), distance: metres(distance) },
     });
     const field = [
