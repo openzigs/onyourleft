@@ -397,57 +397,63 @@ describe('levels open in order, kept on the device — #2363, ADR 0065 D-9', () 
   const choose = (name: string): HTMLAnchorElement | undefined =>
     link(`${GAME_COURSES_TEXT.choose}: ${name}`);
 
-  it(
-    'finishes level 1 in a ride, and the picker, reading the device afresh, offers level 2 as open',
-    { timeout: 60_000 },
-    async () => {
-      // A fresh device: level 1 open, level 2 locked with the reason in words and no way to choose it.
-      await openPicker();
-      expect(standing(FIRST.id)).toBe('open');
-      expect(standing(SECOND.id)).toBe('locked');
-      expect(text()).toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
-      expect(choose(SECOND.name)).toBeUndefined();
-      const href = choose(FIRST.name)?.getAttribute('href') ?? '';
-      mounted?.unmount();
+  // #1688's ruling: cheaper, never a longer timeout. Frames of 10 s, the most
+  // one `advanceTo` runs (`MAXIMUM_STEPS_PER_ADVANCE`, 200 steps), so the
+  // round's fixed 0.05 s steps are the same and its end comes in 10 frames,
+  // not 46. In this file's run on the Mac, Node 26, two runs each: 286–889 ms
+  // → 129–167 ms without coverage, 531–626 ms → 280–365 ms with `--coverage`;
+  // run alone (it then pays the first mount's imports) 965–1 644 ms → 326–993
+  // ms with `--coverage`.
+  it('finishes level 1 in a ride, and the picker, reading the device afresh, offers level 2 as open', async () => {
+    // A fresh device: level 1 open, level 2 locked with the reason in words and no way to choose it.
+    await openPicker();
+    expect(standing(FIRST.id)).toBe('open');
+    expect(standing(SECOND.id)).toBe('locked');
+    expect(text()).toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
+    expect(choose(SECOND.name)).toBeUndefined();
+    const href = choose(FIRST.name)?.getAttribute('href') ?? '';
+    mounted?.unmount();
 
-      // Level 1, ridden to its round's end.
-      stubSeed(7);
-      await openSetup(href);
-      await click(rideButton());
-      await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
-      for (
-        let frame = 0;
-        frame < 400 && !localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY);
-        frame++
-      ) {
-        await pump(2_000);
-      }
-      mounted?.unmount();
-      mounted = undefined;
+    // Level 1, ridden to its round's end.
+    stubSeed(7);
+    await openSetup(href);
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    // Twice the 10 frames the round takes, so a round that never keeps its
+    // level fails on the read below, not on the clock.
+    for (let frame = 0; frame < 20 && !localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY); frame++) {
+      await pump(10_000);
+    }
+    mounted?.unmount();
+    mounted = undefined;
 
-      // Read back as a new page reads it: through the storage, and nothing held in memory.
-      expect(readLevelProgress(localStorage)).toStrictEqual({ finished: [FIRST.id] });
-      // The week is as it was (D-9.3).
-      expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+    // Read back as a new page reads it: through the storage, and nothing held in memory.
+    expect(readLevelProgress(localStorage)).toStrictEqual({ finished: [FIRST.id] });
+    // The week is as it was (D-9.3).
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
 
-      // The picker, opened afresh: level 2 is open and can be chosen, level 1 says it is finished.
-      await openPicker();
-      expect(standing(FIRST.id)).toBe('finished');
-      expect(text()).toContain(GAME_COURSES_TEXT.levelFinished);
-      expect(standing(SECOND.id)).toBe('open');
-      expect(gameRouteFromHash(choose(SECOND.name)?.getAttribute('href') ?? '')).toBe(
-        levelRouteId(SECOND.id),
-      );
-      expect(text()).not.toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
-    },
-  );
+    // The picker, opened afresh: level 2 is open and can be chosen, level 1 says it is finished.
+    await openPicker();
+    expect(standing(FIRST.id)).toBe('finished');
+    expect(text()).toContain(GAME_COURSES_TEXT.levelFinished);
+    expect(standing(SECOND.id)).toBe('open');
+    expect(gameRouteFromHash(choose(SECOND.name)?.getAttribute('href') ?? '')).toBe(
+      levelRouteId(SECOND.id),
+    );
+    expect(text()).not.toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
+  });
 
-  it('ends a ride before the round’s end with no level finished', { timeout: 30_000 }, async () => {
+  // #1688's ruling: cheaper, never a longer timeout. The same 5 s of riding in
+  // 5 frames of 1 s, not 20 of 250 ms: the round's steps are fixed at 0.05 s
+  // whatever the frame. In this file's run on the Mac, Node 26, two runs each:
+  // 127–307 ms → 82–99 ms without coverage, 194–233 ms → 132–178 ms with
+  // `--coverage`; run alone 373–623 ms → 348–616 ms with `--coverage`.
+  it('ends a ride before the round’s end with no level finished', async () => {
     stubSeed(7);
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
     await click(rideButton());
     await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
-    for (let frame = 0; frame < 20; frame++) await pump();
+    for (let frame = 0; frame < 5; frame++) await pump(1_000);
     await click(
       queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find((button) =>
         (button.textContent ?? '').startsWith('End ride'),
