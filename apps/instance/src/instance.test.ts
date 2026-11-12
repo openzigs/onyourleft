@@ -69,6 +69,12 @@ const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
 const CLI = fileURLToPath(new URL('./operator/cli.ts', import.meta.url));
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+/**
+ * The bound of a wait inside a case that has Vitest's 5 s (#2550's review,
+ * F3): under the case's budget, so a wait that never ends fails naming what
+ * it waited for, not as "Test timed out in 5000ms".
+ */
+const WAIT_MS = 3_000;
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -384,7 +390,7 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
     clients.push(replay);
     expect(await replay.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     // The replay changed nothing: still one seat in the room.
-    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 4_000);
+    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', WAIT_MS);
     const frame = rider.messages.find((m) => m.type === 'frame');
     expect(frame?.type === 'frame' && frame.riders.length).toBe(1);
   });
@@ -571,7 +577,7 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
     await until(
       () => bobSocket.messages.some((m) => m.type === 'frame'),
       'the race running',
-      4_000,
+      WAIT_MS,
     );
     // The race has left its lobby, and the store says so.
     const fresh = openServingStore(path);
@@ -592,12 +598,12 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
       await ticket(instance.url, ann.sessionToken, 'race-rejoin'),
     );
     clients.push(annAgain);
-    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', 4_000);
+    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', WAIT_MS);
     expect(annAgain.messages[0]).toMatchObject({ type: 'welcome', riderId: annSeat });
     await until(
       () => annAgain.messages.some((m) => m.type === 'frame'),
       'frames after the rejoin',
-      4_000,
+      WAIT_MS,
     );
   });
 });
@@ -1365,14 +1371,14 @@ describe('a rider’s race on the running instance — #784, #785', () => {
 
     const second = await start(path);
     await second.instance.opened;
-    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
+    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', WAIT_MS);
     const fresh = openServingStore(path);
     try {
       // #948 N-b: the route goes first, and the close that commits follows it.
       await vi.waitFor(
         async () =>
           expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull(),
-        { timeout: 10_000 },
+        { timeout: WAIT_MS },
       );
       expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
     } finally {

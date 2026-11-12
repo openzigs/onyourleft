@@ -14,13 +14,17 @@
  * is not fair, and one writer missed the lock for its whole five seconds.
  * `busy-retry.test.ts` holds the retry deterministically.
  *
- * ⚠️ **A red here under load may be a TIMEOUT, not "database is locked".**
- * With the retry, one write can now wait about 21 s (four 5 s busy timeouts
- * and the pauses between) before it gives up, far past Vitest's 5 s default,
- * which the cases but the DEFERRED control keep (#2550: on the nightly coverage job they took 331
- * to 597 ms, runs 43207158376 and 43008116660, EPYC 9V74). A writer starved that
- * long fails the case on Vitest's clock first, so read the failure: a
- * timeout is the same defect as the error, arriving slower.
+ * ⚠️ **These writers do not run on the product's busy settings** (#2550's
+ * review, F2). On those, one write may wait about 21 s (four 5 s busy
+ * timeouts and the pauses between) and then land, which is correct, but this
+ * case has Vitest's 5 s default (on the nightly coverage job the cases took
+ * 331 to 597 ms, runs 43207158376 and 43008116660, EPYC 9V74). So the two
+ * writers wait at most 200 ms for the lock and retry after 50, 100, 200 and
+ * 400 ms (`CONTENDED_WRITER`): a write that meets the lock five times in a row
+ * gives up in about 1.8 s, inside the case, as "database is locked". What
+ * the case proves holds at any timeout: every write lands through the
+ * retry, and no `SQLITE_BUSY` reaches a caller. The product's own settings
+ * are tested in `node-sqlite.test.ts` and `busy-retry.test.ts`.
  *
  * The control runs the same two writers with the busy timeout at nought and
  * no retry, and requires `SQLITE_BUSY` (in SQLite's words, "database is
@@ -53,6 +57,12 @@ afterEach(async () => {
  */
 const CONTROL_WRITES_PER_THREAD = 3_000;
 
+/** The writers' busy settings: the header says why they are not the product's. */
+const CONTENDED_WRITER = {
+  busyTimeoutMilliseconds: 200,
+  busyRetryDelaysMilliseconds: [50, 100, 200, 400],
+} as const;
+
 function writer(
   path: string,
   prefix: string,
@@ -82,7 +92,17 @@ async function migrated(): Promise<string> {
 describe('two writers on one database (#769)', () => {
   it('both land every write, and no SQLITE_BUSY escapes', async () => {
     const path = await migrated();
-    const errors = await Promise.all([writer(path, 'left'), writer(path, 'right')]);
+    const errors = await Promise.all(
+      ['left', 'right'].map((prefix) =>
+        writer(
+          path,
+          prefix,
+          CONTENDED_WRITER.busyTimeoutMilliseconds,
+          WRITES_PER_THREAD,
+          CONTENDED_WRITER.busyRetryDelaysMilliseconds,
+        ),
+      ),
+    );
     expect(errors.flat()).toEqual([]);
     const store = await openSqlStore(path);
     for (const prefix of ['left', 'right']) {

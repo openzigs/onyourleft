@@ -233,6 +233,16 @@ const ATHLETE = {
  * (docs/agents/ci.md §4c, "Cheaper cases under coverage — #1688").
  */
 
+/**
+ * The retry ladder of the two cases whose holder lets go after the first
+ * attempt (#2550's review, F2). Only that first attempt has to fail, so the
+ * pauses need only outlast the holder's commit: 1.55 s in all, where the
+ * 200, 500, 1 000 and 2 000 ms these cases had came to 3.7 s of a 5 s case.
+ * Each pause is about the sum of those before it, so a write lands within
+ * about twice the time the holder took to let go.
+ */
+const LET_GO_LADDER = [50, 100, 200, 400, 800];
+
 /** How many times a statement whose SQL starts with `prefix` was handed to SQLite. */
 function attemptsOf(queries: readonly string[], prefix: string): number {
   return queries.filter((sql) => sql.trimStart().toLowerCase().startsWith(prefix)).length;
@@ -249,7 +259,7 @@ describe('a write while another connection holds the lock past the busy timeout 
     // failed, and only a retry can write. `attemptsOf` then proves it ran.
     const store = await openSqlStore(path, {
       busyTimeoutMilliseconds: 50,
-      busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
+      busyRetryDelaysMilliseconds: LET_GO_LADDER,
       onQuery: (sql) => {
         queries.push(sql);
         if (attemptsOf(queries, 'insert into "athlete"') === 1) setTimeout(holder.letGo, 0);
@@ -274,7 +284,7 @@ describe('a write while another connection holds the lock past the busy timeout 
     let holder: Holder | undefined;
     const store = await openSqlStore(path, {
       busyTimeoutMilliseconds: 50,
-      busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
+      busyRetryDelaysMilliseconds: LET_GO_LADDER,
       onQuery: (sql) => {
         queries.push(sql);
         // Kysely's bare `begin`, which `node-sqlite.ts` prepares as BEGIN IMMEDIATE.

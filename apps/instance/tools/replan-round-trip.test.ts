@@ -486,6 +486,14 @@ async function catching(): Promise<{ url: string; requests: string[] }> {
  */
 const FIRST_OF_THE_CLEAN_UP = 11;
 
+/**
+ * The bound of a wait inside an interrupted run's case, which has Vitest's
+ * 5 s (#2550's review, F3): under the case's budget, so a wait that never
+ * ends, or an interruption that waited for the 20 s run in flight, fails on
+ * its own assertion rather than as "Test timed out in 5000ms".
+ */
+const WAIT_MS = 3_000;
+
 describe('the round-trip measurement of a hosted model, on a key of the measurer’s own — #1235', () => {
   it('measures a hosted job to its decrypted result, on the hosted server with the key, and says the key nowhere', async () => {
     const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
@@ -589,7 +597,6 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     const url = await instance([], true, service.fetch);
     const lines: string[] = [];
     const stop = new AbortController();
-    const began = performance.now();
     const measuring = measure(
       options(url, 'sealed', {
         hosted: HOSTED,
@@ -598,12 +605,15 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
       }),
     ).catch((error: unknown) => error);
     // Interrupted once the hosted service has the warm-up's request.
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 4_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: WAIT_MS });
+    // Timed from the interruption, not the start, so the wait above is not
+    // counted against it.
+    const interrupted = performance.now();
     stop.abort();
     const failure = await measuring;
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe(INTERRUPTED);
-    expect(performance.now() - began).toBeLessThan(4_000);
+    expect(performance.now() - interrupted).toBeLessThan(WAIT_MS);
     expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
   });
 
@@ -627,7 +637,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
         log: (line) => lines.push(line),
       }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(held).toBe(true), { timeout: 4_000 });
+    await vi.waitFor(() => expect(held).toBe(true), { timeout: WAIT_MS });
     stop.abort();
     const failure = await measuring;
     expect((failure as Error).message).toBe(INTERRUPTED);
@@ -645,7 +655,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     const measuring = measure(
       options(url, 'sealed', { hosted: HOSTED, signal: stop.signal }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 4_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: WAIT_MS });
     // The instance cannot be reached from the interruption on.
     down = true;
     stop.abort();
