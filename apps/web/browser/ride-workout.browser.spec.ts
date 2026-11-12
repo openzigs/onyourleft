@@ -1403,7 +1403,8 @@ test.describe('the actions row at a short laptop window, in a workout with a tra
  *
  * Held here: `actionsRowFailures` above for every control, and
  *
- * - running, every control's words inside its border as well as its box;
+ * - running and paused, every control's words inside its border as well as its
+ *   box, and `CONTROL_WORDS_CLEARANCE_PIXELS` clear of it;
  * - *Pause* (or *Resume*), *End ride* and the lock on one line, in order;
  * - on the two overlay layouts *Trainer notice* on that line too (its own
  *   line is the 80 px of panel `theme.css` §"#2281" exists not to spend),
@@ -1445,6 +1446,13 @@ const UPRIGHT: readonly (Viewport & { readonly scrolls?: true })[] = [
 /** `theme.css` `.oyl-hud__control`'s border, each side. */
 const CONTROL_BORDER_PIXELS = 2;
 
+/**
+ * The air held between a control's words and its border, each side: a
+ * border's width, so the words do not touch it. Running on `main` *End ride*
+ * had 3 px at 800×1280 and 2.5 at 360 wide, the least on the row.
+ */
+const CONTROL_WORDS_CLEARANCE_PIXELS = 2;
+
 const UPRIGHT_RIDES = [
   { name: 'a workout with a trainer', query: '?trainer=workout&graph=plain', notice: true },
   { name: 'a ride with no notice', query: '', notice: false },
@@ -1479,22 +1487,28 @@ test.describe('the actions row upright, running and paused — #2281', () => {
                 : [first, 'End ride', 'Lock'],
             );
             expect(actionsRowFailures(row, viewport)).toEqual([]);
-            // Running, the state a rider reads at the bars, the words are
-            // inside the border too and not drawn over it: shared out equally
-            // (`flex: 1`) *End ride* is 77 px at 800×1280 and its words
-            // cross both borders, inside its box by the measure above.
-            if (!paused) {
-              expect(
-                row.controls
-                  .filter(
-                    ({ box, ink }) =>
-                      ink !== undefined &&
-                      (ink.left < box.left + CONTROL_BORDER_PIXELS - SUBPIXEL_TOLERANCE ||
-                        ink.right > box.right - CONTROL_BORDER_PIXELS + SUBPIXEL_TOLERANCE),
-                  )
-                  .map(({ words }) => `${words}'s words cross its border`),
-              ).toEqual([]);
-            }
+            // Running and paused, the words are clear of the border too, by
+            // `CONTROL_WORDS_CLEARANCE_PIXELS`, and not drawn over it or
+            // touching it: shared out equally (`flex: 1`) *End ride* is 77 px
+            // at 800×1280 and its words cross both borders, inside its box by
+            // the measure above, and paused (the owner's ruling of 2026-11-12)
+            // *Resume* and *End ride* were 78–79 px around 74–75 px of words.
+            const edge = CONTROL_BORDER_PIXELS + CONTROL_WORDS_CLEARANCE_PIXELS;
+            expect(
+              row.controls
+                .filter(
+                  ({ box, ink }) =>
+                    ink !== undefined &&
+                    (ink.left < box.left + edge - SUBPIXEL_TOLERANCE ||
+                      ink.right > box.right - edge + SUBPIXEL_TOLERANCE),
+                )
+                .map(
+                  ({ words, box, ink }) =>
+                    `${words}'s words (${(ink?.width ?? 0).toFixed(1)} px) are within ` +
+                    `${String(CONTROL_WORDS_CLEARANCE_PIXELS)} px of its border ` +
+                    `(box ${box.width.toFixed(1)} px)`,
+                ),
+            ).toEqual([]);
 
             const [pause, end, lock, notice] = row.controls;
             if (pause === undefined || end === undefined || lock === undefined) {
