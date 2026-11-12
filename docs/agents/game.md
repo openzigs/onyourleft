@@ -1114,7 +1114,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         them and keeps its own two refusals (#1817 counts
                         them there). A
                         DRAWING: it reaches `scene.ts` §`lateralOf` through
-                        `SceneInput.steeredLateral` (the rider only) and the
+                        `SceneInput.steeredLateral` (the rider only), and the
+                        bicycle's turn and lean through `SceneInput.steeredSway`
+                        (#2456, `lane-change-lean.ts`: a damped sideways
+                        speed `GameView` holds beside the camera's heading), and the
                         obstacles through their rider offset, never
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
@@ -1125,6 +1128,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a level bot or ghost making the room. One just behind
                         is held aside until its front wheel is behind the
                         camera's eye, then eases to its line (#1863)
+    src/game/lane-change-lean.ts
+                        how a lane change is DRAWN (#2456): the bicycle turns
+                        into the move and bicycle and rider lean, then
+                        straighten on arrival. Pure; the rider stays drawn at
+                        `steeredLateral`, so nothing the obstacles, race or
+                        trainer read changes. A standstill still yaws a
+                        little (the turn rate floors the speed at 10 m/s) but
+                        does not lean
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
@@ -1213,7 +1224,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         for and eight on one they did not** — the wind reading
                         is last and absent rather than nought in still air, on
                         the `NO_READING` precedent, and "nine" is safe only
-                        because the wind cannot change mid-ride
+                        because the wind cannot change mid-ride. Since #2426
+                        the Draft field (a room's or a solo ride's) shows the
+                        SHELTER MARK while the rider is in the draft: an arch
+                        over a filled pocket beside its label (`HudCore.tsx`
+                        §`ShelterMark`, `aria-hidden`), a solid outline, and
+                        "In the draft" on its line with the scale read after
+                        it, visually hidden. ⚠️ ONE state: `room-ride.ts`
+                        §`draftEvent`'s 10 % / 5 %, the room's from
+                        `GameView`'s `inDraftRef` and the solo one from the
+                        simulation, so the mark never flickers at 10 % and
+                        never disagrees with the room's spoken cue. Seen and
+                        not spoken (owner, #2421 item 3); never colour alone;
+                        no motion; nothing outside the Draft field changes,
+                        the power figure least of all (`draft.a11y.test.tsx`)
     src/game/audio-cues.ts
                         the ride's non-speech sounds (#400) — every rule about
                         them, against `audio-port.ts`: off by default, audio

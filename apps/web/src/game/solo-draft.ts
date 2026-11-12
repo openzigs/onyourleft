@@ -38,6 +38,28 @@ import { fieldDraftFactors } from '@onyourleft/physics';
  */
 export const DRAFTED_SHARE = 0.1;
 
+/** {@link DRAFTED_SHARE} in words, so no sentence states a share of its own. */
+const DRAFTED_SHARE_TEXT = `${String(Math.round(DRAFTED_SHARE * 100))} %`;
+
+/**
+ * What a drafted ride's page says of it — #2451, ADR 0066 D-5.3: the fact
+ * kept with the ride, read back after a reload. In words, never a colour.
+ * The value of the page's *Draft* row; {@link DRAFTED_RIDE_NOTE} is the
+ * smaller line under it (owner ruling of 2026-11-11 on #2487: the one
+ * sentence it replaced wrapped to three lines in its grid cell).
+ */
+export const DRAFTED_RIDE_TEXT = 'Drafted';
+
+/** The *Draft* row's secondary line, under {@link DRAFTED_RIDE_TEXT}. */
+export const DRAFTED_RIDE_NOTE = `${DRAFTED_SHARE_TEXT}+ behind the pacer or your ghost`;
+
+/**
+ * The mark a drafted segment effort carries wherever it is shown — #2451,
+ * ADR 0066 D-5.2. *"Yours only"* because it is never offered to an
+ * instance's board, as an effort in a privacy zone is said to be.
+ */
+export const DRAFTED_EFFORT_TEXT = 'Drafted — yours only';
+
 /**
  * Who gives the rider a draft on a solo ride, handed to the simulation at its
  * setup — present only with the device's switch on (`solo-draft-preference.ts`)

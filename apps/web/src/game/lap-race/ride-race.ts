@@ -103,7 +103,7 @@ import {
   type LapRaceOwed,
 } from '../hud/lap-race-announce';
 import { botName, riderEntry, type LapRaceEntrant, type LapRaceHud } from '../hud/lap-race-hud';
-import type { SteerIntent } from '../lanes';
+import { sidewaysSpeedOf, type SteerIntent } from '../lanes';
 import type { LapRaceInView, RaceHitLook } from '../port';
 import type { RaceBotInput } from '../scene';
 
@@ -405,6 +405,8 @@ export interface LapRaceDrawing {
   readonly riderDistance: number;
   /** Where the rider has steered across the road: `SceneInput.steeredLateral`. */
   readonly steeredLateral: number;
+  /** How fast `lanes.ts` §`stepSteer` is moving them there, metres a second: what `SceneInput.steeredSway` is damped toward (#2456). */
+  readonly steeringSpeed: number;
   readonly riderHit: RaceHitLook | undefined;
   readonly raceBots: readonly RaceBotInput[];
 }
@@ -439,6 +441,7 @@ export function lapRaceDrawing(
   return {
     riderDistance: riderDistance + rider.racer.raceOffset,
     steeredLateral: ride.input.steer.offset,
+    steeringSpeed: sidewaysSpeedOf(ride.input.steer),
     riderHit: hitLook(rider.effects, race.atMs, reducedMotion),
     raceBots,
   };
