@@ -24,7 +24,10 @@ bicycle's:
   -- past its saddle and bars, on the side away from its wheels -- lying on
   the low side and facing the bicycle, propped on the low arm, which reaches
   out ahead and away from it with the elbow up, the other hand caught on the
-  road before the chest, the top knee still drawn up, the head lifted.
+  road before the chest, the top leg lying on its side and partly bent, the
+  head lifted. (The owner's ruling of 2026-11-12: the top knee was drawn up
+  and pointed stiffly at the sky; its foot is now further back and its knee
+  bends towards the bicycle, the thigh along the road.)
 - **down**, until the rise: settled (#2505) -- the torso lower and further
   out, the low arm stretched further ahead, the other hand dropped onto the
   hip, the top leg let down onto the low one, the head down.
@@ -59,7 +62,8 @@ bicycle on its side.
 
 `realistic-textures.test.ts` section "#2505" reads the drawn body back and
 holds it 3 cm clear of every part of the bicycle, out of the road, with the
-low arm in sight from above, and moving between landed and down.
+low arm in sight from above, moving between landed and down, and the landed
+top thigh more than 50 degrees from straight up.
 """
 
 RIDING = "riding"
@@ -100,10 +104,10 @@ CRASH_MOMENTS = (
             "hips": on_road(0.18, 1.32, -0.28),
             "shoulders": on_road(0.24, 1.40, 0.22),
             "hands": (on_road(0.10, 1.15, 0.30), on_road(0.06, 1.60, 0.60)),
-            "feet": (on_road(0.24, 1.45, -0.50), on_road(0.06, 1.22, -0.70)),
+            "feet": (on_road(0.16, 1.32, -0.88), on_road(0.06, 1.22, -0.70)),
             "nod": -0.3,
             "elbows": (on_road(1.0, 0.0, -0.3), on_road(0.5, 1.0, 0.0)),
-            "knees": (on_road(0.6, -0.6, 0.5), on_road(0.0, -1.0, 0.3)),
+            "knees": (on_road(0.3, -0.8, 0.4), on_road(0.0, -1.0, 0.3)),
         },
     ),
     (

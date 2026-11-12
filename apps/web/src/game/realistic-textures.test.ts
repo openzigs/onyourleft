@@ -2224,8 +2224,7 @@ describe('the realistic rider moves like a rider — #625', () => {
         return false;
       };
 
-      it('keeps every vertex of the body landed and down at least 3 cm from every part of the bicycle, either side', async () => {
-        const renderer = await loadedOn(TABLET);
+      it('keeps every vertex of the body landed and down at least 3 cm from every part of the bicycle, either side', () => {
         const riders = renderer.realisticRidersOfLoadedWorld();
         if (riders === undefined) throw new Error('no world');
         const lines: string[] = [];
@@ -2258,10 +2257,9 @@ describe('the realistic rider moves like a rider — #625', () => {
           }
         }
         console.log(`#2505: the body's least gap from the bicycle — ${lines.join('; ')}`);
-      }, 120_000);
+      });
 
-      it('keeps every limb out of the road: nothing more than 4 cm into it', async () => {
-        const renderer = await loadedOn(TABLET);
+      it('keeps every limb out of the road: nothing more than 4 cm into it', () => {
         const riders = renderer.realisticRidersOfLoadedWorld();
         if (riders === undefined) throw new Error('no world');
         for (const seconds of LYING_SECONDS) {
@@ -2277,10 +2275,9 @@ describe('the realistic rider moves like a rider — #625', () => {
             `${String(seconds)} s: ${heaviest[deepest.vertex] ?? ''}`,
           ).toBeLessThan(DEEPEST_METRES);
         }
-      }, 120_000);
+      });
 
-      it('shows the low arm from above, its elbow and the upper arm by the shoulder, not under the torso', async () => {
-        const renderer = await loadedOn(TABLET);
+      it('shows the low arm from above, its elbow and the upper arm by the shoulder, not under the torso', () => {
         const riders = renderer.realisticRidersOfLoadedWorld();
         if (riders === undefined) throw new Error('no world');
         for (const seconds of LYING_SECONDS) {
@@ -2306,10 +2303,9 @@ describe('the realistic rider moves like a rider — #625', () => {
         // Non-vacuity: the same measure finds the torso over its own spine.
         const { pose } = drawn(riders, crashMarker(CRASH_RISE_AT_SECONDS, 1));
         expect(coveredFromAbove(at(pose, 'spine02') as Point, bodyNow(riders), [])).toBe(true);
-      }, 120_000);
+      });
 
-      it('settles between landing and lying down: four joints move 10 cm or more, one 20 cm', async () => {
-        const renderer = await loadedOn(TABLET);
+      it('settles between landing and lying down: four joints move 10 cm or more, one 20 cm', () => {
         const riders = renderer.realisticRidersOfLoadedWorld();
         if (riders === undefined) throw new Error('no world');
         const landed = drawn(riders, crashMarker(CRASH_FALL_SECONDS, 1)).pose;
@@ -2327,7 +2323,56 @@ describe('the realistic rider moves like a rider — #625', () => {
         );
         expect(moved.filter((each) => each.by >= 0.1).length).toBeGreaterThanOrEqual(4);
         expect(moved[0]?.by ?? 0).toBeGreaterThanOrEqual(0.2);
-      }, 120_000);
+      });
+
+      it('lays the top leg on its side as it lands, partly bent: its knee is not pointed at the sky', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        /** The angle between two directions, in degrees. */
+        const degrees = (a: readonly number[], b: readonly number[]): number =>
+          (Math.acos(
+            Math.min(
+              1,
+              Math.max(-1, dot(a as Point, b as Point) / (length(a as Point) * length(b as Point))),
+            ),
+          ) *
+            180) /
+          Math.PI;
+        const lines: string[] = [];
+        const measured: { side: number; fromUp: number; bent: number }[] = [];
+        for (const side of [1, -1] as const) {
+          const { pose } = drawn(riders, crashMarker(CRASH_FALL_SECONDS, side));
+          // The top leg: the one whose knee is the higher off the road.
+          const legs = (['L', 'R'] as const).map((each) => ({
+            hip: at(pose, `upperleg01${each}`) as Point,
+            knee: at(pose, `lowerleg01${each}`) as Point,
+            foot: at(pose, `foot${each}`) as Point,
+          }));
+          const [top, low] = [...legs].sort((p, q) => q.knee[1] - p.knee[1]) as [
+            (typeof legs)[number],
+            (typeof legs)[number],
+          ];
+          expect(top.knee[1]).toBeGreaterThan(low.knee[1]);
+          const thigh = minus(top.knee, top.hip);
+          // The thigh's angle from straight up, and how far the knee is bent
+          // (0° a straight leg).
+          const fromUp = degrees(thigh, [0, 1, 0]);
+          const bent = degrees(thigh, minus(top.foot, top.knee));
+          lines.push(
+            `${String(side)}: the thigh ${fromUp.toFixed(0)}° from up, the knee bent ${bent.toFixed(0)}°`,
+          );
+          measured.push({ side, fromUp, bent });
+        }
+        console.log(`#2505: the landed top leg — ${lines.join('; ')}`);
+        for (const { side, fromUp, bent } of measured) {
+          // Lying on its side, the thigh lies nearer the road than the sky:
+          // more than 50° from straight up.
+          expect(fromUp, `side ${String(side)}`).toBeGreaterThan(50);
+          // And the knee partly bent, not folded double nor locked straight.
+          expect(bent, `side ${String(side)}`).toBeGreaterThan(20);
+          expect(bent, `side ${String(side)}`).toBeLessThan(110);
+        }
+      });
     });
 
     describe('refuses a crash clip it could not sample', () => {
