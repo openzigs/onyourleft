@@ -38,8 +38,9 @@ What it does:
    to what is left of <target-tris> once the helmet and glasses are paid for.
    ⚠️ Smooth-shaded: until #623 every face was flat, which drew a faceted body
    and split every vertex three ways (26 986 vertices for 8 998 triangles).
-5. Build the helmet and glasses (#623) round the head's own vertices -- one
-   mesh, one draw call among three riders, as the sphere cap was.
+5. Build the helmet and glasses (#623) round the head's own vertices, and an
+   eyeball in each socket (#2495) -- one mesh, one draw call among three
+   riders, as the sphere cap was.
 6. Bake, with Cycles on ONE thread (`process_tree.py` says why), from HIGH onto
    LOW's texture coordinates: a tangent-space NORMAL map, and AMBIENT
    OCCLUSION with the helmet in the scene.
@@ -49,7 +50,8 @@ What it does:
    main colour a texel is -- premultiplied, with the colour map black there). The skin
    is MakeHuman's CC0 skin's detail on the tone the rider already had; the
    brows are MakeHuman's CC0 eyebrow, laid onto the skin through its own
-   `.mhclo` fit. The eyes are left as they were (#623's open question).
+   `.mhclo` fit. The skin round each eye stays flat: the eyes are balls in the
+   helmet's mesh (#2495), not paint.
 8. Add the kit's relief and the riding pose's creases (seams, the zip, the
    straps, the pockets, the chamois, the folds at hip, knee, elbow and
    shoulder) to the baked normal map, and write the three maps as PNGs for
@@ -427,6 +429,58 @@ if not LOD:
     up = Vector((0, 0, 0.003))
     add_quad((bridge_r - up, bridge_l - up, bridge_l + up, bridge_r + up), FRAME)
 
+# The eyes (#2495): an eyeball in each socket, in this mesh, so they ride the
+# head bone with the helmet and cost no draw call. Each is the front of a
+# sphere at MakeHuman's own eye -- the centre and radius of its CC0 eye helper,
+# looking along its own eye bone -- drawn in bands from `rider_kit.py`'s
+# numbers: the pupil, the iris to its darker rim, and the white. A band's
+# vertices are its own, so each edge between colours is crisp, and every normal
+# is the sphere's own, so no edge shows in the shading. The pack (#2485) keeps
+# the flat eyes: its rider is seen from metres away, behind dark lenses.
+eye_normals = {}
+eye_tris = 0
+for side, eye_helper, eye_bone in (
+    () if LOD else ((1, "helper-l-eye", "eye.L"), (-1, "helper-r-eye", "eye.R"))
+):
+    middle = centre_of(groups[eye_helper])
+    ball = max((positions[i] - middle).length for i in groups[eye_helper])
+    gaze = (joint(bones[eye_bone]["tail"]) - joint(bones[eye_bone]["head"])).normalized()
+    # Two directions across the gaze, so a ring is drawn round it.
+    across = gaze.cross(Vector((0, 0, 1))).normalized()
+    upward = across.cross(gaze).normalized()
+
+    def on_ball(angle, segment):
+        """A point of the ball `angle` degrees off the gaze, `segment` round it."""
+        polar = math.radians(angle)
+        around = 2 * math.pi * segment / KIT.EYE_SEGMENTS
+        return (
+            gaze * math.cos(polar)
+            + (across * math.cos(around) + upward * math.sin(around)) * math.sin(polar)
+        )
+
+    for inner, outer, inner_colour, outer_colour in KIT.EYE_BANDS:
+        start = len(helmet_vertices)
+        rings = []
+        for angle, colour in ((inner, inner_colour), (outer, outer_colour)):
+            ring = []
+            for segment in range(1 if angle == 0 else KIT.EYE_SEGMENTS):
+                direction = on_ball(angle, segment)
+                ring.append(len(helmet_vertices))
+                eye_normals[len(helmet_vertices)] = direction
+                helmet_vertices.append(tuple(middle + direction * ball))
+                helmet_colours.append(colour)
+            rings.append(ring)
+        near, far = rings
+        for segment in range(KIT.EYE_SEGMENTS):
+            following = (segment + 1) % KIT.EYE_SEGMENTS
+            if len(near) == 1:
+                # Wound outwards: `across`, `upward` and the gaze are left-handed.
+                helmet_faces.append((near[0], far[following], far[segment]))
+                eye_tris += 1
+            else:
+                helmet_faces.append((near[segment], near[following], far[following], far[segment]))
+                eye_tris += 2
+
 helmet_mesh = bpy.data.meshes.new("helmet")
 helmet_mesh.from_pydata(helmet_vertices, [], helmet_faces)
 for polygon in helmet_mesh.polygons:
@@ -440,6 +494,11 @@ bm.from_mesh(helmet_mesh)
 bmesh.ops.triangulate(bm, faces=bm.faces[:])
 bm.to_mesh(helmet_mesh)
 bm.free()
+if eye_normals:
+    # The eyes' normals are the ball's; the helmet's stay what they were.
+    helmet_mesh.normals_split_custom_set_from_vertices(
+        [eye_normals.get(index, normal.vector) for index, normal in enumerate(helmet_mesh.vertex_normals)]
+    )
 helmet = bpy.data.objects.new("helmet", helmet_mesh)
 scene.collection.objects.link(helmet)
 helmet_tris = len(helmet_mesh.polygons)
@@ -1029,9 +1088,9 @@ def linear_of(values):
 skin_linear = linear_of(skin_texels)
 skin_mean = skin_linear[skin].mean(axis=0)
 detail = np.clip(skin_linear / skin_mean, *KIT.SKIN_DETAIL_RANGE)
-# ⚠️ The eyes are left exactly as they were -- flat skin -- because whether the
-# face has eyes is still the owner's question (#623), and the pack PAINTS eyes
-# into its sockets. Its detail fades out round each eye.
+# ⚠️ The pack PAINTS eyes into its sockets, and the eyes are the balls step 5
+# puts in them (#2495), so the skin's detail fades out round each eye: the
+# lids are the rider's flat tone, with no second eye drawn on them.
 for eye in (eye_l, eye_r):
     distance = np.linalg.norm(P - np.array(eye), axis=2)
     keep = smooth(eye_radius + 0.004, eye_radius + 0.014, distance)[..., None]
@@ -1332,6 +1391,7 @@ with open(OUT_REPORT, "w") as handle:
             "sourceTriangles": source_tris,
             "bodyTriangles": body_tris,
             "helmetTriangles": helmet_tris,
+            "eyeTriangles": eye_tris,
             "triangles": body_tris + helmet_tris,
             "heightMetres": height_m,
             "textures": 3,
