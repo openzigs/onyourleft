@@ -531,6 +531,10 @@ function expectGradesOnly(alone: Run, drafted: Run): void {
 // 3.7 s, and 5.5 s under --coverage; the ghost's three 4.0 s and 6.2 s; the
 // ERG pair 2.8 s and 8.2 s. Each ride is now its own case: after, at a load
 // average of 10 to 15, 1.0 to 2.2 s each, and 2.1 to 3.0 s under --coverage.
+// On the nightly's EPYC 7763 that was 3.5 to 4.5 s a case under --coverage
+// (run 43233467339). Since the renderer says it draws nothing, no frame is
+// built after the first: 1.3 to 1.8 s on an EPYC 9V74 (runs 43293464256,
+// 43303890753) and 1.6 to 2.3 s on a Xeon 8370C (run 43298427279).
 describe('a solo draft reaches no trainer write in simulation mode — #2425, ADR 0066 D-4', () => {
   it('behind the pacer, the switch off: no draft taken', async () => {
     const alone = await ridden('pacer', pacer, false, 'simulation');

@@ -476,11 +476,12 @@ function expectGradesAtTheOdometer(name: 'alone' | 'drafted', run: Run): void {
 }
 
 describe('a draft reaches no trainer write in simulation mode — #2423, ADR 0038 D-1', () => {
-  // #2524: the alone run is now its own case, so each case rides one run. A
-  // ride of 300 frames of the real GameView is what is left: 3.5 to 4.5 s a
-  // case under --coverage on the nightly's EPYC 7763 (run 43233467339), against
-  // the 5 s default. The earlier local timings (a single M4 Pro run at a load
-  // average of 20 to 33) are not cited: they overstated the gain.
+  // #2524: the alone run is now its own case, so each case rides one run: 3.5
+  // to 4.5 s a case under --coverage on the nightly's EPYC 7763 (run
+  // 43233467339). Since the renderer above says it draws nothing, no frame is
+  // built after the first: 1.4 to 1.8 s on an EPYC 9V74 (runs 43293464256,
+  // 43303890753) and 1.8 to 2.3 s on a Xeon 8370C (run 43298427279). What is
+  // left is the HUD's renders.
   it('writes the road’s grade at the rider’s own odometer, and the protocol’s defaults for everything else, ridden alone', async () => {
     expectGradesAtTheOdometer('alone', await ridden(1, 'simulation'));
   });
