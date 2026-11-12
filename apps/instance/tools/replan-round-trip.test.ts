@@ -226,6 +226,11 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     await expect(measure(options(url, 'sealed'))).rejects.toThrow('serves no encryption key');
   }, 60_000);
 
+  // No timeout of its own (#2556). Alone it took 0.35–0.49 s locally, with
+  // and without --coverage, and 901 and 962 ms on the nightly coverage job
+  // (43207158376, 43008116660, EPYC 9V74): the instance's start about half
+  // of it, the 27 jobs the rest. The 7.5 s it was read at, and 7.9 s here,
+  // were a loaded machine, with this file beside others.
   it('takes a new account before one athlete’s twelve starts an hour run out', async () => {
     const url = await instance(
       Array.from({ length: 14 }, () => TEXT),
@@ -237,11 +242,6 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     await expect(
       measure(options(url, 'plaintext', { runs: 13, startsPerAccount: 100 })),
     ).rejects.toThrow('rate_limited');
-    // No timeout of its own (#2556). Alone it took 0.30–0.49 s locally, with
-    // and without --coverage, and 901 and 962 ms on the nightly coverage job
-    // (43207158376, 43008116660, EPYC 9V74): the instance's start about half
-    // of it, the 27 jobs the rest. The 7.5 s it was read at, and 7.9 s here,
-    // were a loaded machine, with this file beside others.
   });
 
   it('unloads before each cold run, and makes no cold run with nothing to unload with', async () => {
