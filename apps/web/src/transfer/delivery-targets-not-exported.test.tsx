@@ -157,6 +157,8 @@ interface Course {
   readonly origin: CorridorOrigin;
   /** The level's round, on a level. */
   readonly level?: (LevelFile['round'] & { readonly lengthMetres: number }) | undefined;
+  /** #2366: the level's file is served in rain and at dusk. */
+  readonly weather?: boolean;
 }
 
 const TOWN: Course = { corridor: town.corridor, profile: town.profile, origin: ORIGIN };
@@ -201,10 +203,14 @@ function port(): GamePort {
 }
 
 /** #2362: the game's port for a rider with no route of their own, opening the fixture level. */
-function levelPort(): GamePort {
+function levelPort(weather = false): GamePort {
+  // #2366: the same level, in rain and at dusk.
+  const served: LevelFile = weather
+    ? { ...LEVEL, round: { ...LEVEL.round, weather: 'rain', light: 'dusk' } }
+    : LEVEL;
   return {
     listRoutes: () => Promise.resolve([]),
-    loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+    loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? served : undefined),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
       rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
@@ -421,7 +427,7 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
       />
     ) : (
       <GameView
-        port={levelPort()}
+        port={levelPort(course.weather === true)}
         trainer={gameTrainerPortOver(controller)}
         renderer={() =>
           Promise.resolve({
@@ -472,6 +478,14 @@ const theRide = (): Promise<Ridden> => (ridden ??= rideAndSave());
 let riddenOnLevel: Promise<Ridden> | undefined;
 /** #2362: the one level ride its cases read, ridden by the first that asks. */
 const theLevelRide = (): Promise<Ridden> => (riddenOnLevel ??= rideAndSave(ON_LEVEL));
+let riddenInWeather: Promise<Ridden> | undefined;
+/** #2366: the same level ride in rain and at dusk, ridden by the first that asks. */
+const theLevelRideInWeather = (): Promise<Ridden> =>
+  (riddenInWeather ??= rideAndSave({
+    ...ON_LEVEL,
+    level: { ...LEVEL.round, weather: 'rain', light: 'dusk', lengthMetres: LEVEL.lengthMetres },
+    weather: true,
+  }));
 
 beforeEach(() => {
   pending = [];
@@ -493,6 +507,7 @@ afterEach(() => {
 afterAll(async () => {
   if (ridden !== undefined) await (await ridden).harness.destroy();
   if (riddenOnLevel !== undefined) await (await riddenOnLevel).harness.destroy();
+  if (riddenInWeather !== undefined) await (await riddenInWeather).harness.destroy();
   localStorage.clear();
 });
 
@@ -1214,6 +1229,43 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
       expect(report.failures).toStrictEqual([]);
       expect(tracesInValue('sync', instance.sent, levelMarkers(ride.targets))).toStrictEqual([]);
       expect(jsonOf(instance.sent)).not.toContain(LEVEL_KEY);
+    },
+  );
+});
+
+describe('a ride on a level in rain and at dusk records what a clear one does — #2366, ADR 0065 D-11', () => {
+  it(
+    'stores the same ride, streams and laps as the same level ridden in clear daylight',
+    { timeout: 120_000 },
+    async () => {
+      const clear = await theLevelRide();
+      // Each ride on its own clock from the start line, as each case's would be.
+      pending = [];
+      nowMs = START_MS;
+      const wet = await theLevelRideInWeather();
+      const readBack = (ride: Ridden) =>
+        ride.harness.read(async (store) => [
+          await store.getActivity(ATHLETE_A, RIDE_ID),
+          await store.getStreamSet(ATHLETE_A, RIDE_ID),
+          await store.listLaps(ATHLETE_A, RIDE_ID),
+        ]);
+      const [clearRead, wetRead] = [await readBack(clear), await readBack(wet)];
+      expect(clearRead[0]).toBeDefined();
+      expect(jsonOf(wetRead)).toBe(jsonOf(clearRead));
+      // The same round's houses, in the same order: the weather picked nothing.
+      expect(wet.targets).toStrictEqual(clear.targets);
+      // Not vacuous: the wet ride's frames were drawn in rain and at dusk, the clear one's not.
+      expect(wet.drawn.length).toBeGreaterThan(20);
+      expect(
+        wet.drawn.every(
+          (frame) => frame.delivery?.weather?.rain === true && frame.delivery.weather.dusk,
+        ),
+      ).toBe(true);
+      expect(clear.drawn.some((frame) => frame.delivery?.weather?.rain === true)).toBe(false);
+      // And its markers showed later: fewer of them on its first frame.
+      expect(wet.drawn[0]?.delivery?.markers.length ?? 0).toBeLessThan(
+        clear.drawn[0]?.delivery?.markers.length ?? 0,
+      );
     },
   );
 });

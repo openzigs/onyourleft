@@ -590,6 +590,12 @@ export interface RealisticPageConfig {
    * @see realistic/lap-race.ts
    */
   readonly race: 'worst' | undefined;
+  /**
+   * #2366: a Delivery level's weather on every frame that carries a round —
+   * `rain` (the rain's one call), `dusk` (the dimmer light, no call), or
+   * `rain-dusk`, both. `undefined` is clear daylight. @see realistic/delivery.ts
+   */
+  readonly weather: 'rain' | 'dusk' | 'rain-dusk' | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -611,6 +617,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   place: undefined,
   delivery: undefined,
   race: undefined,
+  weather: undefined,
 };
 
 const KNOWN = new Set([
@@ -630,6 +637,7 @@ const KNOWN = new Set([
   'decorations',
   'place',
   'delivery',
+  'weather',
   'race',
 ]);
 
@@ -1074,6 +1082,9 @@ export function parseConfig(search: string): RealisticPageConfig {
     place: params.has('place') ? oneOf('place', PLACES, 'south') : undefined,
     delivery: params.has('delivery') ? deliveryFrom(params.get('delivery') ?? '') : undefined,
     race: params.has('race') ? raceFrom(params) : undefined,
+    weather: params.has('weather')
+      ? oneOf('weather', ['rain', 'dusk', 'rain-dusk'] as const, 'rain')
+      : undefined,
   };
 }
 
@@ -1224,6 +1235,7 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.place !== undefined) params.set('place', config.place);
   if (config.delivery !== undefined) params.set('delivery', String(config.delivery));
   if (config.race !== undefined) params.set('race', config.race);
+  if (config.weather !== undefined) params.set('weather', config.weather);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

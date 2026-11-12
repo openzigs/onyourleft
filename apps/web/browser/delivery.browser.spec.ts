@@ -176,6 +176,23 @@ test.describe('Delivery’s belt — #1814', () => {
     });
   }
 
+  test('draws a level’s rain in one call, and none under prefers-reduced-motion — #2366', async ({
+    page,
+  }) => {
+    await open(page);
+    const moving = await page.evaluate(() => window.__oylDelivery?.rainCalls());
+    console.log(`#2366 rain calls: ${JSON.stringify(moving)}`);
+    // The rain is drawn, in one call and no more.
+    expect(moving?.rainShown).toBe(true);
+    expect((moving?.rain ?? 0) - (moving?.clear ?? 0)).toBe(1);
+    // Reduced motion: no falling rain, and no call for it.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await page.evaluate(() => window.__oylDelivery?.rainCalls());
+    console.log(`#2366 rain calls, reduced motion: ${JSON.stringify(still)}`);
+    expect(still?.rainShown).toBe(false);
+    expect(still?.rain).toBe(still?.clear);
+  });
+
   test('takes a marker off its house on the frame after a parcel is delivered there, read from what the view drew', async ({
     page,
   }) => {

@@ -61,6 +61,7 @@ import {
   REALISTIC_VILLAGE_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
+import { REALISTIC_DUSK_EXPOSURE_SHARE, REALISTIC_EXPOSURE } from '../src/game/realistic-light';
 
 import { NIGHTLY } from './nightly';
 import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
@@ -133,9 +134,15 @@ const PIECES = 20;
 /** #1689's frame, exactly as `realistic-town.browser.spec.ts` §`DECORATED` writes it, with a round. */
 const DELIVERING = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31&delivery=${String(PIECES)}`;
 
-/** #2362: on the fixture level, half way along, its footprints either side (ADR 0065 D-7.5). */
+/**
+ * #2362: on the fixture level, half way along, its footprints either side
+ * (ADR 0065 D-7.5). Since #2366 in rain and at dusk, a level's worst case:
+ * the rain's one call on top of the round's, and the dusk's dimmer light,
+ * which costs none. One load, because this shard's loads of the page are
+ * counted (`nightly-split.test.ts` §"#1698") and it has none to spare.
+ */
 const LEVEL_HOLD_METRES = 1000;
-const ON_THE_LEVEL = `?ladder=0&panel=0&seconds=1&at=${String(LEVEL_HOLD_METRES)}&town=level&delivery=${String(PIECES)}`;
+const ON_THE_LEVEL = `?ladder=0&panel=0&seconds=1&at=${String(LEVEL_HOLD_METRES)}&town=level&delivery=${String(PIECES)}&weather=rain-dusk`;
 
 test.describe('the realistic page’s village frame, delivering — #1815', { tag: NIGHTLY }, () => {
   test('draws the decorated village hold with a Delivery round’s worst case inside DELIVERY_VILLAGE_DRAW_CALLS', async ({
@@ -172,7 +179,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     await seenFromAfar(page, testInfo, 'realistic');
   });
 
-  test('draws a round on the fixture level, a parked car among the obstacles, inside DELIVERY_VILLAGE_DRAW_CALLS — #2362', async ({
+  test('draws a round on the fixture level, a parked car among the obstacles, in rain and at dusk, inside DELIVERY_VILLAGE_DRAW_CALLS — #2362, #2366', async ({
     page,
   }) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
@@ -189,6 +196,12 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     expect(level.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
     expect(level.result.lastFrame.triangles).toBeLessThanOrEqual(DELIVERY_VILLAGE_FRAME_TRIANGLES);
     expect(level.result.drawCalls).toBe(level.result.lastFrame.calls);
+    // #2366: the rain was drawn, in its one call, and the realistic world's exposure dimmed for dusk.
+    expect(level.page.weather?.rain).toBe(true);
+    expect(level.page.weather?.exposure).toBeCloseTo(
+      REALISTIC_EXPOSURE * REALISTIC_DUSK_EXPOSURE_SHARE,
+      6,
+    );
   });
 });
 

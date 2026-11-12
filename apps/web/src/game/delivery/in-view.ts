@@ -57,13 +57,28 @@
  * the browser gate's `delivery-harness.ts` hands it one too. The frame's
  * types are `port.ts`', so the view itself reaches none of Delivery's modules.
  *
+ * ## Rain and dusk: a marker shows once the rider is closer (#2366, ADR 0065 D-10.4)
+ *
+ * On a level in rain or at dusk, a house's marker is drawn only once the
+ * rider is within {@link LOW_LIGHT_REVEAL_METRES} of it
+ * ({@link DeliveryDrawInput.revealMetres}); in clear daylight, and with the
+ * assist's wider windows, as far as the corridor reaches, as before. A
+ * drawing only: the house is on the round, said and thrown at exactly as in
+ * clear weather. The frame also carries the round's weather
+ * ({@link DeliveryInView.weather}) for the renderer's rain and light.
+ *
  * ## Nothing here leaves the ride
  *
  * Positions are held in memory for the frame (DL11), and nothing here formats
  * one into a string.
  */
 
-import type { DeliveryInView, DeliveryObstaclePiece, DeliveryPiece } from '../port';
+import type {
+  DeliveryInView,
+  DeliveryObstaclePiece,
+  DeliveryPiece,
+  DeliveryWeatherFrame,
+} from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
 import { obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
@@ -104,6 +119,15 @@ export interface DeliveryDrawInput {
   /** The round's obstacles, as #1811 placed them, and where each stands. */
   readonly obstacles: readonly Obstacle[];
   readonly obstacleState: ObstacleState;
+  /**
+   * #2366: the rider's distance after the last step that ran, metres, and how
+   * near a house they must be for its marker to be drawn. Without a reveal
+   * distance, every marker on the corridor is drawn.
+   */
+  readonly riderAlong?: number;
+  readonly revealMetres?: number | undefined;
+  /** #2366: the round's rain and dusk, handed on to the renderer. Clear daylight unless given. */
+  readonly weather?: DeliveryWeatherFrame;
   /**
    * How far the frame is past the last simulation step, in ticks: `0` to `1`.
    * The pieces move between ticks with it, so a parcel does not step at 20 Hz
@@ -172,9 +196,12 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const sinceStep = Math.min(1, Math.max(0, input.sinceStep ?? 0));
 
   const markers: DeliveryPiece[] = [];
+  const { revealMetres, riderAlong } = input;
   for (const target of input.targets) {
     if (input.round.houses[target.position] !== 'expecting') continue;
     if (onCorridor(centre, target.distance) === undefined) continue;
+    // #2366: in rain or at dusk, only once the rider is close enough to see it.
+    if (!revealed(target.distance, riderAlong, revealMetres)) continue;
     markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw });
   }
 
@@ -217,5 +244,27 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
     });
   });
 
-  return { parcels, markers, obstacles };
+  return input.weather === undefined
+    ? { parcels, markers, obstacles }
+    : { parcels, markers, obstacles, weather: input.weather };
+}
+
+/**
+ * How near a house the rider must be for its marker to be drawn in rain or at
+ * dusk, metres — #2366: **40**. At `obstacles.ts`
+ * §`AVOIDABLE_FASTEST_METRES_PER_SECOND` (12 m/s) that is 3.4 s before the
+ * house's throw window closes (`throw.ts` §`THROW_WINDOW_AFTER_METRES`), and
+ * the window opens 20 m after the marker shows. This project's own number,
+ * for the owner's approval in #2366's pull request.
+ */
+export const LOW_LIGHT_REVEAL_METRES = 40;
+
+/** Whether a house at `distance` is near enough the rider to be drawn, with no reveal distance always. */
+function revealed(
+  distance: number,
+  riderAlong: number | undefined,
+  revealMetres: number | undefined,
+): boolean {
+  if (revealMetres === undefined || riderAlong === undefined) return true;
+  return distance - riderAlong <= revealMetres;
 }

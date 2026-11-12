@@ -172,6 +172,8 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   LatheGeometry,
+  LineBasicMaterial,
+  LineSegments,
   LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
@@ -630,6 +632,7 @@ import {
   halfToFloat,
   HORIZON_AZIMUTH_BINS,
   PHOTOGRAPHIC_ROAD_GRAIN,
+  REALISTIC_DUSK_EXPOSURE_SHARE,
   REALISTIC_EXPOSURE,
   REALISTIC_FOG_DIRECTION_SHARE,
   REALISTIC_HORIZON_BAND,
@@ -11579,6 +11582,53 @@ function obstacleShape(): BufferGeometry {
  */
 export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
 
+/**
+ * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
+ * streaks {@link RAIN_STREAK_METRES} long in a box {@link RAIN_BOX_METRES}
+ * across, falling at {@link RAIN_FALL_METRES_PER_SECOND}, drawn as ONE line
+ * segments call round the camera's eye. The streaks are laid out twice, one
+ * box above the other, so moving the whole set down by up to one box's
+ * height and back is seamless: no streak is placed per frame. This project's
+ * own numbers, for the owner's approval in #2366's pull request.
+ */
+const RAIN_STREAKS = 700;
+const RAIN_STREAK_METRES = 0.45;
+const RAIN_BOX_METRES = { across: 24, high: 10 } as const;
+const RAIN_FALL_METRES_PER_SECOND = 8;
+
+/** The streaks, twice over, seeded so every view draws the same rain. */
+function rainShape(): BufferGeometry {
+  const positions = new Float32Array(RAIN_STREAKS * 2 * 2 * 3);
+  let state = 0x2366;
+  const next = (): number => {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+  const { across, high } = RAIN_BOX_METRES;
+  for (let streak = 0; streak < RAIN_STREAKS; streak += 1) {
+    const x = (next() - 0.5) * across;
+    const y = next() * high;
+    const z = (next() - 0.5) * across;
+    for (const copy of [0, 1]) {
+      const at = (streak * 2 + copy) * 6;
+      positions.set([x, y + copy * high, z, x, y + copy * high + RAIN_STREAK_METRES, z], at);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Whether the rider asked for reduced motion: no falling rain is drawn for them (#2366). */
+function prefersReducedMotion(): boolean {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
 
@@ -11623,6 +11673,11 @@ export class DeliveryBelt {
   /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
   readonly #paints = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
   readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
+  /** #2366: a level's rain, one call, shown only on a frame whose round is in rain. */
+  readonly #rain = new LineSegments(
+    rainShape(),
+    new LineBasicMaterial({ color: 0xb4c4d2, transparent: true, opacity: 0.5, depthWrite: false }),
+  );
   #shown = true;
 
   constructor(world: 'stylised' | 'realistic') {
@@ -11646,6 +11701,8 @@ export class DeliveryBelt {
       mesh.visible = false;
       return mesh;
     };
+    this.#rain.frustumCulled = false;
+    this.#rain.visible = false;
     this.#meshes = {
       parcels: made(parcelShape(), this.#materials.lit),
       markers: made(markerShape(), this.#materials.lit),
@@ -11655,6 +11712,12 @@ export class DeliveryBelt {
 
   addTo(scene: Scene): void {
     for (const mesh of Object.values(this.#meshes)) scene.add(mesh);
+    scene.add(this.#rain);
+  }
+
+  /** #2366: whether the last frame drew the rain. For the jsdom suite and the browser gate. */
+  rainShown(): boolean {
+    return this.#rain.visible;
   }
 
   /** One kind's mesh. For the jsdom suite and the browser gate's probes. */
@@ -11665,6 +11728,7 @@ export class DeliveryBelt {
   setShown(on: boolean): void {
     this.#shown = on;
     if (!on) for (const mesh of Object.values(this.#meshes)) mesh.visible = false;
+    if (!on) this.#rain.visible = false;
   }
 
   /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
@@ -11680,7 +11744,20 @@ export class DeliveryBelt {
    * {@link MARKER_TRUE_SIZE_WITHIN_METRES} is drawn larger
    * ({@link markerScaleAt}). Without one, every marker is its true size.
    */
-  update(view: DeliveryInView | undefined, eye?: { readonly x: number; readonly z: number }): void {
+  update(
+    view: DeliveryInView | undefined,
+    eye?: { readonly x: number; readonly y?: number; readonly z: number },
+    seconds = 0,
+  ): void {
+    // #2366: rain round the eye, falling with the ride's clock, unless the
+    // rider asked for reduced motion; no frame without a round in rain draws it.
+    const raining = view?.weather?.rain === true && !prefersReducedMotion();
+    this.#rain.visible = this.#shown && raining && eye !== undefined;
+    if (this.#rain.visible && eye !== undefined) {
+      const { high } = RAIN_BOX_METRES;
+      const fall = (((seconds * RAIN_FALL_METRES_PER_SECOND) % high) + high) % high;
+      this.#rain.position.set(eye.x, (eye.y ?? 0) - high - fall, eye.z);
+    }
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
     this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
@@ -11764,6 +11841,9 @@ export class DeliveryBelt {
       mesh.geometry.dispose();
       mesh.dispose();
     }
+    this.#rain.removeFromParent();
+    this.#rain.geometry.dispose();
+    (this.#rain.material as Material).dispose();
     for (const materials of [this.#materials, this.#obstacleMaterials]) {
       materials.lit.dispose();
       if (materials.flat !== materials.lit) materials.flat.dispose();
@@ -22195,6 +22275,23 @@ export function deliveryDrawnOf(
 }
 
 /**
+ * A level's weather as a view last drew it — #2366: whether it drew the rain,
+ * and the exposure its frame was drawn at (dimmer at dusk in the realistic
+ * world). `undefined` exposure on a view with no renderer.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`, whose spec holds the
+ * rain undrawn under `prefers-reduced-motion`; the product never asks
+ */
+export function deliveryWeatherOf(view: GameView): {
+  readonly rain: boolean;
+  readonly exposure: number | undefined;
+} {
+  return view instanceof ThreeGameView
+    ? { rain: view.deliveryRainShown(), exposure: view.exposure() }
+    : { rain: false, exposure: undefined };
+}
+
+/**
  * What a view's lap-race belt drew of `what` on its last frame — #1902, read
  * back off the instance buffers three uploads, not off the frame the view
  * was handed. Nothing on a view that has drawn no lap race.
@@ -22741,7 +22838,7 @@ class ThreeGameView implements GameView {
     this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
     // #1814: and a Delivery round's pieces, on a frame that carries one;
     // #2453: its far markers enlarged by their distance from the eye.
-    this.#updateDelivery(frame.delivery, rig.eye);
+    this.#updateDelivery(frame.delivery, rig.eye, frame.water.seconds);
     // #1902: and a lap race's pieces and its racers' hit effects, likewise.
     this.#updateLapRace(frame.lapRace, frame.markers);
     this.#updateMarkers(
@@ -22761,14 +22858,30 @@ class ThreeGameView implements GameView {
    */
   #updateDelivery(
     view: DeliveryInView | undefined,
-    eye: { readonly x: number; readonly z: number },
+    eye: { readonly x: number; readonly y: number; readonly z: number },
+    seconds: number,
   ): void {
     if (view !== undefined && this.#delivery === undefined) {
       this.#delivery = new DeliveryBelt(this.#drawing);
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
-    this.#delivery?.update(view, eye);
+    this.#delivery?.update(view, eye, seconds);
+    // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
+    if (this.#renderer !== undefined && this.#drawing === 'realistic') {
+      this.#renderer.toneMappingExposure =
+        REALISTIC_EXPOSURE * (view?.weather?.dusk === true ? REALISTIC_DUSK_EXPOSURE_SHARE : 1);
+    }
+  }
+
+  /** #2366: whether the last frame drew a Delivery level's rain. @see DeliveryBelt.rainShown */
+  deliveryRainShown(): boolean {
+    return this.#delivery?.rainShown() ?? false;
+  }
+
+  /** #2366: the exposure the last frame was drawn at. For the jsdom suite and the browser gate. */
+  exposure(): number | undefined {
+    return this.#renderer?.toneMappingExposure;
   }
 
   /**

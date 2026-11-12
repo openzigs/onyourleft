@@ -96,6 +96,7 @@ import {
   decorationKindTriangles,
   decorationKindsOf,
   deliveryDrawnOf,
+  deliveryWeatherOf,
   facadeTrimsOf,
   facadeWreathOf,
   firDepthPrepassOf,
@@ -372,6 +373,12 @@ declare global {
        * frozen 50 otherwise. Absent with the result, and on a stylised race.
        */
       readonly villageCeiling?: number;
+      /**
+       * #2366: a level's weather as the view drew the last frame — the rain
+       * drawn or not, and the exposure (dimmer at dusk). Absent unless
+       * `?weather=` asked for one (`three-renderer.ts` §`deliveryWeatherOf`).
+       */
+      readonly weather?: { readonly rain: boolean; readonly exposure: number | undefined };
       /**
        * #1972: what a lap race was on the last frame before the result was
        * published — the racers the frame carried and what the view's belt
@@ -752,7 +759,13 @@ async function run(): Promise<void> {
     });
     // #1815: a Delivery round's worst case on the road ahead, or no round at all.
     if (config.delivery !== undefined) {
-      drawn = { ...drawn, delivery: deliveryAhead(drawn, distance, config.delivery) };
+      const ahead = deliveryAhead(drawn, distance, config.delivery);
+      // #2366: in a level's rain or at its dusk, as the page asks.
+      const weather =
+        config.weather === undefined
+          ? undefined
+          : { rain: config.weather !== 'dusk', dusk: config.weather !== 'rain' };
+      drawn = { ...drawn, delivery: weather === undefined ? ahead : { ...ahead, weather } };
     }
     // #1972: a lap race's pieces on the road ahead, or no race at all.
     if (config.race !== undefined) drawn = lapRaceAhead(drawn, distance);
@@ -812,6 +825,7 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(delivery === undefined ? {} : { delivery }),
+        ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),
         // A stylised race is the scenery-free frame's; the village's ceiling is
         // no part of it. #1971: a realistic race's frame is the village's.
         ...(drawn === undefined || (config.race !== undefined && config.world !== 'realistic')

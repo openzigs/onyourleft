@@ -77,7 +77,7 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/ass
 import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
-import { parseLevelFile } from './delivery/levels/level-file';
+import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
@@ -2116,15 +2116,37 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     throw new Error('no seed put the unsteered rider into a parked car');
   })();
 
+  /** #2366: the fixture level in rain and at dusk, read through the app's reader. */
+  const WET_LEVEL = parseLevelFile(
+    {
+      ...JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            'delivery/levels/fixtures/fixture-level.json',
+          ),
+          'utf8',
+        ),
+      ),
+      round: { ...LEVEL.round, weather: 'rain', light: 'dusk' },
+    },
+    'fixture-level',
+  );
+
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
-  async function rideLevel(obstacles: 'normal' | 'none'): Promise<{
+  async function rideLevel(
+    obstacles: 'normal' | 'none',
+    level: LevelFile = LEVEL,
+  ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
+    readonly said: readonly string[];
     readonly started: readonly unknown[];
   }> {
     pending = [];
     nowMs = START_MS;
     offered.length = 0;
+    said.length = 0;
     startedRounds.length = 0;
     writeRealisticWorldChoice(localStorage, true);
     localStorage.setItem(
@@ -2135,7 +2157,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     const writes: Write[] = [];
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
-      loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+      loadDeliveryLevel: (id) => Promise.resolve(id === level.id ? level : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({
         rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
@@ -2161,7 +2183,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     await clickThrough(buttonStarting('Ride '));
     for (let index = 0; index < FRAMES; index += 1) await pump();
     await settle();
-    const ridden = { writes, offered: [...offered], started: [...startedRounds] };
+    const ridden = { writes, offered: [...offered], said: [...said], started: [...startedRounds] };
     mounted.unmount();
     mounted = undefined;
     globalThis.location.hash = '';
@@ -2186,6 +2208,26 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
       expect(without.offered).not.toContain('delivery-crash');
       expect(without.writes.length).toBeGreaterThan(20);
       expect(withCars.writes).toStrictEqual(without.writes);
+    },
+  );
+
+  it(
+    'sends the same writes at the same times, and says the same words in the same order, in rain and at dusk as in clear daylight â€” #2366',
+    { timeout: 30_000 },
+    async () => {
+      const clear = await rideLevel('normal');
+      const wet = await rideLevel('normal', WET_LEVEL);
+      // Not vacuous: the wet ride's round was in rain and at dusk, its markers hidden until nearer.
+      const [round] = wet.started as (DeliveryRide | undefined)[];
+      expect(round?.weather).toStrictEqual({ rain: true, dusk: true });
+      expect(round?.revealMetres).toBeGreaterThan(0);
+      const [clearRound] = clear.started as (DeliveryRide | undefined)[];
+      expect(clearRound?.revealMetres).toBeUndefined();
+      expect(clear.writes.length).toBeGreaterThan(20);
+      expect(wet.writes).toStrictEqual(clear.writes);
+      // The live region's words, text and order, are a clear round's.
+      expect(clear.said.length).toBeGreaterThan(0);
+      expect(wet.said).toStrictEqual(clear.said);
     },
   );
 

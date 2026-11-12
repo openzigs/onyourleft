@@ -11,7 +11,7 @@
  * browser gate does: `delivery.browser.spec.ts`.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
 import { CAMERA_ABOVE_METRES, MAXIMUM_FIELD_OF_VIEW_DEGREES, NEAR_PLANE_METRES } from './camera';
@@ -291,6 +291,34 @@ describe('Delivery’s belt — #1814', () => {
     // Until #2453, 0.4 m across from 1.52 m up: hidden by a garden hedge, and 2 pixels at 100 m.
     expect(span(diamond.xs)).toBeGreaterThanOrEqual(0.9 - 1e-6);
     expect(Math.min(...diamond.ys)).toBeGreaterThanOrEqual(2.4 - 1e-6);
+    belt.dispose();
+  });
+
+  it('draws a level’s rain round the eye only on a frame in rain, and none under prefers-reduced-motion — #2366', () => {
+    const belt = new DeliveryBelt('stylised');
+    const eye = { x: 3, y: 12, z: 40 };
+    const pieces = { parcels: [], markers: [], obstacles: [] };
+    belt.update({ ...pieces, weather: { rain: false, dusk: true } }, eye, 1);
+    expect(belt.rainShown()).toBe(false);
+    belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+    expect(belt.rainShown()).toBe(true);
+    belt.update(undefined, eye, 1);
+    expect(belt.rainShown()).toBe(false);
+    // The rider asked for reduced motion: no falling rain at all.
+    const media = vi.fn((query: string) => ({ matches: query.includes('reduce') }));
+    vi.stubGlobal('matchMedia', media);
+    try {
+      belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+      expect(media).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)');
+      expect(belt.rainShown()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+    expect(belt.rainShown()).toBe(true);
+    // Hidden with the belt.
+    belt.setShown(false);
+    expect(belt.rainShown()).toBe(false);
     belt.dispose();
   });
 
