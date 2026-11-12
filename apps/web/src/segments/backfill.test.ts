@@ -417,32 +417,31 @@ describe('privacy and frozen attributes reach the stored effort', () => {
 });
 
 describe('the measured budget — #66’s fifth criterion', () => {
-  it(
-    'sweeps a 1,000-activity library within its stated budget',
-    // ⚠️ The budget is a **Vitest timeout**, not a clock the code reads — the
-    // pattern `packages/domain`'s power-duration test established, and for the
-    // same reason: the code under test still cannot tell the time. What the
-    // number pins is the COMPLEXITY. The sweep is linear in the library and the
-    // matcher is linear in the ride against a prefiltered corpus, so a
-    // regression to anything quadratic fails this by orders of magnitude rather
-    // than by a few per cent, which is the only way a wall-clock assertion is
-    // worth having. Measured at roughly 1.4 s in this container against a 30 s
-    // budget; the headroom is deliberate, because an assertion tuned near the
-    // observed value is a flake on a loaded runner (#165's lesson).
-    { timeout: 30_000 },
-    async () => {
-      const port = stubMatchPort({
-        athleteId: OWNER,
-        rides: libraryOf(1000),
-        segments: [theSegment()],
-      });
+  it('sweeps a 1,000-activity library within its stated budget', async () => {
+    // ⚠️ The budget is **Vitest's default timeout of 5 s**, not a clock the
+    // code reads — the pattern `packages/domain`'s power-duration test
+    // established, and for the same reason: the code under test still cannot
+    // tell the time. What the number pins is the COMPLEXITY. The sweep is
+    // linear in the library and the matcher is linear in the ride against a
+    // prefiltered corpus, so a regression to anything quadratic fails this by
+    // orders of magnitude rather than by a few per cent, which is the only way
+    // a wall-clock assertion is worth having. It was a 30 s budget until #2525
+    // (#1688's ruling: never a longer timeout than the default). Locally on an
+    // Apple M4 Pro at a load average of 14 to 17 the sweep took 0.37 s, and
+    // 0.84 s under --coverage, before; 0.52 s, and 0.84 to 1.8 s under
+    // --coverage, after (the case is unchanged). A sweep that re-reads the
+    // library for each ride still goes past the default.
+    const port = stubMatchPort({
+      athleteId: OWNER,
+      rides: libraryOf(1000),
+      segments: [theSegment()],
+    });
 
-      const { efforts, steps } = await sweepToEnd(port, indexSegments([theSegment()]));
+    const { efforts, steps } = await sweepToEnd(port, indexSegments([theSegment()]));
 
-      expect(efforts).toBe(1000);
-      expect(port.stored.size).toBe(1000);
-      // 1000 / 25 = 40 pages, and a 41st that comes back short and ends it.
-      expect(steps).toBe(41);
-    },
-  );
+    expect(efforts).toBe(1000);
+    expect(port.stored.size).toBe(1000);
+    // 1000 / 25 = 40 pages, and a 41st that comes back short and ends it.
+    expect(steps).toBe(41);
+  });
 });
