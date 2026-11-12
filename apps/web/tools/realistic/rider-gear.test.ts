@@ -178,12 +178,12 @@ const colourOf = (vertex: number): Vec3 => {
   const values = colourFlat.values;
   return [values[at] as number, values[at + 1] as number, values[at + 2] as number];
 };
-/** A smoked lens: dark, its blue over its red. A strap's and a frame's lead by a tenth. */
-const isLens = ([r, , b]: Vec3): boolean => b < 0.1 && b > 1.3 * r;
+/** A smoked lens: a dark grey, its blue over its red. A strap's, a frame's and a vent's lead by a tenth. */
+const isLens = ([r, , b]: Vec3): boolean => b < 0.2 && b > 1.3 * r;
 /** A strap or a glasses frame: near black, and grey. */
 const isStrap = (colour: Vec3): boolean => Math.max(...colour) < 0.05 && !isLens(colour);
 /** The shell, and a vent's floor and walls — every part of the helmet itself. */
-const isShell = (colour: Vec3): boolean => Math.min(...colour) > 0.05;
+const isShell = (colour: Vec3): boolean => Math.min(...colour) > 0.05 && !isLens(colour);
 const all = (triangle: Triangle, test: (colour: Vec3) => boolean): boolean =>
   triangle.every((vertex) => test(colourOf(vertex)));
 
@@ -369,12 +369,13 @@ describe('the realistic rider’s glasses, helmet, straps and shoes — #2504', 
     // Non-vacuity, and one lens colour.
     expect([...colours]).toHaveLength(1);
     const [r, g, b] = [...colours][0]!.split(',').map(Number) as unknown as Vec3;
-    // As the screen shows it, sRGB: every channel between 0.15 and 0.32 — a
-    // smoked grey, where 0.10 in red read as flat black and a light grey would
-    // show the eyes behind it as a pale mask.
+    // As the screen shows it, sRGB: every channel between 0.25 and 0.42 — a
+    // smoked grey. 0.10 in red read as flat black, and so did 0.18 once the
+    // renderer had lit and tone-mapped it under the helmet's brim; past 0.42
+    // a pale lens would read as a mask.
     for (const channel of [r, g, b]) {
-      expect(channel).toBeGreaterThan(0.15);
-      expect(channel).toBeLessThan(0.32);
+      expect(channel).toBeGreaterThan(0.25);
+      expect(channel).toBeLessThan(0.42);
     }
     // Blue-led, faintly: blue over red by 10 % to 60 %, green between them.
     expect(b / r).toBeGreaterThan(1.1);

@@ -171,8 +171,8 @@ def macro_targets():
 # its 2 000, seen from metres away.
 HELMET_RINGS, HELMET_SEGMENTS = (3, 10) if LOD else (7, 22)
 # How much further the shell's back comes down below its widest ring, as a
-# share of how far it came down before (the owner's ruling of 2026-11-12).
-DROP = 0.6
+# share of how far it came down before -- twice as far (the owner's ruling of 2026-11-12).
+DROP = 1.0
 
 
 def mh(path):
@@ -408,9 +408,10 @@ SHELL = (0.86, 0.86, 0.86)
 STRAP = (0.02, 0.02, 0.022)
 # #2504: a smoked lens, blue-led so it reads as glass and not as a strap. The
 # owner's ruling of 2026-11-12: (0.010, 0.016, 0.034) was a blue-black that
-# read as flat black; a dark grey, its blue a little over its red, reads as
-# smoked glass and still hides the eyes, the lens being opaque.
-LENS = (0.028, 0.033, 0.048)
+# read as flat black, lit under the helmet's brim and tone-mapped; a dark
+# grey, its blue a little over its red, reads as smoked glass and still hides
+# the eyes, the lens being opaque.
+LENS = (0.074, 0.084, 0.114)
 FRAME = (0.03, 0.03, 0.032)
 # A vent's floor and walls: the helmet's inside, a mid grey.
 VENT = (0.09, 0.09, 0.095)
@@ -442,12 +443,12 @@ def shell_point(ring, segment):
     stretch = 1 + 0.12 * back ** 2
     # The owner's ruling of 2026-11-12: the back rim stopped at the skull's
     # base, high above the nape. Below the shell's widest ring the back is
-    # drawn down DROP further, so the tail comes down over the top of the neck
+    # drawn down by DROP again, so the tail comes down over the top of the neck
     # with the outline seen from above unchanged; the front, where back is 0,
     # not at all.
     height = math.cos(down)
     if height < 0:
-        height *= 1 + DROP * back ** 6
+        height *= 1 + DROP * back ** 10
     return centre + Vector((
         radius.x * math.sin(down) * math.sin(around),
         -radius.y * stretch * math.sin(down) * math.cos(around),
