@@ -101,6 +101,7 @@ export {
   BOT_SKILL_MISJUDGEMENT,
   BOT_SKILLS,
   botFieldPersonalities,
+  botFieldSkills,
   strategicBotDecision,
 } from './strategy';
 
@@ -174,7 +175,7 @@ export {
   TACTIC_MEMORY_AT_START,
 } from './tactics';
 
-export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
+export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
   BOT_PLAN_SURGE_CEILING,
   BOT_SPRINT_LONGEST_METRES,

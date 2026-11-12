@@ -201,6 +201,19 @@ describe('the racecraft each state encodes, on hand-built views (#2462)', () => 
   });
 });
 
+describe('the last bot reads a view with nobody behind it (#2463)', () => {
+  it('takes a `null` gap behind, as the leader takes a `null` gap ahead', () => {
+    // #2463 found a race's last bot refused: its view's `null` gap behind was
+    // held to a finite number, so the wired race threw on its first tick.
+    const last = view({ rank: 8, gapBehindMetres: null });
+    expect(() => pick(last)).not.toThrow();
+    expect(pick(last)).toBe(pick(view({ rank: 8, gapBehindMetres: 2 })));
+    expect(() =>
+      pick(view({ rank: 1, gapAheadMetres: null, gapBehindMetres: null })),
+    ).not.toThrow();
+  });
+});
+
 describe('an attack lasts its named time (#2462)', () => {
   it('holds an attack up a climb until BOT_TACTIC_ATTACK_MS, and no longer', () => {
     const climber = capacityOf('climber');
@@ -474,6 +487,7 @@ describe('it refuses a view that is not a race’s, and reaches nothing it shoul
       { fieldSize: 2.5 },
       { gapAheadMetres: Number.NaN },
       { gapBehindMetres: Number.NaN },
+      { gapBehindMetres: Number.POSITIVE_INFINITY },
       { riderWattsPerKilogram: Number.NaN },
     ]) {
       expect(

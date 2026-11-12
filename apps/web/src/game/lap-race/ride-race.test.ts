@@ -15,6 +15,7 @@ import {
   botFieldArchetypes,
   botFieldPaces,
   botFieldPersonalities,
+  botFieldSkills,
   kilograms,
 } from '@onyourleft/domain';
 import { lapRaceDraftFactors } from '@onyourleft/physics';
@@ -128,7 +129,7 @@ describe('a lap race in a ride — #1906', () => {
     }
   });
 
-  it('deals its bots a mixed field from the race’s seed (#1959), at one skill, on the chosen tier', () => {
+  it('deals its bots a mixed field from the race’s seed (#1959), a skill each (#2463), on the chosen tier', () => {
     vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
       <T extends ArrayBufferView>(array: T): T => {
         (array as unknown as Uint32Array)[0] = 7;
@@ -139,9 +140,10 @@ describe('a lap race in a ride — #1906', () => {
     const personalities = ride.bots.map((bot) => bot.strategy.personality);
     expect(personalities).toEqual(botFieldPersonalities(7, LAP_RACE_MOST_BOTS));
     expect(new Set(personalities).size).toBe(3);
-    expect(ride.bots.map((bot) => bot.strategy.skill)).toEqual(
-      Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'canny'),
-    );
+    // #2463, ADR 0067 D-7: a tactics skill each, dealt from the same seed, all three in the field.
+    const skills = ride.bots.map((bot) => bot.strategy.skill);
+    expect(skills).toEqual(botFieldSkills(7, LAP_RACE_MOST_BOTS));
+    expect(new Set(skills).size).toBe(3);
     expect(ride.bots.map((bot) => bot.tier)).toEqual(
       Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'brisk'),
     );

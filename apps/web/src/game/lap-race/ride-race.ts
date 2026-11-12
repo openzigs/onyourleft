@@ -76,6 +76,7 @@ import {
   BOT_MASS_KILOGRAMS,
   botFieldPaces,
   botFieldPersonalities,
+  botFieldSkills,
   createItemRace,
   racePosition,
   raceCourse,
@@ -123,13 +124,6 @@ import {
 /** The race's length of one tick: the simulation's step, `simulation.ts` §`SIMULATION_STEP_SECONDS`. */
 export const LAP_RACE_TICK_SECONDS = 0.05;
 
-/**
- * How well a solo race's bots choose (#1959): the middle of
- * `@onyourleft/domain` §`BOT_SKILLS`, until the chooser offers it beside the
- * tier, in words the owner approves.
- */
-const LAP_RACE_BOT_SKILL: BotSkill = 'canny';
-
 /** The rider's id in the race. Never shown: the HUD names the rider's own line itself. */
 export const LAP_RACE_RIDER_ID = 'rider';
 
@@ -153,6 +147,8 @@ export interface LapRaceRide {
   readonly owed: LapRaceOwed;
   /** Whether every racer drafts, the rider included: ADR 0066 D-6's switch at the press (D-3.4). */
   readonly draft: boolean;
+  /** The rider's mass, kilograms, for the W/kg the bots read of them (#2463); absent, they read none. */
+  readonly riderMassKilograms: number | undefined;
   /**
    * The rider's draft multiplier `k` on the last tick, from the field's one
    * `fieldDraftFactors` call (#2461): `1` alone, before the first tick, and
@@ -179,6 +175,11 @@ export interface LapRaceRideStart {
    * lap race. Absent, no racer drafts.
    */
   readonly draft?: boolean | undefined;
+  /**
+   * The rider's mass, kilograms: the bots read the rider's power as W/kg
+   * (#2463, ADR 0067 D-0), as the standings show it. Absent, they read none.
+   */
+  readonly riderMassKilograms?: number | undefined;
 }
 
 /**
@@ -261,6 +262,9 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
   const personalities = botFieldPersonalities(seed, ids.length);
+  // #2463, ADR 0067 D-7: each bot its tactics skill from the race's seed, so a
+  // field misjudges the race by different amounts, and is never all of one.
+  const skills = botFieldSkills(seed, ids.length);
   // #2455: each bot its own ability and pacing style, from the race's seed,
   // so the field spreads into a race rather than riding as one.
   const paces = botFieldPaces(seed, ids.length);
@@ -279,15 +283,16 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   );
   return {
     race,
-    // A mixed field: the three personalities and the five pacing styles in
-    // turn, and an ability each, from the race's seed.
+    // A mixed field: the three personalities, the three skills and the five
+    // pacing styles (each its archetype, #2459) in turn, and an ability each,
+    // from the race's seed.
     bots: ids.map((id, index) =>
       lapRaceBot(
         id,
         tier,
         {
           personality: personalities[index] as BotPersonality,
-          skill: LAP_RACE_BOT_SKILL,
+          skill: skills[index] as BotSkill,
         },
         paces[index] as BotPace,
       ),
@@ -303,6 +308,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     ),
     owed: lapRaceOwedAtStart(race, LAP_RACE_RIDER_ID),
     draft: input.draft === true,
+    riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
   };
 }
@@ -325,6 +331,11 @@ export interface LapRaceRideStep {
   readonly ticks: number;
   /** The rider's odometer after them, metres: the simulation's own. */
   readonly along: number;
+  /**
+   * The rider's power on this frame, watts, or absent with no live reading:
+   * what the bots read of the rider as W/kg (#2463). Read only by the bots.
+   */
+  readonly riderWatts?: number | undefined;
 }
 
 /**
@@ -345,6 +356,11 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   const from = ride.along;
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
+  const mass = ride.riderMassKilograms;
+  const riderWattsPerKilogram =
+    step.riderWatts === undefined || mass === undefined || !(mass > 0)
+      ? undefined
+      : step.riderWatts / mass;
   let { race, bots, input, owed, riderDraft } = ride;
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
@@ -363,6 +379,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       conditions: ride.conditions,
       seed: ride.seed,
       draft: ride.draft,
+      ...(riderWattsPerKilogram === undefined ? {} : { riderWattsPerKilogram }),
       rider: {
         effortDistances: rider.effortDistances,
         ...(rider.lanes === undefined ? {} : { lanes: rider.lanes }),

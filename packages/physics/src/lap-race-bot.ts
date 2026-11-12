@@ -26,20 +26,33 @@
  * recorded sample is a parameter anywhere here** (ADR 0007 D4, ADR 0060 D-7.1),
  * and a type-level test holds the signatures to that.
  *
- * ## No rubber-banding (ADR 0060 D-9, ADR 0061 D-1)
+ * ## Tactics that read the race; a capacity that never moves (#2463, ADR 0067 D-0, D-1)
  *
- * A bot's power is a function of its tier, the road under it, the effort
- * distance it has left and its own W′ balance, and never of any other racer.
- * ADR 0067 D-0 has since lifted that rule for strategy; until #2463 wires a
- * strategy that reads the race, what follows still holds. The
- * plan is built from the bot's tier, the race's course and the race's seed
- * (`botRacePlan`), and stepped on the bot's own odometer, which is its effort
- * distance: **never its `raceOffset`, its drawn distance or its place**, which
- * other racers' items move (ADR 0061 D-3). The race's standings are never read
- * on the way to {@link advancePlannedBot}, and neither is its strategy: two races
- * where the same bot leads and trails read back identical power traces, and so
- * do two bots of one tier and different skill. That holds because a solo
- * race's bots have no draft (ADR 0061 D-4) unless the step asks for one.
+ * Since #2463 a bot races: each tick, {@link stepBotRace} builds each bot's
+ * `RaceView` from the race as it stood (its rank among the racers still
+ * racing, the gaps ahead and behind, whether the racer ahead is in a move, the
+ * rider's gap and power, the laps and metres left, the grade ahead, its own W′
+ * balance), all on **effort distance**, never the drawn line. `tactics.ts`
+ * §`decideTactic` picks its state once per decision window and gives a target;
+ * the plan (`botPlanStep` with that target) shapes it to the road and the
+ * bot's style, and `wbal.ts` §`spendableWatts` limits it to what the balance
+ * pays for, before {@link advancePlannedBot} rides it through the one
+ * {@link advance}. A bot's power now depends on the race, the rider included.
+ *
+ * **Its capacity does not** (ADR 0067 D-1.2, ADR 0060 D-14 Q4): the plan, its
+ * CP, W′ and peak, is built once, at the bot's first tick, from its tier, its
+ * pace (and so its archetype), the race's course and the race's seed
+ * (`botRacePlan`), and kept on the bot ({@link LapRaceBot.plan}) for the race.
+ * No rank, gap or rider reaches it, and `lap-race-bot.test.ts` replays each
+ * bot's W′ balance from its own power on that one capacity, leading and
+ * trailing. A bot that has finished races no more: it rides its plan alone.
+ *
+ * ## The budget (ADR 0067 D-6.4)
+ *
+ * O(bots) a tick: one sort of the racers still racing, one map by id, one
+ * `fieldDraftFactors` call with the draft on, and per bot one view and one
+ * `decideTactic` call. The view takes the place of the plan, which until
+ * #2463 was rebuilt for every bot on every tick.
  *
  * ## The draft (#2460, ADR 0067 D-3)
  *
@@ -66,21 +79,31 @@ import type {
   BotEnergy,
   BotMemory,
   BotPace,
+  BotPlanTactic,
+  BotRacePlan,
   BotStrategy,
   ItemRaceState,
   RaceTickInput,
+  RaceView,
   Seconds,
+  TacticMemory,
   Watts,
 } from '@onyourleft/domain';
 import {
   BOT_EVEN_PACE,
+  BOT_MASS_KILOGRAMS,
   BOT_MEMORY_AT_START,
+  BOT_TACTIC_MOVE_SHARE,
   botPlanStep,
   botRacePlan,
   botTierPlan,
   botWPrimeJoules,
+  decideTactic,
+  distanceOnRoute,
+  gradeAt,
   stepRace,
   strategicBotDecision,
+  TACTIC_MEMORY_AT_START,
   type BotTier,
 } from '@onyourleft/domain';
 
@@ -103,6 +126,14 @@ export interface LapRaceBot {
   readonly pace: BotPace;
   /** What its decisions remember from the last tick of this race: nothing stored, nothing recorded. */
   readonly memory: BotMemory;
+  /** What its tactics remember from the last tick of this race (#2463): its state and since when. */
+  readonly tactics: TacticMemory;
+  /**
+   * Its race plan, and in it its capacity (#2463, ADR 0067 D-1.1): built at its
+   * first tick from its tier, pace, the course and the seed, then kept for the
+   * race. `undefined` on the start line.
+   */
+  readonly plan: BotRacePlan | undefined;
   /**
    * Its W′ balance (#2458, ADR 0067 D-2): spent above its CP, recovered below
    * it, and full at the start. Its capacity is fixed for the race.
@@ -133,7 +164,19 @@ export interface BotRaceStep {
    * switch, which `apps/web` reads). Absent or `false`, no bot drafts.
    */
   readonly draft?: boolean;
+  /**
+   * The rider's power, W/kg, as the bots read it (#2463, ADR 0067 D-0): what
+   * `RaceView.riderWattsPerKilogram` holds. Absent, the bots read none.
+   */
+  readonly riderWattsPerKilogram?: number | undefined;
 }
+
+/**
+ * How far up the road a bot reads the grade ahead, metres (#2463): about 5 s at
+ * a race pace, so a bot sees a climb coming before it is on it. ⚠️ A feel
+ * number for #2464's harness and the owner.
+ */
+export const BOT_GRADE_AHEAD_METRES = 50;
 
 /**
  * Every racer's draft multiplier `k`, by id, from the field's **effort
@@ -179,6 +222,8 @@ export function lapRaceBot(
     strategy,
     pace,
     memory: BOT_MEMORY_AT_START,
+    tactics: TACTIC_MEMORY_AT_START,
+    plan: undefined,
     energy: { wbalJoules: botWPrimeJoules(tier, pace), exhausted: false },
     ride: BOT_AT_START_LINE,
     power: 0,
@@ -206,7 +251,18 @@ export function stepBotRace(
   const uses: string[] = [...(step.rider?.uses ?? [])];
   // #2460: the field's shelter, once for every racer, as the race stood.
   const factors = step.draft === true ? lapRaceDraftFactors(race) : undefined;
-  const moved = bots.map((bot): LapRaceBot => {
+  // #2463: the race as it stood, once for the field: the racers still racing,
+  // the leader first on effort distance, ties by id so a replay is the same.
+  const racing = race.racers
+    .filter((entry) => entry.racer.finishedAtMs === null)
+    .map((entry) => entry.racer)
+    .sort((a, b) => b.effortDistance - a.effortDistance || (a.id < b.id ? -1 : 1));
+  const seats = new Map(racing.map((racer, at) => [racer.id, at]));
+  const field = new Map(bots.map((bot) => [bot.id, bot]));
+  const rider = race.racers.find((entry) => !field.has(entry.racer.id))?.racer;
+  const riderPerKilogram = step.riderWattsPerKilogram ?? null;
+  const raceMetres = race.course.lapLengthMetres * race.course.laps;
+  const moved = bots.map((bot, seat): LapRaceBot => {
     // How far the bot will ride this tick, near enough: what its puddle
     // look-ahead and its last call grow with.
     const decision = strategicBotDecision(
@@ -220,17 +276,66 @@ export function stepBotRace(
     lanes[bot.id] = decision.lane;
     if (decision.use) uses.push(bot.id);
     const course: BotCourse = { ...step.conditions, plan: botTierPlan(bot.tier) };
+    // Its capacity, once a race (ADR 0067 D-1.1): nothing below changes it.
+    const plan = bot.plan ?? botRacePlan(bot.tier, race.course, step.seed, bot.pace);
+    // #2463: its tactic, from the race as it stood, while it is still racing.
+    const at = seats.get(bot.id);
+    let tactics = bot.tactics;
+    let tactic: BotPlanTactic | undefined;
+    if (at !== undefined) {
+      const own = racing[at] as (typeof racing)[number];
+      const ahead = racing[at - 1];
+      const behind = racing[at + 1];
+      const aheadBot = ahead === undefined ? undefined : field.get(ahead.id);
+      const view: RaceView = {
+        atMs: race.atMs,
+        botIndex: seat,
+        rank: at + 1,
+        fieldSize: racing.length,
+        gapAheadMetres: ahead === undefined ? null : ahead.effortDistance - own.effortDistance,
+        gapBehindMetres: behind === undefined ? null : own.effortDistance - behind.effortDistance,
+        // A bot ahead over its own CP is in a move; so is the rider ahead pushing.
+        aheadInMove:
+          ahead === undefined
+            ? false
+            : aheadBot === undefined
+              ? riderPerKilogram !== null &&
+                riderPerKilogram * BOT_MASS_KILOGRAMS >
+                  plan.capacity.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)
+              : aheadBot.plan !== undefined && aheadBot.power > aheadBot.plan.capacity.cpWatts,
+        riderGapMetres: rider === undefined ? 0 : rider.effortDistance - own.effortDistance,
+        riderWattsPerKilogram: riderPerKilogram,
+        // On effort distance, as every distance here: an item's offset moves no lap.
+        lapsLeft: Math.max(
+          0,
+          race.course.laps - Math.floor(own.effortDistance / race.course.lapLengthMetres),
+        ),
+        metresToLine: raceMetres - own.effortDistance,
+        gradeAheadPercent: gradeAt(
+          step.conditions.profile,
+          distanceOnRoute(step.conditions.profile, bot.ride.distance + BOT_GRADE_AHEAD_METRES),
+        ),
+        energy: bot.energy,
+        capacity: plan.capacity,
+      };
+      const decided = decideTactic(
+        view,
+        plan.archetype,
+        bot.strategy.skill,
+        bot.tactics,
+        step.seed,
+      );
+      tactics = decided.memory;
+      tactic = { targetWatts: decided.targetWatts, kick: decided.tactic === 'kick' };
+    }
     // The plan reads the bot's own odometer, its effort distance, and the
     // grade under it there: never the race's view of where the bot is.
-    const planned = botPlanStep(
-      botRacePlan(bot.tier, race.course, step.seed, bot.pace),
-      bot.energy,
-      {
-        effortDistance: bot.ride.distance,
-        grade: botDemand(bot.ride, course).grade,
-        elapsed: step.elapsed,
-      },
-    );
+    const planned = botPlanStep(plan, bot.energy, {
+      effortDistance: bot.ride.distance,
+      grade: botDemand(bot.ride, course).grade,
+      elapsed: step.elapsed,
+      tactic,
+    });
     const tick = advancePlannedBot(
       bot.ride,
       step.elapsed,
@@ -241,6 +346,8 @@ export function stepBotRace(
     effortDistances[bot.id] = tick.state.distance;
     return {
       ...bot,
+      plan,
+      tactics,
       memory: decision.memory,
       energy: planned.energy,
       ride: tick.state,
