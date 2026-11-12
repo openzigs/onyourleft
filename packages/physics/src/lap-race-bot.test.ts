@@ -1325,6 +1325,70 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
     expect(decisions.mock.calls.every(([view]) => view.riderWattsPerKilogram === 3)).toBe(true);
   });
 
+  it('reads every distance in a bot’s view on effort distance: laps left, the line and the gaps, whatever items did to the offsets (#2463)', () => {
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 4,
+      itemsOn: true,
+      racerIds: ['bot', 'ahead', 'rider'],
+      startMs: 0,
+    });
+    const lap = start.course.lapLengthMetres;
+    const view = (offset: number, lapsDone: number) => {
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => {
+          const effortDistance =
+            entry.racer.id === 'bot' ? lap - 5 : entry.racer.id === 'ahead' ? lap + 10 : lap - 40;
+          return {
+            ...entry,
+            // An item's offset, and a lap the race counted on the drawn line.
+            // The bot knocked one way, every other racer the other.
+            racer: {
+              ...entry.racer,
+              effortDistance,
+              raceOffset: entry.racer.id === 'bot' ? offset : -offset,
+              lapsDone,
+            },
+          };
+        }),
+      };
+      const field = ['bot', 'ahead'].map((id) => ({
+        ...lapRaceBot(id, 'brisk', STRATEGY),
+        ride: {
+          speed: metresPerSecond(9),
+          distance: metres(id === 'bot' ? lap - 5 : lap + 10),
+        },
+      }));
+      const decisions = vi.mocked(decideTactic);
+      decisions.mockClear();
+      stepBotRace(race, field, {
+        elapsed: seconds(1),
+        conditions: conditions(FLAT),
+        seed: 4,
+        riderWattsPerKilogram: 3,
+        rider: { effortDistances: { rider: lap - 40 } },
+      });
+      vi.mocked(advance).mockClear();
+      const [read] = decisions.mock.calls.find(([each]) => each.botIndex === 0) ?? [];
+      if (read === undefined) throw new Error('the bot decided nothing');
+      return read;
+    };
+    const level = view(0, 0);
+    // Still on its first lap on effort distance, 15 m off the next racer, 35 m ahead of the rider.
+    expect(level.lapsLeft).toBe(3);
+    expect(level.metresToLine).toBe(3 * lap - (lap - 5));
+    expect(level.gapAheadMetres).toBe(15);
+    expect(level.gapBehindMetres).toBe(35);
+    expect(level.riderGapMetres).toBe(-35);
+    expect(level.rank).toBe(2);
+    // An offset of the whole bound either way, and a lap counted on the drawn line, change none of it.
+    for (const offset of [RACE_OFFSET_BOUND_METRES, -RACE_OFFSET_BOUND_METRES]) {
+      const knocked = view(offset, 1);
+      expect({ ...knocked, energy: level.energy, capacity: level.capacity }).toEqual(level);
+    }
+  });
+
   it('hands back the rider’s k from that one call, beside the bots’ (#2461), and none with the draft off', () => {
     // The rider 2 m behind a bot on effort distance, a second bot out of reach.
     const race = placed([
