@@ -1709,6 +1709,15 @@ async function run(): Promise<void> {
           ),
         );
       }
+      // #2546: and past its Go. "Go." stands on the *Race* notice for
+      // `RACE_GO_SHOWN_MS` from the room's first frame, and on a phone a
+      // notice takes the route panel's cell while it is up, as a lap's does
+      // (`ride-laps.browser.spec.ts` §`NOTICE_HAS_THE_ROUTE_CELL`). This page
+      // is a race under way, with a lap done and its standings drawn, so it is
+      // measured once that notice has stood down.
+      await until('Go. to stand down', () =>
+        document.querySelector('.oyl-hud__race') === null ? true : undefined,
+      );
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }
