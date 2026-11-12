@@ -39,6 +39,19 @@
  * crash is over and the rider is drawn upright as the ride draws them — no
  * animation between, and the HUD's "Crashed" ends with the pose.
  *
+ * ## The realistic rider's own fall and get-up — #2493
+ *
+ * On top of the roll, the realistic world's MakeHuman rider plays the crash
+ * clip in its own file (`realistic-assets.ts` §`REALISTIC_RIDER_CRASH_CLIP`,
+ * made by `tools/realistic/blender/process_rider.py` on THIS file's times):
+ * the hands off the bars and the feet off the pedals, the low arm out for the
+ * road, lying along the bicycle, and one foot planted to get back on. The
+ * body is blended toward it by {@link crashShare}, so it starts and ends on
+ * the riding pose with the roll. `GameView` hands the scene how long ago the
+ * crash was only when motion is not reduced; under reduced motion the marker
+ * carries no crash and the still pose above is drawn unchanged. The stylised
+ * world draws no MakeHuman rider and keeps the roll alone.
+ *
  * ## A drawing, never physics
  *
  * It imports nothing. Nothing here is read by `simulation.ts`, the gradient

@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { metres } from '@onyourleft/domain';
+import { metres, metresPerSecond, seconds as secondsOf } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
 
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
@@ -61,7 +61,14 @@ import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import { CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { GameView, RidingInputs } from './port';
+import type { GameView, RiderMarker, RidingInputs } from './port';
+import { readGlb } from './model-bytes-testing';
+import {
+  CRASH_FALL_SECONDS,
+  CRASH_RISE_AT_SECONDS,
+  CRASH_SECONDS,
+  crashShare,
+} from './delivery/crash-look';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -97,6 +104,8 @@ import {
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_RIDER,
+  REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
@@ -1748,6 +1757,254 @@ describe('the realistic rider moves like a rider — #625', () => {
     }
     console.log(`PR #2116: the elbow's angle, shoulder to hand — ${lines.join(', ')}`);
   }, 120_000);
+
+  /**
+   * #2493: the body's own fall and get-up in a Delivery crash — the file's
+   * crash clip, played by `RealisticRiderBelt` on top of #2475's roll. Every
+   * frame here is made by `sceneFrame` from the round's `riderCrash`, as
+   * `GameView` makes it, and drawn by the belt; the clip itself is read
+   * straight off `rider.glb`'s bytes, so "the drawn bone is the clip's" is two
+   * readers agreeing, not the belt's output written down.
+   */
+  describe('the crash clip — #2493', () => {
+    const route = northRoute(2_000, () => 0);
+    /** The rider's marker `sceneFrame` makes `seconds` into a crash to `side`, the clip on or not. */
+    const crashMarker = (seconds: number, side: 1 | -1, clip = true): RiderMarker => {
+      const share = crashShare(seconds, false);
+      const frame = sceneFrame({
+        profile: route,
+        origin: corridorOrigin(route),
+        state: {
+          ...atStartLine(route),
+          ride: { speed: metresPerSecond(8), distance: metres(800) },
+          ridden: secondsOf(100),
+        },
+        crankAngle: 0,
+        pedalling: true,
+        ...(share === undefined
+          ? {}
+          : { riderCrash: { share, side, ...(clip ? { seconds } : {}) } }),
+      });
+      const rider = frame.markers.find((marker) => marker.kind === 'rider');
+      if (rider === undefined) throw new Error('no rider');
+      return rider;
+    };
+    /** The body drawn from one marker: every bone, and each hand's and foot's place on the bicycle. */
+    const drawn = (
+      riders: Riders,
+      marker: RiderMarker,
+    ): {
+      readonly pose: ReadonlyMap<string, Posed>;
+      readonly ends: readonly (readonly number[])[];
+    } => {
+      riders.place([marker]);
+      const body = riders.bodies[0];
+      if (body === undefined) throw new Error('no body');
+      const pose = new Map<string, Posed>();
+      for (const each of body.skeleton.bones) {
+        pose.set(each.name, {
+          name: each.name,
+          world: [...each.matrixWorld.elements],
+          local: each.quaternion.toArray(),
+        });
+      }
+      const ends = [
+        inBicycle(riders, handOf(riders, 'wristL')),
+        inBicycle(riders, handOf(riders, 'wristR')),
+        inBicycle(riders, at(pose, 'footL')),
+        inBicycle(riders, at(pose, 'footR')),
+      ];
+      return { pose, ends };
+    };
+    /** How far each hand and foot is from where another drawing has it, in metres. */
+    const apart = (
+      a: readonly (readonly number[])[],
+      b: readonly (readonly number[])[],
+    ): readonly number[] => a.map((end, index) => distance(end, b[index] ?? []));
+
+    /** The clip as the file holds it: its times, and each bone's rotation and the root's place at each. */
+    const clip = (() => {
+      const file = readGlb(
+        fileURLToPath(new URL(`../../public/realistic/${REALISTIC_RIDER}`, import.meta.url)),
+      );
+      interface Doc {
+        readonly accessors: readonly {
+          readonly bufferView: number;
+          readonly byteOffset?: number;
+          readonly count: number;
+          readonly type: string;
+        }[];
+        readonly bufferViews: readonly { readonly byteOffset?: number }[];
+        readonly nodes: readonly { readonly name?: string }[];
+        readonly animations?: readonly {
+          readonly name: string;
+          readonly channels: readonly {
+            readonly sampler: number;
+            readonly target: { readonly node: number; readonly path: string };
+          }[];
+          readonly samplers: readonly { readonly input: number; readonly output: number }[];
+        }[];
+      }
+      const json = file.json as unknown as Doc;
+      const floats = (index: number): number[] => {
+        const accessor = json.accessors[index];
+        if (accessor === undefined) throw new Error(`no accessor ${String(index)}`);
+        const width = { SCALAR: 1, VEC3: 3, VEC4: 4 }[accessor.type] ?? 0;
+        const base =
+          (json.bufferViews[accessor.bufferView]?.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+        const view = new DataView(
+          file.binary.buffer,
+          file.binary.byteOffset,
+          file.binary.byteLength,
+        );
+        return Array.from({ length: accessor.count * width }, (_, at) =>
+          view.getFloat32(base + at * 4, true),
+        );
+      };
+      const animation = json.animations?.find((each) => each.name === REALISTIC_RIDER_CRASH_CLIP);
+      if (animation === undefined) throw new Error('rider.glb holds no crash clip');
+      const turns = new Map<string, number[]>();
+      let rootAt: number[] = [];
+      let times: number[] = [];
+      for (const channel of animation.channels) {
+        const sampler = animation.samplers[channel.sampler];
+        if (sampler === undefined) throw new Error('no sampler');
+        times = floats(sampler.input);
+        // three drops the dot from a node's name: `upperarm01.L` is `upperarm01L`.
+        const name = (json.nodes[channel.target.node]?.name ?? '').replace('.', '');
+        if (channel.target.path === 'rotation') turns.set(name, floats(sampler.output));
+        else rootAt = floats(sampler.output);
+      }
+      return { times, turns, rootAt };
+    })();
+    /** The clip's moment at exactly `seconds`, one of its own times. */
+    const moment = (seconds: number): number => {
+      const index = clip.times.findIndex((time) => Math.abs(time - seconds) < 1e-6);
+      if (index === -1) throw new Error(`the clip has no moment at ${String(seconds)} s`);
+      return index;
+    };
+    /** Whether two rotations are the same turn, either sign. */
+    const sameTurn = (a: readonly number[], b: readonly number[]): number =>
+      1 - Math.abs(a.reduce((sum, each, index) => sum + each * (b[index] ?? 0), 0));
+
+    it('is timed on #2475’s fall, rise and end, and moves every bone and the root', () => {
+      expect(clip.times[0]).toBe(0);
+      expect(clip.times).toEqual(expect.arrayContaining([expect.closeTo(CRASH_FALL_SECONDS, 6)]));
+      expect(clip.times).toEqual(
+        expect.arrayContaining([expect.closeTo(CRASH_RISE_AT_SECONDS, 6)]),
+      );
+      expect(clip.times.at(-1)).toBeCloseTo(CRASH_SECONDS, 6);
+      expect(clip.turns.size).toBe(24);
+      expect(clip.rootAt).toHaveLength(clip.times.length * 3);
+    });
+
+    it('draws the clip’s own pose when the rider is down: every bone the file’s, read back', async () => {
+      const renderer = await loadedOn(TABLET);
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      // Landed, as the fall ends, and still down as the rise starts: share 1.
+      for (const seconds of [CRASH_FALL_SECONDS, CRASH_RISE_AT_SECONDS]) {
+        const { pose } = drawn(riders, crashMarker(seconds, 1));
+        const key = moment(seconds);
+        let worst = 0;
+        for (const [name, turns] of clip.turns) {
+          worst = Math.max(
+            worst,
+            sameTurn(bone(pose, name).local, turns.slice(key * 4, key * 4 + 4)),
+          );
+        }
+        expect(worst, `${String(seconds)} s`).toBeLessThan(1e-6);
+      }
+    }, 120_000);
+
+    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', async () => {
+      const renderer = await loadedOn(TABLET);
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      /** Spherical interpolation, the short way: three's `slerp`, written out. */
+      const slerp = (a: readonly number[], b: readonly number[], t: number): number[] => {
+        let cosine = a.reduce((sum, each, index) => sum + each * (b[index] ?? 0), 0);
+        const to = cosine < 0 ? b.map((each) => -each) : [...b];
+        cosine = Math.abs(cosine);
+        if (cosine > 1 - 1e-9) return a.map((each, index) => each + ((to[index] ?? 0) - each) * t);
+        const angle = Math.acos(cosine);
+        const [p, q] = [Math.sin((1 - t) * angle), Math.sin(t * angle)];
+        return a.map((each, index) => (each * p + (to[index] ?? 0) * q) / Math.sin(angle));
+      };
+      for (const seconds of [0.3, 1.35]) {
+        const share = crashShare(seconds, false) ?? Number.NaN;
+        expect(share, String(seconds)).toBeGreaterThan(0.3);
+        expect(share, String(seconds)).toBeLessThan(0.7);
+        const rolled = drawn(riders, crashMarker(seconds, 1, false)).pose;
+        const { pose } = drawn(riders, crashMarker(seconds, 1));
+        const key = clip.times.findIndex((_, index) => seconds < (clip.times[index + 1] ?? 0));
+        const along =
+          (seconds - (clip.times[key] ?? 0)) /
+          ((clip.times[key + 1] ?? 0) - (clip.times[key] ?? 0));
+        let worst = 0;
+        for (const [name, turns] of clip.turns) {
+          const there = slerp(
+            turns.slice(key * 4, key * 4 + 4),
+            turns.slice(key * 4 + 4, key * 4 + 8),
+            along,
+          );
+          const wanted = slerp(bone(rolled, name).local, there, share);
+          worst = Math.max(worst, sameTurn(bone(pose, name).local, wanted));
+        }
+        // Under a third of a degree: the belt samples in single precision.
+        expect(worst, String(seconds)).toBeLessThan(1e-5);
+      }
+    }, 120_000);
+
+    it('throws the hands off the bars and the feet off the pedals as it falls and lies, and plants one to get up — never with the roll alone', async () => {
+      const renderer = await loadedOn(TABLET);
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      const lines: string[] = [];
+      const off = new Map<string, readonly number[]>();
+      for (const [name, seconds] of [
+        ['fall', 0.3],
+        ['down', 0.8],
+        ['rise', 1.35],
+      ] as const) {
+        const rolled = drawn(riders, crashMarker(seconds, 1, false)).ends;
+        const played = apart(drawn(riders, crashMarker(seconds, 1)).ends, rolled);
+        off.set(name, played);
+        lines.push(`${name} ${played.map((each) => (each * 100).toFixed(0)).join('/')} cm`);
+      }
+      console.log(`#2493: hands L/R, feet L/R off the rolled rider's — ${lines.join(', ')}`);
+      // Down: every hand and foot far off the bars and the pedals.
+      for (const each of off.get('down') ?? []) expect(each).toBeGreaterThan(0.2);
+      // Falling, part of the way by the share: both hands and both feet off.
+      for (const each of off.get('fall') ?? []) expect(each).toBeGreaterThan(0.05);
+      // Rising: the high hand back on its grip, the low one still pushing off
+      // the road and the low foot still planted on it.
+      const [high, low, , lowFoot] = off.get('rise') ?? [];
+      expect(high).toBeLessThan(0.03);
+      expect(low).toBeGreaterThan(0.05);
+      expect(lowFoot).toBeGreaterThan(0.15);
+    }, 120_000);
+
+    it('falls to the left as the mirror image of the right, and is the ride once the crash is over', async () => {
+      const renderer = await loadedOn(TABLET);
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      const right = drawn(riders, crashMarker(0.8, 1)).ends;
+      const left = drawn(riders, crashMarker(0.8, -1)).ends;
+      // The left hand to the left is the right hand to the right, `x` negated.
+      for (const [index, mirror] of [1, 0, 3, 2].entries()) {
+        const a = left[index] ?? [];
+        const b = right[mirror] ?? [];
+        expect(distance([-(a[0] ?? 0), a[1] ?? 0, a[2] ?? 0], b)).toBeLessThan(0.01);
+      }
+      // Over: no crash on the marker, and the body the ride's.
+      const over = crashMarker(CRASH_SECONDS, 1);
+      expect(over.crash).toBeUndefined();
+      const riding = drawn(riders, over).ends;
+      const plain = drawn(riders, crashMarker(-1, 1)).ends;
+      for (const each of apart(riding, plain)) expect(each).toBeLessThan(1e-9);
+    }, 120_000);
+  });
 });
 
 /**

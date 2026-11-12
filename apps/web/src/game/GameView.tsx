@@ -3721,9 +3721,19 @@ function GameScreen({
           // #2454: the round's crash, drawn as a fall and a getting back up.
           // Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          // #2493: and how long ago, for the realistic rider's crash clip —
+          // never under reduced motion, which keeps #2475's still pose.
           ...(crashAt === undefined || crashed === undefined
             ? {}
-            : { riderCrash: { share: crashAt, side: crashed.side } }),
+            : {
+                riderCrash: {
+                  share: crashAt,
+                  side: crashed.side,
+                  ...(reducedMotionRef.current
+                    ? {}
+                    : { seconds: (crashClock - crashed.atMs) / 1000 }),
+                },
+              }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
         // the wall clock between them, so a corridor that jumps turns the view

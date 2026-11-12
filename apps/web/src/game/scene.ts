@@ -402,8 +402,15 @@ export interface SceneInput {
    * ⚠️ **Optional the UNSAFE way round**: a round that forgot it draws a crash
    * as nothing, which is what #2454 was filed about. `delivery-wiring.test.tsx`
    * reads the fallen rider back off the frames of a round with a crash in it.
+   *
+   * #2493: `seconds`, how long ago the crash was, while motion is not reduced:
+   * the rider's marker then carries the crash (`RiderMarker.crash`) and the
+   * realistic rider plays its crash clip. Absent under reduced motion, which
+   * keeps #2475's still pose.
    */
-  readonly riderCrash?: { readonly share: number; readonly side: CrashSide } | undefined;
+  readonly riderCrash?:
+    | { readonly share: number; readonly side: CrashSide; readonly seconds?: number | undefined }
+    | undefined;
 }
 
 /**
@@ -1427,12 +1434,17 @@ function ridersOnTheRoad(
     // getting back up, on top of the lean the ride asks for.
     const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
     const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
-    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
+    const placed = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) * (1 - (crash?.share ?? 0)) : 0,
       rideSeconds: rideClock,
       riding: ridingOf(rider, input.profile),
     });
+    // #2493: and the body's own part of it, where motion is not reduced.
+    const marker =
+      crash?.seconds === undefined
+        ? placed
+        : { ...placed, crash: { seconds: crash.seconds, side: crash.side, share: crash.share } };
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle

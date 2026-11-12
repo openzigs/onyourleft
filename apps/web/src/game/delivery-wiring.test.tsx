@@ -95,7 +95,8 @@ import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce
 import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
-import type { GameRenderer, SceneFrame } from './port';
+import type { GameRenderer, RiderMarker, SceneFrame } from './port';
+import { CRASH_SECONDS } from './delivery/crash-look';
 import { LINE_LIMIT_METRES, lineOffsetAt, racingLine } from './racing-line';
 import { DELIVERY_VILLAGE_DRAW_CALLS, villageDrawCallCeiling } from './realistic-budget';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -971,6 +972,23 @@ describe('a crash drawn inside a game ride — #2454', () => {
       expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
       expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
       expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
+      // #2493: every frame drawn down hands the realistic rider the crash's
+      // time and side, for its crash clip, inside the crash's 1.5 s; a ride
+      // with no round never does.
+      const rider = (frame: SceneFrame): RiderMarker | undefined =>
+        frame.markers.find((marker) => marker.kind === 'rider');
+      const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
+      expect(timed.length).toBeGreaterThan(0);
+      for (const crash of timed) {
+        expect(crash.seconds).toBeGreaterThanOrEqual(0);
+        expect(crash.seconds).toBeLessThan(CRASH_SECONDS);
+        expect(Math.abs(crash.side)).toBe(1);
+      }
+      for (const frame of round.drawn) {
+        if (Math.abs(rider(frame)?.lean ?? 0) > 70 * DEGREE)
+          expect(rider(frame)?.crash).toBeDefined();
+      }
+      expect(plain.drawn.every((frame) => rider(frame)?.crash === undefined)).toBe(true);
     },
   );
 
@@ -986,6 +1004,12 @@ describe('a crash drawn inside a game ride — #2454', () => {
     const leans = riderLeans(drawn);
     expect(Math.max(...leans)).toBeGreaterThan(74.9);
     expect(leans.every((lean) => lean < 45 || lean > 74.9)).toBe(true);
+    // #2493: and no crash clip — #2475's still pose, unchanged.
+    expect(
+      drawn.every(
+        (frame) => frame.markers.find((marker) => marker.kind === 'rider')?.crash === undefined,
+      ),
+    ).toBe(true);
     // #2454's review: "Crashed" for exactly as long as the rider is drawn down — never upright.
     expect(sights.some((sight) => sight.detail === 'Crashed')).toBe(true);
     for (const sight of sights) expect(sight.detail === 'Crashed').toBe(sight.lean > 74.9);

@@ -147,6 +147,7 @@
 import {
   AgXToneMapping,
   AmbientLight,
+  AnimationClip,
   BackSide,
   Box3,
   BoxGeometry,
@@ -490,6 +491,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
@@ -666,6 +668,7 @@ import type {
   GameView,
   LapRaceInView,
   LapRacePiece,
+  RiderCrashLook,
   RiderMarker,
   SceneFrame,
 } from './port';
@@ -6456,7 +6459,11 @@ export function compressedRealisticLoaders(
     model: async (url) => {
       const manager = new LoadingManager();
       manager.setURLModifier(realisticResourceUrl(url));
-      return (await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url)).scene;
+      const gltf = await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url);
+      // #2493: a model's clips travel on its scene, where three keeps them:
+      // the rider's crash clip is read off it by `RealisticRiderBelt`.
+      gltf.scene.animations = gltf.animations;
+      return gltf.scene;
     },
     texture: (url) => ktx2.loadAsync(url),
     sky: (url) => new HDRLoader().loadAsync(url),
@@ -14074,6 +14081,11 @@ export class RealisticRiderBelt {
   readonly #handWanted = new Vector3();
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
+  /** #2493: the body's own fall and get-up, read off the file. @see crashClipOf */
+  readonly #crash: RiderCrashClip;
+  readonly #crashSample: number[] = [0, 0, 0, 0];
+  readonly #crashTurn = new Quaternion();
+  readonly #crashAt = new Vector3();
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -14082,6 +14094,9 @@ export class RealisticRiderBelt {
       constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
     );
     const helmetSource = helmetOf(body);
+    // #2493: the crash clip, by bone, in the clones' own bone order.
+    const crash = body.animations.find((clip) => clip.name === REALISTIC_RIDER_CRASH_CLIP);
+    if (crash === undefined) throw new Error('the rider model holds no crash clip');
     // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
     const riders = 3 + REALISTIC_REMOTE_RIDERS;
     const bicycle = realisticBicycleMeshes(maps, riders);
@@ -14168,6 +14183,7 @@ export class RealisticRiderBelt {
       });
     }
     this.#scale = scale;
+    this.#crash = crashClipOf(crash, (this.#riders[0] as RealisticRiderSlot).ordered);
     this.#group.visible = false;
   }
 
@@ -14370,6 +14386,8 @@ export class RealisticRiderBelt {
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
     this.#pose(rider, rider.angle, marker.bodyLean - motion.bicycleRock, motion, stance);
+    // #2493: a Delivery crash, the body's own part of it, on top of the roll.
+    if (marker.crash !== undefined) this.#crashPose(rider, marker.crash);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -14546,6 +14564,46 @@ export class RealisticRiderBelt {
   }
 
   /**
+   * The body's own fall and get-up in a Delivery crash — #2493: every bone
+   * turned from the riding pose `#pose` left toward the crash clip's pose at
+   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
+   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * right; a fall to the left reads each bone's mirror image (its other
+   * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
+   * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
+   * Allocates nothing.
+   */
+  #crashPose(rider: RealisticRiderSlot, crash: RiderCrashLook): void {
+    const clip = this.#crash;
+    const times = clip.times;
+    const last = times.length - 1;
+    const seconds = Math.min(Math.max(crash.seconds, times[0] ?? 0), times[last] ?? 0);
+    let key = 0;
+    while (key < last - 1 && seconds >= (times[key + 1] ?? 0)) key += 1;
+    const span = (times[key + 1] ?? 0) - (times[key] ?? 0);
+    const along = span > 0 ? (seconds - (times[key] ?? 0)) / span : 0;
+    const mirrored = crash.side < 0;
+    for (let index = 0; index < rider.ordered.length; index += 1) {
+      const values = clip.turns[mirrored ? (clip.mirror[index] ?? index) : index];
+      if (values === undefined) continue;
+      Quaternion.slerpFlat(this.#crashSample, 0, values, key * 4, values, key * 4 + 4, along);
+      const [x, y, z, w] = this.#crashSample as [number, number, number, number];
+      this.#crashTurn.set(x, mirrored ? -y : y, mirrored ? -z : z, w);
+      (rider.ordered[index] as Bone).quaternion.slerp(this.#crashTurn, crash.share);
+    }
+    const root = rider.ordered[clip.root] as Bone;
+    const at = clip.rootAt;
+    const x = (at[key * 3] ?? 0) + ((at[key * 3 + 3] ?? 0) - (at[key * 3] ?? 0)) * along;
+    this.#crashAt.set(
+      mirrored ? -x : x,
+      (at[key * 3 + 1] ?? 0) + ((at[key * 3 + 4] ?? 0) - (at[key * 3 + 1] ?? 0)) * along,
+      (at[key * 3 + 2] ?? 0) + ((at[key * 3 + 5] ?? 0) - (at[key * 3 + 2] ?? 0)) * along,
+    );
+    root.position.lerp(this.#crashAt, crash.share);
+    rider.root.updateMatrixWorld(true);
+  }
+
+  /**
    * Turns `bone` by `angle` about `axis`, both in world space, and updates it
    * and everything under it — #625. Nothing at a zero angle. Allocates nothing.
    */
@@ -14620,6 +14678,60 @@ const LIMB_BONES = [
     foot: 'footR',
   },
 ] as const;
+
+/**
+ * The rider's crash clip, read once off the file — #2493: `rider.glb`'s
+ * animation `crash`, which `tools/realistic/blender/process_rider.py` poses
+ * from `rider_crash.py`'s moments. Every array is by the body's bone order.
+ */
+interface RiderCrashClip {
+  /** The moments, in seconds after the crash. */
+  readonly times: Float32Array;
+  /** Each bone's rotation at each moment, four numbers a moment; a bone the clip does not turn has none. */
+  readonly turns: readonly (number[] | undefined)[];
+  /** Each bone's mirror image across `x = 0`: its other side's index, or its own. */
+  readonly mirror: readonly number[];
+  /** Which bone is the skeleton's root, and where it is at each moment. */
+  readonly root: number;
+  readonly rootAt: Float32Array;
+}
+
+/**
+ * Reads the crash clip's tracks into {@link RiderCrashClip}, by the order of
+ * `ordered`. Every track shares one set of times, as the pipeline writes them,
+ * and a clip that does not is refused rather than mis-sampled.
+ */
+function crashClipOf(clip: AnimationClip, ordered: readonly Bone[]): RiderCrashClip {
+  const names = ordered.map((bone) => bone.name);
+  let times: Float32Array | undefined;
+  const turns: (number[] | undefined)[] = names.map(() => undefined);
+  let rootAt: Float32Array | undefined;
+  const root = names.indexOf('root');
+  for (const track of clip.tracks) {
+    const dot = track.name.lastIndexOf('.');
+    const bone = names.indexOf(track.name.slice(0, dot));
+    const property = track.name.slice(dot + 1);
+    if (bone === -1) throw new Error(`the crash clip moves ${track.name}, which is no bone`);
+    const own = Float32Array.from(track.times);
+    if (times !== undefined && own.join() !== times.join()) {
+      throw new Error(`the crash clip's ${track.name} is timed apart from the rest`);
+    }
+    times = own;
+    if (property === 'quaternion') turns[bone] = Array.from(track.values);
+    else if (property === 'position' && bone === root) rootAt = Float32Array.from(track.values);
+    else throw new Error(`the crash clip moves ${track.name}, which it may not`);
+  }
+  if (times === undefined || rootAt === undefined || root === -1) {
+    throw new Error('the crash clip is missing its times or its root');
+  }
+  const mirror = names.map((name, index) => {
+    const side = name.at(-1);
+    if (side !== 'L' && side !== 'R') return index;
+    const other = names.indexOf(`${name.slice(0, -1)}${side === 'L' ? 'R' : 'L'}`);
+    return other === -1 ? index : other;
+  });
+  return { times, turns, mirror, root, rootAt };
+}
 
 /** One realistic rider: its body, its bones at rest, and its held crank angle. */
 interface RealisticRiderSlot {

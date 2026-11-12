@@ -185,6 +185,19 @@ describe('a crash drawn on the road — scene.ts §SceneInput.riderCrash', () =>
     expect(part.pedalling).toBeLessThanOrEqual(0.5);
   });
 
+  it('#2493: carries the crash on the rider’s marker for the clip, only when told how long ago, and on nobody else', () => {
+    const played = markers({ riderCrash: { share: 1, side: -1, seconds: 0.8 } });
+    expect(of(played, 'rider').crash).toEqual({ seconds: 0.8, side: -1, share: 1 });
+    expect(of(played, 'bot').crash).toBeUndefined();
+    // With no time — reduced motion — the marker is #2475's still pose, exactly.
+    const still = markers({ riderCrash: { share: 1, side: -1 } });
+    expect(of(still, 'rider').crash).toBeUndefined();
+    expect({ ...of(played, 'rider'), crash: undefined }).toEqual({
+      ...of(still, 'rider'),
+      crash: undefined,
+    });
+  });
+
   it('draws the ride as it was with no crash, or a crash at nought', () => {
     expect(markers({ riderCrash: { share: 0, side: 1 } })).toEqual(markers({}));
     expect(markers({ riderCrash: undefined })).toEqual(markers({}));
