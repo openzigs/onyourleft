@@ -657,7 +657,7 @@ describe('TransferView — exporting', () => {
     expect(document.body.textContent).toContain(
       'This format cannot carry: each lap’s average heart rate, each lap’s highest heart rate, ' +
         'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
-        'each lap’s climb. The stored ride keeps them.',
+        'each lap’s calories, each lap’s climb. The stored ride keeps them.',
     );
     expect(document.body.textContent).not.toMatch(/lap\.[a-z]/);
     expect(document.body.textContent).not.toContain('FIT carries every channel');
@@ -683,7 +683,8 @@ describe('TransferView — exporting', () => {
       'This format cannot carry: the distance at each point, each lap’s elapsed time, ' +
         'each lap’s distance, each lap’s average heart rate, each lap’s highest heart rate, ' +
         'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
-        'which splits are laps and which are part laps, each lap’s climb, moving time. ' +
+        'each lap’s calories, which splits are laps and which are part laps, each lap’s ' +
+        'climb, moving time. ' +
         'The stored ride keeps them.',
     );
     expect(document.body.textContent).not.toMatch(/point\.distance|lap\.total/);

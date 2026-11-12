@@ -210,6 +210,34 @@ export interface HudReading {
    * handed in (the demo).
    */
   readonly qualifier?: string | undefined;
+  /**
+   * That the rider is IN the draft — #2426, the Draft field's alone, by
+   * `room-ride.ts` §`draftEvent`'s one 10 % / 5 % state (the same state that
+   * gives the room's spoken cue, so what is seen and what is heard never
+   * disagree). `HudCore.tsx` draws the shelter mark (§`ShelterMark`, an arch
+   * over a filled pocket) beside the label and a heavier outline round the
+   * field; {@link detail} says *"In the draft"*. ⚠️ **Never colour alone**
+   * (SC 1.4.1): the glyph, the outline and the words each say it. Absent on
+   * every other field, and on the Draft field out of the draft.
+   */
+  readonly sheltered?: boolean | undefined;
+  /**
+   * Words a screen reader hears after {@link detail} and nobody sees — #2426:
+   * the gauge's full scale (*"at most 59 %"*) while {@link detail} says the
+   * rider is in the draft, so the scale is never lost to a rider who cannot
+   * see the gauge. Drawn visually hidden inside the same `dd`. Absent on every
+   * other field.
+   */
+  readonly said?: string | undefined;
+  /**
+   * Words a screen reader hears after {@link unit} and nobody sees — #2472:
+   * a SOLO ride's Draft field draws its unit as the `%` alone, to keep it on
+   * its number's line in the tablet's narrowest track (#2425, #2130), and
+   * this gives a screen reader back what it is a share of: *"34 % of drag"*,
+   * as a room's field draws it. Drawn visually hidden inside the unit, so
+   * what is drawn does not change. Absent on every other field.
+   */
+  readonly unitSaid?: string | undefined;
 }
 
 /**
@@ -351,6 +379,12 @@ export interface RoomHud {
    * and the rider is drafted exactly the same.
    */
   readonly draftShown?: boolean | undefined;
+  /**
+   * Whether the rider is in the room's draft — #2426: `GameView`'s
+   * `inDraftRef`, `room-ride.ts` §`draftEvent`'s 10 % / 5 % state, the one the
+   * spoken cue follows. Drawn as the shelter mark ({@link HudReading.sheltered}).
+   */
+  readonly inDraft?: boolean | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
@@ -456,6 +490,13 @@ export interface HudInput {
    * preference off (D-6, R-13). Never on a ride in a room, which has its own.
    */
   readonly soloDraft?: number | undefined;
+  /**
+   * Whether the rider is in the solo draft — #2426: the simulation's own
+   * `draftEvent` state (`simulation.ts` §`GameState.soloDraft.inDraft`), drawn
+   * as the shelter mark ({@link HudReading.sheltered}). Read only beside
+   * {@link soloDraft}.
+   */
+  readonly soloInDraft?: boolean | undefined;
   /**
    * The Delivery round, on a Delivery ride — #1812. Absent on every other
    * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
@@ -759,7 +800,9 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...gapReadings(input),
     ...roomReadings(input.room),
     // #2425: a solo ride's draft, where a room's would be; a ride runs one.
-    ...(input.soloDraft === undefined ? [] : [draftField(input.soloDraft, SOLO_DRAFT_KEY)]),
+    ...(input.soloDraft === undefined
+      ? []
+      : [draftField(input.soloDraft, SOLO_DRAFT_KEY, input.soloInDraft === true)]),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
@@ -1152,7 +1195,9 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
-    ...(room.draftShown === true ? [draftField(room.draft)] : []),
+    ...(room.draftShown === true
+      ? [draftField(room.draft, 'room-draft', room.inDraft === true)]
+      : []),
   ];
 }
 
@@ -1270,8 +1315,13 @@ export const SOLO_DRAFT_KEY = 'solo-draft';
  * phrase under it says what that full scale is (#327: *"the full-scale mark is
  * drawn … If the scale is instead the theoretical maximum, the gauge says
  * so"*). `'Off'` and the dash carry none: there is nothing to measure.
+ *
+ * #2426: `inDraft` is `room-ride.ts` §`draftEvent`'s state. In the draft, a
+ * number is {@link HudReading.sheltered} and the line under it says
+ * {@link IN_THE_DRAFT}, with the scale moved to {@link HudReading.said} for a
+ * screen reader. `'Off'` and the dash are never sheltered: there is no draft.
  */
-function draftField(draft: RoomHud['draft'], key = 'room-draft'): HudReading {
+function draftField(draft: RoomHud['draft'], key: string, inDraft: boolean): HudReading {
   const base = { key, label: DRAFT_LABEL, stale: false } as const;
   if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
   if (draft === undefined || !Number.isFinite(draft)) {
@@ -1284,15 +1334,25 @@ function draftField(draft: RoomHud['draft'], key = 'room-draft'): HudReading {
   // under it wraps at 1024×768 and pushes the notices under the map credit
   // (`ride-attribution.browser.spec.ts` §"#1552"). So a solo draft's unit is
   // the `%` alone, and the line under it is the gauge's scale as a room's is.
+  // #2472: and a screen reader still hears "of drag" after it.
   const solo = key === SOLO_DRAFT_KEY;
+  const scale = draftScaleText(DRAFT_FULL_SCALE_PERCENT);
   return {
     ...base,
     value: String(percent),
     unit: solo ? '%' : '% of drag',
-    detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
+    ...(solo ? { unitSaid: 'of drag' } : {}),
+    ...(inDraft ? { detail: IN_THE_DRAFT, said: scale, sheltered: true } : { detail: scale }),
     gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
   };
 }
+
+/**
+ * What the Draft field's line says while the rider is in the draft — #2426,
+ * approved by the owner on #2421 (2026-11-09, item 4). Seen, and never spoken
+ * as an announcement (item 3): a screen reader reads it as part of the field.
+ */
+export const IN_THE_DRAFT = 'In the draft';
 
 /** What the gauge's full scale is, in words under the number (#787). ⚠️ Draft wording for the owner. */
 function draftScaleText(fullScalePercent: number): string {
