@@ -252,6 +252,14 @@ function region(root: ParentNode): string {
   return root.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
 }
 
+/** What the HUD's *Power* field reads, as a rider reads it. */
+function powerShown(root: ParentNode): string {
+  const row = queryAll(root, '.oyl-hud__field').find((each) =>
+    /^Power/u.test(each.querySelector('dt')?.textContent ?? ''),
+  );
+  return row?.querySelector('dd')?.textContent ?? '';
+}
+
 /** Mount a game ride and press *Ride*: a solo race with `race`, or a room's ride. */
 async function rideOn(options: {
   readonly race?: LapRaceChoice | undefined;
@@ -471,6 +479,21 @@ describe('a solo lap race counts down ten seconds on its line before Go — #254
     const goneAfter = RACE_GO_SHOWN_MS / FRAME_MS;
     expect(on.shown[COUNTDOWN_FRAMES - 1 + goneAfter - 1]).toContain(RACE_TEXT.go);
     expect(on.shown[COUNTDOWN_FRAMES - 1 + goneAfter]).toBe('');
+  });
+
+  it('shows the rider’s live power on the HUD while they warm up on the line, from the countdown’s first frame', async () => {
+    const root = await rideOn({ race: RACE });
+    const shown: string[] = [];
+    for (let frame = 1; frame < COUNTDOWN_FRAMES; frame += 1) {
+      await pump();
+      expect(raceNotice(root), `frame ${String(frame)}`).toContain(
+        RACE_TEXT.counting(secondsAfter(frame)),
+      );
+      shown.push(powerShown(root));
+    }
+    // Held the whole time, and the power the rider pedals on every frame of it.
+    expect(inputs.every((each) => each.odometer === 0)).toBe(true);
+    expect(shown).toEqual(shown.map(() => `${String(RIDING_WATTS)} W`));
   });
 
   it('renders the solo and the room countdown from one text: a change to it is a change to both', async () => {
@@ -710,6 +733,7 @@ describe('a room’s lap race counts down on the room’s word — #2546', () =>
     // fell due at 15 s, inside the 3 s window before Go, had it been said.
     const lobbyFrames = 13;
     const goFrame = lobbyFrames + COUNTDOWN_FRAMES + 1;
+    expect(goFrame * FRAME_MS).toBeGreaterThan(15_000);
     expect(goFrame * FRAME_MS - 15_000).toBeLessThan(3_000);
     const said: string[] = [];
     for (let frame = 1; frame <= goFrame + 2; frame += 1) {
@@ -750,7 +774,32 @@ describe('a room’s lap race counts down on the room’s word — #2546', () =>
     expect(raceNotice(root)).toContain(RACE_TEXT.go);
   });
 
-  it('shows a rider who joins a room whose race is already running no "Go."', async () => {
+  it('shows the rider’s live power on the HUD while they wait in the lobby and count down', async () => {
+    const room = new ScriptedRoom();
+    const root = await rideOn({ room });
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'off' });
+      await Promise.resolve();
+    });
+    const shown: string[] = [];
+    for (let frame = 1; frame <= 4 + COUNTDOWN_FRAMES; frame += 1) {
+      if (frame === 5) {
+        await act(async () => {
+          room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
+          await Promise.resolve();
+        });
+      }
+      await pump();
+      shown.push(powerShown(root));
+    }
+    // Held: the countdown is on the notice, and nobody has moved.
+    expect(raceNotice(root)).toContain(RACE_TEXT.counting(0));
+    expect(inputs.every((each) => each.odometer === 0)).toBe(true);
+    expect(shown).toEqual(shown.map(() => `${String(RIDING_WATTS)} W`));
+  });
+
+  it('shows and says to a rider who joins a room whose race is already running no "Go."', async () => {
     announcements(true);
     const room = new ScriptedRoom();
     const root = await rideOn({ room });
@@ -762,12 +811,16 @@ describe('a room’s lap race counts down on the room’s word — #2546', () =>
       await Promise.resolve();
     });
     const shown: string[] = [];
+    const said: string[] = [];
     for (let frame = 1; frame <= 8; frame += 1) {
       await pump();
       shown.push(raceNotice(root));
+      said.push(region(root));
     }
     // The control: the race is running for this rider, who is riding it.
     expect(inputs.at(-1)?.odometer).toBeGreaterThan(0);
     expect(shown.filter((text) => text.includes(RACE_TEXT.go))).toEqual([]);
+    // Nor heard: with announcements on, no "Go." is said to a rider already racing.
+    expect(said.filter((text) => text.includes(RACE_TEXT.go))).toEqual([]);
   });
 });

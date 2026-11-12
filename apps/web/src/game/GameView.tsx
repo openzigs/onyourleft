@@ -3169,7 +3169,8 @@ function GameScreen({
         (counted === undefined ? undefined : countdownRace(counted.ride.countdownLeftMs, at));
       let stepsRun = 0;
       if (heldOnTheLine(race)) {
-        simulation.holdAt(at);
+        // The reading kept for the HUD's Power, and no step run with it.
+        simulation.holdAt(at, sensors.rider);
         heldOnLineMsRef.current += Math.max(0, at - lastFrameAt);
       } else {
         // Go's own frame: held to the instant of Go, and ridden from it.
@@ -3397,14 +3398,17 @@ function GameScreen({
       // #2546: the same for a solo lap race's countdown and its "Go.", which
       // stands on the HUD for a moment from the frame this device saw it.
       const raced = raceEvent(raceSaidRef.current, race, at);
-      // "Go." stands on the HUD only for a rider who saw the race held: a
-      // rider who joins a room whose race is already running sees none.
+      // "Go." stands on the HUD, and is said, only for a rider who saw the
+      // race held: a rider who joins a room whose race is already running
+      // neither sees nor hears one.
       const sawItHeld = raceSaidRef.current === 'waiting' || raceSaidRef.current === 'counting';
       if (raced.said === 'running' && sawItHeld) {
         raceWentAtRef.current = at;
       }
       raceSaidRef.current = raced.said;
-      if (raced.event !== undefined) events.push(raced.event);
+      if (raced.event !== undefined && (raced.said !== 'running' || sawItHeld)) {
+        events.push(raced.event);
+      }
       const raceWords = raceNotice(race, at, madeTheRoomRef.current, raceWentAtRef.current) ?? '';
       if (raceWords !== raceShownRef.current) {
         raceShownRef.current = raceWords;
@@ -3560,7 +3564,7 @@ function GameScreen({
         events.push(...lapRaceSaid(raceAnnounced, sayAt));
       }
       // #2546: no power on its cadence while the rider is held on a race's
-      // line, in a room's lobby or a countdown, as on \`main\` where this clock
+      // line, in a room's lobby or a countdown, as on `main` where this clock
       // stood still there: a reading would also close the window "Go." needs.
       const preference = heldOnTheLine(race)
         ? { ...announcementsRef.current, powerEverySeconds: 'never' as const }
