@@ -486,6 +486,14 @@ describe('the solo draft in a lap race — #2425 ADR 0066 D-2, restated by #2461
     expect(draftedRide(stepped.at(-1))).toBe(true);
   });
 
+  it('shows the Draft field with no own ghost beside the race: the race alone hands the draft', async () => {
+    // The cases above send the own ghost with the race, as the chooser does;
+    // with none, only the race (`raced`) gives the ride its solo draft state.
+    const { draft } = await rideSolo({ lapRace: race, frames: 80 });
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
   it('hides the field with the display preference off, and the ride is marked all the same (R-13)', async () => {
     localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
     const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
