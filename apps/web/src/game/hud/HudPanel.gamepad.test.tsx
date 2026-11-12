@@ -31,6 +31,7 @@ import {
 import { mount, type Mounted } from '../../testing/mount';
 import { startSteer, steerToward, type SteerState } from '../delivery/steer';
 import type { ControllerPort } from '../delivery/controller-port';
+import { createSteeringController } from '../../ride/steering-controller';
 import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowIntent } from '../delivery/throw-input';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
@@ -411,10 +412,41 @@ describe('the throw buttons give way to a pad in use — #2514', () => {
     expect(throwButtons()).toBe(3);
   });
 
-  it('draws none with a paired controller, whose throws are the rider’s; Pause and End ride stay', async () => {
-    await ride(true, { onControllerEvents: () => () => undefined });
+  it('draws the buttons with a controller handed in and nothing paired, then none once one pairs, and again after it forgets', async () => {
+    // The app hands the HUD its steering controller on every Bluetooth-capable
+    // platform, paired or not: the real one, driven from none to connected.
+    let drop: () => void = () => undefined;
+    const controller = createSteeringController({
+      requestAndConnect: () =>
+        Promise.resolve({
+          name: 'Handlebar',
+          onEvents: () => () => undefined,
+          onDisconnect: (listener) => {
+            drop = listener;
+            return () => undefined;
+          },
+          disconnect: () => undefined,
+        }),
+    });
+    await ride(true, controller);
+    expect(controller.state.kind).toBe('none');
+    expect(throwButtons()).toBe(3);
+    await act(async () => {
+      await controller.pair();
+    });
+    expect(controller.state.kind).toBe('connected');
     expect(throwButtons()).toBe(0);
     expect(control('Pause')).toBeDefined();
     expect(control('End ride')).toBeDefined();
+    act(() => {
+      drop();
+    });
+    expect(controller.state.kind).toBe('none');
+    expect(throwButtons()).toBe(3);
+  });
+
+  it('draws the buttons for a bare port that never says it is paired', async () => {
+    await ride(true, { onControllerEvents: () => () => undefined });
+    expect(throwButtons()).toBe(3);
   });
 });

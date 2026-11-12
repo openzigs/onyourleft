@@ -24,7 +24,16 @@
  * `HudPanel` renders it.
  */
 
-import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+  type ReactNode,
+} from 'react';
 
 import { POWER_ZONE_NAMES } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
@@ -295,6 +304,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   const [touchLocked, setTouchLocked] = useState(false);
   // #2514: whether a gamepad is in use, which the throw buttons give way to.
   const [padInUse, setPadInUse] = useState(false);
+  // #2514: a controller is handed in whether or not one is paired, so the
+  // buttons go only while it says it is (a port that says nothing: not paired).
+  const controllerPaired = useSyncExternalStore(
+    (onChange) => props.controller?.subscribe?.(onChange) ?? (() => undefined),
+    () => props.controller?.paired === true,
+  );
   useTouchLock(hud, touchLocked);
   // #2349: while the end-of-ride question is open it stands where Pause and
   // End ride do, and when it closes with the ride still on (Keep riding),
@@ -316,6 +331,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
         ...(focus ? ['oyl-hud--focus'] : []),
+        // A test hook (#2514): no stylesheet rule reads it.
         ...(game ? ['oyl-hud--delivery-game'] : []),
       ].join(' ')}
       aria-label="Ride metrics"
@@ -493,7 +509,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           <ThrowControl
             port={props.throwing}
             touchLocked={touchLocked}
-            buttonless={padInUse || props.controller !== undefined}
+            buttonless={padInUse || controllerPaired}
           />
         )}
         {/*

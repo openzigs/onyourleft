@@ -16,6 +16,11 @@
  * `a11y/kept-visible.a11y.test.tsx` §`GAME_RIDING_KEPT_VISIBLE`), and a
  * rider who has hidden everything they may still sees every one of them.
  *
+ * One exception, by design (#2514): a Delivery round's game strip draws cadence,
+ * heart rate and gradient only when the rider asks for them (`delivery: 'game'`),
+ * so the road keeps its room. Its side effect: a dropped heart-rate or cadence
+ * sensor's stale indication is not shown in the strip until they are brought back.
+ *
  * ## The text size
  *
  * Normal, large and extra large ({@link HUD_TEXT_SIZES}): a factor on the
