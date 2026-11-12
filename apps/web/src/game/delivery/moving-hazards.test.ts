@@ -327,41 +327,69 @@ describe('every moving hazard is said before it can touch the rider — #2364, A
 });
 
 describe('no moving hazard enters a lane a standing obstacle blocks — #2364', () => {
+  // #2497's CI timed this case out at 5 s under coverage: it swept every tick
+  // twice, once a speed, and called `expect` once a tick for every standing
+  // obstacle in the placement, near or not. It now checks the same positions
+  // against the same obstacles, each once:
+  //
+  // - **One speed covers every speed.** Where a hazard is depends on the
+  //   seconds since it was set going and not on the rider, and both speeds
+  //   walk the same ticks from nought. The sweep stops at the first tick K at
+  //   which the rider, at `start + speed·K·tick`, is past the hazard; that
+  //   sum grows with speed, so at the slowest speed's K any faster rider is
+  //   past it too, and every faster speed stops at or before it. The slowest
+  //   speed's ticks hold every tick any avoidable speed sweeps (#1688).
+  // - **Only a standing obstacle the hazard can reach along the road is
+  //   compared.** Two obstacles in different stretches cannot share a lane, so
+  //   one further along than the hazard's whole path, by more than their two
+  //   half-lengths, is the same `false` it was.
+  // - **One `expect` for the lot**: each meeting is written down, and the case
+  //   asserts there are none, naming each one if there are.
+  //
+  // Counted on this commit: 414 placed hazards; 256 950 positions over the two
+  // speeds before, 198 898 now, the faster speed's 58 052 each among them; and
+  // 444 936 `expect` calls before, one now. Placement keeps every standing
+  // obstacle out of a hazard's stretch, so none passes the reach filter here:
+  // a placement that put one beside a hazard's path would, and is red.
   it('finds no distance where a moving hazard and a standing obstacle hold one lane, at any speed', () => {
+    const meetings: string[] = [];
     let swept = 0;
     for (const placed of PLACEMENTS) {
       const standing = placed.filter((obstacle) => obstacle.stands !== undefined);
       for (const hazard of placed.filter(isMoving)) {
         const shape = OBSTACLE_KINDS[hazard.kind];
-        for (const speed of [
-          AVOIDABLE_SLOWEST_METRES_PER_SECOND,
-          AVOIDABLE_FASTEST_METRES_PER_SECOND,
-        ]) {
-          // From the moment it is set going until the rider, in the middle of
-          // the road, has passed it: where it is, along and across.
-          let along = hazard.along - MOVING_HAZARD_SIGHT_METRES;
-          for (let seconds = 0; ; seconds += DELIVERY_TICK_SECONDS) {
-            const at = obstacleAlong(hazard, seconds);
-            if (along - RIDER_BEHIND_METRES > at + shape.halfLength) break;
-            const across = obstacleAcross(hazard, seconds);
-            swept += 1;
-            for (const other of standing) {
-              const otherShape = OBSTACLE_KINDS[other.kind];
-              const sameStretch =
-                Math.abs(at - other.along) < shape.halfLength + otherShape.halfLength;
-              const sameLane =
-                Math.abs(across - other.stands) <
-                shape.halfWidth + otherShape.halfWidth + 2 * RIDER_HALF_WIDTH_METRES;
-              expect(
-                sameStretch && sameLane,
-                `a ${hazard.kind} meets a standing ${other.kind}`,
-              ).toBe(false);
+        // From the moment it is set going until a rider at the slowest
+        // avoidable speed, in the middle of the road, has passed it: where it
+        // is, along and across.
+        const path: (readonly [number, number])[] = [];
+        let along = hazard.along - MOVING_HAZARD_SIGHT_METRES;
+        for (let seconds = 0; ; seconds += DELIVERY_TICK_SECONDS) {
+          const at = obstacleAlong(hazard, seconds);
+          if (along - RIDER_BEHIND_METRES > at + shape.halfLength) break;
+          path.push([at, obstacleAcross(hazard, seconds)]);
+          along += AVOIDABLE_SLOWEST_METRES_PER_SECOND * DELIVERY_TICK_SECONDS;
+        }
+        swept += path.length;
+        const ats = path.map(([at]) => at);
+        const nearest = Math.min(...ats);
+        const furthest = Math.max(...ats);
+        for (const other of standing) {
+          const otherShape = OBSTACLE_KINDS[other.kind];
+          const reach = shape.halfLength + otherShape.halfLength;
+          if (other.along <= nearest - reach || other.along >= furthest + reach) continue;
+          const width = shape.halfWidth + otherShape.halfWidth + 2 * RIDER_HALF_WIDTH_METRES;
+          for (const [at, across] of path) {
+            const sameStretch = Math.abs(at - other.along) < reach;
+            const sameLane = Math.abs(across - other.stands) < width;
+            if (sameStretch && sameLane) {
+              meetings.push(`a ${hazard.kind} at ${hazard.along} m meets a standing ${other.kind}`);
+              break;
             }
-            along += speed * DELIVERY_TICK_SECONDS;
           }
         }
       }
     }
+    expect(meetings).toStrictEqual([]);
     expect(swept).toBeGreaterThan(1_000);
   });
 });
