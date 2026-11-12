@@ -42,6 +42,7 @@ import { importSecretKey, sealHostedKey } from './analysis/hosted-key.ts';
 import { secretText } from './analysis/hosted-key-testing.ts';
 import { HOSTED_TEST_QUESTION, HOSTED_TEST_SYSTEM } from './analysis/hosted-test.ts';
 import { modelKeySet } from './operator/commands.ts';
+import { runCommand } from './operator/run.ts';
 import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
@@ -249,7 +250,7 @@ describe('the running instance forgets every rate-limited address when its windo
     // Every sweep is stopped: the rate limits', the rooms', the jobs' and the notices'.
     expect(cleared).toBe(4);
     expect(pending).toHaveLength(0);
-  }, 30_000);
+  });
 });
 
 describe('the running instance erases a notice’s notifier details when they are due — #1381, #1923', () => {
@@ -355,16 +356,20 @@ describe('the running instance erases a notice’s notifier details when they ar
     erased = await erasedOnceOf(second);
     expect(erased.get(second)).toBe(Math.floor(clock.ms / 1000));
     expect(erased.get(open)).toBeNull();
-  }, 30_000);
+  });
 });
 
 describe('the entry point opens the store — #780 (from #861: every identity route answered 503)', () => {
   it('signs a rider in, mints a ticket over HTTP, and a room worker admits it once — the second time closes 4003', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
+    // The operator's command, run in this process rather than spawned: the
+    // same `room-open`, without a second Node starting (#2550).
     expect(
-      cli(path, 'room-open', 'ride-1', '--kind', 'ride', '--length', '10000', '--countdown', '0')
-        .status,
+      await runCommand(
+        ['room-open', 'ride-1', '--kind', 'ride', '--length', '10000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const { instance } = await start(path);
 
@@ -382,23 +387,16 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
     await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 15_000);
     const frame = rider.messages.find((m) => m.type === 'frame');
     expect(frame?.type === 'frame' && frame.riders.length).toBe(1);
-  }, 60_000);
+  });
 
   it('serves /metrics after a populated fixture with no athlete id, display name, room id or coordinate in it — #791', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     expect(
-      cli(
-        path,
-        'room-open',
-        'secret-room-7',
-        '--kind',
-        'ride',
-        '--length',
-        '10000',
-        '--countdown',
-        '0',
-      ).status,
+      await runCommand(
+        ['room-open', 'secret-room-7', '--kind', 'ride', '--length', '10000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const token = 't'.repeat(40);
     const { instance } = await start(path, { metrics: true, metricsToken: token });
@@ -456,14 +454,14 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
       0,
     );
     expect(connected).toBe(2);
-  }, 60_000);
+  });
 
   it('does not serve /metrics unless the operator turned it on', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     const { instance } = await start(path);
     expect((await fetch(`${instance.url}/metrics`)).status).toBe(404);
-  }, 60_000);
+  });
 });
 
 describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
@@ -482,7 +480,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
     });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
-  }, 60_000);
+  });
 
   it('says in its startup log that analysis is off, and why, for a refused model address (#1096)', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -505,7 +503,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       'instance: analysis is off: OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because',
     );
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
-  }, 60_000);
+  });
 
   it('is not ready — and admits no room — while a migration is running, and is once it has finished', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -536,7 +534,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       status: 'ready',
       checks: { database: true, migrations: 'at-head', rooms: true },
     });
-  }, 60_000);
+  });
 });
 
 describe('a race rider who drops mid-race rejoins it — #895 review B1', () => {
@@ -544,17 +542,10 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     expect(
-      cli(
-        path,
-        'room-open',
-        'race-rejoin',
-        '--kind',
-        'race',
-        '--length',
-        '100000',
-        '--countdown',
-        '0',
-      ).status,
+      await runCommand(
+        ['room-open', 'race-rejoin', '--kind', 'race', '--length', '100000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const { instance } = await start(path);
     const ann = await signIn(instance.url, 'Ann');
@@ -608,7 +599,7 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
       'frames after the rejoin',
       15_000,
     );
-  }, 60_000);
+  });
 });
 
 describe('graceful shutdown drains rooms — #780 criterion 6', () => {
@@ -941,7 +932,7 @@ describe('the history index on the running instance — #835', () => {
     await instance.stop();
     running = undefined;
     expect(pending).toStrictEqual([]);
-  }, 30_000);
+  });
 });
 
 describe('the analysis model on the running instance — #1096', () => {
@@ -1388,7 +1379,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       await fresh.close();
     }
     expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
-  }, 30_000);
+  });
 });
 
 /** A secret, so the running instance makes its keys and seals its sealed-only routes (#1189). */

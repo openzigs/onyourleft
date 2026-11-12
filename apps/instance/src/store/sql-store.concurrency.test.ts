@@ -16,9 +16,11 @@
  *
  * ⚠️ **A red here under load may be a TIMEOUT, not "database is locked".**
  * With the retry, one write can now wait about 21 s (four 5 s busy timeouts
- * and the pauses between) before it gives up, inside these cases' 30 s. A
- * writer starved that long fails the case on Vitest's clock first, so read
- * the failure: a timeout is the same defect as the error, arriving slower.
+ * and the pauses between) before it gives up, far past Vitest's 5 s default,
+ * which these cases keep (#2550: on the nightly coverage job they took 331
+ * to 597 ms, runs 43207158376 and 43008116660, EPYC 9V74). A writer starved that
+ * long fails the case on Vitest's clock first, so read the failure: a
+ * timeout is the same defect as the error, arriving slower.
  *
  * The control runs the same two writers with the busy timeout at nought and
  * no retry, and requires `SQLITE_BUSY` (in SQLite's words, "database is
@@ -78,7 +80,7 @@ async function migrated(): Promise<string> {
 }
 
 describe('two writers on one database (#769)', () => {
-  it('both land every write, and no SQLITE_BUSY escapes', { timeout: 30_000 }, async () => {
+  it('both land every write, and no SQLITE_BUSY escapes', async () => {
     const path = await migrated();
     const errors = await Promise.all([writer(path, 'left'), writer(path, 'right')]);
     expect(errors.flat()).toEqual([]);
@@ -91,18 +93,14 @@ describe('two writers on one database (#769)', () => {
     await store.close();
   });
 
-  it(
-    'is a test that can fail: with no busy timeout and no retry, SQLITE_BUSY does escape (the control)',
-    { timeout: 30_000 },
-    async () => {
-      const path = await migrated();
-      const errors = await Promise.all([
-        writer(path, 'left', 0, CONTROL_WRITES_PER_THREAD, []),
-        writer(path, 'right', 0, CONTROL_WRITES_PER_THREAD, []),
-      ]);
-      expect(errors.flat().some((message) => /database is locked/.test(message))).toBe(true);
-    },
-  );
+  it('is a test that can fail: with no busy timeout and no retry, SQLITE_BUSY does escape (the control)', async () => {
+    const path = await migrated();
+    const errors = await Promise.all([
+      writer(path, 'left', 0, CONTROL_WRITES_PER_THREAD, []),
+      writer(path, 'right', 0, CONTROL_WRITES_PER_THREAD, []),
+    ]);
+    expect(errors.flat().some((message) => /database is locked/.test(message))).toBe(true);
+  });
 });
 
 /**
@@ -238,20 +236,16 @@ async function racers(operation: RaceJob['operation'], deferred: boolean) {
 }
 
 describe('the #867 rules hold between two connections on one file (#889)', () => {
-  it(
-    'revoking the last two keys at once leaves every athlete a key',
-    { timeout: 60_000 },
-    async () => {
-      const { errors, after } = await racers('revoke', false);
-      expect(errors).toEqual([]);
-      for (const athlete of after) {
-        expect(athlete.outcomes).toEqual(['last_device', 'revoked']);
-        expect(athlete.liveKeys).toBe(1);
-      }
-    },
-  );
+  it('revoking the last two keys at once leaves every athlete a key', async () => {
+    const { errors, after } = await racers('revoke', false);
+    expect(errors).toEqual([]);
+    for (const athlete of after) {
+      expect(athlete.outcomes).toEqual(['last_device', 'revoked']);
+      expect(athlete.liveKeys).toBe(1);
+    }
+  });
 
-  it('renaming into the last slot at once lands one rename', { timeout: 60_000 }, async () => {
+  it('renaming into the last slot at once lands one rename', async () => {
     const { errors, after } = await racers('rename', false);
     expect(errors).toEqual([]);
     for (const athlete of after) {
@@ -260,26 +254,22 @@ describe('the #867 rules hold between two connections on one file (#889)', () =>
     }
   });
 
-  it(
-    'a mailed token redeemed as its address is cleared: whichever transaction runs second loses (#1194)',
-    { timeout: 60_000 },
-    async () => {
-      const { errors, after } = await racers('redeem', false);
-      expect(errors).toEqual([]);
-      for (const athlete of after) {
-        expect(athlete.addresses).toBe(0);
-        // The redemption ran first (it spent the token at 50, and the clear
-        // then had nothing left to void) and took it; or the clear ran first
-        // (voiding it at 60) and the redemption is `unbound`. Never a token
-        // taken from an address already gone.
-        if (athlete.tokenUsedAt === 50) expect(athlete.outcomes).toEqual(['cleared', 'taken']);
-        else {
-          expect(athlete.tokenUsedAt).toBe(60);
-          expect(athlete.outcomes).toEqual(['cleared', 'unbound']);
-        }
+  it('a mailed token redeemed as its address is cleared: whichever transaction runs second loses (#1194)', async () => {
+    const { errors, after } = await racers('redeem', false);
+    expect(errors).toEqual([]);
+    for (const athlete of after) {
+      expect(athlete.addresses).toBe(0);
+      // The redemption ran first (it spent the token at 50, and the clear
+      // then had nothing left to void) and took it; or the clear ran first
+      // (voiding it at 60) and the redemption is `unbound`. Never a token
+      // taken from an address already gone.
+      if (athlete.tokenUsedAt === 50) expect(athlete.outcomes).toEqual(['cleared', 'taken']);
+      else {
+        expect(athlete.tokenUsedAt).toBe(60);
+        expect(athlete.outcomes).toEqual(['cleared', 'unbound']);
       }
-    },
-  );
+    }
+  });
 
   it(
     // Under WAL the race surfaces as SQLITE_BUSY (counted in `errors`), not as
