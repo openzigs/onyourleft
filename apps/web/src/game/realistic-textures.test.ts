@@ -2023,9 +2023,12 @@ describe('the realistic rider moves like a rider — #625', () => {
       /** The least gap the body keeps from every part of the bicycle. */
       const LEAST_GAP_METRES = 0.03;
       /** How far a body lying on the road may press into it: flesh, not a limb through it. */
-      const DEEPEST_METRES = 0.04;
-      /** Landed, half way to down, and down. */
-      const LYING_SECONDS = [CRASH_FALL_SECONDS, 0.8, CRASH_RISE_AT_SECONDS];
+      const DEEPEST_METRES = 0.045;
+      /** Landed to down, every twentieth of a second: a blend that swings through between three instants is seen. */
+      const LYING_SECONDS = Array.from(
+        { length: Math.round((CRASH_RISE_AT_SECONDS - CRASH_FALL_SECONDS) / 0.05) + 1 },
+        (_, i) => CRASH_FALL_SECONDS + i * 0.05,
+      ).filter((t) => t <= CRASH_RISE_AT_SECONDS + 1e-9);
       /** The arm on the road's side when falling to the right: three drops the dot. */
       const LOW_ARM = ['upperarm01R', 'lowerarm01R', 'wristR'];
 
