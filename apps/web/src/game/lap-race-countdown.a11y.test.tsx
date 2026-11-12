@@ -42,7 +42,9 @@ const themeCss = readFileSync(
 /** Every `property` declared in a rule whose selector names `.className`, with the selector. */
 function motionDeclaredFor(className: string): string[] {
   const found: string[] = [];
-  const named = new RegExp(`\\.${className.replace(/[-]/g, '\\-')}(?![\\w-])`);
+  // Every regular-expression metacharacter escaped, backslash included.
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const named = new RegExp(`\\.${escaped}(?![\\w-])`);
   for (const rule of themeCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selector = (rule[1] ?? '').trim();
     const block = rule[2] ?? '';
