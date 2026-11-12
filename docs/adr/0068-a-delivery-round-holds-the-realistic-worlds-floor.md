@@ -1,9 +1,12 @@
 # ADR 0068: A Delivery round holds the realistic world's floor — superseding the step out of realism in ADR 0026 D-3, while a round runs
 
-- **Status**: **Proposed, 2026-11-12.** Nothing here is the owner's ruling yet: it is the author's
-  recommendation, to be accepted or changed on this ADR's pull request before the change merges
+- **Status**: **Accepted, 2026-11-12**, on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/pull/2530#issuecomment-6828858146) on this ADR's pull request (#2530): *"Its decision record (Delivery
+  holds the realistic world for the whole round) is accepted."* D-1 and D-2 were drafted as the
+  author's recommendation and are accepted as written; D-2's hold has no bound
 - **Date**: 2026-11-12
-- **Deciders**: the owner, on the pull request. The author recommends
+- **Deciders**: **the owner**, in the [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/pull/2530#issuecomment-6828858146) on the pull request. The author
+  drafted it for that approval
 - **Issue**: [#2513](https://github.com/openzigs/onyourleft/issues/2513)
 - **Number**: **0068**. On 2026-11-12 `docs/adr/` holds no file numbered 0068 and
   `docs/agents/conventions.md` §7 gives 0068 as the next free number
@@ -28,8 +31,11 @@ This was reproduced on the shipped build under SwiftShader and on a forced step-
 (*Settings › Game world*, `oyl.game.realisticReport.v1`, read over `adb` on 2026-11-12 from the
 combination build installed on 2026-11-11) holds `"steps":[]` for every recent ride: none of them
 stepped down or left realism. So the ladder leaving realism is **not** shown to be what the owner
-saw on the tablet, and this ADR is a hardening that the tablet has not yet needed. #2513 stays open
-on the tablet for its cause.
+saw on the tablet, and this ADR is a hardening that the tablet has not yet needed. #2513's cause
+was found later the same day, and it was not this: the house was drawn, but its marker stood
+behind the tablet's top-right HUD panel from about 100 m to 7 m out, and the *Next house*
+countdown reached nought level with the house, where it is out of frame. The same pull request
+fixes that (a low marker, and a countdown to the throw point); this ADR is the second fix.
 
 ## Decision
 
@@ -39,7 +45,7 @@ realism the ladder steps down and climbs back exactly as before; an ordinary rid
 round is over leave realism exactly as before. (`quality.ts` §`nextWorldQuality`, its `holdRealism`
 argument; `GameView.tsx` passes it.)
 
-**D-2. The hold has no bound** (the author's recommendation, for the owner to rule on). A device too
+**D-2. The hold has no bound** (the author's recommendation, accepted by the owner on 2026-11-12). A device too
 slow for the realistic floor stays in realism for the whole round and drops frames, because ADR 0059
 D-3.4 already accepts that for Delivery and a round in the stylised world is a round with no houses.
 The alternative is an escape on an extreme frame time (for example the frame time of the 2026-11-08
@@ -56,4 +62,6 @@ tablet frame check either way. Neither is built.
 ## What would make this ADR wrong
 
 - The owner's tablet moving-ride check showing a held round at a frame rate the rider cannot ride.
-- The tablet's report showing the cause of #2513 is elsewhere (see Context).
+- The tablet's report showing that a held round never happens on a real device, so the hold costs
+  frames and buys nothing. #2513's own cause was elsewhere (see Context); this ADR does not rest on
+  it.

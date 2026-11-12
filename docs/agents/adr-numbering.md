@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0068 is [ADR 0068](../adr/0068-a-delivery-round-holds-the-realistic-worlds-floor.md)**,
+  taken by [#2513](https://github.com/openzigs/onyourleft/issues/2513) on 2026-11-12 for a Delivery
+  round holding the realistic world's floor. It is **Accepted** (2026-11-12), on the owner's
+  [ruling of that day](https://github.com/openzigs/onyourleft/pull/2530#issuecomment-6828858146) on #2530. It supersedes ADR 0026 D-3's step out of realism, only while a
+  round runs, as an ADR rather than an amendment, because ADR 0013 D-3 sends a reversed decision to
+  a new ADR. It took the next free number after 0067; **0057 and 0058 stay claimed** by #1748 and
+  #1752. **The next free number is 0069.** A reviewer who remembers this file offering 0068 is
+  reading the old file.
   ⚠️ **0067 is [ADR 0067](../adr/0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)**,
   taken by [#2457](https://github.com/openzigs/onyourleft/issues/2457) on 2026-11-11 for lap-race
   bots racing with a strategy that reads the race, on the owner's ruling of 2026-11-10 on
@@ -21,7 +29,7 @@ It has the same authority as the root file. Where the text below says "this file
   its D-3 answer (b), which the owner chose, ADR 0066 D-1.5's and D-4's lap-race clauses, D-2 and D-6's last bullet, and
   ADR 0038 D-5's "Out" bullet, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed
   decision to a new ADR. It took the next free number after 0066; **0057 and 0058 stay claimed** by
-  #1748 and #1752. **The next free number is 0069.** A reviewer who remembers this file offering
+  #1748 and #1752. The next free number was then 0068. A reviewer who remembers this file offering
   0067 is reading the old file.
   ⚠️ **0066 is [ADR 0066](../adr/0066-the-bot-pacer-and-the-riders-own-ghost-give-a-draft-in-a-solo-ride.md)**,
   taken by [#2424](https://github.com/openzigs/onyourleft/issues/2424) on 2026-11-10 for the bot
