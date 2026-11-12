@@ -927,26 +927,41 @@ async function run(): Promise<void> {
   };
   // #2513: a real round on the page's town — the product's own pick, markers
   // and HUD words — its rider held before each house in turn, in route order,
-  // each frame drawn first at its refill chunk's start as a ride's would be.
+  // each chunk drawn first at its start, as a ride's refill would be.
   // Every frame here is drawn and read between two of the loop's.
   if (town !== undefined && config.town === 'level') {
     const buildings = town.buildings;
     const houses = fixtureLevel.round.houses;
     window.__oylRealisticRound = (leads) => {
-      const ride = startDeliveryRide({
-        buildings,
-        profile,
-        origin,
-        riderDistance: 0,
-        lineOffset: 0,
-        storage: undefined,
-        level: {
-          houses,
-          hazardsPerKilometre: { static: 0, moving: 0 },
-          lengthMetres: 1,
-          id: 'fixture-level',
-        },
-      });
+      // The round's seed, fixed: `ride-round.ts` draws one at the press from
+      // `crypto.getRandomValues`, and some seeds pick the fixture's houses on
+      // one side only, which failed "houses on both sides" about one run in
+      // three. Restored at once, so nothing else on the page draws from it.
+      const draw = crypto.getRandomValues.bind(crypto);
+      crypto.getRandomValues = <T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint32Array) array[0] = ROUND_SEED;
+        return array;
+      };
+      const ride = (() => {
+        try {
+          return startDeliveryRide({
+            buildings,
+            profile,
+            origin,
+            riderDistance: 0,
+            lineOffset: 0,
+            storage: undefined,
+            level: {
+              houses,
+              hazardsPerKilometre: { static: 0, moving: 0 },
+              lengthMetres: 1,
+              id: 'fixture-level',
+            },
+          });
+        } finally {
+          crypto.getRandomValues = draw;
+        }
+      })();
       if (ride === undefined) throw new Error('the town gave the round no houses');
       const drawAt = (along: number, held: typeof ride): SceneFrame => {
         const frame = rideFrame({
@@ -972,11 +987,20 @@ async function run(): Promise<void> {
         view.render(withRound);
         return withRound;
       };
+      // The chunk's start is drawn once, on entering it, as a ride draws it: the
+      // samples go in route order, so a second sample in the same chunk is
+      // already selected for. Half the renders of drawing it before every sample,
+      // which kept this one evaluate busy long enough on CI's SwiftShader to
+      // starve the next case's context set-up (#2513's nightly shard 5).
+      let chunkDrawn: number | undefined;
       const sightings = roundSamples(ride.targets, leads).map((sample): RoundSighting => {
         const target = ride.targets[sample.position];
         if (target === undefined) throw new Error('a sample names no house of the round');
         const held = rideHeldAt(ride, sample.position, sample.along);
-        drawAt(sample.chunkStart, held);
+        if (sample.chunkStart !== chunkDrawn) {
+          drawAt(sample.chunkStart, held);
+          chunkDrawn = sample.chunkStart;
+        }
         drawAt(sample.along, held);
         const plan = planOfTarget(buildings, target);
         const centre = plan === -1 ? undefined : buildings.plans[plan]?.centroid;
@@ -1010,6 +1034,9 @@ async function run(): Promise<void> {
   };
   requestAnimationFrame(tick);
 }
+
+/** #2513: the seed `__oylRealisticRound`'s round is picked with: one that picks the fixture's houses either side. */
+const ROUND_SEED = 1;
 
 /** Puts an error where the procedure reads it, and on the screen. Never throws. */
 function fail(message: string): void {
