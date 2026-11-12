@@ -77,7 +77,8 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/ass
 import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
-import { parseLevelFile } from './delivery/levels/level-file';
+import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
+import { MOVING_HAZARD_KINDS, type ObstacleKind } from './delivery/obstacles';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
@@ -2064,8 +2065,28 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     return mappedBuildingsOf(plans);
   })();
 
-  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
-  const CRASHING_SEED = ((): number => {
+  /**
+   * #2364: the fixture level with moving hazards in its round as well, as a
+   * level that asks for them carries them. Read through the app's reader.
+   */
+  const MOVING_LEVEL = parseLevelFile(
+    {
+      ...JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            'delivery/levels/fixtures/fixture-level.json',
+          ),
+          'utf8',
+        ),
+      ),
+      round: { ...LEVEL.round, hazardsPerKilometre: { static: 1, moving: 4 } },
+    },
+    'fixture-level',
+  );
+
+  /** The ride's frames, as the simulation steps the scripted power trace on the level. */
+  const LEVEL_FRAMES = ((): readonly ShadowFrame[] => {
     const simulation = new GameSimulation({
       profile: LEVEL_PROFILE,
       conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
@@ -2080,7 +2101,12 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         speed: simulation.state.ride.speed,
       });
     }
-    for (let seed = 1; seed < 400; seed += 1) {
+    return frames;
+  })();
+
+  /** The first seed whose round on `level` the unsteered rider crashes into a `kind` on. */
+  function crashingSeed(level: LevelFile, kind: ObstacleKind): number {
+    for (let seed = 1; seed < 600; seed += 1) {
       stubSeed(seed);
       let ride = startDeliveryRide({
         buildings: LEVEL_BUILDINGS,
@@ -2089,13 +2115,13 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         riderDistance: 0,
         lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
         storage: undefined,
-        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
+        level: { ...level.round, lengthMetres: level.lengthMetres },
       });
       vi.restoreAllMocks();
       if (ride === undefined) continue;
-      if (!ride.obstacles.some((obstacle) => obstacle.kind === 'parked-car')) continue;
+      if (!ride.obstacles.some((obstacle) => obstacle.kind === kind)) continue;
       let crashes = 0;
-      for (const frame of frames) {
+      for (const frame of LEVEL_FRAMES) {
         if (frame.steps === 0) continue;
         const stepped = stepDeliveryRide(ride, {
           ticks: frame.steps,
@@ -2105,19 +2131,25 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         ride = stepped.ride;
         crashes += stepped.crashes;
       }
-      // A crash into a parked car itself (#2362, round 2), so the ride below
-      // also draws the rider moved clear of it.
-      const intoCar = ride.obstacles.some(
-        (obstacle, index) =>
-          obstacle.kind === 'parked-car' && ride.obstacleState.crashed[index] === true,
+      // A crash into a `kind` itself (#2362, round 2): for a parked car, so the
+      // ride below also draws the rider moved clear of it.
+      const into = ride.obstacles.some(
+        (obstacle, index) => obstacle.kind === kind && ride.obstacleState.crashed[index] === true,
       );
-      if (crashes > 0 && intoCar) return seed;
+      if (crashes > 0 && into) return seed;
     }
-    throw new Error('no seed put the unsteered rider into a parked car');
-  })();
+    throw new Error(`no seed put the unsteered rider into a ${kind}`);
+  }
+
+  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
+  const CRASHING_SEED = crashingSeed(LEVEL, 'parked-car');
 
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
-  async function rideLevel(obstacles: 'normal' | 'none'): Promise<{
+  async function rideLevel(
+    obstacles: 'normal' | 'none',
+    level: LevelFile = LEVEL,
+    seed = CRASHING_SEED,
+  ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
     readonly started: readonly unknown[];
@@ -2135,7 +2167,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     const writes: Write[] = [];
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
-      loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+      loadDeliveryLevel: (id) => Promise.resolve(id === level.id ? level : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({
         rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
@@ -2143,7 +2175,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         heartRate: { value: 142, live: true, paired: true },
       }),
     };
-    stubSeed(CRASHING_SEED);
+    stubSeed(seed);
     mounted = await mount(
       <GameView
         port={levelPort}
@@ -2187,6 +2219,26 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
       expect(without.writes.length).toBeGreaterThan(20);
       expect(withCars.writes).toStrictEqual(without.writes);
     },
+  );
+
+  it.each(MOVING_HAZARD_KINDS)(
+    'sends the same writes at the same times with a levelâ€™s moving hazards as with none, a crash into a %s among them â€” #2364',
+    async (kind) => {
+      const seed = crashingSeed(MOVING_LEVEL, kind);
+      const without = await rideLevel('none', MOVING_LEVEL, seed);
+      const withHazards = await rideLevel('normal', MOVING_LEVEL, seed);
+      const [round] = withHazards.started as (DeliveryRide | undefined)[];
+      const [bare] = without.started as (DeliveryRide | undefined)[];
+      expect(round?.onLevel).toBe(true);
+      expect(round?.obstacles.some((obstacle) => obstacle.kind === kind)).toBe(true);
+      expect(bare?.obstacles).toEqual([]);
+      // The rider rode into one, so a crash was counted and said.
+      expect(withHazards.offered).toContain('delivery-crash');
+      expect(without.offered).not.toContain('delivery-crash');
+      expect(without.writes.length).toBeGreaterThan(20);
+      expect(withHazards.writes).toStrictEqual(without.writes);
+    },
+    30_000,
   );
 
   it(

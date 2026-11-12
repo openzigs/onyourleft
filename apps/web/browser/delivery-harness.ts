@@ -107,7 +107,7 @@ declare global {
       viewCalls(count: number): DeliveryViewCalls;
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
-      kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
+      kinds(world: 'stylised' | 'realistic'): Readonly<Record<ProbedKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
       inLane(
@@ -131,7 +131,15 @@ declare global {
 
 const counter = drawCounter(WebGL2RenderingContext.prototype);
 
-const ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone', 'parked-car'];
+/**
+ * The kinds this harness reads pixels of. #2364's dog and other rider are
+ * held to their footprints and their one instanced mesh by
+ * `delivery-belt.test.ts`; a car pulling out is drawn as a parked car.
+ */
+const ROSTER = ['bin', 'trolley', 'cone', 'parked-car'] as const satisfies readonly ObstacleKind[];
+
+/** One of {@link ROSTER}. */
+type ProbedKind = (typeof ROSTER)[number];
 
 /** The kinds that cross the road: a parked car (#2362) only ever stands. */
 const CROSSING_ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone'];
@@ -193,7 +201,7 @@ function piecesOn(frame: SceneFrame, count: number): DeliveryInView {
     markers: Array.from({ length: count }, (_, index) => at(index, 6, 0)),
     obstacles: Array.from({ length: count }, (_, index) => ({
       ...at(index, -2, 0),
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as ProbedKind,
     })),
   };
 }
@@ -306,8 +314,8 @@ function markerLeaves(): DeliveryMarkerReading {
   return { delivered, before, after };
 }
 
-function kinds(world: 'stylised' | 'realistic'): Record<ObstacleKind, readonly boolean[]> {
-  const read = (kind: ObstacleKind): readonly boolean[] =>
+function kinds(world: 'stylised' | 'realistic'): Record<ProbedKind, readonly boolean[]> {
+  const read = (kind: ProbedKind): readonly boolean[] =>
     deliveryKindProbe(canvas(256, 256), world, kind, KIND_POINTS);
   return {
     bin: read('bin'),
@@ -326,7 +334,7 @@ function probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCal
       y: 0,
       z: -3,
       yaw: 0,
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as ProbedKind,
     })),
   };
   return deliveryCallsProbe(canvas(64, 32), world, view);

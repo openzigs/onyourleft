@@ -63,10 +63,21 @@
  * one into a string.
  */
 
-import type { DeliveryInView, DeliveryObstaclePiece, DeliveryPiece } from '../port';
+import type {
+  DeliveryInView,
+  DeliveryObstacleKind,
+  DeliveryObstaclePiece,
+  DeliveryPiece,
+} from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
-import { obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
+import {
+  obstacleAcross,
+  obstacleAlong,
+  type Obstacle,
+  type ObstacleKind,
+  type ObstacleState,
+} from './obstacles';
 import type { Round } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -203,19 +214,42 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const obstacles: DeliveryObstaclePiece[] = [];
   const { obstacleState } = input;
   input.obstacles.forEach((obstacle, index) => {
-    const at = onCorridor(centre, obstacle.along);
-    if (at === undefined) return;
     const started = obstacleState.startedAt[index];
     const seconds =
       started === undefined
         ? 0
         : (obstacleState.tick - started + sinceStep) * DELIVERY_TICK_SECONDS;
+    // #2364: another rider is drawn where they have ridden to.
+    const at = onCorridor(centre, obstacleAlong(obstacle, seconds));
+    if (at === undefined) return;
     obstacles.push({
-      ...placed(at, obstacleAcross(obstacle, seconds), 0, 0),
-      kind: obstacle.kind,
+      ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
+      kind: drawnObstacleKind(obstacle.kind),
       index,
     });
   });
 
   return { parcels, markers, obstacles };
+}
+
+/**
+ * The shape an obstacle is drawn as — #2364: its own, except a car pulling
+ * out, which is a parked car's body moving, so it is drawn as one and the
+ * obstacles' one geometry carries one car (`three-renderer.ts`
+ * §`DELIVERY_OBSTACLE_TRIANGLES`).
+ */
+export function drawnObstacleKind(kind: ObstacleKind): DeliveryObstacleKind {
+  return kind === 'car-pulling-out' ? 'parked-car' : kind;
+}
+
+/**
+ * How an obstacle faces, from the road's heading — #2364: another rider faces
+ * the rider, coming the other way, and a dog faces where it runs: its drawn
+ * head is to its left (`three-renderer.ts` §`dogParts`), so a dog from the
+ * left kerb is turned about. Every other kind faces along the road.
+ */
+function obstacleTurn(obstacle: Obstacle): number {
+  if (obstacle.kind === 'oncoming-rider') return Math.PI;
+  if (obstacle.kind === 'dog' && obstacle.from === 'left') return Math.PI;
+  return 0;
 }

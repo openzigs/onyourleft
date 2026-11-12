@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
 import { CAMERA_ABOVE_METRES, MAXIMUM_FIELD_OF_VIEW_DEGREES, NEAR_PLANE_METRES } from './camera';
-import { deliveryInView } from './delivery/in-view';
+import { deliveryInView, drawnObstacleKind } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
   startObstacles,
@@ -32,7 +32,7 @@ import {
   type ThrowState,
   type ThrowTarget,
 } from './delivery/throw';
-import type { DeliveryInView, DeliveryPiece } from './port';
+import type { DeliveryInView, DeliveryObstacleKind, DeliveryPiece } from './port';
 import type { CorridorPoint } from './terrain';
 import {
   DELIVERY_OBSTACLE_TRIANGLES,
@@ -46,7 +46,14 @@ import {
 import { PEAK_IRRADIANCE } from './world';
 
 const KINDS: readonly DeliveryPieceKind[] = ['parcels', 'markers', 'obstacles'];
-const ROSTER = Object.keys(OBSTACLE_KINDS) as readonly ObstacleKind[];
+/**
+ * The kinds the view draws, in the renderer's order: every one of
+ * `OBSTACLE_KINDS` but a car pulling out, which is drawn as a parked car
+ * (#2364, `in-view.ts` §`drawnObstacleKind`).
+ */
+const ROSTER = (Object.keys(OBSTACLE_KINDS) as readonly ObstacleKind[]).filter(
+  (kind) => drawnObstacleKind(kind) === kind,
+) as readonly DeliveryObstacleKind[];
 
 /** `count` of each piece, a metre apart, every obstacle kind in turn. */
 function pieces(count: number): DeliveryInView {
@@ -56,7 +63,7 @@ function pieces(count: number): DeliveryInView {
     markers: Array.from({ length: count }, (_, index) => at(index)),
     obstacles: Array.from({ length: count }, (_, index) => ({
       ...at(index),
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as DeliveryObstacleKind,
     })),
   };
 }
@@ -114,7 +121,7 @@ function markerOn(belt: DeliveryBelt, target: DeliveryTarget): boolean {
 }
 
 /** The bounding box of the vertices of `kind` in the obstacle mesh's geometry. */
-function kindBox(belt: DeliveryBelt, kind: ObstacleKind): { min: number[]; max: number[] } {
+function kindBox(belt: DeliveryBelt, kind: DeliveryObstacleKind): { min: number[]; max: number[] } {
   const geometry = belt.meshOf('obstacles').geometry;
   const position = geometry.getAttribute('position');
   const kinds = geometry.getAttribute('oylPieceKind');
@@ -579,11 +586,13 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
   it('paints its cars in three body colours from ONE car in the geometry, each instance its own paint by its place on the round (round 6)', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('obstacles').geometry;
-    // One car: every vertex's kind is one of the roster's four, none a second or third car.
+    // One car: every vertex's kind is one of the drawn roster's, none a second
+    // or third car — #2364's car pulling out is drawn as this one.
     const kinds = geometry.getAttribute('oylPieceKind');
     const seen = new Set<number>();
     for (let at = 0; at < kinds.count; at += 1) seen.add(kinds.getX(at));
-    expect([...seen].sort()).toEqual([0, 1, 2, 3]);
+    expect([...seen].sort()).toEqual(ROSTER.map((_, index) => index));
+    expect(ROSTER).not.toContain('car-pulling-out');
     // Its body, and only its body, takes the instance's paint.
     const painted = geometry.getAttribute('oylPainted');
     const car = carVertices(belt, CAR_KIND);
@@ -643,12 +652,14 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // cone's too, runs every kind's triangles through the vertex shader. Round 5
     // held three whole cars (4 526); one painted car is 1 522: bin 88, trolley
     // 124, cone 42 and the car 1 268, and #2396 adds 8 for each of three hazard
-    // markers, 1 546. A change past this is for the owner and
+    // markers, 1 546. #2364 adds a dog (72) and another rider (124), each with
+    // a marker, 1 758, and raises this bound from 1 600 to 1 800 for the
+    // owner's approval in its pull request. A change past this is for the owner and
     // the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
     expect(position.count / 3).toBe(DELIVERY_OBSTACLE_TRIANGLES);
-    expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_600);
+    expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_800);
     belt.dispose();
   });
 });

@@ -10996,6 +10996,8 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
   trolley: { halfLength: 0.25, halfWidth: 0.3 },
   cone: { halfLength: 0.2, halfWidth: 0.2 },
   'parked-car': { halfLength: 2.2, halfWidth: 0.9 },
+  dog: { halfLength: 0.2, halfWidth: 0.45 },
+  'oncoming-rider': { halfLength: 0.85, halfWidth: 0.3 },
 };
 
 /** The roster, in order: a kind's index is its number in both attributes. */
@@ -11191,6 +11193,14 @@ const DELIVERY_PAINT = {
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
   hazard: 0xe8432f,
+  // #2364: a brown dog with a darker muzzle and tail, and another rider in a
+  // teal jacket and dark legs on a grey bicycle, this project's own.
+  dogCoat: 0x8a5a35,
+  dogDark: 0x4a2f1c,
+  riderJacket: 0x2a8c8c,
+  riderLegs: 0x2b2f36,
+  riderSkin: 0xd2a07c,
+  riderFrame: 0x7d848c,
 } as const;
 
 /**
@@ -11225,7 +11235,13 @@ const HAZARD_MARKER_HEIGHT_METRES = 0.36;
 const HAZARD_MARKER_REACH_METRES = 0.2;
 
 /** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
-const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = [
+  'bin',
+  'trolley',
+  'cone',
+  'dog',
+  'oncoming-rider',
+];
 
 /**
  * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
@@ -11461,6 +11477,61 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
 }
 
 /**
+ * A dog, side on — #2364, this project's own: a brown body on its front and
+ * hind legs, a head with a darker muzzle, and a tail, about 0.65 m tall, in
+ * six boxes, because every obstacle instance submits every kind's triangles
+ * ({@link DELIVERY_OBSTACLE_TRIANGLES}). It runs
+ * across the road, so its length is across it: its head is along `+x`, the
+ * rider's left as drawn (`delivery/in-view.ts` §`obstacleTurn` turns it to
+ * face the way it runs). Upright and whole: a contact is never drawn as harm
+ * (ADR 0065 D-10.6). {@link fittedToFootprint} holds it to `obstacles.ts`'
+ * 0.9 m across by 0.4 m along.
+ */
+function dogParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.dog;
+  return fittedToFootprint(
+    [
+      [deliveryBox(0.58, 0.24, 0.24, 0, 0.42, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.2, 0.22, 0.18, 0.34, 0.58, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.1, 0.09, 0.12, 0.47, 0.52, 0), DELIVERY_PAINT.dogDark],
+      [deliveryBox(0.18, 0.05, 0.05, -0.38, 0.52, 0), DELIVERY_PAINT.dogDark],
+      // The front legs and the hind legs, each pair one box.
+      [deliveryBox(0.07, 0.32, 0.2, 0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.07, 0.32, 0.2, -0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+    ],
+    halfWidth,
+    halfLength,
+  );
+}
+
+/**
+ * Another rider coming the other way — #2364, this project's own: a grey
+ * bicycle on two black wheels, a rider in a teal jacket with dark legs and a
+ * bare head, about 1.7 m tall, the bicycle's nose along `+z` (`in-view.ts`
+ * §`obstacleTurn` turns them to face the rider). A drawn figure of the level,
+ * never the pacer, a bot or another rider's data (ADR 0065 D-10.7), and never
+ * drawn hurt. {@link fittedToFootprint} holds it to `obstacles.ts`' 1.7 m
+ * along by 0.6 m across.
+ */
+function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['oncoming-rider'];
+  const radius = 0.33;
+  return fittedToFootprint(
+    [
+      [deliveryWheel(radius, 0.04, 0, radius, -0.52), DELIVERY_PAINT.black],
+      [deliveryWheel(radius, 0.04, 0, radius, 0.52), DELIVERY_PAINT.black],
+      [deliveryBox(0.05, 0.05, 1.0, 0, 0.6, 0), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.56, 0.04, 0.04, 0, 1.0, 0.46), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.28, 0.5, 0.12, 0, 0.62, -0.12), DELIVERY_PAINT.riderLegs],
+      [deliveryBox(0.34, 0.55, 0.26, 0, 1.15, 0.0), DELIVERY_PAINT.riderJacket],
+      [deliveryBox(0.2, 0.22, 0.2, 0, 1.55, 0.08), DELIVERY_PAINT.riderSkin],
+    ],
+    halfWidth,
+    halfLength,
+  );
+}
+
+/**
  * The obstacle roster, every kind in one geometry, each vertex marked
  * with its kind (@see withObstacleKinds), standing on the road at the
  * origin. Each kind's footprint is its collision box in `obstacles.ts`
@@ -11552,6 +11623,9 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
+  // #2364: the moving hazards' own figures; a car pulling out is drawn as the car below.
+  for (const [made, colour] of dogParts()) add('dog', made, colour);
+  for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
   // One car: its body's vertices take the instance's paint (round 6).
   const body = PARKED_CAR_PAINTS[0] as number;
   for (const [made, colour] of parkedCarParts(body)) {
@@ -11569,7 +11643,9 @@ function obstacleShape(): BufferGeometry {
  * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
  * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
  * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
- * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
+ * the bin, the trolley and the cone; since #2364 **1 758**, adding a dog's 72
+ * and another rider's 124, each with its marker's 8. A car pulling out is
+ * drawn as the parked car and adds none. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
  * obstacles cost this many times the instances drawn in vertex work, and no
  * fragment for the collapsed ones.
@@ -11577,7 +11653,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_758;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
