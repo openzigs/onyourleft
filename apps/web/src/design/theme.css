@@ -10800,10 +10800,24 @@ select.oyl-input {
  * - **On a tablet nothing gives way.** §"#1398"'s lift now applies with a
  *   side camera too, and the side camera's row leaves the panel as well,
  *   stacked directly above the sound row (3.125 rem: the mute's 3 rem and
- *   the row's two borders) in the left column. Measured at 1024×768: the
- *   side camera's row from y = 464 to 523, the sound row to 577, the route
- *   panel from 590, and the actions panel from 581, under the standings'
- *   532.
+ *   the row's two borders) in the left column. Measured at 1024×768 since
+ *   #2130 (#2259, CI's fonts and a Mac's within 4 px): the side camera's row
+ *   from y = 305 to 364, the sound row to 418, the route panel from 422, and
+ *   the actions panel from 581, the standings ending at 433.
+ *   ⚠️ **What this rule still holds is the actions panel one row shorter,
+ *   and no collision.** When #1409 was written, the side camera's row in
+ *   that panel put it over the race's standings at 1280×800 and 1024×768.
+ *   Since #2130 put every unit on its number's line, the 4:3 tablet's
+ *   secondary panel is 41 px shorter. Measured with this rule taken out of
+ *   the live sheet, the row goes back into the actions panel, which then
+ *   begins 53 px higher: at 528 at 1024×768, 95 px under the standings; at
+ *   560 at 1280×800; and at 1040 at 800×1280. Nothing on any of the three
+ *   tablets is then over anything else or over the leaning rider. So
+ *   `ride-room.browser.spec.ts` §"#1409" holds it at the tablets only by
+ *   "the side camera's row a panel of its own", and its control no longer
+ *   runs there. Taking the rule out would move the side camera's row and
+ *   *Stop side camera* back beside *Follow* and *Report*: a layout change
+ *   for the owner's screenshots, not a tidy-up.
  * - **On a phone on its side the two lifted rows share the strip above the
  *   bottom-start cell**, which #1358 measured at 57 px without anchors and
  *   which holds one row: *Stop side camera* in a 6 rem panel at the start,
@@ -10840,7 +10854,9 @@ select.oyl-input {
  * *Report* upright, by §"#1407"'s first two rules, beside *Stop*, and the
  * panel is the same height open as closed.
  * `ride-room.browser.spec.ts` §"#1409" holds all of it at every overlay viewport,
- * both ways, and takes this block out as its control.
+ * both ways, and takes this block out as its control at 736×360 and 360×752.
+ * Since #2130 the control does not run at a tablet: there it would find
+ * nothing (the tablet bullet above says why).
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
   .oyl-game--riding
