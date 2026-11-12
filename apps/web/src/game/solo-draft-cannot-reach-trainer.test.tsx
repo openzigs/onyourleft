@@ -403,16 +403,30 @@ async function rideWith(
   };
 }
 
-/** The same company ridden with the switch off, then on. */
-async function ridePair(
-  company: Company,
+/**
+ * Each run, ridden once by the first case that asks for it and read by every
+ * case after, so a case pays for one ride (#2524, #1688's ruling: a slow case
+ * is made cheaper, never given a longer timeout). A case run alone with `-t`
+ * rides whatever it reads that no earlier case has.
+ */
+const runs = new Map<string, Promise<Run>>();
+function ridden(
+  name: string,
+  company: () => Promise<Company>,
+  soloDraft: boolean,
   mode: 'simulation' | 'erg',
-): Promise<{ readonly alone: Run; readonly drafted: Run }> {
-  const alone = await rideWith(company, false, mode);
-  await endRun();
-  const drafted = await rideWith(company, true, mode);
-  await endRun();
-  return { alone, drafted };
+): Promise<Run> {
+  const key = `${name} ${soloDraft ? 'on' : 'off'} ${mode}`;
+  let run = runs.get(key);
+  if (run === undefined) {
+    run = company().then(async (with_) => {
+      const done = await rideWith(with_, soloDraft, mode);
+      await endRun();
+      return done;
+    });
+    runs.set(key, run);
+  }
+  return run;
 }
 
 /**
@@ -420,23 +434,17 @@ async function ridePair(
  * switch off, scaled by {@link GHOST_PACE} and {@link GHOST_LEAD_METRES} up
  * the road. Handed in through `GamePort.loadGhost`, as a saved attempt is.
  */
-async function ownGhost(): Promise<GhostTrack> {
-  const unpaced = await rideWith('alone', false, 'simulation');
-  await endRun();
-  return buildGhostTrack({
-    elapsedSeconds: unpaced.track.elapsed,
-    distanceMetres: unpaced.track.distance.map((at) => at * GHOST_PACE + GHOST_LEAD_METRES),
-  });
+async function ownGhost(): Promise<Company> {
+  const unpaced = await ridden('nobody', () => Promise.resolve('alone'), false, 'simulation');
+  return {
+    ghost: buildGhostTrack({
+      elapsedSeconds: unpaced.track.elapsed,
+      distanceMetres: unpaced.track.distance.map((at) => at * GHOST_PACE + GHOST_LEAD_METRES),
+    }),
+  };
 }
 
-/**
- * The gate's budget for a case of two rides (`draft-cannot-reach-trainer.test.tsx`
- * §`RIDES` has the CI figures), and half as much again for the ghost's
- * three. Locally, 2026-11-10: 3.6 s for the pacer's simulation pair and
- * 2.6 s for the ghost's three rides alone, 4.7 s and 6.5 s beside the gate.
- */
-const RIDES = { timeout: 20_000 } as const;
-const THREE_RIDES = { timeout: 30_000 } as const;
+const pacer = (): Promise<Company> => Promise.resolve('pacer');
 
 const SET_SIMULATION_PARAMETERS = 0x11;
 const SET_TARGET_POWER = 0x05;
@@ -506,42 +514,61 @@ function expectGradesOnly(alone: Run, drafted: Run): void {
   );
 }
 
+// #2524: each pair was one case, the ghost's three rides one case. Locally on
+// an Apple M4 Pro at a load average of 13 to 23: the pacer's simulation pair
+// 3.7 s, and 5.5 s under --coverage; the ghost's three 4.0 s and 6.2 s; the
+// ERG pair 2.8 s and 8.2 s. Each ride is now its own case: after, at a load
+// average of 10 to 15, 1.0 to 2.2 s each, and 2.1 to 3.0 s under --coverage.
 describe('a solo draft reaches no trainer write in simulation mode — #2425, ADR 0066 D-4', () => {
-  it(
-    'behind the pacer: the road’s grade at the rider’s own odometer, the protocol’s defaults for everything else, and the same release',
-    RIDES,
-    async () => {
-      const { alone, drafted } = await ridePair('pacer', 'simulation');
-      expectDrafted(alone, drafted);
-      expectGradesOnly(alone, drafted);
-    },
-  );
+  it('behind the pacer, the switch off: no draft taken', async () => {
+    const alone = await ridden('pacer', pacer, false, 'simulation');
+    expect(alone.soloDraft).toBeUndefined();
+  });
 
-  it(
-    'behind the rider’s own ghost: the same, from the ghost’s replayed distance',
-    THREE_RIDES,
-    async () => {
-      const { alone, drafted } = await ridePair({ ghost: await ownGhost() }, 'simulation');
-      expectDrafted(alone, drafted);
-      expectGradesOnly(alone, drafted);
-    },
-  );
+  it('behind the pacer: the road’s grade at the rider’s own odometer, the protocol’s defaults for everything else, and the same release', async () => {
+    const alone = await ridden('pacer', pacer, false, 'simulation');
+    const drafted = await ridden('pacer', pacer, true, 'simulation');
+    expectDrafted(alone, drafted);
+    expectGradesOnly(alone, drafted);
+  });
+
+  it('rides the rider’s own earlier attempt, with nobody, for the ghost below', async () => {
+    const unpaced = await ridden('nobody', () => Promise.resolve('alone'), false, 'simulation');
+    expect(unpaced.soloDraft).toBeUndefined();
+    expect(unpaced.track.distance.length).toBeGreaterThan(0);
+  });
+
+  it('behind the rider’s own ghost, the switch off: no draft taken', async () => {
+    const alone = await ridden('ghost', ownGhost, false, 'simulation');
+    expect(alone.soloDraft).toBeUndefined();
+  });
+
+  it('behind the rider’s own ghost: the same, from the ghost’s replayed distance', async () => {
+    const alone = await ridden('ghost', ownGhost, false, 'simulation');
+    const drafted = await ridden('ghost', ownGhost, true, 'simulation');
+    expectDrafted(alone, drafted);
+    expectGradesOnly(alone, drafted);
+  });
 });
 
 describe('a solo draft reaches no trainer write under a workout (ERG) — #2425, ADR 0059 D-2', () => {
-  it(
-    'behind the pacer: the same target powers at the same frames, and the same release',
-    RIDES,
-    async () => {
-      const { alone, drafted } = await ridePair('pacer', 'erg');
-      expectDrafted(alone, drafted);
-      const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
-      expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
-      expect(drafted.riding).toEqual(alone.riding);
-      expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
-      expect(drafted.release.map((write) => write.bytes)).toEqual(
-        alone.release.map((write) => write.bytes),
-      );
-    },
-  );
+  it('behind the pacer, the switch off: the workout’s target powers', async () => {
+    const alone = await ridden('pacer', pacer, false, 'erg');
+    expect(alone.soloDraft).toBeUndefined();
+    const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
+    expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
+  });
+
+  it('behind the pacer: the same target powers at the same frames, and the same release', async () => {
+    const alone = await ridden('pacer', pacer, false, 'erg');
+    const drafted = await ridden('pacer', pacer, true, 'erg');
+    expectDrafted(alone, drafted);
+    const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
+    expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
+    expect(drafted.riding).toEqual(alone.riding);
+    expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
+    expect(drafted.release.map((write) => write.bytes)).toEqual(
+      alone.release.map((write) => write.bytes),
+    );
+  });
 });

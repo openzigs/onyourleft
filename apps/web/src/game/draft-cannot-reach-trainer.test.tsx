@@ -385,34 +385,25 @@ async function rideAt(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
   };
 }
 
-/** The trace ridden alone and then drafted, in one mode. */
-async function ridePair(
-  mode: 'simulation' | 'erg',
-): Promise<{ readonly alone: Run; readonly drafted: Run }> {
-  const alone = await rideAt(1, mode);
-  await endRun();
-  const drafted = await rideAt(DRAFTED, mode);
-  return { alone, drafted };
+/**
+ * Each of the four runs, ridden once by the first case that asks for it and
+ * read by every case after: a case pays for one ride, not two (#2524, #1688's
+ * ruling: a slow case is made cheaper, never given a longer timeout). A case
+ * run alone with `-t` rides whatever it reads that no earlier case has.
+ */
+const runs = new Map<string, Promise<Run>>();
+function ridden(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
+  const key = `${mode} at ${String(k)}`;
+  let run = runs.get(key);
+  if (run === undefined) {
+    run = rideAt(k, mode).then(async (done) => {
+      await endRun();
+      return done;
+    });
+    runs.set(key, run);
+  }
+  return run;
 }
-
-/**
- * The simulation-mode pair, ridden once for the two cases that read it: the
- * first case to ask pays for both rides (see {@link RIDES}).
- */
-let simulationPair: Promise<{ readonly alone: Run; readonly drafted: Run }> | undefined;
-const simulationRides = (): Promise<{ readonly alone: Run; readonly drafted: Run }> =>
-  (simulationPair ??= ridePair('simulation'));
-
-/**
- * A case that rides two of the runs above, the second simulation case reading
- * the first's: about three times the slowest figure under coverage, as
- * `docs/agents/ci.md` §4c asks of a case slow under coverage. The figures,
- * 2026-11-10, the grade case then the ERG case: 4 484 ms and 3 663 ms on CI's
- * `Tests` (run 42891832209, AMD EPYC 9V45); locally 2.1 s and 2.0 s, and 3.1 s
- * and 3.0 s under coverage, so about 6.5 s under coverage on that runner. On
- * an EPYC 7763 the first run went past Vitest's default 5 s (42889357062).
- */
-const RIDES = { timeout: 20_000 } as const;
 
 const SET_SIMULATION_PARAMETERS = 0x11;
 const SET_TARGET_POWER = 0x05;
@@ -441,60 +432,71 @@ const DEFAULTS = notTheGrade([
   }),
 ]);
 
+/**
+ * Every Set Indoor Bike Simulation Parameters write of one run is the road's
+ * grade at the rider's own odometer, and the protocol's defaults for the rest.
+ */
+function expectGradesAtTheOdometer(name: 'alone' | 'drafted', run: Run): void {
+  const grades = run.riding.filter((write) => write.bytes[0] === SET_SIMULATION_PARAMETERS);
+  // Enough writes to mean something, over climbs and descents.
+  expect(grades.length, name).toBeGreaterThan(15);
+  expect(
+    grades.some((write) => gradeOf(write.bytes) > 3),
+    name,
+  ).toBe(true);
+  expect(
+    grades.some((write) => gradeOf(write.bytes) < -3),
+    name,
+  ).toBe(true);
+  // One wire write for every grade offered: none coalesced, none refused,
+  // so the n-th write is the n-th offer.
+  expect(grades.length, name).toBe(run.offeredAt.length);
+  grades.forEach((write, index) => {
+    const odometer = run.offeredAt[index] ?? Number.NaN;
+    const road = gradeAt(run.profile, distanceOnRoute(run.profile, metres(odometer)));
+    expect(write.bytes, `${name} write ${String(index)}`).toHaveLength(7);
+    expect(
+      Math.abs(gradeOf(write.bytes) - road),
+      `${name} write ${String(index)} at ${odometer.toFixed(2)} m`,
+    ).toBeLessThanOrEqual(GRADE_QUANTUM_PERCENT / 2 + 1e-9);
+    expect(notTheGrade(write.bytes), `${name} write ${String(index)}`).toEqual(DEFAULTS);
+  });
+}
+
 describe('a draft reaches no trainer write in simulation mode — #2423, ADR 0038 D-1', () => {
-  it(
-    'writes the road’s grade at the rider’s own odometer, and the protocol’s defaults for everything else, drafted or not',
-    RIDES,
-    async () => {
-      const { alone, drafted } = await simulationRides();
+  // #2524: the two runs of this case were one case of 2.6 s, and 16.6 s under
+  // --coverage, locally on an Apple M4 Pro at a load average of 20 to 33; the
+  // alone run is now its own case, so each case rides one run. After, at a
+  // load average of 10 to 15: 2.2 s and 1.2 s, and 3.0 s and 2.3 s under
+  // --coverage. A ride of 300 frames of the real GameView is what is left.
+  it('writes the road’s grade at the rider’s own odometer, and the protocol’s defaults for everything else, ridden alone', async () => {
+    expectGradesAtTheOdometer('alone', await ridden(1, 'simulation'));
+  });
 
-      // The draft took effect: the same trace rode further.
-      expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
+  it('writes the road’s grade at the rider’s own odometer, and the protocol’s defaults for everything else, drafted or not', async () => {
+    const alone = await ridden(1, 'simulation');
+    const drafted = await ridden(DRAFTED, 'simulation');
 
-      // Nothing but grades is written during the ride, and what else is
-      // written (a Stop, a Reset, a target power) is the same bytes in the
-      // same order, drafted or not: the grade check below cannot see an
-      // opcode it does not filter for.
-      const notGrades = (run: Run): readonly (readonly number[])[] =>
-        run.riding
-          .filter((write) => write.bytes[0] !== SET_SIMULATION_PARAMETERS)
-          .map((write) => write.bytes);
-      expect(notGrades(drafted)).toEqual(notGrades(alone));
+    // The draft took effect: the same trace rode further.
+    expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
 
-      for (const [name, run] of [
-        ['alone', alone],
-        ['drafted', drafted],
-      ] as const) {
-        const grades = run.riding.filter((write) => write.bytes[0] === SET_SIMULATION_PARAMETERS);
-        // Enough writes to mean something, over climbs and descents.
-        expect(grades.length, name).toBeGreaterThan(15);
-        expect(
-          grades.some((write) => gradeOf(write.bytes) > 3),
-          name,
-        ).toBe(true);
-        expect(
-          grades.some((write) => gradeOf(write.bytes) < -3),
-          name,
-        ).toBe(true);
-        // One wire write for every grade offered: none coalesced, none refused,
-        // so the n-th write is the n-th offer.
-        expect(grades.length, name).toBe(run.offeredAt.length);
-        grades.forEach((write, index) => {
-          const odometer = run.offeredAt[index] ?? Number.NaN;
-          const road = gradeAt(run.profile, distanceOnRoute(run.profile, metres(odometer)));
-          expect(write.bytes, `${name} write ${String(index)}`).toHaveLength(7);
-          expect(
-            Math.abs(gradeOf(write.bytes) - road),
-            `${name} write ${String(index)} at ${odometer.toFixed(2)} m`,
-          ).toBeLessThanOrEqual(GRADE_QUANTUM_PERCENT / 2 + 1e-9);
-          expect(notTheGrade(write.bytes), `${name} write ${String(index)}`).toEqual(DEFAULTS);
-        });
-      }
-    },
-  );
+    // Nothing but grades is written during the ride, and what else is
+    // written (a Stop, a Reset, a target power) is the same bytes in the
+    // same order, drafted or not: the grade check below cannot see an
+    // opcode it does not filter for.
+    const notGrades = (run: Run): readonly (readonly number[])[] =>
+      run.riding
+        .filter((write) => write.bytes[0] !== SET_SIMULATION_PARAMETERS)
+        .map((write) => write.bytes);
+    expect(notGrades(drafted)).toEqual(notGrades(alone));
 
-  it('lets the trainer go with the same bytes, drafted or not', RIDES, async () => {
-    const { alone, drafted } = await simulationRides();
+    expectGradesAtTheOdometer('alone', alone);
+    expectGradesAtTheOdometer('drafted', drafted);
+  });
+
+  it('lets the trainer go with the same bytes, drafted or not', async () => {
+    const alone = await ridden(1, 'simulation');
+    const drafted = await ridden(DRAFTED, 'simulation');
 
     expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
     expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
@@ -505,21 +507,28 @@ describe('a draft reaches no trainer write in simulation mode — #2423, ADR 003
 });
 
 describe('a draft reaches no trainer write under a workout (ERG) — #2423, ADR 0059 D-2', () => {
-  it(
-    'sends the same target powers at the same frames, and the same release, drafted or not',
-    RIDES,
-    async () => {
-      const { alone, drafted } = await ridePair('erg');
+  // #2524: one case of 2.3 s, and 19.0 s under --coverage, at the load above;
+  // the alone run is now ridden by a case of its own. After, at a load
+  // average of 10 to 15: 1.1 s each, and 2.2 s and 2.1 s under --coverage.
+  it('sends the workout’s target powers, ridden alone', async () => {
+    const alone = await ridden(1, 'erg');
+    const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
+    expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
+    expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
+  });
 
-      expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
-      const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
-      // The workout's blocks changed the target inside the ride.
-      expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
-      expect(drafted.riding).toEqual(alone.riding);
-      expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
-      expect(drafted.release.map((write) => write.bytes)).toEqual(
-        alone.release.map((write) => write.bytes),
-      );
-    },
-  );
+  it('sends the same target powers at the same frames, and the same release, drafted or not', async () => {
+    const alone = await ridden(1, 'erg');
+    const drafted = await ridden(DRAFTED, 'erg');
+
+    expect(drafted.distance).toBeGreaterThan(alone.distance + 10);
+    const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
+    // The workout's blocks changed the target inside the ride.
+    expect(new Set(targets.map((write) => write.bytes.join(','))).size).toBeGreaterThan(2);
+    expect(drafted.riding).toEqual(alone.riding);
+    expect(alone.release.some((write) => write.bytes[0] === STOP)).toBe(true);
+    expect(drafted.release.map((write) => write.bytes)).toEqual(
+      alone.release.map((write) => write.bytes),
+    );
+  });
 });
