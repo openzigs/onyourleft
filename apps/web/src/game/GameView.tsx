@@ -3563,10 +3563,11 @@ function GameScreen({
       // #2454: how far into a crash the rider is, while one is — on every frame,
       // drawn or not, as the HUD's "Crashed" reads it.
       const crashed = crashRef.current;
+      const crashSeconds = crashed === undefined ? 0 : (crashClock - crashed.atMs) / 1000;
       const crashAt =
         crashed === undefined || deliveryRef.current === undefined
           ? undefined
-          : crashShare((crashClock - crashed.atMs) / 1000, reducedMotionRef.current);
+          : crashShare(crashSeconds, reducedMotionRef.current);
       if (crashAt === undefined) crashRef.current = undefined;
       crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
@@ -3729,9 +3730,7 @@ function GameScreen({
                 riderCrash: {
                   share: crashAt,
                   side: crashed.side,
-                  ...(reducedMotionRef.current
-                    ? {}
-                    : { seconds: (crashClock - crashed.atMs) / 1000 }),
+                  ...(reducedMotionRef.current ? {} : { seconds: crashSeconds }),
                 },
               }),
         });

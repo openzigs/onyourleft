@@ -1989,6 +1989,8 @@ describe('the realistic rider moves like a rider — #625', () => {
       const renderer = await loadedOn(TABLET);
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
+      // The body before any crash has touched it: what "the ride's" is read against.
+      const before = drawn(riders, crashMarker(-1, 1)).ends;
       const right = drawn(riders, crashMarker(0.8, 1)).ends;
       const left = drawn(riders, crashMarker(0.8, -1)).ends;
       // The left hand to the left is the right hand to the right, `x` negated.
@@ -2001,9 +2003,56 @@ describe('the realistic rider moves like a rider — #625', () => {
       const over = crashMarker(CRASH_SECONDS, 1);
       expect(over.crash).toBeUndefined();
       const riding = drawn(riders, over).ends;
-      const plain = drawn(riders, crashMarker(-1, 1)).ends;
-      for (const each of apart(riding, plain)) expect(each).toBeLessThan(1e-9);
+      for (const each of apart(riding, before)) expect(each).toBeLessThan(1e-9);
     }, 120_000);
+
+    describe('refuses a crash clip it could not sample', () => {
+      const bones = ['root', 'pelvis', 'upperarm01.L'].map((name) => ({ name }));
+      const times = [0, 1];
+      /** A track by the file's own names, the clip's two moments unless said otherwise. */
+      const track = (name: string, width: number, at = times) => ({
+        name,
+        times: at,
+        values: Array.from({ length: at.length * width }, () => 0),
+      });
+      const whole = [track('root.position', 3), track('pelvis.quaternion', 4)];
+      const readOf = async (
+        tracks: typeof whole,
+        clips = [{ name: REALISTIC_RIDER_CRASH_CLIP, tracks }],
+      ) => {
+        const { crashClipOf } = await import('./three-renderer');
+        return () => crashClipOf(clips, bones);
+      };
+
+      it('reads a whole clip', async () => {
+        const clip = (await readOf(whole))();
+        expect(clip.root).toBe(0);
+        expect(clip.turns[1]).toHaveLength(8);
+      });
+      it('wants the clip by its name', async () => {
+        expect(await readOf(whole, [{ name: 'idle', tracks: whole }])).toThrow(
+          'holds no crash clip',
+        );
+      });
+      it('refuses a track that names no bone', async () => {
+        expect(await readOf([...whole, track('tail.quaternion', 4)])).toThrow('which is no bone');
+      });
+      it('refuses a track timed apart from the rest', async () => {
+        expect(await readOf([...whole, track('upperarm01.L.quaternion', 4, [0, 2])])).toThrow(
+          'timed apart',
+        );
+      });
+      it('refuses a property the clip may not move', async () => {
+        expect(await readOf([...whole, track('pelvis.position', 3)])).toThrow('which it may not');
+        expect(await readOf([...whole, track('pelvis.scale', 3)])).toThrow('which it may not');
+      });
+      it('refuses a clip with no root track, or none at all', async () => {
+        expect(await readOf([track('pelvis.quaternion', 4)])).toThrow(
+          'missing its times or its root',
+        );
+        expect(await readOf([])).toThrow('missing its times or its root');
+      });
+    });
   });
 });
 

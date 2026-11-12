@@ -147,7 +147,6 @@
 import {
   AgXToneMapping,
   AmbientLight,
-  AnimationClip,
   BackSide,
   Box3,
   BoxGeometry,
@@ -14094,9 +14093,6 @@ export class RealisticRiderBelt {
       constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
     );
     const helmetSource = helmetOf(body);
-    // #2493: the crash clip, by bone, in the clones' own bone order.
-    const crash = body.animations.find((clip) => clip.name === REALISTIC_RIDER_CRASH_CLIP);
-    if (crash === undefined) throw new Error('the rider model holds no crash clip');
     // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
     const riders = 3 + REALISTIC_REMOTE_RIDERS;
     const bicycle = realisticBicycleMeshes(maps, riders);
@@ -14183,7 +14179,8 @@ export class RealisticRiderBelt {
       });
     }
     this.#scale = scale;
-    this.#crash = crashClipOf(crash, (this.#riders[0] as RealisticRiderSlot).ordered);
+    // #2493: the crash clip, by bone, in the clones' own bone order.
+    this.#crash = crashClipOf(body.animations, (this.#riders[0] as RealisticRiderSlot).ordered);
     this.#group.visible = false;
   }
 
@@ -14696,12 +14693,27 @@ interface RiderCrashClip {
   readonly rootAt: Float32Array;
 }
 
+/** The part of three's `AnimationClip` that {@link crashClipOf} reads, so a test can hand it plain data. */
+interface CrashClipSource {
+  readonly name: string;
+  readonly tracks: readonly {
+    readonly name: string;
+    readonly times: ArrayLike<number>;
+    readonly values: ArrayLike<number>;
+  }[];
+}
+
 /**
  * Reads the crash clip's tracks into {@link RiderCrashClip}, by the order of
  * `ordered`. Every track shares one set of times, as the pipeline writes them,
  * and a clip that does not is refused rather than mis-sampled.
  */
-function crashClipOf(clip: AnimationClip, ordered: readonly Bone[]): RiderCrashClip {
+export function crashClipOf(
+  clips: readonly CrashClipSource[],
+  ordered: readonly { readonly name: string }[],
+): RiderCrashClip {
+  const clip = clips.find((each) => each.name === REALISTIC_RIDER_CRASH_CLIP);
+  if (clip === undefined) throw new Error('the rider model holds no crash clip');
   const names = ordered.map((bone) => bone.name);
   let times: Float32Array | undefined;
   const turns: (number[] | undefined)[] = names.map(() => undefined);
