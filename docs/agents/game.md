@@ -779,7 +779,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ The jersey's main colour is in NO
+                        8 998 triangles. ⚠️ **Since #2495 it has EYES**, and
+                        a reviewer who remembers flat skin under the glasses
+                        is reading the old file: a ball in each socket at
+                        MakeHuman's own eye, drawn in `rider_kit.py`'s
+                        pupil, iris and white, in the HELMET's mesh (so on the
+                        head bone, no draw call), its 168 triangles taken out
+                        of the body's share (`rider-eyes.test.ts`). The pack's
+                        rider (#2485) keeps flat ones. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
