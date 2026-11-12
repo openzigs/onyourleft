@@ -56,6 +56,12 @@ import { northRoute } from '../../route-fixtures-testing';
 import { SHIPPED_LEVELS } from '../../shipped-levels';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../../world-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from '../delivery-progress';
+import {
+  LEVEL_PROGRESS_STORAGE_KEY,
+  NO_LEVEL_FINISHED,
+  readLevelProgress,
+  writeLevelProgress,
+} from '../level-progress';
 import type { WeekProgress } from '../round';
 
 import { LEVEL_CATALOGUE } from './catalogue';
@@ -156,10 +162,10 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const due = pending;
   pending = [];
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     for (const callback of due) callback(nowMs);
     await Promise.resolve();
@@ -237,6 +243,8 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     'with no saved route and no instance, lists both levels, each chosen opens a round, and level 1’s says its first house',
     { timeout: 30_000 },
     async () => {
+      // #2363: level 1 finished on this device, so level 2 is open to choose too.
+      writeLevelProgress(localStorage, { finished: [FIRST.id] });
       await openPicker();
       // Both levels are listed, in unlock order, each with a way to choose it.
       const names = [...document.querySelectorAll('[data-level] h3')].map(
@@ -381,6 +389,88 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
   });
 });
 
+describe('levels open in order, kept on the device — #2363, ADR 0065 D-9', () => {
+  const [, SECOND] = SHIPPED_LEVELS.list();
+  if (SECOND === undefined) throw new Error('the app ships one level');
+  const standing = (id: string): string | undefined =>
+    document.querySelector<HTMLElement>(`[data-level="${id}"]`)?.dataset['standing'];
+  const choose = (name: string): HTMLAnchorElement | undefined =>
+    link(`${GAME_COURSES_TEXT.choose}: ${name}`);
+
+  it(
+    'finishes level 1 in a ride, and the picker, reading the device afresh, offers level 2 as open',
+    { timeout: 60_000 },
+    async () => {
+      // A fresh device: level 1 open, level 2 locked with the reason in words and no way to choose it.
+      await openPicker();
+      expect(standing(FIRST.id)).toBe('open');
+      expect(standing(SECOND.id)).toBe('locked');
+      expect(text()).toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
+      expect(choose(SECOND.name)).toBeUndefined();
+      const href = choose(FIRST.name)?.getAttribute('href') ?? '';
+      mounted?.unmount();
+
+      // Level 1, ridden to its round's end.
+      stubSeed(7);
+      await openSetup(href);
+      await click(rideButton());
+      await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+      for (
+        let frame = 0;
+        frame < 400 && !localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY);
+        frame++
+      ) {
+        await pump(2_000);
+      }
+      mounted?.unmount();
+      mounted = undefined;
+
+      // Read back as a new page reads it: through the storage, and nothing held in memory.
+      expect(readLevelProgress(localStorage)).toStrictEqual({ finished: [FIRST.id] });
+      // The week is as it was (D-9.3).
+      expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+
+      // The picker, opened afresh: level 2 is open and can be chosen, level 1 says it is finished.
+      await openPicker();
+      expect(standing(FIRST.id)).toBe('finished');
+      expect(text()).toContain(GAME_COURSES_TEXT.levelFinished);
+      expect(standing(SECOND.id)).toBe('open');
+      expect(gameRouteFromHash(choose(SECOND.name)?.getAttribute('href') ?? '')).toBe(
+        levelRouteId(SECOND.id),
+      );
+      expect(text()).not.toContain(GAME_COURSES_TEXT.levelLocked(FIRST.name));
+    },
+  );
+
+  it('ends a ride before the round’s end with no level finished', { timeout: 30_000 }, async () => {
+    stubSeed(7);
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    for (let frame = 0; frame < 20; frame++) await pump();
+    await click(
+      queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('End ride'),
+      ),
+    );
+    await click(endRideAnswer(document, 'End ride'));
+    expect(readLevelProgress(localStorage)).toStrictEqual(NO_LEVEL_FINISHED);
+  });
+
+  it('reads and rides no locked level from its address typed by hand', async () => {
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(SECOND.id)));
+    expect(read).toStrictEqual([]);
+    expect(rideButton()?.textContent ?? '').not.toContain(SECOND.name);
+    mounted?.unmount();
+    mounted = undefined;
+    // Once level 1 is finished, the same address opens level 2's round.
+    writeLevelProgress(localStorage, { finished: [FIRST.id] });
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(SECOND.id)));
+    expect(read).toStrictEqual([SECOND.id]);
+    expect(rideButton()?.textContent).toContain(SECOND.name);
+  });
+});
+
 describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, ADR 0065 D-10.9', () => {
   it(
     'says the parked car or bin ahead with announcements off, the default, and no house, miss or crash',
@@ -494,6 +584,8 @@ describe('a level rides in the realistic world whatever Settings chose — the o
 
   it('lists the levels on the Delivery picker with the standard world chosen, the routes’ notice under them', async () => {
     writeRealisticWorldChoice(localStorage, false);
+    // #2363: level 1 finished, so every level has a way to choose it.
+    writeLevelProgress(localStorage, { finished: [FIRST.id] });
     const routes: readonly RidableRoute[] = [
       { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
     ];
