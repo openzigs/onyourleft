@@ -1773,6 +1773,18 @@ describe('the world has a light direction — #286', () => {
     expect(horizontal).toBeCloseTo(1, 12);
   });
 
+  it('lights the sun white by day and in the colour it is given at a Delivery level’s dusk — #2508', () => {
+    const lamps = new WorldLamps();
+    const [, directional] = lamps.lamps;
+    lamps.apply(harnessSun());
+    expect(directional.color.getHex()).toBe(0xffffff);
+    lamps.apply(harnessSun(), 1, 0xffa060);
+    expect(directional.color.getHex()).toBe(0xffa060);
+    // And white again on the next frame that is not at dusk.
+    lamps.apply(harnessSun(), 0);
+    expect(directional.color.getHex()).toBe(0xffffff);
+  });
+
   it('points the directional lamp at the route own sun', () => {
     const sun = harnessSun();
     const lamps = new WorldLamps();

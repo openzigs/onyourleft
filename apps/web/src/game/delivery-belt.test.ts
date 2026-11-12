@@ -41,6 +41,10 @@ import {
   MARKER_MOST_SCALE,
   MARKER_TRUE_SIZE_WITHIN_METRES,
   markerScaleAt,
+  RAIN_STREAK_METRES,
+  RAIN_STREAK_WIDTH_METRES,
+  RAIN_STREAKS,
+  RAIN_TRIANGLES,
   type DeliveryPieceKind,
 } from './three-renderer';
 import { PEAK_IRRADIANCE } from './world';
@@ -319,6 +323,43 @@ describe('Delivery’s belt — #1814', () => {
     // Hidden with the belt.
     belt.setShown(false);
     expect(belt.rainShown()).toBe(false);
+    belt.dispose();
+  });
+
+  it('draws heavier rain: 1 500 streaks 0.6 m long and 12 mm wide, each two crossed quads, in its one mesh — #2508', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_STREAKS).toBe(1_500);
+    expect(RAIN_STREAK_METRES).toBe(0.6);
+    expect(RAIN_STREAK_WIDTH_METRES).toBe(0.012);
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.rainGeometry();
+    const position = geometry.getAttribute('position');
+    // Unindexed: three corners a triangle, two triangles a quad, two quads a streak, laid out twice.
+    expect(geometry.index).toBeNull();
+    expect(position.count / 3).toBe(RAIN_TRIANGLES);
+    expect(RAIN_TRIANGLES).toBe(RAIN_STREAKS * 2 * 2 * 2);
+    // Read back, quad by quad: 0.6 m tall and 12 mm across, one across x and one across z.
+    const quads = position.count / 6;
+    let acrossX = 0;
+    let acrossZ = 0;
+    for (let quad = 0; quad < quads; quad += 1) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const zs: number[] = [];
+      for (let corner = 0; corner < 6; corner += 1) {
+        xs.push(position.getX(quad * 6 + corner));
+        ys.push(position.getY(quad * 6 + corner));
+        zs.push(position.getZ(quad * 6 + corner));
+      }
+      const span = (values: number[]): number => Math.max(...values) - Math.min(...values);
+      expect(span(ys)).toBeCloseTo(RAIN_STREAK_METRES, 5);
+      expect(Math.max(span(xs), span(zs))).toBeCloseTo(RAIN_STREAK_WIDTH_METRES, 5);
+      expect(Math.min(span(xs), span(zs))).toBe(0);
+      if (span(xs) > 0) acrossX += 1;
+      else acrossZ += 1;
+    }
+    expect(acrossX).toBe(RAIN_STREAKS * 2);
+    expect(acrossZ).toBe(RAIN_STREAKS * 2);
     belt.dispose();
   });
 

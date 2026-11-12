@@ -172,8 +172,6 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   LatheGeometry,
-  LineBasicMaterial,
-  LineSegments,
   LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
@@ -634,6 +632,10 @@ import {
   PHOTOGRAPHIC_ROAD_GRAIN,
   REALISTIC_DUSK_EXPOSURE_SHARE,
   REALISTIC_EXPOSURE,
+  REALISTIC_RAIN_SKY_SHARE,
+  duskSkyTexel,
+  rainSkyTexel,
+  skyRowElevation,
   REALISTIC_FOG_DIRECTION_SHARE,
   REALISTIC_HORIZON_BAND,
   REALISTIC_HORIZON_HAZE_SHARE,
@@ -665,6 +667,7 @@ import type {
   DeliveryObstacleKind,
   DeliveryObstaclePiece,
   DeliveryPiece,
+  DeliveryWeatherFrame,
   GameRenderer,
   GameView,
   LapRaceInView,
@@ -723,6 +726,7 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
+import { roadTintIn, sunColourIn, weatheredWorld } from './weather-look';
 import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
@@ -2444,8 +2448,10 @@ export class WorldLamps {
    * the shadow MAP's frame, on the one rung that has one, and
    * {@link aimShadowAt} moves both ends for that rung after this has run.
    */
-  apply(sun: SunStyle, ambientShare = 1): void {
+  apply(sun: SunStyle, ambientShare = 1, colour = 0xffffff): void {
     this.#sun.target.position.set(0, 0, 0);
+    // #2508: warm at a Delivery level's dusk (`weather-look.ts` §`sunColourIn`), white otherwise.
+    this.#sun.color.setHex(colour);
     // ⚠️ `ambientShare` is 0 in the realistic world (ADR 0026 D-9): the
     // environment map IS the ambient term there, solved to give a horizontal
     // surface exactly `sun.ambient` (`realistic-light.ts`), and an ambient lamp
@@ -7310,6 +7316,7 @@ function surfaceMapsOf(world: RealisticWorld): readonly Texture[] {
 /** Releases a realistic world that another has replaced. */
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
+  releaseWeatheredSkies(world.sky);
   world.banners?.texture.dispose();
   world.wordmark.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
@@ -7342,6 +7349,88 @@ function skyPixelsOf(texture: DataTexture): SkyPixels {
       return half ? halfToFloat(value) : value;
     },
   };
+}
+
+/** Each loaded sky's weathers, each graded once, by {@link weatherKey}. @see weatheredSkyOf */
+const WEATHERED_SKIES = new WeakMap<RealisticSky, Map<string, RealisticSky>>();
+
+/** Which grade a weather asks of the sky: `dusk`, `rain` or both. */
+function weatherKey(weather: DeliveryWeatherFrame): string {
+  return `${weather.dusk ? 'dusk' : ''}|${weather.rain ? 'rain' : ''}`;
+}
+
+/**
+ * `sky` in a Delivery level's dusk or rain — #2508: its photograph graded
+ * texel by texel (`realistic-light.ts` §`duskSkyTexel`, then
+ * §`rainSkyTexel`), into a texture of its own format, and every band the view
+ * reads off a sky read again off the graded one, so the haze, the horizon
+ * ring and the water converge on the sky drawn behind them. Built once a sky
+ * and a weather, on its first frame, and kept until the world is released
+ * ({@link releaseWeatheredSkies}). Its `upward` is the daytime sky's: the
+ * environment that lights the surfaces is still the daytime one, dimmed by
+ * the weather's ambient share (`weather-look.ts`). The sky itself in clear
+ * daylight.
+ */
+function weatheredSkyOf(
+  sky: RealisticSky,
+  weather: DeliveryWeatherFrame | undefined,
+): RealisticSky {
+  if (weather === undefined || (!weather.dusk && !weather.rain)) return sky;
+  const key = weatherKey(weather);
+  const made = WEATHERED_SKIES.get(sky)?.get(key);
+  if (made !== undefined) return made;
+  const source = sky.texture;
+  const image = source.image as { width: number; height: number; data: ArrayLike<number> };
+  const { width, height, data } = image;
+  const half = source.type === HalfFloatType;
+  const graded = half ? new Uint16Array(data.length) : new Float32Array(data.length);
+  const read = (index: number): number => {
+    const value = data[index] ?? 0;
+    return half ? DataUtils.fromHalfFloat(value) : value;
+  };
+  for (let row = 0; row < height; row += 1) {
+    const elevation = skyRowElevation(row, height);
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      let [r, g, b] = [read(at), read(at + 1), read(at + 2)];
+      if (weather.dusk) [r, g, b] = duskSkyTexel(r, g, b, elevation, sky.upward);
+      if (weather.rain) [r, g, b] = rainSkyTexel(r, g, b);
+      graded[at] = half ? DataUtils.toHalfFloat(r) : r;
+      graded[at + 1] = half ? DataUtils.toHalfFloat(g) : g;
+      graded[at + 2] = half ? DataUtils.toHalfFloat(b) : b;
+      graded[at + 3] = data[at + 3] ?? 0;
+    }
+  }
+  const texture = new DataTexture(graded, width, height, RGBAFormat, source.type);
+  texture.mapping = source.mapping;
+  texture.colorSpace = source.colorSpace;
+  texture.flipY = source.flipY;
+  texture.minFilter = source.minFilter;
+  texture.magFilter = source.magFilter;
+  texture.generateMipmaps = source.generateMipmaps;
+  texture.needsUpdate = true;
+  const pixels = skyPixelsOf(texture);
+  const directions = skyHorizonTable(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]);
+  const weathered: RealisticSky = {
+    texture,
+    upward: sky.upward,
+    sunU: sky.sunU,
+    zenith: skyBandRadiance(pixels, WATER_ZENITH_BAND[0], WATER_ZENITH_BAND[1]),
+    horizon: skyBandRadiance(pixels, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]),
+    skyline: skyBandRadiance(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]),
+    directions,
+    flatDirections: flattenedTable(directions),
+  };
+  const weathers = WEATHERED_SKIES.get(sky) ?? new Map<string, RealisticSky>();
+  weathers.set(key, weathered);
+  WEATHERED_SKIES.set(sky, weathers);
+  return weathered;
+}
+
+/** Releases every weather `sky` was graded for. @see weatheredSkyOf */
+function releaseWeatheredSkies(sky: RealisticSky): void {
+  for (const each of WEATHERED_SKIES.get(sky)?.values() ?? []) each.texture.dispose();
+  WEATHERED_SKIES.delete(sky);
 }
 
 /**
@@ -11585,33 +11674,80 @@ export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
 /**
  * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
  * streaks {@link RAIN_STREAK_METRES} long in a box {@link RAIN_BOX_METRES}
- * across, falling at {@link RAIN_FALL_METRES_PER_SECOND}, drawn as ONE line
- * segments call round the camera's eye. The streaks are laid out twice, one
- * box above the other, so moving the whole set down by up to one box's
- * height and back is seamless: no streak is placed per frame. This project's
- * own numbers, for the owner's approval in #2366's pull request.
+ * across, falling at {@link RAIN_FALL_METRES_PER_SECOND}, drawn as ONE call
+ * round the camera's eye. The streaks are laid out twice, one box above the
+ * other, so moving the whole set down by up to one box's height and back is
+ * seamless: no streak is placed per frame.
+ *
+ * #2508, the owner's ruling on PR #2502 ("thin, sparse streaks"): **1 500**
+ * streaks, from 700, **0.6 m** long, from 0.45, and each
+ * {@link RAIN_STREAK_WIDTH_METRES} wide. A WebGL line is one pixel wide
+ * whatever it is asked, so a streak is two thin quads crossed at right angles
+ * about its own vertical, which reads as a streak from every bearing: 4
+ * triangles a streak, 12 000 for the rain, still one triangles call
+ * ({@link RAIN_TRIANGLES}). The rain's grey sky and thicker haze are the
+ * world's (`weather-look.ts`), and cost no call. This project's own numbers,
+ * for the owner's approval in #2508's pull request.
  */
-const RAIN_STREAKS = 700;
-const RAIN_STREAK_METRES = 0.45;
+export const RAIN_STREAKS = 1_500;
+export const RAIN_STREAK_METRES = 0.6;
+/**
+ * How wide a streak is, metres — #2508: **0.012**, about a pixel and a half
+ * 5 m off on the owner's 1280×800 tablet and three pixels 2 m off.
+ */
+export const RAIN_STREAK_WIDTH_METRES = 0.012;
 const RAIN_BOX_METRES = { across: 24, high: 10 } as const;
 const RAIN_FALL_METRES_PER_SECOND = 8;
 
+/**
+ * The triangles the rain draws in its one call — #2508: two crossed quads a
+ * streak, the streaks laid out twice. @test-facing `delivery-belt.test.ts`
+ * holds the geometry to it; the product builds the geometry and does not read
+ * this number
+ */
+export const RAIN_TRIANGLES = RAIN_STREAKS * 2 * 2 * 2;
+
+/** The rain's paint, sRGB, and how opaque a streak is. */
+const RAIN_COLOUR = 0xb4c4d2;
+const RAIN_OPACITY = 0.55;
+
 /** The streaks, twice over, seeded so every view draws the same rain. */
 function rainShape(): BufferGeometry {
-  const positions = new Float32Array(RAIN_STREAKS * 2 * 2 * 3);
+  // Two quads a streak, two triangles a quad, three corners a triangle, unindexed.
+  const positions = new Float32Array(RAIN_TRIANGLES * 3 * 3);
   let state = 0x2366;
   const next = (): number => {
     state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
     return state / 0x1_0000_0000;
   };
   const { across, high } = RAIN_BOX_METRES;
+  const half = RAIN_STREAK_WIDTH_METRES / 2;
+  let at = 0;
+  const corner = (x: number, y: number, z: number): void => {
+    positions[at] = x;
+    positions[at + 1] = y;
+    positions[at + 2] = z;
+    at += 3;
+  };
   for (let streak = 0; streak < RAIN_STREAKS; streak += 1) {
     const x = (next() - 0.5) * across;
     const y = next() * high;
     const z = (next() - 0.5) * across;
     for (const copy of [0, 1]) {
-      const at = (streak * 2 + copy) * 6;
-      positions.set([x, y + copy * high, z, x, y + copy * high + RAIN_STREAK_METRES, z], at);
+      const foot = y + copy * high;
+      const head = foot + RAIN_STREAK_METRES;
+      // One quad across x, one across z.
+      for (const [dx, dz] of [
+        [half, 0],
+        [0, half],
+      ] as const) {
+        corner(x - dx, foot, z - dz);
+        corner(x + dx, foot, z + dz);
+        corner(x + dx, head, z + dz);
+        corner(x - dx, foot, z - dz);
+        corner(x + dx, head, z + dz);
+        corner(x - dx, head, z - dz);
+      }
     }
   }
   const geometry = new BufferGeometry();
@@ -11673,10 +11809,19 @@ export class DeliveryBelt {
   /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
   readonly #paints = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
   readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
-  /** #2366: a level's rain, one call, shown only on a frame whose round is in rain. */
-  readonly #rain = new LineSegments(
+  /** #2366: a level's rain, one call, shown only on a frame whose round is in rain. #2508: streaks of width. */
+  readonly #rain = new Mesh(
     rainShape(),
-    new LineBasicMaterial({ color: 0xb4c4d2, transparent: true, opacity: 0.5, depthWrite: false }),
+    new MeshBasicMaterial({
+      color: RAIN_COLOUR,
+      transparent: true,
+      opacity: RAIN_OPACITY,
+      depthWrite: false,
+      side: DoubleSide,
+      // three draws a transparent two-sided material in two passes, back faces
+      // then front, unless told not to: that is a second call (#2508).
+      forceSinglePass: true,
+    }),
   );
   #shown = true;
 
@@ -11718,6 +11863,11 @@ export class DeliveryBelt {
   /** #2366: whether the last frame drew the rain. For the jsdom suite and the browser gate. */
   rainShown(): boolean {
     return this.#rain.visible;
+  }
+
+  /** #2508: the rain's geometry, for the jsdom suite to read its streaks back. */
+  rainGeometry(): BufferGeometry {
+    return this.#rain.geometry;
   }
 
   /** #2366: the rain's foot, in world y, as last placed. For the jsdom suite. */
@@ -21383,6 +21533,8 @@ export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();
+  // #2508: and its weathers', which three uploads again if a frame in one asks for it.
+  for (const each of WEATHERED_SKIES.get(world.sky)?.values() ?? []) each.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
@@ -22597,6 +22749,8 @@ class ThreeGameView implements GameView {
   #realistic: RealisticDrawing | undefined;
   /** Which world the last frame was drawn in. Never `'realistic'` without {@link #realistic}. */
   #drawing: QualitySettings['world'] = 'stylised';
+  /** This frame's Delivery weather, if its round has any — #2508. @see render */
+  #weather: DeliveryWeatherFrame | undefined;
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -22693,10 +22847,20 @@ class ThreeGameView implements GameView {
     this.setQuality(settings);
   }
 
-  render(frame: SceneFrame): void {
+  render(given: SceneFrame): void {
     if (this.#renderer === undefined) {
       return;
     }
+    // #2508: a Delivery level's dusk and rain re-light the world the frame is
+    // drawn in — the sky, the haze, the sun and the ground — in both worlds,
+    // for no draw call. `weather-look.ts` has the colours.
+    this.#weather = given.delivery?.weather;
+    const frame =
+      this.#weather === undefined
+        ? given
+        : { ...given, world: weatheredWorld(given.world, this.#weather) };
+    // And the stylised road, whose colours are unlit, painted down with it.
+    this.#roadMaterial.color.setRGB(...roadTintIn(this.#weather));
     this.#stage(frame);
     // #619 lever 2: this view's rung, written into the one uniform every
     // textured realistic material reads — here, because several views share
@@ -22764,8 +22928,8 @@ class ThreeGameView implements GameView {
       frame.water.surface,
       frame.world,
       frame.water.seconds,
-      // #475: on the realistic rungs the water reflects the realistic sky.
-      this.#drawing === 'realistic' ? realisticWorld?.sky : undefined,
+      // #475: on the realistic rungs the water reflects the realistic sky; #2508, the one drawn.
+      this.#drawnSky(),
     );
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
@@ -22879,6 +23043,17 @@ class ThreeGameView implements GameView {
       this.#renderer.toneMappingExposure =
         REALISTIC_EXPOSURE * (view?.weather?.dusk === true ? REALISTIC_DUSK_EXPOSURE_SHARE : 1);
     }
+  }
+
+  /**
+   * The realistic sky this frame draws — #2508: the loaded one, or in a
+   * Delivery level's dusk or rain its graded copy ({@link weatheredSkyOf}).
+   * `undefined` in the stylised world, or with no realistic world loaded.
+   */
+  #drawnSky(): RealisticSky | undefined {
+    const loaded = realisticWorld;
+    if (this.#drawing !== 'realistic' || loaded === undefined) return undefined;
+    return weatheredSkyOf(loaded.sky, this.#weather);
   }
 
   /** #2366: whether the last frame drew a Delivery level's rain. @see DeliveryBelt.rainShown */
@@ -23775,10 +23950,15 @@ class ThreeGameView implements GameView {
       // ADR 0026 D-9: the sky is the ambient term, solved to give a horizontal
       // surface exactly `world.ts`'s ambient share, and turned so its sun
       // stands where `world.ts`'s does. `realistic-light.ts` has the arithmetic.
-      this.#lighting.apply(world.sun, 0);
+      this.#lighting.apply(world.sun, 0, sunColourIn(this.#weather));
       const intensity = environmentIntensity(world.sun.ambient, loaded.sky.upward);
       this.#scene.environmentIntensity = intensity;
-      this.#scene.backgroundIntensity = intensity;
+      // #2508: in a level's dusk or rain the photograph graded to it, and in its rain darker.
+      const sky = this.#drawnSky() ?? loaded.sky;
+      const skyIntensity =
+        intensity * (this.#weather?.rain === true ? REALISTIC_RAIN_SKY_SHARE : 1);
+      this.#scene.background = sky.texture;
+      this.#scene.backgroundIntensity = skyIntensity;
       const turn = skyRotation(loaded.sky.sunU, world.sun.x, world.sun.z);
       this.#scene.backgroundRotation.set(0, turn, 0);
       this.#scene.environmentRotation.set(0, turn, 0);
@@ -23788,12 +23968,12 @@ class ThreeGameView implements GameView {
       // whole horizon ring used to converge on the pale one — a white film in
       // front of a grey sky, with a hard edge wherever it met either.
       if (this.#horizonFromSky) {
-        this.#horizonColour.setRGB(...drawnHorizonColour(loaded.sky.skyline, intensity));
+        this.#horizonColour.setRGB(...drawnHorizonColour(sky.skyline, skyIntensity));
         this.#horizonIsSky = true;
-        this.#air = this.#airFor(loaded.sky, intensity, turn);
+        this.#air = this.#airFor(sky, skyIntensity, turn);
       }
     } else {
-      this.#lighting.apply(world.sun);
+      this.#lighting.apply(world.sun, 1, sunColourIn(this.#weather));
     }
     this.#fog.color.copy(this.#horizonColour);
   }

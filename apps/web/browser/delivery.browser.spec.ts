@@ -193,6 +193,46 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(still?.rain).toBe(still?.clear);
   });
 
+  test('draws a level’s dusk darker and warmer than clear daylight, and its rain greyer, read back from a real frame — #2508', async ({
+    page,
+  }) => {
+    await open(page);
+    const read = await page.evaluate(() => window.__oylDelivery?.weatherLook());
+    console.log(`#2508 weather look: ${JSON.stringify(read)}`);
+    const clear = read?.clear;
+    const dusk = read?.dusk;
+    const rain = read?.rain;
+    expect(clear).toBeDefined();
+    // Dusk: well under three-quarters of clear daylight's luma, and warmer —
+    // more red against its blue than the day has.
+    expect(dusk?.luma ?? Infinity).toBeLessThan((clear?.luma ?? 0) * 0.75);
+    expect((dusk?.red ?? 0) / (dusk?.blue ?? 1)).toBeGreaterThan(
+      ((clear?.red ?? 0) / (clear?.blue ?? 1)) * 1.1,
+    );
+    // Rain: darker than clear, and greyer — its channels closer together.
+    const spread = (look: typeof clear): number =>
+      Math.max(look?.red ?? 0, look?.green ?? 0, look?.blue ?? 0) -
+      Math.min(look?.red ?? 0, look?.green ?? 0, look?.blue ?? 0);
+    expect(rain?.luma ?? Infinity).toBeLessThan(clear?.luma ?? 0);
+    expect(spread(rain)).toBeLessThan(spread(clear));
+  });
+
+  for (const weather of ['clear', 'dusk', 'rain', 'rain-dusk'] as const) {
+    test(`photographs a level in ${weather} on the tablet for the owner — #2508`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((w) => window.__oylDelivery?.weatherShowcase(w), weather);
+      const shot = await page.locator(`#delivery-weather-${weather}`).screenshot();
+      await testInfo.attach(`delivery-weather-${weather}`, {
+        body: shot,
+        contentType: 'image/png',
+      });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+
   test('takes a marker off its house on the frame after a parcel is delivered there, read from what the view drew', async ({
     page,
   }) => {
