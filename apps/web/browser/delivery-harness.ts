@@ -24,6 +24,14 @@
  *    materials, three's `renderer.info.render.calls` shown and hidden: the
  *    realistic world's programs compile and draw without loading the
  *    realistic world, which the required gate does not pay for (#866).
+ * 3a. **`programs(world, car)`** — PR #2548: every program the belt makes in
+ *    each world's materials, with a car of Kenney's parts among the
+ *    obstacles where `car` is set, read off WebGL itself: linked or not, and
+ *    the vertex attribute slots each uses, beside `MAX_VERTEX_ATTRIBS`
+ *    (`three-renderer.ts` §`deliveryProgramsProbe`). The car is
+ *    {@link STAND_IN_CAR}, one triangle a part, because the program is made
+ *    from which attributes the parts carry and not from their triangles, and
+ *    the required gate loads none of the realistic set (#866).
  * 4. **`kinds(world)`** — one obstacle of each kind, square-on: whether a
  *    point only the bin covers, one the bin and the cone cover, and one the
  *    bin and the trolley cover read as painted.
@@ -75,8 +83,12 @@ import {
   deliveryCallsProbe,
   deliveryDrawnOf,
   deliveryKindProbe,
+  deliveryProgramsProbe,
   threeGameRenderer,
   type DeliveryCalls,
+  type DeliveryCarGeometry,
+  type DeliveryCarRole,
+  type DeliveryProgramReading,
 } from '../src/game/three-renderer';
 
 import { drawCounter } from './realistic/draws';
@@ -107,6 +119,10 @@ declare global {
       viewCalls(count: number): DeliveryViewCalls;
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
+      programs(
+        world: 'stylised' | 'realistic',
+        car: boolean,
+      ): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] };
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
@@ -648,8 +664,41 @@ function pastCarShowcase(eyeAhead: number, behind: boolean): void {
   });
 }
 
+/** A car of one triangle a part, every role of Kenney's among them — PR #2548. @see programs */
+const STAND_IN_CAR: DeliveryCarGeometry = {
+  parts: (
+    [
+      'body',
+      'paint',
+      'front-wheel',
+      'front-wheel',
+      'back-wheel',
+      'back-wheel',
+      'indicator-left',
+      'indicator-right',
+    ] as const satisfies readonly DeliveryCarRole[]
+  ).map((role, index) => ({
+    role,
+    position: new Float32Array([0, 0.3 * index, 0, 0.5, 0.3 * index, 0, 0, 0.3 * index + 0.3, 0]),
+    normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    colour: new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+    pivot: [0, 0.3, index < 4 ? 1.3 : -1.3] as const,
+  })),
+  wheelRadius: 0.3,
+  wheelbase: 2.6,
+  triangles: 8,
+};
+
+function programs(
+  world: 'stylised' | 'realistic',
+  car: boolean,
+): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] } {
+  return deliveryProgramsProbe(canvas(), world, car ? STAND_IN_CAR : undefined);
+}
+
 window.__oylDelivery = {
   ready: true,
+  programs,
   pastCarShowcase,
   carsShowcase,
   viewCalls,

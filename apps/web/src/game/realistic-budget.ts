@@ -1497,3 +1497,16 @@ export function environmentMapBytes(skyWidth: number): number {
   const height = 4 * cube;
   return width * height * 8;
 }
+
+/**
+ * The most vertex attribute slots a Delivery program may use — PR #2548:
+ * **14**, two under WebGL's floor of 16 (`MAX_VERTEX_ATTRIBS`, which the
+ * pinned Chromium, the Mac and tablet Mali GPUs all report), so the next
+ * feature has room without packing again. A `mat4` is four slots, anything
+ * else one. `three-renderer.ts` §`DELIVERY_PIECE_ATTRIBUTE` says how the belt's
+ * obstacles fit: 13 slots with Kenney's car, 10 without.
+ *
+ * @test-facing `delivery-car.test.ts` and `delivery.browser.spec.ts` hold the
+ * belt's programs to it; the product does not read it
+ */
+export const DELIVERY_MOST_VERTEX_ATTRIBUTES = 14;

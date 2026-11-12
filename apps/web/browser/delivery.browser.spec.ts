@@ -31,6 +31,13 @@
  *    eye where `delivery/camera-clear.ts` puts it; the car covers at most a
  *    fifth of the road under the rider. With the eye behind the rider, a
  *    flat block of the car's paint covers 65 % to 98 % of it.
+ * 3a. **Every program the belt makes links** (PR #2548): in each world's
+ *    materials, and in the realistic world's with a car of Kenney's parts,
+ *    every program three made for the belt is read off WebGL for its link
+ *    status and its vertex attribute slots, and the console carries no shader
+ *    error. Kenney's car first made the realistic obstacles' program ask for
+ *    17 of the 16 slots the pinned Chromium has, and while it failed to link
+ *    every other case here stayed green: the calls were still made.
  * 7. **The owner's photographs** of #2396: a bin in the rider's lane, and a
  *    parked car being passed, before and after.
  *
@@ -40,6 +47,8 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+
+import { DELIVERY_MOST_VERTEX_ATTRIBUTES } from '../src/game/realistic-budget';
 
 async function open(page: Page): Promise<void> {
   const response = await page.goto('/delivery.html');
@@ -160,6 +169,37 @@ test.describe('Delivery’s belt — #1814', () => {
       expect(one?.shown).toBe(MOST_DELIVERY_CALLS);
       expect(twenty?.shown).toBe(one?.shown);
     });
+
+    for (const car of world === 'realistic' ? [false, true] : [false]) {
+      test(`links every program it makes in the ${world} world’s materials${car ? ', a car of Kenney’s parts among its obstacles,' : ''} inside ${String(DELIVERY_MOST_VERTEX_ATTRIBUTES)} vertex attribute slots — PR #2548`, async ({
+        page,
+      }) => {
+        const shaderErrors: string[] = [];
+        page.on('console', (message) => {
+          if (message.type() === 'error' || /shader error/i.test(message.text())) {
+            shaderErrors.push(message.text().slice(0, 400));
+          }
+        });
+        await open(page);
+        const read = await page.evaluate(([w, c]) => window.__oylDelivery?.programs(w, c), [
+          world,
+          car,
+        ] as const);
+        console.log(`#2548 ${world}${car ? ' with a car' : ''} programs: ${JSON.stringify(read)}`);
+        if (read === undefined) throw new Error('no harness');
+        // Not vacuous: the belt made programs, and the context has WebGL's 16 slots at least.
+        expect(read.programs.length).toBeGreaterThan(0);
+        expect(read.most).toBeGreaterThanOrEqual(16);
+        for (const program of read.programs) {
+          expect(program.linked, `${program.name} linked`).toBe(true);
+          expect(program.slots, `${program.name} slots`).toBeGreaterThan(0);
+          expect(program.slots, `${program.name} slots`).toBeLessThanOrEqual(
+            DELIVERY_MOST_VERTEX_ATTRIBUTES,
+          );
+        }
+        expect(shaderErrors).toEqual([]);
+      });
+    }
 
     test(`draws each obstacle kind’s own shape only, in one instanced call, in the ${world} world’s materials`, async ({
       page,

@@ -25,7 +25,11 @@ import { OBSTACLE_KINDS } from './delivery/obstacles';
 import { GlslProgram } from './glsl-program-testing';
 import type { DeliveryCarMotion, DeliveryObstaclePiece } from './port';
 import { REALISTIC_DELIVERY_CAR } from './realistic-assets';
-import { DELIVERY_CAR_TRIANGLES, DELIVERY_VILLAGE_FRAME_TRIANGLES } from './realistic-budget';
+import {
+  DELIVERY_CAR_TRIANGLES,
+  DELIVERY_MOST_VERTEX_ATTRIBUTES,
+  DELIVERY_VILLAGE_FRAME_TRIANGLES,
+} from './realistic-budget';
 import { deliveryCarFacts, type CarNodeFacts } from './realistic-bytes-testing';
 import {
   BRAKING_DIP_RADIANS,
@@ -222,6 +226,28 @@ describe('the committed car, read back off its GLB — #2540', () => {
     }
   });
 
+  it('glazes its windows a dark tint, not the kit’s near-white swatch — PR #2548', () => {
+    // `process_vehicle.py` §GLASS_SRGB, #2b3642, as linear RGB.
+    const linear = (srgb: number): number => {
+      const c = srgb / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const glass = [0x2b, 0x36, 0x42].map(linear);
+    const { colour } = node('body').geometry;
+    let glazed = 0;
+    for (let at = 0; at < colour.length; at += 3) {
+      const corner = [0, 1, 2].map((axis) => colour[at + axis] as number);
+      if (corner.every((value, axis) => Math.abs(value - (glass[axis] as number)) < 1e-3)) {
+        glazed += 1;
+      }
+    }
+    // The kit's ten glass triangles: windscreen, rear screen and a side window each side.
+    expect(glazed).toBe(10 * 3);
+    // Dark, and a blue-grey: not the pale swatch the kit drew them in.
+    expect(Math.max(...glass)).toBeLessThan(0.06);
+    expect(glass[2] as number).toBeGreaterThan(glass[0] as number);
+  });
+
   it('fills obstacles.ts’ parked car’s footprint, standing on the road', () => {
     const points = PARTS.flatMap((name) => placed(node(name)));
     const xs = points.map(([x]) => x);
@@ -273,7 +299,7 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     // The stylised world keeps its simple car, handed Kenney's or not.
     const stylised = new DeliveryBelt('stylised', GEOMETRY);
     expect(triangles(stylised)).toBe(DELIVERY_OBSTACLE_TRIANGLES);
-    expect(stylised.meshOf('obstacles').geometry.getAttribute('oylCarPart')).toBeUndefined();
+    expect(stylised.meshOf('obstacles').geometry.getAttribute('oylCarPivot')).toBeUndefined();
     const bare = new DeliveryBelt('realistic');
     expect(triangles(bare)).toBe(DELIVERY_OBSTACLE_TRIANGLES);
     realistic.dispose();
@@ -290,16 +316,14 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
   it('marks each car vertex with its part, its indicator and its pivot, and paints only its paint per instance', () => {
     const belt = new DeliveryBelt('realistic', GEOMETRY);
     const geometry = belt.meshOf('obstacles').geometry;
-    const part = geometry.getAttribute('oylCarPart');
-    const lamp = geometry.getAttribute('oylCarLamp');
+    const piece = geometry.getAttribute('oylPiece');
     const pivot = geometry.getAttribute('oylCarPivot');
-    const painted = geometry.getAttribute('oylPainted');
     const glow = geometry.getAttribute('oylGlow');
     const counts = new Map<string, number>();
-    for (let at = 0; at < part.count; at += 1) {
-      const key = `${String(part.getX(at))}/${String(lamp.getX(at))}/${String(painted.getX(at))}/${String(glow.getX(at))}`;
+    for (let at = 0; at < piece.count; at += 1) {
+      const key = `${String(piece.getZ(at))}/${String(piece.getW(at))}/${String(piece.getY(at))}/${String(glow.getX(at))}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
-      if (part.getX(at) >= 2) {
+      if (piece.getZ(at) >= 2) {
         // A wheel's pivot is a hub: at the wheels' radius, off the middle.
         expect(pivot.getY(at)).toBeCloseTo(GEOMETRY.wheelRadius, 5);
         expect(Math.abs(pivot.getZ(at))).toBeGreaterThan(1);
@@ -353,15 +377,15 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     expect(text).toContain(DELIVERY_CAR_POSE_GLSL);
     expect(text).toContain('attribute vec4 oylCarPose;');
     const pose = text.indexOf(
-      'transformed = oylCarPivot + oylCarTurn( transformed - oylCarPivot, oylCarPart, oylCarPose );',
+      'transformed = oylCarPivot + oylCarTurn( transformed - oylCarPivot, oylPiece.z, oylCarPose );',
     );
     const collapse = text.indexOf(
-      'transformed *= 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) );',
+      'transformed *= 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) );',
     );
     expect(pose).toBeGreaterThan(text.indexOf('#include <begin_vertex>'));
     expect(collapse).toBeGreaterThan(pose);
-    expect(text).toContain('objectNormal = oylCarTurn( objectNormal, oylCarPart, oylCarPose );');
-    expect(text).toContain('vColor.xyz *= oylCarLampLevel( oylCarLamp, oylCarLamps );');
+    expect(text).toContain('objectNormal = oylCarTurn( objectNormal, oylPiece.z, oylCarPose );');
+    expect(text).toContain('vColor.xyz *= oylCarLampLevel( oylPiece.w, oylCarLamps );');
     expect(material.customProgramCacheKey()).toContain('oyl-delivery-car');
     // And a realistic belt with no car of Kenney's is not taught it.
     const bare = new DeliveryBelt('realistic');
@@ -369,6 +393,101 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     expect(plain.customProgramCacheKey()).not.toContain('oyl-delivery-car');
     belt.dispose();
     bare.dispose();
+  });
+});
+
+/** WebGL's own floor for `MAX_VERTEX_ATTRIBS`, and what the pinned Chromium, the Mac and tablet Mali GPUs report. */
+const WEBGL_VERTEX_ATTRIBUTES = 16;
+
+/** The slots a GLSL attribute of `type` takes. */
+const SLOTS: Readonly<Record<string, number>> = { float: 1, vec2: 1, vec3: 1, vec4: 1, mat4: 4 };
+
+/** The attributes three declares itself for these programs and the geometry may carry. */
+const THREE_ATTRIBUTES = new Set(['position', 'normal', 'color']);
+
+interface SlotMesh {
+  readonly isInstancedMesh?: boolean;
+  readonly geometry: { readonly attributes: Record<string, unknown> };
+  readonly material: unknown;
+}
+
+/**
+ * The vertex attribute slots a belt mesh's program uses — PR #2548. Its
+ * material's `onBeforeCompile` is run over the chunks it splices, as three
+ * runs it, and every `attribute` it declares is read off the text; three's
+ * own are what the geometry carries of {@link THREE_ATTRIBUTES} and, for an
+ * instanced mesh, `instanceMatrix`'s four. Every attribute a splice
+ * declares must be on the geometry, so none is counted that is not bound.
+ */
+function vertexSlots(mesh: SlotMesh): number {
+  const material = mesh.material as {
+    onBeforeCompile(shader: unknown, renderer: unknown): void;
+  };
+  const shader = {
+    vertexShader: [
+      '#include <common>',
+      '#include <fog_pars_vertex>',
+      'void main() {',
+      '#include <beginnormal_vertex>',
+      '#include <begin_vertex>',
+      '#include <color_vertex>',
+      '#include <fog_vertex>',
+      '}',
+    ].join('\n'),
+    fragmentShader: [
+      '#include <common>',
+      '#include <fog_pars_fragment>',
+      'void main() {',
+      '#include <opaque_fragment>',
+      '#include <fog_fragment>',
+      '}',
+    ].join('\n'),
+    uniforms: {} as Record<string, { value: unknown }>,
+    defines: {},
+  };
+  material.onBeforeCompile(shader, undefined);
+  const declared = new Map<string, number>();
+  for (const [, type, name] of shader.vertexShader.matchAll(/attribute (\w+) (\w+);/g)) {
+    const slots = SLOTS[type as string];
+    if (slots === undefined) throw new Error(`no slot count for ${String(type)}`);
+    declared.set(name as string, slots);
+  }
+  const carried = Object.keys(mesh.geometry.attributes);
+  for (const name of declared.keys()) expect(carried, `${name} declared`).toContain(name);
+  let slots = mesh.isInstancedMesh === true ? 4 : 0;
+  // One the geometry carries and no splice declares is read by nothing, so it takes no slot.
+  for (const name of carried) slots += THREE_ATTRIBUTES.has(name) ? 1 : (declared.get(name) ?? 0);
+  return slots;
+}
+
+describe('the belt’s programs fit WebGL’s vertex attributes — PR #2548', () => {
+  it(`uses at most ${String(DELIVERY_MOST_VERTEX_ATTRIBUTES)} of WebGL’s ${String(WEBGL_VERTEX_ATTRIBUTES)} slots in every program, Kenney’s car’s obstacles at 13`, () => {
+    const realistic = new DeliveryBelt('realistic', GEOMETRY);
+    const counted: Record<string, number> = {};
+    for (const [name, belt] of [
+      ['realistic, Kenney’s car', realistic],
+      ['realistic, no car', new DeliveryBelt('realistic')],
+      ['stylised', new DeliveryBelt('stylised', GEOMETRY)],
+    ] as const) {
+      for (const shading of ['lit', 'flat'] as const) {
+        belt.setShading(shading);
+        for (const what of ['parcels', 'markers', 'obstacles'] as const) {
+          counted[`${name} ${shading} ${what}`] = vertexSlots(
+            belt.meshOf(what) as unknown as SlotMesh,
+          );
+        }
+      }
+      belt.dispose();
+    }
+    for (const [program, slots] of Object.entries(counted)) {
+      expect(slots, program).toBeLessThanOrEqual(DELIVERY_MOST_VERTEX_ATTRIBUTES);
+    }
+    expect(DELIVERY_MOST_VERTEX_ATTRIBUTES).toBeLessThan(WEBGL_VERTEX_ATTRIBUTES);
+    // Measured: the instance matrix's 4, position, normal, colour and glow,
+    // the piece and the pivot, and the instance's obstacle, pose and indicators.
+    expect(counted['realistic, Kenney’s car lit obstacles']).toBe(13);
+    expect(counted['realistic, no car lit obstacles']).toBe(10);
+    expect(counted['realistic, Kenney’s car lit markers']).toBe(8);
   });
 });
 
@@ -502,11 +621,12 @@ describe('the pose’s shader text, run — #2540', () => {
     expect(turn([0.3, 0.8, -1.2], 0, [1, 0.5, 0.03, 0.03])).toEqual([0.3, 0.8, -1.2]);
   });
 
-  it('draws an indicator bright while lit and dim while not, and leaves every other vertex as it is', () => {
+  it('draws an indicator bright while lit and dark while not, and leaves every other vertex as it is', () => {
     expect(program.call('oylCarLampLevel', 0, [0, 0])).toBe(1);
-    expect(program.call('oylCarLampLevel', 1, [1, 0])).toBe(1);
-    expect(program.call('oylCarLampLevel', 1, [0, 1])).toBeCloseTo(0.25, 9);
-    expect(program.call('oylCarLampLevel', 2, [0, 1])).toBe(1);
-    expect(program.call('oylCarLampLevel', 2, [1, 0])).toBeCloseTo(0.25, 9);
+    // PR #2548: lit past its own amber, for the AgX tone mapping; off a dark lens.
+    expect(program.call('oylCarLampLevel', 1, [1, 0])).toBeCloseTo(1.25, 9);
+    expect(program.call('oylCarLampLevel', 1, [0, 1])).toBeCloseTo(0.08, 9);
+    expect(program.call('oylCarLampLevel', 2, [0, 1])).toBeCloseTo(1.25, 9);
+    expect(program.call('oylCarLampLevel', 2, [1, 0])).toBeCloseTo(0.08, 9);
   });
 });

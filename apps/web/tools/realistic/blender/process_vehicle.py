@@ -33,7 +33,10 @@ the colour the kit drew there.
    split off as `paint` the body's faces whose texture coordinates' middle
    lies in <paint-cell> -- the swatch the kit paints this car's body with,
    as `column,row` of 32 by 128 pixel cells -- so the renderer can paint it
-   per instance; what is left is `body`.
+   per instance; what is left is `body`. The body's faces drawn from
+   GLASS_CELL, the kit's pale glass swatch, are coloured GLASS_SRGB instead:
+   read as the kit drew them, the windows were near-white (PR #2548's
+   pictures), not glass.
 4. Stand it on the origin and bring it to <length> by <width> by <height>
    metres: the body's footprint centred at x = y = 0 and the lowest point of
    the tyres at z = 0, the body stretched to the box (Kenney's cars are
@@ -88,14 +91,21 @@ TEMPLATE_WHEEL = "wheel-front-left"
 # each a flat half and a graded half, so a cell of 32 is one of them.
 CELL_WIDTH = 32
 CELL_HEIGHT = 128
+# Step 3: the kit's glass swatch, `column,row`: its windscreen, rear screen and
+# front side windows, ten triangles of the sedan. Its rear side windows are
+# not glass in the kit -- one painted face with the pillar -- and stay so.
+GLASS_CELL = (1, 3)
+# Tinted glass, as sRGB: #2b3642, this project's own, a dark blue-grey.
+GLASS_SRGB = (0x2B / 255, 0x36 / 255, 0x42 / 255)
 # Step 5: the indicators, in metres, this project's own numbers.
 INDICATOR_WIDTH = 0.14
 INDICATOR_HEIGHT = 0.07
 INDICATOR_INSET = 0.38
 INDICATOR_UP = 0.62
 INDICATOR_PROUD = 0.006
-# Amber, as sRGB: #f59a1b, the stylised car's indicator (#2506).
-INDICATOR_SRGB = (0xF5 / 255, 0x9A / 255, 0x1B / 255)
+# Amber, as sRGB: #ff7a00, deeper than the stylised car's #f59a1b (#2506),
+# which the realistic world's AgX tone mapping washed out (PR #2548).
+INDICATOR_SRGB = (0xFF / 255, 0x7A / 255, 0x00 / 255)
 # Step 6: an edge whose faces meet at more than this is drawn as a crease.
 SHARP_DEGREES = 35.0
 
@@ -213,6 +223,9 @@ body = meshes["body"]
 height_px, width_px, _ = picture.shape
 uv_layer = body.data.uv_layers.active
 painted = []
+glass = [linear(c) for c in GLASS_SRGB] + [1.0]
+glazed = 0
+body_colours = body.data.color_attributes["colour"].data
 for polygon in body.data.polygons:
     us = [uv_layer.data[i].uv for i in polygon.loop_indices]
     u = sum(each.x for each in us) / len(us)
@@ -221,8 +234,14 @@ for polygon in body.data.polygons:
     row = int(min(max(1.0 - v, 0.0), 0.999999) * height_px) // CELL_HEIGHT
     if column == PAINT_COLUMN and row == PAINT_ROW:
         painted.append(polygon.index)
+    if (column, row) == GLASS_CELL:
+        for i in polygon.loop_indices:
+            body_colours[i].color = glass
+        glazed += len(polygon.vertices) - 2
 if not painted:
     raise SystemExit(f"no face of the body is painted from cell {PAINT_COLUMN},{PAINT_ROW}")
+if not glazed:
+    raise SystemExit(f"no face of the body is glass from cell {GLASS_CELL}")
 paint = body.copy()
 paint.data = body.data.copy()
 paint.name = "paint"
@@ -361,6 +380,7 @@ report = {
     "triangles": sum(counts.values()),
     "bodyTriangles": counts["body"],
     "paintTriangles": counts["paint"],
+    "glassTriangles": glazed,
     "wheelTriangles": triangles(wheel),
     "wheels": len(WHEELS),
     "indicatorTriangles": counts["indicator-left"] + counts["indicator-right"],

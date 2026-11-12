@@ -10989,14 +10989,31 @@ export interface DrawnDeliveryPiece {
 }
 
 /**
- * The vertex attribute saying which of `obstacles.ts` §`OBSTACLE_KINDS` an
- * obstacle-shape vertex belongs to, by its index in the roster — #1814.
+ * The vertex attribute saying what an obstacle-shape vertex is, packed in one
+ * `vec4` — #1814, #2362 and #2540: `x` which of `obstacles.ts`
+ * §`OBSTACLE_KINDS` it belongs to, by its index in the roster; `y` 1 where it
+ * is a parked car's body, whose colour is the instance's paint; `z` which
+ * part of Kenney's car it is ({@link DELIVERY_CAR_PART_CODES}, 0 for none);
+ * and `w` which indicator (0 none, 1 the left, 2 the right).
+ *
+ * ⚠️ **Packed because WebGL has 16 vertex attribute slots**, and the pinned
+ * Chromium on SwiftShader, the Mac's Metal and tablet Mali GPUs all report
+ * exactly 16 (`MAX_VERTEX_ATTRIBS`; an instance matrix alone is 4). As five
+ * one-float attributes and two more for the instance, the realistic world's
+ * obstacle program asked for 17, failed to link, and drew no obstacle at all
+ * (PR #2548). `delivery-car.test.ts` counts the program's slots against
+ * `realistic-budget.ts` §`DELIVERY_MOST_VERTEX_ATTRIBUTES`, and `delivery.browser.spec.ts`
+ * reads that every program the belt makes linked.
  * @see withObstacleKinds
  */
-const DELIVERY_PIECE_KIND_ATTRIBUTE = 'oylPieceKind';
+const DELIVERY_PIECE_ATTRIBUTE = 'oylPiece';
 
-/** The instanced attribute saying which of the roster an obstacle instance is. @see withObstacleKinds */
-const DELIVERY_OBSTACLE_KIND_ATTRIBUTE = 'oylObstacleKind';
+/**
+ * The instanced attribute saying what an obstacle instance is, packed in one
+ * `vec4`: `xyz` its body paint (#2362), linear RGB, and `w` which of the
+ * roster it is. @see withObstacleKinds
+ */
+const DELIVERY_OBSTACLE_ATTRIBUTE = 'oylObstacle';
 
 /**
  * Each obstacle's footprint, metres: `delivery/obstacles.ts` §`OBSTACLE_KINDS`'
@@ -11024,18 +11041,12 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
  * A parked car's body paints — #2362: blue-grey, brick red and pale silver,
  * this project's own colours. **One car in the geometry, painted per
  * instance** (round 6 of PR #2378's review): the car's body vertices carry
- * {@link DELIVERY_PAINTED_ATTRIBUTE}, and {@link withObstacleKinds} takes their
- * colour from the instance's {@link DELIVERY_OBSTACLE_PAINT_ATTRIBUTE} instead
+ * {@link DELIVERY_PIECE_ATTRIBUTE}'s `y`, and {@link withObstacleKinds} takes their
+ * colour from the instance's {@link DELIVERY_OBSTACLE_ATTRIBUTE} instead
  * of the vertex's. Round 5 held three whole cars, one a paint, and every
  * instance of every kind submitted all three.
  */
 const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
-
-/** The vertex attribute marking a parked car's body, whose colour is the instance's paint. @see PARKED_CAR_PAINTS */
-const DELIVERY_PAINTED_ATTRIBUTE = 'oylPainted';
-
-/** The instanced attribute holding each obstacle instance's body paint, linear RGB. @see PARKED_CAR_PAINTS */
-const DELIVERY_OBSTACLE_PAINT_ATTRIBUTE = 'oylObstaclePaint';
 
 /** Which of {@link PARKED_CAR_PAINTS} a car piece wears: by its place on the round, so it keeps its colour for the ride. */
 function parkedCarPaint(piece: DeliveryObstaclePiece): number {
@@ -11045,8 +11056,8 @@ function parkedCarPaint(piece: DeliveryObstaclePiece): number {
 /**
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
  * — #1814. Every obstacle instance carries every kind's triangles, each
- * vertex marked with its kind ({@link DELIVERY_PIECE_KIND_ATTRIBUTE}); a vertex
- * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE})
+ * vertex marked with its kind ({@link DELIVERY_PIECE_ATTRIBUTE}'s `x`); a vertex
+ * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_ATTRIBUTE}'s `w`)
  * is collapsed to the instance's origin, so its triangles have no area and
  * draw no pixel. That is what lets a wheelie bin, a hand trolley and a cone
  * share one instanced call: an instanced draw is ONE geometry, and three's
@@ -11070,12 +11081,12 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PAINTED_ATTRIBUTE};\nattribute vec3 ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE};`,
+        `#include <common>\nattribute vec4 ${DELIVERY_PIECE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_OBSTACLE_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) );`,
+      `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_ATTRIBUTE}.x - ${DELIVERY_OBSTACLE_ATTRIBUTE}.w ) );`,
       'vertex',
       spliced,
     );
@@ -11083,7 +11094,7 @@ function withObstacleKinds<M extends Material>(material: M): M {
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <color_vertex>',
-      `#include <color_vertex>\n\tvColor.xyz = mix( vColor.xyz, ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE}, ${DELIVERY_PAINTED_ATTRIBUTE} );`,
+      `#include <color_vertex>\n\tvColor.xyz = mix( vColor.xyz, ${DELIVERY_OBSTACLE_ATTRIBUTE}.xyz, ${DELIVERY_PIECE_ATTRIBUTE}.y );`,
       'vertex',
       spliced,
     );
@@ -11125,10 +11136,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const normals = new Float32Array(vertices * 3);
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
-  const kinds = new Float32Array(vertices);
-  const painted = new Float32Array(vertices);
-  const carParts = new Float32Array(vertices);
-  const carLamps = new Float32Array(vertices);
+  const pieces = new Float32Array(vertices * 4);
   const pivots = new Float32Array(vertices * 3);
   const paint = new Color();
   let at = 0;
@@ -11146,10 +11154,10 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
         colours[corner * 3 + 2] = paint.b;
       }
       glow[corner] = part.glows === true ? 1 : 0;
-      kinds[corner] = part.kind ?? 0;
-      painted[corner] = part.painted === true ? 1 : 0;
-      carParts[corner] = part.carPart ?? 0;
-      carLamps[corner] = part.carLamp ?? 0;
+      pieces[corner * 4] = part.kind ?? 0;
+      pieces[corner * 4 + 1] = part.painted === true ? 1 : 0;
+      pieces[corner * 4 + 2] = part.carPart ?? 0;
+      pieces[corner * 4 + 3] = part.carLamp ?? 0;
       pivots[corner * 3] = part.pivot?.[0] ?? 0;
       pivots[corner * 3 + 1] = part.pivot?.[1] ?? 0;
       pivots[corner * 3 + 2] = part.pivot?.[2] ?? 0;
@@ -11164,13 +11172,10 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   geometry.setAttribute('color', new BufferAttribute(colours, 3));
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
-    geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
-    geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
+    geometry.setAttribute(DELIVERY_PIECE_ATTRIBUTE, new BufferAttribute(pieces, 4));
   }
-  // #2540: Kenney's car's parts, for withDeliveryCarPose.
+  // #2540: Kenney's car's pivots, for withDeliveryCarPose; its parts and indicators are in the piece's `zw`.
   if (parts.some((part) => part.carPart !== undefined)) {
-    geometry.setAttribute(DELIVERY_CAR_PART_ATTRIBUTE, new BufferAttribute(carParts, 1));
-    geometry.setAttribute(DELIVERY_CAR_LAMP_ATTRIBUTE, new BufferAttribute(carLamps, 1));
     geometry.setAttribute(DELIVERY_CAR_PIVOT_ATTRIBUTE, new BufferAttribute(pivots, 3));
   }
   geometry.computeBoundingSphere();
@@ -11801,12 +11806,6 @@ export function deliveryCarPose(
   };
 }
 
-/** The vertex attribute saying which part of the car a vertex is: 0 none, 1 the body, 2 a front wheel, 3 a back wheel. @see DELIVERY_CAR_POSE_GLSL */
-const DELIVERY_CAR_PART_ATTRIBUTE = 'oylCarPart';
-
-/** The vertex attribute saying which indicator a vertex is: 0 none, 1 the left, 2 the right. */
-const DELIVERY_CAR_LAMP_ATTRIBUTE = 'oylCarLamp';
-
 /** The vertex attribute holding what a car vertex turns about. @see DeliveryCarPart.pivot */
 const DELIVERY_CAR_PIVOT_ATTRIBUTE = 'oylCarPivot';
 
@@ -11816,7 +11815,7 @@ const DELIVERY_CAR_POSE_ATTRIBUTE = 'oylCarPose';
 /** The instanced attribute holding each instance's indicators: left, right, each 0 or 1. */
 const DELIVERY_CAR_LAMPS_ATTRIBUTE = 'oylCarLamps';
 
-/** {@link DELIVERY_CAR_PART_ATTRIBUTE}'s number for each part. */
+/** Which part of the car a vertex is, in {@link DELIVERY_PIECE_ATTRIBUTE}'s `z`: 0 none, 1 the body, 2 a front wheel, 3 a back wheel. @see DELIVERY_CAR_POSE_GLSL */
 const DELIVERY_CAR_PART_CODES: Readonly<Record<DeliveryCarRole, number>> = {
   body: 1,
   paint: 1,
@@ -11826,8 +11825,19 @@ const DELIVERY_CAR_PART_CODES: Readonly<Record<DeliveryCarRole, number>> = {
   'back-wheel': 3,
 };
 
-/** How bright an indicator that is off is drawn, of its lit colour — #2540: an unlit amber lens. */
-const INDICATOR_OFF_SHARE = 0.25;
+/**
+ * How bright an indicator that is off is drawn, of its amber — #2540: an
+ * unlit lens, dark. At a quarter, PR #2548's pictures showed it a pale amber
+ * that a lit one did not stand far enough above to read as blinking at 12 m.
+ */
+const INDICATOR_OFF_SHARE = 0.08;
+
+/**
+ * How bright a lit indicator is drawn, of its amber — PR #2548: above 1, so
+ * that after the realistic world's AgX tone mapping it reads as a lamp and
+ * not as the washed-out amber of a lens drawn at its own colour.
+ */
+const INDICATOR_LIT_GAIN = 1.25;
 
 /**
  * The car's pose in GLSL — #2540: `oylCarTurn` turns a vector of a car part
@@ -11865,7 +11875,7 @@ vec3 oylCarTurn( vec3 v, float part, vec4 pose ) {
 float oylCarLampLevel( float lamp, vec2 lamps ) {
 	if ( lamp < 0.5 ) { return 1.0; }
 	float lit = lamp < 1.5 ? lamps.x : lamps.y;
-	return mix( ${INDICATOR_OFF_SHARE.toFixed(2)}, 1.0, lit );
+	return mix( ${INDICATOR_OFF_SHARE.toFixed(2)}, ${INDICATOR_LIT_GAIN.toFixed(2)}, lit );
 }
 `;
 
@@ -11878,7 +11888,10 @@ float oylCarLampLevel( float lamp, vec2 lamps ) {
  * obstacles' one call: no uniform, no second mesh, no new call.
  *
  * Applied OUTSIDE {@link withObstacleKinds}, so its lines run first: a car
- * is posed, and then whatever is not the instance's kind is collapsed. Only
+ * is posed, and then whatever is not the instance's kind is collapsed. It
+ * reads each vertex's part and indicator from {@link DELIVERY_PIECE_ATTRIBUTE}'s
+ * `zw`, which {@link withObstacleKinds} declares, so it adds only the pivot,
+ * the pose and the indicators. Only
  * the realistic world's material, which is physically based and so has an
  * `objectNormal`; the stylised world keeps its own car, which has no parts.
  */
@@ -11891,28 +11904,28 @@ function withDeliveryCarPose<M extends Material>(material: M): M {
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <common>',
-      `#include <common>\nattribute float ${DELIVERY_CAR_PART_ATTRIBUTE};\nattribute float ${DELIVERY_CAR_LAMP_ATTRIBUTE};\nattribute vec3 ${DELIVERY_CAR_PIVOT_ATTRIBUTE};\nattribute vec4 ${DELIVERY_CAR_POSE_ATTRIBUTE};\nattribute vec2 ${DELIVERY_CAR_LAMPS_ATTRIBUTE};\n${DELIVERY_CAR_POSE_GLSL}`,
+      `#include <common>\nattribute vec3 ${DELIVERY_CAR_PIVOT_ATTRIBUTE};\nattribute vec4 ${DELIVERY_CAR_POSE_ATTRIBUTE};\nattribute vec2 ${DELIVERY_CAR_LAMPS_ATTRIBUTE};\n${DELIVERY_CAR_POSE_GLSL}`,
       'vertex',
       spliced,
     );
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <beginnormal_vertex>',
-      `#include <beginnormal_vertex>\n\tobjectNormal = oylCarTurn( objectNormal, ${DELIVERY_CAR_PART_ATTRIBUTE}, ${DELIVERY_CAR_POSE_ATTRIBUTE} );`,
+      `#include <beginnormal_vertex>\n\tobjectNormal = oylCarTurn( objectNormal, ${DELIVERY_PIECE_ATTRIBUTE}.z, ${DELIVERY_CAR_POSE_ATTRIBUTE} );`,
       'vertex',
       spliced,
     );
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed = ${DELIVERY_CAR_PIVOT_ATTRIBUTE} + oylCarTurn( transformed - ${DELIVERY_CAR_PIVOT_ATTRIBUTE}, ${DELIVERY_CAR_PART_ATTRIBUTE}, ${DELIVERY_CAR_POSE_ATTRIBUTE} );`,
+      `#include <begin_vertex>\n\ttransformed = ${DELIVERY_CAR_PIVOT_ATTRIBUTE} + oylCarTurn( transformed - ${DELIVERY_CAR_PIVOT_ATTRIBUTE}, ${DELIVERY_PIECE_ATTRIBUTE}.z, ${DELIVERY_CAR_POSE_ATTRIBUTE} );`,
       'vertex',
       spliced,
     );
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <color_vertex>',
-      `#include <color_vertex>\n\tvColor.xyz *= oylCarLampLevel( ${DELIVERY_CAR_LAMP_ATTRIBUTE}, ${DELIVERY_CAR_LAMPS_ATTRIBUTE} );`,
+      `#include <color_vertex>\n\tvColor.xyz *= oylCarLampLevel( ${DELIVERY_PIECE_ATTRIBUTE}.w, ${DELIVERY_CAR_LAMPS_ATTRIBUTE} );`,
       'vertex',
       spliced,
     );
@@ -12016,10 +12029,12 @@ export class DeliveryBelt {
   readonly #meshes: Readonly<Record<DeliveryPieceKind, InstancedMesh>>;
   readonly #materials: { readonly lit: Material; readonly flat: Material };
   readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
-  /** Each obstacle instance's kind, by its index in the roster. */
-  readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
-  /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
-  readonly #paints = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
+  /** Each obstacle instance's body paint (#2362) and kind, by its index in the roster: {@link DELIVERY_OBSTACLE_ATTRIBUTE}. */
+  readonly #obstacles = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY * 4),
+    4,
+  );
+  /** Which of the paints each obstacle instance wears, for {@link drawn}. */
   readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
   /** Kenney's car (#2540), where the belt draws it; its parked cars are this file's own otherwise. */
   readonly #car: DeliveryCarGeometry | undefined;
@@ -12046,10 +12061,8 @@ export class DeliveryBelt {
       flat: obstacle.flat === obstacle.lit ? lit : posed(withObstacleKinds(obstacle.flat)),
     };
     const obstacles = obstacleShape(this.#car);
-    this.#kinds.setUsage(DynamicDrawUsage);
-    obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
-    this.#paints.setUsage(DynamicDrawUsage);
-    obstacles.setAttribute(DELIVERY_OBSTACLE_PAINT_ATTRIBUTE, this.#paints);
+    this.#obstacles.setUsage(DynamicDrawUsage);
+    obstacles.setAttribute(DELIVERY_OBSTACLE_ATTRIBUTE, this.#obstacles);
     if (this.#car !== undefined) {
       this.#poses.setUsage(DynamicDrawUsage);
       obstacles.setAttribute(DELIVERY_CAR_POSE_ATTRIBUTE, this.#poses);
@@ -12103,18 +12116,17 @@ export class DeliveryBelt {
     this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
     this.#place(this.#meshes.obstacles, obstacles);
-    const kinds = this.#kinds.array as Float32Array;
     const count = this.#meshes.obstacles.count;
-    const paints = this.#paints.array as Float32Array;
+    const packed = this.#obstacles.array as Float32Array;
     for (let at = 0; at < count; at += 1) {
       const piece = obstacles[at] as DeliveryObstaclePiece;
-      kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
       const paint = piece.kind === 'parked-car' ? parkedCarPaint(piece) : -1;
       this.#paintOf[at] = paint;
       DELIVERY_PAINT_COLOUR.set(PARKED_CAR_PAINTS[Math.max(0, paint)] as number);
-      paints[at * 3] = DELIVERY_PAINT_COLOUR.r;
-      paints[at * 3 + 1] = DELIVERY_PAINT_COLOUR.g;
-      paints[at * 3 + 2] = DELIVERY_PAINT_COLOUR.b;
+      packed[at * 4] = DELIVERY_PAINT_COLOUR.r;
+      packed[at * 4 + 1] = DELIVERY_PAINT_COLOUR.g;
+      packed[at * 4 + 2] = DELIVERY_PAINT_COLOUR.b;
+      packed[at * 4 + 3] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
       // #2540: a car's pose, from how it moves; anything else, and a parked car, at rest.
       if (this.#car !== undefined) {
         const pose =
@@ -12130,8 +12142,7 @@ export class DeliveryBelt {
       }
     }
     if (count > 0) {
-      this.#kinds.needsUpdate = true;
-      this.#paints.needsUpdate = true;
+      this.#obstacles.needsUpdate = true;
       if (this.#car !== undefined) {
         this.#poses.needsUpdate = true;
         this.#lamps.needsUpdate = true;
@@ -12171,10 +12182,11 @@ export class DeliveryBelt {
     const mesh = this.#meshes[what];
     if (!mesh.visible) return [];
     const matrices = mesh.instanceMatrix.array;
-    const kinds = this.#kinds.array;
+    const packed = this.#obstacles.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
-      const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
+      const kind =
+        what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[packed[at * 4 + 3] as number] : undefined;
       const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
       const poses = this.#poses.array;
       const lamps = this.#lamps.array;
@@ -12273,6 +12285,82 @@ export function deliveryCallsProbe(
   belt.dispose();
   renderer.dispose();
   return { shown, hidden, drawn };
+}
+
+/**
+ * One program {@link deliveryProgramsProbe} read: three's name for it, whether
+ * WebGL linked it, and the vertex attribute slots it uses (a `mat4` four).
+ *
+ * @test-facing read by `browser/delivery-harness.ts` and its spec
+ */
+export interface DeliveryProgramReading {
+  readonly name: string;
+  readonly linked: boolean;
+  readonly slots: number;
+}
+
+/**
+ * Every program the Delivery belt makes in `world`'s materials, read off
+ * WebGL itself — PR #2548. The belt holds one of each piece, a car of
+ * `car`'s among the obstacles where one is handed, and is drawn in each
+ * shading, so every program it can make is made; then each program three
+ * holds (`renderer.info.programs`, the belt's alone in a renderer of its
+ * own) is read for `LINK_STATUS` and its active attributes, with the
+ * context's `MAX_VERTEX_ATTRIBS` beside them.
+ *
+ * A program that asks for more slots than the context has does not link,
+ * three logs a shader error, and the mesh draws nothing while
+ * {@link deliveryCallsProbe}'s call count still reads right: PR #2548's car
+ * made the realistic obstacles' program ask for 17 of 16, and the round drew
+ * no obstacle at all.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`; the product draws the
+ * belt through the view and reads none of this
+ */
+export function deliveryProgramsProbe(
+  canvas: HTMLCanvasElement,
+  world: 'stylised' | 'realistic',
+  car?: DeliveryCarGeometry,
+): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] } {
+  const renderer = new WebGLRenderer({ canvas, antialias: false });
+  renderer.setSize(64, 32, false);
+  const belt = new DeliveryBelt(world, car);
+  const scene = new Scene();
+  belt.addTo(scene);
+  const piece = { x: 0, y: 0, z: 0, yaw: 0 };
+  belt.update({
+    parcels: [piece],
+    markers: [piece],
+    obstacles: DELIVERY_OBSTACLE_ORDER.map((kind, index) => ({ ...piece, z: 6 * index, kind })),
+  });
+  const sun = new DirectionalLight(0xffffff, 1);
+  sun.position.set(0, 1, 1);
+  scene.add(sun);
+  const eye = new PerspectiveCamera(60, 2, 0.1, 500);
+  eye.position.set(0, 30, 1);
+  eye.lookAt(0, 0, 0);
+  for (const shading of ['lit', 'flat'] as const) {
+    belt.setShading(shading);
+    renderer.render(scene, eye);
+  }
+  const gl = renderer.getContext();
+  const slotsOf = (type: number): number =>
+    type === gl.FLOAT_MAT4 ? 4 : type === gl.FLOAT_MAT3 ? 3 : type === gl.FLOAT_MAT2 ? 2 : 1;
+  const programs = (renderer.info.programs ?? []).map((each, index) => {
+    const program = each.program as globalThis.WebGLProgram;
+    const linked = gl.getProgramParameter(program, gl.LINK_STATUS) === true;
+    const active = linked ? (gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES) as number) : 0;
+    let slots = 0;
+    for (let at = 0; at < active; at += 1) {
+      const attribute = gl.getActiveAttrib(program, at);
+      if (attribute !== null) slots += slotsOf(attribute.type) * attribute.size;
+    }
+    return { name: each.name === '' ? `program ${String(index)}` : each.name, linked, slots };
+  });
+  const most = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+  belt.dispose();
+  renderer.dispose();
+  return { most, programs };
 }
 
 /**

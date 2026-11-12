@@ -2106,6 +2106,7 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
     triangles: 1376,
     bodyTriangles: 570,
     paintTriangles: 134,
+    glassTriangles: 10,
     wheelTriangles: 166,
     wheels: 4,
     indicatorTriangles: 8,
@@ -2370,7 +2371,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
         DELIVERY_CAR_SOURCE.paintCell,
       ],
     },
-    modified: `the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about ${String(DELIVERY_CAR_SOURCE.wheelTriangles)} triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part; stood on the origin and brought to ${String(DELIVERY_CAR_SOURCE.lengthMetres)} m by ${String(DELIVERY_CAR_SOURCE.widthMetres)} m by ${String(DELIVERY_CAR_SOURCE.heightMetres)} m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture`,
+    modified: `the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about ${String(DELIVERY_CAR_SOURCE.wheelTriangles)} triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part, and its glass coloured a dark tint in place of the kit's pale swatch; stood on the origin and brought to ${String(DELIVERY_CAR_SOURCE.lengthMetres)} m by ${String(DELIVERY_CAR_SOURCE.widthMetres)} m by ${String(DELIVERY_CAR_SOURCE.heightMetres)} m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture`,
     credit: { creator: 'Kenney', url: DELIVERY_CAR_SOURCE.page },
   },
 ];
