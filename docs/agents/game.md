@@ -332,7 +332,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         holds a ride's distance, speed and grades identical
                         eased or not. Stateless — the lag a rider holding this
                         speed would have here — so a pacer or ghost level with
-                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        the rider AT THEIR SPEED is drawn level. ⚠️ Since
+                        #2427 riders at different speeds are drawn in their
+                        odometers' order (ADR 0038 D-3.4): `scene.ts`
+                        §`inOdometerOrder` keeps each a quarter of its
+                        odometer gap from the next, out from the rider, who
+                        is never moved (`drawn-order.test.ts`). Without it a
+                        faster rider just ahead, lagging more, was drawn up
+                        to 30 m behind the one it shelters. ⚠️ Not in a Delivery round
                         or a lap race (`scene.ts` §`easingLine`), where the
                         drawn place is where the game meets the rider; there
                         #546's 38.7° cap and its parked cranks still bind.
@@ -783,7 +790,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         single-sided: a lens wound towards the face is culled
                         from the front (#2504). `rider-gear.test.ts` reads the
                         lenses, the closed vents, the straps on the skin and
-                        the shoes back out of the file. ⚠️ The jersey's main colour is in NO
+                        the shoes back out of the file. ⚠️ **Since #2495 it has EYES**, and
+                        a reviewer who remembers flat skin under the glasses
+                        is reading the old file: a ball in each socket at
+                        MakeHuman's own eye, drawn in `rider_kit.py`'s
+                        pupil, iris and white, in the HELMET's mesh (so on the
+                        head bone, no draw call), its 168 triangles taken out
+                        of the body's share (`rider-eyes.test.ts`). The pack's
+                        rider (#2485) keeps flat ones. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
@@ -1118,7 +1132,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         them and keeps its own two refusals (#1817 counts
                         them there). A
                         DRAWING: it reaches `scene.ts` §`lateralOf` through
-                        `SceneInput.steeredLateral` (the rider only) and the
+                        `SceneInput.steeredLateral` (the rider only), and the
+                        bicycle's turn and lean through `SceneInput.steeredSway`
+                        (#2456, `lane-change-lean.ts`: a damped sideways
+                        speed `GameView` holds beside the camera's heading), and the
                         obstacles through their rider offset, never
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
@@ -1129,6 +1146,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a level bot or ghost making the room. One just behind
                         is held aside until its front wheel is behind the
                         camera's eye, then eases to its line (#1863)
+    src/game/lane-change-lean.ts
+                        how a lane change is DRAWN (#2456): the bicycle turns
+                        into the move and bicycle and rider lean, then
+                        straighten on arrival. Pure; the rider stays drawn at
+                        `steeredLateral`, so nothing the obstacles, race or
+                        trainer read changes. A standstill still yaws a
+                        little (the turn rate floors the speed at 10 m/s) but
+                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        `scene.ts` §`drawnSteer` gives each marker the
+                        kinematic steer (`bicycle.ts` §`steerAngle`, clamped
+                        at 20°) of the drawn heading's turn rate (from
+                        `SceneInput.steeredSwayRate`) or a bend's lean, and
+                        both belts turn the fork, front wheel and bar about
+                        the 72° head tube in the vertex shader
+                        (`three-renderer.ts` §`withSteering`, no draw call);
+                        the realistic hands are solved to the turned grips
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
@@ -1217,7 +1250,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         for and eight on one they did not** — the wind reading
                         is last and absent rather than nought in still air, on
                         the `NO_READING` precedent, and "nine" is safe only
-                        because the wind cannot change mid-ride
+                        because the wind cannot change mid-ride. Since #2426
+                        the Draft field (a room's or a solo ride's) shows the
+                        SHELTER MARK while the rider is in the draft: an arch
+                        over a filled pocket beside its label (`HudCore.tsx`
+                        §`ShelterMark`, `aria-hidden`), a solid outline, and
+                        "In the draft" on its line with the scale read after
+                        it, visually hidden. ⚠️ ONE state: `room-ride.ts`
+                        §`draftEvent`'s 10 % / 5 %, the room's from
+                        `GameView`'s `inDraftRef` and the solo one from the
+                        simulation, so the mark never flickers at 10 % and
+                        never disagrees with the room's spoken cue. Seen and
+                        not spoken (owner, #2421 item 3); never colour alone;
+                        no motion; nothing outside the Draft field changes,
+                        the power figure least of all (`draft.a11y.test.tsx`)
     src/game/audio-cues.ts
                         the ride's non-speech sounds (#400) — every rule about
                         them, against `audio-port.ts`: off by default, audio

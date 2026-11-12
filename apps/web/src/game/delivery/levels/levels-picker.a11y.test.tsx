@@ -35,6 +35,8 @@ import { SHIPPED_LEVELS } from '../../shipped-levels';
 import { BUILT_IN_CIRCUITS_TEXT, LEVEL_WORLD_ID } from '../../StageChooser';
 import { writeRealisticWorldChoice } from '../../world-preference';
 
+import { writeLevelProgress } from '../level-progress';
+
 import { parseLevelFile } from './level-file';
 
 const FIXTURE = JSON.parse(
@@ -85,6 +87,21 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
+const [FIRST] = SHIPPED_LEVELS.list();
+if (FIRST === undefined) throw new Error('the app ships no level');
+
+/** The link that chooses the level `name`, by its text as a screen reader reads it. */
+function chooseLink(
+  within: Element | null | undefined,
+  name: string,
+): HTMLAnchorElement | undefined {
+  return queryAll<HTMLAnchorElement>(within ?? document, 'a').find(
+    (each) =>
+      (each.textContent ?? '').replace(/\s+/g, ' ').trim() ===
+      `${GAME_COURSES_TEXT.choose}: ${name}`,
+  );
+}
+
 async function picker(routes: readonly RidableRoute[]): Promise<void> {
   globalThis.location.hash = '#/games/delivery';
   mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port(routes)} />);
@@ -97,18 +114,15 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
     ['to a rider with no routes', []],
   ] as const) {
     it(`are listed under their own heading, ${label}, each link named by its level, with no finding`, async () => {
+      // #2363: level 1 finished, so every level is open to choose.
+      writeLevelProgress(localStorage, { finished: [FIRST.id] });
       await picker(routes);
       const section = document.querySelector('.oyl-game-courses__levels');
       const heading = section?.querySelector('h2');
       expect(heading?.textContent).toBe(GAME_COURSES_TEXT.levelsHeading);
       expect(section?.getAttribute('aria-labelledby')).toBe(heading?.id);
       for (const level of SHIPPED_LEVELS.list()) {
-        const link = queryAll<HTMLAnchorElement>(section ?? document, 'a').find(
-          (each) =>
-            (each.textContent ?? '').replace(/\s+/g, ' ').trim() ===
-            `${GAME_COURSES_TEXT.choose}: ${level.name}`,
-        );
-        expect(link, level.name).toBeDefined();
+        expect(chooseLink(section, level.name), level.name).toBeDefined();
       }
       const credit = section?.querySelector('[data-credit="levels"]');
       expect(credit?.textContent).toContain(OSM_ATTRIBUTION);
@@ -116,6 +130,43 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
       expect(formatViolations(auditAccessibility(document))).toBe('');
     });
   }
+
+  for (const [label, routes] of [
+    ['beside a saved route', [OWN]],
+    ['to a rider with no routes', []],
+  ] as const) {
+    it(`say a locked level is locked in words, named with its state and with no way to choose it, ${label}, with no finding — #2363`, async () => {
+      await picker(routes);
+      const section = document.querySelector('.oyl-game-courses__levels');
+      const [first, second] = SHIPPED_LEVELS.list();
+      if (first === undefined || second === undefined) throw new Error('the app ships one level');
+      const locked = section?.querySelector<HTMLElement>(`[data-level="${second.id}"]`);
+      expect(locked?.dataset['standing']).toBe('locked');
+      const words = GAME_COURSES_TEXT.levelLocked(first.name);
+      expect(locked?.textContent).toContain(words);
+      // Its accessible name is the level's name and its state, from the words on screen.
+      const named = (locked?.getAttribute('aria-labelledby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' ');
+      expect(named).toBe(`${second.name} ${words}`);
+      expect(locked?.querySelector('a')).toBeNull();
+      expect(chooseLink(section, second.name)).toBeUndefined();
+      expect(chooseLink(section, first.name)).toBeDefined();
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+    });
+  }
+
+  it('say a finished level is finished in words, still with its way to choose it, with no finding — #2363', async () => {
+    writeLevelProgress(localStorage, { finished: [FIRST.id] });
+    await picker([OWN]);
+    const section = document.querySelector('.oyl-game-courses__levels');
+    const finished = section?.querySelector<HTMLElement>(`[data-level="${FIRST.id}"]`);
+    expect(finished?.dataset['standing']).toBe('finished');
+    expect(finished?.textContent).toContain(GAME_COURSES_TEXT.levelFinished);
+    expect(chooseLink(section, FIRST.name)).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
 
   it('are listed with the standard world chosen, above the routes’ notice, with no finding', async () => {
     writeRealisticWorldChoice(localStorage, false);
