@@ -75,6 +75,8 @@ function onLevel(sky: Weather, storage = storageOf()): DeliveryRide {
       houses: 8,
       hazardsPerKilometre: { static: 0, moving: 0 },
       lengthMetres: 2_000,
+      // #2363: a level round names its level.
+      id: 'test-level',
       ...sky,
     },
   });

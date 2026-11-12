@@ -245,11 +245,13 @@ import {
   type ListedLevel,
 } from './delivery/levels/levels';
 import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
+import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  keepLevelFinished,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -2037,10 +2039,20 @@ function GameScreen({
     // #2362: the level the Delivery picker opened this on, read with the
     // routes for the same reason, so its card is there when the chooser is.
     const levelId = openedOn.current === undefined ? undefined : levelOfRouteId(openedOn.current);
+    // #2363, ADR 0065 D-9.1: a level still locked on this device is not read,
+    // so an address typed by hand rides no round the picker would not offer.
     const levelRead = (
       levelId === undefined
         ? Promise.resolve(undefined)
-        : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined))
+        : (port.listDeliveryLevels?.() ?? Promise.resolve([])).then((listed) => {
+            const order = listed.map((each) => each.id);
+            // A level the listing does not name has no place in the order, so
+            // nothing says it is open: it is not read (fails closed).
+            return !order.includes(levelId) ||
+              levelStanding(order, readLevelProgress(deviceStorage()), levelId).state === 'locked'
+              ? undefined
+              : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined));
+          })
     ).catch((): undefined => undefined);
     void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
       ([found, circuitsFound, levelFound]) => {
@@ -2778,7 +2790,11 @@ function GameScreen({
                 level:
                   levelRidden === undefined
                     ? undefined
-                    : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
+                    : {
+                        ...levelRidden.file.round,
+                        lengthMetres: levelRidden.file.lengthMetres,
+                        id: levelRidden.file.id,
+                      },
               });
         const noRoundText: string | undefined =
           deliveryRef.current !== undefined
@@ -3580,6 +3596,8 @@ function GameScreen({
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
           keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
+          // #2363, ADR 0065 D-9: a level's round, reached its end, opens the next level.
+          keepLevelFinished(deviceStorage(), stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
