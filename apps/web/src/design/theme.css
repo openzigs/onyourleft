@@ -8816,9 +8816,9 @@ select.oyl-input {
    snapped to half of a 1440p monitor — kept the 77 px row, where measured
    *End ride*'s words ran out of its box and *Trainer notice*'s were covered,
    until §"#2281" below shared that row out by its words and kept it one
-   line. A line of its own was not the answer there. On the tablet, with a re-plan waiting, the
-   line cost the actions panel enough to begin 25 px inside the leaning
-   rider's box on the CI runner's fonts (389 px tall,
+   line. A line of its own was not the answer there. On the tablet, with a
+   re-plan waiting, the line cost the actions panel enough to begin 25 px
+   inside the leaning rider's box on the CI runner's fonts (389 px tall,
    `ride-workout.browser.spec.ts` §"#1244" and §"#1329"), and those cases hold
    *Trainer notice* on the stage on every tablet, so it cannot give way there
    as it does on a phone on its side (§"#1482" above). Filed as #2278 under #2034. */
