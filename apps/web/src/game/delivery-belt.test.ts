@@ -11,7 +11,6 @@
  * browser gate does: `delivery.browser.spec.ts`.
  */
 
-import { Color, SRGBColorSpace } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
@@ -850,12 +849,27 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const mailbox = diamondOf(MAILBOX);
     expect(doorstep.length).toBeGreaterThan(0);
     expect(mailbox.length).toBeGreaterThan(0);
-    /** The paint's hue in degrees and its saturation, from linear channels in sRGB. */
-    const hueOf = ([r, g, b]: readonly [number, number, number]): [number, number] => {
-      const colour = new Color().setRGB(r, g, b);
-      const hsl = { h: 0, s: 0, l: 0 };
-      colour.getHSL(hsl, SRGBColorSpace);
-      return [hsl.h * 360, hsl.s];
+    /**
+     * The paint's hue in degrees and its HSL saturation, from the geometry's
+     * linear channels encoded as sRGB (this suite imports no three: the seam).
+     */
+    const hueOf = (linear: readonly [number, number, number]): [number, number] => {
+      const [r, g, b] = linear.map((c) =>
+        c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055,
+      ) as [number, number, number];
+      const most = Math.max(r, g, b);
+      const least = Math.min(r, g, b);
+      const spread = most - least;
+      const lightness = (most + least) / 2;
+      if (spread === 0) return [0, 0];
+      const saturation = spread / (1 - Math.abs(2 * lightness - 1));
+      const sixth =
+        most === r
+          ? ((g - b) / spread + 6) % 6
+          : most === g
+            ? (b - r) / spread + 2
+            : (r - g) / spread + 4;
+      return [sixth * 60, saturation];
     };
     const [mailboxHue, mailboxSaturation] = hueOf(mailbox[0]?.rgb ?? [0, 0, 0]);
     const [doorstepHue] = hueOf(doorstep[0]?.rgb ?? [0, 0, 0]);
