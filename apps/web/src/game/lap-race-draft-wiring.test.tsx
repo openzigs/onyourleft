@@ -4,7 +4,10 @@
 /**
  * #2461 (ADR 0067 D-3, AC3) through the real `GameView`: a rider 2 m behind a
  * bot for 30 s covers more effort distance than the same power trace with no
- * bot ahead, read off the odometer every HUD field reads.
+ * bot ahead, read off the game simulation's odometer, which the race's effort
+ * distance reads. That is not the recorded ride: the saved activity's distance,
+ * and the HUD's *Distance*, *Climbed* and *Avg power* (#2076), are the
+ * recorder's, integrated from the trainer's measured speed.
  *
  * Its own file, not `lap-race-wiring.test.tsx`: ADR 0067 D-3.6 restates that
  * file "only as follows" and says nothing else in it changes. The harness here
@@ -282,8 +285,9 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
     // The device's default, the switch on, and the same trace on an ordinary ride.
     const drafted = await rideFlat(ONE_BOT, trace, WHEEL_FRAMES);
     const alone = await rideFlat(undefined, trace, WHEEL_FRAMES);
-    // `GameState.ride.distance` on the last frame: the odometer every HUD
-    // field and the race's effort distance read.
+    // `GameState.ride.distance` on the last frame: the game simulation's
+    // odometer, which the race's effort distance reads. Not the recorder's
+    // distance, which the saved ride and the HUD's Distance field show.
     // The real ride is the shadow's, so its rider sat on the wheel too.
     expect(drafted.odometer).toBe(shadow.odometer);
     expect(drafted.trace.filter((k) => k < 0.75).length).toBeGreaterThanOrEqual(HELD_FRAMES);
