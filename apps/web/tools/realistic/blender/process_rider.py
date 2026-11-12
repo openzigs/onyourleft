@@ -170,6 +170,9 @@ def macro_targets():
 # pack's (#2485) is coarser, with no vents, straps or frame: 64 triangles of
 # its 2 000, seen from metres away.
 HELMET_RINGS, HELMET_SEGMENTS = (3, 10) if LOD else (7, 22)
+# How much further the shell's back comes down below its widest ring, as a
+# share of how far it came down before (the owner's ruling of 2026-11-12).
+DROP = 0.6
 
 
 def mh(path):
@@ -403,8 +406,11 @@ radius = Vector((
 
 SHELL = (0.86, 0.86, 0.86)
 STRAP = (0.02, 0.02, 0.022)
-# #2504: a smoked lens, blue-led so it reads as glass and not as a strap.
-LENS = (0.010, 0.016, 0.034)
+# #2504: a smoked lens, blue-led so it reads as glass and not as a strap. The
+# owner's ruling of 2026-11-12: (0.010, 0.016, 0.034) was a blue-black that
+# read as flat black; a dark grey, its blue a little over its red, reads as
+# smoked glass and still hides the eyes, the lens being opaque.
+LENS = (0.028, 0.033, 0.048)
 FRAME = (0.03, 0.03, 0.032)
 # A vent's floor and walls: the helmet's inside, a mid grey.
 VENT = (0.09, 0.09, 0.095)
@@ -434,16 +440,31 @@ def shell_point(ring, segment):
     down = rim * ring / HELMET_RINGS
     # A road helmet's tail: longer behind.
     stretch = 1 + 0.12 * back ** 2
+    # The owner's ruling of 2026-11-12: the back rim stopped at the skull's
+    # base, high above the nape. Below the shell's widest ring the back is
+    # drawn down DROP further, so the tail comes down over the top of the neck
+    # with the outline seen from above unchanged; the front, where back is 0,
+    # not at all.
+    height = math.cos(down)
+    if height < 0:
+        height *= 1 + DROP * back ** 6
     return centre + Vector((
         radius.x * math.sin(down) * math.sin(around),
         -radius.y * stretch * math.sin(down) * math.cos(around),
-        radius.z * math.cos(down),
+        radius.z * height,
     ))
 
 
 def is_vent(ring, segment):
-    """Four rows of slots over the crown, running front to back."""
-    return not LOD and ring in (1, 2, 4) and segment in (2, 5, 17, 20)
+    """Four rows of slots over the crown, running front to back, each row the
+    mirror of the other side's (segment k's mirror is HELMET_SEGMENTS - 1 - k).
+
+    The owner's ruling of 2026-11-12: the right side's rows were 17 and 20, a
+    segment nearer the middle than the left's 2 and 5 mirrored, and 20's floor
+    lay under the crown's highest point -- the scalp came up through it, a
+    speck at the top centre seen from the front. That vent is closed and the
+    rows mirrored."""
+    return not LOD and ring in (1, 2, 4) and segment in (2, 5, 16, 19)
 
 
 # #2504: a vent was a hole, and the scalp showed through it. Each is now a
