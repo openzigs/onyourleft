@@ -91,6 +91,8 @@ import {
 import { writeRealisticReport } from './realistic-report';
 import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
+import { readSoloDraftChoice } from './solo-draft-preference';
+import { draftedRide, soloDraftPercent, type SoloDraftSources } from './solo-draft';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
 import { deviceToday, NO_SEASON, seasonOn, type CalendarDay, type Season } from './season';
@@ -243,11 +245,13 @@ import {
   type ListedLevel,
 } from './delivery/levels/levels';
 import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
+import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  keepLevelFinished,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -325,6 +329,7 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type Seconds,
   type TimeInZones,
   type Watts,
   type Wind,
@@ -1036,13 +1041,6 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
 }
 
 /**
- * The game screen — and, when the fragment asks for one (#1992), the same
- * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
- * asked for. Keyed on the choice, so changing it is a new screen and a ride
- * in progress is never switched between a real rider and a simulated one.
- */
-
-/**
  * How long the rider's choice of route must settle before `GameView` builds
  * its drawn path (`drawn-line.ts`), in milliseconds: **250** — #2422's review.
  * Chosen: long enough that stepping through the picker builds nothing, short
@@ -1050,6 +1048,43 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  */
 export const DRAWN_LINE_WARM_DELAY_MS = 250;
 
+/**
+ * Whether a ride on `route`, started from the chooser with these choices, is
+ * drawn along the route's drawn path (`drawn-line.ts`) — #2470. The chooser
+ * builds the path only for such a ride. A built-in level is always a
+ * Delivery round and a built-in circuit always a lap race; a Delivery round
+ * and a lap race on a loop ridden outside a room are drawn beside the road,
+ * where the game's own events meet the rider (`scene.ts` §`easingLine`).
+ * This decides as `begin` does with its `deliveryWanted` and `raceChoice`.
+ *
+ * ⚠️ **A ride in a room is still warmed.** A group ride is drawn along the
+ * path. A room's lap race is known only from the room, once the rider has
+ * joined it. And the chooser builds the PICKED route, which a rider in a
+ * room rides alone (`begin`'s `roomId`).
+ */
+export function drawnAlongPath(
+  route: RidableRoute,
+  choice: {
+    readonly delivery: boolean;
+    readonly lapRace: LapRaceChoice | undefined;
+    readonly roomId: string | undefined;
+  },
+): boolean {
+  if (isLevelRouteId(route.id) || isCircuitRouteId(route.id) || choice.delivery) return false;
+  return !(
+    choice.lapRace !== undefined &&
+    route.profile.loop &&
+    choice.roomId === undefined &&
+    lapRaceChoiceRaceable(choice.lapRace)
+  );
+}
+
+/**
+ * The game screen — and, when the fragment asks for one (#1992), the same
+ * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
+ * asked for. Keyed on the choice, so changing it is a new screen and a ride
+ * in progress is never switched between a real rider and a simulated one.
+ */
 export function GameView(props: GameViewProps): JSX.Element {
   // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
   // for the same simulated ride as the address switch, for one route.
@@ -1684,6 +1719,13 @@ function GameScreen({
    */
   const outcomeRef = useRef<GhostOutcome | undefined>(undefined);
   /**
+   * Whether the attempt {@link outcomeRef} settled was ridden in a draft —
+   * #2425, ADR 0066 D-5.1 and D-5.6: latched on the frame the outcome settles,
+   * from the simulation's own in-draft metres (`solo-draft.ts`
+   * §`draftedRide`), and reset with it at the start of a ride.
+   */
+  const outcomeDraftedRef = useRef(false);
+  /**
    * How far the rider's cranks have turned, in radians — #349.
    *
    * ⚠️ **A ref, for the reason {@link outcomeRef} is one and then some**: this
@@ -1997,10 +2039,20 @@ function GameScreen({
     // #2362: the level the Delivery picker opened this on, read with the
     // routes for the same reason, so its card is there when the chooser is.
     const levelId = openedOn.current === undefined ? undefined : levelOfRouteId(openedOn.current);
+    // #2363, ADR 0065 D-9.1: a level still locked on this device is not read,
+    // so an address typed by hand rides no round the picker would not offer.
     const levelRead = (
       levelId === undefined
         ? Promise.resolve(undefined)
-        : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined))
+        : (port.listDeliveryLevels?.() ?? Promise.resolve([])).then((listed) => {
+            const order = listed.map((each) => each.id);
+            // A level the listing does not name has no place in the order, so
+            // nothing says it is open: it is not read (fails closed).
+            return !order.includes(levelId) ||
+              levelStanding(order, readLevelProgress(deviceStorage()), levelId).state === 'locked'
+              ? undefined
+              : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined));
+          })
     ).catch((): undefined => undefined);
     void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
       ([found, circuitsFound, levelFound]) => {
@@ -2064,6 +2116,7 @@ function GameScreen({
       // (ride-result.ts, ADR 0039 D-2.4): hand nothing, not what it settled.
       trainerPortRef.current?.gameRideEnded(
         ghostRiderRef.current === undefined ? outcomeRef.current : undefined,
+        outcomeDraftedRef.current,
       );
       // #785: the race this ride was in, as its room said it, kept with the
       // recording under the ride so it is saved with it on this device —
@@ -2185,9 +2238,21 @@ function GameScreen({
   // route on a laptop and more on a tablet. Built here, a moment after the
   // rider's choice settles, it is waiting for the ride's first frame rather
   // than stalling it; flicking through the picker builds nothing. Cached
-  // against the profile object, which is the one `start` rides.
+  // against the profile object, which is the one `start` rides. #2470: and
+  // only for a ride drawn along it — not a Delivery round or a lap race, the
+  // choices read as the chooser hands them to `start`.
+  const warmsPath =
+    corridorRoute !== undefined &&
+    drawnAlongPath(corridorRoute, {
+      delivery:
+        props.delivery ??
+        ((withDelivery && readRealisticWorldChoice(deviceStorage())) ||
+          gameDeliveryFromHash(globalThis.location.hash)),
+      lapRace: props.lapRace ?? (withLapRace ? lapRaceChoice : undefined),
+      roomId: props.roomId,
+    });
   useEffect(() => {
-    if (corridorRoute === undefined || !choosing) return;
+    if (corridorRoute === undefined || !choosing || !warmsPath) return;
     const profile = corridorRoute.profile;
     const timer = window.setTimeout(() => {
       drawnLine(profile);
@@ -2195,7 +2260,7 @@ function GameScreen({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [corridorRoute, choosing]);
+  }, [corridorRoute, choosing, warmsPath]);
 
   // #2294: with a Delivery round chosen, every saved route's houses for a
   // round, counted on this device through the same corridor port, one route
@@ -2317,6 +2382,7 @@ function GameScreen({
       // that is no longer loaded: the same false congratulation that module
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
+      outcomeDraftedRef.current = false;
       setNoticeChoice('auto');
       // #397: a new ride starts silent. The last ride's sentence is not this
       // one's, and a region carrying it at mount would announce it again.
@@ -2476,6 +2542,17 @@ function GameScreen({
         // odometer start the demo's group preset uses (#1647), so the world
         // drawn there is the one this ride would have drawn on arriving.
         ...startOf(simulated, profile.totalDistance),
+        // #2425, ADR 0066 D-1: a solo ride drafts the rider behind the pacer
+        // and their OWN ghost, with the device's switch on (D-6). Never in a
+        // room, whose `k` is the room's (D-1.5), never in a lap race (D-2),
+        // never behind another rider's ghost (D-3); with the switch off, or
+        // with nobody to give a draft, nothing is handed and the ride is
+        // today's to the bit.
+        ...soloDraftOf(
+          roomId === undefined && raceChoice === undefined && readSoloDraftChoice(deviceStorage()),
+          pacer !== undefined && raceChoice === undefined,
+          ghostRiderRef.current === undefined ? ghostRef.current : undefined,
+        ),
       });
       simulationRef.current = simulation;
       // #2078: a new ride, a new ring — its clock starts again from nought —
@@ -2713,7 +2790,11 @@ function GameScreen({
                 level:
                   levelRidden === undefined
                     ? undefined
-                    : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
+                    : {
+                        ...levelRidden.file.round,
+                        lengthMetres: levelRidden.file.lengthMetres,
+                        id: levelRidden.file.id,
+                      },
               });
         const noRoundText: string | undefined =
           deliveryRef.current !== undefined
@@ -3108,11 +3189,23 @@ function GameScreen({
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
       // unit-tested turned out to be reachable by nobody.
+      const settledBefore = outcomeRef.current;
       outcomeRef.current = settleGhostOutcome(
         outcomeRef.current,
         ghostRef.current,
         simulation.state,
       );
+      // #2425, ADR 0066 D-5.6: the attempt just settled was drafted when the
+      // rider rode at least `DRAFTED_SHARE` of it in the draft — latched now,
+      // as the outcome is, and never re-read.
+      if (settledBefore === undefined && outcomeRef.current !== undefined) {
+        outcomeDraftedRef.current = draftedRide(simulation.state.soloDraft);
+      }
+      // #2451, ADR 0066 D-5.3: the in-draft state and the road behind it, to
+      // the recording under the ride, so the saved ride says it was drafted.
+      if (simulation.state.soloDraft !== undefined) {
+        trainerPortRef.current?.soloDraftStepped?.(simulation.state.soloDraft);
+      }
       // #2078: the last ten minutes of power and heart rate, one sample a
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a
@@ -3274,6 +3367,11 @@ function GameScreen({
         const drafted = draftEvent(inDraftRef.current, roomNow?.hud.draft);
         inDraftRef.current = drafted.inDraft;
         if (drafted.event !== undefined) events.push(drafted.event);
+      } else if (room?.status().kind !== 'joined') {
+        // #2426: the shelter mark follows the same state, so it goes with the
+        // room. A lost room applies no draft (`RoomSession.draftFactor()` is 1),
+        // and the last frame's draft is not one the rider is in now.
+        inDraftRef.current = false;
       }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
@@ -3498,6 +3596,8 @@ function GameScreen({
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
           keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
+          // #2363, ADR 0065 D-9: a level's round, reached its end, opens the next level.
+          keepLevelFinished(deviceStorage(), stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
@@ -4335,7 +4435,22 @@ function GameScreen({
         riderMass={props.riderMass}
         thresholdPower={thresholdPower}
         powerZoneTime={powerZoneTime}
-        chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
+        chases={chasedGaps(
+          state,
+          ghostRef.current,
+          outcomeRef.current,
+          ghostRiderRef.current,
+          outcomeDraftedRef.current,
+        )}
+        // #2425: a solo ride's draft, from the simulation's own `k` — only
+        // when the rider's display preference shows it (ADR 0066 D-6, R-13).
+        {...(state.soloDraft === undefined || !draftShownRef.current
+          ? {}
+          : {
+              soloDraft: soloDraftPercent(state.soloDraft.k),
+              // #2426: in the draft by the simulation's own `draftEvent` state.
+              soloInDraft: state.soloDraft.inDraft,
+            })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={
@@ -4359,6 +4474,8 @@ function GameScreen({
                 ...(roomFrameRef.current?.hud ?? { nearby: 0 }),
                 // #787: the draft field only when the rider's setting shows it.
                 draftShown: draftShownRef.current,
+                // #2426: the shelter mark, from the one state the spoken cue follows.
+                inDraft: inDraftRef.current,
               },
             })}
         standings={
@@ -4880,6 +4997,7 @@ function chasedGaps(
   ghost: GhostTrack | undefined,
   outcome: GhostOutcome | undefined,
   rider?: string,
+  drafted = false,
 ): readonly ChasedGap[] {
   const found: ChasedGap[] = [];
   const bot = state.bot;
@@ -4897,7 +5015,29 @@ function chasedGaps(
       // what turns the field from a gap into a result — `hud/fields.ts`
       // §`ChasedGap.outcome`.
       ...(outcome === undefined ? {} : { outcome }),
+      // #2425: and whether that settled attempt was ridden in a draft.
+      ...(outcome !== undefined && drafted ? { drafted } : {}),
     });
   }
   return found;
+}
+
+/**
+ * The solo draft a ride is handed — #2425, ADR 0066 D-1 — or nothing: with
+ * the switch off (`on` false), and with neither a pacer nor the rider's own
+ * ghost to give one. The ghost enters as its own `ghostDistanceAt`, a
+ * replay at the ride's racing clock and never a re-simulation (D-1.1).
+ */
+function soloDraftOf(
+  on: boolean,
+  pacer: boolean,
+  ownGhost: GhostTrack | undefined,
+): { readonly soloDraft?: SoloDraftSources } {
+  if (!on || (!pacer && ownGhost === undefined)) return {};
+  return {
+    soloDraft:
+      ownGhost === undefined
+        ? {}
+        : { ghostAt: (ridden: Seconds) => ghostDistanceAt(ownGhost, ridden) },
+  };
 }

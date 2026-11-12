@@ -32,6 +32,7 @@ import type { UnitSystem } from '@onyourleft/store';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
+import { VisuallyHidden } from '../../design/VisuallyHidden';
 
 import {
   CALORIES_KEY,
@@ -41,6 +42,7 @@ import {
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
+  SOLO_DRAFT_KEY,
   hudReadings,
   isDeliveryReading,
   isEffortReading,
@@ -637,6 +639,9 @@ function fieldClass(reading: HudReading): string {
     // coming is outlined (`theme.css` §"A LAP RACE ON THE HUD").
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
+    // #2426: in the draft, a heavier SOLID outline (`theme.css` §"IN THE
+    // DRAFT"): a shape, beside the shelter mark and the words.
+    ...(reading.sheltered === true ? ['oyl-hud__field--sheltered'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
     // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
     ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
@@ -655,6 +660,12 @@ function fieldClass(reading: HudReading): string {
     // #2080: a room's draft by name, which gives way to a race's standings
     // with the swap in them at large text (`theme.css` §"A LOOP'S LAP SPLITS").
     ...(reading.key === 'room-draft' ? ['oyl-hud__field--draft'] : []),
+    // #2425: a solo ride's draft, drawn on a tablet only (`theme.css`
+    // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY").
+    ...(reading.key === SOLO_DRAFT_KEY ? ['oyl-hud__field--solo-draft'] : []),
+    // And the wind by name, which gives way to it on a tablet when the pacer
+    // and the ghost are drawn too (the same section).
+    ...(reading.key === 'wind' ? ['oyl-hud__field--wind'] : []),
   ].join(' ');
 }
 
@@ -676,6 +687,7 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           // #2420: the power field's view, in the term and out of its capitals.
           <span className="oyl-hud__label-qualifier"> ({reading.qualifier})</span>
         )}
+        {reading.sheltered === true ? <ShelterMark /> : null}
       </dt>
       <dd
         className={
@@ -690,6 +702,10 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           <span className="oyl-hud__unit">
             {' '}
             {reading.unit}
+            {reading.unitSaid === undefined ? null : (
+              // #2472: heard, not drawn — `fields.ts` §`HudReading.unitSaid`.
+              <VisuallyHidden> {reading.unitSaid}</VisuallyHidden>
+            )}
             {reading.slope === undefined ? null : (
               <SlopeGlyph
                 slope={reading.slope}
@@ -708,6 +724,7 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           // why the phrase is not folded into the value instead.
           <span className="oyl-hud__detail"> {reading.detail}</span>
         )}
+        {reading.said === undefined ? null : <VisuallyHidden> {reading.said}</VisuallyHidden>}
         {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
         {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
         {reading.stale ? (
@@ -1027,6 +1044,32 @@ const SLOPE_RISE: Readonly<Record<GradeBandKey, number>> = {
   steep: 8,
   wall: 10,
 };
+
+/**
+ * The shelter mark — #2426: the Draft field's sign that the rider is IN the
+ * draft. A low arch, the rider ahead, over a solid filled pocket, the
+ * sheltered air the rider sits in: a closed, filled shape drawn here and taken
+ * from no icon set, which reads at HUD size with no colour at all. Drawn
+ * beside the field's label rather than its number, so it can never push the
+ * unit off the number's line (#2130) or add a line to the field.
+ *
+ * ⚠️ `aria-hidden`: the words under the number say it (`fields.ts`
+ * §`HudReading.sheltered`). No motion: it is there or it is not.
+ */
+function ShelterMark(): JSX.Element {
+  return (
+    <svg
+      className="oyl-hud__shelter"
+      viewBox="0 0 16 12"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-shelter=""
+    >
+      <path className="oyl-hud__shelter-arch" d="M1 9 Q8 -1 15 9" />
+      <path className="oyl-hud__shelter-pocket" d="M4 11 Q8 4 12 11 Z" />
+    </svg>
+  );
+}
 
 /**
  * A field's gauge — #787, the draft's (#327's indicator criteria): a bar

@@ -702,6 +702,15 @@ const RIDE_TOTALS: RideTotals = {
  */
 const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') === 'none';
 
+/**
+ * `ride.html?ghost=none` — #2472: the ride with the pacer and the wind and no
+ * ghost, which a rider can start by leaving *Race your own* unticked. On a
+ * tablet from 50 rem tall the wind gives way to a solo ride's draft only
+ * beside BOTH the pacer and the ghost (`theme.css` §"the wind gives way to
+ * it"), so this is the ride that pins that scope.
+ */
+const NO_GHOST = new URLSearchParams(window.location.search).get('ghost') === 'none';
+
 const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
   ? {
       ...RIDE_TOTALS,
@@ -1145,6 +1154,14 @@ function fontPixels(selector: string): number {
   return element === null ? 0 : Number.parseFloat(window.getComputedStyle(element).fontSize);
 }
 
+/** #2425: whether the tier holding `field` draws a solo ride's draft. */
+function soloDraftDrawn(field: Element): boolean {
+  const draft = field.parentElement?.querySelector(':scope > .oyl-hud__field--solo-draft');
+  if (draft == null) return false;
+  const box = draft.getBoundingClientRect();
+  return box.width * box.height > 1;
+}
+
 function measure(): StageMeasurement {
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
@@ -1160,7 +1177,13 @@ function measure(): StageMeasurement {
       strip ||
       ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
         field.classList.contains(name),
-      );
+      ) ||
+      // #2425: a solo ride's draft, away from a tablet (`theme.css` §"A SOLO
+      // RIDE'S DRAFT, ON A TABLET ONLY"), and the wind where that draft is
+      // DRAWN, which it gives way to on a tablet beside the pacer and the
+      // ghost (the same section).
+      field.classList.contains('oyl-hud__field--solo-draft') ||
+      (field.classList.contains('oyl-hud__field--wind') && soloDraftDrawn(field));
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);
       continue;
@@ -1534,7 +1557,10 @@ async function run(): Promise<void> {
     };
     return;
   }
-  for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
+  // #2472: `?ghost=none` rides with the pacer and the wind but no ghost, the
+  // solo ride whose wind does NOT give way to its draft on a tablet.
+  const ticked = NO_GHOST ? ['pacer', 'Ride in a wind'] : ['pacer', 'Race your', 'Ride in a wind'];
+  for (const text of ticked) {
     const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
     if (box === undefined || box.disabled) {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);

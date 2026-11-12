@@ -65,7 +65,7 @@ import {
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { distanceUnit, formatDistance, shownDistance, spokenDistanceUnit } from '../units/format';
-import { GAME_OUTCOME_TEXT, type SavedRide } from './ride-result';
+import { gameOutcomeText, type SavedRide } from './ride-result';
 
 /** The unit a heart rate is shown in — `ride/MetricGrid.tsx`'s. */
 const HEART_RATE_UNIT = 'bpm';
@@ -181,7 +181,7 @@ export function RideResultCard({
         )}
       </dl>
       {result.gameOutcome === undefined ? null : (
-        <p className="oyl-result__outcome">{GAME_OUTCOME_TEXT[result.gameOutcome]}</p>
+        <p className="oyl-result__outcome">{gameOutcomeText(result)}</p>
       )}
       <div className="oyl-result__actions">
         <Button onClick={onDone}>Done</Button>
@@ -210,7 +210,6 @@ export function resultSentence(result: SavedRide, spokenDistance: string | undef
     spokenDistance === undefined
       ? `Ride saved: ${time}.`
       : `Ride saved: ${time}, ${spokenDistance}.`;
-  return result.gameOutcome === undefined
-    ? facts
-    : `${facts} ${GAME_OUTCOME_TEXT[result.gameOutcome]}`;
+  const outcome = gameOutcomeText(result);
+  return outcome === undefined ? facts : `${facts} ${outcome}`;
 }

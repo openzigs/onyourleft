@@ -619,6 +619,31 @@ describe('the gap to whatever the rider is chasing', () => {
       expect(field.value).not.toBe(NO_READING);
     });
 
+    it.each([
+      ['beaten', 'Beaten', 'by you, with its draft'],
+      ['level', 'Matched', 'by you, with its draft'],
+      ['not-beaten', 'Finished', 'ahead of you, with its draft'],
+    ] as const)(
+      'says “with its draft” in words after a drafted %s attempt — #2425, ADR 0066 D-5.1',
+      (outcome, value, detail) => {
+        const field = fieldNamed(
+          {
+            ...baseInput(),
+            chases: [{ to: 'ghost', gap: stillAhead, outcome, drafted: true }],
+          },
+          'gap-ghost',
+        );
+        expect(field.value).toBe(value);
+        expect(field.detail).toBe(detail);
+        // Not drafted reads exactly as before.
+        const undrafted = fieldNamed(
+          { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome, drafted: false }] },
+          'gap-ghost',
+        );
+        expect(undrafted.detail).toBe(detail.replace(', with its draft', ''));
+      },
+    );
+
     it('leaves a live gap alone', () => {
       const field = fieldNamed(
         { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead }] },
@@ -1169,6 +1194,25 @@ describe('the room on the HUD — #783', () => {
     expect(keys(true)).toContain('room-draft');
     // The room's other fields are there either way, at the same indexes.
     expect(keys(false)).toEqual(keys(true).filter((key) => key !== 'room-draft'));
+  });
+
+  it('shows a solo ride’s draft as a room’s is drawn, rounded, where the room’s fields would be — #2425', () => {
+    const solo = (percent: number) =>
+      hudReadings({ ...baseInput(), soloDraft: percent }).find((r) => r.key === 'solo-draft');
+    // #2425, #2130: the solo field's unit is the `%` alone, so it stays on
+    // its number's line in the tier's narrowest track.
+    expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '%' });
+    // #2472: and a screen reader hears what it is a share of; a room's field draws it.
+    expect(solo(33.6)?.unitSaid).toBe('of drag');
+    expect(solo(33.6)?.detail).toBe('at most 59 %');
+    expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
+    expect(solo(0)).toMatchObject({ value: '0' });
+    // Absent with no solo draft handed in, and every other field where it was.
+    const without = hudReadings(baseInput()).map((r) => r.key);
+    const withIt = hudReadings({ ...baseInput(), soloDraft: 12 }).map((r) => r.key);
+    expect(without).not.toContain('solo-draft');
+    expect(withIt).not.toContain('room-draft');
+    expect(withIt.filter((key) => key !== 'solo-draft')).toEqual(without);
   });
 
   it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {

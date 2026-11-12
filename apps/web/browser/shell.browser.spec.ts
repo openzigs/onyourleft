@@ -2216,9 +2216,10 @@ test.describe('#397 — the announcement controls', () => {
     // carries it for the same reason and shipped without it. Twenty-seven
     // since #787's Draft switch, which carries it too. Twenty-eight since
     // #1622's Holiday decorations switch, in the Game world panel.
+    // Twenty-nine since #2425's Draft on your own switch, which carries it too.
     expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
     expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
-    expect(seen.length).toBe(28);
+    expect(seen.length).toBe(29);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
@@ -4264,8 +4265,13 @@ test.describe('#2058 — the menus’ music, in a real engine', () => {
     await expect.poll(async () => (await readMusic(page)).playing).toBe(true);
     // The default level, 0.5, reached by a ramp rather than set.
     await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    // "Moves", not "grows": the loop is one second, so its `currentTime`
+    // wraps to 0 at each pass and never exceeds the loop's length. #2484:
+    // `started` read as exactly 1, at the end of a pass, and no later reading
+    // could be greater than it. Nothing in the player seeks, so a time that
+    // differs from `started` is a time the element played on to.
     const started = (await readMusic(page)).time;
-    await expect.poll(async () => (await readMusic(page)).time).toBeGreaterThan(started);
+    await expect.poll(async () => (await readMusic(page)).time).not.toBe(started);
 
     for (const ride of ['#/ride', '#/game']) {
       await page.evaluate((hash) => {
