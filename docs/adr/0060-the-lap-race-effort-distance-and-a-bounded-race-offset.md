@@ -441,3 +441,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that there can be no rule on racing strategy. Read ADR 0067 D-0 and D-1 for what replaces them;
   D-14 Q4's *"No"* is kept as ADR 0067 D-1 reads it (no bot's capacity changes with its place). This
   entry only points there; nothing else in this ADR changes.
+- **2026-11-12** — **D-2.4 is narrowed**: with ADR 0066 D-6's draft switch on (the device default),
+  a lap race records the drafted speed and distance, as a room does. Under
+  [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md) D-3's answer (b) the
+  rider takes a draft from the bots, and a draft is a multiplier on the rider's `C_D·A` in the
+  game's simulation (ADR 0067 D-3.3), so the same power carries the rider further and the recorded
+  ride's speed and distance show it; power, cadence and heart rate are unchanged. The recorded
+  distance is still the effort distance (D-3), never the drawn one, and nothing a draft does reaches
+  any trainer write (D-2.1 as the 2026-11-11 entry narrows it). **With the switch off, D-2.4 stands
+  as written**: no racer drafts and the recorded ride is what the same ride without the mode
+  records. `apps/web/src/game/lap-race-wiring.test.tsx` › `the recorded ride is unchanged by a lap
+  race — #1906 (D-2.4)` holds the switch-off half, and
+  `apps/web/src/game/lap-race-draft-wiring.test.tsx` › `the rider takes a draft from a bot, through
+  the simulation only — #2461 (ADR 0067 D-3)` › `carries a rider 2 m behind a bot for 30 s further
+  than the same trace with no bot ahead, read off the ride the HUD reads` holds the switch-on half
+  (#2461). Recorded on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6829334664).
+  This entry only narrows D-2.4; nothing else in this ADR changes.
