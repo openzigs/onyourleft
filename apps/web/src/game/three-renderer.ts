@@ -8616,23 +8616,24 @@ const WEATHER_SHADED = new WeakSet<Material>();
  * Whether a material is shaded by a Delivery level's weather — PR #2522.
  *
  * @test-facing held by `seasonal-nature.test.ts` §"PR #2522", which asserts the
- * vegetation and the hedge are taught it
+ * vegetation, the hedge and every realistic house are taught it
  */
 export function shadedByWeather(material: Material): boolean {
   return WEATHER_SHADED.has(material);
 }
 
 /**
- * Teaches a realistic plant's or hedge's material the weather's shade — the
- * owner's ruling on PR #2522: at dusk the trees "stay bright green and look
- * pasted on" against a ground that `weather-look.ts` darkens and warms. Its
+ * Teaches a realistic plant's, hedge's or house's material the weather's
+ * shade — the owner's ruling on PR #2522: at dusk the trees "stay bright
+ * green and look pasted on" against a ground that `weather-look.ts` darkens
+ * and warms, and (2026-11-12) the houses go down with them. Its
  * surface colour is multiplied by {@link FOLIAGE}'s `oylWeatherShade` — at
  * dusk the ground's own darkening, white otherwise — after its seeded tint
  * and its autumn, before its light, so the sun and the sky light it as they
  * light the ground. A uniform and a multiply: no draw call.
  *
- * The material must already have been taught its instance channels
- * ({@link withInstanceChannels}); spliced after the last of its tint lines,
+ * The material must already have been taught its tint
+ * ({@link withInstanceChannels} or {@link withVertexTint}); spliced after the last of its tint lines,
  * and throws at compile, as the tint does, if neither is there. Idempotent.
  */
 function withWeatherShade(material: Material): void {
@@ -16872,8 +16873,9 @@ function structureMaterials(
       ),
     ),
   );
-  // PR #2522: a hedge is planting, and goes down at dusk with the trees.
-  if (surface === 'hedge') withWeatherShade(lit);
+  // PR #2522: a hedge goes down at dusk with the trees, and (the owner's
+  // ruling of 2026-11-12) a house with the scenery it stands among.
+  withWeatherShade(lit);
   return {
     // #1665: a lit pane shows #1662's room behind it.
     lit: surface === 'glass' ? withLotGlass(lit) : lit,
@@ -19896,12 +19898,15 @@ function mappedBuildingMaterial(
       ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
     }),
   );
-  return withAtmosphere(
+  const built = withAtmosphere(
     withFacade(
       withVertexTint(maps === undefined ? material : withTextureLodBias(material)),
       surface,
     ),
   );
+  // PR #2522: and it goes down at dusk with the scenery, as a village house does.
+  withWeatherShade(built);
+  return built;
 }
 
 /**
@@ -19919,9 +19924,12 @@ function houseModelMaterial(atlas: Texture | undefined): MeshStandardMaterial {
     }),
   );
   // #1686: and the snow on their roofs, as the mapped roofs beside them carry it.
-  return withRoofSnow(
+  const built = withRoofSnow(
     withAtmosphere(withVertexTint(atlas === undefined ? material : withTextureLodBias(material))),
   );
+  // PR #2522: and they go down at dusk with the scenery.
+  withWeatherShade(built);
+  return built;
 }
 
 /**
