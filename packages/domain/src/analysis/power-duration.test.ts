@@ -240,29 +240,41 @@ describe('powerDurationCurve — the stated time budget', () => {
    * time budget on a stated machine. An analysis feature that takes ninety
    * seconds is one nobody opens twice."*
    *
-   * ⚠️ **The budget is the runner's timeout, not a clock this package reads.**
-   * The first version of this test called `performance.now()` and the
-   * platform-isolation closure rejected it — `packages/domain` compiles with
-   * `lib: ["ES2024"]` and `types: []`, so `performance` is simply not a name
-   * that exists here (docs/agents/lint-boundaries.md §4d). That is the rule working, and the
-   * replacement is better than what it rejected: Vitest fails the test if it
-   * exceeds the timeout, so the budget is enforced by the harness while the
-   * code under test still cannot tell the time.
+   * ⚠️ **The budget is the runner's timeout, Vitest's default 5 s, and the
+   * complexity is held by counting what the curve reads — #2527.** Neither
+   * reads a clock: the first version of this test called `performance.now()`
+   * and the platform-isolation closure rejected it — `packages/domain`
+   * compiles with `lib: ["ES2024"]` and `types: []`, so `performance` is
+   * simply not a name that exists here (docs/agents/lint-boundaries.md §4d).
    *
-   * **Two seconds for the whole curve over a four-hour ride**, measured at
-   * roughly 15 ms in this container. The headroom is deliberate — a wall-clock
-   * assertion tuned close to the observed value is a flake on a loaded runner
-   * (the lesson #165 recorded) — and what the number really pins is the
-   * COMPLEXITY. The rolling sum is O(n) per duration; the naive form that
-   * recomputes each window's mean is O(n·d), which for the 7200 s duration
-   * alone is about 10^8 additions and takes minutes rather than milliseconds.
-   * This fails by orders of magnitude if that regression is ever made, which
-   * is the only way a timing test is worth having.
+   * ⚠️ **What the timeout alone did not hold.** This case had a two-second
+   * timeout of its own, on the reasoning that the naive form that recomputes
+   * each window's mean is O(n·d), about 10^8 additions for the 7200 s
+   * duration alone, and "takes minutes". It does not: V8 runs that naive form
+   * over the whole curve inside the two seconds, and #2527's mutation of it
+   * stayed green against the old case. So the case now counts every sample
+   * the curve reads, through a `Proxy` over the series: the rolling sum reads
+   * each sample at most twice a duration (once in, once out of the window),
+   * and the naive form reads each window whole. That fails by orders of
+   * magnitude on any machine, which a wall-clock budget cannot promise. The
+   * case took 3 to 13 ms locally, with and without --coverage, before and
+   * after; #1688's ruling removed its own timeout.
    */
-  it('processes a four-hour 1 Hz activity across the whole curve', { timeout: 2000 }, () => {
+  it('processes a four-hour 1 Hz activity across the whole curve', () => {
     const fourHours = steady(220, 4 * 3600);
+    let reads = 0;
+    const counted = new Proxy(fourHours, {
+      get(target, key, receiver): unknown {
+        if (typeof key === 'string' && /^\d+$/u.test(key)) reads += 1;
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
 
-    const curve = powerDurationCurve(fourHours);
+    const curve = powerDurationCurve(counted);
+
+    // O(n) a duration: no sample read more than twice for any one of them.
+    expect(reads).toBeGreaterThanOrEqual(fourHours.length * CURVE_DURATIONS.length);
+    expect(reads).toBeLessThanOrEqual(2 * fourHours.length * CURVE_DURATIONS.length);
 
     // Every duration in the list is inside four hours, so all of them are
     // achieved — which also says the loop really did run over all of them

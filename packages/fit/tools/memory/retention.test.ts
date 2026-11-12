@@ -185,7 +185,12 @@ describe('decoding a large FIT file', () => {
     expect(bytes.length).toBeLessThan(8 * MIB);
   });
 
-  it('stays inside a heap capped at the bound this package declares', { timeout: 120_000 }, () => {
+  // #2527, #1688's ruling: neither case carries a timeout of its own. Each is
+  // one child process decoding the file under the cap: 0.88 s and 0.64 s, and
+  // 0.92 s and 0.79 s under --coverage, locally on an Apple M4 Pro at a load
+  // average of 7 to 11, where each had 120 s. The child's own `spawnSync`
+  // timeout above stays: a synchronous spawn is not something Vitest can stop.
+  it('stays inside a heap capped at the bound this package declares', () => {
     const attempt = decodeUnderCap('streaming', cap);
     expect(attempt.aborted, `the streaming decode did not finish: ${attempt.detail}`).toBe(false);
     // Every record of every copy, so the cap was met by decoding the file and
@@ -194,27 +199,23 @@ describe('decoding a large FIT file', () => {
     expect(attempt.report?.inputBytes).toBe(bytes.length);
   });
 
-  it(
-    'does not, when the message stream is materialised — so the bound is not vacuous',
-    { timeout: 120_000 },
-    () => {
-      // The shape #127 was filed about, under the identical cap. If this ever
-      // passes, either the constant has been raised until nothing can fail it
-      // or `readFitContainer` has stopped building the array — and in the
-      // second case this file is what should be rewritten, deliberately.
-      const attempt = decodeUnderCap('array', cap);
-      expect(
-        attempt.aborted,
-        `materialising ${String(SOURCE_RECORD_COUNT * COPIES)} messages fitted inside ` +
-          `${String(Math.ceil(cap / MIB))} MiB, which it must not: ${attempt.detail}`,
-      ).toBe(true);
-      // And it must have died of the heap, not of anything else. Without this
-      // the arm passes on a typo in the child's path — which is the same shape
-      // as the bound it exists to disprove.
-      expect(
-        attempt.heapExhausted,
-        `the array decode failed, but not by exhausting the heap: ${attempt.detail}`,
-      ).toBe(true);
-    },
-  );
+  it('does not, when the message stream is materialised — so the bound is not vacuous', () => {
+    // The shape #127 was filed about, under the identical cap. If this ever
+    // passes, either the constant has been raised until nothing can fail it
+    // or `readFitContainer` has stopped building the array — and in the
+    // second case this file is what should be rewritten, deliberately.
+    const attempt = decodeUnderCap('array', cap);
+    expect(
+      attempt.aborted,
+      `materialising ${String(SOURCE_RECORD_COUNT * COPIES)} messages fitted inside ` +
+        `${String(Math.ceil(cap / MIB))} MiB, which it must not: ${attempt.detail}`,
+    ).toBe(true);
+    // And it must have died of the heap, not of anything else. Without this
+    // the arm passes on a typo in the child's path — which is the same shape
+    // as the bound it exists to disprove.
+    expect(
+      attempt.heapExhausted,
+      `the array decode failed, but not by exhausting the heap: ${attempt.detail}`,
+    ).toBe(true);
+  });
 });

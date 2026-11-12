@@ -255,51 +255,33 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
     expect(agreedOnThrown).toBeGreaterThan(0);
   });
 
-  it(
-    'produces a decode or a FitDecodeError for every case, and nothing else',
-    // 180 s, and the number is measured rather than chosen.
-    //
-    // This is a ceiling, not a performance budget. ⚠️ It was called a HANG
-    // GUARD here until #682's review, on the reasoning that a wedged record loop
-    // never terminates and so any finite ceiling catches it — which is not
-    // true: this case is synchronous, Vitest cannot interrupt a synchronous
-    // case, and a wedged loop is caught only by the CI job's own stop. What the
-    // ceiling does catch is a slow-down, and the only question is how much
-    // honest work fits underneath. 60 s did not, and it failed on `main`
-    // rather than on the pull request that broke it.
-    //
-    // What the original 60 s missed is that CI runs `test:coverage`, not `test`.
-    // Measured on one machine, same commit, same seed:
-    //
-    //     this file, `pnpm run test`           6.8 s
-    //     this file, `pnpm run test:coverage` 22.7 s   <- 3.3x, v8 instrumenting
-    //                                                    a hot decode loop
-    //
-    // A GitHub runner is roughly 2-3x slower again, which puts the real cost at
-    // 45-70 s -- straddling the old ceiling. #146 then changed `| 0x80` to
-    // `^ 0x80` in `cases.ts`, which was correct (the old form was a no-op on the
-    // 30.3% of corpus bytes already carrying the high bit) and which turned 15.1%
-    // of sweep cases from a pristine re-decode into real work. That is what
-    // pushed a marginal case over.
-    //
-    // Do not "fix" a future timeout here by trimming the sweep. `byteSweep`
-    // guarantees EVERY offset is enlarged, which is what makes the M16 mutation
-    // reproducible; a stride would keep the runtime and lose the property. The
-    // sweep is ~75% of this file's cost (6.4 s of 8.1 s uninstrumented, measured
-    // by zeroing the other knobs) and it is the part worth paying for.
-    //
-    // ⚠️ 300 s since #682, and a reviewer who remembers 180 s is reading the
-    // old file. Under coverage on CI this case took 52.5 s to 96.6 s over
-    // thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515) —
-    // 54 % of 180 s, the slowest on 36405580515, the slower of the two runners
-    // (a job over 1 000 s; 82.4 s to 96.6 s on that runner, 52.5 s to 67.1 s on
-    // the other). 300 s is about three times the slowest.
-    { timeout: 300_000 },
-    () => {
-      // A wedged record loop never reaches an assertion, and the timeout cannot
-      // stop a synchronous case either, so the only thing that catches it is
-      // the CI job's own stop. The timeout turns a slow-down red.
-      for (const fuzzCase of cases) runFitCase(fuzzCase, FUZZ_SEED);
+  /**
+   * Every case, in {@link FIT_SLICES} cases of their own: case `slice` runs
+   * every case whose place in the list leaves `slice` over by
+   * {@link FIT_SLICES}, so each runs every kind of case and the costly
+   * truncations and the byte sweep are shared out, and together they run
+   * every case once, as the one case did (#2527).
+   *
+   * ⚠️ #1688's ruling: a slow case is made cheaper, never given a longer
+   * timeout. This was one case with a 300 s ceiling (since #682; 52.5 s to
+   * 96.6 s under coverage on CI before the file left the coverage run). It
+   * took 6.7 s locally without coverage, on an Apple M4 Pro at a load average
+   * of 7 to 11. Each slice is Vitest's default 5 s now, which still turns a
+   * slow-down red, and still cannot stop a synchronous case that never
+   * returns: that is the CI job's own stop (docs/agents/ci.md §4c).
+   *
+   * Do not "fix" a future timeout here by trimming the sweep. `byteSweep`
+   * guarantees EVERY offset is enlarged, which is what makes the M16 mutation
+   * reproducible; a stride would keep the runtime and lose the property. Add
+   * slices instead.
+   */
+  const FIT_SLICES = 12;
+  it.each(Array.from({ length: FIT_SLICES }, (_, slice) => slice))(
+    'produces a decode or a FitDecodeError for every case, and nothing else: slice %i of 12',
+    (slice) => {
+      for (let at = slice; at < cases.length; at += FIT_SLICES) {
+        runFitCase(cases[at] as (typeof cases)[number], FUZZ_SEED);
+      }
     },
   );
 });
@@ -317,20 +299,12 @@ describe('the GPX and TCX readers survive the same fuzz', () => {
       expect(cases.length).toBeGreaterThan(500);
     });
 
-    it(
-      `produces a decode or an ActivityXmlError for every mutated ${extension} case`,
-      // The ceiling the FIT arm above had until #682, for the same reason (at
-      // most 5.7 s here on the thirteen runs #682 read, 3 % of it, so it did not
-      // move with the FIT arm's). This arm has no
-      // byte sweep and costs a fraction of it, so 60 s was not close to failing
-      // here -- but it was calibrated against `pnpm run test` exactly as the
-      // other one was, and the 3.3x coverage multiplier applies to both. Leaving
-      // a second number to be discovered the same way, on `main`, is the bug
-      // rather than a saving.
-      { timeout: 180_000 },
-      () => {
-        for (const fuzzCase of cases) runXmlCase(fuzzCase, FUZZ_SEED, decode);
-      },
-    );
+    it(`produces a decode or an ActivityXmlError for every mutated ${extension} case`, () => {
+      // #2527: Vitest's default 5 s, under #1688's ruling, where it had 180 s
+      // (at most 5.7 s on the thirteen runs #682 read, under coverage, which
+      // this file has since left). 0.54 s for .gpx and 0.39 s for .tcx
+      // locally, on an Apple M4 Pro at a load average of 7 to 11.
+      for (const fuzzCase of cases) runXmlCase(fuzzCase, FUZZ_SEED, decode);
+    });
   }
 });
