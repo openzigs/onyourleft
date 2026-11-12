@@ -1196,6 +1196,54 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
     expect(counted).not.toHaveBeenCalled();
   });
 
+  it('hands back the rider’s k from that one call, beside the bots’ (#2461), and none with the draft off', () => {
+    // The rider 2 m behind a bot on effort distance, a second bot out of reach.
+    const race = placed([
+      ['ahead', 102],
+      ['rider', 100],
+      ['away', 40],
+    ]);
+    const field = [
+      {
+        ...lapRaceBot('ahead', 'brisk', STRATEGY),
+        ride: { speed: metresPerSecond(10), distance: metres(102) },
+      },
+      {
+        ...lapRaceBot('away', 'brisk', STRATEGY),
+        ride: { speed: metresPerSecond(10), distance: metres(40) },
+      },
+    ];
+    const counted = vi.mocked(fieldDraftFactors);
+    counted.mockClear();
+    const drafted = stepBotRace(race, field, {
+      elapsed: seconds(0.05),
+      conditions: conditions(FLAT),
+      seed: 1,
+      draft: true,
+      rider: { effortDistances: { rider: 100.5 } },
+    });
+    // One call for the field: what it gave each racer is what comes back, by id.
+    expect(counted).toHaveBeenCalledTimes(1);
+    const given = counted.mock.results[0]?.value as readonly number[];
+    const order = race.racers.map((entry) => entry.racer.id);
+    expect(drafted.draft).toEqual(
+      Object.fromEntries(order.map((id, index) => [id, given[index] as number])),
+    );
+    // The rider sits in the bot's draft; the bot out of reach is alone.
+    expect(drafted.draft?.rider).toBe(lapRaceDraftFactors(race).rider);
+    expect(drafted.draft?.rider).toBeLessThan(0.8);
+    expect(drafted.draft?.away).toBe(1);
+    counted.mockClear();
+    const alone = stepBotRace(race, field, {
+      elapsed: seconds(0.05),
+      conditions: conditions(FLAT),
+      seed: 1,
+      rider: { effortDistances: { rider: 100.5 } },
+    });
+    expect(alone.draft).toBeUndefined();
+    expect(counted).not.toHaveBeenCalled();
+  });
+
   it('keeps every bot’s W′ balance in [0, W′] and its power inside its bounds with the field drafting, and replays byte for byte', () => {
     const run = (): readonly LapRaceBot[] => {
       let bots: readonly LapRaceBot[] = dealtField('hard', 5).map(({ id, tier, pace }) =>

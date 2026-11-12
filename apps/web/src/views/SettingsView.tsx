@@ -2194,9 +2194,13 @@ function SoloDraftPanel({
               against your best that you rode partly in its draft says so.
             </p>
             <p className="oyl-muted">
+              In a lap race against bots, you and the bots draft each other in the same way, and
+              turning this off turns the draft off for every racer.
+            </p>
+            <p className="oyl-muted">
               Turn this off to ride on your own with no draft at all, as before. It changes nothing
-              in a room or a race. Your trainer is never sent a draft, only the gradient of the road
-              you are on.
+              in a room. Your trainer is never sent a draft, only the gradient of the road you are
+              on.
             </p>
           </>
         }

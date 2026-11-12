@@ -11,8 +11,9 @@
  * ⚠️ **The PHYSICS, and not `draft-preference.ts`.** That one decides only
  * what a rider is shown about a draft; this one decides whether a solo ride
  * drafts at all. With it off the simulation is handed no solo draft and is
- * byte-identical to the ride before #2425. It has no effect in a room or a lap
- * race (D-6).
+ * byte-identical to the ride before #2425. It has no effect in a room (D-6).
+ * Since #2461 it reaches the solo lap race (ADR 0067 D-3.4, superseding D-6's
+ * last bullet): on, every racer drafts, the rider included; off, none does.
  *
  * **On by default** (D-6, R-10): only a stored "off" is off, and anything this
  * module cannot read is the default — `draft-preference.ts`'s shape exactly.

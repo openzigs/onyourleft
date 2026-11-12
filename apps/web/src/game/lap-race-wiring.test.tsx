@@ -29,6 +29,16 @@
  *
  * Every shared ride runs with every network primitive replaced by a refusal
  * that counts its calls (ADR 0060 D-7.3, CLAUDE.md §1).
+ *
+ * ## The draft switch (#2461, ADR 0067 D-3.4 and D-3.6)
+ *
+ * Every ride here runs with ADR 0066 D-6's draft switch **off** unless it asks
+ * for the device's default, which is on: off, no racer drafts and a race is
+ * the race before #2461 to the bit, which is what D-3.6 keeps the D-2.1 case
+ * for, unchanged. The cases that ride with it on record the rider's draft
+ * multiplier `k` at each `advanceTo` (the simulation below is the real one,
+ * watched) and replay that trace onto an ordinary ride, `draftWith` before each
+ * `advanceTo`, so the race is held to an ordinary ride ridden at its `k`.
  */
 
 import { act } from 'react';
@@ -38,9 +48,17 @@ import {
   BOT_PLAN_SURGE_CEILING,
   BOT_TIER_WATTS_PER_KILOGRAM,
   botFieldPaces,
+  gradePercent,
+  metresPerSecond,
   seconds,
   watts,
 } from '@onyourleft/domain';
+import {
+  dragAreaSquareMetres,
+  powerRequired,
+  withDefaultCoefficients,
+  withDragArea,
+} from '@onyourleft/physics';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
@@ -80,6 +98,7 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { GameSimulation, SIMULATION_STEP_SECONDS, type RiderInput } from './simulation';
+import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { writeRealisticWorldChoice } from './world-preference';
 import { endRideAnswer } from './end-ride-testing';
@@ -96,6 +115,32 @@ vi.mock('./hud/announce', async (importOriginal) => {
       return heard;
     },
   };
+});
+
+/**
+ * The rider's draft multiplier `k` at each `advanceTo` of a ride (#2461):
+ * `recorded` is filled while set, and `replay`, while set, is ridden by
+ * `draftWith` before each call, by the call's index.
+ */
+const draftTrace = vi.hoisted(() => ({
+  recorded: undefined as number[] | undefined,
+  replay: undefined as readonly number[] | undefined,
+}));
+vi.mock('./simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./simulation')>();
+  class TracedSimulation extends actual.GameSimulation {
+    #calls = 0;
+    override advanceTo(
+      ...args: Parameters<InstanceType<typeof actual.GameSimulation>['advanceTo']>
+    ): ReturnType<InstanceType<typeof actual.GameSimulation>['advanceTo']> {
+      const replay = draftTrace.replay;
+      if (replay !== undefined) this.draftWith(replay[this.#calls] ?? 1);
+      draftTrace.recorded?.push(this.draftFactor);
+      this.#calls += 1;
+      return super.advanceTo(...args);
+    }
+  }
+  return { ...actual, GameSimulation: TracedSimulation };
 });
 
 /** What each drawn frame's input said of the rider and the race, in order. */
@@ -161,12 +206,12 @@ let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
 
-function port(route: RidableRoute = ROUTE): GamePort {
+function port(route: RidableRoute = ROUTE, power: (at: number) => number = powerAt): GamePort {
   return {
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
-      rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
+      rider: { power: watts(power(nowMs)), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
       heartRate: { value: 142, live: true, paired: true },
     }),
@@ -259,6 +304,8 @@ beforeEach(() => {
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  draftTrace.recorded = undefined;
+  draftTrace.replay = undefined;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -422,11 +469,16 @@ async function rideTheTrace(options: {
   readonly pacerIntensity?: string | undefined;
   /** The presses to make, {@link PRESSES} unless given. */
   readonly presses?: ReadonlyMap<number, SteerIntent | 'item'> | undefined;
+  /** Leave the draft switch at the device's default, on (#2461); otherwise it is off. */
+  readonly drafted?: boolean | undefined;
+  /** The rider's power at a clock reading, {@link powerAt} unless given. */
+  readonly power?: ((at: number) => number) | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
+  if (options.drafted !== true) localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
   mounted = await mount(
     <GameView
-      port={port(options.route)}
+      port={port(options.route, options.power)}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
       renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic))}
       now={() => nowMs}
@@ -474,16 +526,34 @@ interface RideResult {
   readonly fields: readonly string[];
   readonly standings: string;
   readonly reached: readonly string[];
+  /** The rider's draft `k` at each `advanceTo`, in order (#2461). */
+  readonly trace: readonly number[];
+}
+
+/** How a ride is ridden beside its race: {@link rideTheTrace}'s options of the same names. */
+interface RideOptions {
+  readonly drafted?: boolean | undefined;
+  /** A `k` trace to ride the rider at, one a call of `advanceTo`. */
+  readonly replay?: readonly number[] | undefined;
+  readonly route?: RidableRoute | undefined;
+  readonly power?: ((at: number) => number) | undefined;
+  readonly frames?: number | undefined;
 }
 
 /** The scripted ride, start to *End ride*, with the network refused, read and unmounted. */
-async function rideOnce(race: LapRaceChoice | undefined): Promise<RideResult> {
+async function rideOnce(
+  race: LapRaceChoice | undefined,
+  options: RideOptions = {},
+): Promise<RideResult> {
   pending = [];
   nowMs = START_MS;
   said.length = 0;
   inputs.length = 0;
   reached.length = 0;
   forbidTheNetwork();
+  const trace: number[] = [];
+  draftTrace.recorded = trace;
+  draftTrace.replay = options.replay;
   const writes: Write[] = [];
   const drawn: SceneFrame[] = [];
   const seen = new Map<number, DrawnInput>();
@@ -495,6 +565,10 @@ async function rideOnce(race: LapRaceChoice | undefined): Promise<RideResult> {
     trainer: trainerPort(writes),
     drawn,
     seen,
+    drafted: options.drafted,
+    route: options.route,
+    power: options.power,
+    frames: options.frames,
     // Mid-race, half way round the first lap: every racer still riding.
     onFrame: (index) => {
       if (index === 30) midRace = standings();
@@ -506,8 +580,13 @@ async function rideOnce(race: LapRaceChoice | undefined): Promise<RideResult> {
   await clickThrough(endRideAnswer(document, 'End ride'));
   mounted?.unmount();
   mounted = undefined;
-  return { ...read, writes, drawn, reached: [...reached] };
+  draftTrace.recorded = undefined;
+  draftTrace.replay = undefined;
+  return { ...read, writes, drawn, reached: [...reached], trace };
 }
+
+/** How long the drafted rides of #2461 ride: 40 s, a lap and a half of the loop. */
+const DRAFTED_FRAMES = 80;
 
 /** The three shared rides, each ridden once by the first case that asks. */
 let plainRide: Promise<RideResult> | undefined;
@@ -621,6 +700,31 @@ describe('a solo lap race inside a game ride — #1906', () => {
       expect(on.writes).toStrictEqual(ordinary.writes);
     },
   );
+
+  it('with the draft on, sends the trainer the same writes, each grade at the same time, as an ordinary ride ridden at the race’s k step for step, items off and on (ADR 0067 D-3.6)', async () => {
+    // The device's default, the switch on: every racer drafts, the rider
+    // included. Over the first lap and a half, which is cheaper than the whole
+    // trace and still writes every grade the loop has (#1688: no timeout).
+    const frames = DRAFTED_FRAMES;
+    const off = await rideOnce(ITEMS_OFF, { drafted: true, frames });
+    const on = await rideOnce(RACE, { drafted: true, frames });
+    // Items move race offsets and never effort distances, which is all the
+    // draft reads (D-3.2): one `k` trace for both, so one ordinary ride.
+    expect(on.trace).toStrictEqual(off.trace);
+    // An ordinary ride, no race, ridden at the races' `k` trace.
+    const replay = await rideOnce(undefined, { replay: off.trace, frames });
+    // Non-vacuity: the rider sat in a bot's draft for a good part of the race,
+    // the replay rode at it, and the road's grades climb and fall.
+    expect(off.trace.filter((k) => k < 0.9).length).toBeGreaterThan(20);
+    expect(replay.trace).toStrictEqual(off.trace);
+    expect(off.writes.length).toBeGreaterThan(30);
+    const grades = off.writes.map((each) => each.parameters.grade);
+    expect(Math.max(...grades)).toBeGreaterThan(1);
+    expect(Math.min(...grades)).toBeLessThan(-1);
+    // Every grade written, and its time, is an ordinary ride's at that `k`.
+    expect(off.writes).toStrictEqual(replay.writes);
+    expect(on.writes).toStrictEqual(replay.writes);
+  });
 
   it(
     'runs a whole race with every network primitive refused, and reaches none (D-7.3)',
@@ -948,6 +1052,115 @@ interface Recorded {
   readonly movingSeconds: number;
   readonly laps: readonly unknown[];
 }
+
+describe('the rider takes a draft from a bot, through the simulation only — #2461 (ADR 0067 D-3)', () => {
+  /** A flat loop, so the gap to a bot is the rider's power and the draft alone. */
+  const FLAT = circuitRoute(RADIUS, () => 0);
+  const FLAT_ROUTE: RidableRoute = {
+    id: 'flat-race',
+    name: 'Flat loop',
+    profile: FLAT,
+    attempts: 0,
+  };
+  /** One bot, no items: the bot the rider sits behind, and nothing else moving the race. */
+  const ONE_BOT: LapRaceChoice = { laps: 4, bots: 1, tier: 'brisk', itemsOn: false };
+  /** The gap the rider holds, metres behind the bot on effort distance, and how close to it. */
+  const WHEEL_METRES = 2;
+  const WHEEL_BAND_METRES = 0.5;
+  /** A minute of ride: the gap settles in the first half and is held through the second. */
+  const WHEEL_FRAMES = 120;
+  /** 30 s of frames: the least the rider must sit on the wheel for. */
+  const HELD_FRAMES = 60;
+
+  /**
+   * The shadow of a drafted one-bot race, with the rider holding the bot's
+   * wheel at {@link WHEEL_METRES}, as `GameView` would ride it: the simulation,
+   * the race stepped on it, and the rider's `k` handed back by `draftWith`.
+   * The rider's power each frame is a rider's own: the power to ride at the
+   * bot's speed, plus a little to close or open the gap, at the `k` the rider
+   * is getting. What comes out is a power trace, a function of the clock.
+   */
+  function wheelShadow(): {
+    readonly power: readonly number[];
+    readonly gaps: readonly number[];
+    readonly odometer: number;
+  } {
+    stubSeed(script.seed);
+    const conditions = rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION);
+    let ride = startLapRaceRide({
+      choice: ONE_BOT,
+      profile: FLAT,
+      conditions: lapRaceBotConditions(FLAT, conditions),
+      riderDistance: 0,
+      lineOffset: lineOffsetAt(racingLine(FLAT), 0),
+      storage: undefined,
+      draft: true,
+    });
+    vi.restoreAllMocks();
+    if (ride === undefined) throw new Error('the flat loop is a loop, so a race starts on it');
+    const simulation = new GameSimulation({ profile: FLAT, conditions });
+    const area = withDefaultCoefficients(conditions.coefficients);
+    // Frame 0 is the press; frame 1 the first the simulation runs from.
+    const power: number[] = [150, 150];
+    const gaps: number[] = [];
+    for (let frame = 1; frame <= WHEEL_FRAMES; frame += 1) {
+      const { steps } = simulation.advanceTo(START_MS + frame * FRAME_MS, {
+        power: watts(power[frame] ?? 0),
+        live: true,
+      });
+      if (steps > 0)
+        ride = stepLapRaceRide(ride, { ticks: steps, along: simulation.state.ride.distance });
+      simulation.draftWith(ride.riderDraft);
+      const bot = ride.bots[0];
+      if (bot === undefined) throw new Error('a one-bot race has its bot');
+      const gap = bot.ride.distance - simulation.state.ride.distance;
+      gaps.push(gap);
+      // The bot's speed, a fifth of the gap's error a second faster or slower,
+      // reached in about a second.
+      const speed = simulation.state.ride.speed as number;
+      const target = Math.max(0.5, (bot.ride.speed as number) + 0.2 * (gap - WHEEL_METRES));
+      const held = powerRequired({
+        groundSpeed: metresPerSecond(target),
+        totalMass: conditions.totalMass,
+        grade: gradePercent(0),
+        airDensityKilogramsPerCubicMetre: conditions.airDensityKilogramsPerCubicMetre,
+        coefficients: { ...area, ...withDragArea(ride.riderDraft * dragAreaSquareMetres(area)) },
+      }).totalWatts;
+      const surge = (conditions.totalMass as number) * speed * (target - speed);
+      power.push(Math.max(0, Math.min(800, held + surge)));
+    }
+    return { power, gaps, odometer: simulation.state.ride.distance };
+  }
+
+  it('carries a rider 2 m behind a bot for 30 s further than the same trace with no bot ahead, read off the ride the HUD reads', async () => {
+    const shadow = wheelShadow();
+    // The fixture: the rider sat within half a metre of 2 m behind the bot for
+    // at least 30 s in a row.
+    let run = 0;
+    let longest = 0;
+    for (const gap of shadow.gaps) {
+      run = Math.abs(gap - WHEEL_METRES) <= WHEEL_BAND_METRES ? run + 1 : 0;
+      longest = Math.max(longest, run);
+    }
+    expect(longest).toBeGreaterThanOrEqual(HELD_FRAMES);
+    const trace = (at: number): number =>
+      shadow.power[Math.round((at - START_MS) / FRAME_MS)] ?? 150;
+    const options = { route: FLAT_ROUTE, power: trace, frames: WHEEL_FRAMES };
+    // The device's default, the switch on, and the same trace on an ordinary ride.
+    const drafted = await rideOnce(ONE_BOT, { ...options, drafted: true });
+    const alone = await rideOnce(undefined, options);
+    // `GameState.ride.distance` on the last frame: the odometer every HUD
+    // field and the race's effort distance read.
+    const odometer = (ride: RideResult): number =>
+      ride.inputs.get(WHEEL_FRAMES - 1)?.odometer ?? Number.NaN;
+    // The real ride is the shadow's, so its rider sat on the wheel too.
+    expect(odometer(drafted)).toBe(shadow.odometer);
+    expect(drafted.trace.filter((k) => k < 0.75).length).toBeGreaterThanOrEqual(HELD_FRAMES);
+    expect(alone.trace.every((k) => k === 1)).toBe(true);
+    // Sheltered, the same power went further: by metres, not by rounding.
+    expect(odometer(drafted)).toBeGreaterThan(odometer(alone) + 10);
+  });
+});
 
 describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () => {
   /** The scripted ride, recorded by the real ride controller against the #44 simulator, and saved. */

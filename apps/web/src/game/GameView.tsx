@@ -2489,7 +2489,8 @@ function GameScreen({
         ...startOf(simulated, profile.totalDistance),
         // #2425, ADR 0066 D-1: a solo ride drafts the rider behind the pacer
         // and their OWN ghost, with the device's switch on (D-6). Never in a
-        // room, whose `k` is the room's (D-1.5), never in a lap race (D-2),
+        // room, whose `k` is the room's (D-1.5), never in a lap race, whose
+        // `k` is the race's own (ADR 0067 D-3, #2461: `stepLapRaceRide`),
         // never behind another rider's ghost (D-3); with the switch off, or
         // with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
@@ -2775,6 +2776,9 @@ function GameScreen({
               riderDistance: simulation.state.ride.distance,
               lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
               storage: deviceStorage(),
+              // #2461, ADR 0067 D-3.4: ADR 0066 D-6's switch reaches the race.
+              // On, every racer drafts, the rider included; off, none does.
+              draft: readSoloDraftChoice(deviceStorage()),
             });
       setState(simulation.state);
       setChosen(route);
@@ -3530,10 +3534,18 @@ function GameScreen({
       // writes to itself, the HUD and the frame, never to the trainer (D-2).
       const lapRace = lapRaceRef.current;
       if (lapRace !== undefined && stepsRun > 0) {
-        lapRaceRef.current = stepLapRaceRide(lapRace, {
+        const raced = stepLapRaceRide(lapRace, {
           ticks: stepsRun,
           along: simulation.state.ride.distance,
         });
+        lapRaceRef.current = raced;
+        // #2461, ADR 0067 D-3.3: the rider's draft from the field, ridden from
+        // the next step on as a room's `k` is (`room-ride.ts` §`roomFrame`):
+        // a multiplier on the rider's drag in the simulation and nothing
+        // else, so the trainer feels it only as the rider arriving sooner.
+        // After the grade above was sampled, so this frame's write never
+        // sees it. `1` with the switch off: the ride before #2461.
+        simulation.draftWith(raced.riderDraft);
       }
       // #1911: a room's lap race, on the same steps and after the same grade:
       // the rider's inputs sent, what the room's newest frame covers dropped,

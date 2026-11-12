@@ -17,6 +17,7 @@ import {
   botFieldPersonalities,
   kilograms,
 } from '@onyourleft/domain';
+import { lapRaceDraftFactors } from '@onyourleft/physics';
 
 import { botName, lapRaceStandings } from '../hud/lap-race-hud';
 
@@ -287,6 +288,76 @@ function sampledGaps(seed: number): { readonly lap: number; readonly gaps: reado
   }
   return samples;
 }
+
+describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067 D-3)', () => {
+  /** One bot and the rider, items off, the seed fixed, the switch as given. */
+  function oneBot(draft: boolean | undefined): LapRaceRide {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+    const ride = startLapRaceRide({
+      choice: { laps: 3, bots: 1, tier: 'brisk', itemsOn: false },
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      ...(draft === undefined ? {} : { draft }),
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  }
+
+  /** 30 s of ticks with the rider held 2 m behind the bot on effort distance, once it is that far up. */
+  function onTheWheel(start: LapRaceRide): { ride: LapRaceRide; ks: number[]; field: number[] } {
+    let ride = start;
+    const ks: number[] = [];
+    const field: number[] = [];
+    for (let tick = 0; tick < 30 / LAP_RACE_TICK_SECONDS; tick += 1) {
+      const bot = ride.bots[0];
+      if (bot === undefined) throw new Error('a one-bot race has its bot');
+      // The field's `k` as the race stands before the tick: what the tick drafts on.
+      field.push(lapRaceDraftFactors(ride.race).rider ?? Number.NaN);
+      ride = stepLapRaceRide(ride, { ticks: 1, along: bot.ride.distance - 2 });
+      ks.push(ride.riderDraft);
+    }
+    return { ride, ks, field };
+  }
+
+  it('hands the rider the k the field’s one draft call gave it, every tick: in the draft 2 m behind a bot', () => {
+    const start = oneBot(true);
+    expect(start.draft).toBe(true);
+    expect(start.riderDraft).toBe(1);
+    const { ks, field } = onTheWheel(start);
+    // With the switch on, the rider's `k` is the field's, tick for tick: the
+    // one call `stepBotRace` made, never a walk of its own.
+    expect(ks).toEqual(field);
+    // Two metres behind the bot is ADR 0038's table between 1 m and 5 m.
+    const settled = ks.slice(ks.length / 2);
+    for (const k of settled) expect(k).toBeGreaterThan(0.66);
+    for (const k of settled) expect(k).toBeLessThan(0.71);
+  });
+
+  it('drafts nobody with the switch off or absent: the rider at 1 and the bots as the race before #2461', () => {
+    const off = onTheWheel(oneBot(false));
+    const absent = onTheWheel(oneBot(undefined));
+    const on = onTheWheel(oneBot(true));
+    expect(oneBot(undefined).draft).toBe(false);
+    expect(off.ks.every((k) => k === 1)).toBe(true);
+    expect(off.ride.bots).toEqual(absent.ride.bots);
+    expect(off.ride.race).toEqual(absent.ride.race);
+    // Not vacuous: the same ticks with the switch on drafted the rider. The
+    // bot in front gets ADR 0038's small lead effect, so it rides further.
+    expect(on.ks.some((k) => k < 1)).toBe(true);
+    expect(on.ride.bots[0]?.ride.distance).toBeGreaterThan(off.ride.bots[0]?.ride.distance ?? 0);
+  });
+});
 
 describe('the field spreads into a race: the bots ride apart (#2455)', () => {
   it('reads at least four different gaps among the seven bots over a lap, on a seeded race', () => {
