@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CALORIES_KEY,
   CLOCK_KEY,
+  CRASHED_TEXT,
   DELIVERY_HOUSES_KEY,
   DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
@@ -1545,6 +1546,17 @@ describe('a Delivery round on the HUD — #1812', () => {
         detail: 'Day 3 of 7',
       },
     ]);
+  });
+
+  it('says “Crashed” under the score while a crash is drawn, and the day again after — #2454', () => {
+    const detail = (crashed: boolean | undefined): string | undefined =>
+      hudReadings({ ...base, delivery: { ...delivery, crashed } }).find(
+        (each) => each.key === DELIVERY_SCORE_KEY,
+      )?.detail;
+    expect(detail(true)).toBe(CRASHED_TEXT);
+    expect(CRASHED_TEXT).toBe('Crashed');
+    expect(detail(false)).toBe('Day 3 of 7');
+    expect(detail(undefined)).toBe('Day 3 of 7');
   });
 
   it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {

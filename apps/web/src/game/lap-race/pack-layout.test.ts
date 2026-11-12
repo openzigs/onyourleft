@@ -8,15 +8,15 @@
  * own markers. No case sets its own timeout (#1688).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { kilograms, metres, metresPerSecond } from '@onyourleft/domain';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute } from '../route-fixtures-testing';
-import { sceneFrame, type SceneInput } from '../scene';
+import { drawnRiderDistance, placedRiders, sceneFrame, type SceneInput } from '../scene';
 import { atStartLine } from '../simulation';
-import { corridorOrigin } from '../terrain';
+import { corridorOrigin, roadCorridor } from '../terrain';
 import { LAP_RACE_MOST_BOTS } from './choice';
 import {
   BIKE_LENGTH_METRES,
@@ -145,15 +145,6 @@ describe('rows a bike length apart, the rider’s the anchor (#2544)', () => {
 describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => {
   /** The race's seed, fixed: it is drawn from the platform's source. */
   const SEED = 2_544;
-  beforeEach(() => {
-    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
-      <T extends ArrayBufferView>(array: T): T => {
-        (array as unknown as Uint32Array)[0] = SEED;
-        return array;
-      },
-    );
-  });
-  afterEach(() => vi.restoreAllMocks());
 
   const LOOP = circuitRoute(120);
   /** The least centre-to-centre distance, metres, between two drawn racers: a pair of handlebars. */
@@ -180,19 +171,59 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
     return ride;
   }
 
-  /** Every frame's drawn racers, rider first, and each bot's place across the road. */
-  function ridden(frames: number): {
+  /** How many frames the race is ridden for: 40 s at the race's 20 Hz tick. */
+  const FRAMES = 800;
+  /**
+   * Every this many frames, a whole `sceneFrame` is built as well, and its
+   * markers must be the ones placed.
+   */
+  const WHOLE_FRAME_EVERY = 20;
+
+  /**
+   * Every frame's drawn racers, rider first, and each bot's place across the road.
+   *
+   * The racers are placed through `placedRiders`, the step `sceneFrame` takes
+   * its markers from, rather than through a whole frame each time: the
+   * scenery, the ground and the side roads are nine tenths of a frame and no
+   * marker reads them, and 800 whole frames, twice, took 8.9 s a case under
+   * coverage on CI (the nightly of 2026-11-12, #1688's ruling: a slow case is
+   * made cheaper, never given a longer timeout). Every twentieth frame is also
+   * built whole and must agree to the bit, as `line-on-the-road.test.ts` does
+   * (#588), so a frame that stopped drawing these markers is still red here.
+   */
+  interface Ridden {
     readonly apart: number[];
     readonly sideways: number[];
     /** On each frame, the most racers within a row and a bike length of one another, on race places. */
     readonly packed: number[];
-  } {
+    /** How many frames were also built whole, and agreed. */
+    readonly whole: number;
+  }
+
+  /** `rideSeeded`, with the platform's random source fixed at `SEED`. */
+  function rideOnce(frames: number): Ridden {
+    const spy = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = SEED;
+        return array;
+      });
+    try {
+      return rideSeeded(frames);
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  function rideSeeded(frames: number): Ridden {
     let ride = start();
     let along = ride.startAlong;
     const apart: number[] = [];
     const sideways: number[] = [];
     const packed: number[] = [];
     let lateralBefore: ReadonlyMap<string, number> | undefined;
+    const origin = corridorOrigin(LOOP);
+    let whole = 0;
     for (let frame = 0; frame < frames; frame += 1) {
       along += RIDER_SPEED * LAP_RACE_TICK_SECONDS;
       ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 230 });
@@ -200,7 +231,7 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
       const base = atStartLine(LOOP);
       const input: SceneInput = {
         profile: LOOP,
-        origin: corridorOrigin(LOOP),
+        origin,
         state: {
           ...base,
           ride: {
@@ -213,7 +244,14 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
         steeredSway: 0,
         raceBots: drawing.raceBots,
       };
-      const markers = sceneFrame(input).markers;
+      const markers = placedRiders(
+        input,
+        roadCorridor(LOOP, origin, drawnRiderDistance(input)),
+      ).map((placed) => placed.marker);
+      if (frame % WHOLE_FRAME_EVERY === 0) {
+        expect(sceneFrame(input).markers, `frame ${String(frame)}`).toEqual(markers);
+        whole += 1;
+      }
       let least = Number.POSITIVE_INFINITY;
       for (let one = 0; one < markers.length; one += 1) {
         for (let other = one + 1; other < markers.length; other += 1) {
@@ -245,11 +283,19 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
       }
       lateralBefore = lateral;
     }
-    return { apart, sideways, packed };
+    return { apart, sideways, packed, whole };
   }
 
+  /** The race ridden once, and read by both cases. */
+  let race: Ridden;
+  beforeAll(() => {
+    race = rideOnce(FRAMES);
+  });
+
   it(`never draws two racers within ${String(LEAST_APART_METRES)} m of each other, on any frame`, () => {
-    const { apart, packed } = ridden(800);
+    const { apart, packed, whole } = race;
+    expect(apart).toHaveLength(FRAMES);
+    expect(whole).toBe(FRAMES / WHOLE_FRAME_EVERY);
     expect(Math.min(...apart)).toBeGreaterThan(LEAST_APART_METRES);
     // And the field did ride as a pack around the rider: four racers or more
     // within one bike length and a row on some frame, which is what the
@@ -258,7 +304,7 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
   });
 
   it('moves no racer across the road faster than the steering speed, on any frame', () => {
-    const { sideways } = ridden(600);
+    const { sideways } = race;
     expect(sideways.length).toBeGreaterThan(0);
     for (const step of sideways) {
       expect(step).toBeLessThanOrEqual(
