@@ -21,7 +21,7 @@ It has the same authority as the root file. Where the text below says "this file
   its D-3 answer (b), which the owner chose, ADR 0066 D-1.5's and D-4's lap-race clauses, D-2 and D-6's last bullet, and
   ADR 0038 D-5's "Out" bullet, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed
   decision to a new ADR. It took the next free number after 0066; **0057 and 0058 stay claimed** by
-  #1748 and #1752. **The next free number is 0068.** A reviewer who remembers this file offering
+  #1748 and #1752. **The next free number is 0069.** A reviewer who remembers this file offering
   0067 is reading the old file.
   ⚠️ **0066 is [ADR 0066](../adr/0066-the-bot-pacer-and-the-riders-own-ghost-give-a-draft-in-a-solo-ride.md)**,
   taken by [#2424](https://github.com/openzigs/onyourleft/issues/2424) on 2026-11-10 for the bot

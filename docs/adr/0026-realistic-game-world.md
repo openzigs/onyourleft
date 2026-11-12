@@ -569,13 +569,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   §`nextWorldQuality` now steps the realistic rungs down, and out to the stylised top, only on
   sustained frame time over `FRAME_MS_REDUCE_ABOVE` (45 ms, unchanged); the whole-world rule and
   every other part of D-3 stand. ADR 0008 carries the matching entry.
-- **2026-11-12** — **D-3's step out of realism waits for a Delivery round to end.** D-3 says the
-  realistic ladder's floor steps to the stylised ladder's top. While a Delivery round runs it now
-  holds the floor instead ([#2513](https://github.com/openzigs/onyourleft/issues/2513)):
-  `apps/web/src/game/quality.ts` §`nextWorldQuality` takes `holdRealism`, and `GameView.tsx` passes
-  it only while a round has houses left. A round's houses are mapped buildings, which the stylised
-  world does not draw, so a round that left realism went on counting houses the rider could not see.
-  [ADR 0059](0059-delivery-a-parcel-round-game-mode.md) D-3.1 runs Delivery in the realistic world
-  and D-3.4 accepts more dropped frames on the tablet for it. An ordinary ride, and a ride whose round
-  is over, step out exactly as before; the whole-world rule and every other part of D-3 stand.
-  Proposed in #2513's pull request for the owner's approval before merge.
+- **2026-11-12** — **D-3's step out of realism is held while a Delivery round runs.** This is a
+  decision, not an amendment, and is made by [ADR 0068](0068-a-delivery-round-holds-the-realistic-worlds-floor.md),
+  which supersedes that part of D-3 and no other ([#2513](https://github.com/openzigs/onyourleft/issues/2513)).

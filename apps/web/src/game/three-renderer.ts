@@ -19735,8 +19735,11 @@ export class MappedBuildingBelt {
   /**
    * The plans drawn on the last frame: selected at the last refill and not
    * hidden by {@link clearOf} — #2513. Indices into {@link buildings}' plans.
+   * None while the belt is not {@link drawing} (not shown, switched off or not
+   * carried): a selection nothing draws is not a drawn house.
    */
   drawnPlans(): readonly number[] {
+    if (!this.drawing) return [];
     const drawn: number[] = [];
     for (let at = 0; at < this.#selection.count; at += 1) {
       if (this.#hidden[at] !== 1) drawn.push(this.#selection.plans[at] as number);
