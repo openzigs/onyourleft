@@ -613,9 +613,14 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     const dir = await freshDirectory();
     const path = join(dir, 'instance.sqlite');
     await migrateForDeploy(path);
+    // The operator's command, run in this process rather than spawned: the
+    // same `room-open` without a second Node starting, which took 0.3 to 5.4 s
+    // of this case locally (#2551). The instance below is still its own process.
     expect(
-      cli(path, 'room-open', 'race-1', '--kind', 'race', '--length', '40', '--countdown', '0')
-        .status,
+      await runCommand(
+        ['room-open', 'race-1', '--kind', 'race', '--length', '2', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     // The operating system's choice, never a random one: #954.
     const port = await freeLoopbackPort();
@@ -661,7 +666,10 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
         headers: { authorization: `Bearer ${ann.sessionToken}` },
       });
       expect(started.status).toBe(200);
-      // Ann rides hard enough to cross 40 m in a few seconds; Bob does not ride.
+      // Ann rides; Bob does not. The course is 2 m (#2551): a room sends a frame
+      // a second, and Ann at 800 W has ridden 2.8 m by the first, so she
+      // has finished one frame after the start. At 40 m it took six frames:
+      // 6 s of the case locally, which took 7.5 s on CI under coverage.
       let sequence = 0;
       const pedal = setInterval(() => {
         sequence += 1;
@@ -674,10 +682,9 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
               (m) =>
                 m.type === 'frame' &&
                 m.riders[0]?.decimetres !== undefined &&
-                m.riders[0].decimetres >= 400,
+                m.riders[0].decimetres >= 20,
             ),
           'Ann across the line',
-          15_000,
         );
       } finally {
         clearInterval(pedal);
@@ -710,7 +717,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     } finally {
       await fresh.close();
     }
-  }, 90_000);
+  });
 });
 
 describe('the metrics token — #895 review N3', () => {
