@@ -10,7 +10,7 @@
  * send. Whether the rider's app then obeys is spike 0034 §7's device rows.
  */
 
-import { act } from 'react';
+import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -57,10 +57,43 @@ vi.mock('./lazy/more', () => ({
   ),
 }));
 
-const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+const { standInGroup } = vi.hoisted(() => ({
+  /**
+   * The ride group's module with every named export a view rendering one
+   * paragraph (not a landmark: `AppShell` already wraps a view in its own
+   * `<main>`), so a view added to the group later is stood in unasked, as
+   * `header-mute.test.tsx` does. `then` is left undefined: the module is
+   * awaited by `import()`.
+   */
+  standInGroup: (): object =>
+    new Proxy(
+      {},
+      {
+        has: (_target, name) => typeof name === 'string' && name !== 'then',
+        get: (_target, name) =>
+          typeof name === 'string' && name !== 'then'
+            ? function StandInView(): ReactElement {
+                return <p>{name}</p>;
+              }
+            : undefined,
+      },
+    ),
+}));
 
-/** A ride route's view is the largest to load the first time, under coverage most of all. */
-const RIDE_ROUTE = { timeout: 20_000 } as const;
+/**
+ * The ride routes' views, reduced to one paragraph each, for the same reason as
+ * the side camera above: whether the controls show on a ride route is
+ * `AppShell`'s guard (`otherPlayerMayShow`), read off the route, and the real
+ * `RideView` and `GameView` would only be the cost of loading them. #2525's
+ * sweep (#1688's ruling: a slow case is made cheaper, never given a longer
+ * timeout) — the ride group's first load was most of each ride-route case:
+ * 2.9 s, and 3.7 s under --coverage, locally on an Apple M4 Pro at a load
+ * average of 14 to 17, with a 20 s timeout; now 6 to 84 ms, and 6 to 119 ms
+ * under --coverage, at 15 to 17.
+ */
+vi.mock('./lazy/ride', () => standInGroup());
+
+const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
 let mounted: Mounted | undefined;
 
@@ -181,7 +214,6 @@ describe('the rider’s own music player in the header — #2073', () => {
 
   it.each(['/ride', '/game'])(
     'is never on the ride route %s, and is not asked there either',
-    RIDE_ROUTE,
     async (path) => {
       const shell = await open(path, true);
       await onePoll(shell.time);
@@ -191,7 +223,7 @@ describe('the rider’s own music player in the header — #2073', () => {
     },
   );
 
-  it('leaves when a ride route opens, though it was seen on a menu route', RIDE_ROUTE, async () => {
+  it('leaves when a ride route opens, though it was seen on a menu route', async () => {
     const shell = await open('/', true);
     await onePoll(shell.time);
     expect(group()).not.toBeNull();

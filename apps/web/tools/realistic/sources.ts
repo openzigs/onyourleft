@@ -1998,6 +1998,13 @@ export const WORDMARK_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
 /**
+ * What the rider's two eyes cost — #2495: `blender/rider_kit.py`'s bands, a
+ * fan of twelve round the pupil and three rings of twelve quads, twice. Taken
+ * out of the body's share of the rider's 9 000 triangles, never added to it.
+ */
+export const RIDER_EYE_TRIANGLES = 168;
+
+/**
  * What `realistic:process --check` requires of a run's REPORT, as well as of
  * its bytes — #900 item 2, by output file.
  *
@@ -2015,6 +2022,8 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   // the GLB, the ones the crank moves, and a row a phase. A run that cut the
   // body or found the moving vertices differently is not this one.
   [REALISTIC_RIDER_PACK.lod]: { triangles: 2000, vertices: 1364, moving: 430, phases: 32 },
+  // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
+  [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8998 },
 };
 
 /** Why a run's report is not what {@link EXPECTED_REPORTS} requires of `file`, or nothing. */
@@ -2187,8 +2196,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
         },
       ],
     },
-    modified:
-      'the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet and glasses leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, one mesh coloured per vertex; in its rest pose',
+    modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet, glasses and eyes leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose`,
   },
   // #2485: the pack's rider — the bake half of #681. The same body, cut to
   // about 2 000 triangles, and its vertices posed at every phase of a crank
