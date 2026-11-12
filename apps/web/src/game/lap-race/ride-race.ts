@@ -112,6 +112,7 @@ import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
 import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './assist-preference';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
+import { drawnShift, NO_PACK_LAYOUT, stepPackLayout, type PackLayout } from './pack-layout';
 import {
   askLane,
   askToUseItem,
@@ -155,6 +156,12 @@ export interface LapRaceRide {
    * always with {@link draft} off. The simulation rides the rider at it.
    */
   readonly riderDraft: number;
+  /**
+   * Where the drawing lays the field out (#2544, `pack-layout.ts`): each bot's
+   * row, a bike length a row, and its place across its lane, stepped with the
+   * race. Drawing only: the race never reads it.
+   */
+  readonly pack: PackLayout;
 }
 
 /** What a race needs at the press. */
@@ -310,6 +317,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     draft: input.draft === true,
     riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
+    pack: NO_PACK_LAYOUT,
   };
 }
 
@@ -364,7 +372,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     step.riderWatts === undefined || mass === undefined || !(mass > 0)
       ? undefined
       : step.riderWatts / mass;
-  let { race, bots, input, owed, riderDraft } = ride;
+  let { race, bots, input, owed, riderDraft, pack } = ride;
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
@@ -393,6 +401,21 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     bots = stepped.bots;
     // #2461: the rider's `k` from the same call that drafted the bots.
     riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
+    // #2544: the field laid out for the drawing, a tick on, the rider where
+    // they steered.
+    const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
+    pack = stepPackLayout(
+      race.racers.map((entry) => ({
+        id: entry.racer.id,
+        along: racePosition(entry.racer),
+        lateral:
+          entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
+        speed: speeds.get(entry.racer.id) ?? 0,
+      })),
+      LAP_RACE_RIDER_ID,
+      pack,
+      LAP_RACE_TICK_SECONDS,
+    );
     owed = oweRaceTick(
       owed,
       before,
@@ -401,7 +424,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
     );
   }
-  return { ...ride, race, bots, input, owed, riderDraft, along: to };
+  return { ...ride, race, bots, input, owed, riderDraft, pack, along: to };
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
@@ -451,10 +474,23 @@ export function lapRaceDrawing(
     const speed = speeds.get(entry.racer.id);
     if (speed === undefined) continue;
     const hit = hitLook(entry.effects, race.atMs, reducedMotion);
+    // #2544: its place in the pack, a bike length a row from the rider's and
+    // beside the others in its lane; its lane alone before the first tick.
+    const place = ride.pack.get(entry.racer.id);
     raceBots.push({
-      distanceMetres: ride.startAlong + racePosition(entry.racer) - speed * behindSeconds,
+      // Never behind the route's start, where a row behind a rider who pressed
+      // at its very beginning would otherwise be drawn.
+      distanceMetres: Math.max(
+        0,
+        ride.startAlong +
+          racePosition(entry.racer) +
+          (place === undefined ? 0 : drawnShift(place, behindSeconds, LAP_RACE_TICK_SECONDS)) -
+          speed * behindSeconds,
+      ),
       speedMetresPerSecond: speed,
-      lateralMetres: laneLateral(entry.lane),
+      lateralMetres: place?.lateral ?? laneLateral(entry.lane),
+      swayMetresPerSecond: place?.sway ?? 0,
+      laidOut: place !== undefined,
       ...(hit === undefined ? {} : { hit }),
     });
   }
