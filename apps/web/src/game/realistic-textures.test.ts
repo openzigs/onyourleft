@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { metres, metresPerSecond, seconds as secondsOf } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
@@ -326,10 +326,9 @@ function rgbaChainBytes(width: number, height: number): number {
   }
 }
 
-let undo: (() => void)[] = [];
-
-beforeEach(() => {
-  undo = [
+/** The in-process workers and the served files a world loads from. Returns the undos. */
+function served(): (() => void)[] {
+  return [
     inProcessWorkers(),
     servedFrom(ORIGIN, (path) => {
       const transcoder = TRANSCODER_FILES.find((each) => path === `/basis/${each}`);
@@ -338,6 +337,12 @@ beforeEach(() => {
       return new Uint8Array(readFileSync(file));
     }),
   ];
+}
+
+let undo: (() => void)[] = [];
+
+beforeEach(() => {
+  undo = served();
 });
 
 afterEach(() => {
@@ -1770,6 +1775,20 @@ describe('the realistic rider moves like a rider — #625', () => {
    * readers agreeing, not the belt's output written down.
    */
   describe('the crash clip — #2493', () => {
+    /**
+     * One world for every case here, loaded once (owner ruling #1688: no
+     * per-case timeout — a slow case is made cheaper). Each case places its
+     * own markers before it reads a pose, so none sees another's.
+     */
+    let renderer: Renderer;
+    beforeAll(async () => {
+      const undoing = served();
+      try {
+        renderer = await loadedOn(TABLET);
+      } finally {
+        for (const each of undoing.reverse()) each();
+      }
+    });
     const route = northRoute(2_000, () => 0);
     /** The rider's marker `sceneFrame` makes `seconds` into a crash to `side`, the clip on or not. */
     const crashMarker = (seconds: number, side: 1 | -1, clip = true): RiderMarker => {
@@ -1901,8 +1920,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(clip.rootAt).toHaveLength(clip.times.length * 3);
     });
 
-    it('draws the clip’s own pose when the rider is down: every bone the file’s, read back', async () => {
-      const renderer = await loadedOn(TABLET);
+    it('draws the clip’s own pose when the rider is down: every bone the file’s, read back', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       // Landed, as the fall ends, and still down as the rise starts: share 1.
@@ -1918,10 +1936,9 @@ describe('the realistic rider moves like a rider — #625', () => {
         }
         expect(worst, `${String(seconds)} s`).toBeLessThan(1e-6);
       }
-    }, 120_000);
+    });
 
-    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', async () => {
-      const renderer = await loadedOn(TABLET);
+    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       /** Spherical interpolation, the short way: three's `slerp`, written out. */
@@ -1957,10 +1974,9 @@ describe('the realistic rider moves like a rider — #625', () => {
         // Under a third of a degree: the belt samples in single precision.
         expect(worst, String(seconds)).toBeLessThan(1e-5);
       }
-    }, 120_000);
+    });
 
-    it('throws the hands off the bars and the feet off the pedals as it falls and lies, and plants one to get up — never with the roll alone', async () => {
-      const renderer = await loadedOn(TABLET);
+    it('throws the hands off the bars and the feet off the pedals as it falls and lies, and plants one to get up — never with the roll alone', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       const lines: string[] = [];
@@ -1986,10 +2002,9 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(high).toBeLessThan(0.03);
       expect(low).toBeGreaterThan(0.05);
       expect(lowFoot).toBeGreaterThan(0.15);
-    }, 120_000);
+    });
 
-    it('falls to the left as the mirror image of the right, and is the ride once the crash is over', async () => {
-      const renderer = await loadedOn(TABLET);
+    it('falls to the left as the mirror image of the right, and is the ride once the crash is over', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       // The body before any crash has touched it: what "the ride's" is read against.
@@ -2007,7 +2022,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(over.crash).toBeUndefined();
       const riding = drawn(riders, over).ends;
       for (const each of apart(riding, before)) expect(each).toBeLessThan(1e-9);
-    }, 120_000);
+    });
 
     /**
      * #2505: the second pass, from the screenshot review of #2501. Landed and
