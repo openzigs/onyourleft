@@ -123,6 +123,7 @@ import {
   type Viewport,
   OVERLAY_VIEWPORTS,
   STACKED_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
   openRide,
   sharedRide,
   measure,
@@ -214,6 +215,67 @@ async function expectGradientInItsBand(page: Page): Promise<void> {
   );
   // The sign, small text, keeps the ink.
   if (paint.sign !== undefined) expect(paint.sign, how).toBe(paint.ink);
+}
+
+/**
+ * The #2075 case, shared by the overlay viewports and #2259's laptop windows:
+ * the road ahead the route panel's full width and taller than the whole
+ * route's strip, on its own row under it — or, on a phone, upright or on its
+ * side, beside the strip at its height (`theme.css` §"THE ROAD AHEAD"); and
+ * upright the plan view a column beside the two strips, exactly the route
+ * panel's gap from the road ahead. Both ways (#1120).
+ */
+async function expectRoadAheadInPlace(page: Page, viewport: Viewport): Promise<void> {
+  // A phone, upright or on its side, has no row to give (`theme.css`
+  // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
+  const beside = Math.min(viewport.width, viewport.height) <= 480;
+  const upright = viewport.width < 736 && viewport.height >= 752;
+  for (const [how, seen] of await bothWays(page)) {
+    const whole = named(seen.items, 'the elevation strip');
+    const ahead = named(seen.items, 'the road ahead');
+    const plan = named(seen.items, 'the plan view');
+    const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+    if (route === undefined) throw new Error(`${how}: no route panel`);
+    expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
+    expect(
+      ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+        ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+      `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
+    ).toBe(true);
+    if (beside) {
+      expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
+      expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+    }
+    if (beside && upright) {
+      // The phone's width: the strips run from the whole route's strip's
+      // start to the plan view's column, and the plan view is no wider
+      // than the box its rider's mark is sized for.
+      expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
+        PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
+      );
+      // #2259: the panel's gap, bounded both ways. Bounded from above only,
+      // a road ahead running under the plan view (a negative gap) passed.
+      const gap = plan.box.left - ahead.box.right;
+      expect(
+        Math.abs(gap - ROUTE_PANEL_GAP_PIXELS),
+        `${how}: ${describeItem(ahead)} ${gap.toFixed(1)} px beside ${describeItem(plan)}`,
+      ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    }
+    if (!beside) {
+      expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
+    }
+  }
 }
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
@@ -510,57 +572,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     test('the road ahead is the route panel’s width and taller, or beside the strip on a phone — #2075', async ({
       browser,
     }) => {
-      const page = await sharedRide(browser, viewport);
-      // A phone, upright or on its side, has no row to give (`theme.css`
-      // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
-      const beside = Math.min(viewport.width, viewport.height) <= 480;
-      const upright = viewport.width < 736 && viewport.height >= 752;
-      for (const [how, seen] of await bothWays(page)) {
-        const whole = named(seen.items, 'the elevation strip');
-        const ahead = named(seen.items, 'the road ahead');
-        const plan = named(seen.items, 'the plan view');
-        const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
-        if (route === undefined) throw new Error(`${how}: no route panel`);
-        expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
-        expect(
-          ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
-            ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
-          `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
-        ).toBe(true);
-        if (beside) {
-          expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
-          expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
-        }
-        if (beside && upright) {
-          // The phone's width: the strips run from the whole route's strip's
-          // start to the plan view's column, and the plan view is no wider
-          // than the box its rider's mark is sized for.
-          expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
-            PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
-          );
-          const gap = plan.box.left - ahead.box.right;
-          expect(
-            gap,
-            `${how}: ${describeItem(ahead)} beside ${describeItem(plan)}`,
-          ).toBeLessThanOrEqual(ROUTE_PANEL_GAP_PIXELS + SUBPIXEL_TOLERANCE);
-        }
-        if (!beside) {
-          expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
-          expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
-        }
-      }
+      await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
     });
 
     /**
@@ -954,6 +966,23 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
         ).toBe(true);
       }
     }
+  });
+}
+
+/**
+ * #2259 (the review of #2216) — THE ROAD AHEAD ON A SCREEN 30 TO 47 REM TALL.
+ * Its own row under the whole route's strip is the default outside a phone's
+ * two layouts (`theme.css` §"THE ROAD AHEAD"), so a laptop's window and the
+ * middle corners layout draw it too, and none of the overlay viewports above
+ * is that tall. The #2075 case, at #2034's three laptop windows and #1169's
+ * three, which share #1169's page; ride-conditions.browser.spec.ts §"#2034"
+ * holds every panel there clear of the leaning rider and of each other.
+ */
+for (const viewport of [...LAPTOP_VIEWPORTS, ...MIDDLE_CORNERS_VIEWPORTS]) {
+  test(`#2259 the road ahead is the route panel’s width and taller, on its own row — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
   });
 }
 
