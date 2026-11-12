@@ -12,6 +12,17 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0067 is [ADR 0067](../adr/0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)**,
+  taken by [#2457](https://github.com/openzigs/onyourleft/issues/2457) on 2026-11-11 for lap-race
+  bots racing with a strategy that reads the race, on the owner's ruling of 2026-11-10 on
+  [#2455](https://github.com/openzigs/onyourleft/issues/2455) that there can be no rule on racing
+  strategy. It is **Accepted** (2026-11-11): the owner ruled on its D-8 on its pull request, (b)
+  for R-3 and the rest as recommended. It supersedes ADR 0060 D-9 and ADR 0061 D-1 to D-4, D-6, D-8.1, D-8.5 and D-8.6, and, under
+  its D-3 answer (b), which the owner chose, ADR 0066 D-1.5's and D-4's lap-race clauses, D-2 and D-6's last bullet, and
+  ADR 0038 D-5's "Out" bullet, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed
+  decision to a new ADR. It took the next free number after 0066; **0057 and 0058 stay claimed** by
+  #1748 and #1752. **The next free number is 0068.** A reviewer who remembers this file offering
+  0067 is reading the old file.
   ⚠️ **0066 is [ADR 0066](../adr/0066-the-bot-pacer-and-the-riders-own-ghost-give-a-draft-in-a-solo-ride.md)**,
   taken by [#2424](https://github.com/openzigs/onyourleft/issues/2424) on 2026-11-10 for the bot
   pacer and the rider's own ghost giving a draft in a solo ride, on the owner's ruling of 2026-11-09
@@ -19,9 +30,9 @@ It has the same authority as the root file. Where the text below says "this file
   what that ruling answers, and its author's recommendations are Proposed until the owner confirms
   them (its D-9). It supersedes the first sentence of ADR 0038 D-5's "Out" bullet for those two, as
   an ADR rather than an amendment, because ADR 0013 D-3 sends a reversed decision to a new ADR. It
-  took the next free number after 0065; **0057 and 0058 stay claimed** by #1748 and #1752. **The
-  next free number is 0067.** A reviewer who remembers this file offering 0066 is reading the old
-  file.
+  took the next free number after 0065; **0057 and 0058 stay claimed** by #1748 and #1752. The
+  next free number was then 0067. A reviewer who remembers this file offering 0066 is reading the
+  old file.
   ⚠️ **0065 is [ADR 0065](../adr/0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**,
   taken by [#2360](https://github.com/openzigs/onyourleft/issues/2360) on 2026-11-08 for the
   built-in Delivery levels (short town rounds with their houses baked in, committed and shipped in

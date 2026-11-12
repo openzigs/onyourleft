@@ -52,6 +52,7 @@ import {
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
+import { laneChangeLean, laneChangeRate } from './lane-change-lean';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -66,6 +67,7 @@ import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
 import {
   LINE_LIMIT_METRES,
+  MAXIMUM_LEAN_RADIANS,
   leanAt,
   lineOffsetAt,
   lineSlopeAt,
@@ -363,6 +365,21 @@ export interface SceneInput {
    * on every other ride, a room ride included (DL9).
    */
   readonly steeredLateral?: number | undefined;
+  /**
+   * How fast the steered rider is DRAWN moving across the road, in metres a
+   * second, positive to the right — #2456: `lane-change-lean.ts`
+   * §`dampedSway` of `lanes.ts` §`sidewaysSpeedOf`, held by `GameView`'s frame
+   * loop. It turns the rider's bicycle into a lane change and leans them the
+   * way they are going ({@link lateralOf}, `lane-change-lean.ts`), and does
+   * not move where they are drawn: that is still {@link steeredLateral}
+   * exactly. Read only where {@link steeredLateral} is given.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, as {@link steeredLateral} is: a ride
+   * that forgot it draws a lane change as the slide #2456 was filed about.
+   * `lap-race-wiring.test.tsx` and `delivery-wiring.test.tsx` read it back off
+   * the frames a lane change was drawn from.
+   */
+  readonly steeredSway?: number | undefined;
   /**
    * Where the chase camera's EYE stands across the road, in metres right of
    * the centre line, where it is not behind the rider — #2396,
@@ -886,12 +903,19 @@ export function cameraPose(
     // behind the rider and 400 m ahead, so both reads are inside it everywhere
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
-    // ⚠️ At the odometer's place, on a drawn path too — #2422's review. It
-    // sets only the camera's pitch and draws nothing, and read where the
-    // pacing puts the eye it moved the eye's height by the shift times the
-    // grade, which `landform.test.ts`' far-leg rays on a 140–150° climb to a
-    // level far leg, at a third of a metre of margin, could not take.
-    eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
+    // ⚠️ On a drawn path, the road's height under the eye where it stands
+    // (@see drawnHeight) — #2470. `cameraRig` stands the eye 2 m over
+    // `eyeRoadY`, so this sets the eye's HEIGHT as well as the pitch. Read
+    // at the odometer's place, the eye stood up to 0.30 m off 2 m over the
+    // road under it on an 8 % climb through a corner, because the pacing
+    // draws the eye metres along the road from that place.
+    // `drawn-line.test.ts` holds it to 7 cm. `landform.test.ts`' far-leg
+    // tests were re-derived for this eye: its climb test's road-facing check
+    // and its crease test's bound against the ground's own steps.
+    eyeRoadY:
+      path === undefined
+        ? placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y
+        : drawnHeight(corridor, path, atDistance - CAMERA_BEHIND_METRES, { x: eyeX, z: eyeZ }),
     targetRoadY: target.y,
   };
 }
@@ -1264,6 +1288,8 @@ interface Rider {
   readonly lane?: number | undefined;
   /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
   readonly steered?: number | undefined;
+  /** How fast it is drawn moving across the road while steered — the rider's only. @see SceneInput.steeredSway */
+  readonly sway?: number | undefined;
   /** A remote rider's name on the road. @see RiderMarker.label */
   readonly label?: string | undefined;
   /** @see RiderMarker.followed */
@@ -1314,6 +1340,7 @@ function ridersOnTheRoad(
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
+      sway: input.steeredSway,
       hit: input.riderHit,
       // #1999: what the rider's drawn position is chosen from.
       cadence: input.cadence,
@@ -1431,7 +1458,10 @@ function ridersOnTheRoad(
     const lateral = across.metres;
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
-    const roll = bicycleRoll(line === undefined ? 0 : leanAt(line, rider.distance, rider.speed));
+    // #2456: and a steered rider's lean into a lane change, on top of the bend's.
+    const roll = bicycleRoll(
+      line === undefined ? 0 : withSteeringLean(rider, leanAt(line, rider.distance, rider.speed)),
+    );
     const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
@@ -1606,7 +1636,11 @@ function levelness(one: Rider, other: Rider): number {
  * {@link DRAWN_LIMIT_METRES}.
  */
 function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Across {
-  if (rider.steered !== undefined) return { metres: rider.steered, rate: 0 };
+  // #2456: a steered rider's place moves across the road as fast as it is
+  // drawn swaying, so its bicycle turns into a lane change rather than sliding.
+  if (rider.steered !== undefined) {
+    return { metres: rider.steered, rate: laneChangeRate(rider.sway ?? 0, rider.speed) };
+  }
   if (rider.laned !== undefined) {
     return { metres: lanedLateral(rider, rider.laned, riders, line), rate: 0 };
   }
@@ -1636,6 +1670,19 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Ac
 }
 
 /**
+ * `bend`, the combined lean a bend asks of `rider`, with what a steered
+ * rider's lane change adds to it — #2456,
+ * `lane-change-lean.ts` §`laneChangeLean` — held with the bend's inside
+ * `racing-line.ts` §`MAXIMUM_LEAN_RADIANS`'s reach, so the two together never
+ * lean past the tyres' grip. The bend's alone for every rider nobody steered.
+ */
+function withSteeringLean(rider: Rider, bend: number): number {
+  if (rider.steered === undefined || rider.sway === undefined) return bend;
+  const lean = bend + laneChangeLean(rider.sway, rider.speed);
+  return Math.max(-MAXIMUM_LEAN_RADIANS, Math.min(MAXIMUM_LEAN_RADIANS, lean));
+}
+
+/**
  * Where a rider is drawn across the road, and how fast that place moves —
  * #1995. @see lateralOf
  */
@@ -1645,8 +1692,10 @@ interface Across {
   /**
    * Metres sideways per metre ridden, the same sign: the line's own rate
    * ({@link lineSlopeAt}) for a rider on it, scaled by the share of it they
-   * keep. Nought for a rider whose place is not the line's — a Delivery
-   * round's steered rider and a lap race's laned bot.
+   * keep. Nought for a lap race's laned bot, whose place is not the line's.
+   * A steered rider's (#2456) is its drawn sway over its speed,
+   * `lane-change-lean.ts` §`laneChangeRate`: nought in a lane, toward the
+   * move in a lane change.
    */
   readonly rate: number;
 }

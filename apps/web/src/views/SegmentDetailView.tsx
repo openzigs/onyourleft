@@ -26,6 +26,7 @@ import { personalBest, RANKING_BASIS_LABEL, rankEfforts } from '@onyourleft/doma
 import { segmentId, type SegmentEffortRecord, type UnitSystem } from '@onyourleft/store';
 
 import { StatusMessage } from '../design/StatusMessage';
+import { DRAFTED_EFFORT_TEXT } from '../game/solo-draft';
 import { formatDuration } from '../format';
 import { loadHistory, loadOverlay, type EffortHistory, type OverlayResult } from '../efforts/load';
 import type { EffortPort } from '../efforts/store-port';
@@ -71,7 +72,14 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<readonly string[]>([]);
-  const [overlay, setOverlay] = useState<OverlayResult | undefined>(undefined);
+  const [overlay, setOverlay] = useState<
+    | {
+        readonly result: OverlayResult;
+        readonly first: SegmentEffortRecord;
+        readonly second: SegmentEffortRecord;
+      }
+    | undefined
+  >(undefined);
   const units = useUnits();
 
   useEffect(() => {
@@ -144,7 +152,9 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
       return;
     }
     loadOverlay(port, first, second)
-      .then(setOverlay)
+      .then((result) => {
+        setOverlay({ result, first, second });
+      })
       .catch(() => {
         setProblem('This device could not read the rides those efforts came from.');
       });
@@ -213,7 +223,10 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
                             toggle(effort.id);
                           }}
                         />{' '}
-                        <span>Compare {formatDuration(effort.elapsed)} effort</span>
+                        <span>
+                          Compare {formatDuration(effort.elapsed)} effort
+                          {effort.drafted === true ? ', drafted' : ''}
+                        </span>
                       </label>
                     </td>
                     <td>{formatDuration(effort.elapsed)}</td>
@@ -225,11 +238,17 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
                       )}
                     </td>
                     <td>
-                      {/* Words, never a colour or an icon alone (#48). */}
-                      {effort.id === best?.id ? 'Personal best' : ''}
-                      {effort.visibility === 'private-match'
-                        ? `${effort.id === best?.id ? ' · ' : ''}In a privacy zone — yours only`
-                        : ''}
+                      {/* Words, never a colour or an icon alone (#48). #2451:
+                      and a drafted effort says so, ADR 0066 D-5.2. */}
+                      {[
+                        effort.id === best?.id ? 'Personal best' : undefined,
+                        effort.visibility === 'private-match'
+                          ? 'In a privacy zone — yours only'
+                          : undefined,
+                        effort.drafted === true ? DRAFTED_EFFORT_TEXT : undefined,
+                      ]
+                        .filter((part) => part !== undefined)
+                        .join(' · ')}
                     </td>
                   </tr>
                 );
@@ -280,7 +299,9 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
         </ScrollTable>
       )}
 
-      {overlay === undefined ? null : <Overlay result={overlay} />}
+      {overlay === undefined ? null : (
+        <Overlay result={overlay.result} first={overlay.first} second={overlay.second} />
+      )}
 
       {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
       {boards?.offered() === true ? (
@@ -295,8 +316,24 @@ export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewPr
   );
 }
 
+/**
+ * A compared effort's column heading — #2451, ADR 0066 D-5.2: a drafted effort
+ * is never silently set beside an undrafted one, so its heading says so.
+ */
+function effortHeading(which: 'First' | 'Second', effort: SegmentEffortRecord): string {
+  return effort.drafted === true ? `${which} effort, drafted` : `${which} effort`;
+}
+
 /** The comparison, as a table. The chart is a later addition over the same rows. */
-function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
+function Overlay({
+  result,
+  first,
+  second,
+}: {
+  readonly result: OverlayResult;
+  readonly first: SegmentEffortRecord;
+  readonly second: SegmentEffortRecord;
+}): JSX.Element {
   const units = useUnits();
   if (result.kind === 'no-track') {
     return (
@@ -334,8 +371,8 @@ function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
         <thead>
           <tr>
             <th scope="col">Distance</th>
-            <th scope="col">First effort</th>
-            <th scope="col">Second effort</th>
+            <th scope="col">{effortHeading('First', first)}</th>
+            <th scope="col">{effortHeading('Second', second)}</th>
             <th scope="col">Difference</th>
           </tr>
         </thead>

@@ -432,3 +432,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   answer are unchanged, and nothing else in this ADR changes. Recorded on the owner's
   [ruling of 2026-11-01](https://github.com/openzigs/onyourleft/pull/1984#issuecomment-6557317199)
   (Q5).
+- **2026-11-11** — **Once [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
+  is Accepted, D-9 is superseded by it for lap-race bots in a solo race**: D-9.1, what ADR 0061
+  left of D-9.2, and D-9.3. **D-2.1's words *"or when"* are narrowed by it** (its D-3.3 and D-6.1,
+  under its D-3 answer (b), which keeps drafting in the lap race): where a bot rides decides the rider's draft factor
+  and so when a grade is sent, never what is sent. All of it on the owner's
+  [ruling of 2026-11-10](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845)
+  that there can be no rule on racing strategy. Read ADR 0067 D-0 and D-1 for what replaces them;
+  D-14 Q4's *"No"* is kept as ADR 0067 D-1 reads it (no bot's capacity changes with its place). This
+  entry only points there; nothing else in this ADR changes.
