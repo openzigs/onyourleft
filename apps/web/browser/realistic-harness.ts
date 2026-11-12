@@ -104,6 +104,7 @@ import {
   groundBlendOf,
   lapRaceDrawnOf,
   loadRealisticWorld,
+  mappedBuildingsDrawnOf,
   loadSceneryModels,
   mappedBlobsShownOf,
   overhangShadowsOf,
@@ -152,6 +153,13 @@ import {
 import { deliveryAhead } from './realistic/delivery';
 import { drawCounter } from './realistic/draws';
 import { RACE_HIT, lapRaceAhead, raceBotsAhead } from './realistic/lap-race';
+import {
+  planOfTarget,
+  rideHeldAt,
+  roundSamples,
+  sideOfRoad,
+  type RoundSighting,
+} from './realistic/round';
 import { changedPixels, oneMarkerAhead, onePickUpAhead, type Sighting } from './realistic/sighting';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
@@ -165,7 +173,10 @@ import {
 } from '../src/demo/synthetic-road';
 import { outAndBackRoute } from '../src/game/route-fixtures-testing';
 import { fixtureLevelTown, plannedTown } from './realistic/town';
+import fixtureLevel from '../src/game/delivery/levels/fixtures/fixture-level.json';
 import { frameCensus, type FrameCensus } from './realistic/village';
+import { deliveryInView } from '../src/game/delivery/in-view';
+import { nextHouse, startDeliveryRide } from '../src/game/delivery/ride-round';
 
 /** #1627: one village-square tree's triangles, as the belt counts them. */
 const VILLAGE_TREE_KIND = HOLIDAY_DECORATIONS['winter-lights']?.find(
@@ -297,6 +308,18 @@ declare global {
       aheadMetres: number,
       photograph?: boolean,
     ) => Sighting & { readonly photo?: string };
+    /**
+     * #2513: a real Delivery round on the page's town, its rider held
+     * `leads` metres before each of its houses in turn, and what the frame
+     * drew there: the house, its marker and the HUD's side and distance.
+     * Only on `town=level`, the fixture level, with its own round's houses.
+     * @see realistic/round.ts
+     */
+    __oylRealisticRound?: (leads: readonly number[]) => {
+      /** The houses on the round: the fixture level's own `round.houses`. */
+      readonly houses: number;
+      readonly sightings: readonly RoundSighting[];
+    };
     __oylRealistic?: {
       readonly ready: boolean;
       /**
@@ -902,6 +925,80 @@ async function run(): Promise<void> {
     // The frame with the piece, as a PNG, before the next frame draws over it.
     return photograph ? { ...seen, photo: canvas.toDataURL('image/png') } : seen;
   };
+  // #2513: a real round on the page's town — the product's own pick, markers
+  // and HUD words — its rider held before each house in turn, in route order,
+  // each frame drawn first at its refill chunk's start as a ride's would be.
+  // Every frame here is drawn and read between two of the loop's.
+  if (town !== undefined && config.town === 'level') {
+    const buildings = town.buildings;
+    const houses = fixtureLevel.round.houses;
+    window.__oylRealisticRound = (leads) => {
+      const ride = startDeliveryRide({
+        buildings,
+        profile,
+        origin,
+        riderDistance: 0,
+        lineOffset: 0,
+        storage: undefined,
+        level: { houses, hazardsPerKilometre: { static: 0, moving: 0 }, lengthMetres: 1 },
+      });
+      if (ride === undefined) throw new Error('the town gave the round no houses');
+      const drawAt = (along: number, held: typeof ride): SceneFrame => {
+        const frame = rideFrame({
+          profile,
+          origin,
+          distance: along,
+          elapsed: 0,
+          rung: worldRung(state),
+          town,
+        });
+        const withRound: SceneFrame = {
+          ...frame,
+          lapRace: undefined,
+          delivery: deliveryInView({
+            corridor: frame.corridor,
+            targets: held.targets,
+            round: held.round,
+            throws: held.throws,
+            obstacles: held.obstacles,
+            obstacleState: held.obstacleState,
+          }),
+        };
+        view.render(withRound);
+        return withRound;
+      };
+      const sightings = roundSamples(ride.targets, leads).map((sample): RoundSighting => {
+        const target = ride.targets[sample.position];
+        if (target === undefined) throw new Error('a sample names no house of the round');
+        const held = rideHeldAt(ride, sample.position, sample.along);
+        drawAt(sample.chunkStart, held);
+        drawAt(sample.along, held);
+        const plan = planOfTarget(buildings, target);
+        const centre = plan === -1 ? undefined : buildings.plans[plan]?.centroid;
+        let nearest: { readonly x: number; readonly z: number } | undefined;
+        let least = Number.POSITIVE_INFINITY;
+        for (const marker of deliveryDrawnOf(view, 'markers')) {
+          const away = Math.hypot(marker.x - target.x, marker.z - target.z);
+          if (away < least) {
+            least = away;
+            nearest = marker;
+          }
+        }
+        return {
+          ...sample,
+          hud: nextHouse(held),
+          plan,
+          houseDrawn: plan !== -1 && mappedBuildingsDrawnOf(view).includes(plan),
+          houseSide:
+            centre === undefined ? undefined : sideOfRoad(profile, origin, centre.x, centre.z),
+          markerFromStep: nearest === undefined ? undefined : least,
+          markerSide:
+            nearest === undefined ? undefined : sideOfRoad(profile, origin, nearest.x, nearest.z),
+        };
+      });
+      return { houses: ride.targets.length, sightings };
+    };
+  }
   const safeStep = guarded(step, fail);
   const tick = (now: number): void => {
     if (safeStep(now)) requestAnimationFrame(tick);

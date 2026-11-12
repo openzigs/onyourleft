@@ -19732,6 +19732,18 @@ export class MappedBuildingBelt {
     return this.#stats;
   }
 
+  /**
+   * The plans drawn on the last frame: selected at the last refill and not
+   * hidden by {@link clearOf} — #2513. Indices into {@link buildings}' plans.
+   */
+  drawnPlans(): readonly number[] {
+    const drawn: number[] = [];
+    for (let at = 0; at < this.#selection.count; at += 1) {
+      if (this.#hidden[at] !== 1) drawn.push(this.#selection.plans[at] as number);
+    }
+    return drawn;
+  }
+
   /** How many refills this belt has run — for the tests' count over a ride. */
   get refills(): number {
     return this.#refills;
@@ -21786,6 +21798,20 @@ export function mappedBuildingStatsOf(
 ): { readonly stats: MappedBuildingStats; readonly refills: number } | undefined {
   const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
   return belt === undefined ? undefined : { stats: belt.stats, refills: belt.refills };
+}
+
+/**
+ * Which of a view's buildings from map data its last frame drew — #2513:
+ * the plans its last refill selected, less any the near plane hid. Indices
+ * into the plans the frame carried. Empty before a realistic frame has
+ * carried any, and on a stylised view, which draws none.
+ *
+ * @test-facing read by `browser/realistic-harness.ts` §`__oylRealisticRound`,
+ * whose spec finds each Delivery target's house drawn; the product never asks
+ */
+export function mappedBuildingsDrawnOf(view: GameView): readonly number[] {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt?.drawnPlans() ?? [];
 }
 
 /**

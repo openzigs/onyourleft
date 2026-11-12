@@ -3799,7 +3799,15 @@ function GameScreen({
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
-        const next = nextWorldQuality(previous, sample);
+        // #2513: a Delivery round's houses are mapped buildings, which only the
+        // realistic world draws, so while one runs the ladder holds realism's
+        // floor rather than leaving it (`quality.ts` §`nextWorldQuality`).
+        const running = deliveryRef.current;
+        const next = nextWorldQuality(
+          previous,
+          sample,
+          running !== undefined && running.outcome === undefined,
+        );
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
           previous,
