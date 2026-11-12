@@ -27,6 +27,7 @@ import {
   SKIP_HOUSE_AHEAD_METRES,
   skipHouseSentence,
 } from '../hud/delivery-announce';
+import { drawnRoadPosition } from '../terrain';
 
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery-progress';
@@ -88,6 +89,11 @@ function storageOf(entries: Record<string, unknown> = {}): PreferenceStorage {
   };
 }
 
+/** The level the helper takes: `LEVEL`'s shape with its numbers widened. */
+type LevelOf = {
+  readonly [K in keyof typeof LEVEL]: (typeof LEVEL)[K] extends number ? number : (typeof LEVEL)[K];
+};
+
 let seed = 2_365;
 beforeEach(() => {
   vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
@@ -102,7 +108,7 @@ afterEach(() => {
   seed = 2_365;
 });
 
-function onLevel(storage = storageOf(), level: typeof LEVEL = LEVEL): DeliveryRide {
+function onLevel(storage = storageOf(), level: LevelOf = LEVEL): DeliveryRide {
   const ride = startDeliveryRide({
     buildings: town.buildings,
     profile: town.profile,
@@ -200,6 +206,37 @@ describe('picked per ride from the in-memory seed, and stored nowhere — #2365,
     }
   });
 
+  it('draws a mailbox at the kerb, on the line from the road to its house’s front step', () => {
+    // The same seed with no shares picks the same houses, each at its front step.
+    const own = pickRoundTargets(
+      {
+        buildings: town.buildings,
+        profile: town.profile,
+        origin: town.origin,
+        riderDistance: 0,
+        houses: 8,
+      },
+      7,
+    );
+    const mailboxes = pick(7).targets.filter((each) => each.mailbox === true);
+    expect(mailboxes.length).toBeGreaterThan(0);
+    for (const mailbox of mailboxes) {
+      const step = own.targets.find((each) => each.distance === mailbox.distance);
+      if (step === undefined) throw new Error('the mailbox house is not in the own pick');
+      const road = drawnRoadPosition(town.profile, town.origin, mailbox.distance);
+      // Where it is drawn: off the kerb by the mailbox distance, not on the doorstep.
+      expect(Math.hypot(mailbox.x - road.x, mailbox.z - road.z)).toBeCloseTo(mailbox.fromRoad, 6);
+      expect(mailbox.x === step.x && mailbox.z === step.z).toBe(false);
+      // On the road-to-step line: the cross product of the two offsets is nil.
+      const cross =
+        (mailbox.x - road.x) * (step.z - road.z) - (mailbox.z - road.z) * (step.x - road.x);
+      expect(Math.abs(cross)).toBeLessThan(1e-6);
+      expect(
+        (mailbox.x - road.x) * (step.x - road.x) + (mailbox.z - road.z) * (step.z - road.z),
+      ).toBeGreaterThan(0);
+    }
+  });
+
   it('makes none of either without a level’s shares: a rider’s own route is as before', () => {
     const own = pickRoundTargets(
       {
@@ -246,7 +283,7 @@ describe('a round always holds enough houses to deliver to — #2365', () => {
           ...LEVEL,
           houses,
           noDeliveryShare: LEVEL_MOST_NO_DELIVERY_SHARE,
-        } as unknown as typeof LEVEL);
+        });
         expect(ride.round.houses.length).toBeGreaterThanOrEqual(FEWEST_DELIVERY_HOUSES);
       }
     }
