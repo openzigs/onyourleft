@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft/domain';
 
-import { combinedLean } from './bicycle';
+import { MAXIMUM_STEER_RADIANS, WHEELBASE_METRES, combinedLean, steerAngle } from './bicycle';
 import { MAXIMUM_LEAN_RADIANS, MAXIMUM_ROLL_RADIANS_PER_SECOND } from './racing-line';
 import {
   LANE_CHANGE_LEAN_LIMIT_RADIANS,
@@ -311,5 +311,126 @@ describe('a lane change, drawn frame by frame — #2456', () => {
     // At 20 m/s round a 20 m hairpin the bend alone asks for the most there is;
     // the lane change toward its inside adds nothing past it.
     expect(Math.max(...leans)).toBeCloseTo(MAXIMUM_LEAN_RADIANS, 9);
+  });
+});
+
+describe('the bars turned into a lane change and through a bend — #2494', () => {
+  interface Steered {
+    readonly steer: number;
+    readonly turn: number;
+  }
+  /**
+   * One move, as {@link laneChange} draws it, with the sway's rate over each
+   * frame handed to the scene as `GameView` hands it — what `dampedSway` moved
+   * the sway by, over the frame's time — or none, and at `speed`.
+   */
+  function steeredChange(
+    intent: 'lane-left' | 'lane-right',
+    withRate: boolean,
+    speed = SPEED,
+  ): readonly Steered[] {
+    let steer = steerToward(startSteer(0), intent);
+    let sway = 0;
+    let stepped = 0;
+    const out: Steered[] = [];
+    for (let frame = 1; frame <= FPS; frame += 1) {
+      const time = frame / FPS;
+      while (stepped + SIMULATION_STEP_SECONDS <= time + 1e-12) {
+        steer = stepSteer(steer, SIMULATION_STEP_SECONDS);
+        stepped += SIMULATION_STEP_SECONDS;
+      }
+      const before = sway;
+      sway = dampedSway(sway, sidewaysSpeedOf(steer), 1 / FPS);
+      const distance = START + speed * time;
+      const input = {
+        profile: ROUTE,
+        origin: corridorOrigin(ROUTE),
+        state: {
+          ...atStartLine(ROUTE),
+          ride: { speed: metresPerSecond(speed), distance: metres(distance) },
+          ridden: seconds(time),
+        },
+        steeredLateral: steer.offset,
+      };
+      const straight = sceneFrame({ ...input, steeredSway: 0 }).markers.find(
+        (marker) => marker.kind === 'rider',
+      );
+      const marker = sceneFrame({
+        ...input,
+        steeredSway: sway,
+        ...(withRate ? { steeredSwayRate: (sway - before) * FPS } : {}),
+      }).markers.find((each) => each.kind === 'rider');
+      if (straight === undefined || marker === undefined) throw new Error('no rider');
+      out.push({ steer: marker.steer ?? 0, turn: turnOff(straight, marker) });
+    }
+    return out;
+  }
+
+  it.each([
+    ['lane-right', 1],
+    ['lane-left', -1],
+  ] as const)(
+    'turns the bars toward a move to the %s while the bicycle turns into it, back as it straightens, and straight in the lane',
+    (intent, side) => {
+      const frames = steeredChange(intent, true);
+      const steers = frames.map((each) => each.steer * side);
+      const turns = frames.map((each) => each.turn * side);
+      // As the sway starts, the bicycle starts to turn and the bars are turned
+      // into the move by what that turn asks for: atan(1.02 × 2.19 / 10), 12.6°.
+      expect(steers[0]).toBeGreaterThan(10 * DEGREE);
+      // Toward the move for as long as the bicycle is still turning into it…
+      const building = Math.round(SWAY_SETTLE_SECONDS * FPS);
+      for (const each of steers.slice(0, building)) expect(each).toBeGreaterThan(0);
+      // …straight while it holds its heading across the road…
+      const holding = frames
+        .map((each, index) => ({ each, index }))
+        .filter(
+          ({ index }) => index > 0 && turns[index] === turns[index - 1] && index < building * 2,
+        );
+      expect(holding.length).toBeGreaterThan(3);
+      for (const { each } of holding) expect(each.steer).toBe(0);
+      // …back the other way as it straightens, as a rider steers out of a move…
+      expect(Math.min(...steers)).toBeLessThan(-10 * DEGREE);
+      // …never past the clamp, and straight once the rider is in the lane.
+      expect(Math.max(...steers.map(Math.abs))).toBeLessThanOrEqual(MAXIMUM_STEER_RADIANS);
+      expect(frames.at(-1)?.steer).toBe(0);
+    },
+  );
+
+  it('holds the bars straight when the scene is told no rate: the control', () => {
+    for (const each of steeredChange('lane-right', false)) expect(each.steer).toBe(0);
+  });
+
+  it('turns them no further than the clamp at a walking pace, and not at all at a standstill', () => {
+    const walking = steeredChange('lane-right', true, 2).map((each) => Math.abs(each.steer));
+    expect(Math.max(...walking)).toBeCloseTo(MAXIMUM_STEER_RADIANS, 12);
+    for (const each of steeredChange('lane-right', true, 0)) expect(each.steer).toBe(0);
+    expect(steerAngle(2, 0)).toBe(0);
+    expect(steerAngle(Number.NaN, 10)).toBe(0);
+    expect(steerAngle(1, 10)).toBeCloseTo(Math.atan(WHEELBASE_METRES / 10), 12);
+    expect(steerAngle(-1, 10)).toBeCloseTo(-Math.atan(WHEELBASE_METRES / 10), 12);
+    expect(steerAngle(100, 1)).toBe(MAXIMUM_STEER_RADIANS);
+  });
+
+  it('turns them a little through a bend, toward it, for every rider on the road', () => {
+    const hairpin = hairpinRoute(20);
+    const apex = 400 + (Math.PI * 20) / 2;
+    const frame = sceneFrame({
+      profile: hairpin,
+      origin: corridorOrigin(hairpin),
+      state: {
+        ...atStartLine(hairpin),
+        ride: { speed: metresPerSecond(8), distance: metres(apex) },
+        ridden: seconds(apex / 8),
+      },
+    });
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) throw new Error('no rider in the frame');
+    // Toward the bend, the lean's side, by about atan(L / R): a few degrees.
+    expect(Math.sign(rider.steer ?? 0)).toBe(Math.sign(rider.lean));
+    expect(Math.abs(rider.steer ?? 0)).toBeGreaterThan(0.5 * DEGREE);
+    expect(Math.abs(rider.steer ?? 0)).toBeLessThan(5 * DEGREE);
+    // And none on a straight.
+    expect(riderAt(START, 0, 0).steer).toBeUndefined();
   });
 });

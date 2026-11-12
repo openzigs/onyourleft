@@ -166,6 +166,8 @@ const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
  * that forgot it draws a lane change as a slide.
  */
 const swayInputs = vi.hoisted((): (number | undefined)[] => []);
+/** #2494: the rider's drawn steer on every frame `sceneFrame` made, in order. */
+const steerOutputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -174,7 +176,9 @@ vi.mock('./scene', async (importOriginal) => {
       steeredInputs.push(args[0].steeredLateral);
       cameraInputs.push(args[0].cameraLateral);
       swayInputs.push(args[0].steeredSway);
-      return actual.sceneFrame(...args);
+      const frame = actual.sceneFrame(...args);
+      steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
+      return frame;
     },
   };
 });
@@ -1010,6 +1014,11 @@ describe('lane steering inside a game ride — #1853', () => {
     expect(Math.min(...swayed)).toBeGreaterThanOrEqual(0);
     expect(swayInputs.at(-1)).toBe(0);
     expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[1]);
+    // #2494: the bars turned into the move and back out of it, then straight.
+    const steers = steerOutputs.slice(pressed).map((each) => (each ?? 0) * side);
+    expect(Math.max(...steers)).toBeGreaterThan(0.1);
+    expect(Math.min(...steers)).toBeLessThan(-0.1);
+    expect(steerOutputs.at(-1)).toBeUndefined();
   });
 });
 

@@ -1119,7 +1119,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `steeredLateral`, so nothing the obstacles, race or
                         trainer read changes. A standstill still yaws a
                         little (the turn rate floors the speed at 10 m/s) but
-                        does not lean
+                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        `scene.ts` §`drawnSteer` gives each marker the
+                        kinematic steer (`bicycle.ts` §`steerAngle`, clamped
+                        at 20°) of the drawn heading's turn rate (from
+                        `SceneInput.steeredSwayRate`) or a bend's lean, and
+                        both belts turn the fork, front wheel and bar about
+                        the 72° head tube in the vertex shader
+                        (`three-renderer.ts` §`withSteering`, no draw call);
+                        the realistic hands are solved to the turned grips
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
