@@ -356,15 +356,20 @@ describe('the demo camera tour — #1649', () => {
   });
 
   it('under reduced motion there is no blend and no pan: every change of shot is a cut', () => {
-    // #2525: 1.6 s, and 3.5 s under --coverage, locally on an Apple M4 Pro at
-    // a load average of 14 to 17, with a 30 s timeout that #1688's ruling
-    // removes. It now builds the frames {@link WHERE_A_BLEND_OR_A_PAN_SHOWS},
-    // 428 of the 1 160 it built, which alone were 3.6 s under --coverage: 0.8
-    // to 2.8 s, and 1.8 to 2.7 s under --coverage, at a load average of 15
-    // to 24.
+    // #2525, #1688's ruling (a slow case is made cheaper, never given a longer
+    // timeout): this case filmed every preset's reduced-motion lap, with a
+    // 30 s timeout. 1.6 s, and 3.5 s under --coverage, locally on an Apple M4
+    // Pro at a load average of 14 to 17. Building only the frames
+    // {@link WHERE_A_BLEND_OR_A_PAN_SHOWS}, 428 of 1 160, was not enough: the
+    // nightly coverage run on this branch (43237229409) took 6.3 s and timed
+    // out. Each preset's lap is now a case of its own, below.
     const reduced = reducedMotionTour(planTour(GROUP_PRESET));
     expect(reduced.shots.every((shot) => shot.into === 'cut')).toBe(true);
-    for (const preset of DEMO_PRESETS) {
+  });
+
+  it.each(DEMO_PRESETS.map((preset) => [preset.id, preset] as const))(
+    'under reduced motion the %s tour neither blends nor pans, from the first frame of each shot',
+    (_, preset) => {
       const player = createDemoPlayer(preset, { reducedMotion: true });
       expect(player.tour.shots.map((shot) => shot.into)).not.toContain('blend');
       // One lap holds every shot of the tour, and only the overhead and
@@ -393,8 +398,8 @@ describe('the demo camera tour — #1649', () => {
         expect(shot.frame.camera.headingX).toBe(first.frame.camera.headingX);
         expect(shot.frame.camera.headingZ).toBe(first.frame.camera.headingZ);
       }
-    }
-  });
+    },
+  );
 
   it('poseLookingAt is the inverse of cameraRig for any sight that is not vertical', () => {
     const eye = { x: 3, y: 20, z: -4 };
