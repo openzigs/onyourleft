@@ -61,6 +61,10 @@
  * Each drafted run also asserts that the rider WAS drafted — they rode
  * further on the same trace — so no comparison here can pass because the
  * draft never took effect.
+ *
+ * ⚠️ The runs here ride a view with no drawing context (#2524), so the
+ * drawing-view half of this proof is `blind-view-wiring.test.tsx`: its rows
+ * for the draft pinned here show a view that draws sends the same writes.
  */
 
 import { act } from 'react';

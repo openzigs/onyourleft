@@ -34,6 +34,11 @@
  * Each drafted run also asserts that the rider WAS drafted: the simulation's
  * own in-draft metres are more than nought, and the same trace rode further.
  * So no comparison here can pass because the draft never took effect.
+ *
+ * ⚠️ The runs here ride a view with no drawing context (#2524), so the
+ * drawing-view half of this proof is `blind-view-wiring.test.tsx`: its rows
+ * for the pacer's and the ghost's solo draft show a view that draws sends
+ * the same writes.
  */
 
 import { act } from 'react';
