@@ -22634,6 +22634,10 @@ export function deliveryWeatherOf(view: GameView): {
 /**
  * PR #2522: a level's weather as a view last drew it, linear colours each
  * channel. @see deliveryWeatherOf
+ *
+ * @test-facing read by `browser/delivery-harness.ts` and
+ * `browser/realistic-harness.ts`, whose specs hold the dusk's shade, the
+ * rain's light and its clearance; the product never asks
  */
 export interface DeliveryWeatherReadback {
   /** The ground's colour, the terrain's lit material's. */
