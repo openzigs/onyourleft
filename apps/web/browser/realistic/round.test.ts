@@ -52,7 +52,12 @@ function round(): DeliveryRide {
     riderDistance: 0,
     lineOffset: 0,
     storage: undefined,
-    level: { houses: 6, hazardsPerKilometre: { static: 0, moving: 0 }, lengthMetres: 1 },
+    level: {
+      houses: 6,
+      hazardsPerKilometre: { static: 0, moving: 0 },
+      lengthMetres: 1,
+      id: 'round-sighting',
+    },
   });
   if (ride === undefined) throw new Error('the town gave the round no houses');
   return ride;

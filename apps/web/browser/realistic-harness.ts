@@ -940,7 +940,12 @@ async function run(): Promise<void> {
         riderDistance: 0,
         lineOffset: 0,
         storage: undefined,
-        level: { houses, hazardsPerKilometre: { static: 0, moving: 0 }, lengthMetres: 1 },
+        level: {
+          houses,
+          hazardsPerKilometre: { static: 0, moving: 0 },
+          lengthMetres: 1,
+          id: 'fixture-level',
+        },
       });
       if (ride === undefined) throw new Error('the town gave the round no houses');
       const drawAt = (along: number, held: typeof ride): SceneFrame => {
