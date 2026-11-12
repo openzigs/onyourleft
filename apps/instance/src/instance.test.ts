@@ -1315,7 +1315,11 @@ describe('a rider’s race on the running instance — #784, #785', () => {
   it('never opens a group ride that is over as a lobby again', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
-    const { instance } = await start(path);
+    // One room worker, not the two `serverConfig` gives (#2553): one room
+    // needs one, and each worker is a Node process to fork and load. It took
+    // 0.4 to 0.8 s alone and up to 8.3 s beside the rest of this file on a
+    // loaded machine, where every fork waits for a CPU.
+    const { instance } = await start(path, { roomWorkers: 1 });
     const ann = await signIn(instance.url, 'Ann');
     const made = await fetch(`${instance.url}/v1/rooms`, {
       method: 'POST',
@@ -1343,7 +1347,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const late = await joinRoom(wsUrl(instance.url), roomId, undefined);
     clients.push(late);
     expect(await late.closed).toMatchObject({ code: 4005 });
-  }, 30_000);
+  });
 
   it('ends, as it opens, a race a restart interrupted, and lets its route go — a lobby nobody started it keeps', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
