@@ -903,12 +903,19 @@ export function cameraPose(
     // behind the rider and 400 m ahead, so both reads are inside it everywhere
     // except the first 4.5 m and the last 25 m of a point-to-point route —
     // where they settle on the first or last point and the gaze goes level.
-    // ⚠️ At the odometer's place, on a drawn path too — #2422's review. It
-    // sets only the camera's pitch and draws nothing, and read where the
-    // pacing puts the eye it moved the eye's height by the shift times the
-    // grade, which `landform.test.ts`' far-leg rays on a 140–150° climb to a
-    // level far leg, at a third of a metre of margin, could not take.
-    eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
+    // ⚠️ On a drawn path, the road's height under the eye where it stands
+    // (@see drawnHeight) — #2470. `cameraRig` stands the eye 2 m over
+    // `eyeRoadY`, so this sets the eye's HEIGHT as well as the pitch. Read
+    // at the odometer's place, the eye stood up to 0.30 m off 2 m over the
+    // road under it on an 8 % climb through a corner, because the pacing
+    // draws the eye metres along the road from that place.
+    // `drawn-line.test.ts` holds it to 7 cm. `landform.test.ts`' far-leg
+    // tests were re-derived for this eye: its climb test's road-facing check
+    // and its crease test's bound against the ground's own steps.
+    eyeRoadY:
+      path === undefined
+        ? placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y
+        : drawnHeight(corridor, path, atDistance - CAMERA_BEHIND_METRES, { x: eyeX, z: eyeZ }),
     targetRoadY: target.y,
   };
 }

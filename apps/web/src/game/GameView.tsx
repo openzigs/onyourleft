@@ -1039,13 +1039,6 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
 }
 
 /**
- * The game screen — and, when the fragment asks for one (#1992), the same
- * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
- * asked for. Keyed on the choice, so changing it is a new screen and a ride
- * in progress is never switched between a real rider and a simulated one.
- */
-
-/**
  * How long the rider's choice of route must settle before `GameView` builds
  * its drawn path (`drawn-line.ts`), in milliseconds: **250** — #2422's review.
  * Chosen: long enough that stepping through the picker builds nothing, short
@@ -1053,6 +1046,43 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  */
 export const DRAWN_LINE_WARM_DELAY_MS = 250;
 
+/**
+ * Whether a ride on `route`, started from the chooser with these choices, is
+ * drawn along the route's drawn path (`drawn-line.ts`) — #2470. The chooser
+ * builds the path only for such a ride. A built-in level is always a
+ * Delivery round and a built-in circuit always a lap race; a Delivery round
+ * and a lap race on a loop ridden outside a room are drawn beside the road,
+ * where the game's own events meet the rider (`scene.ts` §`easingLine`).
+ * This decides as `begin` does with its `deliveryWanted` and `raceChoice`.
+ *
+ * ⚠️ **A ride in a room is still warmed.** A group ride is drawn along the
+ * path. A room's lap race is known only from the room, once the rider has
+ * joined it. And the chooser builds the PICKED route, which a rider in a
+ * room rides alone (`begin`'s `roomId`).
+ */
+export function drawnAlongPath(
+  route: RidableRoute,
+  choice: {
+    readonly delivery: boolean;
+    readonly lapRace: LapRaceChoice | undefined;
+    readonly roomId: string | undefined;
+  },
+): boolean {
+  if (isLevelRouteId(route.id) || isCircuitRouteId(route.id) || choice.delivery) return false;
+  return !(
+    choice.lapRace !== undefined &&
+    route.profile.loop &&
+    choice.roomId === undefined &&
+    lapRaceChoiceRaceable(choice.lapRace)
+  );
+}
+
+/**
+ * The game screen — and, when the fragment asks for one (#1992), the same
+ * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
+ * asked for. Keyed on the choice, so changing it is a new screen and a ride
+ * in progress is never switched between a real rider and a simulated one.
+ */
 export function GameView(props: GameViewProps): JSX.Element {
   // PR #2113's ruling: the picker's *Preview without a trainer*, which asks
   // for the same simulated ride as the address switch, for one route.
@@ -2196,9 +2226,21 @@ function GameScreen({
   // route on a laptop and more on a tablet. Built here, a moment after the
   // rider's choice settles, it is waiting for the ride's first frame rather
   // than stalling it; flicking through the picker builds nothing. Cached
-  // against the profile object, which is the one `start` rides.
+  // against the profile object, which is the one `start` rides. #2470: and
+  // only for a ride drawn along it — not a Delivery round or a lap race, the
+  // choices read as the chooser hands them to `start`.
+  const warmsPath =
+    corridorRoute !== undefined &&
+    drawnAlongPath(corridorRoute, {
+      delivery:
+        props.delivery ??
+        ((withDelivery && readRealisticWorldChoice(deviceStorage())) ||
+          gameDeliveryFromHash(globalThis.location.hash)),
+      lapRace: props.lapRace ?? (withLapRace ? lapRaceChoice : undefined),
+      roomId: props.roomId,
+    });
   useEffect(() => {
-    if (corridorRoute === undefined || !choosing) return;
+    if (corridorRoute === undefined || !choosing || !warmsPath) return;
     const profile = corridorRoute.profile;
     const timer = window.setTimeout(() => {
       drawnLine(profile);
@@ -2206,7 +2248,7 @@ function GameScreen({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [corridorRoute, choosing]);
+  }, [corridorRoute, choosing, warmsPath]);
 
   // #2294: with a Delivery round chosen, every saved route's houses for a
   // round, counted on this device through the same corridor port, one route
