@@ -2203,10 +2203,11 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
           along: frame.along,
           speed: frame.speed,
         });
-        ride = stepped.ride;
+        const now = stepped.ride;
+        ride = now;
         crashes += stepped.crashes;
-        const intoKind = ride.obstacles.some(
-          (obstacle, index) => obstacle.kind === kind && ride.obstacleState.crashed[index] === true,
+        const intoKind = now.obstacles.some(
+          (obstacle, index) => obstacle.kind === kind && now.obstacleState.crashed[index] === true,
         );
         if (first === undefined && intoKind) first = at + 1;
       }
