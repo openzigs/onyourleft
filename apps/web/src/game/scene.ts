@@ -52,6 +52,7 @@ import {
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, type EasedPlace } from './bend-easing';
+import { crashedRoll, type CrashSide } from './delivery/crash-look';
 import { laneChangeLean, laneChangeRate } from './lane-change-lean';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
@@ -407,6 +408,19 @@ export interface SceneInput {
    * (`lap-race/in-view.ts` §`hitLook`). @see RiderMarker.hit
    */
   readonly riderHit?: RaceHitLook | undefined;
+  /**
+   * The rider's crash in a Delivery round, while one is drawn — #2454,
+   * `delivery/crash-look.ts`: how far into the crash pose they are (0 on the
+   * bike, 1 on the ground, §`crashShare`) and which side they fall to. Their
+   * roll is drawn toward the fallen bicycle's (§`crashedRoll`) and their pedal
+   * stroke stopped; where they are drawn is unchanged, so the camera does
+   * nothing new. A drawing, never physics: `simulation.ts` never reads it.
+   *
+   * ⚠️ **Optional the UNSAFE way round**: a round that forgot it draws a crash
+   * as nothing, which is what #2454 was filed about. `delivery-wiring.test.tsx`
+   * reads the fallen rider back off the frames of a round with a crash in it.
+   */
+  readonly riderCrash?: { readonly share: number; readonly side: CrashSide } | undefined;
 }
 
 /**
@@ -1436,12 +1450,16 @@ function ridersOnTheRoad(
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     // #2456: and a steered rider's lean into a lane change, on top of the bend's.
-    const roll = bicycleRoll(
+    const ridden = bicycleRoll(
       line === undefined ? 0 : withSteeringLean(rider, leanAt(line, rider.distance, rider.speed)),
     );
+    // #2454: the rider's own crash in a Delivery round, drawn as a fall and a
+    // getting back up, on top of the lean the ride asks for.
+    const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
+    const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
     const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
-      pedalling: rider.pedalling ? pedallingShare(roll.bicycle) : 0,
+      pedalling: rider.pedalling ? pedallingShare(roll.bicycle) * (1 - (crash?.share ?? 0)) : 0,
       rideSeconds: rideClock,
       riding: ridingOf(rider, input.profile),
     });

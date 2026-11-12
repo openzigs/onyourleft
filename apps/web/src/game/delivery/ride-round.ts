@@ -204,8 +204,6 @@ export interface DeliveryRide {
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
   readonly onLevel: boolean;
-  /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
-  readonly levelId: string | undefined;
   /**
    * The houses on a level that must not get a parcel (#2365), for the drawing
    * and the warning; never on the round. Each `position` is its place here.
@@ -218,6 +216,8 @@ export interface DeliveryRide {
    * `false` with the assist's no fail on, when it costs nothing (DL10).
    */
   readonly noDeliveryCosts: boolean;
+  /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
+  readonly levelId: string | undefined;
 }
 
 /** What a round needs at the press. */
@@ -317,10 +317,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     along: input.riderDistance,
     outcome: undefined,
     onLevel: input.level !== undefined,
-    levelId: input.level?.id,
     noDeliveryTargets: pick.noDelivery,
     throwNoDelivery: pick.noDelivery.map(throwTargetOf),
     noDeliveryCosts: !assist.noFail,
+    levelId: input.level?.id,
   };
 }
 
