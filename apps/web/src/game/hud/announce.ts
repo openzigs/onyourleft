@@ -29,7 +29,7 @@
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
  * | 5a′ | the room's connection lost | event (#782) | ruling Q3/Q6 | **yes** — #782 |
- * | 5a″ | a race's countdown, its start and its end | event (#785) | the room's own word | **yes** — #785 |
+ * | 5a″ | a race's end, then its countdown and its start | event (#785; solo since #2546) | the room's own word | the end **yes** — #785; the countdown and the start no — #2546 |
  * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
  * | 5a⁗ | this ride is not being recorded: its recording could not start | event (#2381) | the owner's ruling of 2026-11-08 | **yes** — #2381 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
@@ -60,7 +60,8 @@
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
  * | `room-lost` | `GameView` | `net/room-port.ts` §`RoomConnection.status` going to `lost` (#782) |
- * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) |
+ * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785): its end |
+ * | `race-start` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) or a solo lap race's countdown (#2546): its countdown and "Go" |
  * | `room-rider` | `GameView` | `game/room-ride.ts` §`riderEvents`, from the room's frames (#784) |
  * | `not-recording` | `GameView` | `GameTrainerPort.recordGameRide` answering `false` or throwing at the press of *Ride* (#2381) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
@@ -121,9 +122,13 @@
  *
  * ⚠️ **Ranks 5a″ and 5a‴ are #785's and #784's.** A race's countdown, its
  * "go" and its end are the room's word on what the rider is doing — held on
- * the line, riding, done — so they are in {@link ALWAYS_SPOKEN}, for the
- * room-lost reason: a rider who cannot see the notice would otherwise pedal
- * against a start line nothing tells them has lifted. A rider joining or
+ * the line, riding, done. Its end is in {@link ALWAYS_SPOKEN}, for the
+ * room-lost reason. ⚠️ **Its countdown and its "go" were too until #2546**,
+ * for the reason that a rider who cannot see the notice would otherwise pedal
+ * against a start line nothing tells them has lifted; the owner's ruling of
+ * 2026-11-12 on #2546 is that announcements off is silence for them, solo and
+ * in a room, and the *Race* notice still counts down. So they are their own
+ * kind, `race-start`, ranked just below the end. A rider joining or
  * leaving the room is #784's "announced by the HUD's live region when
  * announcements are on": the lowest room event, and never with them off —
  * nothing about it changes what the rider must do. Below the room's lost
@@ -308,6 +313,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'side-camera-lost'; readonly text: string }
   | { readonly kind: 'room-lost'; readonly text: string }
   | { readonly kind: 'room-race'; readonly text: string }
+  | { readonly kind: 'race-start'; readonly text: string }
   | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'not-recording'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
@@ -344,6 +350,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'side-camera-lost',
   'room-lost',
   'room-race',
+  // #2546: a race's countdown and its "Go", solo or in a room. Rank 5a″, below its end.
+  'race-start',
   'room-rider',
   // #2381: this ride's recording could not start. Rank 5a⁗; the module note says why here.
   'not-recording',
@@ -396,7 +404,8 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'side-camera-lost',
   // #782: the room gone is a status, for the side camera's reason. @see the module note, rank 5a′
   'room-lost',
-  // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
+  // #785: a race over is the room's word on what the rider is doing. Rank 5a″.
+  // #2546: and not its countdown or its "Go" (`race-start`), the owner's ruling of 2026-11-12.
   'room-race',
   // #2381: this ride is not being recorded is a status, for room-lost's reason. Rank 5a⁗.
   'not-recording',

@@ -125,10 +125,12 @@ import {
 import { VoiceButton, VoiceNotice } from './hud/VoiceNotice';
 import {
   acrossTheRoomsLine,
+  countdownRace,
   heldOnTheLine,
   nextToFollow,
   placeAcrossOf,
   RACE_NOTICE_LABEL,
+  RACE_TEXT,
   raceEvent,
   raceFactOf,
   raceNotice,
@@ -269,6 +271,8 @@ import type { ItemInputPort } from './lap-race/item-input-port';
 import {
   askRaceItem,
   askRaceLane,
+  countLapRaceDown,
+  lapRaceCounting,
   lapRaceDrawing,
   lapRaceFrame,
   lapRaceHeard,
@@ -1972,6 +1976,16 @@ function GameScreen({
   const madeTheRoomRef = useRef(false);
   /** The race's last state said through the HUD's region (#785). */
   const raceSaidRef = useRef<RoomRace['kind'] | undefined>(undefined);
+  /** When this device saw the race start, for "Go." on the HUD (#2546). */
+  const raceWentAtRef = useRef<number | undefined>(undefined);
+  /**
+   * How long the rider has been held on a race's line this ride, ms — #2546.
+   * The simulation's clock stands still while they are (`simulation.ts`
+   * §`holdAt`), so the announcer's clock is the two together: the countdown's
+   * first sentence and its "Go." are ten seconds apart on it, as they are on
+   * the wall, and "Go." is said at Go rather than a window later.
+   */
+  const heldOnLineMsRef = useRef(0);
   /** The other riders the room's frames held at the last look (#784). */
   const ridersSeenRef = useRef<ReadonlySet<number> | undefined>(undefined);
   /**
@@ -2658,6 +2672,8 @@ function GameScreen({
       roomLostSaidRef.current = false;
       roomRecordAskedRef.current = false;
       raceSaidRef.current = undefined;
+      raceWentAtRef.current = undefined;
+      heldOnLineMsRef.current = 0;
       ridersSeenRef.current = undefined;
       inDraftRef.current = false;
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
@@ -3138,14 +3154,32 @@ function GameScreen({
       // the race — its first frame — and the wait is never ridden afterwards
       // (`simulation.ts` §`holdAt`). The trainer is still given the rider's own
       // road's grade at the line: nothing about a room reaches it.
-      const race = roomRef.current?.race();
+      //
+      // #2546: and a solo lap race's rider until its countdown has run out on
+      // the ride's own frames — this one included, and a paused ride's none —
+      // read as a room's race is, so the hold, the notice and the region are
+      // the room's. Never from a room's countdown: a room's rider is held
+      // until the room's first frame, whatever this device's clock says.
+      const roomRaceNow = roomRef.current?.race();
+      const solo = lapRaceRef.current;
+      const counted = solo === undefined ? undefined : countLapRaceDown(solo, lastFrameAt, at);
+      if (counted !== undefined) lapRaceRef.current = counted.ride;
+      const race =
+        roomRaceNow ??
+        (counted === undefined ? undefined : countdownRace(counted.ride.countdownLeftMs, at));
       let stepsRun = 0;
       if (heldOnTheLine(race)) {
         simulation.holdAt(at);
+        heldOnLineMsRef.current += Math.max(0, at - lastFrameAt);
       } else {
+        // Go's own frame: held to the instant of Go, and ridden from it.
+        if (counted?.heldToMs !== undefined) {
+          simulation.holdAt(counted.heldToMs);
+          heldOnLineMsRef.current += Math.max(0, counted.heldToMs - lastFrameAt);
+        }
         stepsRun = simulation.advanceTo(at, sensors.rider).steps;
       }
-      if (race?.kind === 'running') {
+      if (roomRaceNow?.kind === 'running') {
         const dt = Math.max(0, (at - lastFrameAt) / 1000);
         const power = sensors.rider.live ? (sensors.rider.power as number) : 0;
         raceWattsRef.current = {
@@ -3187,7 +3221,7 @@ function GameScreen({
       if (
         roomLap !== undefined &&
         roomLapRaceRef.current === undefined &&
-        race?.kind === 'running'
+        roomRaceNow?.kind === 'running'
       ) {
         roomLapRaceRef.current = startRoomLapRace({
           race: roomLap,
@@ -3360,14 +3394,19 @@ function GameScreen({
       }
       // #785: the race's countdown, its start and its end, each said once —
       // and on the HUD, re-rendered as it moves (@see setRaceShown).
-      const raceWords = raceNotice(race, at, madeTheRoomRef.current) ?? '';
+      // #2546: the same for a solo lap race's countdown and its "Go.", which
+      // stands on the HUD for a moment from the frame this device saw it.
+      const raced = raceEvent(raceSaidRef.current, race, at);
+      if (raced.said === 'running' && raceSaidRef.current !== 'running') {
+        raceWentAtRef.current = at;
+      }
+      raceSaidRef.current = raced.said;
+      if (raced.event !== undefined) events.push(raced.event);
+      const raceWords = raceNotice(race, at, madeTheRoomRef.current, raceWentAtRef.current) ?? '';
       if (raceWords !== raceShownRef.current) {
         raceShownRef.current = raceWords;
         setRaceShown(raceWords);
       }
-      const raced = raceEvent(raceSaidRef.current, race, at);
-      raceSaidRef.current = raced.said;
-      if (raced.event !== undefined) events.push(raced.event);
       // #784: a rider joining or leaving the room, with announcements on.
       // The room as it was found is the baseline: nobody "joined" it. So not
       // until the room has sent this rider a frame.
@@ -3510,12 +3549,15 @@ function GameScreen({
       // and #1818's one sentence on a ride that asked for a round and has none.
       events.push(...deliveryEvents(deliveryOwedRef.current));
       // #1906: the lap race's laps, hits, items, place and finish, owed until said.
+      // #2546: the announcer's clock is the ride's and the time held on a
+      // race's line together. @see heldOnLineMsRef
+      const sayAt = simulation.state.elapsed + heldOnLineMsRef.current / 1000;
       const raceAnnounced = lapRaceRef.current;
       if (raceAnnounced !== undefined) {
-        events.push(...lapRaceSaid(raceAnnounced, simulation.state.elapsed));
+        events.push(...lapRaceSaid(raceAnnounced, sayAt));
       }
       const heard = announce(announcerRef.current, {
-        now: simulation.state.elapsed,
+        now: sayAt,
         readings,
         ...(remaining === undefined ? {} : { remaining }),
         events,
@@ -3536,7 +3578,7 @@ function GameScreen({
       }
       deliveryOwedRef.current = deliverySpoken(deliveryOwedRef.current, heard.kind);
       if (raceAnnounced !== undefined) {
-        lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, simulation.state.elapsed);
+        lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, sayAt);
       }
       if (heard.sentence === REPLANS_OFF_SAID) {
         replansOffOwedRef.current = false;
@@ -4323,6 +4365,23 @@ function GameScreen({
     ) : undefined;
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
+  // #2546: a solo lap race's countdown, in the room's words, from what the
+  // last frame left of it — and, paused on the line, that it waits for the
+  // rider, which a room's does not.
+  const soloRace = lapRaceRef.current;
+  const raceWords =
+    race !== undefined
+      ? raceNotice(race, renderedAt, madeTheRoomRef.current, raceWentAtRef.current)
+      : soloRace === undefined
+        ? undefined
+        : phase === 'paused' && lapRaceCounting(soloRace)
+          ? RACE_TEXT.pausedCounting(Math.ceil(soloRace.countdownLeftMs / 1000))
+          : raceNotice(
+              countdownRace(soloRace.countdownLeftMs, renderedAt),
+              renderedAt,
+              false,
+              raceWentAtRef.current,
+            );
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
@@ -4813,11 +4872,10 @@ function GameScreen({
           // room and to nobody else (the owner's ruling of 2026-09-30; the
           // instance refuses anybody else's start too), whose notice says who
           // will; and it says what came of the press.
-          race === undefined ||
-          raceNotice(race, renderedAt, madeTheRoomRef.current) === undefined ? undefined : (
+          raceWords === undefined ? undefined : (
             <div key="race" className="oyl-hud__race">
               <StatusMessage tone="info" label={RACE_NOTICE_LABEL}>
-                {raceNotice(race, renderedAt, madeTheRoomRef.current)}
+                {raceWords}
                 {starting === 'refused'
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}

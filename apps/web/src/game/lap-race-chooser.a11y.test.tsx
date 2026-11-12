@@ -33,6 +33,7 @@ import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { BOT_STYLE_TEXT, BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_ASSIST_STORAGE_KEY } from './lap-race/assist-preference';
 import { DEFAULT_LAP_RACE_CHOICE, LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from './lap-race/choice';
+import { LAP_RACE_COUNTDOWN_MS } from './lap-race/ride-race';
 import type { GameRenderer, SceneFrame } from './port';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { LAP_RACE_CHOICE_TEXT } from './StageChooser';
@@ -385,7 +386,8 @@ describe('#1907 — the lap race in the chooser', () => {
     await activateWithKeyboard(itemsSwitch() as HTMLElement);
     expect(itemsSwitch()?.checked).toBe(false);
     await activateWithKeyboard(rideButton() as HTMLElement);
-    await pump(6);
+    // #2546: past the race's countdown, so its bots are riding and have a figure each.
+    await pump(LAP_RACE_COUNTDOWN_MS / 500 + 6);
     // The running race's HUD: the place among the rider and three bots, the
     // first of two laps, and no item field, for a race with no items.
     const fields = raceFields();
