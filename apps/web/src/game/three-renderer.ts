@@ -11273,16 +11273,23 @@ const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox'
  * thick, a doorstep's, to `postThick`, 0.14 m. From where
  * its throw window opens, 20 m short of it, the whole mark stands about 77
  * pixels tall on the owner's 1280×800 tablet, up from 58, and the box about
- * 16, up from 8 (`delivery-belt.test.ts` §"#2507"). Its top, 2.65 m, is still
- * over a metre below a doorstep's 3.66 m, which #2365 holds, and only the
- * drawing grew: the catch is still `delivery/throw.ts`
- * §`MAILBOX_CATCH_RADIUS_METRES`.
+ * 16, up from 8 (`delivery-belt.test.ts` §"#2507"). Only the drawing grew:
+ * the catch is still `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
+ *
+ * The owner's second ruling on PR #2518 (2026-11-12): **the whole mailbox
+ * stands below a house marker's top**, now that #2530 stands that marker low
+ * on its step, its top about 1.86 m (a 0.6 m post under a 0.9 m diamond
+ * stretched 1.4). So the post came down from 1 m to 0.5 m, the diamond from
+ * 0.72 m across to 0.5 m, and its gap over the roof from 0.1 m to
+ * `diamondGap`, 0.05 m: the top from 2.65 m to 1.79 m. The box keeps its
+ * 0.9 m, what makes it read as a mailbox at 12 m to 20 m.
  */
 const OTHER_MARKER_METRES = {
-  post: 1.0,
+  post: 0.5,
   postThick: 0.14,
   box: 0.9,
-  diamond: 0.72,
+  diamond: 0.5,
+  diamondGap: 0.05,
   ring: 0.42,
   signPost: 2.4,
   sign: 0.8,
@@ -11380,6 +11387,24 @@ function stepRing(radius: number, band: number): BufferGeometry {
     .translate(0, 0.04, 0);
 }
 
+/**
+ * A no-delivery sign's ring, standing upright across the road's line,
+ * `radius` to the middle of its band and `band` either side — #2507: flat,
+ * **32 triangles**, where the torus of 3 by 12 it replaces was 72. Two faces
+ * back to back, 8 sides each: the markers' materials draw front faces only,
+ * and a house's yaw turns toward the road, so the face an oncoming rider
+ * sees is the front on one side of the road and the back on the other. One
+ * face of 12 sides, 24 triangles, would vanish for every sign on one side.
+ */
+function signRing(radius: number, band: number): BufferGeometry {
+  const face = new RingGeometry(radius - band, radius + band, 8, 1).rotateY(Math.PI / 2);
+  const back = face.clone().rotateY(Math.PI);
+  const both = mergeGeometries([face.toNonIndexed(), back.toNonIndexed()]);
+  face.dispose();
+  back.dispose();
+  return both;
+}
+
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
@@ -11466,7 +11491,11 @@ function markerShape(): BufferGeometry {
     {
       made: new OctahedronGeometry(mailboxHalf, 0)
         .scale(1, MARKER_DIAMOND_STRETCH, 1)
-        .translate(0, other.post + boxAcross + 0.1 + mailboxHalf * MARKER_DIAMOND_STRETCH, 0),
+        .translate(
+          0,
+          other.post + boxAcross + other.diamondGap + mailboxHalf * MARKER_DIAMOND_STRETCH,
+          0,
+        ),
       colour: DELIVERY_PAINT.mailboxGlow,
       glows: true,
       untoned: true,
@@ -11485,10 +11514,8 @@ function markerShape(): BufferGeometry {
       kind: kind('no-delivery'),
     },
     {
-      // #2507, trimmed to fit the frame's triangles: 3 × 12, not 4 × 16.
-      made: new TorusGeometry(other.sign / 2, 0.06, 3, 12)
-        .rotateY(Math.PI / 2)
-        .translate(0, other.signPost + other.sign / 2, 0),
+      // #2507, trimmed to fit the frame's triangles: a flat ring, not a torus.
+      made: signRing(other.sign / 2, 0.06).translate(0, other.signPost + other.sign / 2, 0),
       colour: DELIVERY_PAINT.hazard,
       glows: true,
       kind: kind('no-delivery'),
@@ -11791,6 +11818,19 @@ function obstacleShape(): BufferGeometry {
  * builds the geometry and does not read this number
  */
 export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
+
+/**
+ * The triangles in the markers' one geometry — #2507: **184**, a doorstep's
+ * 44, a mailbox's 84 and a no-delivery sign's 56 (96 until its torus became
+ * {@link signRing}'s flat ring, 40 fewer). Every marker instance submits all
+ * of them (the kind collapse is per vertex, as the obstacles' is), so a
+ * Delivery frame's markers cost this many times the instances drawn in
+ * vertex work.
+ *
+ * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
+ * builds the geometry and does not read this number
+ */
+export const DELIVERY_MARKER_TRIANGLES = 184;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
