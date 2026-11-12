@@ -482,11 +482,20 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     );
   }
 
-  /** The efforts grouped by their ride, excluded ones left out. */
-  function byRide(efforts: readonly SegmentEffortRecord[]): Map<ActivityId, SegmentEffortRecord[]> {
+  /**
+   * The efforts grouped by their ride, excluded ones left out — and, to
+   * share, drafted ones too: #2451, ADR 0066 D-5.2, a drafted effort is not
+   * offered to an instance's board. A ride whose every effort here was
+   * drafted is not sent at all, so it is not made public for nothing.
+   */
+  function byRide(
+    efforts: readonly SegmentEffortRecord[],
+    kind: 'share' | 'withdraw',
+  ): Map<ActivityId, SegmentEffortRecord[]> {
     const rides = new Map<ActivityId, SegmentEffortRecord[]>();
     for (const effort of efforts) {
       if (effort.visibility === 'excluded') continue;
+      if (kind === 'share' && effort.drafted === true) continue;
       rides.set(effort.activityId, [...(rides.get(effort.activityId) ?? []), effort]);
     }
     return rides;
@@ -611,7 +620,7 @@ export function createLeaderboardPort(dependencies: LeaderboardPortDependencies)
     let rides = 0;
     let notSynced = 0;
     let failed = 0;
-    for (const [activity, mine] of byRide(efforts)) {
+    for (const [activity, mine] of byRide(efforts, kind)) {
       const file = content.get(activity);
       if (file === undefined) {
         notSynced += 1;

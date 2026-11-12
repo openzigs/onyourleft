@@ -37,6 +37,7 @@ import { DRAFT_READING_STORAGE_KEY } from './draft-preference';
 import type { GhostOutcome } from './ghost-outcome';
 import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
+import { draftedRide, type SoloDraftState } from './solo-draft';
 import type { LapRaceChoice } from './lap-race/choice';
 import { circuitRoute } from './route-fixtures-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
@@ -175,6 +176,8 @@ let nowMs = 0;
 let mounted: Mounted | undefined;
 /** What the game handed the ride controller as each ride ended. */
 let handed: { readonly outcome: GhostOutcome | undefined; readonly drafted: boolean | undefined }[];
+/** Every solo draft the game handed the recording, frame by frame — #2451. */
+let stepped: SoloDraftState[];
 
 const trainer: GameTrainerPort = {
   readTrainer: () => NO_GAME_TRAINER,
@@ -183,6 +186,9 @@ const trainer: GameTrainerPort = {
   recordingMayStop: () => false,
   gameRideEnded: (outcome, drafted) => {
     handed.push({ outcome, drafted });
+  },
+  soloDraftStepped: (draft) => {
+    stepped.push(draft);
   },
   rideMovingSeconds: () => undefined,
   watchRide: () => () => undefined,
@@ -194,6 +200,7 @@ beforeEach(() => {
   pending = [];
   nowMs = 1_000_000;
   handed = [];
+  stepped = [];
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
     return pending.length;
@@ -335,7 +342,8 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
     const { draft, heard } = await rideSolo({ pacer: true, frames: 160 });
     const readings = draft.map(percentOf);
     // Present from the first frame, on the gauge's own scale.
-    expect(draft.every((text) => /^\d+ % at most 59 %$/.test(text ?? ''))).toBe(true);
+    // #2472: as a screen reader reads it, "of drag" after the drawn `%`.
+    expect(draft.every((text) => /^\d+ % of drag at most 59 %$/.test(text ?? ''))).toBe(true);
     expect(Math.max(...readings.map((value) => value ?? 0))).toBeGreaterThanOrEqual(10);
     expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
     // D-5.5: the solo draft has no spoken cue, entering or leaving.
@@ -426,6 +434,25 @@ describe('“Your best” after a drafted attempt — #2425, ADR 0066 D-5.1, D-5
     expect(handed).toHaveLength(1);
     expect(handed[0]?.outcome).toBeDefined();
     expect(handed[0]?.drafted).toBe(true);
+  });
+
+  it('hands the recording the in-draft state and the road behind it, frame by frame — #2451, D-5.3', async () => {
+    const { draft } = await rideSolo({ ownGhost: true, frames: 300 });
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    expect(stepped.length).toBeGreaterThan(100);
+    // The simulation's own counts, never falling within one ride: what the
+    // recording sums is what the rider rode.
+    for (let index = 1; index < stepped.length; index += 1) {
+      expect(stepped[index]!.riddenMetres).toBeGreaterThanOrEqual(stepped[index - 1]!.riddenMetres);
+    }
+    expect(stepped.some((each) => each.inDraft)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
+  it('hands the recording no solo draft with the switch off — #2451', async () => {
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
+    await rideSolo({ ownGhost: true, frames: 120 });
+    expect(stepped).toEqual([]);
   });
 
   it('latches it with the outcome: riding on alone afterwards never takes it away', async () => {

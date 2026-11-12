@@ -32,6 +32,7 @@ import type { UnitSystem } from '@onyourleft/store';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
+import { VisuallyHidden } from '../../design/VisuallyHidden';
 
 import {
   CALORIES_KEY,
@@ -697,6 +698,10 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           <span className="oyl-hud__unit">
             {' '}
             {reading.unit}
+            {reading.unitSaid === undefined ? null : (
+              // #2472: heard, not drawn — `fields.ts` §`HudReading.unitSaid`.
+              <VisuallyHidden> {reading.unitSaid}</VisuallyHidden>
+            )}
             {reading.slope === undefined ? null : (
               <SlopeGlyph
                 slope={reading.slope}

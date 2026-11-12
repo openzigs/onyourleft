@@ -3156,6 +3156,11 @@ function GameScreen({
       if (settledBefore === undefined && outcomeRef.current !== undefined) {
         outcomeDraftedRef.current = draftedRide(simulation.state.soloDraft);
       }
+      // #2451, ADR 0066 D-5.3: the in-draft state and the road behind it, to
+      // the recording under the ride, so the saved ride says it was drafted.
+      if (simulation.state.soloDraft !== undefined) {
+        trainerPortRef.current?.soloDraftStepped?.(simulation.state.soloDraft);
+      }
       // #2078: the last ten minutes of power and heart rate, one sample a
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a

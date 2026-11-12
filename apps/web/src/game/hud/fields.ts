@@ -210,6 +210,15 @@ export interface HudReading {
    * handed in (the demo).
    */
   readonly qualifier?: string | undefined;
+  /**
+   * Words a screen reader hears after {@link unit} and nobody sees — #2472:
+   * a SOLO ride's Draft field draws its unit as the `%` alone, to keep it on
+   * its number's line in the tablet's narrowest track (#2425, #2130), and
+   * this gives a screen reader back what it is a share of: *"34 % of drag"*,
+   * as a room's field draws it. Drawn visually hidden inside the unit, so
+   * what is drawn does not change. Absent on every other field.
+   */
+  readonly unitSaid?: string | undefined;
 }
 
 /**
@@ -1284,11 +1293,13 @@ function draftField(draft: RoomHud['draft'], key = 'room-draft'): HudReading {
   // under it wraps at 1024×768 and pushes the notices under the map credit
   // (`ride-attribution.browser.spec.ts` §"#1552"). So a solo draft's unit is
   // the `%` alone, and the line under it is the gauge's scale as a room's is.
+  // #2472: and a screen reader still hears "of drag" after it.
   const solo = key === SOLO_DRAFT_KEY;
   return {
     ...base,
     value: String(percent),
     unit: solo ? '%' : '% of drag',
+    ...(solo ? { unitSaid: 'of drag' } : {}),
     detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
     gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
   };
