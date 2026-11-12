@@ -17,7 +17,7 @@
  * ⚠️ **A red here under load may be a TIMEOUT, not "database is locked".**
  * With the retry, one write can now wait about 21 s (four 5 s busy timeouts
  * and the pauses between) before it gives up, far past Vitest's 5 s default,
- * which these cases keep (#2550: on the nightly coverage job they took 331
+ * which the cases but the DEFERRED control keep (#2550: on the nightly coverage job they took 331
  * to 597 ms, runs 43207158376 and 43008116660, EPYC 9V74). A writer starved that
  * long fails the case on Vitest's clock first, so read the failure: a
  * timeout is the same defect as the error, arriving slower.

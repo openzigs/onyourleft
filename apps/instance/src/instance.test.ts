@@ -384,7 +384,7 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
     clients.push(replay);
     expect(await replay.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     // The replay changed nothing: still one seat in the room.
-    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 15_000);
+    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 4_000);
     const frame = rider.messages.find((m) => m.type === 'frame');
     expect(frame?.type === 'frame' && frame.riders.length).toBe(1);
   });
@@ -571,7 +571,7 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
     await until(
       () => bobSocket.messages.some((m) => m.type === 'frame'),
       'the race running',
-      15_000,
+      4_000,
     );
     // The race has left its lobby, and the store says so.
     const fresh = openServingStore(path);
@@ -592,12 +592,12 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
       await ticket(instance.url, ann.sessionToken, 'race-rejoin'),
     );
     clients.push(annAgain);
-    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', 15_000);
+    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', 4_000);
     expect(annAgain.messages[0]).toMatchObject({ type: 'welcome', riderId: annSeat });
     await until(
       () => annAgain.messages.some((m) => m.type === 'frame'),
       'frames after the rejoin',
-      15_000,
+      4_000,
     );
   });
 });

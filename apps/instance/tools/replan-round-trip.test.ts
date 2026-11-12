@@ -598,12 +598,12 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
       }),
     ).catch((error: unknown) => error);
     // Interrupted once the hosted service has the warm-up's request.
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 4_000 });
     stop.abort();
     const failure = await measuring;
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe(INTERRUPTED);
-    expect(performance.now() - began).toBeLessThan(15_000);
+    expect(performance.now() - began).toBeLessThan(4_000);
     expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
   });
 
@@ -627,7 +627,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
         log: (line) => lines.push(line),
       }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(held).toBe(true), { timeout: 30_000 });
+    await vi.waitFor(() => expect(held).toBe(true), { timeout: 4_000 });
     stop.abort();
     const failure = await measuring;
     expect((failure as Error).message).toBe(INTERRUPTED);
@@ -645,7 +645,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     const measuring = measure(
       options(url, 'sealed', { hosted: HOSTED, signal: stop.signal }),
     ).catch((error: unknown) => error);
-    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 4_000 });
     // The instance cannot be reached from the interruption on.
     down = true;
     stop.abort();
