@@ -726,13 +726,7 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import {
-  roadTintIn,
-  sunShareIn,
-  sceneryShadeIn,
-  sunColourIn,
-  weatheredWorld,
-} from './weather-look';
+import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
 import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
@@ -4750,16 +4744,16 @@ export class TerrainBelt {
     this.#applyRange();
   }
 
-  /**
-   * This frame's ground, in the world's ground colour. Grows its buffers and
-   * never shrinks them, for the road's reason (#240's NFR-3).
-   */
   /** PR #2522: the ground's colour as last drawn, linear, lit material. For the browser gate. */
   colour(): readonly [number, number, number] {
     const { r, g, b } = this.#materials.lit.color;
     return [r, g, b];
   }
 
+  /**
+   * This frame's ground, in the world's ground colour. Grows its buffers and
+   * never shrinks them, for the road's reason (#240's NFR-3).
+   */
   update(ground: TerrainMesh, groundColour: number): void {
     // ⚠️ #469: the mesh's arrays are lent, and a later build has written over
     // them. Drawing it would draw that build's ground under this frame's road
@@ -8621,7 +8615,7 @@ const WEATHER_SHADED = new WeakSet<Material>();
 /**
  * Whether a material is shaded by a Delivery level's weather — PR #2522.
  *
- * @test-facing held by `weather-look.test.ts` §"PR #2522", which asserts the
+ * @test-facing held by `seasonal-nature.test.ts` §"PR #2522", which asserts the
  * vegetation and the hedge are taught it
  */
 export function shadedByWeather(material: Material): boolean {
@@ -22955,8 +22949,8 @@ class ThreeGameView implements GameView {
   #drawing: QualitySettings['world'] = 'stylised';
   /** This frame's Delivery weather, if its round has any — #2508. @see render */
   #weather: DeliveryWeatherFrame | undefined;
-  /** PR #2522: this frame's share of the route's light, linear. @see sunShareIn */
-  #sunShare: readonly [number, number, number] = [1, 1, 1];
+  /** PR #2522: this frame's shade of the scenery and share of the route's light. @see WeatherShading */
+  readonly #weatherShading = new WeatherShading();
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -23070,8 +23064,8 @@ class ThreeGameView implements GameView {
     // PR #2522: the scenery goes down at dusk with the ground it stands on,
     // and what the lamps do not reach — the far impostors and the rain — is
     // lit by the share of the route's light the frame's sun gives.
-    const shade = sceneryShadeIn(given.world, this.#weather);
-    this.#sunShare = sunShareIn(given.world.sun, frame.world.sun, this.#weather);
+    this.#weatherShading.update(given.world, this.#weather);
+    const { shade, share } = this.#weatherShading;
     this.#scatter.setShade(shade);
     this.#stage(frame);
     // #619 lever 2: this view's rung, written into the one uniform every
@@ -23093,8 +23087,8 @@ class ThreeGameView implements GameView {
       FOLIAGE.oylSunAmbient.value = frame.world.sun.ambient;
       FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
       // PR #2522: and the weather's shade and light, for the plants and the hedges.
-      FOLIAGE.oylWeatherShade.value.set(...shade);
-      FOLIAGE.oylImpostorSun.value.set(...this.#sunShare);
+      FOLIAGE.oylWeatherShade.value.set(shade[0], shade[1], shade[2]);
+      FOLIAGE.oylImpostorSun.value.set(share[0], share[1], share[2]);
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -23252,7 +23246,7 @@ class ThreeGameView implements GameView {
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
-    this.#delivery?.setRainShare(this.#sunShare);
+    this.#delivery?.setRainShare(this.#weatherShading.share);
     this.#delivery?.update(view, eye, seconds);
     // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
     if (this.#renderer !== undefined && this.#drawing === 'realistic') {

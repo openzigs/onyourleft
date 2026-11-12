@@ -7,6 +7,8 @@
  * §"#2508" reads a real frame back, clear against dusk and rain.
  */
 
+import { getHeapStatistics, GCProfiler } from 'node:v8';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -30,6 +32,7 @@ import {
   sceneryShadeIn,
   sunColourIn,
   weatheredWorld,
+  WeatherShading,
 } from './weather-look';
 import type { WorldStyle } from './world';
 
@@ -260,5 +263,89 @@ describe('what the lamps do not reach is lit by the frame’s share of the route
   it('gives all of it for a route with no light to share', () => {
     const dark = { ...DAY.sun, ambient: 0, direct: 0 };
     expect(sunShareIn(dark, dark)).toEqual([1, 1, 1]);
+  });
+});
+
+describe('a frame’s shade and share are held, not worked out again — PR #2522, #240 NFR-3', () => {
+  const WEATHERS = [
+    undefined,
+    { dusk: false, rain: false },
+    { dusk: false, rain: true },
+    { dusk: true, rain: false },
+    { dusk: true, rain: true },
+  ];
+
+  it('allocates nothing on a frame, in every weather', () => {
+    for (const weather of WEATHERS) {
+      const light = new WeatherShading();
+      // The window holds the frame's own work and nothing else: a read of a
+      // double in the harness's loop can box a number of its own.
+      const frames = (count: number): void => {
+        for (let i = 0; i < count; i += 1) light.update(DAY, weather);
+      };
+      // Warm up, so the measured window runs optimised code as a ride does.
+      frames(300_000);
+      const attempts: string[] = [];
+      let measured = false;
+      for (let attempt = 0; attempt < 8 && !measured; attempt += 1) {
+        const profiler = new GCProfiler();
+        profiler.start();
+        const before = getHeapStatistics().used_heap_size;
+        frames(100_000);
+        const after = getHeapStatistics().used_heap_size;
+        const { statistics } = profiler.stop();
+        // A collection inside the window would hide an allocation: measure again.
+        if (statistics.length > 0) {
+          attempts.push('collected');
+          continue;
+        }
+        measured = true;
+        // Ten bytes a frame would be a megabyte; the window's own bookkeeping is far below this.
+        expect(after - before, JSON.stringify(weather)).toBeLessThan(64 * 1024);
+      }
+      expect(measured, `${JSON.stringify(weather)}: ${attempts.join(', ')}`).toBe(true);
+      // Non-vacuity: the frames worked out this weather's shade and share.
+      expect(light.shade).toEqual(sceneryShadeIn(DAY, weather));
+      expect(light.share).toEqual(sunShareIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather));
+    }
+  });
+
+  it('holds what the functions give, and works them out again when the ground, the sun or the weather changes', () => {
+    const light = new WeatherShading();
+    const expectAsGiven = (world: WorldStyle, weather?: { dusk: boolean; rain: boolean }) => {
+      light.update(world, weather);
+      expect(light.shade).toEqual(sceneryShadeIn(world, weather));
+      expect(light.share).toEqual(
+        sunShareIn(world.sun, weatheredWorld(world, weather).sun, weather),
+      );
+    };
+    // Each step changes one thing the answer follows, and the answer moves with it.
+    expectAsGiven(DAY);
+    expect(light.shade).toEqual([1, 1, 1]);
+    expectAsGiven(DAY, { dusk: true, rain: false });
+    expect(light.shade[0]).toBeLessThan(1);
+    expectAsGiven(DAY, { dusk: true, rain: true });
+    expectAsGiven(DAY, { dusk: false, rain: true });
+    expect(light.shade).toEqual([1, 1, 1]);
+    expect(light.share[0]).toBeLessThan(1);
+    expectAsGiven(DAY, { dusk: true, rain: true });
+    expectAsGiven({ ...DAY, groundColour: 0x3f5a2b }, { dusk: true, rain: true });
+    expectAsGiven(
+      { ...DAY, groundColour: 0x3f5a2b, sun: { ...DAY.sun, ambient: DAY.sun.ambient / 2 } },
+      { dusk: true, rain: true },
+    );
+    expectAsGiven(
+      {
+        ...DAY,
+        groundColour: 0x3f5a2b,
+        sun: { ...DAY.sun, ambient: DAY.sun.ambient / 2, direct: DAY.sun.direct / 2 },
+      },
+      { dusk: true, rain: true },
+    );
+    // And it hands out the same two tuples every frame, which the renderer reads.
+    const { shade, share } = light;
+    expectAsGiven(DAY);
+    expect(light.shade).toBe(shade);
+    expect(light.share).toBe(share);
   });
 });

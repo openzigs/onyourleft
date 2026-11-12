@@ -87,10 +87,12 @@ function mixed(from: number, to: number, share: number): number {
 /** `colour` with each sRGB channel scaled by its share of `tint`. */
 function tinted(colour: number, tint: readonly [number, number, number]): number {
   let out = 0;
-  [16, 8, 0].forEach((shift, channel) => {
+  // A plain loop, not a callback over an array: `sceneryShadeIn` calls this every frame.
+  for (let channel = 0; channel < 3; channel += 1) {
+    const shift = 16 - 8 * channel;
     const value = Math.round(((colour >> shift) & 0xff) * (tint[channel] as number));
     out |= Math.min(255, Math.max(0, value)) << shift;
-  });
+  }
   return out;
 }
 
@@ -176,13 +178,9 @@ function linearOf(channel: number): number {
   return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
 }
 
-/** A packed sRGB colour, in linear light, each channel. */
-function linearColourOf(colour: number): [number, number, number] {
-  return [16, 8, 0].map((shift) => linearOf(((colour >> shift) & 0xff) / 255)) as [
-    number,
-    number,
-    number,
-  ];
+/** Channel `channel` (0 red, 1 green, 2 blue) of a packed sRGB colour, in linear light. */
+function linearChannelOf(colour: number, channel: number): number {
+  return linearOf(((colour >> (16 - 8 * channel)) & 0xff) / 255);
 }
 
 /**
@@ -195,22 +193,28 @@ function linearColourOf(colour: number): [number, number, number] {
  * through the sun, as it does the ground. `world` is the route's own, before
  * the weather. Applied by `three-renderer.ts` to the stylised scenery's
  * colour and to the realistic vegetation's and hedges' surface colour, and
- * to no draw call.
+ * to no draw call. Written into `out` and returned, so the frame that asks
+ * allocates nothing (#240 NFR-3).
  */
 export function sceneryShadeIn(
   world: WorldStyle,
   weather?: DeliveryWeatherFrame,
-): readonly [number, number, number] {
-  if (weather?.dusk !== true) return [1, 1, 1];
-  const day = linearColourOf(world.groundColour);
-  const dusk = linearColourOf(tinted(world.groundColour, DUSK_GROUND_TINT));
-  // A channel the ground has none of takes the tint's own share of it.
-  return [0, 1, 2].map((channel) => {
-    const from = day[channel] as number;
-    return from > 0
-      ? (dusk[channel] as number) / from
-      : linearOf(DUSK_GROUND_TINT[channel] as number);
-  }) as unknown as readonly [number, number, number];
+  out: [number, number, number] = [1, 1, 1],
+): [number, number, number] {
+  if (weather?.dusk !== true) {
+    out.fill(1);
+    return out;
+  }
+  const dusk = tinted(world.groundColour, DUSK_GROUND_TINT);
+  for (let channel = 0; channel < 3; channel += 1) {
+    const from = linearChannelOf(world.groundColour, channel);
+    // A channel the ground has none of takes the tint's own share of it.
+    out[channel] =
+      from > 0
+        ? linearChannelOf(dusk, channel) / from
+        : linearOf(DUSK_GROUND_TINT[channel] as number);
+  }
+  return out;
 }
 
 /**
@@ -221,16 +225,63 @@ export function sceneryShadeIn(
  * dimmer and warm, in rain dimmer. For what the lamps do not reach: a far
  * tree's impostor, whose relight is a ratio and so keeps its daytime
  * brightness under any sun, and the rain's streaks, which are unlit.
+ * Written into `out` and returned, as {@link sceneryShadeIn} is.
  */
 export function sunShareIn(
   day: SunStyle,
   drawn: SunStyle,
   weather?: DeliveryWeatherFrame,
-): readonly [number, number, number] {
+  out: [number, number, number] = [1, 1, 1],
+): [number, number, number] {
   const whole = day.ambient + day.direct / 2;
-  if (!(whole > 0)) return [1, 1, 1];
-  const sun = linearColourOf(sunColourIn(weather));
-  return sun.map(
-    (channel) => (drawn.ambient + (drawn.direct / 2) * channel) / whole,
-  ) as unknown as readonly [number, number, number];
+  const sun = sunColourIn(weather);
+  for (let channel = 0; channel < 3; channel += 1) {
+    out[channel] =
+      whole > 0 ? (drawn.ambient + (drawn.direct / 2) * linearChannelOf(sun, channel)) / whole : 1;
+  }
+  return out;
+}
+
+/**
+ * A frame's {@link sceneryShadeIn} and {@link sunShareIn}, held — PR #2522's
+ * review: the renderer asks every frame, in clear weather too, and the
+ * answer changes only with the route's ground colour, its sun's light and
+ * the weather. Worked out again only when one of those changes, into the
+ * same two tuples, so a frame allocates nothing for them (#240 NFR-3).
+ */
+export class WeatherShading {
+  /** The scenery's shade, linear, each channel. @see sceneryShadeIn */
+  readonly shade: [number, number, number] = [1, 1, 1];
+  /** The share of the route's light the frame's sun gives, linear. @see sunShareIn */
+  readonly share: [number, number, number] = [1, 1, 1];
+  // NaN matches nothing, so the first frame always works them out.
+  #ground = Number.NaN;
+  #ambient = Number.NaN;
+  #direct = Number.NaN;
+  #dusk = false;
+  #rain = false;
+
+  /** This frame's, for `world` (the route's own, before the weather) under `weather`. */
+  update(world: WorldStyle, weather?: DeliveryWeatherFrame): void {
+    const dusk = weather?.dusk === true;
+    const rain = weather?.rain === true;
+    // The drawn sun's light follows from the route's and the weather alone,
+    // and only its ambient and direct reach the share.
+    if (
+      world.groundColour === this.#ground &&
+      world.sun.ambient === this.#ambient &&
+      world.sun.direct === this.#direct &&
+      dusk === this.#dusk &&
+      rain === this.#rain
+    ) {
+      return;
+    }
+    this.#ground = world.groundColour;
+    this.#ambient = world.sun.ambient;
+    this.#direct = world.sun.direct;
+    this.#dusk = dusk;
+    this.#rain = rain;
+    sceneryShadeIn(world, weather, this.shade);
+    sunShareIn(world.sun, weatheredWorld(world, weather).sun, weather, this.share);
+  }
 }
