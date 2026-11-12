@@ -369,7 +369,7 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
-  it('draws a car pulling out’s hazard marker at least 24 px tall on a 1280×800 frame from the chase camera 20 m behind it, and the small kinds’ marker is not — #2506', () => {
+  it('draws a car pulling out’s hazard marker at least 24 px tall on a 1280×800 frame from the chase camera, the car 20 m ahead of the rider, and the small kinds’ marker is not — #2506', () => {
     // The owner's ruling of 2026-11-12: the marker was 8 to 10 px from 20 m.
     // The product's camera (camera.ts §cameraRig, §projectToFrame) on a level
     // straight, the rider at the origin heading +z, the car in their lane.
