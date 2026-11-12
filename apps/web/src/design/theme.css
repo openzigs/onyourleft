@@ -127,6 +127,7 @@
   --oyl-color-hud-map-water: #1d3a50;
   --oyl-color-hud-map-street: #7f8a88;
   --oyl-color-hud-map-route: #f0785c;
+  --oyl-color-hud-shelter: #aff13c;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -8028,6 +8029,54 @@ select.oyl-input {
   vector-effect: non-scaling-stroke;
 }
 
+/*
+ * IN THE DRAFT — #2426. While the rider is in the draft (`room-ride.ts`
+ * §`draftEvent`'s 10 % / 5 % state) the Draft field shows the shelter mark
+ * beside its label (an arch over a filled pocket, `HudCore.tsx`
+ * §`ShelterMark`), a heavier SOLID outline round the field, and *"In the
+ * draft"* in full ink on the line under the number. Three signals that are
+ * each a shape or words, so none of it is colour alone (SC 1.4.1); the mark is
+ * `hudShelter` and the words `hudInk`, both declared pairs on `hudSurface`.
+ * Solid, where a lap race's warning (`--alert`) is dashed. An outline takes no
+ * space and the mark sits in the label's line, so going in and out of the
+ * draft moves nothing. ⚠️ **No transition and no animation**: the mark is
+ * there or it is not, and nothing pulses (ADR 0041 D-5).
+ */
+.oyl-hud__field--sheltered {
+  outline: 3px solid var(--oyl-color-hud-shelter);
+  /* ⚠️ Outside the field's box, never inside it: `.oyl-hud__field` has no
+     padding, so an inset ring is drawn over the label, the number, the line
+     under it and the gauge's edges (measured in the browser, #2426 review).
+     The grid's gap (`--oyl-space-sm`) is wider than the ring, so it touches no
+     neighbour. */
+  outline-offset: 0;
+}
+
+.oyl-hud__field--sheltered .oyl-hud__detail {
+  color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__shelter {
+  display: inline-block;
+  width: 1.1em;
+  height: 0.8em;
+  margin-inline-start: 0.35em;
+  overflow: visible;
+  vertical-align: baseline;
+}
+
+.oyl-hud__shelter-arch {
+  fill: none;
+  stroke: var(--oyl-color-hud-shelter);
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__shelter-pocket {
+  fill: var(--oyl-color-hud-shelter);
+}
+
 .oyl-hud__field--stale .oyl-hud__value {
   color: var(--oyl-color-hud-stale-ink);
 }
@@ -8761,7 +8810,9 @@ select.oyl-input {
    not fit before #1482 either, and on a line of its own it is the panel's
    width (#437's toggle; `ride-notices.browser.spec.ts` §"#647"). On a
    landscape corners layout it is PUT on that line rather than left to wrap:
-   #2271 below. */
+   #2271 below. Upright it keeps its place on the row with its words on two
+   lines, and on the column layout and a tall corners window the row does not
+   wrap at all: #2281 below. */
 .oyl-hud__controls {
   display: flex;
   flex-wrap: wrap;
@@ -8819,20 +8870,115 @@ select.oyl-input {
    row and is last under it. `ride-workout.browser.spec.ts` §"#2271" holds
    every control's words inside its box, on top, and on the stage.
 
-   ⚠️ **Landscape only, and what that leaves is recorded as #419 asks: every
-   square or portrait corners window still has the 77 px row** — the upright
-   tablet (800×1280), and also 900×900, 1200×1300 or a desktop window snapped
-   to half of a 1440p monitor, where measured *End ride*'s words run out of
-   its box and *Trainer notice*'s are covered. That predates #2271 and is
-   outside its short-window scope. On the tablet, with a re-plan waiting, the
-   line cost the actions panel enough to begin 25 px inside the leaning
-   rider's box on the CI runner's fonts (389 px tall,
+   ⚠️ **Landscape only.** Every square or portrait corners window — the
+   upright tablet (800×1280), and also 900×900, 1200×1300 or a desktop window
+   snapped to half of a 1440p monitor — kept the 77 px row, where measured
+   *End ride*'s words ran out of its box and *Trainer notice*'s were covered,
+   until §"#2281" below shared that row out by its words and kept it one
+   line. A line of its own was not the answer there. On the tablet, with a
+   re-plan waiting, the line cost the actions panel enough to begin 25 px
+   inside the leaning rider's box on the CI runner's fonts (389 px tall,
    `ride-workout.browser.spec.ts` §"#1244" and §"#1329"), and those cases hold
    *Trainer notice* on the stage on every tablet, so it cannot give way there
    as it does on a phone on its side (§"#1482" above). Filed as #2278 under #2034. */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (orientation: landscape) {
   .oyl-game--riding .oyl-hud__controls > .oyl-hud__notice-toggle {
     flex-basis: 100%;
+  }
+}
+
+/* #2281: UPRIGHT, THE ROW IS SHARED OUT BY ITS WORDS, AND *Trainer notice*
+   SETS ITS TWO WORDS ON TWO LINES — every layout #2271 leaves out (it is
+   `orientation: portrait`, #2271's complement, and a square is portrait):
+   the upright tablet and any square or portrait corners window, the column
+   layout of an upright phone, and the stacked layout upright (390×664).
+   A line of its own for *Trainer notice* was not available there: it costs
+   the panel 80 px, and the moving time stands on a surface of its own just
+   above the actions panel whenever that control is shown (§"THE MOVING TIME
+   ON AN UPRIGHT PHONE"), so the stack would have reached the leaning rider
+   at 360×752; on the tablet, with a re-plan waiting, it did (§"#2271").
+   No word changes and no control moves. Measured in the pinned Chromium,
+   whose glyphs for this row are the same widths on a Mac and on the CI
+   runner (PR #2274's run: *Pause* 57 px, *End ride* 75, *Lock* 36,
+   *Trainer notice* 122 on one line):
+
+   - `flex: 1 1 auto` rather than `flex: 1`, so each control starts from its
+     own words (or #94's 72 px floor, set inline) and the spare width is then
+     shared out equally. With equal shares *End ride* got the same 77 px as
+     the others at 800×1280 and its words ran 6 px out of its box.
+   - No inline padding. The UA's 6 px a side put *End ride* at 87 px and the
+     row over the tablet's 302 px. Every control is still at least its
+     words and two 2 px borders, and the share adds to that.
+   - *Trainer notice* is as narrow as its longer word (`min-content`) and
+     its words wrap: *Trainer* over *notice*, about 50 px of lines inside
+     its 72 px floor, so the row is no taller. Alone on a line, where the
+     stacked layout's 286 px at 320 wide still puts it, it is that line's
+     width and its words are one line again.
+
+   At 800×1280: *Pause* 72 + *End ride* 79 + the lock 48 + *Trainer notice*
+   72, and three 8 px gaps, is 295 px of 302; paused, *Resume* is 78 and the
+   row 301. Upright at 360 wide on a ride with no notice the moving time is
+   beside the controls and the row has 220 px (§"THE MOVING TIME ON AN
+   UPRIGHT PHONE", whose gap to the controls is the controls' own 8 px for
+   this; at 16 px it was 212): 72 + 79 + 48 + 16 is 215, and paused 221.
+
+   ⚠️ **So upright and 47 rem tall or more — the column layout and a tall
+   corners window — the row does NOT WRAP.** Shared out by words, a row
+   whose words outgrow it by a pixel wraps rather than shrinks: measured,
+   the paused row at 360 wide put the lock on a line of its own and the
+   panel grew by 56 px, and at 800×1280 the next to wrap is *Trainer
+   notice*, the 80 px this rule exists to save. Unwrapped, a pixel over
+   comes off *Resume* and *End ride*, whose words still sit inside their
+   boxes, and the floors (72 + 72 + 48 + 72 and the gaps, 288 px) are inside
+   both panels. Elsewhere it keeps wrapping: the stacked layout scrolls and
+   at 320×704 *Trainer notice* still needs its own line, and the middle
+   corners layout's narrowed panel (§"THE MIDDLE corners layout's bottom
+   row", 209 px at 736×751) has never held the lock on *End ride*'s line;
+   unwrapped there the row ran out of the panel (`ride.browser.spec.ts`
+   §"#1169").
+
+   PAUSED, ROOM FOR *Resume* AND *End ride* (owner ruling, 2026-11-12): at
+   the numbers above their words touched their borders paused, 79 px around
+   74.5 at 800×1280 and 900×900 and 78 at 360 wide. The 8 px gaps cannot
+   give it (#669: no two ride-time controls closer than 8 px,
+   `ride-targets.browser.spec.ts`), nor the lock's 48 px or *Trainer
+   notice*'s 72 px floor. So on that unwrapped row the actions panel's
+   inline padding is 4 px and not 8, which gives the row 8 px more;
+   *Trainer notice* stays at its floor (its words still wrap inside it,
+   63 px) rather than take a share, so the spare goes to the two controls
+   whose words are on one line; and the moving time, a reading and not a
+   control, is 4 px from the controls (§"THE MOVING TIME ON AN UPRIGHT
+   PHONE"). Measured paused: *Resume* and *End ride* 83 px each at
+   800×1280 and 900×900 in a workout, 95 at 360 wide in a workout and 84
+   at 360 wide with the moving time beside them. Every word is at least
+   2 px clear of its border, running and paused.
+   `ride-workout.browser.spec.ts` §"#2281" holds every control's words
+   inside its box and 2 px clear of its border, on top and on the stage,
+   the row on one line, and no panel over the leaning rider, at each of
+   these viewports, running and paused. */
+@media (orientation: portrait) {
+  .oyl-hud__controls > .oyl-hud__control {
+    flex: 1 1 auto;
+    padding-inline: 0;
+  }
+
+  .oyl-hud__controls > .oyl-hud__notice-toggle {
+    width: min-content;
+    white-space: normal;
+  }
+}
+
+@media (min-width: 22.5rem) and (min-height: 47rem) and (orientation: portrait) {
+  .oyl-game--riding .oyl-hud__controls {
+    flex-wrap: nowrap;
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    padding-inline: var(--oyl-space-xs);
+  }
+
+  .oyl-game--riding .oyl-hud__controls > .oyl-hud__notice-toggle {
+    flex-grow: 0;
   }
 }
 
@@ -11510,8 +11656,12 @@ select.oyl-input {
  *
  * So upright, the moving time is lifted out of the grid and set beside *Pause*
  * and *End ride*, which are stretched across the actions panel and give up
- * 7 rem of their width for it: 99 px each at 360 px, against their 72 px
- * floor (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). That costs the panel no
+ * the field's width and a 4 px gap for it, against their 72 px floor
+ * (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). Since #2281 that gap is 4 px
+ * and not 16: at 16 the row had 212 px at 360 wide and *End ride*, at
+ * 74 px, ran 9 px out of its box, and at 8 *Resume* and *End ride*'s words
+ * touched their borders paused (§"#2281"). The moving time is a reading, so
+ * #669's 8 px between controls does not bind it. That costs the panel no
  * height at all, which is what every combination of sounds, side camera and
  * notice at the bottom of the screen needs — with sounds on, the actions
  * panel began 32 px under the rider. It is the same reading in the same
@@ -11543,8 +11693,8 @@ select.oyl-input {
 
     .oyl-game--riding .oyl-hud__controls {
       anchor-name: --oyl-hud-controls;
-      /* The moving time's own width (#1124), and the controls' own gap. */
-      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+      /* The moving time's own width (#1124), and a 4 px gap (#2281). */
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-xs));
     }
 
     .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
@@ -11639,11 +11789,11 @@ select.oyl-input {
 @supports not (anchor-name: --oyl-probe) {
   @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
     .oyl-game--riding .oyl-hud__controls {
-      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-xs));
     }
 
     .oyl-game--riding .oyl-hud__actions > .oyl-hud__trainer {
-      margin-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+      margin-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-sm));
     }
 
     .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {

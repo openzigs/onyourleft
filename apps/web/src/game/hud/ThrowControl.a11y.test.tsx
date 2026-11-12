@@ -201,7 +201,10 @@ describe('the throw control on the HUD — #1810', () => {
   it('wraps its row of buttons, as the HUD’s controls do, rather than overflow a narrow panel', () => {
     // SC 1.4.10: three 72 px buttons can be wider than a landscape phone's actions panel.
     expect(declared('.oyl-hud__throw-buttons', 'flex-wrap')).toEqual(['wrap']);
-    expect(declared('.oyl-hud__controls', 'flex-wrap')).toEqual(['wrap']);
+    // #2281: the controls' one `nowrap` is upright and 47 rem tall or more,
+    // where their floors (288 px) fit the panel and a wrap would cost it a
+    // line (`theme.css` §"#2281"); the throws keep wrapping there too.
+    expect(declared('.oyl-hud__controls', 'flex-wrap')).toEqual(['wrap', 'nowrap']);
   });
 
   it('is drawn in the HUD control’s tokens, each pair AA in every theme', () => {
