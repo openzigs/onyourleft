@@ -696,12 +696,16 @@ class Poser:
     def span(self, a, b):
         return float(np.linalg.norm(self.at(a) - self.at(b)))
 
-    def pose(self, hips, shoulders, grip, foot, stance, nod):
+    def pose(self, hips, shoulders, grip, foot, stance, nod, elbows=None, knees=None):
         """Every bone posed onto the joints, as `RealisticRiderBelt` poses the
         rider: the hips on `hips`, the back at `shoulders`, the head turned by
         `nod` (half at the neck, half at the head), each hand's middle on its
         `grip` along its own line and each foot on its `foot` -- index 0 the
-        `+X` (`.L`) side. Returns how far short of a foot the legs fell."""
+        `+X` (`.L`) side. Returns how far short of a foot the legs fell.
+
+        #2505: a crash moment may name the way each elbow and each knee bends
+        (`elbows`, `knees`), which the riding stance's would otherwise decide
+        -- on a bicycle on its side, the stance's elbow bends into the road."""
         self.turns[:] = np.eye(3)
         self.shifts[:] = 0.0
         shortfall = 0.0
@@ -726,7 +730,7 @@ class Poser:
                 sign * math.sin(out),
                 -math.cos(out) * math.cos(stance["elbowBack"]),
                 -math.cos(out) * math.sin(stance["elbowBack"]),
-            ])
+            ]) if elbows is None else np.array(elbows[index])
             elbow = two_bone_joint(shoulder, wrist, upper, fore, pole)
             self.aim(f"upperarm01.{side}", f"lowerarm01.{side}", elbow - shoulder)
             self.aim(f"lowerarm01.{side}", f"wrist.{side}", wrist - elbow)
@@ -736,7 +740,7 @@ class Poser:
             hip = self.at(f"upperleg01.{side}")
             thigh = self.span(f"upperleg01.{side}", f"lowerleg01.{side}")
             shin = self.span(f"lowerleg01.{side}", f"foot.{side}")
-            knee = two_bone_joint(hip, foot[index], thigh, shin, FORWARD)
+            knee = two_bone_joint(hip, foot[index], thigh, shin, FORWARD if knees is None else np.array(knees[index]))
             self.aim(f"upperleg01.{side}", f"lowerleg01.{side}", knee - hip)
             self.aim(f"lowerleg01.{side}", f"foot.{side}", foot[index] - knee)
             shortfall = max(shortfall, float(np.linalg.norm(self.at(f"foot.{side}") - foot[index])))
@@ -1520,7 +1524,8 @@ for _, (anchor, share), moment in CRASH_KIT.CRASH_MOMENTS:
             [np.array(each) for each in moment["feet"]],
             moment["nod"],
         )
-    crash_shortfall = max(crash_shortfall, poser.pose(*joints[:4], CRASH["stance"], joints[4]))
+    bends = {} if moment == CRASH_KIT.RIDING else {key: moment.get(key) for key in ("elbows", "knees")}
+    crash_shortfall = max(crash_shortfall, poser.pose(*joints[:4], CRASH["stance"], joints[4], **bends))
     for name in KEEP:
         index = poser.index[name]
         parent = parent_node[node_of[name]]
