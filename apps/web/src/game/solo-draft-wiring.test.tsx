@@ -26,7 +26,9 @@ import {
   routeProfile,
   watts,
   type GhostTrack,
+  type RouteProfile,
   type RoutePoint,
+  type Seconds,
 } from '@onyourleft/domain';
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -37,8 +39,10 @@ import { DRAFT_READING_STORAGE_KEY } from './draft-preference';
 import type { GhostOutcome } from './ghost-outcome';
 import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
+import { draftedRide, type SoloDraftState } from './solo-draft';
 import type { LapRaceChoice } from './lap-race/choice';
 import { circuitRoute } from './route-fixtures-testing';
+import type { createGradientSession } from './gradient';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import {
   gameTrainerPortOver,
@@ -60,18 +64,35 @@ vi.mock('./scene', async (importOriginal) => {
   };
 });
 
-/** Every distance the ride sampled the trainer's gradient session at. */
-const sampled = vi.hoisted((): number[] => []);
+/**
+ * Each gradient session the game made, with the route it was made over and
+ * every `sample(at, distance, bounded)` the ride called it with — #2520, so
+ * the samples can be replayed through a fresh real session. `real` is the
+ * unwrapped `createGradientSession`, for that replay.
+ */
+const gradients = vi.hoisted(() => ({
+  sessions: [] as {
+    readonly profile: RouteProfile;
+    readonly samples: (readonly [at: Seconds, distance: number, bounded: boolean | undefined])[];
+  }[],
+  real: undefined as typeof createGradientSession | undefined,
+}));
 vi.mock('./gradient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gradient')>();
+  gradients.real = actual.createGradientSession;
   return {
     ...actual,
     createGradientSession: (...args: Parameters<typeof actual.createGradientSession>) => {
       const session = actual.createGradientSession(...args);
+      const made = {
+        profile: args[0].profile,
+        samples: [] as (typeof gradients.sessions)[0]['samples'],
+      };
+      gradients.sessions.push(made);
       return {
         ...session,
         sample: (at: Parameters<typeof session.sample>[0], distance: number, bounded?: boolean) => {
-          sampled.push(distance);
+          made.samples.push([at, distance, bounded]);
           session.sample(at, distance, bounded);
         },
       };
@@ -175,6 +196,8 @@ let nowMs = 0;
 let mounted: Mounted | undefined;
 /** What the game handed the ride controller as each ride ended. */
 let handed: { readonly outcome: GhostOutcome | undefined; readonly drafted: boolean | undefined }[];
+/** Every solo draft the game handed the recording, frame by frame — #2451. */
+let stepped: SoloDraftState[];
 
 const trainer: GameTrainerPort = {
   readTrainer: () => NO_GAME_TRAINER,
@@ -184,16 +207,20 @@ const trainer: GameTrainerPort = {
   gameRideEnded: (outcome, drafted) => {
     handed.push({ outcome, drafted });
   },
+  soloDraftStepped: (draft) => {
+    stepped.push(draft);
+  },
   rideMovingSeconds: () => undefined,
   watchRide: () => () => undefined,
 };
 
 beforeEach(() => {
   odometers.length = 0;
-  sampled.length = 0;
+  gradients.sessions.length = 0;
   pending = [];
   nowMs = 1_000_000;
   handed = [];
+  stepped = [];
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
     return pending.length;
@@ -257,7 +284,14 @@ async function rideSolo(options: {
   /** Ride a rolling loop through the real trainer port, every write kept here. */
   readonly written?: SimulationParameters[];
   readonly frames: number;
-}): Promise<{ readonly draft: (string | undefined)[]; readonly heard: string[] }> {
+}): Promise<{
+  readonly draft: (string | undefined)[];
+  readonly heard: string[];
+  /** #2426: whether each frame's Draft field drew the shelter mark. */
+  readonly marked: boolean[];
+}> {
+  // #2520: this ride's frames alone, never the last ride's in the same case.
+  odometers.length = 0;
   mounted = await mount(
     <GameView
       port={pedallingPort(
@@ -294,6 +328,7 @@ async function rideSolo(options: {
   );
   const draft: (string | undefined)[] = [];
   const heard: string[] = [];
+  const marked: boolean[] = [];
   for (let frame = 0; frame < options.frames; frame += 1) {
     const next = pending.shift();
     if (next === undefined) break;
@@ -304,8 +339,52 @@ async function rideSolo(options: {
     });
     draft.push(field('Draft'));
     heard.push(spoken());
+    marked.push(
+      queryAll(mounted.container, 'dt')
+        .find((dt) => dt.textContent === 'Draft')
+        ?.querySelector('svg.oyl-hud__shelter') != null,
+    );
   }
-  return { draft, heard };
+  return { draft, heard, marked };
+}
+
+/**
+ * #2520, ADR 0066 D-7 ("no grade"): the ride just ridden wrote its trainer
+ * exactly what a fresh, real gradient session writes when it is handed the
+ * same `sample` calls over the same road, one write for one. So nothing
+ * between the session and the trainer changed a grade, a solo draft least of
+ * all. The kinds of parameter (below) cannot see a grade scaled by `k`; this
+ * can. And every distance the ride sampled at is an odometer this ride drew a
+ * frame at: the simulation's own, never a place a draft moved.
+ */
+async function expectTheRoadAlone(written: readonly SimulationParameters[]): Promise<void> {
+  const made = gradients.sessions.at(-1);
+  const real = gradients.real;
+  if (made === undefined || real === undefined)
+    throw new Error('the ride made no gradient session');
+  expect(made.samples.length).toBeGreaterThan(5);
+  for (const [, distance] of made.samples) expect(odometers).toContain(distance);
+  const replayed: SimulationParameters[] = [];
+  const fresh = real({
+    profile: made.profile,
+    control: {
+      setSimulationParameters: (parameters) => {
+        replayed.push(parameters);
+        return Promise.resolve();
+      },
+      letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+    },
+  });
+  for (const [at, distance, bounded] of made.samples) {
+    fresh.sample(at, distance, bounded);
+    await fresh.settled();
+  }
+  expect(replayed.length).toBeGreaterThan(5);
+  const grades = (each: readonly SimulationParameters[]) => each.map(({ grade }) => grade);
+  expect(grades(written), 'the grades written, against a fresh session’s').toEqual(
+    grades(replayed),
+  );
+  expect(written).toEqual(replayed);
 }
 
 function unmountForReride(): void {
@@ -335,10 +414,28 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
     const { draft, heard } = await rideSolo({ pacer: true, frames: 160 });
     const readings = draft.map(percentOf);
     // Present from the first frame, on the gauge's own scale.
-    expect(draft.every((text) => /^\d+ % at most 59 %$/.test(text ?? ''))).toBe(true);
+    // #2472: as a screen reader reads it, "of drag" after the drawn `%`;
+    // #2426: "In the draft" before the scale while the rider is in it.
+    expect(
+      draft.every((text) => /^\d+ % of drag (In the draft )?at most 59 %$/.test(text ?? '')),
+    ).toBe(true);
     expect(Math.max(...readings.map((value) => value ?? 0))).toBeGreaterThanOrEqual(10);
     expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
     // D-5.5: the solo draft has no spoken cue, entering or leaving.
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  it('marks the rider in the pacer’s draft with the shelter mark and the words, by the simulation’s own state — #2426', async () => {
+    const { draft, marked, heard } = await rideSolo({ pacer: true, frames: 160 });
+    expect(marked.some(Boolean), 'the pacer puts the rider in the draft').toBe(true);
+    draft.forEach((text, frame) => {
+      // The mark and the words always together, and never one without the other.
+      expect(text?.includes('In the draft') === true, `frame ${String(frame)}`).toBe(marked[frame]);
+      // The 10 % / 5 % state: marked never below 5 %, unmarked never above 10 % (rounded).
+      const percent = percentOf(text) ?? 0;
+      if (marked[frame] === true) expect(percent).toBeGreaterThanOrEqual(5);
+      else expect(percent).toBeLessThanOrEqual(10);
+    });
     expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
   });
 
@@ -370,16 +467,29 @@ describe('the solo Draft field — #2425, ADR 0066 D-5, D-6', () => {
 });
 
 describe('the trainer never feels a solo draft — #2425, ADR 0066 D-1, through the real GameView', () => {
+  /**
+   * #2510, #1688: eight seconds a ride, not thirty. The pacer's draft is over
+   * 30 % from the fourth frame and stays there past the thirty-second, and the
+   * trainer is written once a second, so each ride makes eight or more writes
+   * and every drafted one after the first is made in the draft. At 120 frames
+   * a ride the case passed Vitest's 5 s under coverage on the nightly runner;
+   * its last forty drafted frames were out of the draft anyway.
+   */
+  const FRAMES = 32;
+
   it('writes the same kinds of parameter drafted and undrafted: a grade, no draft term', async () => {
     const drafted: SimulationParameters[] = [];
-    const { draft } = await rideSolo({ pacer: true, written: drafted, frames: 120 });
+    const { draft } = await rideSolo({ pacer: true, written: drafted, frames: FRAMES });
+    // In the draft from the fourth frame on, so every write after the first was made in it.
+    expect(draft.slice(3).every((text) => (percentOf(text) ?? 0) >= 10)).toBe(true);
     expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
     expect(drafted.length).toBeGreaterThan(5);
+    await expectTheRoadAlone(drafted);
     await endTheRide();
     unmountForReride();
     localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     const alone: SimulationParameters[] = [];
-    await rideSolo({ pacer: true, written: alone, frames: 120 });
+    await rideSolo({ pacer: true, written: alone, frames: FRAMES });
     expect(alone.length).toBeGreaterThan(5);
     const shape = (written: SimulationParameters[]) =>
       written.map((parameters) => Object.keys(parameters).sort().join());
@@ -388,11 +498,8 @@ describe('the trainer never feels a solo draft — #2425, ADR 0066 D-1, through 
     const constants = (written: SimulationParameters[]) =>
       new Set(written.map((parameters) => JSON.stringify({ ...parameters, grade: undefined })));
     expect(constants(drafted)).toEqual(constants(alone));
-    // The only input a draft could reach a write by is the distance the gradient
-    // session is sampled at: it is the simulation's own odometer, the one the
-    // frame is drawn from, and never a place a draft moved.
-    expect(sampled.length).toBeGreaterThan(5);
-    for (const distance of sampled) expect(odometers).toContain(distance);
+    await expectTheRoadAlone(alone);
+    expect(gradients.sessions).toHaveLength(2);
   });
 });
 
@@ -426,6 +533,25 @@ describe('“Your best” after a drafted attempt — #2425, ADR 0066 D-5.1, D-5
     expect(handed).toHaveLength(1);
     expect(handed[0]?.outcome).toBeDefined();
     expect(handed[0]?.drafted).toBe(true);
+  });
+
+  it('hands the recording the in-draft state and the road behind it, frame by frame — #2451, D-5.3', async () => {
+    const { draft } = await rideSolo({ ownGhost: true, frames: 300 });
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    expect(stepped.length).toBeGreaterThan(100);
+    // The simulation's own counts, never falling within one ride: what the
+    // recording sums is what the rider rode.
+    for (let index = 1; index < stepped.length; index += 1) {
+      expect(stepped[index]!.riddenMetres).toBeGreaterThanOrEqual(stepped[index - 1]!.riddenMetres);
+    }
+    expect(stepped.some((each) => each.inDraft)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
+  it('hands the recording no solo draft with the switch off — #2451', async () => {
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
+    await rideSolo({ ownGhost: true, frames: 120 });
+    expect(stepped).toEqual([]);
   });
 
   it('latches it with the outcome: riding on alone afterwards never takes it away', async () => {

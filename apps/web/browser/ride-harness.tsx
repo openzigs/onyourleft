@@ -702,6 +702,15 @@ const RIDE_TOTALS: RideTotals = {
  */
 const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') === 'none';
 
+/**
+ * `ride.html?ghost=none` — #2472: the ride with the pacer and the wind and no
+ * ghost, which a rider can start by leaving *Race your own* unticked. On a
+ * tablet from 50 rem tall the wind gives way to a solo ride's draft only
+ * beside BOTH the pacer and the ghost (`theme.css` §"the wind gives way to
+ * it"), so this is the ride that pins that scope.
+ */
+const NO_GHOST = new URLSearchParams(window.location.search).get('ghost') === 'none';
+
 const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
   ? {
       ...RIDE_TOTALS,
@@ -1548,7 +1557,10 @@ async function run(): Promise<void> {
     };
     return;
   }
-  for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
+  // #2472: `?ghost=none` rides with the pacer and the wind but no ghost, the
+  // solo ride whose wind does NOT give way to its draft on a tablet.
+  const ticked = NO_GHOST ? ['pacer', 'Ride in a wind'] : ['pacer', 'Race your', 'Ride in a wind'];
+  for (const text of ticked) {
     const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
     if (box === undefined || box.disabled) {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);

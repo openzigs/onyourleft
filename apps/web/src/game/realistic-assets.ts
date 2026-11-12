@@ -647,6 +647,49 @@ export type RealisticRiderMap = keyof typeof REALISTIC_RIDER_MAPS;
 export const REALISTIC_RIDER_MAP_NAMES: readonly RealisticRiderMap[] = ['colour', 'normal', 'orm'];
 
 /**
+ * The pack's rider — #2485, the bake half of #681: the same MakeHuman body,
+ * cut by `tools/realistic/blender/process_rider.py` to about
+ * {@link RIDER_PACK_TRIANGLES} triangles with a cheaper helmet, wearing
+ * {@link REALISTIC_RIDER_MAPS} at its own MakeHuman texture coordinates, and
+ * its vertices posed on the bicycle at {@link RIDER_PACK_PHASES} crank angles.
+ *
+ * - `lod` — the body and the helmet, two skinned meshes in the rest pose;
+ * - `vat` — the vertex-animation texture: each of `lod`'s vertices, mesh by
+ *   mesh and primitive by primitive in the file's own order, posed at every
+ *   phase, in metres in the bicycle's own frame. Its layout is
+ *   `tools/realistic/rider-pack.ts` §`readRiderPackVat`.
+ *
+ * ⚠️ **Nothing draws them yet.** The belt that does is #681's second half, which
+ * waits on the owner's tablet row; they are named here because the renderer's
+ * list of files is the pipeline's (`realistic-assets.test.ts`).
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts`, which reads the
+ * committed bake back, until #681's belt draws it
+ */
+export const REALISTIC_RIDER_PACK = {
+  lod: 'rider_pack.glb',
+  vat: 'rider_pack_vat.bin',
+} as const;
+
+/**
+ * About how many triangles the pack's rider is, its helmet included — #681's stated figure.
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts` against the
+ * committed LOD, until #681's belt budgets it
+ */
+export const RIDER_PACK_TRIANGLES = 2_000;
+
+/**
+ * How many crank angles the pack's rider is baked at, evenly over one turn
+ * from a crank angle of zero (`bicycle.ts` §`legBones`' angle): phase `k` is
+ * the crank at `2πk / RIDER_PACK_PHASES`.
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts` against the
+ * committed texture, until #681's belt samples it
+ */
+export const RIDER_PACK_PHASES = 32;
+
+/**
  * The realistic bicycle's four small maps — #624: drawn from arithmetic by
  * `tools/realistic/draw-bicycle-maps.ts`, nothing downloaded (ADR 0026 D-4,
  * ADR 0032 D-1), dedicated `CC0-1.0` as this repository's icons are. What each
@@ -806,6 +849,8 @@ export function realisticFiles(): readonly string[] {
     ]),
     REALISTIC_RIDER,
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
+    REALISTIC_RIDER_PACK.lod,
+    REALISTIC_RIDER_PACK.vat,
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
     REALISTIC_WORDMARK,
     ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),

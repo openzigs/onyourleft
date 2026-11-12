@@ -23,6 +23,7 @@ import {
   countsOnSharedBoard,
   countsTowardPersonalBest,
   createEffort,
+  draftedDistanceShare,
   effortId,
   effortVisibility,
   personalBest,
@@ -135,6 +136,46 @@ describe('what each state means at the two read paths — #66’s seventh criter
   it('an excluded effort counts on neither', () => {
     expect(countsTowardPersonalBest(flagged)).toBe(false);
     expect(countsOnSharedBoard(flagged)).toBe(false);
+  });
+});
+
+describe('a drafted effort — #2451, ADR 0066 D-5.2, D-5.6', () => {
+  const at = (offset: number) => unixSeconds(1_760_000_000 + offset);
+  // Four samples ten seconds apart: 100 m, then 300 m, then 600 m.
+  const positions = [HOME, northOf(HOME, 100), northOf(HOME, 400), northOf(HOME, 1000)];
+  const times = [at(0), at(10), at(20), at(30)];
+
+  it('is the share of the effort’s DISTANCE ridden inside a span, not of its time', () => {
+    // The second of three equal-time steps, but 300 of 1000 m.
+    const share = draftedDistanceShare(positions, times, 0, 3, [{ from: at(10), to: at(20) }]);
+    expect(share).toBeCloseTo(0.3, 3);
+  });
+
+  it('counts a step by its first sample, a span holding its start and not its end', () => {
+    expect(draftedDistanceShare(positions, times, 0, 3, [{ from: at(20), to: at(20) }])).toBe(0);
+    expect(draftedDistanceShare(positions, times, 0, 3, [{ from: at(0), to: at(30) }])).toBe(1);
+    // Only the effort's own steps: a span before it marks nothing in it.
+    expect(draftedDistanceShare(positions, times, 2, 3, [{ from: at(0), to: at(20) }])).toBe(0);
+  });
+
+  it('is nought for a traversal that covers no distance, and with no spans', () => {
+    expect(
+      draftedDistanceShare([HOME, HOME], [at(0), at(1)], 0, 1, [{ from: at(0), to: at(9) }]),
+    ).toBe(0);
+    expect(draftedDistanceShare(positions, times, 0, 3, [])).toBe(0);
+  });
+
+  it('is marked when the caller says so, and only then', () => {
+    expect(createEffort(MATCHED, contextOf({ drafted: true })).drafted).toBe(true);
+    expect('drafted' in createEffort(MATCHED, contextOf())).toBe(false);
+    expect('drafted' in createEffort(MATCHED, contextOf({ drafted: false }))).toBe(false);
+  });
+
+  it('counts toward the rider’s own best and never on a shared board', () => {
+    const drafted = createEffort(MATCHED, contextOf({ drafted: true }));
+    expect(drafted.visibility).toBe('public');
+    expect(countsTowardPersonalBest(drafted)).toBe(true);
+    expect(countsOnSharedBoard(drafted)).toBe(false);
   });
 });
 
