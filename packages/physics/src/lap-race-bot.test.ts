@@ -99,8 +99,12 @@ interface Entrant {
   readonly pace?: BotPace;
 }
 
-function conditions(profile: RouteProfile): LapRaceBotConditions {
-  return { profile, airDensityKilogramsPerCubicMetre: AIR };
+function conditions(profile: RouteProfile, integrationStepSeconds?: number): LapRaceBotConditions {
+  return {
+    profile,
+    airDensityKilogramsPerCubicMetre: AIR,
+    ...(integrationStepSeconds === undefined ? {} : { integrationStepSeconds }),
+  };
 }
 
 interface Run {
@@ -108,13 +112,18 @@ interface Run {
   readonly bots: readonly (readonly LapRaceBot[])[];
 }
 
-/** A solo race of bots, one tick a second, until every bot has finished or `limit` ticks. */
+/**
+ * A solo race of bots, one tick a second, until every bot has finished or `limit` ticks.
+ * `integrationStepSeconds` is the physics' sub-step inside each tick, `advance`'s 10 ms
+ * when not given.
+ */
 function race(
   profile: RouteProfile,
   field: readonly Entrant[],
   seed: number,
   itemsOn: boolean,
   limit = 2_000,
+  integrationStepSeconds?: number,
 ): Run {
   let state = createItemRace({
     course: raceCourse(profile.totalDistance, 3),
@@ -132,7 +141,7 @@ function race(
     if (state.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
     const next = stepBotRace(state, bots, {
       elapsed: seconds(1),
-      conditions: conditions(profile),
+      conditions: conditions(profile, integrationStepSeconds),
       seed,
     });
     state = next.race;
@@ -144,6 +153,19 @@ function race(
   }
   return { races, bots: all };
 }
+
+/**
+ * The physics sub-step of this file's whole-race cases: a quarter second, four
+ * a tick where `advance`'s default 10 ms is a hundred (#2523, #1688's ruling: a
+ * slow case is made cheaper, never given a longer timeout).
+ *
+ * A bot's power, its plan and its decisions are set once a tick from where the
+ * tick began; the sub-step moves only how it gets to the next. The races come
+ * out as they did: the crafty bot's count of 150, the most seed-sensitive
+ * number here, is 102 to 48 at 10 ms and at 0.02, 0.05, 0.1 and 0.25 s. A
+ * whole second a sub-step was not the same race (83 to 67), so it is not used.
+ */
+const RACE_INTEGRATION_STEP_SECONDS = 0.25;
 
 describe('a lap-race bot is the #92 bot, on the one physics', () => {
   it('rides on whatever advance returns, so it cannot be on separate maths', () => {
@@ -308,34 +330,36 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
 });
 
 describe('tiers decide a race with no items', () => {
-  it(
-    'finishes three tiers in tier order on a flat 3-lap loop, every seed of 100',
-    { timeout: 30_000 },
-    () => {
-      // With items off a seed reaches only the bots' lanes, which nothing but
-      // a hit reads, so these are one race a hundred times: the AC's letter,
-      // and a guard that no seed-dependent path moves a racer.
-      for (let seed = 1; seed <= 100; seed += 1) {
-        const run = race(
-          FLAT,
-          [
-            { id: 'a', tier: 'brisk' },
-            { id: 'b', tier: 'fierce' },
-            { id: 'c', tier: 'hard' },
-          ],
-          seed,
-          false,
-        );
-        const last = run.races[run.races.length - 1] as ItemRaceState;
-        expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
-        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
-          'b',
-          'c',
-          'a',
-        ]);
-      }
-    },
-  );
+  it('finishes three tiers in tier order on a flat 3-lap loop, every seed of 100', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 7.3 s, and 6.3 s under
+    // --coverage (one run each, with a 30 s timeout); at the quarter-second
+    // sub-step 0.29 to 0.42 s, and 0.50 to 0.76 s under --coverage (three runs each).
+    // With items off a seed reaches only the bots' lanes, which nothing but
+    // a hit reads, so these are one race a hundred times: the AC's letter,
+    // and a guard that no seed-dependent path moves a racer.
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const run = race(
+        FLAT,
+        [
+          { id: 'a', tier: 'brisk' },
+          { id: 'b', tier: 'fierce' },
+          { id: 'c', tier: 'hard' },
+        ],
+        seed,
+        false,
+        undefined,
+        RACE_INTEGRATION_STEP_SECONDS,
+      );
+      const last = run.races[run.races.length - 1] as ItemRaceState;
+      expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+      expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+        'b',
+        'c',
+        'a',
+      ]);
+    }
+  });
 });
 
 describe('no rubber-banding (ADR 0060 D-9)', () => {
@@ -489,46 +513,48 @@ describe('the same race gives the same decisions', () => {
 });
 
 describe('skill is its own axis, and never power (#1959, ADR 0060 D-9)', () => {
-  it(
-    'a crafty bot beats a naive one of the same tier more often than not, on the same power trace',
-    { timeout: 60_000 },
-    () => {
-      let ahead = 0;
-      let behind = 0;
-      for (let seed = 1; seed <= 150; seed += 1) {
-        // Which id is crafty alternates, so a tie broken by id favours neither.
-        const crafty = seed % 2 === 0 ? 'a' : 'b';
-        const naive = crafty === 'a' ? 'b' : 'a';
-        const personality = BOT_PERSONALITIES[seed % 3] as BotStrategy['personality'];
-        const run = race(
-          HILLY,
-          [
-            { id: crafty, tier: 'hard', strategy: { personality, skill: 'crafty' } },
-            { id: naive, tier: 'hard', strategy: { personality, skill: 'naive' } },
-            {
-              id: 'c',
-              tier: 'hard',
-              strategy: {
-                personality: BOT_PERSONALITIES[(seed + 1) % 3] as BotStrategy['personality'],
-                skill: 'canny',
-              },
+  it('a crafty bot beats a naive one of the same tier more often than not, on the same power trace', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 19.9 s, and 10.2 s under
+    // --coverage (one run each, with a 60 s timeout); at the quarter-second
+    // sub-step 0.57 to 1.15 s, and 1.26 to 1.86 s under --coverage (three runs each).
+    let ahead = 0;
+    let behind = 0;
+    for (let seed = 1; seed <= 150; seed += 1) {
+      // Which id is crafty alternates, so a tie broken by id favours neither.
+      const crafty = seed % 2 === 0 ? 'a' : 'b';
+      const naive = crafty === 'a' ? 'b' : 'a';
+      const personality = BOT_PERSONALITIES[seed % 3] as BotStrategy['personality'];
+      const run = race(
+        HILLY,
+        [
+          { id: crafty, tier: 'hard', strategy: { personality, skill: 'crafty' } },
+          { id: naive, tier: 'hard', strategy: { personality, skill: 'naive' } },
+          {
+            id: 'c',
+            tier: 'hard',
+            strategy: {
+              personality: BOT_PERSONALITIES[(seed + 1) % 3] as BotStrategy['personality'],
+              skill: 'canny',
             },
-          ],
-          seed,
-          true,
-        );
-        const last = run.races[run.races.length - 1] as ItemRaceState;
-        const order = standings(last.racers.map((entry) => entry.racer));
-        if (order.indexOf(crafty) < order.indexOf(naive)) ahead += 1;
-        else behind += 1;
-        // Strength is the tier alone: the two skills ride one power trace, tick for tick.
-        const trace = (id: string): number[] =>
-          run.bots.map((bots) => bots.find((bot) => bot.id === id)?.power ?? -1);
-        expect(trace(crafty), `seed ${String(seed)}`).toEqual(trace(naive));
-      }
-      expect(ahead).toBeGreaterThan(behind);
-    },
-  );
+          },
+        ],
+        seed,
+        true,
+        undefined,
+        RACE_INTEGRATION_STEP_SECONDS,
+      );
+      const last = run.races[run.races.length - 1] as ItemRaceState;
+      const order = standings(last.racers.map((entry) => entry.racer));
+      if (order.indexOf(crafty) < order.indexOf(naive)) ahead += 1;
+      else behind += 1;
+      // Strength is the tier alone: the two skills ride one power trace, tick for tick.
+      const trace = (id: string): number[] =>
+        run.bots.map((bots) => bots.find((bot) => bot.id === id)?.power ?? -1);
+      expect(trace(crafty), `seed ${String(seed)}`).toEqual(trace(naive));
+    }
+    expect(ahead).toBeGreaterThan(behind);
+  });
 });
 
 /** One bot's ride through a run: the power of each tick, where it began, and its grade. */
@@ -568,62 +594,69 @@ const ALL_TIERS: readonly Entrant[] = [
 ];
 
 describe('the race plan (#1960, ADR 0061 D-8)', () => {
-  it(
-    'holds every tier’s mean power to its tier, inside the surge ceiling and #92’s floor',
-    { timeout: 30_000 },
-    () => {
-      for (const profile of [FLAT, HILLY]) {
-        for (const [seed, itemsOn] of [
-          [3, false],
-          [4, true],
-        ] as const) {
-          const run = race(profile, ALL_TIERS, seed, itemsOn);
-          for (const { id, tier } of ALL_TIERS) {
-            const ticks = ticksOf(run, id, profile);
-            expect(ticks.finished, id).toBeGreaterThan(100);
-            const ridden = ticks.power.slice(0, ticks.finished);
-            const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
-            const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), seed);
-            const label = `${id} seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
-            // D-8.1: the mean over the race, one-second ticks, so time-weighted.
-            expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
-            expect(mean(ridden), label).toBeGreaterThanOrEqual(
-              tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
-            );
-            // D-8.2: the surge ceiling, never over 7 W/kg, and #92's −20 % kept.
-            expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
-            expect(Math.max(...ridden), label).toBeLessThanOrEqual(
-              MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS,
-            );
-            expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
-              tierWatts * PACING_FACTOR_FLOOR - 1e-9,
-            );
-            // And it does leave #92's +10 % band upward, in the sprint at least.
-            expect(Math.max(...ridden), label).toBeGreaterThan(tierWatts * PACING_FACTOR_CEILING);
-          }
+  it('holds every tier’s mean power to its tier, inside the surge ceiling and #92’s floor', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 0.88 s, and 0.49 s under
+    // --coverage (one run each, with a 30 s timeout); at the quarter-second
+    // sub-step 0.02 to 0.03 s, and 0.03 to 0.06 s under --coverage (three runs each).
+    for (const profile of [FLAT, HILLY]) {
+      for (const [seed, itemsOn] of [
+        [3, false],
+        [4, true],
+      ] as const) {
+        const run = race(
+          profile,
+          ALL_TIERS,
+          seed,
+          itemsOn,
+          undefined,
+          RACE_INTEGRATION_STEP_SECONDS,
+        );
+        for (const { id, tier } of ALL_TIERS) {
+          const ticks = ticksOf(run, id, profile);
+          expect(ticks.finished, id).toBeGreaterThan(100);
+          const ridden = ticks.power.slice(0, ticks.finished);
+          const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+          const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), seed);
+          const label = `${id} seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
+          // D-8.1: the mean over the race, one-second ticks, so time-weighted.
+          expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
+          expect(mean(ridden), label).toBeGreaterThanOrEqual(
+            tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
+          );
+          // D-8.2: the surge ceiling, never over 7 W/kg, and #92's −20 % kept.
+          expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+          expect(Math.max(...ridden), label).toBeLessThanOrEqual(
+            MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS,
+          );
+          expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
+            tierWatts * PACING_FACTOR_FLOOR - 1e-9,
+          );
+          // And it does leave #92's +10 % band upward, in the sprint at least.
+          expect(Math.max(...ridden), label).toBeGreaterThan(tierWatts * PACING_FACTOR_CEILING);
         }
       }
-    },
-  );
+    }
+  });
 
-  it(
-    'finishes fierce, hard, brisk and steady in that order with items off, every seed of 100',
-    { timeout: 60_000 },
-    () => {
-      for (let seed = 1; seed <= 100; seed += 1) {
-        // A seed moves the sprint's opening here, on a hilly loop where it matters.
-        const run = race(HILLY, ALL_TIERS, seed, false);
-        const last = run.races[run.races.length - 1] as ItemRaceState;
-        expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
-        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
-          'f',
-          'h',
-          'b',
-          's',
-        ]);
-      }
-    },
-  );
+  it('finishes fierce, hard, brisk and steady in that order with items off, every seed of 100', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 16.2 s, and 14.4 s under
+    // --coverage (one run each, with a 60 s timeout); at the quarter-second
+    // sub-step 0.55 to 0.68 s, and 1.13 to 2.03 s under --coverage (three runs each).
+    for (let seed = 1; seed <= 100; seed += 1) {
+      // A seed moves the sprint's opening here, on a hilly loop where it matters.
+      const run = race(HILLY, ALL_TIERS, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
+      const last = run.races[run.races.length - 1] as ItemRaceState;
+      expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+      expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+        'f',
+        'h',
+        'b',
+        's',
+      ]);
+    }
+  });
 
   it('surges on the climbs and eases on the descents of a seeded hilly loop', () => {
     const run = race(HILLY, [{ id: 'bot', tier: 'hard' }], 5, false);
@@ -733,59 +766,59 @@ function positionsAt(run: Run, tick: number): ReadonlyMap<string, number> {
 }
 
 describe('each bot its own pace (#2455)', () => {
-  it(
-    'holds every style’s mean to its tier at either end of the band, inside the bounds of D-8.2',
-    { timeout: 60_000 },
-    () => {
-      for (const profile of [FLAT, HILLY]) {
-        for (const ability of [1, 1 - BOT_ABILITY_SPREAD]) {
-          const field: Entrant[] = BOT_PACING_STYLES.map((style) => ({
-            id: style,
-            tier: 'brisk',
-            pace: { style, ability },
-          }));
-          const run = race(profile, field, 4, true);
-          for (const { id, tier, pace } of field) {
-            const ticks = ticksOf(run, id, profile);
-            const ridden = ticks.power.slice(0, ticks.finished);
-            const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
-            const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), 4, pace);
-            const label = `${id} at ${String(ability)}, ${profile === FLAT ? 'flat' : 'hilly'}`;
-            expect(ticks.finished, label).toBeGreaterThan(100);
-            // D-8.1: never above the tier, and within the tolerance under it.
-            expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
-            expect(mean(ridden), label).toBeGreaterThanOrEqual(
-              tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
-            );
-            // D-8.2: the tier's surge ceiling and its −20 % floor, whatever the pace.
-            expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
-            expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
-              tierWatts * PACING_FACTOR_FLOOR - 1e-9,
-            );
-          }
+  it('holds every style’s mean to its tier at either end of the band, inside the bounds of D-8.2', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 1.76 s, and 0.62 s under
+    // --coverage (one run each, with a 60 s timeout); at the quarter-second
+    // sub-step 0.02 to 0.03 s, and 0.04 to 0.69 s under --coverage (three runs each).
+    for (const profile of [FLAT, HILLY]) {
+      for (const ability of [1, 1 - BOT_ABILITY_SPREAD]) {
+        const field: Entrant[] = BOT_PACING_STYLES.map((style) => ({
+          id: style,
+          tier: 'brisk',
+          pace: { style, ability },
+        }));
+        const run = race(profile, field, 4, true, undefined, RACE_INTEGRATION_STEP_SECONDS);
+        for (const { id, tier, pace } of field) {
+          const ticks = ticksOf(run, id, profile);
+          const ridden = ticks.power.slice(0, ticks.finished);
+          const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+          const plan = botRacePlan(tier, run.races[0]?.course ?? raceCourse(1, 1), 4, pace);
+          const label = `${id} at ${String(ability)}, ${profile === FLAT ? 'flat' : 'hilly'}`;
+          expect(ticks.finished, label).toBeGreaterThan(100);
+          // D-8.1: never above the tier, and within the tolerance under it.
+          expect(mean(ridden), label).toBeLessThanOrEqual(tierWatts + 1e-6);
+          expect(mean(ridden), label).toBeGreaterThanOrEqual(
+            tierWatts * (1 - BOT_PLAN_MEAN_TOLERANCE),
+          );
+          // D-8.2: the tier's surge ceiling and its −20 % floor, whatever the pace.
+          expect(Math.max(...ridden), label).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+          expect(Math.min(...ridden), label).toBeGreaterThanOrEqual(
+            tierWatts * PACING_FACTOR_FLOOR - 1e-9,
+          );
         }
       }
-    },
-  );
+    }
+  });
 
-  it(
-    'keeps the tiers in order with every bot on a pace the field dealt it, every seed of 100',
-    { timeout: 60_000 },
-    () => {
-      for (let seed = 1; seed <= 100; seed += 1) {
-        const paces = botFieldPaces(seed, ALL_TIERS.length);
-        const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
-        const run = race(HILLY, field, seed, false);
-        const last = run.races[run.races.length - 1] as ItemRaceState;
-        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
-          'f',
-          'h',
-          'b',
-          's',
-        ]);
-      }
-    },
-  );
+  it('keeps the tiers in order with every bot on a pace the field dealt it, every seed of 100', () => {
+    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
+    // average of 15 to 26: at the 10 ms default 10.8 s, and 18.9 s under
+    // --coverage (one run each, with a 60 s timeout); at the quarter-second
+    // sub-step 0.53 to 2.04 s, and 0.93 to 1.98 s under --coverage (three runs each).
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const paces = botFieldPaces(seed, ALL_TIERS.length);
+      const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
+      const run = race(HILLY, field, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
+      const last = run.races[run.races.length - 1] as ItemRaceState;
+      expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+        'f',
+        'h',
+        'b',
+        's',
+      ]);
+    }
+  });
 
   it('spreads a field of one tier into a race: apart at the line, and the order changes on the way', () => {
     const order = (at: ReadonlyMap<string, number>): string[] =>

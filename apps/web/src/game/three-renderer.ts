@@ -402,6 +402,8 @@ import {
   type JointPoint,
   type RiderKit,
   type RiderPart,
+  STEERING_AXIS,
+  steeredPoint,
 } from './bicycle';
 import {
   drawnStance,
@@ -3280,10 +3282,15 @@ export class RiderBelt {
     // #623: each rider wears its own kind's kit under its tint. @see RIDER_KITS
     withKitPerInstance(this.#materials.lit);
     withKitPerInstance(this.#materials.flat);
-    this.#bodies = new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders);
-    this.#torsos = new InstancedMesh(
-      mergedParts(RIDER_UPPER_BODY_PARTS),
-      this.#materials.lit,
+    // #2494: the bars turned by each rider's steer, the arms' hands with them.
+    withSteering(this.#materials.lit);
+    withSteering(this.#materials.flat);
+    this.#bodies = steerable(
+      new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders),
+      riders,
+    );
+    this.#torsos = steerable(
+      new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
       riders,
     );
     this.#cranksets = new InstancedMesh(
@@ -3533,6 +3540,9 @@ export class RiderBelt {
     this.#stretch.setScalar(1);
     this.#rider.compose(this.#position, this.#turn, this.#stretch);
     this.#bodies.setMatrixAt(slot, this.#rider);
+    // #2494: the bars, and the hands on them, turned by this rider's steer.
+    steerInstance(this.#bodies, slot, marker.steer ?? 0);
+    steerInstance(this.#torsos, slot, marker.steer ?? 0);
     // #623: the kit this kind wears, under the tint. Written before the tint,
     // because `writeKit` borrows the same scratch colour.
     const kit = this.#kits[marker.kind];
@@ -4319,9 +4329,112 @@ function riderPartGeometry(each: RiderPart): BufferGeometry {
   const geometry = solidGeometry(each.solid);
   paintEveryVertex(geometry, each.colour);
   markKit(geometry, kitRoleOf(each.colour));
+  markSteering(geometry, each);
   geometry.rotateX(each.pitch).rotateY(each.yaw).rotateZ(each.roll);
   geometry.translate(each.x, each.y, each.z);
   return geometry;
+}
+
+/**
+ * How much each vertex of a part turns with the bars — #2494, the
+ * {@link STEER_ATTRIBUTE} {@link withSteering} reads: 1 for a part that turns
+ * wholly, 0 for one that does not, and along a `'toward-end'` tube from 0 at
+ * its start to 1 at its end (`bicycle.ts` §`RiderPart.steers`). Called BEFORE
+ * the part is turned and moved, when a tube still stands along its own `+Y`
+ * from `−length/2` at its start to `+length/2` at its end.
+ */
+function markSteering(geometry: BufferGeometry, part: RiderPart): BufferGeometry {
+  const position = geometry.getAttribute('position');
+  const weights = new Float32Array(position.count);
+  const solid = part.solid;
+  for (let at = 0; at < position.count; at += 1) {
+    weights[at] =
+      part.steers === 'whole'
+        ? 1
+        : part.steers === 'toward-end' && solid.shape === 'tube'
+          ? Math.min(1, Math.max(0, position.getY(at) / solid.length + 0.5))
+          : 0;
+  }
+  geometry.setAttribute(STEER_ATTRIBUTE, new BufferAttribute(weights, 1));
+  return geometry;
+}
+
+/** The vertex attribute that says how much a vertex turns with the bars — #2494. */
+const STEER_ATTRIBUTE = 'oylSteer';
+/** The instance attribute that says how far a rider's bars are turned, in radians — #2494. */
+const INSTANCE_STEER_ATTRIBUTE = 'oylInstanceSteer';
+
+/**
+ * Turns the front of a bicycle by each instance's steer, in the vertex shader
+ * — #2494, so the bars turn with no draw call added: every vertex is turned
+ * about `bicycle.ts` §`STEERING_AXIS` by its own {@link STEER_ATTRIBUTE} times
+ * its instance's {@link INSTANCE_STEER_ATTRIBUTE}, before the instance's
+ * matrix places it — `bicycle.ts` §`steeredPoint`'s Rodrigues turn, written
+ * once more in GLSL, and its normal with it. A geometry without the
+ * attributes reads them as nought (WebGL's default for an attribute with no
+ * array) and is drawn as it was: the cranks and the legs share a material
+ * with the frame. Chained after whatever patch the material already had.
+ */
+function withSteering<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#2494's steering";
+  const { point, direction } = STEERING_AXIS;
+  const vector = (each: { x: number; y: number; z: number }): string =>
+    `vec3(${[each.x, each.y, each.z].map((value) => value.toFixed(9)).join(', ')})`;
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          /* glsl */ `#include <common>
+attribute float ${STEER_ATTRIBUTE};
+attribute float ${INSTANCE_STEER_ATTRIBUTE};
+vec3 oylTurned(vec3 v, float angle) {
+  vec3 k = ${vector(direction)};
+  float c = cos(angle);
+  return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);
+}`,
+          'vertex',
+          spliced,
+        ),
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+objectNormal = oylTurned(objectNormal, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+transformed = ${vector(point)} + oylTurned(transformed - ${vector(point)}, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}+oyl-steering`;
+  return material;
+}
+
+/**
+ * Gives an instanced mesh its per-instance steer, every instance straight —
+ * #2494. @see withSteering
+ */
+function steerable(mesh: InstancedMesh, capacity: number): InstancedMesh {
+  const steer = new InstancedBufferAttribute(new Float32Array(capacity), 1);
+  steer.setUsage(DynamicDrawUsage);
+  mesh.geometry.setAttribute(INSTANCE_STEER_ATTRIBUTE, steer);
+  return mesh;
+}
+
+/** Sets one instance's steer, where the mesh has one. @see steerable */
+function steerInstance(mesh: InstancedMesh, slot: number, steer: number): void {
+  const held = mesh.geometry.getAttribute(INSTANCE_STEER_ATTRIBUTE) as
+    InstancedBufferAttribute | undefined;
+  if (held === undefined) return;
+  held.setX(slot, steer);
+  held.needsUpdate = true;
 }
 
 /** The solids `bicycle.ts` describes, at the segment counts a phone can afford. */
@@ -14085,6 +14198,9 @@ export class RealisticRiderBelt {
   readonly #crashSample: number[] = [0, 0, 0, 0];
   readonly #crashTurn = new Quaternion();
   readonly #crashAt = new Vector3();
+  /** #2494's scratch: a grip where the turned bars hold it, and its hand's tip. */
+  readonly #steeredGrip = { x: 0, y: 0, z: 0 };
+  readonly #handTip = { x: 0, y: 0, z: 0 };
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -14382,13 +14498,22 @@ export class RealisticRiderBelt {
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
-    this.#pose(rider, rider.angle, marker.bodyLean - motion.bicycleRock, motion, stance);
+    this.#pose(
+      rider,
+      rider.angle,
+      marker.bodyLean - motion.bicycleRock,
+      motion,
+      stance,
+      marker.steer ?? 0,
+    );
     // #2493: a Delivery crash, the body's own part of it, on top of the roll.
     if (marker.crash !== undefined) this.#crashPose(rider, marker.crash);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
       mesh.setColorAt(slot, tint);
+      // #2494: the fork, the front wheel and the bar turned by this steer.
+      steerInstance(mesh, slot, marker.steer ?? 0);
     }
     this.#a.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
     this.#turn.setFromAxisAngle(this.#acrossTheBicycle, rider.angle);
@@ -14436,6 +14561,7 @@ export class RealisticRiderBelt {
     bodyLean: number,
     motion: RiderMotion,
     stance: Readonly<RiderStance>,
+    steer: number,
   ): void {
     for (let index = 0; index < rider.ordered.length; index += 1) {
       const bone = rider.ordered[index] as Bone;
@@ -14512,11 +14638,20 @@ export class RealisticRiderBelt {
       // and out past its end. The arm is then solved from the shoulder to
       // that wrist.
       const shoulder = boneOf(rider.bones, limb.upperArm).getWorldPosition(this.#a);
-      const grip = toWorld(joints.grip[index], this.#b);
+      // #2494: the grip, and the hand's line along it, where the bars are
+      // turned to: `bicycle.ts` §`steeredPoint`, the turn the shader gives
+      // the bar itself, so the hand stays on it.
+      const held = joints.grip[index];
+      const steered = steeredPoint(held, steer, this.#steeredGrip);
+      const grip = toWorld(steered, this.#b);
       const upper = this.#length(rider, limb.upperArm, limb.forearm);
       const fore = this.#length(rider, limb.forearm, limb.wrist);
+      this.#handTip.x = held.x;
+      this.#handTip.y = held.y - Math.sin(stance.handDown);
+      this.#handTip.z = held.z + Math.cos(stance.handDown);
+      steeredPoint(this.#handTip, steer, this.#handTip);
       const along = this.#handWanted
-        .set(0, -Math.sin(stance.handDown), Math.cos(stance.handDown))
+        .set(this.#handTip.x - steered.x, this.#handTip.y - steered.y, this.#handTip.z - steered.z)
         .transformDirection(rider.root.matrixWorld);
       const wrist = this.#wristAt.copy(grip).addScaledVector(along, -this.#handReach[index]);
       // The elbow's bend: out from straight down by the position's own angle,
@@ -15847,10 +15982,12 @@ export function realisticBicycleMeshes(
       }),
     ),
   );
+  // #2494: the fork, the front wheel and the bar turned by each rider's steer.
+  for (const material of [frameMaterial, rubberMaterial, metalMaterial]) withSteering(material);
   return {
-    frame: tintable(bike.frame, frameMaterial, capacity),
-    rubber: tintable(bike.rubber, rubberMaterial, capacity),
-    metal: tintable(bike.metal, metalMaterial, capacity),
+    frame: steerable(tintable(bike.frame, frameMaterial, capacity), capacity),
+    rubber: steerable(tintable(bike.rubber, rubberMaterial, capacity), capacity),
+    metal: steerable(tintable(bike.metal, metalMaterial, capacity), capacity),
     cranks: tintable(realisticCrankset(), metalMaterial, capacity),
   };
 }
@@ -15967,6 +16104,8 @@ function realisticBicycle(): {
   const metal: BufferGeometry[] = [];
   for (const part of RIDER_BICYCLE_PARTS) {
     const solid = part.solid;
+    // #2494: how many pieces each list held before this part's.
+    const before = [frame.length, rubber.length, metal.length];
     if (solid.shape === 'ring') {
       // A wheel in the bicycle's YZ plane at its hub: tyre, rim, hub, spokes.
       const radius = solid.radius + solid.thickness;
@@ -16075,11 +16214,17 @@ function realisticBicycle(): {
       const unreachable: never = solid;
       throw new Error(`the realistic bicycle cannot draw a ${JSON.stringify(unreachable)}`);
     }
+    // #2494: every piece this part added — a wheel's tyre, rim, hub and
+    // spokes, or one tube — turns with the bars if the part does. Only whole
+    // parts steer on the bicycle, so where the piece now is does not matter.
+    for (const [index, list] of [frame, rubber, metal].entries()) {
+      for (const piece of list.slice(before[index])) markSteering(piece, part);
+    }
   }
   return {
-    frame: merged(frame, ['uv']),
-    rubber: merged(rubber, ['uv']),
-    metal: merged(metal, ['uv']),
+    frame: merged(frame, ['uv', STEER_ATTRIBUTE]),
+    rubber: merged(rubber, ['uv', STEER_ATTRIBUTE]),
+    metal: merged(metal, ['uv', STEER_ATTRIBUTE]),
   };
 }
 
