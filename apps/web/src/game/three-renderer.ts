@@ -11210,8 +11210,8 @@ const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox'
  * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
  * project's own. A mailbox: a box `box` long and 0.6 of that across and tall
  * on a `post` post at the kerb, a glowing diamond `diamond` across over it,
- * and a ring `ring` round its foot, all smaller than a doorstep's, as its
- * catch is. A house that must not get a parcel: a `signPost` post with a
+ * and a ring `ring` round its foot, the box, diamond and ring smaller than a
+ * doorstep's, as its catch is (the post, since #2507, thicker). A house that must not get a parcel: a `signPost` post with a
  * glowing red ring `sign` across crossed by a bar, standing upright and
  * facing the road, and **no** ring on the step, so it reads as a refusal by
  * its shape and not only its colour.

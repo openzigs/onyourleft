@@ -770,7 +770,8 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     expect(span(post.map((each) => each.x))).toBeCloseTo(0.14, 6);
     expect(Math.min(...box.map((each) => each.y))).toBeCloseTo(1, 6);
     expect(span(diamond.map((each) => each.x))).toBeCloseTo(0.72, 6);
-    expect(span(ring.map((each) => each.x))).toBeGreaterThan(0.8);
+    // The ring's outer span: twice its 0.42 m radius plus the 0.03 m tube.
+    expect(span(ring.map((each) => each.x))).toBeCloseTo(0.9, 6);
     // Still a lower mark than a doorstep's 3.66 m one, by more than a metre: a different target.
     expect(Math.max(...mailbox.map((each) => each.y))).toBeLessThan(2.66);
     belt.dispose();
