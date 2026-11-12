@@ -14008,8 +14008,9 @@ const REALISTIC_ANISOTROPY = 8;
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and
- * coloured per vertex — carried on the head bone in the one instanced mesh the
- * sphere cap was, so they cost no draw call.
+ * coloured per vertex, and since #2495 an eyeball in each socket — carried on
+ * the head bone in the one instanced mesh the sphere cap was, so they cost no
+ * draw call.
  *
  * ⚠️ **One allocation a rider a frame, and it is `legBones`'**: the knee solve
  * returns a two-number object, as it already does for the stylised rider.
