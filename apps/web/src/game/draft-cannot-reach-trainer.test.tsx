@@ -241,11 +241,18 @@ function tracedPort(route: RidableRoute): GamePort {
   };
 }
 
+/**
+ * A renderer that draws nothing, and says so: `hasContext: false`, the view a
+ * device with no WebGL gets (`port.ts` §`hasContext`). `GameView` then
+ * prepares it with one frame and builds it no other (#2524): the frame is
+ * built after the tick's grade is sampled and is read by nothing but the view,
+ * so the wire is the same with or without it (`blind-view-wiring.test.tsx`).
+ */
 function blankRenderer(): GameRenderer {
   return {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
-      hasContext: true,
+      hasContext: false,
       prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,

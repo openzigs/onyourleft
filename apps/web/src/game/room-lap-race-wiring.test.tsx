@@ -110,12 +110,17 @@ function port(): GamePort {
   };
 }
 
-function capturingRenderer(frames: SceneFrame[]): GameRenderer {
+/**
+ * A view that keeps every frame it is handed. `blind` makes it a view with no
+ * drawing context, which `GameView` prepares with one frame and hands no more
+ * (#2524): for a ride whose case reads no frame and no frame's input.
+ */
+function capturingRenderer(frames: SceneFrame[], blind = false): GameRenderer {
   return {
     loadRealisticWorld: () =>
       Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
     create: () => ({
-      hasContext: true,
+      hasContext: !blind,
       prepare: () => Promise.resolve(),
       render: (frame: SceneFrame) => {
         frames.push(frame);
@@ -279,6 +284,8 @@ async function mountRide(options: {
   readonly writes?: Write[] | undefined;
   readonly drawn?: SceneFrame[] | undefined;
   readonly races?: RoomRaceFact[] | undefined;
+  /** A view with no drawing context, so no frame is built: for a ride no case reads a frame of (#2524). */
+  readonly blind?: boolean | undefined;
 }): Promise<void> {
   mounted = await mount(
     <GameView
@@ -286,7 +293,7 @@ async function mountRide(options: {
       {...(options.writes === undefined && options.races === undefined
         ? {}
         : { trainer: trainerPort(options.writes ?? [], options.races) })}
-      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
+      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? [], options.blind))}
       now={() => nowMs}
       riderMass={MASS}
       {...(options.lapRace === undefined ? {} : { lapRace: options.lapRace })}
@@ -330,7 +337,7 @@ let soloRide: Promise<readonly Write[]> | undefined;
 const soloWrites = (): Promise<readonly Write[]> =>
   (soloRide ??= (async () => {
     const solo: Write[] = [];
-    await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo });
+    await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo, blind: true });
     for (let index = 0; index < FRAMES; index += 1) await pump();
     await clickThrough(buttonStarting('End ride'));
     await clickThrough(endRideAnswer(document, 'End ride'));

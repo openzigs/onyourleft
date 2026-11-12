@@ -72,11 +72,12 @@ let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
 
+/** A renderer that draws nothing, and says so, so no frame is built for it (#2524). */
 function renderer(): GameRenderer {
   return {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
-      hasContext: true,
+      hasContext: false,
       prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,

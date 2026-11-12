@@ -170,14 +170,23 @@ function port(route: RidableRoute = ROUTE): GamePort {
   };
 }
 
-function capturingRenderer(frames: SceneFrame[], realistic?: { asked: number }): GameRenderer {
+/**
+ * A view that keeps every frame it is handed. `blind` makes it a view with no
+ * drawing context, which `GameView` prepares with one frame and hands no more
+ * (#2524): for a ride whose case reads no frame and no frame's input.
+ */
+function capturingRenderer(
+  frames: SceneFrame[],
+  realistic?: { asked: number },
+  blind = false,
+): GameRenderer {
   return {
     loadRealisticWorld: () => {
       if (realistic !== undefined) realistic.asked += 1;
       return Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' });
     },
     create: () => ({
-      hasContext: true,
+      hasContext: !blind,
       prepare: () => Promise.resolve(),
       render: (frame: SceneFrame) => {
         frames.push(frame);
@@ -419,13 +428,17 @@ async function rideTheTrace(options: {
   readonly pacerIntensity?: string | undefined;
   /** The presses to make, {@link PRESSES} unless given. */
   readonly presses?: ReadonlyMap<number, SteerIntent | 'item'> | undefined;
+  /** A view with no drawing context, so no frame is built: for a case that reads none (#2524). */
+  readonly blind?: boolean | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
     <GameView
       port={port(options.route)}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
-      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic))}
+      renderer={() =>
+        Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic, options.blind))
+      }
       now={() => nowMs}
       {...(options.race === undefined ? {} : { lapRace: options.race })}
       {...(options.delivery === undefined ? {} : { delivery: options.delivery })}
@@ -643,7 +656,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     process.on('unhandledRejection', onRejection);
     try {
       // Past the first lap's line, on the last lap.
-      await rideTheTrace({ race: RACE, frames: 70 });
+      await rideTheTrace({ race: RACE, frames: 70, blind: true });
       expect(raceFields()[0]).toMatch(/Lap 2 of 2/u);
       await clickThrough(buttonStarting('End ride'));
       await clickThrough(endRideAnswer(document, 'End ride'));
@@ -701,7 +714,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       LAP_RACE_ASSIST_STORAGE_KEY,
       JSON.stringify({ itemsOff: true, autoUse: false, noKnockBack: false, gentlerBots: true }),
     );
-    await rideTheTrace({ race: RACE, frames: 6 });
+    await rideTheTrace({ race: RACE, frames: 6, blind: true });
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
     // One tier below the chosen 'hard', read off the bots' figures (#2455: a
@@ -736,6 +749,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     await rideTheTrace({
       race: RACE,
       frames: 40,
+      blind: true,
       onFrame: () => {
         read.push(
           queryAll<HTMLElement>(
@@ -981,6 +995,7 @@ describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () =>
     await rideTheTrace({
       race,
       trainer: gameTrainerPortOver(controller),
+      blind: true,
       // The bench keeps whole seconds, so it runs one a frame: twice the
       // game's clock, which both rides share, and fine enough that a lap line
       // crossed a frame later is a lap a second longer (the race offset's
