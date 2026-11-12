@@ -1018,6 +1018,10 @@ describe('lane steering inside a game ride — #1853', () => {
     const steers = steerOutputs.slice(pressed).map((each) => (each ?? 0) * side);
     expect(Math.max(...steers)).toBeGreaterThan(0.1);
     expect(Math.min(...steers)).toBeLessThan(-0.1);
+    // Into the move first: the first turn of the bars after the press has the
+    // move's own sign, not the opposite (the max and min above are symmetric).
+    const first = steers.find((each) => Math.abs(each) > 0.1);
+    expect(first).toBeGreaterThan(0);
     expect(steerOutputs.at(-1)).toBeUndefined();
   });
 });

@@ -397,6 +397,31 @@ describe('the bars turned into a lane change and through a bend — #2494', () =
     },
   );
 
+  it('turns them by what the drawn heading’s own turn rate asks, not the sway’s — the chain rule’s saturation too', () => {
+    // The heading turns by facingTurn(atan(rate)), which saturates at the turn
+    // limit, so the bars follow the heading's measured per-frame turn, not an
+    // unsaturated sway-rate estimate of it. Compared at a sway fast enough
+    // that the saturation is well under 1 (at the first frame it is 1).
+    for (const intent of ['lane-right', 'lane-left'] as const) {
+      const frames = steeredChange(intent, true, 5);
+      let compared = 0;
+      for (let index = 1; index < frames.length; index += 1) {
+        const now = frames[index];
+        const before = frames[index - 1];
+        if (now === undefined || before === undefined) continue;
+        const measured = steerAngle((now.turn - before.turn) * FPS, 5);
+        if (Math.abs(measured) < 3 * DEGREE) continue;
+        compared += 1;
+        expect(Math.sign(now.steer)).toBe(Math.sign(measured));
+        // Within the finite difference's own error (0.85 to 1.16 measured);
+        // without the saturation the ratio runs up to 5.7.
+        expect(now.steer / measured).toBeGreaterThan(0.75);
+        expect(now.steer / measured).toBeLessThan(1.25);
+      }
+      expect(compared).toBeGreaterThan(3);
+    }
+  });
+
   it('holds the bars straight when the scene is told no rate: the control', () => {
     for (const each of steeredChange('lane-right', false)) expect(each.steer).toBe(0);
   });
@@ -412,7 +437,7 @@ describe('the bars turned into a lane change and through a bend — #2494', () =
     expect(steerAngle(100, 1)).toBe(MAXIMUM_STEER_RADIANS);
   });
 
-  it('turns them a little through a bend, toward it, for every rider on the road', () => {
+  it('turns them a little through a bend, toward it, for the rider, and the bicycle straight on a straight', () => {
     const hairpin = hairpinRoute(20);
     const apex = 400 + (Math.PI * 20) / 2;
     const frame = sceneFrame({

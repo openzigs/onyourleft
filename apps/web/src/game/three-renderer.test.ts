@@ -2933,6 +2933,12 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       material.onBeforeCompile(shader);
       expect(shader.vertexShader).toContain('oylTurned(transformed');
       expect(shader.vertexShader).toContain('oylTurned(objectNormal');
+      // The turn's direction is `steeredPoint`'s, which turns the realistic
+      // hands on the CPU: Rodrigues' k × v. A v × k would turn the bars the
+      // other way from the hands that hold them, and no jsdom frame shows it.
+      expect(shader.vertexShader).toContain(
+        'return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);',
+      );
       expect(shader.vertexShader).toContain(STEERING_AXIS.direction.y.toFixed(9));
       expect(shader.vertexShader).toContain(STEERING_AXIS.point.z.toFixed(9));
     }

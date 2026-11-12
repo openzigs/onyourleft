@@ -1782,6 +1782,23 @@ describe('the realistic rider moves like a rider — #625', () => {
         inBicycle(riders, handOf(riders, 'wristR')),
       ];
     };
+    /**
+     * Which way each hand lies, wrist to the middle of the drawn hand, as a
+     * yaw in the bicycle's frame (zero straight ahead) — the hand's own line,
+     * which the grip's position does not tell.
+     */
+    const lineYawsAt = (steer: number): readonly number[] => {
+      const hands = handsAt(steer);
+      const body = riders.bodies[0];
+      if (body === undefined) throw new Error('no body');
+      return (['wristL', 'wristR'] as const).map((name, index) => {
+        const bone = body.skeleton.bones.find((each) => each.name === name);
+        if (bone === undefined) throw new Error(`no bone ${name}`);
+        const wrist = inBicycle(riders, bone.getWorldPosition(body.position.clone()).toArray());
+        const hand = hands[index] ?? [];
+        return Math.atan2((hand[0] ?? 0) - (wrist[0] ?? 0), (hand[2] ?? 0) - (wrist[2] ?? 0));
+      });
+    };
     const straight = handsAt(0);
     let worst = 0;
     let moved = 0;
@@ -1805,6 +1822,29 @@ describe('the realistic rider moves like a rider — #625', () => {
           }
         ).geometry.getAttribute('oylInstanceSteer');
         expect(steered.getX(0)).toBeCloseTo(steer, 6);
+      }
+    }
+    // The hand's own line turns with the bars, by what the shader gives the
+    // bar: the line from the grip to the point `handDown` ahead and below it.
+    // A hand tip left unturned, or the old unturned line, keeps it at the
+    // straight line's yaw and fails here.
+    const lines = lineYawsAt(0);
+    const down = (20 * Math.PI) / 180;
+    for (const steer of [MAXIMUM_STEER_RADIANS, -MAXIMUM_STEER_RADIANS / 2]) {
+      const turnedLines = lineYawsAt(steer);
+      for (const [index, side] of [1, -1].entries()) {
+        const held = { x: side * bend, y: hoods.y, z: hoods.z };
+        const grip = steeredPoint(held, steer, { x: 0, y: 0, z: 0 });
+        const tip = steeredPoint(
+          { x: held.x, y: held.y - Math.sin(down), z: held.z + Math.cos(down) },
+          steer,
+          { x: 0, y: 0, z: 0 },
+        );
+        const expected = Math.atan2(tip.x - grip.x, tip.z - grip.z);
+        const measured = (turnedLines[index] ?? 0) - (lines[index] ?? 0);
+        console.log(`#2494: hand line yaw ${measured.toFixed(3)} against ${expected.toFixed(3)}`);
+        expect(Math.abs(expected)).toBeGreaterThan(Math.abs(steer) / 2);
+        expect(Math.abs(measured - expected)).toBeLessThan(Math.abs(expected) / 2);
       }
     }
     console.log(

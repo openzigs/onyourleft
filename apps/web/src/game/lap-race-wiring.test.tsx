@@ -832,6 +832,9 @@ describe('a solo lap race inside a game ride — #1906', () => {
     const steers = inputs.slice(pressed).map((each) => each.steer ?? 0);
     expect(Math.min(...steers)).toBeLessThan(-0.1);
     expect(Math.max(...steers)).toBeGreaterThan(0.1);
+    // Into the move first, left: the max and min above are symmetric, so a
+    // sway rate of the wrong sign would pass them.
+    expect(steers.find((each) => Math.abs(each) > 0.1)).toBeLessThan(0);
     expect(Math.abs(inputs.at(-1)?.steer ?? 0)).toBeLessThan(0.05);
   });
 
