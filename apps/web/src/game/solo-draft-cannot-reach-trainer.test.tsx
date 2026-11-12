@@ -407,7 +407,8 @@ async function rideWith(
  * Each run, ridden once by the first case that asks for it and read by every
  * case after, so a case pays for one ride (#2524, #1688's ruling: a slow case
  * is made cheaper, never given a longer timeout). A case run alone with `-t`
- * rides whatever it reads that no earlier case has.
+ * rides whatever it reads that no earlier case has, and the ghost case
+ * (three rides) can then outrun the 5 s default; whole-file runs do not.
  */
 const runs = new Map<string, Promise<Run>>();
 function ridden(
@@ -425,6 +426,10 @@ function ridden(
       return done;
     });
     runs.set(key, run);
+    // A ride that fails is not kept: the next case rides afresh and reports its
+    // own failure, not this ride's "stopped asking for frames" after afterEach
+    // cut it off.
+    run.catch(() => runs.delete(key));
   }
   return run;
 }

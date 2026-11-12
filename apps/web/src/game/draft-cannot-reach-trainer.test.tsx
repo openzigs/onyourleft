@@ -389,7 +389,8 @@ async function rideAt(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
  * Each of the four runs, ridden once by the first case that asks for it and
  * read by every case after: a case pays for one ride, not two (#2524, #1688's
  * ruling: a slow case is made cheaper, never given a longer timeout). A case
- * run alone with `-t` rides whatever it reads that no earlier case has.
+ * run alone with `-t` rides whatever it reads that no earlier case has, and
+ * the three-ride cases can then outrun the 5 s default (they pass whole-file).
  */
 const runs = new Map<string, Promise<Run>>();
 function ridden(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
@@ -401,6 +402,10 @@ function ridden(k: number, mode: 'simulation' | 'erg'): Promise<Run> {
       return done;
     });
     runs.set(key, run);
+    // A ride that fails is not kept: the next case rides afresh and reports its
+    // own failure, not this ride's "stopped asking for frames" after afterEach
+    // cut it off.
+    run.catch(() => runs.delete(key));
   }
   return run;
 }
@@ -464,11 +469,11 @@ function expectGradesAtTheOdometer(name: 'alone' | 'drafted', run: Run): void {
 }
 
 describe('a draft reaches no trainer write in simulation mode — #2423, ADR 0038 D-1', () => {
-  // #2524: the two runs of this case were one case of 2.6 s, and 16.6 s under
-  // --coverage, locally on an Apple M4 Pro at a load average of 20 to 33; the
-  // alone run is now its own case, so each case rides one run. After, at a
-  // load average of 10 to 15: 2.2 s and 1.2 s, and 3.0 s and 2.3 s under
-  // --coverage. A ride of 300 frames of the real GameView is what is left.
+  // #2524: the alone run is now its own case, so each case rides one run. A
+  // ride of 300 frames of the real GameView is what is left: 3.5 to 4.5 s a
+  // case under --coverage on the nightly's EPYC 7763 (run 43233467339), against
+  // the 5 s default. The earlier local timings (a single M4 Pro run at a load
+  // average of 20 to 33) are not cited: they overstated the gain.
   it('writes the road’s grade at the rider’s own odometer, and the protocol’s defaults for everything else, ridden alone', async () => {
     expectGradesAtTheOdometer('alone', await ridden(1, 'simulation'));
   });
@@ -507,9 +512,8 @@ describe('a draft reaches no trainer write in simulation mode — #2423, ADR 003
 });
 
 describe('a draft reaches no trainer write under a workout (ERG) — #2423, ADR 0059 D-2', () => {
-  // #2524: one case of 2.3 s, and 19.0 s under --coverage, at the load above;
-  // the alone run is now ridden by a case of its own. After, at a load
-  // average of 10 to 15: 1.1 s each, and 2.2 s and 2.1 s under --coverage.
+  // #2524: the alone run is now ridden by a case of its own; see the readings
+  // above (nightly run 43233467339, EPYC 7763, under --coverage).
   it('sends the workout’s target powers, ridden alone', async () => {
     const alone = await ridden(1, 'erg');
     const targets = alone.riding.filter((write) => write.bytes[0] === SET_TARGET_POWER);
