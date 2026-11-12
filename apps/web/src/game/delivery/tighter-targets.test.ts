@@ -75,6 +75,8 @@ const LEVEL = {
   lengthMetres: 2_000,
   mailboxShare: 0.5,
   noDeliveryShare: 0.5,
+  // #2363: a level round names its level.
+  id: 'test-level',
 } as const;
 
 function storageOf(entries: Record<string, unknown> = {}): PreferenceStorage {

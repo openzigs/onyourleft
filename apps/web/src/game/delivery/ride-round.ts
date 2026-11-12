@@ -105,7 +105,9 @@
  * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
  * standing. The assist still places fewer or none. A level round is kept
  * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
- * is never written to `delivery-progress.ts`. The level's throw window is not
+ * is never written to `delivery-progress.ts`. Reached, its end keeps the
+ * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens
+ * the next level in the picker. The level's throw window is not
  * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
  * may (`level-file.ts`), and the later levels that tighten it read it
  * (#2367, which draws them). Its mailbox and no-delivery shares are read
@@ -132,6 +134,7 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { readLevelProgress, withLevelFinished, writeLevelProgress } from './level-progress';
 import type { LevelRound } from './levels/level-file';
 import {
   clearOfParkedCars,
@@ -213,6 +216,8 @@ export interface DeliveryRide {
    * `false` with the assist's no fail on, when it costs nothing (DL10).
    */
   readonly noDeliveryCosts: boolean;
+  /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
+  readonly levelId: string | undefined;
 }
 
 /** What a round needs at the press. */
@@ -246,6 +251,8 @@ export interface DeliveryRideStart {
     | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> &
         Partial<Pick<LevelRound, 'mailboxShare' | 'noDeliveryShare'>> & {
           readonly lengthMetres: number;
+          /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
+          readonly id: string;
         })
     | undefined;
 }
@@ -313,6 +320,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     noDeliveryTargets: pick.noDelivery,
     throwNoDelivery: pick.noDelivery.map(throwTargetOf),
     noDeliveryCosts: !assist.noFail,
+    levelId: input.level?.id,
   };
 }
 
@@ -534,4 +542,20 @@ export function keepDeliveryWeek(
 ): boolean {
   if (ride?.onLevel === true) return false;
   return writeDeliveryProgress(storage, outcome.next);
+}
+
+/**
+ * Keep a built-in level finished, from a round that reached its own end —
+ * #2363, ADR 0065 D-9: every house on it settled, delivered or missed, with
+ * the assisted setting on or off (D-9.1, DL10). The level's id only, in
+ * `level-progress.ts`, and never the week's counts (D-9.3). `false` for a
+ * round on a rider's own route, a round not yet at its end (a ride ended
+ * first finishes no level), and a device that refused.
+ */
+export function keepLevelFinished(
+  storage: PreferenceStorage | undefined,
+  ride: Pick<DeliveryRide, 'levelId' | 'outcome'>,
+): boolean {
+  if (ride.levelId === undefined || ride.outcome === undefined) return false;
+  return writeLevelProgress(storage, withLevelFinished(readLevelProgress(storage), ride.levelId));
 }
