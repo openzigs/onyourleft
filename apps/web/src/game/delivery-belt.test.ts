@@ -14,7 +14,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
-import { CAMERA_ABOVE_METRES, MAXIMUM_FIELD_OF_VIEW_DEGREES, NEAR_PLANE_METRES } from './camera';
+import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_TARGET_AHEAD_METRES,
+  cameraRig,
+  MAXIMUM_FIELD_OF_VIEW_DEGREES,
+  NEAR_PLANE_METRES,
+  projectToFrame,
+} from './camera';
 import { deliveryInView } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
@@ -23,12 +30,15 @@ import {
   type ObstacleKind,
 } from './delivery/obstacles';
 import { recordMiss, startRound, type Round } from './delivery/round';
-import type { DeliveryTarget } from './delivery/targets';
+import { MAILBOX_FROM_KERB_METRES, type DeliveryTarget } from './delivery/targets';
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
+  MAILBOX_CATCH_RADIUS_METRES,
   NO_PARCELS,
   PARCEL_FLIGHT_TICKS,
   stepThrows,
+  THROW_WINDOW_BEFORE_METRES,
+  TARGET_CATCH_RADIUS_METRES,
   type ThrowState,
   type ThrowTarget,
 } from './delivery/throw';
@@ -705,5 +715,120 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     expect(position.count / 3).toBe(DELIVERY_OBSTACLE_TRIANGLES);
     expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_600);
     belt.dispose();
+  });
+});
+
+describe('a mailbox reads from where its throw window opens — #2507, the owner’s ruling on PR #2500', () => {
+  /** The owner's tablet, 1280×800. */
+  const TABLET = { width: 1280, height: 800 } as const;
+  /** The markers' kind number of a mailbox (`three-renderer.ts` §`DELIVERY_MARKER_ORDER`). */
+  const MAILBOX = 1;
+
+  /** Every vertex of the mailbox marker, as the belt's geometry holds it: where, glowing or not, and how dark its paint. */
+  function mailboxVertices(belt: DeliveryBelt): {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly glows: boolean;
+    readonly dark: boolean;
+  }[] {
+    const geometry = belt.meshOf('markers').geometry;
+    const position = geometry.getAttribute('position');
+    const colour = geometry.getAttribute('color');
+    const glow = geometry.getAttribute('oylGlow');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const found = [];
+    for (let at = 0; at < position.count; at += 1) {
+      if (kinds.getX(at) !== MAILBOX) continue;
+      found.push({
+        x: position.getX(at),
+        y: position.getY(at),
+        z: position.getZ(at),
+        glows: glow.getX(at) === 1,
+        // The box's slate paint; the post is pale and the diamond and ring glow.
+        dark: Math.max(colour.getX(at), colour.getY(at), colour.getZ(at)) < 0.3,
+      });
+    }
+    return found;
+  }
+
+  const span = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+
+  it('draws a bigger box on its post, under a bigger glowing diamond and inside a bigger ring, read back from the geometry', () => {
+    const belt = new DeliveryBelt('stylised');
+    const mailbox = mailboxVertices(belt);
+    const box = mailbox.filter((each) => each.dark);
+    const post = mailbox.filter((each) => !each.dark && !each.glows);
+    const diamond = mailbox.filter((each) => each.glows && each.y > 0.2);
+    const ring = mailbox.filter((each) => each.glows && each.y <= 0.2);
+    // Until #2507: a 0.27 m × 0.27 m × 0.45 m box on a 1 m post 0.08 m thick, a 0.45 m diamond and a 0.28 m ring.
+    expect(span(box.map((each) => each.x))).toBeCloseTo(0.54, 6);
+    expect(span(box.map((each) => each.y))).toBeCloseTo(0.54, 6);
+    expect(span(box.map((each) => each.z))).toBeCloseTo(0.9, 6);
+    // The box sits on the post's head, and the post is sturdier than a doorstep's 0.08 m.
+    expect(Math.max(...post.map((each) => each.y))).toBeCloseTo(1, 6);
+    expect(span(post.map((each) => each.x))).toBeCloseTo(0.14, 6);
+    expect(Math.min(...box.map((each) => each.y))).toBeCloseTo(1, 6);
+    expect(span(diamond.map((each) => each.x))).toBeCloseTo(0.72, 6);
+    expect(span(ring.map((each) => each.x))).toBeGreaterThan(0.8);
+    // Still a lower mark than a doorstep's 3.66 m one, by more than a metre: a different target.
+    expect(Math.max(...mailbox.map((each) => each.y))).toBeLessThan(2.66);
+    belt.dispose();
+  });
+
+  it('stands at least 75 pixels tall, its box at least 15, on the tablet from where the throw window opens', () => {
+    // The rider on the middle of the road, heading north, the throw window to a mailbox at the
+    // right-hand kerb just opening: the mailbox THROW_WINDOW_BEFORE_METRES ahead.
+    const pose = {
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+    };
+    const rig = cameraRig(pose);
+    const at = {
+      x: -(CARRIAGEWAY_HALF_WIDTH_METRES + MAILBOX_FROM_KERB_METRES),
+      y: 0,
+      z: THROW_WINDOW_BEFORE_METRES,
+      yaw: -Math.PI / 2,
+    };
+    const belt = new DeliveryBelt('stylised');
+    belt.update({ parcels: [], markers: [{ ...at, kind: 'mailbox' }], obstacles: [] }, rig.eye);
+    const [drawn] = belt.drawn('markers');
+    expect(drawn?.kind).toBe('mailbox');
+    const scale = drawn?.scale ?? 1;
+    /** A vertex of the marker's geometry, as its instance places it, in pixel rows of the tablet's frame. */
+    const row = (vertex: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    }): number => {
+      const cos = Math.cos(at.yaw);
+      const sin = Math.sin(at.yaw);
+      const point = {
+        x: at.x + scale * (vertex.x * cos + vertex.z * sin),
+        y: at.y + scale * vertex.y,
+        z: at.z + scale * (-vertex.x * sin + vertex.z * cos),
+      };
+      const framed = projectToFrame(rig, TABLET.width / TABLET.height, point);
+      expect(framed).toBeDefined();
+      return (framed?.top ?? 0) * TABLET.height;
+    };
+    const mailbox = mailboxVertices(belt);
+    const whole = span(mailbox.map(row));
+    const box = span(mailbox.filter((each) => each.dark).map(row));
+    // Until #2507: 58 pixels for the whole mark and 8 for the box; since, 77 and 16.
+    expect(whole).toBeGreaterThanOrEqual(75);
+    expect(box).toBeGreaterThanOrEqual(15);
+    belt.dispose();
+  });
+
+  it('keeps a mailbox a tighter target than a doorstep: only what is drawn got bigger', () => {
+    expect(MAILBOX_CATCH_RADIUS_METRES).toBe(0.6);
+    expect(MAILBOX_CATCH_RADIUS_METRES).toBeLessThan(TARGET_CATCH_RADIUS_METRES);
   });
 });

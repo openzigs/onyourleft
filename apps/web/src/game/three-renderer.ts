@@ -11208,18 +11208,32 @@ const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox'
 
 /**
  * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
- * project's own. A mailbox: a box `box` long on a `post` post at the kerb,
- * a glowing diamond `diamond` across over it, and a ring `ring` round its
- * foot, all smaller than a doorstep's, as its catch is. A house that must
- * not get a parcel: a `signPost` post with a glowing red ring `sign` across
- * crossed by a bar, standing upright and facing the road, and **no** ring on
- * the step, so it reads as a refusal by its shape and not only its colour.
+ * project's own. A mailbox: a box `box` long and 0.6 of that across and tall
+ * on a `post` post at the kerb, a glowing diamond `diamond` across over it,
+ * and a ring `ring` round its foot, all smaller than a doorstep's, as its
+ * catch is. A house that must not get a parcel: a `signPost` post with a
+ * glowing red ring `sign` across crossed by a bar, standing upright and
+ * facing the road, and **no** ring on the step, so it reads as a refusal by
+ * its shape and not only its colour.
+ *
+ * #2507, the owner's ruling on PR #2500: the mailbox was hard to pick out at
+ * 12 m and beyond, so it is drawn bigger: the box from 0.45 m long to 0.9 m
+ * (0.27 m to 0.54 m across and tall), the diamond from 0.45 m to 0.72 m
+ * across and the ring from 0.28 m to 0.42 m, and its 1 m post from 0.08 m
+ * thick, a doorstep's, to `postThick`, 0.14 m. From where
+ * its throw window opens, 20 m short of it, the whole mark stands about 77
+ * pixels tall on the owner's 1280×800 tablet, up from 58, and the box about
+ * 16, up from 8 (`delivery-belt.test.ts` §"#2507"). Its top, 2.65 m, is still
+ * over a metre below a doorstep's 3.66 m, which #2365 holds, and only the
+ * drawing grew: the catch is still `delivery/throw.ts`
+ * §`MAILBOX_CATCH_RADIUS_METRES`.
  */
 const OTHER_MARKER_METRES = {
   post: 1.0,
-  box: 0.45,
-  diamond: 0.45,
-  ring: 0.28,
+  postThick: 0.14,
+  box: 0.9,
+  diamond: 0.72,
+  ring: 0.42,
   signPost: 2.4,
   sign: 0.8,
 } as const;
@@ -11336,9 +11350,9 @@ function markerShape(): BufferGeometry {
       glows: true,
       kind: kind('house'),
     },
-    // #2365: a mailbox at the kerb.
+    // #2365: a mailbox at the kerb, on a sturdier post than a doorstep's since #2507.
     {
-      made: deliveryBox(postThick, other.post, postThick, 0, other.post / 2, 0),
+      made: deliveryBox(other.postThick, other.post, other.postThick, 0, other.post / 2, 0),
       colour: DELIVERY_PAINT.post,
       kind: kind('mailbox'),
     },

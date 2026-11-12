@@ -187,6 +187,17 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(reading?.after).toEqual({ markers: 1, first: false, second: true });
   });
 
+  test('photographs a mailbox from where its throw window opens, on the tablet, for the owner — #2507', async ({
+    page,
+  }, testInfo) => {
+    await open(page);
+    await page.evaluate(() => window.__oylDelivery?.mailboxShowcase());
+    const shot = await page.locator('#delivery-mailbox').screenshot();
+    await testInfo.attach('delivery-mailbox', { body: shot, contentType: 'image/png' });
+    expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(shot.byteLength).toBeGreaterThan(5000);
+  });
+
   test('photographs the parked cars for the owner — #2362, round 5', async ({ page }, testInfo) => {
     await open(page);
     await page.evaluate(() => window.__oylDelivery?.carsShowcase());
