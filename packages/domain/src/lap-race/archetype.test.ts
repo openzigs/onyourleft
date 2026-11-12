@@ -34,7 +34,7 @@ import archetypeSource from './archetype.ts?raw';
 import { BOT_TIER_WATTS_PER_KILOGRAM, BOT_TIERS } from './bots';
 import { LapRaceError } from './errors';
 import * as lapRace from './index';
-import { BOT_PACING_STYLES, botFieldPaces } from './pace';
+import { BOT_ABILITY_SPREAD, BOT_PACING_STYLES, botFieldPaces } from './pace';
 import { BOT_PLAN_SURGE_CEILING, botRacePlan } from './plan';
 import { raceCourse } from './race';
 import { BOT_SKILL_MISJUDGEMENT, BOT_SKILLS } from './strategy';
@@ -91,7 +91,7 @@ describe('each archetype is a power profile within its tier (ADR 0067 D-1.1, ADR
     ['attack', BOT_ARCHETYPE_ATTACK_PROPENSITY],
   ];
 
-  it('has a row for every archetype in every column, each a finite number above zero', () => {
+  it('has a row for every archetype in every column, each a finite number of at least zero', () => {
     for (const [name, table] of tables) {
       expect(Object.keys(table).sort(), name).toEqual([...BOT_ARCHETYPES].sort());
       for (const archetype of BOT_ARCHETYPES) {
@@ -127,7 +127,9 @@ describe('each archetype is a power profile within its tier (ADR 0067 D-1.1, ADR
       }
     }
     // The weakest bot of a tier is still stronger than the strongest of the tier below.
-    const weakest = Math.min(...BOT_ARCHETYPES.map((each) => BOT_ARCHETYPE_CP_SHARE[each])) * 0.94;
+    const weakest =
+      Math.min(...BOT_ARCHETYPES.map((each) => BOT_ARCHETYPE_CP_SHARE[each])) *
+      (1 - BOT_ABILITY_SPREAD);
     for (let index = 1; index < BOT_TIERS.length; index += 1) {
       const tier = BOT_TIERS[index] as (typeof BOT_TIERS)[number];
       const below = BOT_TIERS[index - 1] as (typeof BOT_TIERS)[number];
@@ -238,9 +240,7 @@ describe('every archetype and skill number is a named, exported constant (#2459)
       expect(Object.keys(lapRace), name).toContain(name);
     }
     // No bare number is declared outside an exported constant, but the salt.
-    const privates = [...archetypeSource.matchAll(/^const (\w+) = (\S+);/gm)].map(
-      (match) => match[1],
-    );
+    const privates = [...archetypeSource.matchAll(/^const (\w+)\b/gm)].map((match) => match[1]);
     expect(privates).toEqual(['TACTICS_SALT']);
   });
 

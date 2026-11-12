@@ -12,6 +12,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type {
   BotPace,
+  BotPacingStyle,
   BotStrategy,
   BotTier,
   GhostSamples,
@@ -29,6 +30,7 @@ import {
   botFieldPaces,
   BOT_PERSONALITIES,
   BOT_TIER_WATTS_PER_KILOGRAM,
+  botPlanStep,
   botRacePlan,
   botWPrimeJoules,
   createItemRace,
@@ -36,6 +38,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   distanceOnRoute,
+  fullBotEnergy,
   geographicPosition,
   gradeAt,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -98,8 +101,12 @@ interface Entrant {
   readonly pace?: BotPace;
 }
 
-function conditions(profile: RouteProfile): LapRaceBotConditions {
-  return { profile, airDensityKilogramsPerCubicMetre: AIR };
+function conditions(profile: RouteProfile, integrationStepSeconds?: number): LapRaceBotConditions {
+  return {
+    profile,
+    airDensityKilogramsPerCubicMetre: AIR,
+    ...(integrationStepSeconds === undefined ? {} : { integrationStepSeconds }),
+  };
 }
 
 interface Run {
@@ -107,13 +114,18 @@ interface Run {
   readonly bots: readonly (readonly LapRaceBot[])[];
 }
 
-/** A solo race of bots, one tick a second, until every bot has finished or `limit` ticks. */
+/**
+ * A solo race of bots, one tick a second, until every bot has finished or `limit` ticks.
+ * `integrationStepSeconds` is the physics' sub-step inside each tick, `advance`'s 10 ms
+ * when not given.
+ */
 function race(
   profile: RouteProfile,
   field: readonly Entrant[],
   seed: number,
   itemsOn: boolean,
   limit = 2_000,
+  integrationStepSeconds?: number,
 ): Run {
   let state = createItemRace({
     course: raceCourse(profile.totalDistance, 3),
@@ -131,7 +143,7 @@ function race(
     if (state.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
     const next = stepBotRace(state, bots, {
       elapsed: seconds(1),
-      conditions: conditions(profile),
+      conditions: conditions(profile, integrationStepSeconds),
       seed,
     });
     state = next.race;
@@ -572,74 +584,135 @@ const ALL_TIERS: readonly Entrant[] = [
   { id: 'f', tier: 'fierce' },
 ];
 
+/** The W′ balance case's physics sub-step: a whole one-second tick, so `advance` runs once a tick. */
+const BALANCE_INTEGRATION_STEP_SECONDS = 1;
+
 describe('the race plan (#1960, ADR 0061 D-8)', () => {
-  it(
-    'keeps every bot’s W′ balance in [0, W′] on every tick of 100 seeded races on a flat and a hilly loop, its power inside the floor, the surge ceiling and 7 W/kg (ADR 0067 D-1.3)',
-    { timeout: 180_000 },
-    () => {
-      // What replaces ADR 0061 D-8.1's mean tolerance (ADR 0067 D-4): a bot's
-      // capacity, not its average, is what is held. Each field is dealt its
-      // paces, so every style and ability is in it, and items alternate.
-      let exhausted = 0;
-      for (const profile of [FLAT, HILLY]) {
-        for (let seed = 1; seed <= 100; seed += 1) {
-          const paces = botFieldPaces(seed, ALL_TIERS.length);
-          const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
-          const run = race(profile, field, seed, seed % 2 === 0);
-          const label = `seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
-          for (const { id, tier, pace } of field) {
-            const wPrime = botWPrimeJoules(tier, pace);
-            const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
-            const plan = botRacePlan(tier, raceCourse(profile.totalDistance, 3), seed, pace);
-            const ticks = ticksOf(run, id, profile);
-            expect(ticks.finished, `${id} ${label}`).toBeGreaterThan(100);
-            // Sampled every tick; asserted once on the extremes, so a race is not
-            // a thousand expectations.
-            let least = Number.POSITIVE_INFINITY;
-            let most = Number.NEGATIVE_INFINITY;
-            // The most a tick rode over what the balance before it could pay
-            // for: a plan that rode past its balance would leave the balance
-            // clamped in range and still be wrong, so the power is read too.
-            let overdrawn = Number.NEGATIVE_INFINITY;
-            for (let tick = 1; tick < run.bots.length; tick += 1) {
-              const before = (run.bots[tick - 1]?.find((each) => each.id === id) as LapRaceBot)
-                .energy;
-              const { energy, power } = run.bots[tick]?.find(
-                (each) => each.id === id,
-              ) as LapRaceBot;
-              least = Math.min(least, energy.wbalJoules);
-              most = Math.max(most, energy.wbalJoules);
-              if (energy.exhausted) exhausted += 1;
-              const paid = before.exhausted
-                ? plan.capacity.cpWatts
-                : plan.capacity.cpWatts + before.wbalJoules;
-              overdrawn = Math.max(overdrawn, power - paid);
-            }
-            expect(least, `${id} ${label}`).toBeGreaterThanOrEqual(0);
-            expect(most, `${id} ${label}`).toBeLessThanOrEqual(wPrime);
-            expect(overdrawn, `${id} ${label}`).toBeLessThanOrEqual(1e-9);
-            const ridden = ticks.power.slice(0, ticks.finished);
-            // ADR 0061 D-8.2, kept: the surge ceiling, never over 7 W/kg, and #92's −20 %.
-            expect(Math.max(...ridden), `${id} ${label}`).toBeLessThanOrEqual(
-              plan.surgeWatts + 1e-9,
-            );
-            expect(Math.max(...ridden), `${id} ${label}`).toBeLessThanOrEqual(
-              MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS,
-            );
-            expect(Math.min(...ridden), `${id} ${label}`).toBeGreaterThanOrEqual(
-              tierWatts * PACING_FACTOR_FLOOR - 1e-9,
-            );
-            // And it does leave #92's +10 % band upward, in the sprint at least.
-            expect(Math.max(...ridden), `${id} ${label}`).toBeGreaterThan(
-              tierWatts * PACING_FACTOR_CEILING,
-            );
-          }
-        }
+  it('keeps every bot’s W′ balance in [0, W′] on every tick of a race at every tier and style on a flat and a hilly loop, its power inside the floor, the surge ceiling and 7 W/kg (ADR 0067 D-1.3)', () => {
+    // What replaces ADR 0061 D-8.1's mean tolerance (ADR 0067 D-4): a bot's
+    // capacity, not its average, is what is held.
+    //
+    // Forty races, not two hundred seeded ones (#1688's ruling: a slow case
+    // is made cheaper, never given a longer timeout). The balance depends on a
+    // bot's tier, its style and its ability, the road and the race; a seed
+    // only picks among those, so the fields are dealt for what they cover:
+    //
+    // - twenty of the four tiers, ten a loop, on the five styles in rotation:
+    //   each tier, style and loop ridden once at each end of the ability band
+    //   (all 80), with items on in every other race;
+    // - twenty of five steady bots on the hilly loop, dealt by the race's own
+    //   `botFieldPaces`, so one of each style across the band. Steady has the
+    //   smallest W′ and the hill spends it: these are the races in which an
+    //   exhausted bot gets some W′ back and asks over CP again, the only ticks
+    //   on which the exhausted cap is what holds its power. Of the 800
+    //   bot-races the seeded version rode, four had one; `heldAtCp` below
+    //   fails the case if a deal ever has none.
+    //
+    // And the physics integrates each one-second tick in one sub-step, not a
+    // hundred. The balance and the power are the plan's, stepped once a tick
+    // on the tick's own second; the sub-step moves only where the bot is,
+    // and the invariants hold wherever it is. Over the seeded version's 200
+    // races the same four bot-races hit the exhausted cap at either sub-step.
+    //
+    // Apple M-series, Node 26, this file: the 200 seeded races at 10 ms took
+    // 19.9 s, and 21.6 s under --coverage (one run each, under the 180 s
+    // timeout this case no longer has); these forty take 194 to 276 ms, and
+    // 359 to 607 ms under --coverage (three runs each).
+    const fields: { profile: RouteProfile; seed: number; field: readonly Entrant[] }[] = [];
+    for (const profile of [FLAT, HILLY]) {
+      for (let seed = 1; seed <= 2 * BOT_PACING_STYLES.length; seed += 1) {
+        // Seed s and seed s + 5 deal a tier one style, and the odd five
+        // between them flips the end of the ability band it rides at.
+        const field = ALL_TIERS.map((entrant, index) => ({
+          ...entrant,
+          pace: {
+            style: BOT_PACING_STYLES[(index + seed) % BOT_PACING_STYLES.length] as BotPacingStyle,
+            ability: (index + seed) % 2 === 0 ? 1 : 1 - BOT_ABILITY_SPREAD,
+          },
+        }));
+        fields.push({ profile, seed, field });
       }
-      // Non-vacuity: some bot somewhere ran its W′ down to nothing and had to ease.
-      expect(exhausted).toBeGreaterThan(0);
-    },
-  );
+    }
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const field = botFieldPaces(seed, BOT_PACING_STYLES.length).map((pace, index): Entrant => ({
+        id: `s${String(index)}`,
+        tier: 'steady',
+        pace,
+      }));
+      fields.push({ profile: HILLY, seed, field });
+    }
+    let exhausted = 0;
+    // Ticks on which an exhausted bot had some W′ back and asked over CP.
+    let heldAtCp = 0;
+    for (const { profile, seed, field } of fields) {
+      const run = race(
+        profile,
+        field,
+        seed,
+        seed % 2 === 0,
+        undefined,
+        BALANCE_INTEGRATION_STEP_SECONDS,
+      );
+      const label = `seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
+      for (const { id, tier, pace } of field) {
+        const wPrime = botWPrimeJoules(tier, pace);
+        const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
+        const plan = botRacePlan(tier, raceCourse(profile.totalDistance, 3), seed, pace);
+        const ticks = ticksOf(run, id, profile);
+        expect(ticks.finished, `${id} ${label}`).toBeGreaterThan(100);
+        // Sampled every tick; asserted once on the extremes, so a race is not
+        // a thousand expectations.
+        let least = Number.POSITIVE_INFINITY;
+        let most = Number.NEGATIVE_INFINITY;
+        // The most a tick rode over what the balance before it could pay
+        // for: a plan that rode past its balance would leave the balance
+        // clamped in range and still be wrong, so the power is read too.
+        let overdrawn = Number.NEGATIVE_INFINITY;
+        for (let tick = 1; tick < run.bots.length; tick += 1) {
+          const bot = run.bots[tick - 1]?.find((each) => each.id === id) as LapRaceBot;
+          const before = bot.energy;
+          const { energy, power } = run.bots[tick]?.find((each) => each.id === id) as LapRaceBot;
+          // What the plan asks here, read with a full balance: over CP is
+          // what an exhausted bot with some of W′ back must still be held from.
+          if (before.exhausted && before.wbalJoules > 0) {
+            const ask = botPlanStep(plan, fullBotEnergy(plan.capacity), {
+              effortDistance: bot.ride.distance,
+              grade: ticks.grade[tick - 1] ?? 0,
+              elapsed: seconds(1),
+            }).power;
+            if (ask > plan.capacity.cpWatts) heldAtCp += 1;
+          }
+          least = Math.min(least, energy.wbalJoules);
+          most = Math.max(most, energy.wbalJoules);
+          if (energy.exhausted) exhausted += 1;
+          const paid = before.exhausted
+            ? plan.capacity.cpWatts
+            : plan.capacity.cpWatts + before.wbalJoules;
+          overdrawn = Math.max(overdrawn, power - paid);
+        }
+        expect(least, `${id} ${label}`).toBeGreaterThanOrEqual(0);
+        expect(most, `${id} ${label}`).toBeLessThanOrEqual(wPrime);
+        expect(overdrawn, `${id} ${label}`).toBeLessThanOrEqual(1e-9);
+        const ridden = ticks.power.slice(0, ticks.finished);
+        // ADR 0061 D-8.2, kept: the surge ceiling, never over 7 W/kg, and #92's −20 %.
+        expect(Math.max(...ridden), `${id} ${label}`).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+        expect(Math.max(...ridden), `${id} ${label}`).toBeLessThanOrEqual(
+          MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS,
+        );
+        expect(Math.min(...ridden), `${id} ${label}`).toBeGreaterThanOrEqual(
+          tierWatts * PACING_FACTOR_FLOOR - 1e-9,
+        );
+        // And it does leave #92's +10 % band upward, in the sprint at least.
+        expect(Math.max(...ridden), `${id} ${label}`).toBeGreaterThan(
+          tierWatts * PACING_FACTOR_CEILING,
+        );
+      }
+    }
+    // Non-vacuity: some bot somewhere ran its W′ down to nothing and had to ease,
+    // and some exhausted bot asked over CP with W′ to spend and was held.
+    expect(exhausted).toBeGreaterThan(0);
+    expect(heldAtCp).toBeGreaterThan(0);
+  });
 
   it(
     'finishes fierce, hard, brisk and steady in that order with items off, every seed of 100',
@@ -874,68 +947,73 @@ describe('each bot its archetype, a power profile within its tier (#2459)', () =
     return standings(state.racers.map((entry) => entry.racer))[0];
   }
 
-  it(
-    'lets a sprinter beat a rouleur of the same tier in a flat final 200 m from level, more often than not over 100 seeds',
-    { timeout: 60_000 },
-    () => {
-      const course = raceCourse(FLAT.totalDistance, 3);
-      const from = course.lapLengthMetres * course.laps - 200;
-      // Level, at a race pace, and fresh: what is left is the archetypes' finish.
-      const level = (bot: LapRaceBot): LapRaceBot => ({
-        ...bot,
-        ride: { speed: metresPerSecond(9), distance: metres(from) },
+  it('lets a sprinter beat a rouleur of the same tier in a flat final 200 m from level, more often than not over 100 seeds', () => {
+    // No timeout of its own (#1688's ruling): each 0.1 s tick is one physics
+    // sub-step, not ten. Who wins is the archetypes' power, which the plan
+    // sets per tick; the sub-step only moves the bots, and the sprinter took
+    // all 100 at a 10 ms sub-step and all 100 at 0.1 s. Apple M-series,
+    // Node 26, this file, three runs each: 529 to 638 ms, and 707 to 760 ms
+    // under --coverage, at 10 ms; 173 to 230 ms, and 312 to 520 ms, now.
+    const course = raceCourse(FLAT.totalDistance, 3);
+    const from = course.lapLengthMetres * course.laps - 200;
+    // Level, at a race pace, and fresh: what is left is the archetypes' finish.
+    const level = (bot: LapRaceBot): LapRaceBot => ({
+      ...bot,
+      ride: { speed: metresPerSecond(9), distance: metres(from) },
+    });
+    let sprinterWins = 0;
+    for (let seed = 1; seed <= 100; seed += 1) {
+      let bots: readonly LapRaceBot[] = [
+        level(lapRaceBot('sprinter', 'brisk', STRATEGY, dealtPace(seed, 0, 'sprinter'))),
+        level(lapRaceBot('rouleur', 'brisk', STRATEGY, dealtPace(seed, 1, 'even'))),
+      ];
+      let state = createItemRace({
+        course,
+        seed,
+        itemsOn: false,
+        racerIds: ['sprinter', 'rouleur'],
+        startMs: 0,
       });
-      let sprinterWins = 0;
-      for (let seed = 1; seed <= 100; seed += 1) {
-        let bots: readonly LapRaceBot[] = [
-          level(lapRaceBot('sprinter', 'brisk', STRATEGY, dealtPace(seed, 0, 'sprinter'))),
-          level(lapRaceBot('rouleur', 'brisk', STRATEGY, dealtPace(seed, 1, 'even'))),
-        ];
-        let state = createItemRace({
-          course,
+      for (let tick = 0; tick < 1_000; tick += 1) {
+        if (state.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
+        const next = stepBotRace(state, bots, {
+          elapsed: seconds(0.1),
+          conditions: conditions(FLAT, 0.1),
           seed,
-          itemsOn: false,
-          racerIds: ['sprinter', 'rouleur'],
-          startMs: 0,
         });
-        for (let tick = 0; tick < 1_000; tick += 1) {
-          if (state.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
-          const next = stepBotRace(state, bots, {
-            elapsed: seconds(0.1),
-            conditions: conditions(FLAT),
-            seed,
-          });
-          state = next.race;
-          bots = next.bots;
-          vi.mocked(advance).mockClear();
-        }
-        expect(state.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
-        if (winner(state) === 'sprinter') sprinterWins += 1;
+        state = next.race;
+        bots = next.bots;
+        vi.mocked(advance).mockClear();
       }
-      expect(sprinterWins).toBeGreaterThan(50);
-    },
-  );
+      expect(state.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+      if (winner(state) === 'sprinter') sprinterWins += 1;
+    }
+    expect(sprinterWins).toBeGreaterThan(50);
+  });
 
-  it(
-    'lets a climber beat a sprinter of the same tier on a seeded hilly loop, more often than not over 100 seeds',
-    { timeout: 60_000 },
-    () => {
-      let climberWins = 0;
-      for (let seed = 1; seed <= 100; seed += 1) {
-        const run = race(
-          HILLY,
-          [
-            { id: 'climber', tier: 'brisk', pace: dealtPace(seed, 0, 'climber') },
-            { id: 'sprinter', tier: 'brisk', pace: dealtPace(seed, 1, 'sprinter') },
-          ],
-          seed,
-          false,
-        );
-        if (winner(run.races[run.races.length - 1] as ItemRaceState) === 'climber') {
-          climberWins += 1;
-        }
+  it('lets a climber beat a sprinter of the same tier on a seeded hilly loop, more often than not over 100 seeds', () => {
+    // No timeout of its own (#1688's ruling): each one-second tick is one
+    // physics sub-step, not a hundred. The climber took all 100 at a 10 ms
+    // sub-step and all 100 at 1 s. Apple M-series, Node 26, this file, three
+    // runs each: 3.7 to 5.2 s, and 4.5 to 6.3 s under --coverage, at 10 ms
+    // (over Vitest's 5 s default); 154 to 212 ms, and 333 to 346 ms, now.
+    let climberWins = 0;
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const run = race(
+        HILLY,
+        [
+          { id: 'climber', tier: 'brisk', pace: dealtPace(seed, 0, 'climber') },
+          { id: 'sprinter', tier: 'brisk', pace: dealtPace(seed, 1, 'sprinter') },
+        ],
+        seed,
+        false,
+        undefined,
+        1,
+      );
+      if (winner(run.races[run.races.length - 1] as ItemRaceState) === 'climber') {
+        climberWins += 1;
       }
-      expect(climberWins).toBeGreaterThan(50);
-    },
-  );
+    }
+    expect(climberWins).toBeGreaterThan(50);
+  });
 });

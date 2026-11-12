@@ -116,8 +116,8 @@ export interface BotRaceStep {
 
 /**
  * A bot on the start line, with its strength, its way of racing and its pace
- * chosen apart. With no pace, it rides #1960's even plan at its tier's full
- * power.
+ * chosen apart. With no pace, it rides the even plan, a rouleur's (#2459), at its
+ * tier's full power.
  */
 export function lapRaceBot(
   id: string,
