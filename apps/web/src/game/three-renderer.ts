@@ -11720,6 +11720,11 @@ export class DeliveryBelt {
     return this.#rain.visible;
   }
 
+  /** #2366: the rain's foot, in world y, as last placed. For the jsdom suite. */
+  rainFootY(): number {
+    return this.#rain.position.y;
+  }
+
   /** One kind's mesh. For the jsdom suite and the browser gate's probes. */
   meshOf(what: DeliveryPieceKind): InstancedMesh {
     return this.#meshes[what];
@@ -11756,7 +11761,9 @@ export class DeliveryBelt {
     if (this.#rain.visible && eye !== undefined) {
       const { high } = RAIN_BOX_METRES;
       const fall = (((seconds * RAIN_FALL_METRES_PER_SECOND) % high) + high) % high;
-      this.#rain.position.set(eye.x, (eye.y ?? 0) - high - fall, eye.z);
+      // The box's foot is the road, not the eye: the streaks are laid out in [0, 2 * high],
+      // so the eye sits 2 m up from the foot and 18 m of rain always stands above it.
+      this.#rain.position.set(eye.x, (eye.y ?? 0) - CAMERA_ABOVE_METRES - fall, eye.z);
     }
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
     this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);

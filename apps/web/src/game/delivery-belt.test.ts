@@ -322,6 +322,20 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
+  it('stands the rain on the road below the eye, falling from there, so it covers the view above the eye — #2366', () => {
+    const belt = new DeliveryBelt('stylised');
+    const eye = { x: 3, y: 12, z: 40 };
+    const view = { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } };
+    // The camera rides 2 m above the road, so the foot of the box is at 10 m.
+    belt.update(view, eye, 0);
+    expect(belt.rainFootY()).toBeCloseTo(10, 6);
+    // One second later it has fallen 8 m; the 20 m box still reaches above the eye.
+    belt.update(view, eye, 1);
+    expect(belt.rainFootY()).toBeCloseTo(2, 6);
+    expect(belt.rainFootY() + 20).toBeGreaterThan(eye.y + 8);
+    belt.dispose();
+  });
+
   it('draws a far house marker larger by its distance from the eye, its foot still on the step, and a near one at its true size — #2453', () => {
     // The numbers are written here, not read from three-renderer.ts, so changing them there fails this.
     expect(MARKER_TRUE_SIZE_WITHIN_METRES).toBe(20);
