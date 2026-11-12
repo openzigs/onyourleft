@@ -8880,16 +8880,19 @@ select.oyl-input {
 
    PAUSED, ROOM FOR *Resume* AND *End ride* (owner ruling, 2026-11-12): at
    the numbers above their words touched their borders paused, 79 px around
-   74 and 75 at 800×1280 and 78 at 360 wide. So on that unwrapped row the
-   gap between controls is 4 px and not 8, and *Trainer notice* stays at
-   its 72 px floor (its words still wrap inside it, 63 px) rather than take
-   a share, so the spare goes to the two controls whose words are on one
-   line. The moving time's gap to the controls is that 4 px too (§"THE
-   MOVING TIME ON AN UPRIGHT PHONE"). Measured paused: *Resume* and *End
-   ride* 85 px each at 800×1280 and 900×900 in a workout, 97 at 360 wide in
-   a workout and 84 at 360 wide with the moving time beside them; running
-   *End ride* is 94, 106 and 93. Every word is at least 2 px clear of its
-   border, running and paused.
+   74.5 at 800×1280 and 900×900 and 78 at 360 wide. The 8 px gaps cannot
+   give it (#669: no two ride-time controls closer than 8 px,
+   `ride-targets.browser.spec.ts`), nor the lock's 48 px or *Trainer
+   notice*'s 72 px floor. So on that unwrapped row the actions panel's
+   inline padding is 4 px and not 8, which gives the row 8 px more;
+   *Trainer notice* stays at its floor (its words still wrap inside it,
+   63 px) rather than take a share, so the spare goes to the two controls
+   whose words are on one line; and the moving time, a reading and not a
+   control, is 4 px from the controls (§"THE MOVING TIME ON AN UPRIGHT
+   PHONE"). Measured paused: *Resume* and *End ride* 83 px each at
+   800×1280 and 900×900 in a workout, 95 at 360 wide in a workout and 84
+   at 360 wide with the moving time beside them. Every word is at least
+   2 px clear of its border, running and paused.
    `ride-workout.browser.spec.ts` §"#2281" holds every control's words
    inside its box and 2 px clear of its border, on top and on the stage,
    the row on one line, and no panel over the leaning rider, at each of
@@ -8909,7 +8912,10 @@ select.oyl-input {
 @media (min-width: 22.5rem) and (min-height: 47rem) and (orientation: portrait) {
   .oyl-game--riding .oyl-hud__controls {
     flex-wrap: nowrap;
-    column-gap: var(--oyl-space-xs);
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    padding-inline: var(--oyl-space-xs);
   }
 
   .oyl-game--riding .oyl-hud__controls > .oyl-hud__notice-toggle {
@@ -11575,11 +11581,12 @@ select.oyl-input {
  *
  * So upright, the moving time is lifted out of the grid and set beside *Pause*
  * and *End ride*, which are stretched across the actions panel and give up
- * the field's width and the controls' own 4 px gap for it, against their
- * 72 px floor (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). Since #2281 that
- * gap is 4 px and not 16: at 16 the row had 212 px at 360 wide and *End
- * ride*, at 74 px, ran 9 px out of its box, and at 8 *Resume* and *End
- * ride*'s words touched their borders paused (§"#2281"). That costs the panel no
+ * the field's width and a 4 px gap for it, against their 72 px floor
+ * (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). Since #2281 that gap is 4 px
+ * and not 16: at 16 the row had 212 px at 360 wide and *End ride*, at
+ * 74 px, ran 9 px out of its box, and at 8 *Resume* and *End ride*'s words
+ * touched their borders paused (§"#2281"). The moving time is a reading, so
+ * #669's 8 px between controls does not bind it. That costs the panel no
  * height at all, which is what every combination of sounds, side camera and
  * notice at the bottom of the screen needs — with sounds on, the actions
  * panel began 32 px under the rider. It is the same reading in the same
@@ -11611,7 +11618,7 @@ select.oyl-input {
 
     .oyl-game--riding .oyl-hud__controls {
       anchor-name: --oyl-hud-controls;
-      /* The moving time's own width (#1124), and the controls' own gap (#2281). */
+      /* The moving time's own width (#1124), and a 4 px gap (#2281). */
       padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-xs));
     }
 
