@@ -6071,7 +6071,7 @@ export interface RealisticShape {
 }
 
 /** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
-interface RealisticSky {
+export interface RealisticSky {
   readonly texture: DataTexture;
   /** The cosine-weighted mean radiance of its upper hemisphere. */
   readonly upward: number;
@@ -7371,7 +7371,7 @@ function weatherKey(weather: DeliveryWeatherFrame): string {
  * the weather's ambient share (`weather-look.ts`). The sky itself in clear
  * daylight.
  */
-function weatheredSkyOf(
+export function weatheredSkyOf(
   sky: RealisticSky,
   weather: DeliveryWeatherFrame | undefined,
 ): RealisticSky {
@@ -7428,7 +7428,7 @@ function weatheredSkyOf(
 }
 
 /** Releases every weather `sky` was graded for. @see weatheredSkyOf */
-function releaseWeatheredSkies(sky: RealisticSky): void {
+export function releaseWeatheredSkies(sky: RealisticSky): void {
   for (const each of WEATHERED_SKIES.get(sky)?.values() ?? []) each.texture.dispose();
   WEATHERED_SKIES.delete(sky);
 }
