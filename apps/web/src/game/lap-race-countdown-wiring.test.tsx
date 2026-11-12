@@ -637,4 +637,137 @@ describe('a room’s lap race counts down on the room’s word — #2546', () =>
     expect(odometer).toBe(0);
     expect(inputs.at(-1)?.odometer).toBeGreaterThan(0);
   });
+
+  /** Announcements on, with power said every 15 s, the shortest cadence a rider can pick. */
+  function powerEveryFifteen(): void {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({
+        ...DEFAULT_ANNOUNCEMENTS,
+        enabled: true,
+        powerEverySeconds: 15,
+        distanceEvery: 'never',
+      }),
+    );
+  }
+
+  /** What the region said, each time it changed, against the seconds since *Ride*. */
+  function spokenWith(said: readonly { readonly at: number; readonly text: string }[]) {
+    return said.filter((each, index) => each.text !== '' && each.text !== said[index - 1]?.text);
+  }
+
+  it('says no power reading on its cadence while the rider waits in the lobby or counts down, and says power on its cadence again after Go', async () => {
+    powerEveryFifteen();
+    const room = new ScriptedRoom();
+    const root = await rideOn({ room });
+    // In the lobby of a race, with no countdown yet: 40 s, over two cadences.
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'off' });
+      await Promise.resolve();
+    });
+    const said: { at: number; text: string }[] = [];
+    const lobbyFrames = 80;
+    for (let frame = 1; frame <= lobbyFrames + COUNTDOWN_FRAMES + 40; frame += 1) {
+      if (frame === lobbyFrames + 1) {
+        await act(async () => {
+          room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
+          await Promise.resolve();
+        });
+      }
+      if (frame === lobbyFrames + COUNTDOWN_FRAMES + 1) {
+        await act(async () => {
+          room.frame(0, [lapFrameRider(0, 0)]);
+          await Promise.resolve();
+        });
+      }
+      await pump();
+      said.push({ at: (frame * FRAME_MS) / 1000, text: region(root) });
+    }
+    const goAt = ((lobbyFrames + COUNTDOWN_FRAMES + 1) * FRAME_MS) / 1000;
+    const spoken = spokenWith(said);
+    // Held, in the lobby and the countdown: the countdown's sentence and nothing on a cadence.
+    expect(spoken.filter((each) => each.at < goAt).map((each) => each.text)).toEqual([
+      RACE_TEXT.counting(10),
+    ]);
+    // Riding: "Go." at Go, and power on its cadence once more, within 15 s of it.
+    expect(spoken.find((each) => each.at >= goAt)).toEqual({ at: goAt, text: RACE_TEXT.go });
+    const reading = spoken.find((each) => each.at > goAt);
+    expect(reading?.text).toBe(`Power ${String(RIDING_WATTS)} watts`);
+    expect(reading?.at).toBeLessThanOrEqual(goAt + 15);
+  });
+
+  it('says Go on the room’s first frame though a power reading fell due 1.5 s before it', async () => {
+    powerEveryFifteen();
+    const room = new ScriptedRoom();
+    const root = await rideOn({ room });
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'off' });
+      await Promise.resolve();
+    });
+    // The countdown from 6.5 s, and the room's first frame at 16.5 s: power
+    // fell due at 15 s, inside the 3 s window before Go, had it been said.
+    const lobbyFrames = 13;
+    const goFrame = lobbyFrames + COUNTDOWN_FRAMES + 1;
+    expect(goFrame * FRAME_MS - 15_000).toBeLessThan(3_000);
+    const said: string[] = [];
+    for (let frame = 1; frame <= goFrame + 2; frame += 1) {
+      if (frame === lobbyFrames + 1) {
+        await act(async () => {
+          room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
+          await Promise.resolve();
+        });
+      }
+      if (frame === goFrame) {
+        await act(async () => {
+          room.frame(0, [lapFrameRider(0, 0)]);
+          await Promise.resolve();
+        });
+      }
+      await pump();
+      said.push(region(root));
+    }
+    expect(said[goFrame - 1]).toBe(RACE_TEXT.go);
+    expect(said[lobbyFrames]).toBe(RACE_TEXT.counting(10));
+    expect(said[goFrame - 2]).toBe(RACE_TEXT.counting(10));
+  });
+
+  it('shows "Go." to a rider who waited in the lobby for a race the room started with no countdown', async () => {
+    const room = new ScriptedRoom();
+    const root = await rideOn({ room });
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'off' });
+      await Promise.resolve();
+    });
+    for (let frame = 1; frame <= 4; frame += 1) await pump();
+    await act(async () => {
+      room.frame(0, [lapFrameRider(0, 0)]);
+      await Promise.resolve();
+    });
+    await pump();
+    expect(raceNotice(root)).toContain(RACE_TEXT.go);
+  });
+
+  it('shows a rider who joins a room whose race is already running no "Go."', async () => {
+    announcements(true);
+    const room = new ScriptedRoom();
+    const root = await rideOn({ room });
+    // The room's race was running before this rider's first frame: no countdown, no lobby.
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'off' });
+      room.frame(40, [lapFrameRider(0, 0), lapFrameRider(1, 120)]);
+      await Promise.resolve();
+    });
+    const shown: string[] = [];
+    for (let frame = 1; frame <= 8; frame += 1) {
+      await pump();
+      shown.push(raceNotice(root));
+    }
+    // The control: the race is running for this rider, who is riding it.
+    expect(inputs.at(-1)?.odometer).toBeGreaterThan(0);
+    expect(shown.filter((text) => text.includes(RACE_TEXT.go))).toEqual([]);
+  });
 });

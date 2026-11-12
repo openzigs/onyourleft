@@ -3397,7 +3397,10 @@ function GameScreen({
       // #2546: the same for a solo lap race's countdown and its "Go.", which
       // stands on the HUD for a moment from the frame this device saw it.
       const raced = raceEvent(raceSaidRef.current, race, at);
-      if (raced.said === 'running' && raceSaidRef.current !== 'running') {
+      // "Go." stands on the HUD only for a rider who saw the race held: a
+      // rider who joins a room whose race is already running sees none.
+      const sawItHeld = raceSaidRef.current === 'waiting' || raceSaidRef.current === 'counting';
+      if (raced.said === 'running' && sawItHeld) {
         raceWentAtRef.current = at;
       }
       raceSaidRef.current = raced.said;
@@ -3556,12 +3559,18 @@ function GameScreen({
       if (raceAnnounced !== undefined) {
         events.push(...lapRaceSaid(raceAnnounced, sayAt));
       }
+      // #2546: no power on its cadence while the rider is held on a race's
+      // line, in a room's lobby or a countdown, as on \`main\` where this clock
+      // stood still there: a reading would also close the window "Go." needs.
+      const preference = heldOnTheLine(race)
+        ? { ...announcementsRef.current, powerEverySeconds: 'never' as const }
+        : announcementsRef.current;
       const heard = announce(announcerRef.current, {
         now: sayAt,
         readings,
         ...(remaining === undefined ? {} : { remaining }),
         events,
-        preference: announcementsRef.current,
+        preference,
       });
       announcerRef.current = heard.state;
       if (heard.sentence !== undefined) {
