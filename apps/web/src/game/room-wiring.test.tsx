@@ -514,7 +514,8 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     room.accept();
     room.welcome(0);
     const into = await frames(1, 6, 30);
-    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    // #2426: in the draft, the line under the number says so; the scale is read after it.
+    expect(field('Draft')).toBe('30 % of drag In the draft at most 59 %');
     expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
     expect(into).toContain(DRAFT_SPOKEN.into(30));
     const out = await frames(7, 8, 0);
@@ -542,8 +543,68 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     room.accept();
     room.welcome(0);
     const heard = await frames(1, 6, 30);
-    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    expect(field('Draft')).toBe('30 % of drag In the draft at most 59 %');
     expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  /** The Draft field's element, its shelter mark, and the words under its number. */
+  const drawn = (): {
+    readonly marked: boolean;
+    readonly outlined: boolean;
+    readonly line: string;
+  } => {
+    const term = queryAll(mounted?.container ?? document, 'dt').find(
+      (dt) => dt.textContent === 'Draft',
+    );
+    const box = term?.closest('.oyl-hud__field');
+    return {
+      marked: term?.querySelector('svg.oyl-hud__shelter[aria-hidden="true"]') != null,
+      outlined: box?.classList.contains('oyl-hud__field--sheltered') === true,
+      line: box?.querySelector('.oyl-hud__detail')?.textContent?.trim() ?? '',
+    };
+  };
+
+  it('marks the rider in the draft from 10 %, holds the mark at 7 %, and takes it away below 5 %, seen and not spoken — #2426', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const heard = await frames(1, 4, 4);
+    expect(drawn()).toEqual({ marked: false, outlined: false, line: 'at most 59 %' });
+    heard.push(...(await frames(5, 4, 12)));
+    expect(drawn()).toEqual({ marked: true, outlined: true, line: 'In the draft' });
+    expect(field('Draft')).toBe('12 % of drag In the draft at most 59 %');
+    // Between the two thresholds the state holds: no flicker at 10 %.
+    heard.push(...(await frames(9, 6, 7)));
+    expect(drawn()).toEqual({ marked: true, outlined: true, line: 'In the draft' });
+    heard.push(...(await frames(15, 4, 4)));
+    expect(drawn()).toEqual({ marked: false, outlined: false, line: 'at most 59 %' });
+    expect(field('Draft')).toBe('4 % of drag at most 59 %');
+    // The owner's ruling on #2421, item 3: the mark is visual and adds no spoken cue.
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  it('takes the mark away while the room is lost, since the simulation applies no draft then — #2426', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    await frames(1, 4, 12);
+    expect(drawn()).toEqual({ marked: true, outlined: true, line: 'In the draft' });
+    room.closeFromServer(1006);
+    await pump(4);
+    expect(drawn().marked).toBe(false);
+    expect(drawn().outlined).toBe(false);
+    expect(field('Draft')).not.toContain('In the draft');
+  });
+
+  it('is not marked from 7 % rising from below: the mark waits for 10 % — #2426', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    await frames(1, 6, 7);
+    expect(drawn()).toEqual({ marked: false, outlined: false, line: 'at most 59 %' });
   });
 });
 
