@@ -78,6 +78,7 @@ import {
   deliveryKindProbe,
   threeGameRenderer,
   type DeliveryCalls,
+  type DeliveryWeatherReadback,
 } from '../src/game/three-renderer';
 
 import { drawCounter } from './realistic/draws';
@@ -111,6 +112,7 @@ declare global {
       rainCalls(): DeliveryRainCalls;
       weatherLook(): Readonly<Record<WeatherName, WeatherLook>>;
       weatherShowcase(weather: WeatherName): void;
+      weatherReadback(): Readonly<Record<WeatherName, DeliveryWeatherReadback | undefined>>;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
@@ -361,6 +363,33 @@ function weatherLook(): Record<WeatherName, WeatherLook> {
   };
   view.destroy();
   return read;
+}
+
+/**
+ * PR #2522: the same frame of the stylised world in each weather, through a
+ * real view, and what each frame was drawn with read back off the view's own
+ * materials: the ground's colour, the scenery's shade, the rain's colour and
+ * how near the camera its nearest streak stood (`three-renderer.ts`
+ * §`deliveryWeatherOf`).
+ */
+function weatherReadback(): Record<WeatherName, DeliveryWeatherReadback | undefined> {
+  const shown = canvas(640, 400);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(640, 400);
+  const read = (weather: WeatherName): DeliveryWeatherReadback | undefined => {
+    const frame = weatherFrame(weather);
+    view.render(frame);
+    view.render(frame);
+    return deliveryWeatherOf(view).readback;
+  };
+  const back = {
+    clear: read('clear'),
+    dusk: read('dusk'),
+    rain: read('rain'),
+    'rain-dusk': read('rain-dusk'),
+  };
+  view.destroy();
+  return back;
 }
 
 /** #2508's photographs for the owner: {@link weatherFrame} on the tablet's 1280×800, in `weather`. */
@@ -807,6 +836,7 @@ window.__oylDelivery = {
   rainCalls,
   weatherLook,
   weatherShowcase,
+  weatherReadback,
   kinds,
   showcase,
   inLane,

@@ -28,14 +28,17 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { glslFunction, type GlslValue } from './glsl-testing';
 import { qualitySettings } from './quality';
 import { seasonOn, type CalendarDay } from './season';
 import {
   AUTUMN_HUE_DEGREES,
   prepareRealisticShape,
+  RealisticStructureBelts,
   RealisticVegetationBelt,
   ScatterBelt,
+  shadedByWeather,
   threeGameRenderer,
   turnsInAutumn,
   type RealisticShape,
@@ -286,5 +289,67 @@ describe('autumn turns the broadleaves and leaves the firs green — #1623', () 
       expect(autumn(BARK, 1)).toEqual(BARK);
       expect(autumn(GREY, 1)).toEqual(GREY);
     });
+  });
+});
+
+describe('the realistic plants and hedges go down at dusk with the ground — PR #2522', () => {
+  const SHADE = 'diffuseColor.rgb *= oylWeatherShade;';
+
+  it('shades every plant’s surface after its tint and its autumn, and before its light', () => {
+    const wood = aWood();
+    const bound = new Set<unknown>();
+    for (const shape of [wood.broadleaf, wood.conifer, wood.shrub, wood.rock]) {
+      for (const part of shape.parts) {
+        expect(shadedByWeather(part.material)).toBe(true);
+        const { fragment, uniforms } = compiled(part.material);
+        expect(fragment).toContain('uniform vec3 oylWeatherShade;');
+        const tint = fragment.indexOf('oylTinted(diffuseColor.rgb, vOylTint)');
+        const autumn = fragment.indexOf('oylAutumnOf(diffuseColor.rgb, oylAutumn)');
+        const shade = fragment.indexOf(SHADE);
+        expect(shade).toBeGreaterThan(tint);
+        expect(shade).toBeGreaterThan(autumn);
+        // Once, on the surface's colour: the light, which three's chunks add later, multiplies it.
+        expect(fragment.split(SHADE)).toHaveLength(2);
+        bound.add(uniforms['oylWeatherShade']);
+      }
+    }
+    // One uniform every plant reads, which the view writes once a frame.
+    expect(bound.size).toBe(1);
+    // The impostors read that same uniform, and the sun's share the ratio takes out.
+    for (const shape of [wood.broadleaf, wood.conifer]) {
+      const impostor = impostorOf(shape);
+      expect(impostor.fragmentShader).toContain(
+        'gl_FragColor.rgb *= oylWeatherShade * oylImpostorLight;',
+      );
+      expect(impostor.fragmentShader.indexOf('oylWeatherShade * oylImpostorLight')).toBeLessThan(
+        impostor.fragmentShader.indexOf('#include <tonemapping_fragment>'),
+      );
+      expect(bound.has(impostor.uniforms['oylWeatherShade'])).toBe(true);
+      expect(impostor.uniforms['oylImpostorLight']?.value).toBeDefined();
+    }
+  });
+
+  it('shades the hedge, and no house', () => {
+    const structures = new RealisticStructureBelts(new Map());
+    try {
+      structures.update([{ kind: 'hedge', x: 0, y: 0, z: 20, rotation: 0, scale: 1, variant: 0 }], {
+        x: 0,
+        y: 0,
+        z: 0,
+        headingX: 0,
+        headingZ: 1,
+        eyeRoadY: 0,
+        targetRoadY: 0,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+      });
+      const hedge = structures.beltOf('hedge')?.meshesOf('hedge')[0]?.material;
+      expect(hedge).toBeDefined();
+      // Taught by the same splice the plants' programs are read through above.
+      expect(shadedByWeather(hedge as never)).toBe(true);
+      const brick = structures.beltOf('brick')?.meshesOf('building')[0]?.material;
+      expect(shadedByWeather(brick as never)).toBe(false);
+    } finally {
+      structures.dispose();
+    }
   });
 });

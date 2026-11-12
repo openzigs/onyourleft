@@ -26,6 +26,8 @@ import {
   RAIN_ROAD_TINT,
   RAIN_SKY_GREY,
   roadTintIn,
+  sceneLightIn,
+  sceneryShadeIn,
   sunColourIn,
   weatheredWorld,
 } from './weather-look';
@@ -158,5 +160,105 @@ describe('a Delivery level’s dusk and rain, as the world a frame is drawn in �
     expect(both).toEqual(weatheredWorld(dusk, { rain: true, dusk: false }));
     expect(both.sun.direct).toBeCloseTo(DAY.sun.direct * DUSK_DIRECT_SHARE * RAIN_DIRECT_SHARE, 12);
     expect(sunColourIn({ rain: true, dusk: true })).toBe(DUSK_SUN_COLOUR);
+  });
+});
+
+/** An sRGB channel, 0 to 255, in linear light. */
+function linear(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/** A packed sRGB colour in linear light. */
+function linearRgb(colour: number): [number, number, number] {
+  return [linear((colour >> 16) & 0xff), linear((colour >> 8) & 0xff), linear(colour & 0xff)];
+}
+
+/**
+ * PR #2522's stated range: a tree's darkening at dusk, each channel, within
+ * this share of the ground's own.
+ */
+const SHADE_TOLERANCE = 0.05;
+
+describe('the scenery goes down at dusk with the ground it stands on — PR #2522', () => {
+  it('shades the scenery at dusk by the ground’s own darkening, each channel, and by nothing otherwise', () => {
+    for (const world of [
+      DAY,
+      { ...DAY, groundColour: 0x3f5a2b },
+      { ...DAY, groundColour: 0x8a7a55 },
+    ]) {
+      const shade = sceneryShadeIn(world, { dusk: true, rain: false });
+      const day = linearRgb(world.groundColour);
+      const dusk = linearRgb(weatheredWorld(world, { dusk: true, rain: false }).groundColour);
+      for (const channel of [0, 1, 2] as const) {
+        const ground = dusk[channel] / day[channel];
+        expect(Math.abs(shade[channel] / ground - 1)).toBeLessThan(SHADE_TOLERANCE);
+      }
+      // Darker, and warmer: red keeps the most of itself, blue the least.
+      expect(shade[0]).toBeLessThan(0.6);
+      expect(shade[0]).toBeGreaterThan(shade[1]);
+      expect(shade[1]).toBeGreaterThan(shade[2]);
+      // And at dusk in rain the same, since rain does not tint the ground.
+      expect(sceneryShadeIn(world, { dusk: true, rain: true })).toEqual(shade);
+    }
+    expect(sceneryShadeIn(DAY)).toEqual([1, 1, 1]);
+    expect(sceneryShadeIn(DAY, { dusk: false, rain: false })).toEqual([1, 1, 1]);
+    expect(sceneryShadeIn(DAY, { dusk: false, rain: true })).toEqual([1, 1, 1]);
+  });
+
+  it('takes the tint’s own share for a channel the ground has none of', () => {
+    const shade = sceneryShadeIn({ ...DAY, groundColour: 0x406000 }, { dusk: true, rain: false });
+    expect(shade[2]).toBeCloseTo(
+      DUSK_GROUND_TINT[2] <= 0.04045
+        ? DUSK_GROUND_TINT[2] / 12.92
+        : ((DUSK_GROUND_TINT[2] + 0.055) / 1.055) ** 2.4,
+      9,
+    );
+  });
+});
+
+describe('what the lamps do not reach is lit by the frame’s share of the route’s light — PR #2522', () => {
+  const lightIn = (weather?: { dusk: boolean; rain: boolean }) =>
+    sceneLightIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather);
+
+  it('gives the whole of it in clear daylight', () => {
+    expect(lightIn()).toEqual([1, 1, 1]);
+    expect(lightIn({ dusk: false, rain: false })).toEqual([1, 1, 1]);
+  });
+
+  it('gives the sky’s share and half the sun’s, the sun in its colour, over the day’s', () => {
+    const whole = DAY.sun.ambient + DAY.sun.direct / 2;
+    const rain = lightIn({ dusk: false, rain: true });
+    const greyed =
+      (DAY.sun.ambient * RAIN_AMBIENT_SHARE + (DAY.sun.direct * RAIN_DIRECT_SHARE) / 2) / whole;
+    for (const channel of rain) expect(channel).toBeCloseTo(greyed, 9);
+    const dusk = lightIn({ dusk: true, rain: false });
+    const sun = linearRgb(DUSK_SUN_COLOUR);
+    const drawn = weatheredWorld(DAY, { dusk: true, rain: false }).sun;
+    for (const channel of [0, 1, 2] as const) {
+      expect(dusk[channel]).toBeCloseTo(
+        (drawn.ambient + (drawn.direct / 2) * sun[channel]) / whole,
+        9,
+      );
+    }
+  });
+
+  it('is dimmer in daytime rain, dimmer and warm at dusk, dimmest at dusk in rain', () => {
+    const luma = ([r, g, b]: readonly number[]) =>
+      0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+    const rain = lightIn({ dusk: false, rain: true });
+    const dusk = lightIn({ dusk: true, rain: false });
+    const both = lightIn({ dusk: true, rain: true });
+    expect(luma(rain)).toBeLessThan(0.8);
+    // Grey in rain: every channel alike.
+    expect(rain[0]).toBeCloseTo(rain[2], 9);
+    expect(luma(dusk)).toBeLessThan(luma(rain));
+    expect(dusk[0]).toBeGreaterThan(dusk[2] * 1.2);
+    expect(luma(both)).toBeLessThan(luma(dusk));
+  });
+
+  it('gives all of it for a route with no light to share', () => {
+    const dark = { ...DAY.sun, ambient: 0, direct: 0 };
+    expect(sceneLightIn(dark, dark)).toEqual([1, 1, 1]);
   });
 });

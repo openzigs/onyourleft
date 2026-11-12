@@ -170,3 +170,67 @@ export function roadTintIn(weather?: DeliveryWeatherFrame): readonly [number, nu
 export function sunColourIn(weather?: DeliveryWeatherFrame): number {
   return weather?.dusk === true ? DUSK_SUN_COLOUR : DAY_SUN_COLOUR;
 }
+
+/** An sRGB channel in [0, 1], in linear light. */
+function linearOf(channel: number): number {
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+/** A packed sRGB colour, in linear light, each channel. */
+function linearColourOf(colour: number): [number, number, number] {
+  return [16, 8, 0].map((shift) => linearOf(((colour >> shift) & 0xff) / 255)) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+/**
+ * How the scenery is shaded under `weather`, linear, each channel — the
+ * owner's ruling on PR #2522 ("trees stay bright green and look pasted on"):
+ * at dusk **exactly the ground's own darkening**, the linear light of the
+ * route's ground tinted by {@link DUSK_GROUND_TINT} over that of its ground,
+ * so a tree, a shrub, a hedge and a far impostor go down with the verge they
+ * stand on, and warm with it. White (nothing) otherwise: rain re-lights them
+ * through the sun, as it does the ground. `world` is the route's own, before
+ * the weather. Applied by `three-renderer.ts` to the stylised scenery's
+ * colour and to the realistic vegetation's and hedges' surface colour, and
+ * to no draw call.
+ */
+export function sceneryShadeIn(
+  world: WorldStyle,
+  weather?: DeliveryWeatherFrame,
+): readonly [number, number, number] {
+  if (weather?.dusk !== true) return [1, 1, 1];
+  const day = linearColourOf(world.groundColour);
+  const dusk = linearColourOf(tinted(world.groundColour, DUSK_GROUND_TINT));
+  // A channel the ground has none of takes the tint's own share of it.
+  return [0, 1, 2].map((channel) => {
+    const from = day[channel] as number;
+    return from > 0
+      ? (dusk[channel] as number) / from
+      : linearOf(DUSK_GROUND_TINT[channel] as number);
+  }) as unknown as readonly [number, number, number];
+}
+
+/**
+ * How much of the route's own light reaches a surface under the drawn
+ * world's sun, linear, each channel — PR #2522: the sky's share and half the
+ * sun's (a surface turned no way in particular), the sun's in its colour
+ * ({@link sunColourIn}), `drawn` over `day`. 1 in clear daylight; at dusk
+ * dimmer and warm, in rain dimmer. For what the lamps do not reach: a far
+ * tree's impostor, whose relight is a ratio and so keeps its daytime
+ * brightness under any sun, and the rain's streaks, which are unlit.
+ */
+export function sceneLightIn(
+  day: SunStyle,
+  drawn: SunStyle,
+  weather?: DeliveryWeatherFrame,
+): readonly [number, number, number] {
+  const whole = day.ambient + day.direct / 2;
+  if (!(whole > 0)) return [1, 1, 1];
+  const sun = linearColourOf(sunColourIn(weather));
+  return sun.map(
+    (channel) => (drawn.ambient + (drawn.direct / 2) * channel) / whole,
+  ) as unknown as readonly [number, number, number];
+}

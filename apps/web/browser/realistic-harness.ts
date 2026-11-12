@@ -378,7 +378,7 @@ declare global {
        * drawn or not, and the exposure (dimmer at dusk). Absent unless
        * `?weather=` asked for one (`three-renderer.ts` §`deliveryWeatherOf`).
        */
-      readonly weather?: { readonly rain: boolean; readonly exposure: number | undefined };
+      readonly weather?: ReturnType<typeof deliveryWeatherOf>;
       /**
        * #1972: what a lap race was on the last frame before the result was
        * published — the racers the frame carried and what the view's belt

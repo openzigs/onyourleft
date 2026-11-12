@@ -202,6 +202,15 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
       REALISTIC_EXPOSURE * REALISTIC_DUSK_EXPOSURE_SHARE,
       6,
     );
+    // PR #2522: the plants, the hedges and the far impostors went down with the
+    // ground — darker, and warm — and no streak stood by the camera.
+    const back = level.page.weather?.readback;
+    console.log(`PR #2522 realistic weather readback: ${JSON.stringify(back)}`);
+    for (const shade of [back?.foliageShade, back?.impostorLight]) {
+      expect(shade?.[0] ?? Infinity).toBeLessThan(0.6);
+      expect(shade?.[0] ?? 0).toBeGreaterThan((shade?.[2] ?? Infinity) * 1.2);
+    }
+    expect(back?.rainClearance ?? 0).toBeGreaterThanOrEqual(2.5);
   });
 });
 

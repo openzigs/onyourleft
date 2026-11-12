@@ -726,7 +726,13 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import { roadTintIn, sunColourIn, weatheredWorld } from './weather-look';
+import {
+  roadTintIn,
+  sceneLightIn,
+  sceneryShadeIn,
+  sunColourIn,
+  weatheredWorld,
+} from './weather-look';
 import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
@@ -2934,6 +2940,25 @@ export class ScatterBelt {
   }
 
   /**
+   * Shades every item the belt draws by `shade`, linear, each channel — PR
+   * #2522: the stylised world's scenery at a Delivery level's dusk, which
+   * goes down with the ground it stands on (`weather-look.ts`
+   * §`sceneryShadeIn`); white otherwise. Its vertex colours are multiplied
+   * by the material's colour, lit or flat, so this is two colour writes and
+   * no draw call. @see shade
+   */
+  setShade(shade: readonly [number, number, number]): void {
+    this.#materials.lit.color.setRGB(shade[0], shade[1], shade[2]);
+    this.#materials.flat.color.setRGB(shade[0], shade[1], shade[2]);
+  }
+
+  /** PR #2522: the shade the belt's materials were last given, linear. For the jsdom suite. */
+  shade(): readonly [number, number, number] {
+    const { r, g, b } = this.#materials.lit.color;
+    return [r, g, b];
+  }
+
+  /**
    * How much of the belt this rung is willing to draw — #245.
    *
    * ⚠️ **Applies a budget; never decides one.** The figure is
@@ -4729,6 +4754,12 @@ export class TerrainBelt {
    * This frame's ground, in the world's ground colour. Grows its buffers and
    * never shrinks them, for the road's reason (#240's NFR-3).
    */
+  /** PR #2522: the ground's colour as last drawn, linear, lit material. For the browser gate. */
+  colour(): readonly [number, number, number] {
+    const { r, g, b } = this.#materials.lit.color;
+    return [r, g, b];
+  }
+
   update(ground: TerrainMesh, groundColour: number): void {
     // ⚠️ #469: the mesh's arrays are lent, and a later build has written over
     // them. Drawing it would draw that build's ground under this frame's road
@@ -8552,10 +8583,7 @@ function withAutumn(material: Material): void {
           IMPOSTOR_TINT_LINE,
           'gl_FragColor = vec4(oylAutumnOf(oylTinted(texel.rgb, vOylTint), oylAutumn), 1.0);',
         ]
-      : [
-          MESH_TINT_LINE,
-          `${MESH_TINT_LINE}\ndiffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);`,
-        ];
+      : [MESH_TINT_LINE, `${MESH_TINT_LINE}\n${MESH_AUTUMN_LINE}`];
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   material.onBeforeCompile = (shader, renderer) => {
@@ -8583,6 +8611,63 @@ const MESH_TINT_LINE = 'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint)
 
 /** The line a tree's impostor applies #621's tint at. @see impostorMaterial */
 const IMPOSTOR_TINT_LINE = 'gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);';
+
+/** The line a broadleaf's mesh turns its autumn at, after its tint. @see withAutumn */
+const MESH_AUTUMN_LINE = 'diffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);';
+
+/** The materials {@link withWeatherShade} has taught. */
+const WEATHER_SHADED = new WeakSet<Material>();
+
+/**
+ * Whether a material is shaded by a Delivery level's weather — PR #2522.
+ *
+ * @test-facing held by `weather-look.test.ts` §"PR #2522", which asserts the
+ * vegetation and the hedge are taught it
+ */
+export function shadedByWeather(material: Material): boolean {
+  return WEATHER_SHADED.has(material);
+}
+
+/**
+ * Teaches a realistic plant's or hedge's material the weather's shade — the
+ * owner's ruling on PR #2522: at dusk the trees "stay bright green and look
+ * pasted on" against a ground that `weather-look.ts` darkens and warms. Its
+ * surface colour is multiplied by {@link FOLIAGE}'s `oylWeatherShade` — at
+ * dusk the ground's own darkening, white otherwise — after its seeded tint
+ * and its autumn, before its light, so the sun and the sky light it as they
+ * light the ground. A uniform and a multiply: no draw call.
+ *
+ * The material must already have been taught its instance channels
+ * ({@link withInstanceChannels}); spliced after the last of its tint lines,
+ * and throws at compile, as the tint does, if neither is there. Idempotent.
+ */
+function withWeatherShade(material: Material): void {
+  if (WEATHER_SHADED.has(material)) return;
+  WEATHER_SHADED.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms['oylWeatherShade'] = FOLIAGE.oylWeatherShade;
+    const after = shader.fragmentShader.includes(MESH_AUTUMN_LINE)
+      ? MESH_AUTUMN_LINE
+      : MESH_TINT_LINE;
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform vec3 oylWeatherShade;',
+        'fragment',
+        "PR #2522's weather shade",
+      ),
+      after,
+      `${after}\ndiffuseColor.rgb *= oylWeatherShade;`,
+      'fragment',
+      "PR #2522's weather shade",
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-weather-shade`;
+}
 
 /**
  * What each material {@link withInstanceChannels} has taught reads: `true`
@@ -8904,6 +8989,18 @@ const FOLIAGE = {
   oylImpostorLit: { value: 1 },
   /** 1 in the product; 0 holds every plant still. @see foliageStillOf */
   oylSwayScale: { value: 1 },
+  /**
+   * PR #2522: the vegetation's and the hedges' shade under a Delivery level's
+   * weather, linear — at dusk the ground's own darkening, white otherwise
+   * (`weather-look.ts` §`sceneryShadeIn`). @see withWeatherShade
+   */
+  oylWeatherShade: { value: new Vector3(1, 1, 1) },
+  /**
+   * PR #2522: how much of the route's own light the frame's sun gives, linear
+   * (`weather-look.ts` §`sceneLightIn`) — read by the impostors alone, whose
+   * relight is a ratio and so never dims with the sun the meshes are lit by.
+   */
+  oylImpostorLight: { value: new Vector3(1, 1, 1) },
 };
 
 /** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
@@ -11697,6 +11794,19 @@ export const RAIN_STREAK_METRES = 0.6;
  */
 export const RAIN_STREAK_WIDTH_METRES = 0.012;
 const RAIN_BOX_METRES = { across: 24, high: 10 } as const;
+
+/**
+ * How near the camera a streak may fall, metres, measured across the ground
+ * from the eye — the owner's ruling on PR #2522: one streak right by the
+ * camera drew "as a bar about 8 px wide and hundreds of px tall, like a
+ * pole". **2.5**: a streak 12 mm wide is about three pixels across there on
+ * the 1280×800 tablet, and its 0.6 m a couple of hundred down, as a near drop
+ * reads. The box is placed on the eye every frame and nothing in it moves
+ * across the ground, so a streak laid outside this circle is outside it on
+ * every frame: none is placed per frame. Measured across the ground, so no
+ * streak is nearer the camera than this in any direction.
+ */
+export const RAIN_CLEAR_METRES = 2.5;
 const RAIN_FALL_METRES_PER_SECOND = 8;
 
 /**
@@ -11707,8 +11817,14 @@ const RAIN_FALL_METRES_PER_SECOND = 8;
  */
 export const RAIN_TRIANGLES = RAIN_STREAKS * 2 * 2 * 2;
 
-/** The rain's paint, sRGB, and how opaque a streak is. */
-const RAIN_COLOUR = 0xb4c4d2;
+/**
+ * The rain's paint, sRGB, and how opaque a streak is. PR #2522: the paint in
+ * the route's own light; each frame it is multiplied by how much of that
+ * light the frame's sun gives (`weather-look.ts` §`sceneLightIn`), so a
+ * streak is lit with the scene — greyer in daytime rain, dim and warm at dusk
+ * — where an unlit one glowed white whatever the light. @see DeliveryBelt.setRainLight
+ */
+export const RAIN_COLOUR = 0xb4c4d2;
 const RAIN_OPACITY = 0.55;
 
 /** The streaks, twice over, seeded so every view draws the same rain. */
@@ -11729,10 +11845,18 @@ function rainShape(): BufferGeometry {
     positions[at + 2] = z;
     at += 3;
   };
+  // A streak's nearest edge is its half-width nearer than its middle.
+  const clear = RAIN_CLEAR_METRES + half;
   for (let streak = 0; streak < RAIN_STREAKS; streak += 1) {
-    const x = (next() - 0.5) * across;
+    // PR #2522: drawn again until it stands clear of the camera, so the
+    // count, and the call's triangles, are unchanged. @see RAIN_CLEAR_METRES
+    let x = (next() - 0.5) * across;
+    let z = (next() - 0.5) * across;
+    while (Math.hypot(x, z) < clear) {
+      x = (next() - 0.5) * across;
+      z = (next() - 0.5) * across;
+    }
     const y = next() * high;
-    const z = (next() - 0.5) * across;
     for (const copy of [0, 1]) {
       const foot = y + copy * high;
       const head = foot + RAIN_STREAK_METRES;
@@ -11863,6 +11987,46 @@ export class DeliveryBelt {
   /** #2366: whether the last frame drew the rain. For the jsdom suite and the browser gate. */
   rainShown(): boolean {
     return this.#rain.visible;
+  }
+
+  /**
+   * Lights the rain with the scene — PR #2522: its paint
+   * ({@link RAIN_COLOUR}, linear) times `light`, linear, each channel. A colour
+   * write and no draw call.
+   */
+  setRainLight(light: readonly [number, number, number]): void {
+    const material = this.#rain.material;
+    material.color.setHex(RAIN_COLOUR);
+    material.color.setRGB(
+      material.color.r * light[0],
+      material.color.g * light[1],
+      material.color.b * light[2],
+    );
+  }
+
+  /** PR #2522: the rain's colour as last lit, linear. For the jsdom suite. */
+  rainColour(): readonly [number, number, number] {
+    const { r, g, b } = this.#rain.material.color;
+    return [r, g, b];
+  }
+
+  /**
+   * PR #2522: the nearest any streak's corner stands to `eye` across the
+   * ground, metres, the rain as last placed — read off the geometry three
+   * draws. For the jsdom suite and the browser gate. @see RAIN_CLEAR_METRES
+   */
+  rainClearanceFrom(eye: { readonly x: number; readonly z: number }): number {
+    const position = this.#rain.geometry.getAttribute('position');
+    const { x, z } = this.#rain.position;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let corner = 0; corner < position.count; corner += 1) {
+      const across = Math.hypot(
+        position.getX(corner) + x - eye.x,
+        position.getZ(corner) + z - eye.z,
+      );
+      if (across < nearest) nearest = across;
+    }
+    return nearest;
   }
 
   /** #2508: the rain's geometry, for the jsdom suite to read its streaks back. */
@@ -12673,6 +12837,8 @@ function impostorMaterial(
       uniform float oylSunAmbient;
       uniform float oylSunDirect;
       uniform float oylImpostorLit;
+      uniform vec3 oylWeatherShade;
+      uniform vec3 oylImpostorLight;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
@@ -12722,6 +12888,9 @@ function impostorMaterial(
         #endif
         // #621: the same tint the tree's meshes wear, on the light it was baked with.
         ${IMPOSTOR_TINT_LINE}
+        // PR #2522: the weather's shade, as the tree's meshes wear it, and the
+        // sun's dimming, which the ratio above takes out and the meshes keep.
+        gl_FragColor.rgb *= oylWeatherShade * oylImpostorLight;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -12735,6 +12904,8 @@ function impostorMaterial(
   material.uniforms['oylSunAmbient'] = FOLIAGE.oylSunAmbient;
   material.uniforms['oylSunDirect'] = FOLIAGE.oylSunDirect;
   material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
+  material.uniforms['oylWeatherShade'] = FOLIAGE.oylWeatherShade;
+  material.uniforms['oylImpostorLight'] = FOLIAGE.oylImpostorLight;
   material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
   material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
   material.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
@@ -13013,6 +13184,8 @@ export class RealisticVegetationBelt {
           if (kind === 'tree-broadleaf') withAutumn(part.material);
           // #1523: a fir is drawn after a depth pre-pass.
           if (kind === 'tree-conifer') withDepthPrepass(part.material);
+          // PR #2522: and every plant goes down at dusk with the ground it stands on.
+          withWeatherShade(part.material);
         }
       }
       if (kind === 'tree-broadleaf') {
@@ -16705,6 +16878,8 @@ function structureMaterials(
       ),
     ),
   );
+  // PR #2522: a hedge is planting, and goes down at dusk with the trees.
+  if (surface === 'hedge') withWeatherShade(lit);
   return {
     // #1665: a lit pane shows #1662's room behind it.
     lit: surface === 'glass' ? withLotGlass(lit) : lit,
@@ -22444,10 +22619,35 @@ export function deliveryDrawnOf(
 export function deliveryWeatherOf(view: GameView): {
   readonly rain: boolean;
   readonly exposure: number | undefined;
+  /** PR #2522: the shades and the lights the frame was drawn with. */
+  readonly readback?: DeliveryWeatherReadback;
 } {
   return view instanceof ThreeGameView
-    ? { rain: view.deliveryRainShown(), exposure: view.exposure() }
+    ? {
+        rain: view.deliveryRainShown(),
+        exposure: view.exposure(),
+        readback: view.weatherReadback(),
+      }
     : { rain: false, exposure: undefined };
+}
+
+/**
+ * PR #2522: a level's weather as a view last drew it, linear colours each
+ * channel. @see deliveryWeatherOf
+ */
+export interface DeliveryWeatherReadback {
+  /** The ground's colour, the terrain's lit material's. */
+  readonly ground: readonly [number, number, number];
+  /** The stylised scenery's shade, its belt's materials' colour. */
+  readonly sceneryShade: readonly [number, number, number];
+  /** The realistic vegetation's and hedges' shade, the uniform they read. */
+  readonly foliageShade: readonly [number, number, number];
+  /** The realistic impostors' share of the route's light, the uniform they read. */
+  readonly impostorLight: readonly [number, number, number];
+  /** The rain's colour, its material's; absent before a frame carried a round. */
+  readonly rainColour: readonly [number, number, number] | undefined;
+  /** The nearest any streak stands to the camera across the ground, metres; absent with no rain drawn. */
+  readonly rainClearance: number | undefined;
 }
 
 /**
@@ -22751,6 +22951,8 @@ class ThreeGameView implements GameView {
   #drawing: QualitySettings['world'] = 'stylised';
   /** This frame's Delivery weather, if its round has any — #2508. @see render */
   #weather: DeliveryWeatherFrame | undefined;
+  /** PR #2522: this frame's share of the route's light, linear. @see sceneLightIn */
+  #sceneLight: readonly [number, number, number] = [1, 1, 1];
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -22861,6 +23063,12 @@ class ThreeGameView implements GameView {
         : { ...given, world: weatheredWorld(given.world, this.#weather) };
     // And the stylised road, whose colours are unlit, painted down with it.
     this.#roadMaterial.color.setRGB(...roadTintIn(this.#weather));
+    // PR #2522: the scenery goes down at dusk with the ground it stands on,
+    // and what the lamps do not reach — the far impostors and the rain — is
+    // lit by the share of the route's light the frame's sun gives.
+    const shade = sceneryShadeIn(given.world, this.#weather);
+    this.#sceneLight = sceneLightIn(given.world.sun, frame.world.sun, this.#weather);
+    this.#scatter.setShade(shade);
     this.#stage(frame);
     // #619 lever 2: this view's rung, written into the one uniform every
     // textured realistic material reads — here, because several views share
@@ -22880,6 +23088,9 @@ class ThreeGameView implements GameView {
         .normalize();
       FOLIAGE.oylSunAmbient.value = frame.world.sun.ambient;
       FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
+      // PR #2522: and the weather's shade and light, for the plants and the hedges.
+      FOLIAGE.oylWeatherShade.value.set(...shade);
+      FOLIAGE.oylImpostorLight.value.set(...this.#sceneLight);
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -23037,6 +23248,7 @@ class ThreeGameView implements GameView {
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
+    this.#delivery?.setRainLight(this.#sceneLight);
     this.#delivery?.update(view, eye, seconds);
     // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
     if (this.#renderer !== undefined && this.#drawing === 'realistic') {
@@ -23064,6 +23276,25 @@ class ThreeGameView implements GameView {
   /** #2366: the exposure the last frame was drawn at. For the jsdom suite and the browser gate. */
   exposure(): number | undefined {
     return this.#renderer?.toneMappingExposure;
+  }
+
+  /**
+   * PR #2522: how the last frame lit what the lamps do not reach and shaded
+   * the scenery, read off the materials and uniforms it was drawn with. For
+   * the browser gate. @see deliveryWeatherOf
+   */
+  weatherReadback(): DeliveryWeatherReadback {
+    return {
+      ground: this.#terrain.colour(),
+      sceneryShade: this.#scatter.shade(),
+      foliageShade: FOLIAGE.oylWeatherShade.value.toArray(),
+      impostorLight: FOLIAGE.oylImpostorLight.value.toArray(),
+      rainColour: this.#delivery?.rainColour(),
+      rainClearance:
+        this.#delivery?.rainShown() === true
+          ? this.#delivery.rainClearanceFrom(this.#camera.position)
+          : undefined,
+    };
   }
 
   /**

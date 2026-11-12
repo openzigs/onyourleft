@@ -41,6 +41,8 @@ import {
   MARKER_MOST_SCALE,
   MARKER_TRUE_SIZE_WITHIN_METRES,
   markerScaleAt,
+  RAIN_CLEAR_METRES,
+  RAIN_COLOUR,
   RAIN_STREAK_METRES,
   RAIN_STREAK_WIDTH_METRES,
   RAIN_STREAKS,
@@ -360,6 +362,52 @@ describe('Delivery’s belt — #1814', () => {
     }
     expect(acrossX).toBe(RAIN_STREAKS * 2);
     expect(acrossZ).toBe(RAIN_STREAKS * 2);
+    belt.dispose();
+  });
+
+  it('lays no streak nearer the camera than RAIN_CLEAR_METRES across the ground, on any frame — PR #2522', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_CLEAR_METRES).toBe(2.5);
+    const belt = new DeliveryBelt('stylised');
+    const view = { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } };
+    let nearest = Number.POSITIVE_INFINITY;
+    const frames: readonly (readonly [{ x: number; y: number; z: number }, number])[] = [
+      [{ x: 3, y: 12, z: 40 }, 0],
+      [{ x: -250, y: 4, z: 1_200 }, 0.37],
+      [{ x: 0, y: 0, z: 0 }, 9.9],
+    ];
+    for (const [eye, seconds] of frames) {
+      belt.update(view, eye, seconds);
+      expect(belt.rainShown()).toBe(true);
+      const clearance = belt.rainClearanceFrom(eye);
+      expect(clearance).toBeGreaterThanOrEqual(RAIN_CLEAR_METRES);
+      nearest = Math.min(nearest, clearance);
+    }
+    // And the rain is still there round the clear circle, not pushed out of view.
+    expect(nearest).toBeLessThan(RAIN_CLEAR_METRES + 0.5);
+    belt.dispose();
+  });
+
+  it('lights the rain with the scene: its paint times the frame’s share of the route’s light — PR #2522', () => {
+    const belt = new DeliveryBelt('stylised');
+    const paint = [(RAIN_COLOUR >> 16) & 0xff, (RAIN_COLOUR >> 8) & 0xff, RAIN_COLOUR & 0xff].map(
+      (channel) => {
+        const c = channel / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      },
+    );
+    belt.setRainLight([1, 1, 1]);
+    belt.rainColour().forEach((channel, at) => expect(channel).toBeCloseTo(paint[at] ?? 0, 6));
+    const dusk = [0.3, 0.16, 0.12] as const;
+    belt.setRainLight(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
+    // Each frame from the paint, never from the last frame's colour.
+    belt.setRainLight(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
     belt.dispose();
   });
 
