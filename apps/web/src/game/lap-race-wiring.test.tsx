@@ -103,6 +103,10 @@ interface DrawnInput {
   readonly riderDistance: number;
   readonly odometer: number;
   readonly steeredLateral: number | undefined;
+  /** #2456: optional the unsafe way round, as `steeredLateral` is. */
+  readonly steeredSway: number | undefined;
+  /** #2494: the rider's drawn steer on the frame made from it. */
+  readonly steer: number | undefined;
   readonly bots: number | undefined;
   readonly pacer: number | undefined;
 }
@@ -113,14 +117,17 @@ vi.mock('./scene', async (importOriginal) => {
     ...actual,
     sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
       const input = args[0];
+      const frame = actual.sceneFrame(...args);
       inputs.push({
         riderDistance: input.riderDistance ?? Number.NaN,
         odometer: input.state.ride.distance,
         steeredLateral: input.steeredLateral,
+        steeredSway: input.steeredSway,
+        steer: frame.markers.find((marker) => marker.kind === 'rider')?.steer,
         bots: input.raceBots?.length,
         pacer: input.botDistance,
       });
-      return actual.sceneFrame(...args);
+      return frame;
     },
   };
 });
@@ -289,11 +296,11 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
 }
 
 /** One animation frame, as `delivery-wiring.test.tsx` §`pump` runs one. */
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const due = pending;
   if (due.length === 0) throw new Error('the ride asked for no frame');
   pending = [];
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     for (const callback of due) callback(nowMs);
     await Promise.resolve();
@@ -822,6 +829,30 @@ describe('a solo lap race inside a game ride — #1906', () => {
     for (let index = 0; index < 8 && item() === holding; index += 1) await pump();
     expect(item()).not.toBe(holding);
     expect(lateral()).toBeLessThan((line ?? 0) - 1);
+  });
+
+  it('draws a lane change swaying toward the move, and still again once the rider is in the lane (#2456)', async () => {
+    await rideTheTrace({ race: RACE, frames: 40, presses: new Map() });
+    const sway = (): number | undefined => inputs.at(-1)?.steeredSway;
+    // In a lane, nothing sways.
+    expect(sway()).toBe(0);
+    await press('lane-left');
+    const pressed = inputs.length;
+    // A 60 Hz screen, a second of it: the move, and the sway settling after it.
+    for (let index = 0; index < 60; index += 1) await pump(1000 / 60);
+    const swayed = inputs.slice(pressed).map((each) => each.steeredSway ?? Number.NaN);
+    expect(Math.min(...swayed)).toBeLessThan(-1);
+    expect(Math.max(...swayed)).toBeLessThanOrEqual(0);
+    expect(sway()).toBe(0);
+    // #2494: the bars turned left into the move and back out of it, then
+    // only as far as the circuit's bend under the rider asks: a degree or two.
+    const steers = inputs.slice(pressed).map((each) => each.steer ?? 0);
+    expect(Math.min(...steers)).toBeLessThan(-0.1);
+    expect(Math.max(...steers)).toBeGreaterThan(0.1);
+    // Into the move first, left: the max and min above are symmetric, so a
+    // sway rate of the wrong sign would pass them.
+    expect(steers.find((each) => Math.abs(each) > 0.1)).toBeLessThan(0);
+    expect(Math.abs(inputs.at(-1)?.steer ?? 0)).toBeLessThan(0.05);
   });
 
   it('runs no race on a route that is not a loop: an ordinary ride', async () => {

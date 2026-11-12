@@ -697,7 +697,27 @@ describe('holding: a defensive leader’s cape absorbs the hit the #1900 bot was
   });
 });
 
-/** Racers deciding by `policies` over `count` seeded races, memoised: they are the slow part. */
+/**
+ * Racers deciding by `policies` over seeded races, memoised: they are the slow
+ * part. A field's thousand races are ridden in parts of {@link PART}, each by
+ * a case of its own below (#2527), and read back whole by the cases after.
+ */
+const PART = 250;
+const parts = new Map<string, readonly RaceRun[]>();
+function racesPart(
+  key: string,
+  first: number,
+  policies: (seed: number) => readonly Policy[],
+): readonly RaceRun[] {
+  const named = `${key} from ${String(first)}`;
+  const known = parts.get(named);
+  if (known !== undefined) return known;
+  const made = Array.from({ length: PART }, (_, at) =>
+    simulateRace(first + at, policies(first + at)),
+  );
+  parts.set(named, made);
+  return made;
+}
 const runs = new Map<string, readonly RaceRun[]>();
 function races(
   key: string,
@@ -706,7 +726,9 @@ function races(
 ): readonly RaceRun[] {
   const known = runs.get(key);
   if (known !== undefined) return known;
-  const made = Array.from({ length: count }, (_, at) => simulateRace(at + 1, policies(at + 1)));
+  const made = Array.from({ length: count / PART }, (_, at) =>
+    racesPart(key, 1 + at * PART, policies),
+  ).flat();
   runs.set(key, made);
   return made;
 }
@@ -715,12 +737,16 @@ function races(
 function mixedPersonality(seed: number, index: number): BotPersonality {
   return BOT_PERSONALITIES[(index + seed) % BOT_PERSONALITIES.length] as BotPersonality;
 }
-const mixed = (): readonly RaceRun[] =>
-  races('mixed', 1_000, (seed) =>
-    Array.from({ length: 6 }, (_, index) => strategy(mixedPersonality(seed, index), 'canny')),
-  );
-const reactiveField = (): readonly RaceRun[] =>
-  races('reactive', 1_000, () => Array.from({ length: 6 }, (): Policy => 'reactive'));
+const MIXED = (seed: number): readonly Policy[] =>
+  Array.from({ length: 6 }, (_, index) => strategy(mixedPersonality(seed, index), 'canny'));
+const REACTIVE = (): readonly Policy[] => Array.from({ length: 6 }, (): Policy => 'reactive');
+/** One opportunist among five of the #1900 bot. */
+const OPPORTUNIST_AMONG_REACTIVE = (): readonly Policy[] => [
+  strategy('opportunist', 'canny'),
+  ...Array.from({ length: 5 }, (): Policy => 'reactive'),
+];
+const mixed = (): readonly RaceRun[] => races('mixed', 1_000, MIXED);
+const reactiveField = (): readonly RaceRun[] => races('reactive', 1_000, REACTIVE);
 
 /** The uses a filter keeps, over many races. */
 function usesOf(all: readonly RaceRun[], keep: (id: string, seed: number) => boolean): Use[] {
@@ -736,12 +762,37 @@ function gustHits(uses: readonly Use[]): number {
   return mean(uses.filter((use) => use.kind === 'crosswind-gust').map((use) => use.hits));
 }
 
-describe('over a thousand seeded races', { timeout: 60_000 }, () => {
+describe('over a thousand seeded races', () => {
+  // #2527, #1688's ruling (a slow case is made cheaper, never given a longer
+  // timeout): this block had a 60 s timeout, and its first two cases rode the
+  // three fields' thousand races each, two fields in the first. Locally on an
+  // Apple M4 Pro at a load average of 7 to 11: 1.9 s and 1.1 s, and 4.7 s and
+  // 3.3 s under --coverage. Each field is now ridden a quarter at a time, a
+  // case a quarter, every race to the line; the cases after read them whole.
+  // Those cases are cheap only because the quarter cases ran first: with the
+  // quarters filtered out (`-t bunching`) the first of them rides eight parts
+  // itself and runs over the 5 s default, which hides its own assertion.
+  for (const [key, name, policies] of [
+    ['reactive', 'six #1900 bots', REACTIVE],
+    [
+      'opportunist-among-reactive',
+      'an opportunist among five #1900 bots',
+      OPPORTUNIST_AMONG_REACTIVE,
+    ],
+    ['mixed', 'two bots of each personality', MIXED],
+  ] as const) {
+    for (const first of [1, 251, 501, 751]) {
+      it(`rides races ${String(first)} to ${String(first + PART - 1)} of ${name} to the line`, () => {
+        for (const run of racesPart(key, first, policies)) {
+          const last = run.states[run.states.length - 1] as ItemRaceState;
+          expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+        }
+      });
+    }
+  }
+
   it('bunching: an opportunist’s gust hits more racers a use than the #1900 bot’s', () => {
-    const opportunist = races('opportunist-among-reactive', 1_000, () => [
-      strategy('opportunist', 'canny'),
-      ...Array.from({ length: 5 }, (): Policy => 'reactive'),
-    ]);
+    const opportunist = races('opportunist-among-reactive', 1_000, OPPORTUNIST_AMONG_REACTIVE);
     const theirs = gustHits(usesOf(reactiveField(), (id) => id === 'b0'));
     const ours = gustHits(usesOf(opportunist, (id) => id === 'b0'));
     expect(ours).toBeGreaterThan(theirs + 0.1);

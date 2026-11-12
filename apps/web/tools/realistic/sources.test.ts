@@ -63,6 +63,7 @@ import {
   REALISTIC_CHAIN_LINK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
   TOWN_STRUCTURE_SURFACES,
 } from '../../src/game/realistic-assets';
@@ -550,6 +551,11 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // writes them top row first as those coordinates read them.
         const glTF = output.file === REALISTIC_RIDER;
         for (const also of recipe.alsoWrites ?? []) {
+          // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
+          if (also.ktx2 === undefined) {
+            expect(also.file, output.file).toBe(REALISTIC_RIDER_PACK.vat);
+            continue;
+          }
           expect(also.ktx2.origin, also.file).toBe(glTF ? 'top-left' : 'bottom-left');
         }
       }
@@ -559,7 +565,14 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
   it('ships every texture as KTX2 and the sky as the upstream HDR, nothing else verbatim', () => {
     const verbatim = OUTPUTS.filter((output) => output.recipe.how === 'verbatim');
     expect(verbatim.map((output) => output.file)).toEqual(['farm_field_2k.hdr']);
-    const pictures = shippedFiles().filter((file) => !/\.(?:glb|hdr)$/.test(file));
+    // #2485: the one file that is neither a model, the sky nor a picture is
+    // the pack's vertex-animation texture, which is numbers no encoder may round.
+    expect(shippedFiles().filter((file) => !/\.(?:glb|hdr|ktx2)$/.test(file))).toEqual([
+      REALISTIC_RIDER_PACK.vat,
+    ]);
+    const pictures = shippedFiles().filter(
+      (file) => !/\.(?:glb|hdr)$/.test(file) && file !== REALISTIC_RIDER_PACK.vat,
+    );
     expect(pictures.length).toBeGreaterThanOrEqual(22);
     for (const file of pictures) expect(file).toMatch(/\.ktx2$/);
     // A colour map is colour, a normal map is normal, never the other way.
@@ -694,13 +707,27 @@ describe('the digest of a run that reads two sources — #623', () => {
 describe('what --check requires of a run’s report — #900 item 2', () => {
   it('names only outputs a Blender run makes, whose script writes the count', () => {
     const files = Object.keys(EXPECTED_REPORTS);
-    expect(files.sort()).toEqual(['island_tree_02-middle.glb', 'island_tree_02.glb']);
+    // #2485: and the pack's rider, whose texture's shape is held too; #2495:
+    // and the rider, whose eyes' cost is.
+    expect(files.sort()).toEqual(
+      [
+        'island_tree_02-middle.glb',
+        'island_tree_02.glb',
+        REALISTIC_RIDER,
+        REALISTIC_RIDER_PACK.lod,
+      ].sort(),
+    );
     for (const file of files) {
       const output = OUTPUTS.find((each) => each.file === file);
       expect(output?.recipe.how, file).toBe('blender');
       if (output?.recipe.how !== 'blender') continue;
       const script = readFileSync(join(PIPELINE, output.recipe.script), 'utf8');
-      expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
+      for (const field of Object.keys(EXPECTED_REPORTS[file] ?? {})) {
+        expect(script, `${file}: ${field}`).toContain(`"${field}": `);
+      }
+      if (file.startsWith('island_tree_02')) {
+        expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
+      }
     }
   });
 

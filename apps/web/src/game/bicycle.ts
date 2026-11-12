@@ -175,9 +175,15 @@
  *   hips (@see bicycleRoll); and in a tight bend the cranks are parked
  *   outside-pedal-down (@see drawnCrankAngle), which is the one exception to
  *   the cadence rule below.
- * - **No steering, and no pitch on a gradient.** Both are below what a 1.6 m
- *   object 8 m from the camera resolves, and both would need state this file
- *   does not have.
+ * - **No pitch on a gradient**: below what a 1.6 m object 8 m from the camera
+ *   resolves. ⚠️ **"No steering" stood beside it until #2494, and a reviewer
+ *   who remembers it is reading the old file**: the owner judged steerable
+ *   bars worth doing (2026-11-11). The front — the fork, the front wheel and
+ *   the bars — turns about the head tube ({@link STEERING_AXIS}) by a
+ *   marker's own steer (`RiderMarker.steer`, {@link steerAngle}), which is
+ *   the state that bullet said this file did not have: it is the scene's,
+ *   from the drawn path, and the parts here only say which of them turn
+ *   ({@link RiderPart.steers}).
  *
  * ⚠️ **This list used to end with a fourth bullet and it is gone — #368.** It
  * read: *"Nothing for the bot or the ghost. They keep their cone and their
@@ -443,6 +449,19 @@ export interface RiderPart {
   readonly yaw: number;
   /** Rotation about `+Z`: what lays a tube across the bicycle. */
   readonly roll: number;
+  /**
+   * Whether the part turns with the bars — #2494: wholly (`'whole'`: the fork,
+   * the front wheel and the bar), or along a tube from not at all at its start
+   * to wholly at its end (`'toward-end'`: the stylised rider's arm, whose hand
+   * is on the bar). Absent for everything else, which stays where it is.
+   * @see STEERING_AXIS
+   */
+  readonly steers?: 'whole' | 'toward-end' | undefined;
+}
+
+/** `made`, turning with the bars — #2494. @see RiderPart.steers */
+function steering(made: RiderPart, how: 'whole' | 'toward-end' = 'whole'): RiderPart {
+  return { ...made, steers: how };
 }
 
 /** A part with no rotation, which is most of them. */
@@ -841,8 +860,32 @@ const SADDLE_Z = -0.28;
 // ⚠️ `HEAD_TUBE_TOP_Y` and `HEAD_TUBE_TOP_Z` are declared **above**, with the
 // bar, because {@link BAR_Y} and {@link BAR_Z} are derived from them and a
 // module-scope `const` cannot be read before its own line.
+/**
+ * The head angle, from the road: **72°**, a road bicycle's — #2494. It is the
+ * steering axis's ({@link STEERING_AXIS}), and the head tube is drawn on it.
+ * ⚠️ The foot was at `z = 0.38` until #2494, a 76.8° angle no road frame has,
+ * which nothing turned about; 72° moves it 15 mm forward and puts the axis
+ * through the front hub, so the front wheel turns about its own middle.
+ */
+const HEAD_ANGLE_RADIANS = (72 * Math.PI) / 180;
 const HEAD_TUBE_FOOT_Y = 0.72;
-const HEAD_TUBE_FOOT_Z = 0.38;
+const HEAD_TUBE_FOOT_Z =
+  HEAD_TUBE_TOP_Z + (HEAD_TUBE_TOP_Y - HEAD_TUBE_FOOT_Y) / Math.tan(HEAD_ANGLE_RADIANS);
+
+/**
+ * The line the front of the bicycle turns about: the head tube's own, through
+ * its top and DOWN it to its foot — #2494. A turn by a positive angle about
+ * this direction, right-handed, takes the front wheel toward `−X`, the
+ * rider's right, which is `RiderMarker.steer`'s sign. @see steeredPoint
+ */
+export const STEERING_AXIS = {
+  point: { x: 0, y: HEAD_TUBE_TOP_Y, z: HEAD_TUBE_TOP_Z },
+  direction: {
+    x: 0,
+    y: -Math.sin(HEAD_ANGLE_RADIANS),
+    z: Math.cos(HEAD_ANGLE_RADIANS),
+  },
+} as const;
 
 /**
  * The rider's back, as the segment between the two joints that define it.
@@ -883,12 +926,14 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
     { y: WHEEL_RADIUS, z: REAR_HUB_Z },
     { yaw: Math.PI / 2 },
   ),
-  part(
-    'front wheel',
-    { shape: 'ring', radius: WHEEL_RADIUS - TYRE_RADIUS, thickness: TYRE_RADIUS },
-    RIDER_PALETTE.tyre,
-    { y: WHEEL_RADIUS, z: FRONT_HUB_Z },
-    { yaw: Math.PI / 2 },
+  steering(
+    part(
+      'front wheel',
+      { shape: 'ring', radius: WHEEL_RADIUS - TYRE_RADIUS, thickness: TYRE_RADIUS },
+      RIDER_PALETTE.tyre,
+      { y: WHEEL_RADIUS, z: FRONT_HUB_Z },
+      { yaw: Math.PI / 2 },
+    ),
   ),
   // ----------------------------------------------------------------- the frame
   tube(
@@ -934,22 +979,26 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
       { x: side * 0.05, y: CRANK_AXIS_Y, z: CRANK_AXIS_Z - 0.02 },
       { y: WHEEL_RADIUS, z: REAR_HUB_Z },
     ),
-    tube(
-      `fork ${side}`,
-      RIDER_PALETTE.frame,
-      0.016,
-      { x: side * 0.05, y: HEAD_TUBE_FOOT_Y, z: HEAD_TUBE_FOOT_Z },
-      { y: WHEEL_RADIUS, z: FRONT_HUB_Z },
+    steering(
+      tube(
+        `fork ${side}`,
+        RIDER_PALETTE.frame,
+        0.016,
+        { x: side * 0.05, y: HEAD_TUBE_FOOT_Y, z: HEAD_TUBE_FOOT_Z },
+        { y: WHEEL_RADIUS, z: FRONT_HUB_Z },
+      ),
     ),
   ]),
   // ------------------------------------------------------- the drop bar, #369
   // A handlebar lies across the bicycle, so its tube is rolled a quarter turn.
-  part(
-    'bar tops',
-    { shape: 'tube', radius: BAR_TUBE_RADIUS, length: HANDLEBAR_LENGTH_METRES },
-    RIDER_PALETTE.tyre,
-    { y: BAR_Y, z: BAR_Z },
-    { roll: Math.PI / 2 },
+  steering(
+    part(
+      'bar tops',
+      { shape: 'tube', radius: BAR_TUBE_RADIUS, length: HANDLEBAR_LENGTH_METRES },
+      RIDER_PALETTE.tyre,
+      { y: BAR_Y, z: BAR_Z },
+      { roll: Math.PI / 2 },
+    ),
   ),
   ...[-1, 1].flatMap((side) => [
     // The bend. A quarter turn about `+Y` stands the torus in the bicycle's own
@@ -957,36 +1006,42 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
     // centre — so sweeping α from a quarter turn to three quarters traces
     // exactly a bar's curve: up at the tops, forward at the hoods, down at the
     // drops. The centre therefore sits one radius BELOW the tops.
-    part(
-      `bar bend ${side}`,
-      {
-        shape: 'bend',
-        radius: BAR_BEND_RADIUS,
-        thickness: BAR_TUBE_RADIUS,
-        start: Math.PI / 2,
-        sweep: Math.PI,
-      },
-      RIDER_PALETTE.tyre,
-      { x: side * BAR_HALF_WIDTH, y: BAR_Y - BAR_BEND_RADIUS, z: BAR_Z },
-      { yaw: Math.PI / 2 },
+    steering(
+      part(
+        `bar bend ${side}`,
+        {
+          shape: 'bend',
+          radius: BAR_BEND_RADIUS,
+          thickness: BAR_TUBE_RADIUS,
+          start: Math.PI / 2,
+          sweep: Math.PI,
+        },
+        RIDER_PALETTE.tyre,
+        { x: side * BAR_HALF_WIDTH, y: BAR_Y - BAR_BEND_RADIUS, z: BAR_Z },
+        { yaw: Math.PI / 2 },
+      ),
     ),
     // …and the drop itself, running back from the bottom of that bend, which is
     // where a hand in {@link HAND_POSITIONS}.drops actually lands.
-    tube(
-      `bar drop ${side}`,
-      RIDER_PALETTE.tyre,
-      BAR_TUBE_RADIUS,
-      { x: side * BAR_HALF_WIDTH, y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z },
-      { y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z - DROP_TAIL_METRES },
+    steering(
+      tube(
+        `bar drop ${side}`,
+        RIDER_PALETTE.tyre,
+        BAR_TUBE_RADIUS,
+        { x: side * BAR_HALF_WIDTH, y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z },
+        { y: BAR_Y - 2 * BAR_BEND_RADIUS, z: BAR_Z - DROP_TAIL_METRES },
+      ),
     ),
     // …and the brake hood on the front of the bend, which a hand on the hoods
     // holds. @see HOOD
-    part(
-      `bar hood ${side}`,
-      { shape: 'box', width: 0.025, height: 0.03, depth: HOOD.length },
-      RIDER_PALETTE.tyre,
-      { x: side * BAR_HALF_WIDTH, y: HOOD.y, z: HOOD.z },
-      { pitch: HOOD.pitch },
+    steering(
+      part(
+        `bar hood ${side}`,
+        { shape: 'box', width: 0.025, height: 0.03, depth: HOOD.length },
+        RIDER_PALETTE.tyre,
+        { x: side * BAR_HALF_WIDTH, y: HOOD.y, z: HOOD.z },
+        { pitch: HOOD.pitch },
+      ),
     ),
   ]),
   part('saddle', { shape: 'box', width: 0.1, height: 0.035, depth: 0.24 }, RIDER_PALETTE.tyre, {
@@ -1013,12 +1068,16 @@ export const RIDER_UPPER_BODY_PARTS: readonly RiderPart[] = [
   ...[-1, 1].map((side) =>
     // The arms. Same solid as a frame tube because at this distance an arm is a
     // segment between two joints and nothing else.
-    tube(
-      `arm ${side}`,
-      RIDER_PALETTE.jersey,
-      0.032,
-      { x: side * SHOULDER_ACROSS, y: SHOULDER_Y, z: SHOULDER_Z },
-      { y: GRIP_Y, z: GRIP_Z },
+    // #2494: the hand on the bar turns with it, the shoulder does not.
+    steering(
+      tube(
+        `arm ${side}`,
+        RIDER_PALETTE.jersey,
+        0.032,
+        { x: side * SHOULDER_ACROSS, y: SHOULDER_Y, z: SHOULDER_Z },
+        { y: GRIP_Y, z: GRIP_Z },
+      ),
+      'toward-end',
     ),
   ),
   part(
@@ -1056,6 +1115,61 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
  * through this point.
  */
 export const UPPER_BODY_PIVOT = { y: HIP_Y, z: HIP_Z } as const;
+
+/** The wheelbase, hub to hub: 1.02 m — #2494, the kinematic bicycle's `L`. */
+export const WHEELBASE_METRES = FRONT_HUB_Z - REAR_HUB_Z;
+
+/**
+ * The most the bars are drawn turned either way: **20°** — #2494. A rider at
+ * a walking pace turning as fast as a lane change is drawn turning asks for
+ * more (2.2 rad/s at 3 m/s is 37°), and a road bar turned past about 20°
+ * meets the rider's knee; the turn into the move still reads at 20°.
+ */
+export const MAXIMUM_STEER_RADIANS = (20 * Math.PI) / 180;
+
+/**
+ * The steer a bicycle turning at `yawRate` radians a second at `speed` metres
+ * a second has, in radians — #2494: the kinematic bicycle's
+ * `δ = atan(L · ω / v)`, {@link WHEELBASE_METRES} its `L`, positive to the
+ * rider's right as `yawRate` is, and clamped to
+ * {@link MAXIMUM_STEER_RADIANS}. Nought at a standstill, and for a turn rate or
+ * a speed that is not a number.
+ */
+export function steerAngle(yawRate: number, speed: number): number {
+  if (!(speed > 0) || !Number.isFinite(yawRate)) return 0;
+  const steer = Math.atan((WHEELBASE_METRES * yawRate) / speed);
+  return Math.max(-MAXIMUM_STEER_RADIANS, Math.min(MAXIMUM_STEER_RADIANS, steer)) + 0;
+}
+
+/**
+ * Where `point`, in the bicycle's frame, is drawn with the bars turned by
+ * `steer` — #2494: turned about {@link STEERING_AXIS} by that angle (a
+ * right-handed turn about the axis pointing down the head tube, so a positive
+ * steer takes the front to the rider's right). Written into `into`, which is
+ * returned; allocates nothing. The renderer's vertex shader turns the front's
+ * vertices by exactly this, and the realistic rider's grips by this.
+ */
+export function steeredPoint(
+  point: { readonly x: number; readonly y: number; readonly z: number },
+  steer: number,
+  into: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+  const { point: on, direction: axis } = STEERING_AXIS;
+  const x = point.x - on.x;
+  const y = point.y - on.y;
+  const z = point.z - on.z;
+  const cosine = Math.cos(steer);
+  const sine = Math.sin(steer);
+  // Rodrigues: p cos θ + (k × p) sin θ + k (k · p)(1 − cos θ).
+  const along = (axis.x * x + axis.y * y + axis.z * z) * (1 - cosine);
+  const crossX = axis.y * z - axis.z * y;
+  const crossY = axis.z * x - axis.x * z;
+  const crossZ = axis.x * y - axis.y * x;
+  into.x = on.x + x * cosine + crossX * sine + axis.x * along;
+  into.y = on.y + y * cosine + crossY * sine + axis.y * along;
+  into.z = on.z + z * cosine + crossZ * sine + axis.z * along;
+  return into;
+}
 
 /**
  * The cranks, the chainring and the pedals — **in the axis's own frame**.
