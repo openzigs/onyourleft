@@ -1289,8 +1289,9 @@ test.describe('a race’s voice button on its line — #875', () => {
  * one, began 50 px into the leaning rider at 360×752 and 36 px at 360×800,
  * and covered *Stop side camera* at 390×844. The control takes §"#1409"'s
  * rules out of the live stylesheet, puts back #1398's exception for a side
- * camera, and requires the same measurement to fail at 1024×768, 736×360 and
- * 360×752.
+ * camera, and requires the same measurement to fail at 736×360 and 360×752.
+ * It ran at 1024×768 as well until #2130, after which it found nothing there
+ * (the note on the control below; `theme.css` §"#1409" has the measurement).
  */
 const ROOM_SOUNDS_SIDE = `${FOLLOWING_WITH_SOUNDS}&side=filming`;
 
