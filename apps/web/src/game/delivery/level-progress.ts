@@ -55,7 +55,11 @@ export const LEVEL_PROGRESS_FIELDS = ['version', 'finished'] as const;
  */
 export const KEPT_LEVEL_ID_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
 
-/** More finished levels than the app could ship: a stored list longer than this is not ours. */
+/**
+ * More finished levels than the app could ship: a stored list longer than this is not ours.
+ * The catalogue stays well under it; at the cap the writer would drop the newest id and the
+ * reader would refuse a longer list, so raise it before the catalogue nears it.
+ */
 export const MOST_LEVELS_KEPT = 64;
 
 /** What this device has kept: the ids of the levels it has finished, in the order they were. */

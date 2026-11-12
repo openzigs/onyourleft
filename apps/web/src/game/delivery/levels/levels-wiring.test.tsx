@@ -213,7 +213,7 @@ async function openPicker(routes: readonly RidableRoute[] = []): Promise<void> {
 /** The setup on `href`, as the picker's link opens it, with this test's renderer and clock. */
 async function openSetup(
   href: string,
-  extra: { readonly rooms?: RoomsPort; readonly roomId?: string } = {},
+  extra: { readonly rooms?: RoomsPort; readonly roomId?: string; readonly port?: GamePort } = {},
 ): Promise<void> {
   globalThis.location.hash = href;
   mounted = await mount(
@@ -455,6 +455,12 @@ describe('levels open in order, kept on the device — #2363, ADR 0065 D-9', () 
     );
     await click(endRideAnswer(document, 'End ride'));
     expect(readLevelProgress(localStorage)).toStrictEqual(NO_LEVEL_FINISHED);
+  });
+
+  it('reads no level from its address when the port’s listing does not name it', async () => {
+    const unlisted: GamePort = { ...port(), listDeliveryLevels: () => Promise.resolve([]) };
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)), { port: unlisted });
+    expect(read).toStrictEqual([]);
   });
 
   it('reads and rides no locked level from its address typed by hand', async () => {

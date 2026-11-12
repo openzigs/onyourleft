@@ -79,6 +79,7 @@ import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { parseLevelFile } from './delivery/levels/level-file';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
+import { SHIPPED_LEVELS } from './shipped-levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
@@ -2135,6 +2136,8 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     const writes: Write[] = [];
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
+      // The listing must name the level: an unlisted one is not read (#2363).
+      listDeliveryLevels: () => Promise.resolve([{ ...SHIPPED_LEVELS.list()[0]!, id: LEVEL.id }]),
       loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({

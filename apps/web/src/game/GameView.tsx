@@ -2013,15 +2013,15 @@ function GameScreen({
     const levelRead = (
       levelId === undefined
         ? Promise.resolve(undefined)
-        : (port.listDeliveryLevels?.() ?? Promise.resolve([])).then((listed) =>
-            levelStanding(
-              listed.map((each) => each.id),
-              readLevelProgress(deviceStorage()),
-              levelId,
-            ).state === 'locked'
+        : (port.listDeliveryLevels?.() ?? Promise.resolve([])).then((listed) => {
+            const order = listed.map((each) => each.id);
+            // A level the listing does not name has no place in the order, so
+            // nothing says it is open: it is not read (fails closed).
+            return !order.includes(levelId) ||
+              levelStanding(order, readLevelProgress(deviceStorage()), levelId).state === 'locked'
               ? undefined
-              : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined)),
-          )
+              : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined));
+          })
     ).catch((): undefined => undefined);
     void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
       ([found, circuitsFound, levelFound]) => {
