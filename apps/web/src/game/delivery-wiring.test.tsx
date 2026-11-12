@@ -326,11 +326,11 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
  * callback, so another `requestAnimationFrame` consumer (the HUD's gamepad
  * poll, #1821) cannot spend one of the ride's frames.
  */
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const due = pending;
   if (due.length === 0) throw new Error('the ride asked for no frame');
   pending = [];
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     for (const callback of due) callback(nowMs);
     await Promise.resolve();
@@ -2145,12 +2145,45 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     'fixture-level',
   );
 
+  /** #1688: how many frames' time one coarse frame of {@link frameSteps} is. */
+  const COARSE_FRAMES = 5;
+  /** #1688: how many frames either side of a throw {@link frameSteps} keeps fine. */
+  const FINE_AROUND = 8;
+
+  /**
+   * #1688: the frames a level ride pumps, each in frames of `FRAME_MS`: all
+   * of them one at a time, or with `fine`, {@link COARSE_FRAMES} at once
+   * wherever none of those is in it.
+   */
+  function frameSteps(fine: ReadonlySet<number> | undefined): readonly number[] {
+    const steps: number[] = [];
+    for (let index = 0; index < FRAMES;) {
+      const step =
+        fine !== undefined &&
+        index + COARSE_FRAMES <= FRAMES &&
+        Array.from({ length: COARSE_FRAMES }, (_, each) => index + each).every(
+          (each) => !fine.has(each),
+        )
+          ? COARSE_FRAMES
+          : 1;
+      steps.push(step);
+      index += step;
+    }
+    return steps;
+  }
+
   /**
    * #2365: after which frame to press a throw at each house on `SKIP_LEVEL`
    * that must not get a parcel, under the ride's seed: the frame a shadow of
-   * the ride is nearest the place a parcel lands on it from.
+   * the ride is nearest the place a parcel lands on it from. #1688: and the
+   * frames to keep fine, those within {@link FINE_AROUND} of each; the press
+   * is chosen on a shadow pumped as {@link frameSteps} pumps them, since the
+   * power is read once a frame.
    */
-  function skipThrowScript(seed: number): ReadonlyMap<number, ThrowSide> {
+  function skipThrowScript(seed: number): {
+    readonly throws: ReadonlyMap<number, ThrowSide>;
+    readonly fine: ReadonlySet<number>;
+  } {
     stubSeed(seed);
     const round = startDeliveryRide({
       buildings: LEVEL_BUILDINGS,
@@ -2163,32 +2196,44 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     });
     vi.restoreAllMocks();
     if (round === undefined) throw new Error('the level gave no round');
-    const simulation = new GameSimulation({
-      profile: LEVEL_PROFILE,
-      conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
-    });
-    const shadow: { along: number; speed: number }[] = [];
-    for (let frame = 1; frame <= FRAMES; frame += 1) {
-      const at = START_MS + frame * FRAME_MS;
-      simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
-      shadow.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
-    }
-    const throws = new Map<number, ThrowSide>();
-    for (const house of round.throwNoDelivery) {
-      const across = CARRIAGEWAY_HALF_WIDTH_METRES + house.clear;
-      let best = -1;
-      let bestGap = Infinity;
-      shadow.forEach((frame, index) => {
-        const from = house.along - frame.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
-        const gap = Math.abs(frame.along - from);
-        if (gap < bestGap) {
-          best = index;
-          bestGap = gap;
-        }
+    const script = (fine: ReadonlySet<number> | undefined): Map<number, ThrowSide> => {
+      const simulation = new GameSimulation({
+        profile: LEVEL_PROFILE,
+        conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
       });
-      if (bestGap < 2) throws.set(best, house.side);
-    }
-    return throws;
+      // The frame each press may follow, by its index, and where the shadow is after it.
+      const shadow = new Map<number, { along: number; speed: number }>();
+      let index = 0;
+      for (const step of frameSteps(fine)) {
+        index += step;
+        const at = START_MS + index * FRAME_MS;
+        simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
+        const frame = { along: simulation.state.ride.distance, speed: simulation.state.ride.speed };
+        if (step === 1) shadow.set(index - 1, frame);
+      }
+      const throws = new Map<number, ThrowSide>();
+      for (const house of round.throwNoDelivery) {
+        const across = CARRIAGEWAY_HALF_WIDTH_METRES + house.clear;
+        let best = -1;
+        let bestGap = Infinity;
+        shadow.forEach((frame, at) => {
+          const from = house.along - frame.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+          const gap = Math.abs(frame.along - from);
+          if (gap < bestGap) {
+            best = at;
+            bestGap = gap;
+          }
+        });
+        if (bestGap < 2) throws.set(best, house.side);
+      }
+      return throws;
+    };
+    const fine = new Set(
+      [...script(undefined).keys()].flatMap((at) =>
+        Array.from({ length: 2 * FINE_AROUND + 1 }, (_, each) => at - FINE_AROUND + each),
+      ),
+    );
+    return { throws: script(fine), fine };
   }
 
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
@@ -2196,6 +2241,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     obstacles: 'normal' | 'none',
     level: LevelFile = LEVEL,
     throwsAt: ReadonlyMap<number, ThrowSide> = new Map(),
+    fine?: ReadonlySet<number>,
   ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
@@ -2238,9 +2284,11 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     );
     await settle();
     await clickThrough(buttonStarting('Ride '));
-    for (let index = 0; index < FRAMES; index += 1) {
-      await pump();
-      const side = throwsAt.get(index);
+    let index = 0;
+    for (const step of frameSteps(fine)) {
+      await pump(step * FRAME_MS);
+      index += step;
+      const side = throwsAt.get(index - 1);
       if (side !== undefined) await pressThrow(side);
     }
     await settle();
@@ -2272,23 +2320,26 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     },
   );
 
-  it(
-    'sends the same writes at the same times with parcels thrown at houses that must not get one as with none thrown — #2365',
-    { timeout: 30_000 },
-    async () => {
-      const script = skipThrowScript(CRASHING_SEED);
-      expect(script.size).toBeGreaterThan(0);
-      const without = await rideLevel('none', SKIP_LEVEL);
-      noDeliveries.count = 0;
-      const thrown = await rideLevel('none', SKIP_LEVEL, script);
-      // Non-vacuity: the round had such houses, and a parcel thrown came down on one.
-      const [round] = thrown.started as (DeliveryRide | undefined)[];
-      expect(round?.noDeliveryTargets.length).toBeGreaterThan(0);
-      expect(noDeliveries.count).toBeGreaterThan(0);
-      expect(without.writes.length).toBeGreaterThan(20);
-      expect(thrown.writes).toStrictEqual(without.writes);
-    },
-  );
+  // #1688's ruling: cheaper, never a longer timeout. Both rides pump the same
+  // frames (`frameSteps`): 1 s at once away from the throws, and frames of
+  // 200 ms within 1.6 s of each, the presses chosen on a shadow pumped the
+  // same way; about 107 frames a ride, not 330. On this Mac, Node 26, the
+  // case in its block, four runs each at load averages of 15 to 35: 2.0–6.0 s
+  // → 0.65–2.1 s without coverage, 4.3–20 s → 1.5–5.1 s with `--coverage`,
+  // the new case's slowest reading at the load at which the old one took 20 s.
+  it('sends the same writes at the same times with parcels thrown at houses that must not get one as with none thrown — #2365', async () => {
+    const { throws: script, fine } = skipThrowScript(CRASHING_SEED);
+    expect(script.size).toBeGreaterThan(0);
+    const without = await rideLevel('none', SKIP_LEVEL, new Map(), fine);
+    noDeliveries.count = 0;
+    const thrown = await rideLevel('none', SKIP_LEVEL, script, fine);
+    // Non-vacuity: the round had such houses, and a parcel thrown came down on one.
+    const [round] = thrown.started as (DeliveryRide | undefined)[];
+    expect(round?.noDeliveryTargets.length).toBeGreaterThan(0);
+    expect(noDeliveries.count).toBeGreaterThan(0);
+    expect(without.writes.length).toBeGreaterThan(20);
+    expect(thrown.writes).toStrictEqual(without.writes);
+  });
 
   it(
     'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',

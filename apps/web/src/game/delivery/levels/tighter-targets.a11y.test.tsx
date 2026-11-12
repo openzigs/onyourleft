@@ -116,10 +116,10 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-async function pump(): Promise<void> {
+async function pump(ms = 250): Promise<void> {
   const due = pending;
   pending = [];
-  nowMs += 250;
+  nowMs += ms;
   await act(async () => {
     for (const callback of due) callback(nowMs);
     await Promise.resolve();
@@ -127,43 +127,46 @@ async function pump(): Promise<void> {
 }
 
 describe('#2365 — a house that must not get a parcel, said in words', () => {
-  it(
-    'says the next house is to be skipped through the HUD’s one live region, with announcements off, with no finding',
-    { timeout: 30_000 },
-    async () => {
-      globalThis.location.hash = `#/game?route=${levelRouteId(LEVEL.id)}&play=delivery`;
-      mounted = await mount(
-        <main>
-          <h1>Trainer game</h1>
-          <GameView
-            port={port}
-            renderer={() => Promise.resolve(renderer)}
-            now={() => nowMs}
-            riderMass={kilograms(72)}
-          />
-        </main>,
-      );
-      for (let i = 0; i < 50 && (mounted.container.textContent ?? '').includes('Loading'); i++) {
-        await settle();
-      }
-      const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
-        (button.textContent ?? '').startsWith('Ride '),
-      );
-      expect(ride).toBeDefined();
-      await act(async () => {
-        ride?.click();
-        await Promise.resolve();
-      });
+  // #1688's ruling: cheaper, never a longer timeout. Frames of 1 s, not
+  // 250 ms: the simulation's steps are fixed at 0.05 s whatever the frame,
+  // and the warning stands in the region past a frame's end. It is heard
+  // after 72 s, 72 frames, not 282; the bound, 120 s, is under twice that, so
+  // a warning never said fails on the read, not on the clock. On this Mac,
+  // Node 26, at load averages of 15 to 35: 1.3–5.5 s → 0.58–3.0 s without
+  // coverage, 2.5–12 s → 0.85–2.8 s with `--coverage`.
+  it('says the next house is to be skipped through the HUD’s one live region, with announcements off, with no finding', async () => {
+    globalThis.location.hash = `#/game?route=${levelRouteId(LEVEL.id)}&play=delivery`;
+    mounted = await mount(
+      <main>
+        <h1>Trainer game</h1>
+        <GameView
+          port={port}
+          renderer={() => Promise.resolve(renderer)}
+          now={() => nowMs}
+          riderMass={kilograms(72)}
+        />
+      </main>,
+    );
+    for (let i = 0; i < 50 && (mounted.container.textContent ?? '').includes('Loading'); i++) {
       await settle();
-      const region = (): string =>
-        document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
-      let heard: string | undefined;
-      for (let frame = 0; frame < 800 && heard === undefined; frame += 1) {
-        await pump();
-        if (SKIP_SAID.includes(region())) heard = region();
-      }
-      expect(SKIP_SAID).toContain(heard);
-      expect(formatViolations(auditAccessibility(document))).toBe('');
-    },
-  );
+    }
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    expect(ride).toBeDefined();
+    await act(async () => {
+      ride?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    const region = (): string =>
+      document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    let heard: string | undefined;
+    for (let frame = 0; frame < 120 && heard === undefined; frame += 1) {
+      await pump(1_000);
+      if (SKIP_SAID.includes(region())) heard = region();
+    }
+    expect(SKIP_SAID).toContain(heard);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
 });
