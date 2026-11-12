@@ -448,8 +448,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   carries the rider further in the game, but the saved speed channel is what the trainer measured and
   the saved distance is that channel integrated (`recording/totals.ts` §`rideDistance`). **The draft
   reaches the saved ride only through its lap times**, because the rider reaches the lap line sooner.
-  Nothing a draft does reaches any trainer write (D-2.1 as the 2026-11-11 entry narrows it). With the
-  switch off no racer drafts, and D-2.4 stands as written. No recording behaviour changes.
+  A draft decides only when a grade is sent to the trainer, never what grade is sent (D-2.1 as the
+  2026-11-11 entry narrows it). With the switch off no racer drafts, and D-2.4 stands as written. No
+  recording behaviour changes.
   `apps/web/src/game/lap-race-draft-wiring.test.tsx` › `the rider takes a draft from a bot, through
   the simulation only — #2461 (ADR 0067 D-3)` › `saves the trainer’s measured speed and distance with
   the switch on, and the draft only moves the lap times (ADR 0060 D-2.4, 2026-11-12)` reads the saved
