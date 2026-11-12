@@ -45,6 +45,7 @@ import { ROOM_LOST_TEXT } from './room-ride';
 import { LAP_RACE_CHOICE_TEXT } from './StageChooser';
 import { circuitRoute } from './route-fixtures-testing';
 import { GameSimulation, type RiderInput } from './simulation';
+import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { endRideAnswer } from './end-ride-testing';
 
@@ -323,8 +324,11 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     'sends the trainer the same grades at the same times as a solo race with items off, while the room overrules three predicted outcomes (D-2.1)',
     { timeout: 20_000 },
     async () => {
-      // The solo race with items off, on the same power trace.
+      // The solo race with items off, on the same power trace. With the draft
+      // switch off (#2461, ADR 0067 D-3.4): a solo race with it on drafts the
+      // rider behind its bots, and a room's draft is the room's, not the switch's.
       const solo: Write[] = [];
+      localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
       await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo });
       for (let index = 0; index < FRAMES; index += 1) await pump();
       await clickThrough(buttonStarting('End ride'));
