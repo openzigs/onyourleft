@@ -332,7 +332,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         holds a ride's distance, speed and grades identical
                         eased or not. Stateless — the lag a rider holding this
                         speed would have here — so a pacer or ghost level with
-                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        the rider AT THEIR SPEED is drawn level. ⚠️ Since
+                        #2427 riders at different speeds are drawn in their
+                        odometers' order (ADR 0038 D-3.4): `scene.ts`
+                        §`inOdometerOrder` keeps each a quarter of its
+                        odometer gap from the next, out from the rider, who
+                        is never moved (`drawn-order.test.ts`). Without it a
+                        faster rider just ahead, lagging more, was drawn up
+                        to 30 m behind the one it shelters. ⚠️ Not in a Delivery round
                         or a lap race (`scene.ts` §`easingLine`), where the
                         drawn place is where the game meets the rider; there
                         #546's 38.7° cap and its parked cranks still bind.
@@ -779,7 +786,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ The jersey's main colour is in NO
+                        8 998 triangles. ⚠️ **Since #2495 it has EYES**, and
+                        a reviewer who remembers flat skin under the glasses
+                        is reading the old file: a ball in each socket at
+                        MakeHuman's own eye, drawn in `rider_kit.py`'s
+                        pupil, iris and white, in the HELMET's mesh (so on the
+                        head bone, no draw call), its 168 triangles taken out
+                        of the body's share (`rider-eyes.test.ts`). The pack's
+                        rider (#2485) keeps flat ones. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
@@ -1143,7 +1157,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `steeredLateral`, so nothing the obstacles, race or
                         trainer read changes. A standstill still yaws a
                         little (the turn rate floors the speed at 10 m/s) but
-                        does not lean
+                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        `scene.ts` §`drawnSteer` gives each marker the
+                        kinematic steer (`bicycle.ts` §`steerAngle`, clamped
+                        at 20°) of the drawn heading's turn rate (from
+                        `SceneInput.steeredSwayRate`) or a bend's lean, and
+                        both belts turn the fork, front wheel and bar about
+                        the 72° head tube in the vertex shader
+                        (`three-renderer.ts` §`withSteering`, no draw call);
+                        the realistic hands are solved to the turned grips
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by

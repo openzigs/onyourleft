@@ -144,8 +144,9 @@ describe('a person’s body, cut from the rider’s by vertex clustering — #15
       }
       dominant.push(joints[vertex * 4 + best] as number);
     }
-    // The body before: the figure the header quotes.
-    expect(indices.length / 3).toBe(8_636);
+    // The body before: the figure the header quotes — 8 468 since #2495's
+    // eyes took their 168 out of it.
+    expect(indices.length / 3).toBe(8_468);
     const cut = clusterDecimate(positions, indices, dominant, PERSON_MAX_TRIANGLES);
     const triangles = cut.indices.length / 3;
     expect(triangles).toBeLessThanOrEqual(PERSON_MAX_TRIANGLES);

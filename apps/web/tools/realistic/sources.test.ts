@@ -713,14 +713,17 @@ describe('the digest of a run that reads two sources — #623', () => {
 describe('what --check requires of a run’s report — #900 item 2', () => {
   it('names only outputs a Blender run makes, whose script writes the count', () => {
     const files = Object.keys(EXPECTED_REPORTS);
-    // #2485: and the pack's rider, whose texture's shape is held too; and
-    // #2540's car, part by part.
-    expect(files.sort()).toEqual([
-      REALISTIC_DELIVERY_CAR,
-      'island_tree_02-middle.glb',
-      'island_tree_02.glb',
-      REALISTIC_RIDER_PACK.lod,
-    ]);
+    // #2485: and the pack's rider, whose texture's shape is held too; #2495:
+    // and the rider, whose eyes' cost is; and #2540's car, part by part.
+    expect(files.sort()).toEqual(
+      [
+        REALISTIC_DELIVERY_CAR,
+        'island_tree_02-middle.glb',
+        'island_tree_02.glb',
+        REALISTIC_RIDER,
+        REALISTIC_RIDER_PACK.lod,
+      ].sort(),
+    );
     for (const file of files) {
       const output = OUTPUTS.find((each) => each.file === file);
       expect(output?.recipe.how, file).toBe('blender');

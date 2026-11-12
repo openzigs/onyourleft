@@ -3716,12 +3716,12 @@ function GameScreen({
           (deliverySteered === undefined || deliveryRef.current === undefined
             ? 0
             : sidewaysSpeedOf(deliveryRef.current.steer));
-        steeredSway = dampedSway(
-          steeredSway,
-          steeringSpeed,
-          steeredSwayAt === undefined ? 0 : (at - steeredSwayAt) / 1000,
-        );
+        const swaySeconds = steeredSwayAt === undefined ? 0 : (at - steeredSwayAt) / 1000;
+        const swayBefore = steeredSway;
+        steeredSway = dampedSway(steeredSway, steeringSpeed, swaySeconds);
         steeredSwayAt = at;
+        // #2494: how fast the sway moved over the frame, which turns the bars.
+        const steeredSwayRate = swaySeconds > 0 ? (steeredSway - swayBefore) / swaySeconds : 0;
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3790,6 +3790,9 @@ function GameScreen({
           // the bicycle into a lane change. Optional the unsafe way round too,
           // so the wiring tests read it back off the frames of a lane change.
           steeredSway,
+          // #2494: and how fast that is changing, which turns the bars into
+          // the move and out of it. Optional the unsafe way round too.
+          steeredSwayRate,
           // #2396: and the camera's eye moved off any parked car it is
           // alongside, so it never passes through one. A drawing only.
           // Optional the unsafe way round (`scene.ts`), so

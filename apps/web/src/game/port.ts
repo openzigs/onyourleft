@@ -328,6 +328,15 @@ export interface RiderMarker {
    */
   readonly hit?: RaceHitLook | undefined;
   /**
+   * How far this rider's bars are drawn turned, in radians, positive to the
+   * rider's right — #2494: the fork, the front wheel and the bar turned about
+   * the head tube (`bicycle.ts` §`STEERING_AXIS`) by the steer the drawn path's
+   * turn asks for (`scene.ts` §`drawnSteer`), and the hands with them. Absent
+   * when the bars are straight; never more than `bicycle.ts`
+   * §`MAXIMUM_STEER_RADIANS` either way.
+   */
+  readonly steer?: number | undefined;
+  /**
    * A lap race's bot — #1971: a `bot` marker that `scene.ts` §`raceBots`
    * placed, rather than the one pacer (#92), which is a `bot` too. Read by
    * `three-renderer.ts` §`realisticRemoteSplit` alone, which draws a race's
