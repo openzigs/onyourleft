@@ -21,6 +21,7 @@ import {
   deliverySpoken,
   MOVING_HAZARD_AHEAD_METRES,
   NOTHING_OWED,
+  OBSTACLE_AHEAD_METRES,
   obstacleAheadSentence,
   oweObstacleAhead,
 } from '../hud/delivery-announce';
@@ -268,40 +269,88 @@ describe('every moving hazard is avoidable — #2364, ADR 0065 D-10.8', () => {
 });
 
 describe('every moving hazard is said before it can touch the rider — #2364, ADR 0065 D-10.9', () => {
-  it(
-    `owes its warning at least MOVING_HAZARD_WARNING_SECONDS (${String(MOVING_HAZARD_WARNING_SECONDS)} s) before its earliest contact, at every speed and lane`,
-    { timeout: 60_000 },
-    () => {
-      const met = new Set<ObstacleKind>();
-      let least = Infinity;
-      for (const placed of PLACEMENTS) {
-        placed.forEach((hazard, index) => {
-          if (!isMoving(hazard)) return;
-          // Every obstacle the rider meets on the way, a standing one ahead of it
-          // among them, so a warning waiting behind another is counted as late.
-          const from = hazard.along - MOVING_HAZARD_SIGHT_METRES - 80;
-          // A metre a second apart, the fastest included: it is the latest warning.
-          for (const speed of SPEEDS.filter((each) => Number.isInteger(each))) {
-            for (const lane of LANE_OFFSETS_METRES) {
-              const { warnedAt, crashedAt } = ride(placed, speed, lane, from, hazard.along + 5);
-              const crashed = crashedAt.get(index);
-              if (crashed === undefined) continue;
-              met.add(hazard.kind);
-              const warned = warnedAt.get(index);
-              expect(warned, `a ${hazard.kind} met unsaid`).toBeDefined();
-              const lead = (crashed - (warned ?? crashed)) * DELIVERY_TICK_SECONDS;
-              least = Math.min(least, lead);
-              expect(lead, `a ${hazard.kind} at ${String(speed)} m/s`).toBeGreaterThanOrEqual(
-                MOVING_HAZARD_WARNING_SECONDS,
+  // #1688's ruling: cheaper, never a longer timeout. Each ride here was the
+  // whole placement's, from 170 m short of the hazard, in all three lanes,
+  // with two `expect`s a crash. Every cut below leaves the warning and the
+  // crash this case reads on the same tick, so it reads what it read:
+  //
+  // - **Only the obstacles between the ride's start and the hazard.** One is
+  //   owed only while ahead of the rider and in its reach, the nearest first,
+  //   and each is said the tick it is owed; a hazard's reach is the longest,
+  //   so one further along is never owed before it, and one behind the start
+  //   never at all. A crash is each obstacle's own (`stepObstacles`).
+  // - **From a metre before the nearest of those can be seen or said.**
+  //   Before it nothing is set going and nothing is owed; the rider's
+  //   distance is still summed a tick at a time from the same start, so each
+  //   tick is where it was. The metre is for rounding: `stepObstacles` and
+  //   `oweObstacleAhead` test the same edge by two different subtractions,
+  //   and without it one dog's warning, a tick ahead of its start, was lost.
+  // - **Only the lanes the hazard can reach.** It moves across from one kerb
+  //   toward its lane or the far kerb and no further, so a lane further from
+  //   that span than their two half-widths is never touched.
+  // - **One `expect` for the lot**: each late warning is written down, and the
+  //   case asserts there are none, naming each one if there are.
+  //
+  // Every crash at every speed and lane, and its lead, is the same 3 028 as
+  // before. On this Mac, Node 26: 3 050–3 541 ms → 262–340 ms without
+  // coverage, 9 424–10 844 ms → 749–838 ms with `--coverage`; at a load
+  // average near 45, 16–17 s → 0.3–1.4 s and 42–47 s → 1.0–1.2 s.
+  it(`owes its warning at least MOVING_HAZARD_WARNING_SECONDS (${String(MOVING_HAZARD_WARNING_SECONDS)} s) before its earliest contact, at every speed and lane`, () => {
+    const met = new Set<ObstacleKind>();
+    const late: string[] = [];
+    let least = Infinity;
+    for (const placed of PLACEMENTS) {
+      placed.forEach((hazard, index) => {
+        if (!isMoving(hazard)) return;
+        // Every obstacle the rider meets on the way, a standing one ahead of it
+        // among them, so a warning waiting behind another is counted as late.
+        const from = hazard.along - MOVING_HAZARD_SIGHT_METRES - 80;
+        const near = placed.filter(
+          (each, slot) => slot === index || (each.along > from && each.along <= hazard.along),
+        );
+        const at = near.indexOf(hazard);
+        const sighted =
+          Math.min(...near.map((each) => each.along)) -
+          Math.max(MOVING_HAZARD_SIGHT_METRES, MOVING_HAZARD_AHEAD_METRES, OBSTACLE_AHEAD_METRES) -
+          1;
+        const shape = OBSTACLE_KINDS[hazard.kind];
+        const [first, last] = [obstacleAcross(hazard, 0), obstacleAcross(hazard, Infinity)];
+        const lanes = LANE_OFFSETS_METRES.filter(
+          (lane) =>
+            Math.abs(
+              lane - Math.min(Math.max(lane, Math.min(first, last)), Math.max(first, last)),
+            ) <=
+            shape.halfWidth + RIDER_HALF_WIDTH_METRES,
+        );
+        // A metre a second apart, the fastest included: it is the latest warning.
+        for (const speed of SPEEDS.filter((each) => Number.isInteger(each))) {
+          let start = from;
+          while (start + speed * DELIVERY_TICK_SECONDS < sighted) {
+            start += speed * DELIVERY_TICK_SECONDS;
+          }
+          for (const lane of lanes) {
+            const { warnedAt, crashedAt } = ride(near, speed, lane, start, hazard.along + 5);
+            const crashed = crashedAt.get(at);
+            if (crashed === undefined) continue;
+            met.add(hazard.kind);
+            const warned = warnedAt.get(at);
+            const lead = (crashed - (warned ?? Infinity)) * DELIVERY_TICK_SECONDS;
+            least = Math.min(least, lead);
+            if (!(lead >= MOVING_HAZARD_WARNING_SECONDS)) {
+              late.push(
+                warned === undefined
+                  ? `a ${hazard.kind} met unsaid`
+                  : `a ${hazard.kind} at ${String(speed)} m/s said ${String(lead)} s ahead`,
               );
             }
           }
-        });
-      }
-      expect(met).toStrictEqual(new Set(MOVING_HAZARD_KINDS));
-      expect(least).toBeLessThan(Infinity);
-    },
-  );
+        }
+      });
+    }
+    expect(late).toStrictEqual([]);
+    expect(met).toStrictEqual(new Set(MOVING_HAZARD_KINDS));
+    expect(least).toBeLessThan(Infinity);
+  });
 
   it('says it where it is set going, in words that name where it comes from', () => {
     expect(MOVING_HAZARD_AHEAD_METRES).toBe(MOVING_HAZARD_SIGHT_METRES);
