@@ -418,6 +418,10 @@ describe('Delivery’s belt — #1814', () => {
           'transformed *= 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) );',
         );
         expect(collapse).toBeGreaterThan(shader.vertexShader.indexOf('#include <begin_vertex>'));
+        // The paint mix reads the painted flag (y), not the car part (z): PR #2548 review.
+        expect(shader.vertexShader).toContain(
+          'vColor.xyz = mix( vColor.xyz, oylObstacle.xyz, oylPiece.y );',
+        );
         expect(material.customProgramCacheKey()).toContain('oyl-delivery-kinds');
         // The parcels' and markers' programs are not taught it: they carry no kind.
         const plain = belt.meshOf('markers').material as unknown as Compilable;

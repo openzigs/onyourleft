@@ -176,7 +176,8 @@ test.describe('Delivery’s belt — #1814', () => {
       }) => {
         const shaderErrors: string[] = [];
         page.on('console', (message) => {
-          if (message.type() === 'error' || /shader error/i.test(message.text())) {
+          // Only three's shader and program reports: an unrelated console error is not a link failure.
+          if (/WebGL(?:Program|Shader)|shader error|program info log/i.test(message.text())) {
             shaderErrors.push(message.text().slice(0, 400));
           }
         });

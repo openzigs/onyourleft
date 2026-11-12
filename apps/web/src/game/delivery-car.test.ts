@@ -386,6 +386,8 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     expect(collapse).toBeGreaterThan(pose);
     expect(text).toContain('objectNormal = oylCarTurn( objectNormal, oylPiece.z, oylCarPose );');
     expect(text).toContain('vColor.xyz *= oylCarLampLevel( oylPiece.w, oylCarLamps );');
+    // The paint mix reads the painted flag (y), not the car part (z): PR #2548 review.
+    expect(text).toContain('vColor.xyz = mix( vColor.xyz, oylObstacle.xyz, oylPiece.y );');
     expect(material.customProgramCacheKey()).toContain('oyl-delivery-car');
     // And a realistic belt with no car of Kenney's is not taught it.
     const bare = new DeliveryBelt('realistic');
