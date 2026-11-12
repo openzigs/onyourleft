@@ -699,12 +699,21 @@ describe('the migrations (#769)', () => {
 
   it('takes both analysis tables away with 0020, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
     const path = await freshPath();
-    await withKysely(path, (db) => migrateToLatest(db));
-    await withKysely(path, async (db) => {
-      while ((await appliedMigrations(db)).at(-1) !== '0020-analysis-jobs') {
-        await migrateDownOne(db);
-      }
-    });
+    // Up to 0020 and no further (#2555). This case went up to the newest
+    // migration and then down, one at a time, to 0020: nineteen downs on top
+    // of thirty-nine ups, for a schema the walk above already holds is the
+    // same either way. It took 5.6 s under coverage on a loaded machine.
+    await withKysely(path, (db) =>
+      migrateToLatest(
+        db,
+        Object.fromEntries(
+          Object.entries(MIGRATIONS).filter(([name]) => name <= '0020-analysis-jobs'),
+        ),
+      ),
+    );
+    expect((await withKysely(path, (db) => appliedMigrations(db))).at(-1)).toBe(
+      '0020-analysis-jobs',
+    );
     seedEveryTable(path);
     const named = (): string[] => {
       const database = openDatabase(path);
