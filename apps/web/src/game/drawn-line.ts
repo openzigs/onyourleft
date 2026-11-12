@@ -161,11 +161,6 @@ export function drawnLine(profile: RouteProfile): DrawnLine {
 }
 
 /**
- * Where a rider at drawn odometer `distance` is on the path, and which way it
- * runs: the spline through {@link DrawnLine.xs}, wrapped on a loop and held at
- * the ends of a line.
- */
-/**
  * The odometer of the ROAD beside where a rider at drawn odometer `distance`
  * is drawn on the path — #2422's review: the pacing puts the path's place a
  * few metres along the road from `distance` through a corner, and a height,
@@ -183,6 +178,11 @@ export function drawnPlaceOf(line: DrawnLine, distance: number): number {
   return distance + low + ((line.shifts[index + 1] as number) - low) * fraction;
 }
 
+/**
+ * Where a rider at drawn odometer `distance` is on the path, and which way it
+ * runs: the spline through {@link DrawnLine.xs}, wrapped on a loop and held at
+ * the ends of a line.
+ */
 export function drawnLineAt(line: DrawnLine, distance: number): DrawnPoint {
   const count = line.xs.length;
   const resolution: number = line.profile.resolution;

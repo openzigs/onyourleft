@@ -39,6 +39,7 @@ import type {
   BeatsPerMinute,
   DegreesCelsius,
   GeographicPosition,
+  Kilocalories,
   Metres,
   MetresPerSecond,
   RevolutionsPerMinute,
@@ -92,6 +93,12 @@ export interface TrackLap {
   readonly averagePower?: Watts | undefined;
   /** `ActivityExtension` v2's `LX/MaxWatts`. */
   readonly maxPower?: Watts | undefined;
+  /**
+   * #2435: TCX's `Calories`, the energy the lap's rider spent, in whole
+   * kilocalories as the schema's `unsignedShort` holds it. GPX has no element
+   * for it (`GPX_LOSSY_CHANNELS`).
+   */
+  readonly calories?: Kilocalories | undefined;
   /** TCX's `Intensity`. Written as `Active` when absent: the element is required. */
   readonly intensity?: TcxIntensity | undefined;
   /** TCX's `TriggerMethod`: what ended the lap. Written as `Manual` when absent. */

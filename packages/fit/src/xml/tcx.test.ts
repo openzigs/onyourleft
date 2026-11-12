@@ -7,7 +7,7 @@
  * difference between the two files is a difference between the two formats.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { kilocalories, unixSeconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { ActivityXmlError } from './errors';
@@ -324,6 +324,99 @@ describe('a lap’s figures and its kind', () => {
     });
     expect(written).not.toContain('AverageHeartRateBpm');
     expect(written).not.toContain('ns3:LX');
+  });
+});
+
+/**
+ * #2435: a lap's `Calories`. The schema types it `xsd:unsignedShort` and makes
+ * it required; this package writes it only when the lap has a figure.
+ */
+describe('a lap’s calories', () => {
+  const lapDocument = (calories: string): string =>
+    [
+      `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}">`,
+      '  <Activities><Activity Sport="Biking">',
+      '    <Lap StartTime="2024-06-15T09:00:00Z">',
+      '      <TotalTimeSeconds>1.0</TotalTimeSeconds><DistanceMeters>7.0</DistanceMeters>',
+      `      <Calories>${calories}</Calories>`,
+      '      <AverageHeartRateBpm><Value>120</Value></AverageHeartRateBpm>',
+      '      <Intensity>Active</Intensity><Cadence>80</Cadence>',
+      '      <TriggerMethod>Manual</TriggerMethod>',
+      '      <Track><Trackpoint><Time>2024-06-15T09:00:00Z</Time></Trackpoint></Track>',
+      '    </Lap>',
+      '  </Activity></Activities>',
+      '</TrainingCenterDatabase>',
+    ].join('\n');
+
+  it('round-trips each lap’s own figure', () => {
+    const original = sampleActivity();
+    expect(original.laps.map((lap) => lap.calories)).toEqual([30, 34]);
+    const reread = decodeTcx(encodeTcx(original)).activity;
+    expect(reread.laps.map((lap) => lap.calories)).toEqual([30, 34]);
+  });
+
+  it('reads the two ends of unsignedShort, 0 and 65535', () => {
+    for (const value of [0, 65_535]) {
+      const { activity, faults } = decodeTcx(lapDocument(String(value)));
+      expect(faults).toEqual([]);
+      expect(activity.laps[0]?.calories).toBe(value);
+    }
+  });
+
+  it.each(['-5', '12.5', '65536', '70000', 'many'])(
+    'drops %s with a fault naming Lap/Calories, and the lap’s other figures still read',
+    (value) => {
+      const { activity, faults } = decodeTcx(lapDocument(value));
+      expect(faults.map((fault) => fault.code)).toEqual(['invalid-value']);
+      expect(faults[0]?.message).toContain('Lap/Calories');
+      expect(faults[0]?.message).not.toContain(value);
+      expect(activity.laps[0]?.calories).toBeUndefined();
+      expect(activity.laps[0]?.averageHeartRate).toBe(120);
+      expect(activity.laps[0]?.averageCadence).toBe(80);
+      expect(activity.laps[0]?.totalDistance).toBe(7);
+    },
+  );
+
+  it('writes it in the schema’s order: after DistanceMeters, before the heart rate and Intensity', () => {
+    const written = encodeTcx(sampleActivity());
+    const lap = written.slice(written.indexOf('<Lap '), written.indexOf('</Lap>'));
+    const at = (element: string): number => {
+      const index = lap.indexOf(`<${element}>`);
+      expect(index, `${element} is not in the lap`).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    expect(lap).toContain('<Calories>30</Calories>');
+    // `MaximumSpeed`, which the schema puts between the two, is never written.
+    expect(lap).not.toContain('<MaximumSpeed>');
+    expect(at('DistanceMeters')).toBeLessThan(at('Calories'));
+    expect(at('Calories')).toBeLessThan(at('AverageHeartRateBpm'));
+    expect(at('Calories')).toBeLessThan(at('Intensity'));
+  });
+
+  it('writes a whole number, the only kind the schema admits', () => {
+    const activity = sampleActivity();
+    const written = encodeTcx({
+      ...activity,
+      laps: activity.laps.map((lap, index) => ({
+        ...lap,
+        calories: kilocalories(index === 0 ? 12.4 : 12.6),
+      })),
+    });
+    expect(written).toContain('<Calories>12</Calories>');
+    expect(written).toContain('<Calories>13</Calories>');
+  });
+
+  it('writes no Calories for a lap with no figure, rather than a false 0', () => {
+    const activity = sampleActivity();
+    const written = encodeTcx({
+      ...activity,
+      laps: activity.laps.map((lap) => ({ ...lap, calories: undefined })),
+    });
+    expect(written).not.toContain('Calories');
+    expect(decodeTcx(written).activity.laps.map((lap) => lap.calories)).toEqual([
+      undefined,
+      undefined,
+    ]);
   });
 });
 

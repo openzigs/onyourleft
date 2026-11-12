@@ -1202,6 +1202,8 @@ describe('the room on the HUD — #783', () => {
     // #2425, #2130: the solo field's unit is the `%` alone, so it stays on
     // its number's line in the tier's narrowest track.
     expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '%' });
+    // #2472: and a screen reader hears what it is a share of; a room's field draws it.
+    expect(solo(33.6)?.unitSaid).toBe('of drag');
     expect(solo(33.6)?.detail).toBe('at most 59 %');
     expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
     expect(solo(0)).toMatchObject({ value: '0' });
