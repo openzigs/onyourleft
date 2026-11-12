@@ -3309,6 +3309,11 @@ function GameScreen({
         const drafted = draftEvent(inDraftRef.current, roomNow?.hud.draft);
         inDraftRef.current = drafted.inDraft;
         if (drafted.event !== undefined) events.push(drafted.event);
+      } else if (room?.status().kind !== 'joined') {
+        // #2426: the shelter mark follows the same state, so it goes with the
+        // room. A lost room applies no draft (`RoomSession.draftFactor()` is 1),
+        // and the last frame's draft is not one the rider is in now.
+        inDraftRef.current = false;
       }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
@@ -4378,7 +4383,11 @@ function GameScreen({
         // when the rider's display preference shows it (ADR 0066 D-6, R-13).
         {...(state.soloDraft === undefined || !draftShownRef.current
           ? {}
-          : { soloDraft: soloDraftPercent(state.soloDraft.k) })}
+          : {
+              soloDraft: soloDraftPercent(state.soloDraft.k),
+              // #2426: in the draft by the simulation's own `draftEvent` state.
+              soloInDraft: state.soloDraft.inDraft,
+            })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={
@@ -4402,6 +4411,8 @@ function GameScreen({
                 ...(roomFrameRef.current?.hud ?? { nearby: 0 }),
                 // #787: the draft field only when the rider's setting shows it.
                 draftShown: draftShownRef.current,
+                // #2426: the shelter mark, from the one state the spoken cue follows.
+                inDraft: inDraftRef.current,
               },
             })}
         standings={

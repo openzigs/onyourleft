@@ -127,6 +127,7 @@
   --oyl-color-hud-map-water: #1d3a50;
   --oyl-color-hud-map-street: #7f8a88;
   --oyl-color-hud-map-route: #f0785c;
+  --oyl-color-hud-shelter: #aff13c;
 
   --oyl-color-info-surface: #dceeff;
   --oyl-color-info-ink: #004876;
@@ -8026,6 +8027,54 @@ select.oyl-input {
   stroke: var(--oyl-color-hud-ink);
   stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+/*
+ * IN THE DRAFT — #2426. While the rider is in the draft (`room-ride.ts`
+ * §`draftEvent`'s 10 % / 5 % state) the Draft field shows the shelter mark
+ * beside its label (an arch over a filled pocket, `HudCore.tsx`
+ * §`ShelterMark`), a heavier SOLID outline round the field, and *"In the
+ * draft"* in full ink on the line under the number. Three signals that are
+ * each a shape or words, so none of it is colour alone (SC 1.4.1); the mark is
+ * `hudShelter` and the words `hudInk`, both declared pairs on `hudSurface`.
+ * Solid, where a lap race's warning (`--alert`) is dashed. An outline takes no
+ * space and the mark sits in the label's line, so going in and out of the
+ * draft moves nothing. ⚠️ **No transition and no animation**: the mark is
+ * there or it is not, and nothing pulses (ADR 0041 D-5).
+ */
+.oyl-hud__field--sheltered {
+  outline: 3px solid var(--oyl-color-hud-shelter);
+  /* ⚠️ Outside the field's box, never inside it: `.oyl-hud__field` has no
+     padding, so an inset ring is drawn over the label, the number, the line
+     under it and the gauge's edges (measured in the browser, #2426 review).
+     The grid's gap (`--oyl-space-sm`) is wider than the ring, so it touches no
+     neighbour. */
+  outline-offset: 0;
+}
+
+.oyl-hud__field--sheltered .oyl-hud__detail {
+  color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__shelter {
+  display: inline-block;
+  width: 1.1em;
+  height: 0.8em;
+  margin-inline-start: 0.35em;
+  overflow: visible;
+  vertical-align: baseline;
+}
+
+.oyl-hud__shelter-arch {
+  fill: none;
+  stroke: var(--oyl-color-hud-shelter);
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__shelter-pocket {
+  fill: var(--oyl-color-hud-shelter);
 }
 
 .oyl-hud__field--stale .oyl-hud__value {
