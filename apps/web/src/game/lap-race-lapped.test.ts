@@ -176,12 +176,21 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
 
       // The scene: one racer marker for each bot in view, standing on the road where that bot is.
       expect(racers.length, label).toBeGreaterThanOrEqual(inView.length);
+      // One marker for one bot: a marker already matched to a bot is not matched again.
+      const matched = new Set<number>();
       for (const bot of inView) {
         const wanted = centreAt(corridor, eye + bot.ahead);
-        const near = racers.some(
-          (marker) => Math.hypot(marker.x - wanted.x, marker.z - wanted.z) < 4,
-        );
-        expect(near, `${label}: a bot ${bot.ahead.toFixed(1)} m up the road`).toBe(true);
+        let nearest = -1;
+        let nearestGap = 4;
+        racers.forEach((marker, index) => {
+          const gap = Math.hypot(marker.x - wanted.x, marker.z - wanted.z);
+          if (!matched.has(index) && gap < nearestGap) {
+            nearest = index;
+            nearestGap = gap;
+          }
+        });
+        if (nearest >= 0) matched.add(nearest);
+        expect(nearest >= 0, `${label}: a bot ${bot.ahead.toFixed(1)} m up the road`).toBe(true);
         if (bot.lapApart) lappedInView += 1;
       }
 
