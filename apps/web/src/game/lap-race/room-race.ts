@@ -69,7 +69,7 @@ import {
 import type { HeldItem } from '@onyourleft/protocol';
 
 import type { RoomLapFrame, RoomLapRace } from '../../net/room-session';
-import type { SteerIntent } from '../lanes';
+import { sidewaysSpeedOf, type SteerIntent } from '../lanes';
 
 import {
   askLane,
@@ -359,6 +359,8 @@ export interface RoomLapRaceDrawing {
   readonly riderDistance: number;
   /** Where the rider has steered across the road: `SceneInput.steeredLateral`. */
   readonly steeredLateral: number;
+  /** How fast `lanes.ts` §`stepSteer` is moving them there, metres a second: what `SceneInput.steeredSway` is damped toward (#2456). */
+  readonly steeringSpeed: number;
   /** Another rider's race offset, metres, by seat: where to draw them along the road. */
   readonly offsetOf: (riderId: number) => number;
 }
@@ -373,6 +375,7 @@ export function roomLapRaceDrawing(
   return {
     riderDistance: riderDistance + ride.drawnOffset,
     steeredLateral: ride.input.steer.offset,
+    steeringSpeed: sidewaysSpeedOf(ride.input.steer),
     offsetOf: (riderId) => riders?.get(riderId)?.raceOffsetMetres ?? 0,
   };
 }

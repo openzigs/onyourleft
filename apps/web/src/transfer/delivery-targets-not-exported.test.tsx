@@ -77,6 +77,11 @@ import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/t
 
 import { riderMassFor } from '../athlete/mass';
 import { DELIVERY_PROGRESS_STORAGE_KEY } from '../game/delivery/delivery-progress';
+import {
+  LEVEL_PROGRESS_STORAGE_KEY,
+  readLevelProgress,
+  writeLevelProgress,
+} from '../game/delivery/level-progress';
 import { deliveryTown, DISTINCTIVE_TOWN_LAYOUT } from '../game/delivery/delivery-town-testing';
 import { parseLevelFile, type LevelFile } from '../game/delivery/levels/level-file';
 import { levelCorridor, levelRoute } from '../game/delivery/levels/levels';
@@ -159,7 +164,8 @@ interface Course {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   /** The level's round, on a level. */
-  readonly level?: (LevelFile['round'] & { readonly lengthMetres: number }) | undefined;
+  readonly level?:
+    (LevelFile['round'] & { readonly lengthMetres: number; readonly id: string }) | undefined;
 }
 
 const TOWN: Course = { corridor: town.corridor, profile: town.profile, origin: ORIGIN };
@@ -167,7 +173,7 @@ const ON_LEVEL: Course = {
   corridor: levelCorridor(LEVEL),
   profile: levelRoute(LEVEL).profile,
   origin: corridorOrigin(levelRoute(LEVEL).profile),
-  level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
+  level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres, id: LEVEL.id },
 };
 
 /** The round's seed: distinctive, so its digits are a marker. Under 2³². */
@@ -207,6 +213,18 @@ function port(): GamePort {
 function levelPort(): GamePort {
   return {
     listRoutes: () => Promise.resolve([]),
+    // The listing names the level, first in the order so it is open: a level
+    // the listing does not name is not read (#2363), as the real port lists them.
+    listDeliveryLevels: () =>
+      Promise.resolve([
+        {
+          id: LEVEL.id,
+          name: 'Fixture level',
+          lengthMetres: LEVEL.lengthMetres,
+          houses: LEVEL.round.houses,
+          routeId: levelRouteId(LEVEL.id),
+        },
+      ]),
     loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
@@ -1110,6 +1128,31 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
 describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 D-13.4', () => {
   /** Where a level ride's own id may be: nowhere a target is scanned for (D-8.3). */
   const LEVEL_KEY = levelRouteId(LEVEL.id);
+  /** #2363: a level finished on this device, under an id nothing else in a ride spells. */
+  const FINISHED_ID = 'finished-marker-round';
+  /**
+   * #2363: every trace of the levels this device has finished — their key,
+   * their field and an id — in the texts `read` gives, with progress planted
+   * on the device first so there is something to find. An empty list is the
+   * answer; `levelProgressIn` going red is held by the last case below.
+   */
+  function levelProgressIn(read: () => readonly string[]): string[] {
+    expect(writeLevelProgress(localStorage, { finished: [FINISHED_ID, LEVEL.id] })).toBe(true);
+    expect(readLevelProgress(localStorage).finished).toContain(FINISHED_ID);
+    const all = read().join('\n');
+    return [LEVEL_PROGRESS_STORAGE_KEY, FINISHED_ID, '"finished"'].filter((trace) =>
+      all.includes(trace),
+    );
+  }
+
+  it('finds the levels finished when a text carries them — #2363', () => {
+    expect(
+      levelProgressIn(() => [localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY) ?? '']),
+    ).toStrictEqual([FINISHED_ID, '"finished"']);
+    expect(levelProgressIn(() => [LEVEL_PROGRESS_STORAGE_KEY])).toStrictEqual([
+      LEVEL_PROGRESS_STORAGE_KEY,
+    ]);
+  });
   const levelMarkers = (targets: readonly DeliveryTarget[]): Marker[] =>
     markersOf(targets, ON_LEVEL.origin);
 
@@ -1194,6 +1237,14 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
       expect(text).toBeDefined();
       expect(tracesInFile(file, levelMarkers(ride.targets))).toStrictEqual([]);
       expect(new TextDecoder().decode(file.bytes)).not.toContain(LEVEL_KEY);
+      // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
+      expect(
+        levelProgressIn(() => [
+          file.fileName,
+          new TextDecoder('latin1').decode(file.bytes),
+          decoded(file.fileName, file.bytes) ?? '',
+        ]),
+      ).toStrictEqual([]);
     },
     RIDE.timeout,
   );
@@ -1225,6 +1276,8 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
       expect(report.failures).toStrictEqual([]);
       expect(tracesInValue('sync', instance.sent, levelMarkers(ride.targets))).toStrictEqual([]);
       expect(jsonOf(instance.sent)).not.toContain(LEVEL_KEY);
+      // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
+      expect(levelProgressIn(() => [jsonOf(instance.sent)])).toStrictEqual([]);
     },
   );
 });
