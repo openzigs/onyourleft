@@ -139,7 +139,8 @@ const counter = drawCounter(WebGL2RenderingContext.prototype);
 /**
  * The kinds this harness reads pixels of. #2364's dog and other rider are
  * held to their footprints and their one instanced mesh by
- * `delivery-belt.test.ts`; a car pulling out is drawn as a parked car.
+ * `delivery-belt.test.ts`. A car pulling out draws a parked car's body, so
+ * it reads as one here, and #2506's `pullingOut` reads its own marker.
  */
 const ROSTER = ['bin', 'trolley', 'cone', 'parked-car'] as const satisfies readonly ObstacleKind[];
 

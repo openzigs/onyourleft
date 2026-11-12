@@ -362,6 +362,44 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
+  it('turns a car pulling out’s indicators to face back, toward a rider behind it, not into its tail — #2506', () => {
+    // The car's nose is along +z, so a rider behind it looks along +z at its
+    // tail: a lamp is seen only if its triangles' front faces −z. The obstacle
+    // material draws front faces alone, which three decides by winding, so
+    // both the winding and the shading normal are read.
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('obstacles').geometry;
+    const position = geometry.getAttribute('position');
+    const normal = geometry.getAttribute('normal');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const glow = geometry.getAttribute('oylGlow');
+    const colour = geometry.getAttribute('color');
+    const pullingOut = ROSTER.indexOf('car-pulling-out');
+    const corner = (at: number): [number, number, number] => [
+      position.getX(at),
+      position.getY(at),
+      position.getZ(at),
+    ];
+    let lamps = 0;
+    for (let at = 0; at < position.count; at += 3) {
+      // A car pulling out's own lit part that is not its hazard marker: an indicator.
+      const ownKind = Math.abs(kinds.getX(at) - pullingOut) < 0.5;
+      const rgb: [number, number, number] = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+      const marker = isHazardRed({ x: 0, y: 0, z: 0, glows: true, rgb });
+      if (!ownKind || glow.getX(at) !== 1 || marker) continue;
+      lamps += 1;
+      const [a, b, c] = [corner(at), corner(at + 1), corner(at + 2)];
+      const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+      const [vx, vy] = [c[0] - a[0], c[1] - a[1]];
+      // The winding's normal, z component: (b − a) × (c − a).
+      expect(ux * vy - uy * vx).toBeLessThan(0);
+      for (const vertex of [at, at + 1, at + 2]) expect(normal.getZ(vertex)).toBeLessThan(0);
+    }
+    // Two indicators, one quad each.
+    expect(lamps).toBe(4);
+    belt.dispose();
+  });
+
   it('stands a house marker’s glowing diamond 0.9 m across on a 2.4 m post, above a hedge, a fence and a parked car — #2453', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('markers').geometry;
