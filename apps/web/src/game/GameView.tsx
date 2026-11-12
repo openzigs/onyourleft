@@ -255,7 +255,8 @@ import {
   stepDeliveryRide,
   type DeliveryRide,
 } from './delivery/ride-round';
-import { steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import { sidewaysSpeedOf, steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import { dampedSway } from './lane-change-lean';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
@@ -2906,6 +2907,12 @@ function GameScreen({
     // the first, which takes the road's own: a resumed ride starts afresh.
     let cameraHeading: GroundHeading | undefined;
     let cameraHeadingAt = 0;
+    // #2456: how fast the steered rider is DRAWN moving across the road, and
+    // when it was last drawn, which `lane-change-lean.ts` §`dampedSway` follows
+    // the steering toward by the wall clock, as the camera's heading is: a
+    // lane change turns and leans the bicycle rather than sliding it.
+    let steeredSway = 0;
+    let steeredSwayAt: number | undefined;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -3596,6 +3603,20 @@ function GameScreen({
         const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
           inRoom: roomRef.current !== undefined,
         });
+        // #2456: the sideways speed the steering is moving the rider at, which
+        // the drawn sway follows; nought on a ride nobody steers.
+        const steeringSpeed =
+          raceDrawn?.steeringSpeed ??
+          roomRaceDrawn?.steeringSpeed ??
+          (deliverySteered === undefined || deliveryRef.current === undefined
+            ? 0
+            : sidewaysSpeedOf(deliveryRef.current.steer));
+        steeredSway = dampedSway(
+          steeredSway,
+          steeringSpeed,
+          steeredSwayAt === undefined ? 0 : (at - steeredSwayAt) / 1000,
+        );
+        steeredSwayAt = at;
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3660,6 +3681,10 @@ function GameScreen({
           // `delivery-wiring.test.tsx` reads it back off every frame's input.
           steeredLateral:
             raceDrawn?.steeredLateral ?? roomRaceDrawn?.steeredLateral ?? deliverySteered,
+          // #2456: and how fast it is drawn moving there, which turns and leans
+          // the bicycle into a lane change. Optional the unsafe way round too,
+          // so the wiring tests read it back off the frames of a lane change.
+          steeredSway,
           // #2396: and the camera's eye moved off any parked car it is
           // alongside, so it never passes through one. A drawing only.
           // Optional the unsafe way round (`scene.ts`), so
