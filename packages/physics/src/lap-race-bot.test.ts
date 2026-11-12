@@ -27,6 +27,7 @@ import type {
 import {
   altitudeMetres,
   BOT_ABILITY_SPREAD,
+  BOT_TACTIC_MOVE_SHARE,
   BOT_MASS_KILOGRAMS,
   BOT_PACING_STYLES,
   botFieldPaces,
@@ -58,6 +59,7 @@ import {
   routeProfile,
   seconds,
   standings,
+  watts,
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
@@ -1387,6 +1389,89 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
       const knocked = view(offset, 1);
       expect({ ...knocked, energy: level.energy, capacity: level.capacity }).toEqual(level);
     }
+  });
+
+  it('hands a bot a view of the racers still racing, a move ahead of it, and the grade 50 m on (#2463)', () => {
+    const course = raceCourse(HILLY.totalDistance, 3);
+    const planned = (id: string, distance: number, power: number): LapRaceBot => {
+      const bot = lapRaceBot(id, 'brisk', STRATEGY);
+      const plan = botRacePlan('brisk', course, 4, bot.pace);
+      return {
+        ...bot,
+        plan,
+        power: power === 0 ? 0 : watts(plan.capacity.cpWatts + power),
+        ride: { speed: metresPerSecond(9), distance: metres(distance) },
+      };
+    };
+    const view = (opts: {
+      readonly aheadPower: number;
+      readonly riderPerKilogram?: number;
+      readonly riderAhead?: boolean;
+      readonly finished?: string;
+      readonly at?: number;
+    }) => {
+      const at = opts.at ?? 100;
+      const start = createItemRace({
+        course,
+        seed: 4,
+        itemsOn: false,
+        racerIds: ['bot', 'ahead', 'rider'],
+        startMs: 0,
+      });
+      const distances: Record<string, number> = {
+        bot: at,
+        ahead: opts.riderAhead === true ? at - 30 : at + 20,
+        rider: opts.riderAhead === true ? at + 20 : at - 30,
+      };
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => ({
+          ...entry,
+          racer: {
+            ...entry.racer,
+            effortDistance: distances[entry.racer.id] as number,
+            finishedAtMs: entry.racer.id === opts.finished ? 500 : null,
+          },
+        })),
+      };
+      const field = [planned('bot', at, 0), planned('ahead', at + 20, opts.aheadPower)];
+      const decisions = vi.mocked(decideTactic);
+      decisions.mockClear();
+      stepBotRace(race, field, {
+        elapsed: seconds(1),
+        conditions: conditions(HILLY),
+        seed: 4,
+        riderWattsPerKilogram: opts.riderPerKilogram,
+        rider: { effortDistances: { rider: distances.rider as number } },
+      });
+      vi.mocked(advance).mockClear();
+      const [read] = decisions.mock.calls.find(([each]) => each.botIndex === 0) ?? [];
+      if (read === undefined) throw new Error('the bot decided nothing');
+      return read;
+    };
+    // A bot ahead is in a move over its own CP, and not at or under it.
+    expect(view({ aheadPower: 1 }).aheadInMove).toBe(true);
+    expect(view({ aheadPower: -1 }).aheadInMove).toBe(false);
+    // The rider ahead is in a move over CP with the share on top, and not just under it.
+    const cp = planned('bot', 0, 0).plan?.capacity.cpWatts as number;
+    const needed = (cp * (1 + BOT_TACTIC_MOVE_SHARE)) / BOT_MASS_KILOGRAMS;
+    expect(
+      view({ aheadPower: 0, riderAhead: true, riderPerKilogram: needed * 1.05 }).aheadInMove,
+    ).toBe(true);
+    expect(
+      view({ aheadPower: 0, riderAhead: true, riderPerKilogram: needed * 0.95 }).aheadInMove,
+    ).toBe(false);
+    // The grade 50 m on, over the turn from a climb to a descent.
+    const turn = view({ aheadPower: 0, at: 225 });
+    const here = gradeAt(HILLY, distanceOnRoute(HILLY, 225));
+    expect(turn.gradeAheadPercent).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, 275)));
+    expect(turn.gradeAheadPercent).not.toBe(here);
+    // A finished racer is not in the rank, the gaps or the field.
+    const all = view({ aheadPower: 0 });
+    expect([all.rank, all.fieldSize, all.gapAheadMetres]).toEqual([2, 3, 20]);
+    const done = view({ aheadPower: 0, finished: 'ahead' });
+    expect([done.rank, done.fieldSize, done.gapAheadMetres]).toEqual([1, 2, null]);
+    expect(done.gapBehindMetres).toBe(30);
   });
 
   it('hands back the rider’s k from that one call, beside the bots’ (#2461), and none with the draft off', () => {

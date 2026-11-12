@@ -2761,7 +2761,8 @@ function GameScreen({
       }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
-      // the rider's mass; its seed is drawn inside and kept by nothing.
+      // the rider's mass (below, it only turns the rider's watts into W/kg for
+      // the bots to read); its seed is drawn inside and kept by nothing.
       reducedMotionRef.current =
         typeof globalThis.matchMedia === 'function' &&
         globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;

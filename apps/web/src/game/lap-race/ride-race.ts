@@ -357,6 +357,9 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
   const mass = ride.riderMassKilograms;
+  // A mass that is not above 0 would turn the watts into Infinity or NaN for
+  // the bots to read, so the bots read no W/kg then: this is the boundary
+  // of an optional field, not a case the rider's own mass reaches.
   const riderWattsPerKilogram =
     step.riderWatts === undefined || mass === undefined || !(mass > 0)
       ? undefined
