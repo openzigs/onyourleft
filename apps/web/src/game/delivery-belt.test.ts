@@ -11,6 +11,7 @@
  * browser gate does: `delivery.browser.spec.ts`.
  */
 
+import { Color, SRGBColorSpace } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
@@ -532,7 +533,10 @@ interface Compilable {
  * belt's splices and the realistic air's look for, as the renderer would —
  * `decoration-belt.test.ts`' shape, since nothing here may import three.
  */
-function compiled(material: Compilable): { readonly vertexShader: string } {
+function compiled(material: Compilable): {
+  readonly vertexShader: string;
+  readonly fragmentShader: string;
+} {
   const shader = {
     vertexShader: [
       '#include <common>',
@@ -547,7 +551,10 @@ function compiled(material: Compilable): { readonly vertexShader: string } {
       '#include <common>',
       '#include <fog_pars_fragment>',
       'void main() {',
+      // three's own order (ShaderLib's mesh programs, r18x).
       '#include <opaque_fragment>',
+      '#include <tonemapping_fragment>',
+      '#include <colorspace_fragment>',
       '#include <fog_fragment>',
       '}',
     ].join('\n'),
@@ -731,22 +738,47 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     readonly z: number;
     readonly glows: boolean;
     readonly dark: boolean;
+    readonly pale: boolean;
+    readonly rgb: readonly [number, number, number];
+    readonly untoned: boolean;
+  }[] {
+    return markerVertices(belt, MAILBOX);
+  }
+
+  /** Every vertex of marker kind `kind`, as {@link mailboxVertices} reads a mailbox's. */
+  function markerVertices(
+    belt: DeliveryBelt,
+    kind: number,
+  ): {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly glows: boolean;
+    readonly dark: boolean;
+    readonly pale: boolean;
+    readonly rgb: readonly [number, number, number];
+    readonly untoned: boolean;
   }[] {
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const colour = geometry.getAttribute('color');
     const glow = geometry.getAttribute('oylGlow');
     const kinds = geometry.getAttribute('oylPieceKind');
+    const untoned = geometry.getAttribute('oylUntoned');
     const found = [];
     for (let at = 0; at < position.count; at += 1) {
-      if (kinds.getX(at) !== MAILBOX) continue;
+      if (kinds.getX(at) !== kind) continue;
+      const rgb = [colour.getX(at), colour.getY(at), colour.getZ(at)] as const;
       found.push({
         x: position.getX(at),
         y: position.getY(at),
         z: position.getZ(at),
         glows: glow.getX(at) === 1,
-        // The box's slate paint; the post is pale and the diamond and ring glow.
-        dark: Math.max(colour.getX(at), colour.getY(at), colour.getZ(at)) < 0.3,
+        // The box's slate paint; the post is pale, the flag red, and the diamond and ring glow.
+        dark: Math.max(...rgb) < 0.3,
+        pale: Math.min(...rgb) > 0.5,
+        rgb,
+        untoned: untoned.getX(at) === 1,
       });
     }
     return found;
@@ -758,7 +790,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const belt = new DeliveryBelt('stylised');
     const mailbox = mailboxVertices(belt);
     const box = mailbox.filter((each) => each.dark);
-    const post = mailbox.filter((each) => !each.dark && !each.glows);
+    const post = mailbox.filter((each) => each.pale && !each.glows);
     const diamond = mailbox.filter((each) => each.glows && each.y > 0.2);
     const ring = mailbox.filter((each) => each.glows && each.y <= 0.2);
     // Until #2507: a 0.27 m × 0.27 m × 0.45 m box on a 1 m post 0.08 m thick, a 0.45 m diamond and a 0.28 m ring.
@@ -770,12 +802,101 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     expect(span(post.map((each) => each.x))).toBeCloseTo(0.14, 6);
     expect(Math.min(...box.map((each) => each.y))).toBeCloseTo(1, 6);
     expect(span(diamond.map((each) => each.x))).toBeCloseTo(0.72, 6);
-    // The ring's outer span: twice its 0.42 m radius plus the 0.03 m tube.
+    // The ring's outer span: twice its 0.42 m radius plus the 0.03 m band.
     expect(span(ring.map((each) => each.x))).toBeCloseTo(0.9, 6);
     // Still a lower mark than a doorstep's 3.66 m one, by more than a metre: a different target.
     expect(Math.max(...mailbox.map((each) => each.y))).toBeLessThan(2.66);
     belt.dispose();
   });
+
+  it('shapes it as a mailbox, not a cube: a box with a rounded roof along its length and a red flag raised at its side — #2507, the owner’s ruling on PR #2518', () => {
+    const belt = new DeliveryBelt('stylised');
+    const mailbox = mailboxVertices(belt);
+    const body = mailbox.filter((each) => each.dark);
+    const top = Math.max(...body.map((each) => each.y));
+    const bottom = Math.min(...body.map((each) => each.y));
+    const halfAcross = Math.max(...body.map((each) => Math.abs(each.x)));
+    // A cube's top is a face as wide as the box. The roof meets its top along a
+    // ridge down the middle, and is narrower the higher it goes.
+    const atTop = body.filter((each) => each.y > top - 1e-6);
+    expect(atTop.length).toBeGreaterThan(0);
+    for (const each of atTop) expect(Math.abs(each.x)).toBeLessThan(1e-6);
+    const roof = body.filter((each) => each.y > bottom + halfAcross + 1e-6);
+    expect(roof.length).toBeGreaterThan(0);
+    for (const each of roof) {
+      // On or inside the round of radius halfAcross about the roof's axis.
+      expect(Math.hypot(each.x, each.y - (bottom + halfAcross))).toBeLessThanOrEqual(
+        halfAcross + 1e-6,
+      );
+    }
+    // Its flag: a red part, neither glowing nor pale, beside the box and raised over its roof.
+    const flag = mailbox.filter((each) => !each.dark && !each.pale && !each.glows);
+    expect(flag.length).toBeGreaterThan(0);
+    for (const each of flag) {
+      const [red, green, blue] = each.rgb;
+      expect(red).toBeGreaterThan(2 * Math.max(green, blue));
+    }
+    expect(Math.min(...flag.map((each) => each.x))).toBeGreaterThanOrEqual(halfAcross);
+    expect(Math.max(...flag.map((each) => each.y))).toBeGreaterThan(top + 0.1);
+    belt.dispose();
+  });
+
+  it('marks it with a diamond of its own amber, not a doorstep’s gold, drawn past the tone mapping so the realistic world keeps it amber — #2507, the owner’s ruling on PR #2518', () => {
+    const belt = new DeliveryBelt('realistic');
+    /** The glowing diamond over a marker of `kind`: its glowing part above the step. */
+    const diamondOf = (kind: number): ReturnType<typeof markerVertices> =>
+      markerVertices(belt, kind).filter((each) => each.glows && each.y > 0.2);
+    const doorstep = diamondOf(0);
+    const mailbox = diamondOf(MAILBOX);
+    expect(doorstep.length).toBeGreaterThan(0);
+    expect(mailbox.length).toBeGreaterThan(0);
+    /** The paint's hue in degrees and its saturation, from linear channels in sRGB. */
+    const hueOf = ([r, g, b]: readonly [number, number, number]): [number, number] => {
+      const colour = new Color().setRGB(r, g, b);
+      const hsl = { h: 0, s: 0, l: 0 };
+      colour.getHSL(hsl, SRGBColorSpace);
+      return [hsl.h * 360, hsl.s];
+    };
+    const [mailboxHue, mailboxSaturation] = hueOf(mailbox[0]?.rgb ?? [0, 0, 0]);
+    const [doorstepHue] = hueOf(doorstep[0]?.rgb ?? [0, 0, 0]);
+    // An amber: orange-yellow, fully saturated, and at least 8 degrees of hue
+    // from the doorstep's gold (42 degrees), toward orange.
+    expect(mailboxHue).toBeGreaterThanOrEqual(28);
+    expect(mailboxHue).toBeLessThanOrEqual(40);
+    expect(mailboxSaturation).toBeGreaterThan(0.95);
+    expect(doorstepHue - mailboxHue).toBeGreaterThanOrEqual(8);
+    // Every vertex of each diamond one paint: they differ by paint, not by shading.
+    for (const each of mailbox) expect(each.rgb).toEqual(mailbox[0]?.rgb);
+    // The mailbox's diamond, and nothing else of any marker, is drawn untoned.
+    expect(mailbox.every((each) => each.untoned)).toBe(true);
+    for (const kind of [0, MAILBOX, 2]) {
+      const others = markerVertices(belt, kind).filter(
+        (each) => !(kind === MAILBOX && each.glows && each.y > 0.2),
+      );
+      expect(others.some((each) => each.untoned)).toBe(false);
+    }
+    belt.dispose();
+  });
+
+  for (const world of ['stylised', 'realistic'] as const) {
+    it(`lets an untoned part leave the tone mapping with its own paint, before the colour space and the fog, in the ${world} world’s marker programs — #2507`, () => {
+      const belt = new DeliveryBelt(world);
+      for (const shading of ['lit', 'flat'] as const) {
+        belt.setShading(shading);
+        const shader = compiled(belt.meshOf('markers').material as unknown as Compilable);
+        expect(shader.vertexShader).toContain('attribute float oylUntoned;');
+        expect(shader.vertexShader).toContain('vOylUntoned = oylUntoned;');
+        const fragment = shader.fragmentShader;
+        const mix = fragment.indexOf(
+          'gl_FragColor.rgb = mix( gl_FragColor.rgb, diffuseColor.rgb, vOylUntoned );',
+        );
+        expect(mix).toBeGreaterThan(fragment.indexOf('#include <tonemapping_fragment>'));
+        expect(mix).toBeLessThan(fragment.indexOf('#include <colorspace_fragment>'));
+        expect(fragment).toContain('varying float vOylUntoned;');
+      }
+      belt.dispose();
+    });
+  }
 
   it('stands at least 75 pixels tall, its box at least 15, on the tablet from where the throw window opens', () => {
     // The rider on the middle of the road, heading north, the throw window to a mailbox at the

@@ -190,6 +190,7 @@ import {
   Quaternion,
   ClampToEdgeWrapping,
   RepeatWrapping,
+  RingGeometry,
   Scene,
   ShaderMaterial,
   ShadowMaterial,
@@ -11075,16 +11076,58 @@ function withObstacleKinds<M extends Material>(material: M): M {
       'vertex',
       spliced,
     );
+    // #2507: an untoned part leaves the tone mapping with its own paint.
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${DELIVERY_UNTONED_ATTRIBUTE};\nvarying float vOylUntoned;`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n\tvOylUntoned = ${DELIVERY_UNTONED_ATTRIBUTE};`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylUntoned;',
+        'fragment',
+        spliced,
+      ),
+      '#include <tonemapping_fragment>',
+      '#include <tonemapping_fragment>\n\tgl_FragColor.rgb = mix( gl_FragColor.rgb, diffuseColor.rgb, vOylUntoned );',
+      'fragment',
+      spliced,
+    );
   };
   material.customProgramCacheKey = () => `${earlierKey}|oyl-delivery-kinds`;
   return material;
 }
+
+/**
+ * The vertex attribute that marks a Delivery part as drawn in its own paint
+ * PAST the tone mapping — #2507, the owner's ruling on PR #2518: the
+ * realistic world's AgX tone mapping (`realistic-light.ts`) turns a glowing
+ * amber into tan, and no amber paint survives it saturated (the most it gives
+ * a bright amber is about half saturation). 1 replaces the tone-mapped colour
+ * with the part's paint, before the output's colour space and the fog, as
+ * the stylised world (no tone mapping) draws every part; 0 changes nothing.
+ * Only a mailbox's diamond carries it. Spliced by {@link withObstacleKinds},
+ * so it is the belt's alone, in the calls the belt already makes.
+ */
+const DELIVERY_UNTONED_ATTRIBUTE = 'oylUntoned';
 
 /** One part of a Delivery piece: placed in the piece's own frame (its `+z` along the road), painted, glowing or not. */
 interface DeliveryPart {
   readonly made: BufferGeometry;
   readonly colour: number;
   readonly glows?: boolean;
+  /** Drawn in its own paint past the tone mapping (#2507). @see DELIVERY_UNTONED_ATTRIBUTE */
+  readonly untoned?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
   /** For a parked car's body: its colour is the instance's paint (#2362). */
@@ -11109,6 +11152,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const glow = new Float32Array(vertices);
   const kinds = new Float32Array(vertices);
   const painted = new Float32Array(vertices);
+  const untoned = new Float32Array(vertices);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
@@ -11124,6 +11168,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       glow[corner] = part.glows === true ? 1 : 0;
       kinds[corner] = part.kind ?? 0;
       painted[corner] = part.painted === true ? 1 : 0;
+      untoned[corner] = part.untoned === true ? 1 : 0;
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -11137,6 +11182,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
     geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
+    geometry.setAttribute(DELIVERY_UNTONED_ATTRIBUTE, new BufferAttribute(untoned, 1));
   }
   geometry.computeBoundingSphere();
   return geometry;
@@ -11196,8 +11242,12 @@ const DELIVERY_PAINT = {
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
   hazard: 0xe8432f,
-  // #2365: a mailbox's slate box, this project's own.
+  // #2365: a mailbox's slate box, this project's own. #2507: its raised red
+  // flag, and its diamond's amber, deeper and more orange than a doorstep's
+  // gold (`glow`), drawn untoned so it stays amber in the realistic world.
   mailbox: 0x3d5a73,
+  mailboxFlag: 0xc0392b,
+  mailboxGlow: 0xff8a00,
 } as const;
 
 /**
@@ -11312,6 +11362,24 @@ function parcelShape(): BufferGeometry {
  */
 const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
 
+/**
+ * A mailbox's raised flag, metres — #2507: a red plate this tall and long at
+ * its side, standing over its roof toward its back.
+ */
+const MAILBOX_FLAG_METRES = { height: 0.45, length: 0.22 } as const;
+
+/**
+ * A glowing ring lying on the step, `radius` to the middle of its band and
+ * `band` either side — #2507: flat, 24 triangles, where a torus of 3 by 12
+ * was 72 the same size from above; every marker instance submits it, twice
+ * (a doorstep's and a mailbox's), so the frame's triangles fit.
+ */
+function stepRing(radius: number, band: number): BufferGeometry {
+  return new RingGeometry(radius - band, radius + band, 12, 1)
+    .rotateX(-Math.PI / 2)
+    .translate(0, 0.04, 0);
+}
+
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
@@ -11329,6 +11397,7 @@ function markerShape(): BufferGeometry {
   const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
   const other = OTHER_MARKER_METRES;
   const box = other.box;
+  const boxAcross = box * 0.6;
   const mailboxHalf = other.diamond / 2;
   return deliveryShape([
     {
@@ -11345,7 +11414,7 @@ function markerShape(): BufferGeometry {
       kind: kind('house'),
     },
     {
-      made: new TorusGeometry(ring, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      made: stepRing(ring, 0.035),
       colour: DELIVERY_PAINT.glow,
       glows: true,
       kind: kind('house'),
@@ -11356,21 +11425,55 @@ function markerShape(): BufferGeometry {
       colour: DELIVERY_PAINT.post,
       kind: kind('mailbox'),
     },
+    // #2507, the owner's ruling on PR #2518: a mailbox's shape, not a cube. Its
+    // lower half a box, its upper a half-round roof along its length, so it
+    // stands 0.6 of its length across and tall as before, and a red flag
+    // raised at its side, standing above the roof.
     {
-      made: deliveryBox(box * 0.6, box * 0.6, box, 0, other.post + box * 0.3, 0),
+      made: deliveryBox(boxAcross, boxAcross / 2, box, 0, other.post + boxAcross / 4, 0),
       colour: DELIVERY_PAINT.mailbox,
       kind: kind('mailbox'),
     },
     {
-      made: new OctahedronGeometry(mailboxHalf, 0)
-        .scale(1, MARKER_DIAMOND_STRETCH, 1)
-        .translate(0, other.post + box * 0.6 + 0.1 + mailboxHalf * MARKER_DIAMOND_STRETCH, 0),
-      colour: DELIVERY_PAINT.glow,
-      glows: true,
+      made: new CylinderGeometry(
+        boxAcross / 2,
+        boxAcross / 2,
+        box,
+        4,
+        1,
+        false,
+        Math.PI / 2,
+        Math.PI,
+      )
+        .rotateX(Math.PI / 2)
+        .translate(0, other.post + boxAcross / 2, 0),
+      colour: DELIVERY_PAINT.mailbox,
       kind: kind('mailbox'),
     },
     {
-      made: new TorusGeometry(other.ring, 0.03, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      made: deliveryBox(
+        0.03,
+        MAILBOX_FLAG_METRES.height,
+        MAILBOX_FLAG_METRES.length,
+        boxAcross / 2 + 0.02,
+        other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
+        -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
+      ),
+      colour: DELIVERY_PAINT.mailboxFlag,
+      kind: kind('mailbox'),
+    },
+    // Its diamond: the mailbox's own amber, untoned (DELIVERY_UNTONED_ATTRIBUTE).
+    {
+      made: new OctahedronGeometry(mailboxHalf, 0)
+        .scale(1, MARKER_DIAMOND_STRETCH, 1)
+        .translate(0, other.post + boxAcross + 0.1 + mailboxHalf * MARKER_DIAMOND_STRETCH, 0),
+      colour: DELIVERY_PAINT.mailboxGlow,
+      glows: true,
+      untoned: true,
+      kind: kind('mailbox'),
+    },
+    {
+      made: stepRing(other.ring, 0.03),
       colour: DELIVERY_PAINT.glow,
       glows: true,
       kind: kind('mailbox'),
@@ -11382,7 +11485,8 @@ function markerShape(): BufferGeometry {
       kind: kind('no-delivery'),
     },
     {
-      made: new TorusGeometry(other.sign / 2, 0.06, 4, 16)
+      // #2507, trimmed to fit the frame's triangles: 3 × 12, not 4 × 16.
+      made: new TorusGeometry(other.sign / 2, 0.06, 3, 12)
         .rotateY(Math.PI / 2)
         .translate(0, other.signPost + other.sign / 2, 0),
       colour: DELIVERY_PAINT.hazard,
