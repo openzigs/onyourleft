@@ -7,7 +7,7 @@
  * and not about where the page held the rider or what it asked of the HUD.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { deliveryTown } from '../../src/game/delivery/delivery-town-testing';
 import {
@@ -21,6 +21,28 @@ import { MAPPED_CHUNK_METRES } from '../../src/game/realistic-budget';
 import { planOfTarget, rideHeldAt, roundSamples, sideOfRoad } from './round';
 
 const town = deliveryTown('round-sighting');
+
+/**
+ * The round's seed, fixed — `ride-round.ts` draws one at the press from
+ * `crypto.getRandomValues`, and the pick it seeds decides which houses, so
+ * a seed that happened to pick one side only failed "the round found both"
+ * under coverage on CI (about 8 % of seeds pick one side only; 2863311527 is
+ * one). A seed that picks houses either side.
+ */
+const ROUND_SEED = 1;
+
+beforeEach(() => {
+  vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+    <T extends ArrayBufferView>(array: T): T => {
+      (array as unknown as Uint32Array)[0] = ROUND_SEED;
+      return array;
+    },
+  );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function round(): DeliveryRide {
   const ride = startDeliveryRide({
