@@ -80,11 +80,10 @@ import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
   DEFAULT_HUD_LAYOUT,
   compactRoute,
-  deliveryEverything,
+  deliveryGame,
   focusArrangement,
   panelShown,
   totalsStripChosen,
-  type HudLayoutPreference,
 } from './hud-layout-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
@@ -248,22 +247,6 @@ function keptWithReadingsHidden(reading: HudReading): boolean {
  * left out of the strip, and comes back with *Everything* in Settings.
  */
 const DELIVERY_STRIP_KEYS: ReadonlySet<string> = new Set(['power', 'speed']);
-
-/**
- * Whether a ride's HUD is a Delivery round's game strip — #2514, the owner's
- * report from the tablet: the houses and their markers stand at the road's
- * edges, where the route panel, the lap table and the wide reading panels
- * were. On a ride running a round, unless the rider chose *Everything*
- * (`hud-layout-preference.ts` §`HUD_DELIVERY_VIEWS`): the strip's readings
- * only ({@link DELIVERY_STRIP_KEYS}), no route panel and no lap table
- * (`HudPanel.tsx`). The notices and the ride controls are drawn as on any ride.
- */
-export function deliveryGame(
-  layout: HudLayoutPreference,
-  delivery: HudCoreProps['delivery'],
-): boolean {
-  return delivery !== undefined && !deliveryEverything(layout);
-}
 
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {

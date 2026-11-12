@@ -261,3 +261,19 @@ export function powerView(preference: HudLayoutPreference): HudPowerView {
 export function deliveryEverything(preference: HudLayoutPreference): boolean {
   return preference.delivery === 'everything';
 }
+
+/**
+ * Whether a ride's HUD is a Delivery round's game strip — #2514, the owner's
+ * report from the tablet: the houses and their markers stand at the road's
+ * edges, where the route panel, the lap table and the wide reading panels
+ * were. On a ride running a round (`delivery` handed to the HUD), unless the
+ * rider chose *Everything*: only the strip's readings (`HudCore.tsx`
+ * §`DELIVERY_STRIP_KEYS`), no route panel and no lap table (`HudPanel.tsx`).
+ * The notices and the ride controls are drawn as on any ride.
+ */
+export function deliveryGame(
+  preference: HudLayoutPreference,
+  delivery: object | undefined,
+): boolean {
+  return delivery !== undefined && !deliveryEverything(preference);
+}

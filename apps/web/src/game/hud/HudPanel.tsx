@@ -66,11 +66,16 @@ import { useTimeOfDay } from '../../design/time-of-day';
 import { NO_READING, type HudInput, type TrainerLine } from './fields';
 import type { ControllerPort } from '../delivery/controller-port';
 import type { LaneInputPort } from '../delivery/lane-input-port';
-import { HudCore, deliveryGame } from './HudCore';
+import { HudCore } from './HudCore';
 import { SIMULATED_MOVING_SENTENCE } from '../simulated-rider';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
-import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
+import {
+  DEFAULT_HUD_LAYOUT,
+  deliveryGame,
+  panelShown,
+  type HudLayoutPreference,
+} from './hud-layout-preference';
 import { StreetMap } from './StreetMap';
 import { RaceStandings } from './RaceStandings';
 import { LapSplits } from './LapSplits';
