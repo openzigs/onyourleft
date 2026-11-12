@@ -367,6 +367,19 @@ export async function readSource(
 }
 
 /**
+ * The id after `--only`, or undefined when the flag is absent. A flag with no
+ * id after it is refused: reading every source (and, with `--lock`, rewriting
+ * the whole lock) is not what a bare `--only` asks for.
+ */
+export function onlyOf(argv: readonly string[]): string | undefined {
+  const at = argv.indexOf('--only');
+  if (at === -1) return undefined;
+  const id = argv[at + 1];
+  if (id === undefined || id.startsWith('--')) throw new Error('--only needs a source id');
+  return id;
+}
+
+/**
  * Every source in `sources`, read by `read` against its entry in `locked` —
  * or, given `only` (#2540's `--only <id>`), that one source read and every
  * other entry kept exactly as the lock has it, in the order `sources` lists
@@ -410,8 +423,7 @@ async function main(): Promise<void> {
       console.log(line);
     },
   };
-  const onlyAt = process.argv.indexOf('--only');
-  const only = onlyAt === -1 ? undefined : process.argv[onlyAt + 1];
+  const only = onlyOf(process.argv);
   const sources = await readSources(SOURCES, locked, only, (source, expected) =>
     readSource(source, expected, run),
   );

@@ -33,6 +33,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MAXIMUM_REDIRECTS,
   readSource,
+  onlyOf,
   readSources,
   type Fetch,
   type FetchRun,
@@ -559,6 +560,13 @@ describe('Kenney’s Car Kit: the owner’s archive, held to Kenney’s own page
 });
 
 describe('--only: one source read, every other entry kept as the lock has it — #2540', () => {
+  it('refuses --only given no id, and reads the id after it otherwise', () => {
+    expect(() => onlyOf(['node', 'x', '--only'])).toThrow('--only needs a source id');
+    expect(() => onlyOf(['node', 'x', '--only', '--lock'])).toThrow('--only needs a source id');
+    expect(onlyOf(['node', 'x', '--only', 'a', '--lock'])).toBe('a');
+    expect(onlyOf(['node', 'x', '--lock'])).toBeUndefined();
+  });
+
   const lockOf = (ids: readonly string[]): { sources: LockedSource[] } => ({
     sources: ids.map((id) => ({
       id,
