@@ -1215,7 +1215,12 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const ann = await signIn(url, 'Ann');
     const bob = await signIn(url, 'Bob');
     const cat = await signIn(url, 'Cat');
-    const made = await call('POST', '/v1/rooms', ann.sessionToken, roomBody({ lengthMetres: 40 }));
+    // A 2 m course (#2552): a room sends a frame a second, and on 40 m the
+    // finish came seven seconds after the start was asked for, of a case that
+    // took 7.5 s on CI under coverage. At 900 and 700 W both riders are past
+    // 2 m on the race's first frame, so both still finish and both results
+    // are still the race's.
+    const made = await call('POST', '/v1/rooms', ann.sessionToken, roomBody({ lengthMetres: 2 }));
     expect(made.status).toBe(200);
     const room = made.body as { roomId: string; code: string; routeSha256: string };
     const routeFile = join(
@@ -1264,7 +1269,6 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(
       () => [annSocket, bobSocket].every((s) => s.messages.some((m) => m.type === 'countdown')),
       'the countdown said to both',
-      5_000,
     );
     for (const socket of [annSocket, bobSocket]) {
       const told = socket.messages.find((m) => m.type === 'countdown');
@@ -1277,11 +1281,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       bobSocket.report(sequence, 700);
     }, 250);
     try {
-      await until(
-        () => annSocket.messages.some((m) => m.type === 'finish'),
-        'the race finished',
-        30_000,
-      );
+      await until(() => annSocket.messages.some((m) => m.type === 'finish'), 'the race finished');
     } finally {
       clearInterval(pedal);
     }
@@ -1299,7 +1299,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // The riders leave; the room is over, and lets its route go.
     annSocket.socket.close();
     bobSocket.socket.close();
-    await until(() => !existsSync(routeFile), 'the route deleted', 10_000);
+    await until(() => !existsSync(routeFile), 'the route deleted');
     expect((await call('GET', `/v1/rooms/${room.roomId}/route`, ann.sessionToken)).status).toBe(
       404,
     );
@@ -1310,7 +1310,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // And no line the instance wrote carries the code.
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(line).not.toContain(room.code.replace(/-/g, ''));
-  }, 90_000);
+  });
 
   it('never opens a group ride that is over as a lobby again', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
