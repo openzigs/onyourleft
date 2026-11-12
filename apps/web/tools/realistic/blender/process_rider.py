@@ -33,7 +33,7 @@ What it does:
 3. Build the joints from `default.mhskel`, and REDUCE the skeleton from 163
    bones (fingers, toes, face, twist bones) to the KEEP set a pedalling rider
    needs. A dropped bone's weights go to its nearest kept ancestor, so no
-   vertex loses its influence.
+   vertex loses its influence. Draw each bare foot out into a shoe (#2504).
 4. Keep the full-resolution body (HIGH) for the bakes; decimate a copy (LOW)
    to what is left of <target-tris> once the helmet and glasses are paid for.
    ⚠️ Smooth-shaded: until #623 every face was flat, which drew a faceted body
@@ -89,6 +89,7 @@ import bmesh
 import bpy
 import numpy as np
 from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 # The kit's numbers, beside this file. ⚠️ No bytecode: Python would otherwise
 # leave a `__pycache__` beside them, a binary `ASSET001` rightly refuses.
@@ -243,6 +244,73 @@ def kept_ancestor(name):
     return name
 
 
+# --- 3 (continued). shoes, not toes (#2504) -----------------------------------
+# MakeHuman's foot is bare, and painting it dark drew five toes in black socks.
+# A cycling shoe is one smooth last: the foot's vertices below the ankle are
+# drawn out onto the convex hull of that foot -- which closes the gaps between
+# the toes and fills the arch into a flat sole -- and stood off it by the
+# upper's thickness, fading to nothing at the ankle (`rider_kit.py`). Each
+# vertex is carried out to the hull along the line from the foot's own axis,
+# heel to toes. Carried straight out, the two walls of a gap between toes land
+# crossed over each other, which the decimated shoe drew as dark creases, so
+# the toe box's vertices are then relaxed over the hull: each moved to its
+# neighbours' middle and carried back out, until the gaps are spanned by an
+# even skin. Before HIGH is copied, so the bakes see the shoe and not the
+# toes; only the body's own vertices move, so no joint does.
+neighbours = {}
+for vertices, _ in faces:
+    for at, vertex in enumerate(vertices):
+        for other in (vertices[at - 1], vertices[(at + 1) % len(vertices)]):
+            neighbours.setdefault(vertex, set()).add(other)
+# The left shoe is made, and the right is its mirror image vertex for vertex:
+# the body is symmetric, and two hulls made apart differ in their last bits,
+# which the decimator turned into two feet cut differently.
+body_vertices = sorted(groups["body"])
+ankle_z = joint(bones["foot.L"]["head"]).z
+foot = [i for i in body_vertices if positions[i].z < ankle_z and positions[i].x > 0]
+at_position = {tuple(round(c, 6) for c in positions[i]): i for i in body_vertices}
+twin = {i: at_position[(round(-positions[i].x, 6), round(positions[i].y, 6), round(positions[i].z, 6))] for i in foot}
+if len(set(twin.values())) != sum(1 for i in body_vertices if positions[i].z < ankle_z and positions[i].x < 0):
+    raise RuntimeError("the feet are not mirror images: no right shoe can mirror the left")
+hull = bmesh.new()
+for i in foot:
+    hull.verts.new(positions[i])
+bmesh.ops.convex_hull(hull, input=hull.verts[:])
+tree = BVHTree.FromBMesh(hull)
+toe_y = min(positions[i].y for i in foot)
+heel_y = max(positions[i].y for i in foot)
+heel = centre_of([i for i in foot if positions[i].y > heel_y - 0.03])
+toes = centre_of([i for i in foot if positions[i].y < toe_y + 0.03])
+axis = toes - heel
+
+
+def out_to_hull(point):
+    """Where the line from the foot's axis out through `point` leaves the hull, and its normal."""
+    u = min(1.0, max(0.0, (point - heel).dot(axis) / axis.length_squared))
+    inside = heel + axis * u
+    on, normal, _, _ = tree.ray_cast(inside, point - inside)
+    return (on, normal if normal.dot(on - inside) > 0 else -normal) if on is not None else (point, None)
+
+
+on_hull = {i: out_to_hull(positions[i]) for i in foot}
+toe_box = [i for i in foot if (positions[i] - heel).dot(axis) / axis.length_squared > KIT.SHOE_TOE_BOX]
+for _ in range(KIT.SHOE_RELAX):
+    on_hull.update({
+        i: out_to_hull(sum((on_hull.get(j, (positions[j],))[0] for j in sorted(neighbours[i])), Vector())
+                       / len(neighbours[i]))
+        for i in toe_box
+    })
+for i in foot:
+    on, normal = on_hull[i]
+    if normal is None:
+        continue
+    t = min(1.0, (ankle_z - positions[i].z) / KIT.SHOE_BLEND)
+    point = positions[i]
+    positions[i] = point + (on + normal * KIT.SHOE_THICKNESS - point) * (t * t * (3 - 2 * t))
+    positions[twin[i]] = Vector((-positions[i].x, positions[i].y, positions[i].z))
+hull.free()
+
+
 mesh = bpy.data.meshes.new("rider")
 mesh.from_pydata([tuple(p) for p in positions], [], [f[0] for f in faces])
 uv_layer = mesh.uv_layers.new(name="uv")
@@ -321,23 +389,36 @@ skull_front = min(p.y for p in skull)
 skull_back = max(p.y for p in skull)
 skull_half_width = max(abs(p.x) for p in skull)
 # The shell: clear of the skull by CLEARANCE all round, its crown over the top
-# of the head.
+# of the head. #2504: seated SEAT lower than it was -- the crown closer to the
+# head, and the rim lower at the sides and the back -- with the front of the
+# rim where it was, over the brows.
 CLEARANCE = 0.015
-centre = Vector((0.0, (skull_front + skull_back) / 2 + 0.006, eye_mid.z + 0.022))
+SEAT = 0.006
+centre = Vector((0.0, (skull_front + skull_back) / 2 + 0.006, eye_mid.z + 0.022 - SEAT))
 radius = Vector((
     skull_half_width + CLEARANCE,
     (skull_back - skull_front) / 2 + CLEARANCE,
-    top - centre.z + CLEARANCE,
+    top - centre.z + CLEARANCE - SEAT,
 ))
 
 SHELL = (0.86, 0.86, 0.86)
 STRAP = (0.02, 0.02, 0.022)
-LENS = (0.015, 0.018, 0.022)
+# #2504: a smoked lens, blue-led so it reads as glass and not as a strap.
+LENS = (0.010, 0.016, 0.034)
 FRAME = (0.03, 0.03, 0.032)
+# A vent's floor and walls: the helmet's inside, a mid grey.
+VENT = (0.09, 0.09, 0.095)
 helmet_vertices, helmet_faces, helmet_colours = [], [], []
 
 
-def add_quad(corners, colour):
+def add_quad(corners, colour, facing=None):
+    """One quad. With `facing`, its corners are put in the order whose front --
+    the side three draws, back faces being culled -- turns towards `facing`
+    (#2504: the lenses faced the eyes and were culled from the front)."""
+    if facing is not None:
+        a, b, c = (Vector(corner) for corner in corners[:3])
+        if (b - a).cross(c - a).dot(facing) < 0:
+            corners = corners[::-1]
     start = len(helmet_vertices)
     helmet_vertices.extend(tuple(c) for c in corners)
     helmet_colours.extend([colour] * 4)
@@ -349,7 +430,7 @@ def shell_point(ring, segment):
     around = 2 * math.pi * segment / HELMET_SEGMENTS
     back = 0.5 - 0.5 * math.cos(around)  # 0 at the front, 1 at the back
     # The rim: over the brows at the front, down to the nape at the back.
-    rim = math.radians(88 + 30 * back ** 1.4)
+    rim = math.radians(85 + 37 * back ** 1.4)
     down = rim * ring / HELMET_RINGS
     # A road helmet's tail: longer behind.
     stretch = 1 + 0.12 * back ** 2
@@ -365,35 +446,102 @@ def is_vent(ring, segment):
     return not LOD and ring in (1, 2, 4) and segment in (2, 5, 17, 20)
 
 
+# #2504: a vent was a hole, and the scalp showed through it. Each is now a
+# slot VENT_DEPTH deep, its floor and four walls the helmet's inside.
+VENT_DEPTH = 0.006
+
+
+def sunk(point):
+    out = point - centre
+    return centre + out * (1 - VENT_DEPTH / out.length)
+
+
 for ring in range(HELMET_RINGS):
     for segment in range(HELMET_SEGMENTS):
-        if is_vent(ring, segment):
+        corners = (
+            shell_point(ring, segment),
+            shell_point(ring + 1, segment),
+            shell_point(ring + 1, segment + 1),
+            shell_point(ring, segment + 1),
+        )
+        if not is_vent(ring, segment):
+            add_quad(corners, SHELL)
             continue
+        floor = tuple(sunk(corner) for corner in corners)
+        middle = sum(corners, Vector()) / 4
+        add_quad(floor, VENT, facing=middle - centre)
+        for at in range(4):
+            a, b = corners[at], corners[(at + 1) % 4]
+            add_quad((a, b, sunk(b), sunk(a)), VENT, facing=middle - (a + b) / 2)
+
+# #2504: the straps and the glasses' arms lie ON the head. They were straight
+# bars between points the skull's widest extent (the ears) placed, so they
+# floated beside the jaw and the temple. Each is now a ribbon through points
+# laid onto the full-resolution body's skin and stood off it by `lift`.
+skin = BVHTree.FromObject(high, bpy.context.evaluated_depsgraph_get())
+
+
+def on_skin(point, lift):
+    """The skin's nearest point to `point`, stood off it by `lift`, and its normal."""
+    on, normal, _, _ = skin.find_nearest(point)
+    return on + normal * lift, normal
+
+
+def ribbon(start, end, steps, half_width, lift, colour, keep_start=False):
+    """A ribbon from `start` to `end` along the skin, `steps` quads, facing out of it.
+
+    With `keep_start`, the first point stays where it is: a strap leaves the
+    helmet's rim, which stands off the head."""
+    points, normals = [], []
+    for step in range(steps + 1):
+        point = start.lerp(end, step / steps)
+        if keep_start and step == 0:
+            points.append(point)
+            normals.append(on_skin(point, 0.0)[1])
+        else:
+            at, normal = on_skin(point, lift)
+            points.append(at)
+            normals.append(normal)
+    across = []
+    for at in range(steps + 1):
+        along = points[min(at + 1, steps)] - points[max(at - 1, 0)]
+        across.append(along.cross(normals[at]).normalized() * half_width)
+    for at in range(steps):
         add_quad(
-            (
-                shell_point(ring, segment),
-                shell_point(ring + 1, segment),
-                shell_point(ring + 1, segment + 1),
-                shell_point(ring, segment + 1),
-            ),
-            SHELL,
+            (points[at] - across[at], points[at + 1] - across[at + 1],
+             points[at + 1] + across[at + 1], points[at] + across[at]),
+            colour,
+            facing=normals[at] + normals[at + 1],
         )
 
+
+# The ear: the head's vertices at the eyes' height that stand out past the
+# cranium above it. A strap passes in front of it and behind it to meet under
+# its lobe; the glasses' arm runs along the temple to its root.
+cranium_half_width = max(abs(p.x) for p in skull if p.z > eye_mid.z + 0.02)
+ear = [p for p in skull if abs(p.x) > cranium_half_width and abs(p.z - eye_mid.z) < 0.03]
+ear_front = min(p.y for p in ear)
+ear_back = max(p.y for p in ear)
+STRAP_HALF_WIDTH, STRAP_LIFT, STRAP_STEPS = 0.005, 0.003, 6
+ARM_HALF_WIDTH, ARM_LIFT, ARM_STEPS = 0.0028, 0.003, 5
+
 # The straps: from the rim before and behind each ear, meeting under it, and
-# on to the chin.
-chin = Vector((0.0, skull_front + 0.035, eye_mid.z - 0.11))
+# on under the chin.
+chin = Vector((0.0, skull_front + 0.02, eye_mid.z - 0.13))
 for side in () if LOD else (1, -1):
-    under_ear = Vector((side * (skull_half_width - 0.004), centre.y + 0.005, eye_mid.z - 0.055))
-    for segment in ((4.5, 7.5) if side > 0 else (17.5, 14.5)):
+    under_ear = on_skin(
+        Vector((side * cranium_half_width, (ear_front + ear_back) / 2, eye_mid.z - 0.06)), 0.0
+    )[0]
+    for segment in ((4.0, 7.5) if side > 0 else (18.0, 14.5)):
         rim = shell_point(HELMET_RINGS, segment)
-        along = (under_ear - rim).normalized()
-        across = along.cross(Vector((side, 0, 0))).normalized() * 0.005
-        add_quad((rim - across, under_ear - across, under_ear + across, rim + across), STRAP)
-    across = Vector((0, 0, 0.005))
-    add_quad((under_ear - across, chin - across, chin + across, under_ear + across), STRAP)
+        ribbon(rim, under_ear, STRAP_STEPS, STRAP_HALF_WIDTH, STRAP_LIFT, STRAP, keep_start=True)
+    ribbon(under_ear, chin, STRAP_STEPS, STRAP_HALF_WIDTH, STRAP_LIFT, STRAP)
 
 # The glasses: a curved lens before each eye, a bridge, and an arm to each ear.
-LENS_OUT = 0.014
+# #2504: every lens quad faces forward, so it is drawn from the front and not
+# culled, and the eyes do not show through.
+LENS_OUT = 0.019
+FORWARD = Vector((0, -1, 0))
 for side, eye in ((1, eye_l), (-1, eye_r)):
     front = eye + Vector((0, -eye_radius - LENS_OUT, 0))
     columns, rows = (1, 1) if LOD else (5, 3)
@@ -414,18 +562,17 @@ for side, eye in ((1, eye_l), (-1, eye_r)):
     for row in range(rows):
         for column in range(columns):
             quad = (grid[row][column], grid[row + 1][column], grid[row + 1][column + 1], grid[row][column + 1])
-            add_quad(quad if side > 0 else quad[::-1], LENS)
+            add_quad(quad, LENS, facing=FORWARD)
     if LOD:
         continue
     outer = grid[rows // 2][columns]
-    ear = Vector((side * (skull_half_width + 0.004), centre.y + 0.02, outer.z + 0.004))
-    up = Vector((0, 0, 0.003))
-    add_quad((outer - up, ear - up, ear + up, outer + up), FRAME)
+    root = Vector((side * cranium_half_width, ear_front, outer.z + 0.004))
+    ribbon(outer, root, ARM_STEPS, ARM_HALF_WIDTH, ARM_LIFT, FRAME, keep_start=True)
 if not LOD:
     bridge_l = eye_l + Vector((-0.026, -eye_radius - LENS_OUT, 0.008))
     bridge_r = eye_r + Vector((0.026, -eye_radius - LENS_OUT, 0.008))
     up = Vector((0, 0, 0.003))
-    add_quad((bridge_r - up, bridge_l - up, bridge_l + up, bridge_r + up), FRAME)
+    add_quad((bridge_r - up, bridge_l - up, bridge_l + up, bridge_r + up), FRAME, facing=FORWARD)
 
 helmet_mesh = bpy.data.meshes.new("helmet")
 helmet_mesh.from_pydata(helmet_vertices, [], helmet_faces)

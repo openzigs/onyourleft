@@ -779,7 +779,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ The jersey's main colour is in NO
+                        8 998 triangles. ⚠️ The helmet's material is
+                        single-sided: a lens wound towards the face is culled
+                        from the front (#2504). `rider-gear.test.ts` reads the
+                        lenses, the closed vents, the straps on the skin and
+                        the shoes back out of the file. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
