@@ -46,6 +46,13 @@
  * PNG (a recipe's `mark`). `--only <file>` makes one output and whatever its
  * run also writes, for working on one asset; a pull request quotes a full run.
  *
+ * ## The pack's rider is posed from `bicycle.ts` — #2485
+ *
+ * Its run is handed the joints `rider-pack.ts` §`packPose` reads off
+ * `src/game/bicycle.ts` at each crank angle, as a JSON file (a recipe's
+ * `pose`), and writes the vertex-animation texture beside the GLB — a second
+ * file with no KTX2 step, copied as it was written.
+ *
  * ## Some trees are generated, not scanned — #1283
  *
  * ADR 0049 D-1. `ez-tree.ts` loads the pinned generator — a tool, like the two
@@ -91,6 +98,7 @@ import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { loadEzTree, stageGeneratedLevel, type EzTreeModule } from './ez-tree';
 import { LOCK, RAW } from './fetch-assets';
+import { packPose } from './rider-pack';
 import {
   GENERATED_TREES,
   geometryDigest,
@@ -199,7 +207,7 @@ function make(
     } else {
       copyFileSync(join(stage, output.file), join(into, output.file));
     }
-    for (const also of alsoWritten(recipe)) {
+    for (const also of recipe.alsoWrites ?? []) {
       encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
     }
     return {
@@ -243,6 +251,12 @@ function make(
     writeFileSync(mark, encodePng(recipe.mark, drawMark(recipe.mark)));
     extra.push(mark);
   }
+  // #2485: the joints the pack's rider is posed onto, from `bicycle.ts`.
+  if (recipe.pose !== undefined) {
+    const pose = join(stage, `${output.file}.pose.json`);
+    writeFileSync(pose, JSON.stringify(packPose(recipe.pose)));
+    extra.push(pose);
+  }
   blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args, ...extra]);
   if (recipe.ktx2 !== undefined) {
     encodeKtx2(recipe.ktx2, join(stage, made), join(into, output.file));
@@ -255,7 +269,9 @@ function make(
     copyFileSync(join(stage, made), join(into, output.file));
   }
   for (const also of recipe.alsoWrites ?? []) {
-    encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
+    // #2485: a second file with no encoding ships as the run wrote it.
+    if (also.ktx2 === undefined) copyFileSync(join(stage, also.made), join(into, also.file));
+    else encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
   }
   return JSON.parse(readFileSync(report, 'utf8')) as unknown;
 }

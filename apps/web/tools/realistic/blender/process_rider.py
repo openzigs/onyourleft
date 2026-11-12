@@ -10,6 +10,11 @@ Run by `process-assets.ts`, never by hand:
         <makehuman-dir> <out.glb> <report.json> <target-tris> <texture-pixels> \
         <colour.png> <normal.png> <orm.png> <system-assets-dir> <mark.png>
 
+or, for the pack's rider (#2485, the bake half of #681):
+
+    Blender -b --factory-startup --python process_rider.py -- \
+        <makehuman-dir> <out.glb> <report.json> lod <target-tris> <vat.bin> <pose.json>
+
 MakeHuman is not needed and not run: the files it ships its assets in are
 plain text -- `base.obj` (the mesh, with its helper geometry), the skeleton
 `default.mhskel` (JSON; a joint is the mean of a list of helper vertices), the
@@ -33,8 +38,9 @@ What it does:
    to what is left of <target-tris> once the helmet and glasses are paid for.
    ⚠️ Smooth-shaded: until #623 every face was flat, which drew a faceted body
    and split every vertex three ways (26 986 vertices for 8 998 triangles).
-5. Build the helmet and glasses (#623) round the head's own vertices -- one
-   mesh, one draw call among three riders, as the sphere cap was.
+5. Build the helmet and glasses (#623) round the head's own vertices, and an
+   eyeball in each socket (#2495) -- one mesh, one draw call among three
+   riders, as the sphere cap was.
 6. Bake, with Cycles on ONE thread (`process_tree.py` says why), from HIGH onto
    LOW's texture coordinates: a tangent-space NORMAL map, and AMBIENT
    OCCLUSION with the helmet in the scene.
@@ -44,14 +50,24 @@ What it does:
    main colour a texel is -- premultiplied, with the colour map black there). The skin
    is MakeHuman's CC0 skin's detail on the tone the rider already had; the
    brows are MakeHuman's CC0 eyebrow, laid onto the skin through its own
-   `.mhclo` fit. The eyes are left as they were (#623's open question).
+   `.mhclo` fit. The skin round each eye stays flat: the eyes are balls in the
+   helmet's mesh (#2495), not paint.
 8. Add the kit's relief and the riding pose's creases (seams, the zip, the
    straps, the pockets, the chamois, the folds at hip, knee, elbow and
    shoulder) to the baked normal map, and write the three maps as PNGs for
    `encode-ktx2.ts`.
 9. Export a skinned GLB in MakeHuman's rest pose, the helmet beside the body.
 
-It does NOT pose the body onto the bicycle. That is done at runtime by
+THE PACK (#2485): with `lod`, steps 1 to 5 run as above with a cheaper helmet
+and the body cut to what it leaves of <target-tris>; there is no bake and no
+kit drawn -- the pack wears the rider's three maps at its own MakeHuman texture
+coordinates. Then the body and the helmet (skinned wholly to the head) are
+exported, read back out of the GLB, and posed at every crank angle
+<pose.json> holds -- the joints `rider-pack.ts` reads off `bicycle.ts`, aimed
+at as `three-renderer.ts` section RealisticRiderBelt aims them -- into the
+vertex-animation texture `rider-pack.ts` states the layout of.
+
+The rider itself is NOT posed onto the bicycle here. That is done at runtime by
 `src/game/three-renderer.ts` section RealisticRiderBelt, which aims each kept
 bone at the joint positions `src/game/bicycle.ts` section `riderJoints`
 derives -- the hips on the saddle, the hands on the hoods, and each knee and
@@ -84,11 +100,18 @@ import rider_kit as KIT  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 MH_DIR, OUT_GLB, OUT_REPORT = args[:3]
-TARGET_TRIS = int(args[3])
-PIXELS = int(args[4])
-COLOUR_PNG, NORMAL_PNG, ORM_PNG = (os.path.join(os.path.dirname(OUT_GLB), name) for name in args[5:8])
-SYSTEM_DIR = args[8]
-MARK_PNG = args[9]
+# #2485: the pack's rider, and its vertex-animation texture.
+LOD = args[3] == "lod"
+if LOD:
+    TARGET_TRIS = int(args[4])
+    VAT_OUT = os.path.join(os.path.dirname(OUT_GLB), args[5])
+    POSE_JSON = args[6]
+else:
+    TARGET_TRIS = int(args[3])
+    PIXELS = int(args[4])
+    COLOUR_PNG, NORMAL_PNG, ORM_PNG = (os.path.join(os.path.dirname(OUT_GLB), name) for name in args[5:8])
+    SYSTEM_DIR = args[8]
+    MARK_PNG = args[9]
 # MakeHuman's unit is the decimetre.
 UNIT = 0.1
 
@@ -144,9 +167,10 @@ def macro_targets():
     return [(name, value) for name, value in out if value > 0]
 
 
-# The helmet's shell: rings from the crown to the rim, segments round it.
-HELMET_RINGS = 7
-HELMET_SEGMENTS = 22
+# The helmet's shell: rings from the crown to the rim, segments round it. The
+# pack's (#2485) is coarser, with no vents, straps or frame: 64 triangles of
+# its 2 000, seen from metres away.
+HELMET_RINGS, HELMET_SEGMENTS = (3, 10) if LOD else (7, 22)
 
 
 def mh(path):
@@ -340,7 +364,7 @@ def shell_point(ring, segment):
 
 def is_vent(ring, segment):
     """Four rows of slots over the crown, running front to back."""
-    return ring in (1, 2, 4) and segment in (2, 5, 17, 20)
+    return not LOD and ring in (1, 2, 4) and segment in (2, 5, 17, 20)
 
 
 for ring in range(HELMET_RINGS):
@@ -360,7 +384,7 @@ for ring in range(HELMET_RINGS):
 # The straps: from the rim before and behind each ear, meeting under it, and
 # on to the chin.
 chin = Vector((0.0, skull_front + 0.035, eye_mid.z - 0.11))
-for side in (1, -1):
+for side in () if LOD else (1, -1):
     under_ear = Vector((side * (skull_half_width - 0.004), centre.y + 0.005, eye_mid.z - 0.055))
     for segment in ((4.5, 7.5) if side > 0 else (17.5, 14.5)):
         rim = shell_point(HELMET_RINGS, segment)
@@ -374,7 +398,7 @@ for side in (1, -1):
 LENS_OUT = 0.014
 for side, eye in ((1, eye_l), (-1, eye_r)):
     front = eye + Vector((0, -eye_radius - LENS_OUT, 0))
-    columns, rows = 5, 3
+    columns, rows = (1, 1) if LOD else (5, 3)
     width, lens_height = 0.05, 0.032
     grid = []
     for row in range(rows + 1):
@@ -393,14 +417,69 @@ for side, eye in ((1, eye_l), (-1, eye_r)):
         for column in range(columns):
             quad = (grid[row][column], grid[row + 1][column], grid[row + 1][column + 1], grid[row][column + 1])
             add_quad(quad if side > 0 else quad[::-1], LENS)
+    if LOD:
+        continue
     outer = grid[rows // 2][columns]
     ear = Vector((side * (skull_half_width + 0.004), centre.y + 0.02, outer.z + 0.004))
     up = Vector((0, 0, 0.003))
     add_quad((outer - up, ear - up, ear + up, outer + up), FRAME)
-bridge_l = eye_l + Vector((-0.026, -eye_radius - LENS_OUT, 0.008))
-bridge_r = eye_r + Vector((0.026, -eye_radius - LENS_OUT, 0.008))
-up = Vector((0, 0, 0.003))
-add_quad((bridge_r - up, bridge_l - up, bridge_l + up, bridge_r + up), FRAME)
+if not LOD:
+    bridge_l = eye_l + Vector((-0.026, -eye_radius - LENS_OUT, 0.008))
+    bridge_r = eye_r + Vector((0.026, -eye_radius - LENS_OUT, 0.008))
+    up = Vector((0, 0, 0.003))
+    add_quad((bridge_r - up, bridge_l - up, bridge_l + up, bridge_r + up), FRAME)
+
+# The eyes (#2495): an eyeball in each socket, in this mesh, so they ride the
+# head bone with the helmet and cost no draw call. Each is the front of a
+# sphere at MakeHuman's own eye -- the centre and radius of its CC0 eye helper,
+# looking along its own eye bone -- drawn in bands from `rider_kit.py`'s
+# numbers: the pupil, the iris to its darker rim, and the white. A band's
+# vertices are its own, so each edge between colours is crisp, and every normal
+# is the sphere's own, so no edge shows in the shading. The pack (#2485) keeps
+# the flat eyes: its rider is seen from metres away, behind dark lenses.
+eye_normals = {}
+eye_tris = 0
+for side, eye_helper, eye_bone in (
+    () if LOD else ((1, "helper-l-eye", "eye.L"), (-1, "helper-r-eye", "eye.R"))
+):
+    middle = centre_of(groups[eye_helper])
+    ball = max((positions[i] - middle).length for i in groups[eye_helper])
+    gaze = (joint(bones[eye_bone]["tail"]) - joint(bones[eye_bone]["head"])).normalized()
+    # Two directions across the gaze, so a ring is drawn round it.
+    across = gaze.cross(Vector((0, 0, 1))).normalized()
+    upward = across.cross(gaze).normalized()
+
+    def on_ball(angle, segment):
+        """A point of the ball `angle` degrees off the gaze, `segment` round it."""
+        polar = math.radians(angle)
+        around = 2 * math.pi * segment / KIT.EYE_SEGMENTS
+        return (
+            gaze * math.cos(polar)
+            + (across * math.cos(around) + upward * math.sin(around)) * math.sin(polar)
+        )
+
+    for inner, outer, inner_colour, outer_colour in KIT.EYE_BANDS:
+        start = len(helmet_vertices)
+        rings = []
+        for angle, colour in ((inner, inner_colour), (outer, outer_colour)):
+            ring = []
+            for segment in range(1 if angle == 0 else KIT.EYE_SEGMENTS):
+                direction = on_ball(angle, segment)
+                ring.append(len(helmet_vertices))
+                eye_normals[len(helmet_vertices)] = direction
+                helmet_vertices.append(tuple(middle + direction * ball))
+                helmet_colours.append(colour)
+            rings.append(ring)
+        near, far = rings
+        for segment in range(KIT.EYE_SEGMENTS):
+            following = (segment + 1) % KIT.EYE_SEGMENTS
+            if len(near) == 1:
+                # Wound outwards: `across`, `upward` and the gaze are left-handed.
+                helmet_faces.append((near[0], far[following], far[segment]))
+                eye_tris += 1
+            else:
+                helmet_faces.append((near[segment], near[following], far[following], far[segment]))
+                eye_tris += 2
 
 helmet_mesh = bpy.data.meshes.new("helmet")
 helmet_mesh.from_pydata(helmet_vertices, [], helmet_faces)
@@ -415,6 +494,11 @@ bm.from_mesh(helmet_mesh)
 bmesh.ops.triangulate(bm, faces=bm.faces[:])
 bm.to_mesh(helmet_mesh)
 bm.free()
+if eye_normals:
+    # The eyes' normals are the ball's; the helmet's stay what they were.
+    helmet_mesh.normals_split_custom_set_from_vertices(
+        [eye_normals.get(index, normal.vector) for index, normal in enumerate(helmet_mesh.vertex_normals)]
+    )
 helmet = bpy.data.objects.new("helmet", helmet_mesh)
 scene.collection.objects.link(helmet)
 helmet_tris = len(helmet_mesh.polygons)
@@ -433,6 +517,273 @@ if source_tris > body_budget:
 body_tris = len(body.data.polygons)
 if body_tris + helmet_tris > TARGET_TRIS:
     raise RuntimeError(f"the rider is {body_tris} + {helmet_tris} triangles, over {TARGET_TRIS}")
+
+# --- THE PACK (#2485): exported, read back, posed at every phase, baked ------
+# The rest of this script is the rider's own bake; the pack wears its maps.
+if LOD:
+    POSE = json.load(open(POSE_JSON))
+    bpy.data.objects.remove(high, do_unlink=True)
+    # Both meshes skinned: the body by its own weights, the helmet wholly by
+    # the head -- the bone `RealisticRiderBelt` carries the rider's helmet on.
+    helmet.vertex_groups.new(name="head").add(list(range(len(helmet_mesh.vertices))), 1.0, "REPLACE")
+    for skinned in (body, helmet):
+        skinned.parent = armature
+        skinned.modifiers.new("skin", "ARMATURE").object = armature
+    bpy.ops.object.select_all(action="DESELECT")
+    for chosen in (body, armature, helmet):
+        chosen.select_set(True)
+    bpy.ops.export_scene.gltf(
+        filepath=OUT_GLB,
+        export_format="GLB",
+        use_selection=True,
+        export_skins=True,
+        export_animations=False,
+        export_vertex_color="ACTIVE",
+        export_tangents=False,
+        export_image_format="NONE",
+        export_yup=True,
+    )
+
+    # Read back what the exporter WROTE -- its vertex order, its four weights
+    # a vertex -- because that is what a renderer draws and skins, and the
+    # texture's columns have to be the file's vertices, not Blender's.
+    with open(OUT_GLB, "rb") as handle:
+        glb = handle.read()
+    document, binary, at = None, None, 12
+    while at + 8 <= len(glb):
+        length, kind = struct.unpack_from("<II", glb, at)
+        chunk = glb[at + 8 : at + 8 + length]
+        if kind == 0x4E4F534A:
+            document = json.loads(chunk)
+        elif kind == 0x004E4942:
+            binary = chunk
+        at += 8 + length + (-length % 4)
+    COMPONENTS = {5121: "<u1", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
+    WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+
+    def read(index):
+        accessor = document["accessors"][index]
+        view = document["bufferViews"][accessor["bufferView"]]
+        kind = np.dtype(COMPONENTS[accessor["componentType"]])
+        width = WIDTH[accessor["type"]]
+        if view.get("byteStride", kind.itemsize * width) != kind.itemsize * width:
+            raise RuntimeError("the exporter interleaved an accessor")
+        values = np.frombuffer(
+            binary,
+            dtype=kind,
+            count=accessor["count"] * width,
+            offset=view.get("byteOffset", 0) + accessor.get("byteOffset", 0),
+        ).reshape(accessor["count"], width)
+        values = values.astype(np.float64)
+        if accessor.get("normalized"):
+            values /= np.iinfo(kind).max
+        return values
+
+    # Every vertex, mesh by mesh and primitive by primitive in the file's order.
+    rest_parts, normal_parts, joint_parts, weight_parts = [], [], [], []
+    for mesh_index, gltf_mesh in enumerate(document["meshes"]):
+        node = next(n for n in document["nodes"] if n.get("mesh") == mesh_index)
+        names = [document["nodes"][j]["name"] for j in document["skins"][node["skin"]]["joints"]]
+        bone_of = np.array([KEEP.index(name) for name in names])
+        for primitive in gltf_mesh["primitives"]:
+            attributes = primitive["attributes"]
+            rest_parts.append(read(attributes["POSITION"]))
+            normal_parts.append(read(attributes["NORMAL"]))
+            joint_parts.append(bone_of[read(attributes["JOINTS_0"]).astype(int)])
+            weight_parts.append(read(attributes["WEIGHTS_0"]))
+    rest = np.concatenate(rest_parts)
+    rest_normals = np.concatenate(normal_parts)
+    joints = np.concatenate(joint_parts)
+    weights = np.concatenate(weight_parts)
+    VERTICES = len(rest)
+    if VERTICES >= 1 << 16:
+        raise RuntimeError(f"{VERTICES} vertices: the moving list is uint16")
+
+    # The skeleton, in the GLB's frame (Blender's (x, y, z) is glTF's
+    # (x, z, -y)), scaled as `RealisticRiderBelt` scales the body: its rest
+    # leg stretched to `bicycle.ts`' thigh and shin.
+    INDEX = {name: index for index, name in enumerate(KEEP)}
+    unscaled = np.array([(HEAD[name].x, HEAD[name].z, -HEAD[name].y) for name in KEEP])
+    rest_leg = np.linalg.norm(
+        unscaled[INDEX["upperleg01.L"]] - unscaled[INDEX["lowerleg01.L"]]
+    ) + np.linalg.norm(unscaled[INDEX["lowerleg01.L"]] - unscaled[INDEX["foot.L"]])
+    scale = POSE["leg"] / rest_leg
+    J = unscaled * scale
+    rest = rest * scale
+    parent_of = {name: kept_ancestor(bones[name]["parent"]) for name in KEEP}
+
+    def descends(name, ancestor):
+        while name is not None:
+            if name == ancestor:
+                return True
+            name = parent_of[name]
+        return False
+
+    beneath = {name: [INDEX[k] for k in KEEP if descends(k, name)] for name in KEEP}
+
+    # Each hand, as `RealisticRiderBelt` measures it off the rest pose: the
+    # middle of the vertices whose heaviest weight is the wrist, and which way
+    # that is from the wrist.
+    heaviest = joints[np.arange(VERTICES), np.argmax(weights, axis=1)]
+    hand_reach, hand_along = [], []
+    for side in "LR":
+        wrist_index = INDEX[f"wrist.{side}"]
+        offset = rest[heaviest == wrist_index].mean(axis=0) - J[wrist_index]
+        hand_reach.append(float(np.linalg.norm(offset)))
+        hand_along.append(offset / np.linalg.norm(offset))
+
+    def rotation(axis, angle):
+        """A turn by `angle` about `axis`, right-handed -- three's `setFromAxisAngle`."""
+        x, y, z = axis / np.linalg.norm(axis)
+        c, s, k = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
+        return np.array([
+            [c + x * x * k, x * y * k - z * s, x * z * k + y * s],
+            [y * x * k + z * s, c + y * y * k, y * z * k - x * s],
+            [z * x * k - y * s, z * y * k + x * s, c + z * z * k],
+        ])
+
+    def between(a, b):
+        """The least turn taking direction `a` to `b` -- three's `setFromUnitVectors`."""
+        a = a / np.linalg.norm(a)
+        b = b / np.linalg.norm(b)
+        cross = np.cross(a, b)
+        sine = np.linalg.norm(cross)
+        if sine < 1e-12:
+            if a @ b > 0:
+                return np.eye(3)
+            raise RuntimeError("a bone asked to turn right round")
+        return rotation(cross, math.atan2(sine, float(np.clip(a @ b, -1, 1))))
+
+    def two_bone_joint(root, target, upper, lower, pole):
+        """`three-renderer.ts` section twoBoneJoint, line for line."""
+        reach = target - root
+        full = max(float(np.linalg.norm(reach)), 1e-6)
+        distance = min(full, upper + lower - 1e-4)
+        along = reach / full
+        cosine = min(1.0, max(-1.0, (upper * upper + distance * distance - lower * lower) / (2 * upper * distance)))
+        bend = pole - (pole @ along) * along
+        bend_length = float(np.linalg.norm(bend))
+        bend = np.array([0.0, 0.0, 1.0]) if bend_length < 1e-9 else bend / bend_length
+        sine = math.sqrt(1 - cosine * cosine)
+        return root + upper * (cosine * along + sine * bend)
+
+    # Each bone's turn and shift from the rest pose, in the bicycle's frame.
+    turns = np.zeros((len(KEEP), 3, 3))
+    shifts = np.zeros((len(KEEP), 3))
+
+    def at(name):
+        """Where a bone's head is now."""
+        index = INDEX[name]
+        return turns[index] @ J[index] + shifts[index]
+
+    def turn(name, by, pivot):
+        """Turns a bone and everything under it about `pivot`."""
+        for index in beneath[name]:
+            turns[index] = by @ turns[index]
+            shifts[index] = by @ (shifts[index] - pivot) + pivot
+
+    def aim(name, child, direction):
+        """`RealisticRiderBelt`'s aim: the bone turned so `child`'s head lies along `direction`."""
+        head = at(name)
+        turn(name, between(at(child) - head, direction), head)
+
+    def span(a, b):
+        return float(np.linalg.norm(at(a) - at(b)))
+
+    def point(joint):
+        return np.array([joint["x"], joint["y"], joint["z"]])
+
+    ACROSS = np.array([1.0, 0.0, 0.0])
+    FORWARD = np.array([0.0, 0.0, 1.0])
+    stance = POSE["stance"]
+    PHASES = len(POSE["phases"])
+    samples = np.zeros((PHASES, VERTICES, 6))
+    shortfall = 0.0
+    for phase_index, phase in enumerate(POSE["phases"]):
+        turns[:] = np.eye(3)
+        shifts[:] = 0.0
+        # The whole body, moved so its hips sit on the saddle.
+        hips = (at("upperleg01.L") + at("upperleg01.R")) / 2
+        shifts += point(phase["hips"]) - hips
+        # The back, from the hips towards the shoulders.
+        aim("spine05", "neck01", point(phase["shoulders"]) - point(phase["hips"]))
+        # The head, turned by the position: half at the neck, half at the head.
+        nod = stance["headPitch"] / 2
+        if nod != 0:
+            for name in ("neck01", "head"):
+                turn(name, rotation(ACROSS, nod), at(name))
+        for index, side in enumerate("LR"):
+            sign = 1 if index == 0 else -1
+            # The arm: shoulder to the wrist behind the grip, on the hand's line.
+            shoulder = at(f"upperarm01.{side}")
+            upper = span(f"upperarm01.{side}", f"lowerarm01.{side}")
+            fore = span(f"lowerarm01.{side}", f"wrist.{side}")
+            along = np.array([0.0, -math.sin(stance["handDown"]), math.cos(stance["handDown"])])
+            wrist = point(phase["grip"][index]) - along * hand_reach[index]
+            out = stance["elbowOut"]
+            pole = np.array([
+                sign * math.sin(out),
+                -math.cos(out) * math.cos(stance["elbowBack"]),
+                -math.cos(out) * math.sin(stance["elbowBack"]),
+            ])
+            elbow = two_bone_joint(shoulder, wrist, upper, fore, pole)
+            aim(f"upperarm01.{side}", f"lowerarm01.{side}", elbow - shoulder)
+            aim(f"lowerarm01.{side}", f"wrist.{side}", wrist - elbow)
+            hand_now = turns[INDEX[f"wrist.{side}"]] @ hand_along[index]
+            turn(f"wrist.{side}", between(hand_now, along), at(f"wrist.{side}"))
+            # The leg: hip to the pedal, the knee forward.
+            hip = at(f"upperleg01.{side}")
+            foot = point(phase["foot"][index])
+            thigh = span(f"upperleg01.{side}", f"lowerleg01.{side}")
+            shin = span(f"lowerleg01.{side}", f"foot.{side}")
+            knee = two_bone_joint(hip, foot, thigh, shin, FORWARD)
+            aim(f"upperleg01.{side}", f"lowerleg01.{side}", knee - hip)
+            aim(f"lowerleg01.{side}", f"foot.{side}", foot - knee)
+            shortfall = max(shortfall, float(np.linalg.norm(at(f"foot.{side}") - foot)))
+        # Skinned as a renderer skins: each vertex by its four weights.
+        posed = np.zeros((VERTICES, 3))
+        normals = np.zeros((VERTICES, 3))
+        for slot in range(4):
+            bone = joints[:, slot]
+            weight = weights[:, slot : slot + 1]
+            posed += weight * (np.einsum("vij,vj->vi", turns[bone], rest) + shifts[bone])
+            normals += weight * np.einsum("vij,vj->vi", turns[bone], rest_normals)
+        normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+        samples[phase_index, :, :3] = posed
+        samples[phase_index, :, 3:] = normals
+
+    # Half floats; a vertex MOVES if any phase's bits differ from phase 0's.
+    halves = samples.astype("<f2")
+    bits = halves.view("<u2")
+    moving = np.nonzero((bits != bits[0]).any(axis=(0, 2)))[0]
+    with open(VAT_OUT, "wb") as handle:
+        handle.write(b"OYLV" + struct.pack("<III", VERTICES, PHASES, len(moving)))
+        handle.write(halves[0].tobytes())
+        handle.write(moving.astype("<u2").tobytes())
+        handle.write(np.ascontiguousarray(halves[:, moving]).tobytes())
+    with open(OUT_REPORT, "w") as handle:
+        json.dump(
+            {
+                "build": BUILD,
+                "targets": applied,
+                "bones": len(KEEP),
+                "sourceTriangles": source_tris,
+                "bodyTriangles": body_tris,
+                "helmetTriangles": helmet_tris,
+                "triangles": body_tris + helmet_tris,
+                "vertices": VERTICES,
+                "moving": int(len(moving)),
+                "phases": PHASES,
+                "scale": round(float(scale), 6),
+                "ankleShortfallMetres": round(shortfall, 5),
+                "vatBytes": os.path.getsize(VAT_OUT),
+            },
+            handle,
+            indent=2,
+        )
+    print("REPORT", open(OUT_REPORT).read())
+    # ⚠️ Blender ends here, with a clean exit: everything below is the rider's.
+    sys.exit(0)
 
 # --- 6. bake the normal map and the occlusion, HIGH onto LOW -----------------
 scene.render.engine = "CYCLES"
@@ -737,9 +1088,9 @@ def linear_of(values):
 skin_linear = linear_of(skin_texels)
 skin_mean = skin_linear[skin].mean(axis=0)
 detail = np.clip(skin_linear / skin_mean, *KIT.SKIN_DETAIL_RANGE)
-# ⚠️ The eyes are left exactly as they were -- flat skin -- because whether the
-# face has eyes is still the owner's question (#623), and the pack PAINTS eyes
-# into its sockets. Its detail fades out round each eye.
+# ⚠️ The pack PAINTS eyes into its sockets, and the eyes are the balls step 5
+# puts in them (#2495), so the skin's detail fades out round each eye: the
+# lids are the rider's flat tone, with no second eye drawn on them.
 for eye in (eye_l, eye_r):
     distance = np.linalg.norm(P - np.array(eye), axis=2)
     keep = smooth(eye_radius + 0.004, eye_radius + 0.014, distance)[..., None]
@@ -1040,6 +1391,7 @@ with open(OUT_REPORT, "w") as handle:
             "sourceTriangles": source_tris,
             "bodyTriangles": body_tris,
             "helmetTriangles": helmet_tris,
+            "eyeTriangles": eye_tris,
             "triangles": body_tris + helmet_tris,
             "heightMetres": height_m,
             "textures": 3,

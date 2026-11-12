@@ -123,6 +123,7 @@ import {
   type Viewport,
   OVERLAY_VIEWPORTS,
   STACKED_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
   openRide,
   sharedRide,
   measure,
@@ -142,6 +143,7 @@ import {
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
+  soloDraftDrawn,
   windGivesWayToTheDraft,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
@@ -213,6 +215,67 @@ async function expectGradientInItsBand(page: Page): Promise<void> {
   );
   // The sign, small text, keeps the ink.
   if (paint.sign !== undefined) expect(paint.sign, how).toBe(paint.ink);
+}
+
+/**
+ * The #2075 case, shared by the overlay viewports and #2259's laptop windows:
+ * the road ahead the route panel's full width and taller than the whole
+ * route's strip, on its own row under it — or, on a phone, upright or on its
+ * side, beside the strip at its height (`theme.css` §"THE ROAD AHEAD"); and
+ * upright the plan view a column beside the two strips, exactly the route
+ * panel's gap from the road ahead. Both ways (#1120).
+ */
+async function expectRoadAheadInPlace(page: Page, viewport: Viewport): Promise<void> {
+  // A phone, upright or on its side, has no row to give (`theme.css`
+  // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
+  const beside = Math.min(viewport.width, viewport.height) <= 480;
+  const upright = viewport.width < 736 && viewport.height >= 752;
+  for (const [how, seen] of await bothWays(page)) {
+    const whole = named(seen.items, 'the elevation strip');
+    const ahead = named(seen.items, 'the road ahead');
+    const plan = named(seen.items, 'the plan view');
+    const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+    if (route === undefined) throw new Error(`${how}: no route panel`);
+    expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
+    expect(
+      ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+        ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+      `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
+    ).toBe(true);
+    if (beside) {
+      expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
+      expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+    }
+    if (beside && upright) {
+      // The phone's width: the strips run from the whole route's strip's
+      // start to the plan view's column, and the plan view is no wider
+      // than the box its rider's mark is sized for.
+      expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
+        PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
+      );
+      // #2259: the panel's gap, bounded both ways. Bounded from above only,
+      // a road ahead running under the plan view (a negative gap) passed.
+      const gap = plan.box.left - ahead.box.right;
+      expect(
+        Math.abs(gap - ROUTE_PANEL_GAP_PIXELS),
+        `${how}: ${describeItem(ahead)} ${gap.toFixed(1)} px beside ${describeItem(plan)}`,
+      ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    }
+    if (!beside) {
+      expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
+    }
+  }
 }
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
@@ -509,57 +572,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     test('the road ahead is the route panel’s width and taller, or beside the strip on a phone — #2075', async ({
       browser,
     }) => {
-      const page = await sharedRide(browser, viewport);
-      // A phone, upright or on its side, has no row to give (`theme.css`
-      // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
-      const beside = Math.min(viewport.width, viewport.height) <= 480;
-      const upright = viewport.width < 736 && viewport.height >= 752;
-      for (const [how, seen] of await bothWays(page)) {
-        const whole = named(seen.items, 'the elevation strip');
-        const ahead = named(seen.items, 'the road ahead');
-        const plan = named(seen.items, 'the plan view');
-        const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
-        if (route === undefined) throw new Error(`${how}: no route panel`);
-        expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
-        expect(
-          ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
-            ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
-          `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
-        ).toBe(true);
-        if (beside) {
-          expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
-          expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
-        }
-        if (beside && upright) {
-          // The phone's width: the strips run from the whole route's strip's
-          // start to the plan view's column, and the plan view is no wider
-          // than the box its rider's mark is sized for.
-          expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
-            PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
-          );
-          const gap = plan.box.left - ahead.box.right;
-          expect(
-            gap,
-            `${how}: ${describeItem(ahead)} beside ${describeItem(plan)}`,
-          ).toBeLessThanOrEqual(ROUTE_PANEL_GAP_PIXELS + SUBPIXEL_TOLERANCE);
-        }
-        if (!beside) {
-          expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
-          expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
-        }
-      }
+      await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
     });
 
     /**
@@ -957,6 +970,23 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
 }
 
 /**
+ * #2259 (the review of #2216) — THE ROAD AHEAD ON A SCREEN 30 TO 47 REM TALL.
+ * Its own row under the whole route's strip is the default outside a phone's
+ * two layouts (`theme.css` §"THE ROAD AHEAD"), so a laptop's window and the
+ * middle corners layout draw it too, and none of the overlay viewports above
+ * is that tall. The #2075 case, at #2034's three laptop windows and #1169's
+ * three, which share #1169's page; ride-conditions.browser.spec.ts §"#2034"
+ * holds every panel there clear of the leaning rider and of each other.
+ */
+for (const viewport of [...LAPTOP_VIEWPORTS, ...MIDDLE_CORNERS_VIEWPORTS]) {
+  test(`#2259 the road ahead is the route panel’s width and taller, on its own row — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
+  });
+}
+
+/**
  * #2076 — the ride so far, and since #2077 the rider's W/kg and zone after it:
  * DRAWN on a tablet and where the HUD stacks, inside
  * the secondary panel, uncovered and over no other reading; GIVEN WAY by clip
@@ -1079,7 +1109,7 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
       }
       // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
       // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
-      const draftDrawn = viewport.width >= 800 && viewport.height >= 752;
+      const draftDrawn = soloDraftDrawn(viewport);
       // And from 50 rem tall the wind gives way to it (§"the wind gives way to
       // it"), beside the pacer and the ghost.
       expect(seen.givenWay, how).toEqual(
@@ -1490,13 +1520,14 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
  * one put its unit and its number on two lines, so the tier grew a row
  * between two loads of the same ride (`theme.css` §"its unit is a line of its
  * own" until its unit became the `%` alone, so #2130's rule that a unit
- * stays on its number's line holds). Read on
- * the widest HUD at every viewport that draws the field: the number set to 59,
- * the field's height and the tier's must not change, and the unit is on the
- * number's line.
+ * stays on its number's line holds). Read on the widest HUD at every viewport
+ * that DRAWS the field (a tablet, `soloDraftDrawn`): the number set to 0 and
+ * then to 59, whatever the live draft is, the field's height and the tier's
+ * must not change, and the unit is on the number's line at both. #2472: and
+ * where the field should be drawn and is not, it fails rather than passes.
  */
-for (const viewport of OVERLAY_VIEWPORTS) {
-  test(`#2425 the solo Draft field keeps its height at a two-digit draft — ${viewport.name}`, async ({
+for (const viewport of OVERLAY_VIEWPORTS.filter(soloDraftDrawn)) {
+  test(`#2425 the solo Draft field keeps its height from one digit to two — ${viewport.name}`, async ({
     browser,
   }) => {
     const page = await sharedRide(browser, viewport);
@@ -1510,35 +1541,67 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       if (field == null || panel == null || !(number instanceof Text) || unit == null) {
         return undefined;
       }
-      const drawn = field.getBoundingClientRect().width > 1;
       const was = number.data;
-      const before = {
-        field: field.getBoundingClientRect().height,
-        panel: panel.getBoundingClientRect().height,
+      const at = (digits: string) => {
+        number.data = digits;
+        const range = document.createRange();
+        range.selectNodeContents(number);
+        const unitBox = unit.getBoundingClientRect();
+        return {
+          width: field.getBoundingClientRect().width,
+          field: field.getBoundingClientRect().height,
+          panel: panel.getBoundingClientRect().height,
+          numberTop: range.getBoundingClientRect().top,
+          numberBottom: range.getBoundingClientRect().bottom,
+          unitMiddle: (unitBox.top + unitBox.bottom) / 2,
+        };
       };
-      number.data = '59';
-      const range = document.createRange();
-      range.selectNodeContents(number);
-      const after = {
-        field: field.getBoundingClientRect().height,
-        panel: panel.getBoundingClientRect().height,
-        numberTop: range.getBoundingClientRect().top,
-        numberBottom: range.getBoundingClientRect().bottom,
-        unitMiddle: (unit.getBoundingClientRect().top + unit.getBoundingClientRect().bottom) / 2,
-      };
+      const one = at('0');
+      const two = at('59');
       number.data = was;
-      return { drawn, was, before, after };
+      return { one, two };
     });
     expect(read, 'the solo Draft field is in the document').toBeDefined();
-    if (read === undefined || !read.drawn) return;
+    if (read === undefined) throw new Error('no solo Draft field');
+    // Drawn here, not given way by clip: a field squeezed to a pixel would
+    // keep its height at any number and prove nothing.
+    expect(read.one.width, 'the solo Draft field is drawn on a tablet').toBeGreaterThan(1);
     console.log(
-      `#2425 the solo Draft field — ${viewport.name}: ${read.before.field.toFixed(1)} px at ${read.was}, ${read.after.field.toFixed(1)} px at 59; the tier ${read.before.panel.toFixed(1)} → ${read.after.panel.toFixed(1)} px`,
+      `#2425 the solo Draft field — ${viewport.name}: ${read.one.field.toFixed(1)} px at 0, ${read.two.field.toFixed(1)} px at 59; the tier ${read.one.panel.toFixed(1)} → ${read.two.panel.toFixed(1)} px`,
     );
-    expect(read.after.field).toBeCloseTo(read.before.field, 1);
-    expect(read.after.panel).toBeCloseTo(read.before.panel, 1);
-    // On the number's line (#2130): the unit's middle is within the number's
-    // line box, which a unit wrapped under the number is not.
-    expect(read.after.unitMiddle).toBeGreaterThan(read.after.numberTop);
-    expect(read.after.unitMiddle).toBeLessThan(read.after.numberBottom);
+    expect(read.two.field).toBeCloseTo(read.one.field, 1);
+    expect(read.two.panel).toBeCloseTo(read.one.panel, 1);
+    // On the number's line (#2130) at both: the unit's middle is within the
+    // number's line box, which a unit wrapped under the number is not.
+    for (const each of [read.one, read.two]) {
+      expect(each.unitMiddle).toBeGreaterThan(each.numberTop);
+      expect(each.unitMiddle).toBeLessThan(each.numberBottom);
+    }
+  });
+}
+
+/*
+ * #2472: the wind gives way to a solo ride's draft on a tablet from 50 rem
+ * tall only beside BOTH the pacer and the ghost (`theme.css` §"the wind gives
+ * way to it"), where the row runs out of tracks. With the pacer and the wind
+ * and no ghost the row has room, and the wind is drawn beside the draft.
+ * Pinned, because widening that rule's `:has` broke no other test.
+ */
+for (const viewport of OVERLAY_VIEWPORTS.filter(windGivesWayToTheDraft)) {
+  test(`#2472 a solo ride with the pacer and no ghost keeps its wind beside the draft — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, '?ghost=none');
+    const seen = await measure(page);
+    const names = seen.items.map((each) => each.name);
+    // The ride it says it is: the pacer and the draft drawn, and no ghost's gap.
+    expect(names).toEqual(expect.arrayContaining(['reading: Pacer', 'reading: Draft']));
+    expect(
+      names.filter((name) => name.startsWith('reading: Your')),
+      'no ghost',
+    ).toEqual([]);
+    expect(seen.givenWay).not.toContain('reading: Wind');
+    const wind = named(seen.items, 'reading: Wind');
+    expect(wind.box.width * wind.box.height, 'the wind is drawn').toBeGreaterThan(1);
   });
 }

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CALORIES_KEY,
   CLOCK_KEY,
+  CRASHED_TEXT,
   DELIVERY_HOUSES_KEY,
   DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
@@ -1202,6 +1203,8 @@ describe('the room on the HUD — #783', () => {
     // #2425, #2130: the solo field's unit is the `%` alone, so it stays on
     // its number's line in the tier's narrowest track.
     expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '%' });
+    // #2472: and a screen reader hears what it is a share of; a room's field draws it.
+    expect(solo(33.6)?.unitSaid).toBe('of drag');
     expect(solo(33.6)?.detail).toBe('at most 59 %');
     expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
     expect(solo(0)).toMatchObject({ value: '0' });
@@ -1543,6 +1546,17 @@ describe('a Delivery round on the HUD — #1812', () => {
         detail: 'Day 3 of 7',
       },
     ]);
+  });
+
+  it('says “Crashed” under the score while a crash is drawn, and the day again after — #2454', () => {
+    const detail = (crashed: boolean | undefined): string | undefined =>
+      hudReadings({ ...base, delivery: { ...delivery, crashed } }).find(
+        (each) => each.key === DELIVERY_SCORE_KEY,
+      )?.detail;
+    expect(detail(true)).toBe(CRASHED_TEXT);
+    expect(CRASHED_TEXT).toBe('Crashed');
+    expect(detail(false)).toBe('Day 3 of 7');
+    expect(detail(undefined)).toBe('Day 3 of 7');
   });
 
   it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {

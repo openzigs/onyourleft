@@ -4265,8 +4265,13 @@ test.describe('#2058 — the menus’ music, in a real engine', () => {
     await expect.poll(async () => (await readMusic(page)).playing).toBe(true);
     // The default level, 0.5, reached by a ramp rather than set.
     await expect.poll(async () => (await readMusic(page)).bus ?? 0).toBeGreaterThan(0.49);
+    // "Moves", not "grows": the loop is one second, so its `currentTime`
+    // wraps to 0 at each pass and never exceeds the loop's length. #2484:
+    // `started` read as exactly 1, at the end of a pass, and no later reading
+    // could be greater than it. Nothing in the player seeks, so a time that
+    // differs from `started` is a time the element played on to.
     const started = (await readMusic(page)).time;
-    await expect.poll(async () => (await readMusic(page)).time).toBeGreaterThan(started);
+    await expect.poll(async () => (await readMusic(page)).time).not.toBe(started);
 
     for (const ride of ['#/ride', '#/game']) {
       await page.evaluate((hash) => {

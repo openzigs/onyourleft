@@ -20,7 +20,9 @@
  * under a heading of their own and with the OpenStreetMap credit beside
  * them (D-6.5). The listing reads no level's file (D-2.5): a level's name,
  * length and houses are the catalogue's. So a rider with no routes and no
- * instance still has a round to ride.
+ * instance still has a round to ride. Since #2363 they open in order (D-9.1):
+ * a level still locked on this device (`level-progress.ts`) is listed with
+ * the reason in words and no way to choose it, and a finished one says so.
  *
  * ⚠️ **Delivery rides in the realistic world only** (the owner's ruling DL6:
  * its houses are the mapped houses a realistic town draws), so with the
@@ -42,6 +44,11 @@ import { VisuallyHidden } from '../design/VisuallyHidden';
 import { choosableCourses, coursesFor, type GameCourse } from '../game/courses';
 import type { GamePort } from '../game/GameView';
 import { readDeliveryProgress } from '../game/delivery/delivery-progress';
+import {
+  levelStanding,
+  readLevelProgress,
+  type LevelStanding,
+} from '../game/delivery/level-progress';
 import type { ListedLevel } from '../game/delivery/levels/levels';
 import { deviceStorage } from '../game/hud/announce-preference';
 import {
@@ -79,6 +86,9 @@ export const GAME_COURSES_TEXT = {
   levelsHeading: 'Built-in rounds',
   levelHouses: (houses: number): string =>
     `${String(houses)} ${houses === 1 ? 'house' : 'houses'} on the round`,
+  // #2363: a level's place in the unlock order, in words, for the owner's approval.
+  levelLocked: (before: string): string => `Locked. Finish ${before} to open this round.`,
+  levelFinished: 'Finished. Ride it again any time.',
 } as const;
 
 export interface GameCoursesViewProps {
@@ -284,26 +294,21 @@ export function GameCoursesView(props: GameCoursesViewProps): JSX.Element {
  * port lists them.
  */
 function LevelsSection(props: { readonly levels: readonly ListedLevel[] }): JSX.Element {
-  const units = useUnits();
   const headingId = useId();
+  // #2363: read as the page opens, so a level finished on the last ride is open now.
+  const [progress] = useState(() => readLevelProgress(deviceStorage()));
+  const order = props.levels.map((level) => level.id);
   return (
     <section className="oyl-game-courses__levels" aria-labelledby={headingId}>
       <h2 id={headingId}>{GAME_COURSES_TEXT.levelsHeading}</h2>
       <ul className="oyl-game-courses__list oyl-sections" aria-labelledby={headingId}>
         {props.levels.map((level) => (
-          <li key={level.id} className="oyl-panel oyl-game-courses__course" data-level={level.id}>
-            <h3 className="oyl-game-courses__name">{level.name}</h3>
-            <p className="oyl-muted">
-              {measurementText(formatDistance(metres(level.lengthMetres), units))} ·{' '}
-              {GAME_COURSES_TEXT.levelHouses(level.houses)}
-            </p>
-            <p className="tw:mb-0">
-              <ButtonLink variant="secondary" href={hrefForGamePlay('delivery', level.routeId)}>
-                {GAME_COURSES_TEXT.choose}
-                <VisuallyHidden>: {level.name}</VisuallyHidden>
-              </ButtonLink>
-            </p>
-          </li>
+          <LevelEntry
+            key={level.id}
+            level={level}
+            standing={levelStanding(order, progress, level.id)}
+            nameOf={(id) => props.levels.find((each) => each.id === id)?.name ?? id}
+          />
         ))}
       </ul>
       <p className="oyl-game-courses__credit" data-credit="levels">
@@ -311,6 +316,58 @@ function LevelsSection(props: { readonly levels: readonly ListedLevel[] }): JSX.
         <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
       </p>
     </section>
+  );
+}
+
+/**
+ * One built-in level — #2363, ADR 0065 D-9.1: a locked level has no way to
+ * choose it, and says in words which level opens it; a finished one says so.
+ * Its state is never carried by colour alone, and the item is named by the
+ * level and its state together.
+ */
+function LevelEntry(props: {
+  readonly level: ListedLevel;
+  readonly standing: LevelStanding;
+  readonly nameOf: (id: string) => string;
+}): JSX.Element {
+  const units = useUnits();
+  const nameId = useId();
+  const stateId = useId();
+  const { level, standing } = props;
+  const state =
+    standing.state === 'locked'
+      ? GAME_COURSES_TEXT.levelLocked(props.nameOf(standing.after))
+      : standing.state === 'finished'
+        ? GAME_COURSES_TEXT.levelFinished
+        : undefined;
+  return (
+    <li
+      className="oyl-panel oyl-game-courses__course"
+      data-level={level.id}
+      data-standing={standing.state}
+      aria-labelledby={state === undefined ? undefined : `${nameId} ${stateId}`}
+    >
+      <h3 id={nameId} className="oyl-game-courses__name">
+        {level.name}
+      </h3>
+      <p className="oyl-muted">
+        {measurementText(formatDistance(metres(level.lengthMetres), units))} ·{' '}
+        {GAME_COURSES_TEXT.levelHouses(level.houses)}
+      </p>
+      {state === undefined ? null : (
+        <p id={stateId} className="oyl-game-courses__holds">
+          {state}
+        </p>
+      )}
+      {standing.state === 'locked' ? null : (
+        <p className="tw:mb-0">
+          <ButtonLink variant="secondary" href={hrefForGamePlay('delivery', level.routeId)}>
+            {GAME_COURSES_TEXT.choose}
+            <VisuallyHidden>: {level.name}</VisuallyHidden>
+          </ButtonLink>
+        </p>
+      )}
+    </li>
   );
 }
 
