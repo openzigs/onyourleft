@@ -2544,15 +2544,17 @@ function GameScreen({
         ...startOf(simulated, profile.totalDistance),
         // #2425, ADR 0066 D-1: a solo ride drafts the rider behind the pacer
         // and their OWN ghost, with the device's switch on (D-6). Never in a
-        // room, whose `k` is the room's (D-1.5), never in a lap race, whose
-        // `k` is the race's own (ADR 0067 D-3, #2461: `stepLapRaceRide`),
-        // never behind another rider's ghost (D-3); with the switch off, or
-        // with nobody to give a draft, nothing is handed and the ride is
+        // room, whose `k` is the room's (D-1.5), never behind another rider's
+        // ghost (D-3); in a lap race the `k` is the race's own (ADR 0067 D-3,
+        // #2461: `stepLapRaceRide`) and the simulation only keeps the in-draft
+        // state for the Draft field and the mark (D-3.7). With the switch off,
+        // or with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
         ...soloDraftOf(
-          roomId === undefined && raceChoice === undefined && readSoloDraftChoice(deviceStorage()),
+          roomId === undefined && readSoloDraftChoice(deviceStorage()),
           pacer !== undefined && raceChoice === undefined,
           ghostRiderRef.current === undefined ? ghostRef.current : undefined,
+          raceChoice !== undefined,
         ),
       });
       simulationRef.current = simulation;
@@ -5033,16 +5035,20 @@ function chasedGaps(
 
 /**
  * The solo draft a ride is handed — #2425, ADR 0066 D-1 — or nothing: with
- * the switch off (`on` false), and with neither a pacer nor the rider's own
- * ghost to give one. The ghost enters as its own `ghostDistanceAt`, a
+ * the switch off (`on` false), and with neither a pacer, the rider's own
+ * ghost nor a lap race (`raced`, ADR 0067 D-3.7) to give one. The ghost enters as its own `ghostDistanceAt`, a
  * replay at the ride's racing clock and never a re-simulation (D-1.1).
  */
 function soloDraftOf(
   on: boolean,
   pacer: boolean,
   ownGhost: GhostTrack | undefined,
+  raced: boolean,
 ): { readonly soloDraft?: SoloDraftSources } {
-  if (!on || (!pacer && ownGhost === undefined)) return {};
+  if (!on) return {};
+  // A lap race: its `k` comes from the race (ADR 0067 D-3.7), never a ghost's.
+  if (raced) return { soloDraft: { raced: true } };
+  if (!pacer && ownGhost === undefined) return {};
   return {
     soloDraft:
       ownGhost === undefined

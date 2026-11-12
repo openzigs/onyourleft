@@ -344,6 +344,32 @@ describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067
     for (const k of settled) expect(k).toBeLessThan(0.71);
   });
 
+  it('hands the rider the last tick’s k of a frame that ran several steps, as the single ticks would: a low frame rate is the same race', () => {
+    // A tablet at low fps runs several steps in one frame (the documented
+    // contract): the rider arrives at the bot's wheel in the frame's last tick.
+    const start = oneBot(true);
+    const bot = start.bots[0];
+    if (bot === undefined) throw new Error('a one-bot race has its bot');
+    // Held back first so the frame's first ticks are out of the draft: 20 m
+    // behind, closing to 2 m behind in the frame.
+    const behind = stepLapRaceRide(start, { ticks: 1, along: bot.ride.distance - 20 });
+    const target = (behind.bots[0]?.ride.distance ?? 0) - 2;
+    const frame = stepLapRaceRide(behind, { ticks: 3, along: target });
+    let single = behind;
+    const ks: number[] = [];
+    for (let tick = 1; tick <= 3; tick += 1) {
+      single = stepLapRaceRide(single, {
+        ticks: 1,
+        along: behind.along + ((target - behind.along) * tick) / 3,
+      });
+      ks.push(single.riderDraft);
+    }
+    // Not vacuous: the first tick was alone and the last was sheltered.
+    expect(ks[0]).toBe(1);
+    expect(ks[2]).toBeLessThan(1);
+    expect(frame.riderDraft).toBe(ks[2]);
+  });
+
   it('drafts nobody with the switch off or absent: the rider at 1 and the bots as the race before #2461', () => {
     const off = onTheWheel(oneBot(false));
     const absent = onTheWheel(oneBot(undefined));

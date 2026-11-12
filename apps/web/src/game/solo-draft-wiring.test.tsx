@@ -453,13 +453,44 @@ describe('no solo draft in a room — #2425, ADR 0066 D-1.5', () => {
   });
 });
 
-describe('no solo draft in a lap race — #2425, ADR 0066 D-2', () => {
+describe('the solo draft in a lap race — #2425 ADR 0066 D-2, restated by #2461 (ADR 0067 D-3.7, D-4)', () => {
+  const race: LapRaceChoice = { laps: 2, bots: 3, tier: 'brisk', itemsOn: false };
+  /** The race's seed, fixed so the bots are dealt the same field in every run (it is drawn from the platform's source). */
+  const SEED = 2;
+  beforeEach(() => {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = SEED;
+        return array;
+      },
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it('drafts nobody behind the own ghost the chooser sends with a lap race', async () => {
-    const race: LapRaceChoice = { laps: 2, bots: 3, tier: 'brisk', itemsOn: false };
+    // ADR 0067 D-3.7: the assertions are kept as they were, with the switch off.
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
     expect(draft.every((text) => text === undefined)).toBe(true);
     await endTheRide();
     expect(handed.every((ended) => ended.drafted !== true)).toBe(true);
+  });
+
+  it('shows the Draft field and marks the ride drafted once the rider sat in a bot’s draft, with the switch on', async () => {
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
+    // The field, read off the HUD: the share of drag the bot's wheel removed.
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    // The mark the recording carries (ADR 0066 D-5.3, D-5.6): the in-draft
+    // state and the road behind it, summing to a drafted ride.
+    expect(stepped.some((each) => each.inDraft)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
+  it('hides the field with the display preference off, and the ride is marked all the same (R-13)', async () => {
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
+    expect(draft.every((text) => text === undefined)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
   });
 });
 
