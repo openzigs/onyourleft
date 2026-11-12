@@ -8,7 +8,6 @@
  * releasing it, left every other test green.
  */
 
-import { DataTexture, FloatType, RGBAFormat } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
 import { releaseWeatheredSkies, weatheredSkyOf, type RealisticSky } from './three-renderer';
@@ -23,7 +22,15 @@ function skyOf(): RealisticSky {
     data[at + 2] = 6;
     data[at + 3] = 1;
   }
-  const texture = new DataTexture(data, width, height, RGBAFormat, FloatType);
+  // A float RGBA texture as weatheredSkyOf reads one: its image and its type.
+  // Built as a plain object, since only three-renderer.ts may import three
+  // (three-seam.test.ts); 1015 is three's FloatType, and only a half-float
+  // type changes how the sky is read.
+  const texture = {
+    image: { width, height, data },
+    type: 1015,
+    dispose: () => undefined,
+  } as unknown as RealisticSky['texture'];
   const flat = [1, 1, 1] as unknown as RealisticSky['zenith'];
   return {
     texture,
