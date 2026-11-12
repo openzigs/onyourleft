@@ -269,6 +269,68 @@ describe('the comparison has a non-visual equivalent — #67’s third criterion
   });
 });
 
+describe('a drafted effort carries its mark — #2451, ADR 0066 D-5.2', () => {
+  const drafted = (record: SegmentEffortRecord): SegmentEffortRecord => ({
+    ...record,
+    drafted: true,
+  });
+
+  it('says so in words in its row, beside the personal best, and not in the row of one that was not', async () => {
+    const port = stubEffortPort({
+      athleteId: OWNER,
+      segments: [theSegment()],
+      efforts: [
+        drafted(effort('fast', 'ride-1', 1_760_000_000, 50)),
+        effort('slow', 'ride-2', 1_760_100_000, 62),
+      ],
+      rides: [
+        { activity: ride('ride-1', 1_760_000_000) },
+        { activity: ride('ride-2', 1_760_100_000) },
+      ],
+    });
+
+    mounted = await mount(<SegmentDetailView port={port} segment="segment-1" />);
+    await settle();
+
+    const rows = queryAll<HTMLTableRowElement>(mounted.container, 'tbody tr').map(
+      (row) => row.textContent ?? '',
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Personal best · Drafted — yours only');
+    expect(rows[0]).toContain('Compare 0:50 effort, drafted');
+    expect(rows[1]).not.toContain('rafted');
+  });
+
+  it('names the mark in the comparison’s own column heading beside an unmarked effort', async () => {
+    const port = stubEffortPort({
+      athleteId: OWNER,
+      segments: [theSegment()],
+      efforts: [
+        effort('fast', 'ride-1', 1_760_000_000, 50),
+        drafted(effort('slow', 'ride-2', 1_760_100_000, 62)),
+      ],
+      rides: [tracked('ride-1', 1_760_000_000, 10, 1), tracked('ride-2', 1_760_100_000, 8, 5)],
+    });
+
+    mounted = await mount(<SegmentDetailView port={port} segment="segment-1" />);
+    await settle();
+    for (const box of queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]')) {
+      box.click();
+      await settle();
+    }
+    queryAll<HTMLButtonElement>(mounted.container, 'button')
+      .find((button) => (button.textContent ?? '').includes('Compare the two'))
+      ?.click();
+    await settle();
+
+    const comparison = queryAll<HTMLTableElement>(mounted.container, 'table')[1];
+    const headings = queryAll(comparison as HTMLTableElement, 'thead th').map(
+      (heading) => heading.textContent,
+    );
+    expect(headings).toEqual(['Distance', 'First effort', 'Second effort, drafted', 'Difference']);
+  });
+});
+
 describe('what the screen does when it cannot read — #67’s seventh criterion', () => {
   it('shows a message rather than a blank page when a read throws', async () => {
     const port = stubEffortPort({

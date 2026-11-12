@@ -36,6 +36,7 @@ import {
 } from '../../src/xml';
 import { CORPUS_DIRECTORY } from './corpus-files';
 import { RIDE_START_UNIX_SECONDS } from './ride';
+import { MALFORMED_LAP_CALORIES } from './xml-fixtures';
 
 function fixture(name: string): string {
   return readFileSync(join(CORPUS_DIRECTORY, name), 'utf8');
@@ -297,6 +298,10 @@ describe('lap-figures.tcx — #1321', () => {
     expect(activity.laps[0]?.maxPower).toBe(highest(powers));
   });
 
+  it('reads each lap’s own Calories — #2435', () => {
+    expect(activity.laps.map((lap) => lap.calories)).toEqual([12, 7]);
+  });
+
   it('reads no power for the lap with none, and each lap’s kind', () => {
     expect(activity.laps[1]?.averagePower).toBeUndefined();
     expect(activity.laps[1]?.maxPower).toBeUndefined();
@@ -310,6 +315,36 @@ describe('lap-figures.tcx — #1321', () => {
     const again = decodeTcx(encodeTcx(activity));
     expect(again.faults).toEqual([]);
     expect(again.activity).toEqual(activity);
+  });
+});
+
+describe('lap-calories-malformed.tcx — #2435', () => {
+  const { activity, faults } = decodeTcx(fixture('lap-calories-malformed.tcx'));
+
+  it('drops each Calories unsignedShort does not admit, with a fault naming the element', () => {
+    expect(activity.laps).toHaveLength(MALFORMED_LAP_CALORIES.length);
+    expect(faults.map((fault) => fault.code)).toEqual(
+      MALFORMED_LAP_CALORIES.map(() => 'invalid-value'),
+    );
+    for (const fault of faults) {
+      expect(fault.message).toContain('Lap/Calories');
+    }
+    // The fault names the constraint and never the value.
+    const said = faults.map((fault) => fault.message).join(' ');
+    for (const value of MALFORMED_LAP_CALORIES) {
+      expect(said).not.toContain(value);
+    }
+    expect(activity.laps.map((lap) => lap.calories)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('still reads every lap’s other figures beside the dropped one', () => {
+    for (const lap of activity.laps) {
+      expect(lap.averageHeartRate).toBe(lap.points[0]?.heartRate);
+      expect(lap.averageCadence).toBe(lap.points[0]?.cadence);
+      expect(lap.averagePower).toBeGreaterThan(0);
+      expect(lap.totalDistance).toBeDefined();
+      expect(lap.points).toHaveLength(2);
+    }
   });
 });
 

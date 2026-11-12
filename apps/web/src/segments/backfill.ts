@@ -35,6 +35,7 @@
 
 import {
   createEffort,
+  draftedDistanceShare,
   geographicPosition,
   implausibleEffort,
   indexCorpus,
@@ -55,6 +56,8 @@ import type {
   SegmentEffortRecord,
   SegmentRecord,
 } from '@onyourleft/store';
+import { DRAFTED_SHARE } from '../game/solo-draft';
+
 import type { MatchStore } from './match-port';
 
 /**
@@ -208,6 +211,8 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     }
 
     const result = matchRide(trace, corpus);
+    // #2451, ADR 0066 D-5.2: when the ride says it was in a draft, and where.
+    const spans = summary.rideFacts?.draftSpans ?? [];
     const found: SegmentEffortRecord[] = result.efforts.map((effort) => {
       const segment = segmentsById.get(effort.segmentId);
       return createEffort(effort, {
@@ -221,6 +226,17 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
         excluded:
           segment !== undefined &&
           implausibleEffort(segment.sport, segment.distance, effort.elapsed) !== undefined,
+        // Marked by the share of the EFFORT's own distance ridden in the
+        // draft (D-5.6), never by whether the ride as a whole was.
+        drafted:
+          spans.length > 0 &&
+          draftedDistanceShare(
+            trace.positions,
+            trace.times,
+            effort.startIndex,
+            effort.endIndex,
+            spans,
+          ) >= DRAFTED_SHARE,
       }) as unknown as SegmentEffortRecord;
     });
     efforts += await store.putActivityEfforts(athleteId, summary.id, found);

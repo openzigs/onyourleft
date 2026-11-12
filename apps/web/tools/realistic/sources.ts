@@ -72,6 +72,9 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_RIDER_PACK,
+  RIDER_PACK_PHASES,
+  RIDER_PACK_TRIANGLES,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
@@ -1863,6 +1866,12 @@ export type OutputRecipe =
        * §`drawMark` at this many pixels and handed to the run as a PNG, last.
        */
       readonly mark?: number;
+      /**
+       * #2485: the pack's rider is posed at this many crank angles —
+       * `rider-pack.ts` §`packPose`, written as JSON and handed to the run
+       * after {@link mark}.
+       */
+      readonly pose?: number;
     }
   /**
    * One level of a GENERATED tree — #1283, ADR 0049 D-1: `generated-trees.ts`
@@ -1879,7 +1888,7 @@ export type OutputRecipe =
       /** Whether the GLB's embedded maps are encoded as KTX2 before it ships. */
       readonly images?: 'ktx2';
       /** The impostor strips a full level's run writes. */
-      readonly alsoWrites?: readonly AlsoWritten[];
+      readonly alsoWrites?: readonly EncodedAlso[];
     };
 
 /** The other files a recipe's run writes beside its own: a tree's strips, the rider's maps. */
@@ -1895,10 +1904,18 @@ export function alsoWritten(recipe: OutputRecipe): readonly AlsoWritten[] {
 export interface AlsoWritten {
   readonly file: string;
   readonly made: string;
-  readonly ktx2: Ktx2Step;
+  /**
+   * How {@link made} is encoded into {@link file}. Absent, it ships as the
+   * run wrote it — #2485: the pack's vertex-animation texture, which no
+   * encoder may round, and which a KTX2 picture cannot hold.
+   */
+  readonly ktx2?: Ktx2Step;
   /** What it is, in words, where it is not a tree's impostor strip — #623. */
   readonly modified?: string;
 }
+
+/** A second file that IS encoded: every tree's impostor strip. */
+export type EncodedAlso = AlsoWritten & { readonly ktx2: Ktx2Step };
 
 /** One file the product ships. */
 export interface OutputSpec {
@@ -1981,6 +1998,13 @@ export const WORDMARK_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
 /**
+ * What the rider's two eyes cost — #2495: `blender/rider_kit.py`'s bands, a
+ * fan of twelve round the pupil and three rings of twelve quads, twice. Taken
+ * out of the body's share of the rider's 9 000 triangles, never added to it.
+ */
+export const RIDER_EYE_TRIANGLES = 168;
+
+/**
  * What `realistic:process --check` requires of a run's REPORT, as well as of
  * its bytes — #900 item 2, by output file.
  *
@@ -1994,6 +2018,12 @@ const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left
 export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
   'island_tree_02.glb': { repeatedTrianglesDropped: 1 },
   'island_tree_02-middle.glb': { repeatedTrianglesDropped: 1 },
+  // #2485: the pack's rider, and the texture's shape: one column a vertex of
+  // the GLB, the ones the crank moves, and a row a phase. A run that cut the
+  // body or found the moving vertices differently is not this one.
+  [REALISTIC_RIDER_PACK.lod]: { triangles: 2000, vertices: 1364, moving: 430, phases: 32 },
+  // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
+  [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8998 },
 };
 
 /** Why a run's report is not what {@link EXPECTED_REPORTS} requires of `file`, or nothing. */
@@ -2024,6 +2054,12 @@ export const RIDER_MADE = {
   normal: 'rider_nor_gl.png',
   orm: 'rider_orm.png',
 } as const;
+
+/**
+ * Where the pack's joints come from — #2485: `rider-pack.ts` §`packPose`
+ * reads them off `bicycle.ts`, and the run poses the body onto them.
+ */
+export const RIDER_PACK_POSE = `${PIPELINE_DIRECTORY}rider-pack.ts`;
 
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
@@ -2160,8 +2196,28 @@ export const OUTPUTS: readonly OutputSpec[] = [
         },
       ],
     },
-    modified:
-      'the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet and glasses leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, one mesh coloured per vertex; in its rest pose',
+    modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet, glasses and eyes leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose`,
+  },
+  // #2485: the pack's rider — the bake half of #681. The same body, cut to
+  // about 2 000 triangles, and its vertices posed at every phase of a crank
+  // revolution. Nothing draws it until #681's belt.
+  {
+    file: REALISTIC_RIDER_PACK.lod,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: RIDER_SCRIPT,
+      args: ['lod', String(RIDER_PACK_TRIANGLES), REALISTIC_RIDER_PACK.vat],
+      pose: RIDER_PACK_PHASES,
+      alsoWrites: [
+        {
+          file: REALISTIC_RIDER_PACK.vat,
+          made: REALISTIC_RIDER_PACK.vat,
+          modified: `a vertex-animation texture of the pack's rider, made in the same run: each of its vertices skinned by its own weights, with the bones aimed as src/game/three-renderer.ts aims the rider's at the joints src/game/bicycle.ts's riderJoints gives (read by ${RIDER_PACK_POSE}) at ${String(RIDER_PACK_PHASES)} crank angles over one revolution, seated on the hoods with no body lean and no motion; positions in metres in the bicycle's own frame and normals, as half floats, every vertex once and the ones the crank moves once a phase, in the layout ${RIDER_PACK_POSE} states. The pose is this repository's own work, derived from no other product, and dedicated CC0-1.0 as the kit is`,
+        },
+      ],
+    },
+    modified: `the pack's rider: the body mesh only, in the rider's athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a cheaper helmet and glasses leave of ${String(RIDER_PACK_TRIANGLES)} triangles, with texture coordinates and no colour of its own; and the helmet (a plain shell of three rings, without vents or straps) and glasses (one quad a lens) built round the head’s own vertices, coloured per vertex and skinned wholly to the head bone; two skinned meshes in the rest pose`,
   },
   // #624: the bicycle's four maps, drawn here. ⚠️ `top-left`: they are drawn
   // in the orientation the bicycle's texture coordinates read them — row 0 is
@@ -2825,10 +2881,12 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
       ? (recipe.alsoWrites ?? []).find((also) => also.file === file)
       : undefined;
   // #618: a file that passed through the encoder names it as well as Blender.
+  // #2485: a second file the run wrote is encoded only where its own step says.
   const encoded =
-    recipe.how === 'ktx2' ||
-    impostor !== undefined ||
-    (recipe.how === 'blender' && (recipe.ktx2 !== undefined || recipe.images === 'ktx2'));
+    impostor !== undefined
+      ? impostor.ktx2 !== undefined
+      : recipe.how === 'ktx2' ||
+        (recipe.how === 'blender' && (recipe.ktx2 !== undefined || recipe.images === 'ktx2'));
   const tool =
     recipe.how === 'ktx2'
       ? PINNED_KTX
@@ -2842,12 +2900,11 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   // second in `modified`, where a reader making it again looks for what was
   // done. `provenance.test.ts` holds that the file named is committed.
   const second = recipe.how === 'blender' && encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : '';
+  const encoding = impostor?.ktx2 === undefined ? '' : `; then ${encodingWords(impostor.ktx2)}`;
   const described =
     impostor === undefined
       ? (output.modified ?? '')
-      : impostor.modified === undefined
-        ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
-        : `${impostor.modified}; then ${encodingWords(impostor.ktx2)}`;
+      : `${impostor.modified ?? 'an eight-view impostor strip of one object of the pack, rendered from the full scan'}${encoding}`;
   const alsoFrom = also
     .map(
       (each) =>
@@ -2909,7 +2966,7 @@ function generatedRecord(
     if (source === undefined) throw new Error(`${file}: ${id} is not in the lock`);
     return source;
   });
-  const strip = alsoWritten(recipe).find((also) => also.file === file);
+  const strip = (recipe.alsoWrites ?? []).find((also) => also.file === file);
   const encoded = strip !== undefined || recipe.images === 'ktx2';
   const described =
     strip === undefined
