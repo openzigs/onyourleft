@@ -110,6 +110,7 @@ import {
 import {
   alsoWritten,
   assetRecord,
+  DELIVERY_CAR_SOURCE,
   formatRecord,
   GENERATED_TREE_SCRIPT,
   generatedTreeMaps,
@@ -122,6 +123,7 @@ import {
   reportFaults,
   shippedFiles,
   TEXTURE_SCRIPT,
+  VEHICLE_SCRIPT,
   type InputLock,
   type OutputSpec,
 } from './sources';
@@ -156,9 +158,12 @@ function blender(script: string, args: readonly string[]): string {
   return output;
 }
 
-/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, or a texture's (#475). */
+/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), or the car kit's sedan (#2540). */
 function inputFor(output: OutputSpec): string {
   if (output.from.startsWith('makehuman')) return join(RAW, output.from);
+  if (output.recipe.how === 'blender' && output.recipe.script === VEHICLE_SCRIPT) {
+    return join(RAW, output.from, DELIVERY_CAR_SOURCE.model);
+  }
   if (
     output.recipe.how === 'blender' &&
     (output.recipe.script === TEXTURE_SCRIPT || output.recipe.script === HOUSE_SCRIPT)

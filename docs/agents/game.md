@@ -1103,7 +1103,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `delivery-belt.test.ts`; the 20-piece village frame
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
-                        measured 201 356) by the same nightly spec
+                        measured 201 356) by the same nightly spec.
+                        ⚠️ **Since #2540 the realistic world's parked car is
+                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
+                        `tools/realistic/blender/process_vehicle.py`), its
+                        wheels and indicators apart and posed per instance in
+                        the same call (`withDeliveryCarPose`, from
+                        `port.ts` §`DeliveryCarMotion`), its roster
+                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
+                        frame 203 998; the stylised world keeps its own car
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and

@@ -30,9 +30,16 @@ import { crc32 } from 'node:zlib';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { MAXIMUM_REDIRECTS, readSource, type Fetch, type FetchRun } from './fetch-assets';
+import {
+  MAXIMUM_REDIRECTS,
+  readSource,
+  readSources,
+  type Fetch,
+  type FetchRun,
+} from './fetch-assets';
 import {
   AMBIENTCG_PHRASE,
+  DELIVERY_CAR_SOURCE,
   HOUSE_MODEL_SOURCES,
   SOURCES,
   type AssetSource,
@@ -493,5 +500,101 @@ describe('a placed house model: the owner’s archive, its record, its members �
       await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(reason);
     }
     expect(written()).toEqual([`${source.id}/${origin.archive}`]);
+  });
+});
+
+describe('Kenney’s Car Kit: the owner’s archive, held to Kenney’s own page — #2540', () => {
+  const source = SOURCES.find((each) => each.id === DELIVERY_CAR_SOURCE.id) as AssetSource;
+  if (source.origin.from !== 'placed') throw new Error('the car kit is not placed');
+  const origin = source.origin;
+  const grant = 'License: (Creative Commons Zero, CC0)';
+  const archiveOf = (licence: string = grant): Uint8Array =>
+    zipOf({
+      [DELIVERY_CAR_SOURCE.model]: 'a car',
+      [DELIVERY_CAR_SOURCE.colourMap]: 'a palette',
+      [DELIVERY_CAR_SOURCE.licenceFile]: licence,
+      'Models/GLB format/police.glb': 'not taken',
+    });
+  // The page as Kenney serves it: its licence beside the word "License".
+  const page = '<div><span>License</span><span>Creative Commons CC0</span></div>';
+  const place = (bytes: Uint8Array): void => {
+    mkdirSync(join(raw, source.id), { recursive: true });
+    writeFileSync(join(raw, source.id, origin.archive), bytes);
+  };
+
+  it('reads Kenney’s page, never the archive, and takes only the sedan, its palette and its licence out of it', async () => {
+    const archive = archiveOf();
+    place(archive);
+    const { fetch, requested } = fakeWeb({ [source.licencePage]: page });
+    const locked = await readSource(source, undefined, runWith(fetch, true));
+    expect(requested).toEqual([DELIVERY_CAR_SOURCE.page]);
+    expect(locked.licence).toBe('CC0-1.0');
+    expect(locked.evidence).toBe('Creative Commons CC0');
+    expect(locked.authors).toBe('Kenney');
+    expect(locked.files.map((file) => file.path)).toEqual([
+      DELIVERY_CAR_SOURCE.archive,
+      DELIVERY_CAR_SOURCE.model,
+      DELIVERY_CAR_SOURCE.colourMap,
+      DELIVERY_CAR_SOURCE.licenceFile,
+    ]);
+    expect(locked.files[0]?.sha256).toBe(sha256(archive));
+    expect(readFileSync(join(raw, source.id, DELIVERY_CAR_SOURCE.model), 'utf8')).toBe('a car');
+    await expect(readSource(source, locked, runWith(fetch, false))).resolves.toEqual(locked);
+  });
+
+  it('refuses a page that does not say CC0, and an archive whose own licence does not', async () => {
+    place(archiveOf());
+    const elsewhere = fakeWeb({
+      [source.licencePage]: '<span>License</span><span>Personal use</span>',
+    });
+    await expect(readSource(source, undefined, runWith(elsewhere.fetch, true))).rejects.toThrow(
+      `does not state "Creative Commons CC0"`,
+    );
+    place(archiveOf('License: (Creative Commons Attribution-NonCommercial)'));
+    const { fetch } = fakeWeb({ [source.licencePage]: page });
+    await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(
+      `${source.id}/${DELIVERY_CAR_SOURCE.licenceFile}: it does not state`,
+    );
+  });
+});
+
+describe('--only: one source read, every other entry kept as the lock has it — #2540', () => {
+  const lockOf = (ids: readonly string[]): { sources: LockedSource[] } => ({
+    sources: ids.map((id) => ({
+      id,
+      licence: 'CC0-1.0',
+      licencePage: `https://polyhaven.com/a/${id}`,
+      evidence: 'was',
+      read: '2026-01-01',
+      authors: 'someone',
+      files: [],
+    })),
+  });
+  const three = SOURCES.slice(0, 3);
+  const ids = three.map((each) => each.id);
+
+  it('reads only the source named, and keeps the others’ entries in their order', async () => {
+    const read: string[] = [];
+    const locked = lockOf(ids);
+    const result = await readSources(three, locked, ids[1], (source) => {
+      read.push(source.id);
+      return Promise.resolve({ ...(locked.sources[1] as LockedSource), evidence: 'read again' });
+    });
+    expect(read).toEqual([ids[1]]);
+    expect(result.map((each) => each.id)).toEqual(ids);
+    expect(result.map((each) => each.evidence)).toEqual(['was', 'read again', 'was']);
+    expect(result[0]).toBe(locked.sources[0]);
+  });
+
+  it('reads every source without it, and refuses a name no source has', async () => {
+    const read: string[] = [];
+    await readSources(three, undefined, undefined, (source) => {
+      read.push(source.id);
+      return Promise.resolve(lockOf([source.id]).sources[0] as LockedSource);
+    });
+    expect(read).toEqual(ids);
+    await expect(
+      readSources(three, lockOf(ids), 'no-such-source', () => Promise.reject(new Error('read'))),
+    ).rejects.toThrow('no source is called no-such-source');
   });
 });

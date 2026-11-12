@@ -586,6 +586,23 @@ export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
 export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
 
 /**
+ * The most triangles Delivery's car may be in the realistic world — #2540,
+ * the owner's ruling of 2026-11-12 on it: **about 1 450 a car**, "trim to
+ * fit, not raise the limit". Every obstacle instance submits the whole
+ * roster, the car's triangles included (`three-renderer.ts`
+ * §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`), so this car's share of
+ * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}' 3 644 of room on the frame of
+ * twenty that measured 201 356 is 182 an instance over the stylised car's
+ * 1 268. Kenney's sedan is 1 376 (`tools/realistic/sources.ts`
+ * §`DELIVERY_CAR_SOURCE`), with ONE level of detail: a second would be more
+ * triangles in the roster every instance submits, never fewer.
+ *
+ * @test-facing held by `delivery-car.test.ts`, which reads the committed GLB
+ * back; the product builds the roster and does not read this number
+ */
+export const DELIVERY_CAR_TRIANGLES = 1_450;
+
+/**
  * The most draw calls the realistic village frame may make **while a lap
  * race runs** — #1971, ADR 0060 D-10.2: **approved by the owner on
  * 2026-11-01**. The tablet read it on 2026-11-01 (village frame held, 30 s

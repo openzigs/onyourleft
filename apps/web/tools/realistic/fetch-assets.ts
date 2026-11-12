@@ -6,7 +6,13 @@
  * ```bash
  * node apps/web/tools/realistic/fetch-assets.ts          # verify against the lock
  * node apps/web/tools/realistic/fetch-assets.ts --lock   # re-read and rewrite the lock
+ * node apps/web/tools/realistic/fetch-assets.ts --only <id> [--lock]   # one source
  * ```
+ *
+ * `--only <id>` reads that one source and no other, and with `--lock`
+ * rewrites that source's entry alone, every other entry kept as it was —
+ * #2540: a source added beside inputs this machine does not hold (an owner's
+ * placed archive is on the owner's) is pinned without re-reading the rest.
  *
  * Needs Node 26 (it runs this `.ts` file directly, as `icons:generate` does)
  * and the network: about 150 MB, most of it the tree scans' geometry — and
@@ -360,6 +366,33 @@ export async function readSource(
   };
 }
 
+/**
+ * Every source in `sources`, read by `read` against its entry in `locked` —
+ * or, given `only` (#2540's `--only <id>`), that one source read and every
+ * other entry kept exactly as the lock has it, in the order `sources` lists
+ * them, so a lock rewritten from it moves no other source.
+ */
+export async function readSources(
+  sources: readonly AssetSource[],
+  locked: InputLock | undefined,
+  only: string | undefined,
+  read: (source: AssetSource, expected: LockedSource | undefined) => Promise<LockedSource>,
+): Promise<LockedSource[]> {
+  if (only !== undefined && !sources.some((source) => source.id === only)) {
+    throw new Error(`no source is called ${only}`);
+  }
+  const results: LockedSource[] = [];
+  for (const source of sources) {
+    const expected = locked?.sources.find((each) => each.id === source.id);
+    if (only !== undefined && source.id !== only) {
+      if (expected !== undefined) results.push(expected);
+      continue;
+    }
+    results.push(await read(source, expected));
+  }
+  return results;
+}
+
 async function main(): Promise<void> {
   const relock = process.argv.includes('--lock');
   const locked: InputLock | undefined = existsSync(LOCK)
@@ -377,11 +410,11 @@ async function main(): Promise<void> {
       console.log(line);
     },
   };
-  const sources: LockedSource[] = [];
-  for (const source of SOURCES) {
-    const expected = locked?.sources.find((each) => each.id === source.id);
-    sources.push(await readSource(source, expected, run));
-  }
+  const onlyAt = process.argv.indexOf('--only');
+  const only = onlyAt === -1 ? undefined : process.argv[onlyAt + 1];
+  const sources = await readSources(SOURCES, locked, only, (source, expected) =>
+    readSource(source, expected, run),
+  );
   if (relock) {
     writeFileSync(LOCK, `${JSON.stringify({ sources }, null, 2)}\n`);
     console.log(`wrote ${LOCK}`);

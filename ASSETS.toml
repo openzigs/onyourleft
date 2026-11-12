@@ -2510,6 +2510,21 @@ inputsha256 = "d55f4dbbe6a5565f585aac6e922509ebb94c2991826917dcaacccaf4a6e90682"
 script = "apps/web/tools/realistic/encode-ktx2.ts"
 tool = "KTX-Software v4.4.2"
 
+# #2540: Delivery's parked car in the realistic world, Kenney's CC0 Car Kit sedan.
+[[asset]]
+path = "apps/web/public/realistic/car_sedan.glb"
+source = "Kenney (the owner’s download, #2540), kenney-car-kit by Kenney; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-11-12"
+sha256 = "5a0702d78a09132a295f241a27ec953b60004635eb4054ff534552e1177ca8aa"
+creator = "Kenney"
+url = "https://kenney.nl/assets/car-kit"
+modified = "the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about 166 triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part; stood on the origin and brought to 4.4 m by 1.8 m by 1.45 m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture"
+input = "https://kenney.nl/assets/car-kit"
+inputsha256 = "641e18d508686c4e9ba690b611ebbc906d454f46fe5d309ea4b7ded0b7dc7154"
+script = "apps/web/tools/realistic/blender/process_vehicle.py"
+tool = "Blender 4.4.3"
+
 
 # ⚠️ **The built-in lap-race circuits (#2293, ADR 0064) are DATABASES, not art.**
 # Each line follows streets drawn from this project's own basemap archive, so
