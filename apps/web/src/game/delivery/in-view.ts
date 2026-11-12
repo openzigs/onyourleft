@@ -63,21 +63,10 @@
  * one into a string.
  */
 
-import type {
-  DeliveryInView,
-  DeliveryObstacleKind,
-  DeliveryObstaclePiece,
-  DeliveryPiece,
-} from '../port';
+import type { DeliveryInView, DeliveryObstaclePiece, DeliveryPiece } from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
-import {
-  obstacleAcross,
-  obstacleAlong,
-  type Obstacle,
-  type ObstacleKind,
-  type ObstacleState,
-} from './obstacles';
+import { obstacleAcross, obstacleAlong, type Obstacle, type ObstacleState } from './obstacles';
 import type { Round } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -224,22 +213,12 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
     if (at === undefined) return;
     obstacles.push({
       ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
-      kind: drawnObstacleKind(obstacle.kind),
+      kind: obstacle.kind,
       index,
     });
   });
 
   return { parcels, markers, obstacles };
-}
-
-/**
- * The shape an obstacle is drawn as — #2364: its own, except a car pulling
- * out, which is a parked car's body moving, so it is drawn as one and the
- * obstacles' one geometry carries one car (`three-renderer.ts`
- * §`DELIVERY_OBSTACLE_TRIANGLES`).
- */
-export function drawnObstacleKind(kind: ObstacleKind): DeliveryObstacleKind {
-  return kind === 'car-pulling-out' ? 'parked-car' : kind;
 }
 
 /**

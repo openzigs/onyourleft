@@ -524,11 +524,12 @@ export interface WaterFrame {
  * restated so that nothing the view reaches imports Delivery's modules.
  * `delivery/in-view.ts` builds {@link DeliveryInView} from
  * the roster, so a kind added there and not here does not typecheck. A car
- * pulling out (#2364) is drawn as a parked car, its body the same, so it has
- * no kind of its own here (`delivery/in-view.ts` §`drawnObstacleKind`).
+ * pulling out (#2364) is drawn as a parked car's body with, since #2506, a
+ * hazard marker overhead and lit amber indicators of its own, so that it
+ * reads apart from a parked car (`three-renderer.ts` §`obstacleShape`).
  */
 export type DeliveryObstacleKind =
-  'bin' | 'trolley' | 'cone' | 'parked-car' | 'dog' | 'oncoming-rider';
+  'bin' | 'trolley' | 'cone' | 'parked-car' | 'dog' | 'car-pulling-out' | 'oncoming-rider';
 
 /** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
 export interface DeliveryPiece {

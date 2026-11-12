@@ -227,7 +227,7 @@ describe('a Delivery frame’s pieces — #1814', () => {
     );
   });
 
-  it('draws each moving hazard where it is, facing the way it goes, a car pulling out as a parked car — #2364', () => {
+  it('draws each moving hazard where it is, facing the way it goes, a car pulling out as its own kind — #2364, #2506', () => {
     const hazards: readonly Obstacle[] = [
       { kind: 'dog', along: RIDER + 50, from: 'left', startAfter: 0 },
       { kind: 'dog', along: RIDER + 55, from: 'right', startAfter: 0 },
@@ -261,7 +261,7 @@ describe('a Delivery frame’s pieces — #1814', () => {
     expect(drawn.map((piece) => piece.kind)).toStrictEqual([
       'dog',
       'dog',
-      'parked-car',
+      'car-pulling-out',
       'oncoming-rider',
     ]);
     // Another rider is drawn where they have ridden to, toward the rider: short of where they came out.

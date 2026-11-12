@@ -27,6 +27,9 @@
  * 4. **`kinds(world)`** — one obstacle of each kind, square-on: whether a
  *    point only the bin covers, one the bin and the cone cover, and one the
  *    bin and the trolley cover read as painted.
+ *    **`pullingOut(world)`** — #2506: a car pulling out read at the same
+ *    points, and a parked car and a car pulling out read at the middle of
+ *    where a hazard marker floats, with the eye raised to it.
  * 5. **`showcase()`** — a real view's frame with a parcel in flight, a house's
  *    marker and one obstacle of each kind, on a canvas the spec photographs
  *    for the owner (the lane's ruling of 2026-10-28).
@@ -108,8 +111,10 @@ declare global {
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ProbedKind, readonly boolean[]>>;
+      pullingOut(world: 'stylised' | 'realistic'): PullingOutReading;
       showcase(): void;
       carsShowcase(): void;
+      pullingOutShowcase(): void;
       inLane(
         kind: ObstacleKind,
         lane: number,
@@ -325,6 +330,28 @@ function kinds(world: 'stylised' | 'realistic'): Record<ProbedKind, readonly boo
   };
 }
 
+/** #2506's reading: a car pulling out's body at {@link KIND_POINTS}, and whether each car paints a hazard marker's middle. */
+interface PullingOutReading {
+  readonly body: readonly boolean[];
+  readonly marker: { readonly 'parked-car': boolean; readonly 'car-pulling-out': boolean };
+}
+
+/**
+ * The middle of an obstacle's hazard marker, the obstacle's own metres:
+ * `three-renderer.ts` §`HAZARD_MARKER_MIDDLE_METRES`, 2.7 m up, on its axis.
+ * Restated: the marker's height is not exported.
+ */
+const MARKER_POINT = [0, 2.7] as const;
+
+function pullingOut(world: 'stylised' | 'realistic'): PullingOutReading {
+  const marker = (kind: 'parked-car' | 'car-pulling-out'): boolean =>
+    deliveryKindProbe(canvas(256, 256), world, kind, [MARKER_POINT], MARKER_POINT[1])[0] === true;
+  return {
+    body: deliveryKindProbe(canvas(256, 256), world, 'car-pulling-out', KIND_POINTS),
+    marker: { 'parked-car': marker('parked-car'), 'car-pulling-out': marker('car-pulling-out') },
+  };
+}
+
 function probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls {
   const view: DeliveryInView = {
     parcels: Array.from({ length: count }, (_, index) => ({ x: index, y: 1, z: 0, yaw: 0 })),
@@ -394,6 +421,41 @@ function carsShowcase(): void {
     along: RIDER + ahead,
     stands: parkedCarStands('right'),
   }));
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles,
+      obstacleState: startObstacles(obstacles),
+    }),
+  });
+}
+
+/**
+ * #2506's photograph for the owner: a parked car at the right kerb 10 m
+ * ahead, and a car about to pull out of the same kerb 20 m ahead, waiting
+ * and not yet set going, through a real view and the real `deliveryInView`.
+ */
+function pullingOutShowcase(): void {
+  const shown = canvas(960, 540);
+  shown.id = 'delivery-pulling-out';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(960, 540);
+  const frame = frameAt(RIDER);
+  const obstacles: Obstacle[] = [
+    { kind: 'parked-car', along: RIDER + 10, stands: parkedCarStands('right') },
+    {
+      kind: 'car-pulling-out',
+      along: RIDER + 20,
+      from: 'right',
+      startAfter: 0,
+      to: parkedCarStands('right'),
+      rides: 0,
+    },
+  ];
   view.render({
     ...frame,
     delivery: deliveryInView({
@@ -660,10 +722,12 @@ window.__oylDelivery = {
   ready: true,
   pastCarShowcase,
   carsShowcase,
+  pullingOutShowcase,
   viewCalls,
   markerLeaves,
   probeCalls,
   kinds,
+  pullingOut,
   showcase,
   inLane,
   inLaneShowcase,
