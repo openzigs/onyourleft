@@ -72,6 +72,13 @@ import { repeatFitDataSection } from './large-file';
  */
 const COPIES = 1400;
 
+/**
+ * The copies the "bound is not vacuous" arm decodes: 1.14 MiB. The array
+ * spelling aborts under its own cap at this size, in 0.41 s locally against
+ * 1.12 s at {@link COPIES}; on CI that arm took 4.4 to 4.8 s of a 5 s default.
+ */
+const VACUITY_COPIES = 350;
+
 const MIB = 1024 * 1024;
 
 const CHILD = join(import.meta.dirname, 'decode-under-a-heap-cap.ts');
@@ -114,7 +121,7 @@ const HEAP_EXHAUSTION = /JavaScript heap out of memory|Reached heap limit|FATAL 
  * and a test that is stricter than the thing it documents fails for a reason
  * nobody can look up.
  */
-function decodeUnderCap(mode: DecodeMode, capBytes: number): Attempt {
+function decodeUnderCap(mode: DecodeMode, copies: number, capBytes: number): Attempt {
   const child = spawnSync(
     process.execPath,
     [
@@ -122,7 +129,7 @@ function decodeUnderCap(mode: DecodeMode, capBytes: number): Attempt {
       '--import',
       TYPE_RESOLVER,
       CHILD,
-      String(COPIES),
+      String(copies),
       mode,
     ],
     { encoding: 'utf8', timeout: 120_000 },
@@ -177,6 +184,12 @@ describe('the harness that measures it', () => {
 describe('decoding a large FIT file', () => {
   const bytes = repeatFitDataSection(SOURCE, COPIES);
   const cap = MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE * bytes.length;
+  // The vacuity arm runs a smaller file under the cap the same constant gives
+  // it: the array spelling retains ~92 bytes per input byte against a bound of
+  // 32, at any size, and it dies when it reaches the cap, so a quarter of the
+  // file is a quarter of the time (#2527).
+  const vacuityBytes = repeatFitDataSection(SOURCE, VACUITY_COPIES);
+  const vacuityCap = MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE * vacuityBytes.length;
 
   it('builds a file the size #127 is about', () => {
     // The measurement is only about a large file if the file is large. #127's
@@ -186,12 +199,12 @@ describe('decoding a large FIT file', () => {
   });
 
   // #2527, #1688's ruling: neither case carries a timeout of its own. Each is
-  // one child process decoding the file under the cap: 0.88 s and 0.64 s, and
-  // 0.92 s and 0.79 s under --coverage, locally on an Apple M4 Pro at a load
-  // average of 7 to 11, where each had 120 s. The child's own `spawnSync`
+  // one child process decoding a file under the cap, where each had 120 s. The
+  // second ran 4.4 to 4.8 s on CI at the full size, so it decodes a quarter of
+  // it (see {@link VACUITY_COPIES}); the first runs 2.1 to 2.3 s there. The child's own `spawnSync`
   // timeout above stays: a synchronous spawn is not something Vitest can stop.
   it('stays inside a heap capped at the bound this package declares', () => {
-    const attempt = decodeUnderCap('streaming', cap);
+    const attempt = decodeUnderCap('streaming', COPIES, cap);
     expect(attempt.aborted, `the streaming decode did not finish: ${attempt.detail}`).toBe(false);
     // Every record of every copy, so the cap was met by decoding the file and
     // not by decoding less of it.
@@ -204,11 +217,11 @@ describe('decoding a large FIT file', () => {
     // passes, either the constant has been raised until nothing can fail it
     // or `readFitContainer` has stopped building the array — and in the
     // second case this file is what should be rewritten, deliberately.
-    const attempt = decodeUnderCap('array', cap);
+    const attempt = decodeUnderCap('array', VACUITY_COPIES, vacuityCap);
     expect(
       attempt.aborted,
-      `materialising ${String(SOURCE_RECORD_COUNT * COPIES)} messages fitted inside ` +
-        `${String(Math.ceil(cap / MIB))} MiB, which it must not: ${attempt.detail}`,
+      `materialising ${String(SOURCE_RECORD_COUNT * VACUITY_COPIES)} messages fitted inside ` +
+        `${String(Math.ceil(vacuityCap / MIB))} MiB, which it must not: ${attempt.detail}`,
     ).toBe(true);
     // And it must have died of the heap, not of anything else. Without this
     // the arm passes on a typo in the child's path — which is the same shape

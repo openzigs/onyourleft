@@ -262,19 +262,27 @@ describe('powerDurationCurve — the stated time budget', () => {
    */
   it('processes a four-hour 1 Hz activity across the whole curve', () => {
     const fourHours = steady(220, 4 * 3600);
+    const MAXIMUM_READS = 2 * fourHours.length * CURVE_DURATIONS.length;
     let reads = 0;
     const counted = new Proxy(fourHours, {
       get(target, key, receiver): unknown {
-        if (typeof key === 'string' && /^\d+$/u.test(key)) reads += 1;
+        if (typeof key === 'string' && /^\d+$/u.test(key)) {
+          reads += 1;
+          // Fail at the bound, not after it: the naive form makes about 247
+          // million reads, and counting them all took 58 s to report red.
+          if (reads > MAXIMUM_READS) throw new Error(`more than ${String(MAXIMUM_READS)} reads`);
+        }
         return Reflect.get(target, key, receiver) as unknown;
       },
     });
 
     const curve = powerDurationCurve(counted);
 
-    // O(n) a duration: no sample read more than twice for any one of them.
-    expect(reads).toBeGreaterThanOrEqual(fourHours.length * CURVE_DURATIONS.length);
-    expect(reads).toBeLessThanOrEqual(2 * fourHours.length * CURVE_DURATIONS.length);
+    // O(n) a duration: no sample read more than twice for any one of them
+    // (the trap above throws at the bound). The floor is only a vacuity guard,
+    // that the curve read the series at all, so a faster form still passes.
+    expect(reads).toBeGreaterThanOrEqual(fourHours.length);
+    expect(reads).toBeLessThanOrEqual(MAXIMUM_READS);
 
     // Every duration in the list is inside four hours, so all of them are
     // achieved — which also says the loop really did run over all of them

@@ -769,6 +769,9 @@ describe('over a thousand seeded races', () => {
   // Apple M4 Pro at a load average of 7 to 11: 1.9 s and 1.1 s, and 4.7 s and
   // 3.3 s under --coverage. Each field is now ridden a quarter at a time, a
   // case a quarter, every race to the line; the cases after read them whole.
+  // Those cases are cheap only because the quarter cases ran first: with the
+  // quarters filtered out (`-t bunching`) the first of them rides eight parts
+  // itself and runs over the 5 s default, which hides its own assertion.
   for (const [key, name, policies] of [
     ['reactive', 'six #1900 bots', REACTIVE],
     [

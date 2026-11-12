@@ -277,7 +277,7 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
    */
   const FIT_SLICES = 12;
   it.each(Array.from({ length: FIT_SLICES }, (_, slice) => slice))(
-    'produces a decode or a FitDecodeError for every case, and nothing else: slice %i of 12',
+    `produces a decode or a FitDecodeError for every case, and nothing else: slice %i of ${String(FIT_SLICES - 1)}`,
     (slice) => {
       for (let at = slice; at < cases.length; at += FIT_SLICES) {
         runFitCase(cases[at] as (typeof cases)[number], FUZZ_SEED);
