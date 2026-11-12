@@ -42,8 +42,10 @@ import {
   drawnCrankAngle,
   pedallingShare,
   simulatedCrankAngle,
+  steerAngle,
   type RiderRoll,
 } from './bicycle';
+import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
 import {
   countrysideWithout,
   NO_LAND_CLASS,
@@ -53,7 +55,7 @@ import {
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { crashedRoll, type CrashSide } from './delivery/crash-look';
-import { laneChangeLean, laneChangeRate } from './lane-change-lean';
+import { LANE_CHANGE_TURN_SPEED_FLOOR, laneChangeLean, laneChangeRate } from './lane-change-lean';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -381,6 +383,19 @@ export interface SceneInput {
    * the frames a lane change was drawn from.
    */
   readonly steeredSway?: number | undefined;
+  /**
+   * How fast {@link steeredSway} is changing, in metres a second a second,
+   * positive to the right — #2494: what `GameView`'s `dampedSway` moved it by
+   * over the frame, divided by the frame's time. The drawn bicycle's heading
+   * into a lane change turns at a rate in step with it, and the bars turn by
+   * the steer that rate asks for (`bicycle.ts` §`steerAngle`). Read only
+   * where {@link steeredSway} is given; absent, a lane change turns no bars.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, as {@link steeredSway} is:
+   * `delivery-wiring.test.tsx` and `lap-race-wiring.test.tsx` read the bars'
+   * steer back off the markers a lane change was drawn with.
+   */
+  readonly steeredSwayRate?: number | undefined;
   /**
    * Where the chase camera's EYE stands across the road, in metres right of
    * the centre line, where it is not behind the rider — #2396,
@@ -1304,6 +1319,8 @@ interface Rider {
   readonly steered?: number | undefined;
   /** How fast it is drawn moving across the road while steered — the rider's only. @see SceneInput.steeredSway */
   readonly sway?: number | undefined;
+  /** How fast that is changing — the rider's only. @see SceneInput.steeredSwayRate */
+  readonly swayRate?: number | undefined;
   /** A remote rider's name on the road. @see RiderMarker.label */
   readonly label?: string | undefined;
   /** @see RiderMarker.followed */
@@ -1355,6 +1372,7 @@ function ridersOnTheRoad(
       pedalling: input.pedalling === true,
       steered: input.steeredLateral,
       sway: input.steeredSway,
+      swayRate: input.steeredSwayRate,
       hit: input.riderHit,
       // #1999: what the rider's drawn position is chosen from.
       cadence: input.cadence,
@@ -1473,19 +1491,22 @@ function ridersOnTheRoad(
     // The COMBINED lean the physics asks for, split into the bicycle's and the
     // body's — #546. @see RiderMarker.lean
     // #2456: and a steered rider's lean into a lane change, on top of the bend's.
-    const ridden = bicycleRoll(
-      line === undefined ? 0 : withSteeringLean(rider, leanAt(line, rider.distance, rider.speed)),
-    );
+    const bend = line === undefined ? 0 : leanAt(line, rider.distance, rider.speed);
+    const ridden = bicycleRoll(line === undefined ? 0 : withSteeringLean(rider, bend));
     // #2454: the rider's own crash in a Delivery round, drawn as a fall and a
     // getting back up, on top of the lean the ride asks for.
     const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
     const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
-    const marker = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
+    // #2494: the bars turned by the steer the drawn path's turn asks for.
+    const steer = drawnSteer(rider, bend);
+    const unsteered = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) * (1 - (crash?.share ?? 0)) : 0,
       rideSeconds: rideClock,
       riding: ridingOf(rider, input.profile),
     });
+    // Under a millionth of a radian is straight: `leanAt` leaves 10⁻¹⁹ on a straight.
+    const marker = Math.abs(steer) < 1e-6 ? unsteered : { ...unsteered, steer };
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
@@ -1698,6 +1719,36 @@ function withSteeringLean(rider: Rider, bend: number): number {
   if (rider.steered === undefined || rider.sway === undefined) return bend;
   const lean = bend + laneChangeLean(rider.sway, rider.speed);
   return Math.max(-MAXIMUM_LEAN_RADIANS, Math.min(MAXIMUM_LEAN_RADIANS, lean));
+}
+
+/**
+ * The steer a rider's bars are drawn turned by, in radians, positive to the
+ * right — #2494: `bicycle.ts` §`steerAngle` of the rate the drawn bicycle is
+ * turning at, at the rider's own speed:
+ *
+ * - **through a bend**, the turn that holds `bend`, its combined lean
+ *   (`racing-line.ts` §`leanAt`): `tan φ = v · ω / g`, so `ω = g tan φ / v`
+ *   — a degree or two through an ordinary bend;
+ * - **into a lane change**, a steered rider's, the rate its drawn heading
+ *   turns at: the heading is `facingTurn(atan(laneChangeRate(sway, v)))`
+ *   (#2456), so by the chain rule it turns at `facingTurn′ · (dsway/dt ÷ V) ÷
+ *   (1 + rate²)`, with `V` the speed `laneChangeRate` divides by — about
+ *   2.2 rad/s while the sway builds, nought while it holds, and back the
+ *   other way as it settles, which is a bicycle steering into a move and out.
+ *
+ * Nought at a standstill. A drawing only.
+ */
+function drawnSteer(rider: Rider, bend: number): number {
+  const speed = rider.speed;
+  if (!(speed > 0)) return 0;
+  let yawRate = (STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED * Math.tan(bend)) / speed;
+  if (rider.steered !== undefined && rider.sway !== undefined && rider.swayRate !== undefined) {
+    const drawnSpeed = Math.max(speed, LANE_CHANGE_TURN_SPEED_FLOOR);
+    const rate = laneChangeRate(rider.sway, speed);
+    const saturation = 1 / Math.cosh(Math.atan(rate) / FACING_TURN_LIMIT_RADIANS);
+    yawRate += (saturation * saturation * (rider.swayRate / drawnSpeed)) / (1 + rate * rate);
+  }
+  return steerAngle(yawRate, speed);
 }
 
 /**
