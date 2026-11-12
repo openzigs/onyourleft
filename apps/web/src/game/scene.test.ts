@@ -19,7 +19,7 @@ import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } f
 import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { easedPlace, GIVE_BACK_SHARE } from './bend-easing';
 import { racingLine } from './racing-line';
-import { hairpinRoute, northRoute } from './route-fixtures-testing';
+import { circuitRoute, hairpinRoute, northRoute } from './route-fixtures-testing';
 import {
   cameraPose,
   drawnRiderDistance,
@@ -1189,6 +1189,57 @@ describe('a lap race’s bots on the road — #1902', () => {
     expect('hit' in (frame.markers[2] ?? {})).toBe(false);
     const ordinary = sceneFrame(input({}));
     expect('hit' in (ordinary.markers[0] ?? {})).toBe(false);
+  });
+});
+
+describe('a lap race’s bots a lap apart on a loop — #2516', () => {
+  // A loop of about 502 m, longer than the 460 m corridor, so a bot stands on it once at most.
+  const loop = circuitRoute(80);
+  const lap = loop.totalDistance as number;
+  const RIDER = 300;
+  const input = (riderAt: number, raceBots: SceneInput['raceBots']): SceneInput => ({
+    profile: loop,
+    origin: corridorOrigin(loop),
+    state: {
+      ...atStartLine(loop),
+      ride: { ...atStartLine(loop).ride, distance: metres(riderAt) },
+    },
+    raceBots,
+  });
+  const racersAt = (riderAt: number, distanceMetres: number): readonly RiderMarker[] =>
+    sceneFrame(
+      input(riderAt, [{ distanceMetres, speedMetresPerSecond: 7, lateralMetres: 1.75 }]),
+    ).markers.filter((marker) => marker.racer === true);
+
+  it('draws a bot a lap down or a lap up where it stands on the road, its cranks from its own odometer', () => {
+    const [own] = racersAt(RIDER, RIDER + 30);
+    expect(own).toBeDefined();
+    for (const distanceMetres of [RIDER + 30 - lap, RIDER + 30 + lap, RIDER + 30 + 2 * lap]) {
+      const racers = racersAt(RIDER, distanceMetres);
+      const label = `a bot ${String(Math.round((distanceMetres - RIDER - 30) / lap))} laps apart`;
+      expect(racers, label).toHaveLength(1);
+      expect(racers[0]?.x, label).toBeCloseTo(own?.x ?? Number.NaN, 6);
+      expect(racers[0]?.z, label).toBeCloseTo(own?.z ?? Number.NaN, 6);
+      // Its cranks turn from its own odometer, so a lap's move never jumps them.
+      expect(racers[0]?.crankAngle, label).toBeCloseTo(simulatedCrankAngle(distanceMetres), 9);
+    }
+  });
+
+  it('still draws no bot off the road the frame built, on whichever lap', () => {
+    const built = sceneFrame(input(RIDER, [])).corridor.centre;
+    const reach = (built.at(-1)?.along ?? Number.NaN) - RIDER;
+    // Beyond the road's far end and short of the stretch behind, a lap round.
+    const off = RIDER + (reach + lap - VIEW_BEHIND_METRES) / 2;
+    expect(off - RIDER).toBeGreaterThan(reach);
+    for (const distanceMetres of [off, off - lap, off + lap]) {
+      expect(racersAt(RIDER, distanceMetres), String(distanceMetres)).toEqual([]);
+    }
+  });
+
+  it('draws a bot a few centimetres short of the line at a race’s start, never throwing', () => {
+    // A bot is drawn back from its newest step along its speed, so on the
+    // first steps it can stand behind the line: a negative odometer.
+    expect(racersAt(0, -0.01)).toHaveLength(1);
   });
 });
 
