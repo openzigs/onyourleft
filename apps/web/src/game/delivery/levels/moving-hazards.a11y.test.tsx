@@ -51,6 +51,18 @@ const MOVING_SAID =
 
 const port: GamePort = {
   listRoutes: () => Promise.resolve([]),
+  // The listing names the level, first so it is open: a level the listing
+  // does not name is not read (#2363), as the real port lists them.
+  listDeliveryLevels: () =>
+    Promise.resolve([
+      {
+        id: LEVEL.id,
+        name: 'Fixture level',
+        lengthMetres: LEVEL.lengthMetres,
+        houses: LEVEL.round.houses,
+        routeId: levelRouteId(LEVEL.id),
+      },
+    ]),
   loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
