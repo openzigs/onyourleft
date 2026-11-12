@@ -52,8 +52,9 @@
  * A function of the view, the archetype, the skill, its memory and the seed.
  * Scalars only, `+ − × ÷`, `Math.min`, `Math.max` (ADR 0067 D-5.2) and `Math.floor`
  * (an addition to D-5.2's list: exact in IEEE 754); it imports nothing from `apps/`, nothing platform-bound and nothing
- * of the trainer (`tactics.test.ts` reads its imports). Wiring it into the race
- * is #2463.
+ * of the trainer (`tactics.test.ts` reads its imports). `@onyourleft/physics`
+ * §`stepBotRace` wires it into the race (#2463): one view and one call per
+ * racing bot per tick, its target through `plan.ts` §`botPlanStep`.
  */
 
 import {

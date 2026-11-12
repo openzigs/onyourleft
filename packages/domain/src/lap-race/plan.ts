@@ -13,8 +13,9 @@
  * A bot's power is a function of its tier, the road, the distance it has left
  * and its own W′ balance, **and never of any other racer**. What
  * {@link botPlanStep} reads is the whole of D-2. ⚠️ ADR 0067 D-0 has since
- * lifted that rule: a bot's strategy may read the race. This plan does not
- * yet; #2462 and #2463 add what does, and nothing here changes a capacity:
+ * lifted that rule: a bot's strategy may read the race. This plan does not;
+ * since #2463 its {@link BotPlanInput.tactic} carries what the tactics read
+ * (#2462), and nothing here changes a capacity:
  *
  * | Input | Where it comes from |
  * |---|---|
