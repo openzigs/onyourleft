@@ -42,6 +42,7 @@ import { importSecretKey, sealHostedKey } from './analysis/hosted-key.ts';
 import { secretText } from './analysis/hosted-key-testing.ts';
 import { HOSTED_TEST_QUESTION, HOSTED_TEST_SYSTEM } from './analysis/hosted-test.ts';
 import { modelKeySet } from './operator/commands.ts';
+import { runCommand } from './operator/run.ts';
 import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
@@ -68,6 +69,25 @@ const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
 const CLI = fileURLToPath(new URL('./operator/cli.ts', import.meta.url));
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+/**
+ * The bound of a wait inside a case that has Vitest's 5 s (#2550's review,
+ * F3). It is a cap under the case's budget, not a promise of how a wait that
+ * never ends fails. It fails naming what it waited for only when the case
+ * reaches the wait with more than this left of its 5 s. Where earlier steps
+ * have spent that, as after the second start in 'ends, as it opens' or at
+ * the third of 'rejoins'' waits in a row, it fails as "Test timed out in
+ * 5000ms" instead (#2570's review, F1).
+ */
+const WAIT_MS = 3_000;
+/**
+ * The phase bounds of 'on SIGTERM mid-race' (#2551) and 'started by its
+ * creator alone' (#2552): shorter than `WAIT_MS` because each of those cases
+ * waits through several phases. The same caveat holds: a phase reached late
+ * in the case's 5 s fails as Vitest's timeout, not by name.
+ */
+const WELCOMES_WAIT_MS = 1_000;
+const ACROSS_THE_LINE_WAIT_MS = 2_500;
+const RACE_PHASE_WAIT_MS = 2_000;
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -249,7 +269,7 @@ describe('the running instance forgets every rate-limited address when its windo
     // Every sweep is stopped: the rate limits', the rooms', the jobs' and the notices'.
     expect(cleared).toBe(4);
     expect(pending).toHaveLength(0);
-  }, 30_000);
+  });
 });
 
 describe('the running instance erases a notice’s notifier details when they are due — #1381, #1923', () => {
@@ -355,16 +375,20 @@ describe('the running instance erases a notice’s notifier details when they ar
     erased = await erasedOnceOf(second);
     expect(erased.get(second)).toBe(Math.floor(clock.ms / 1000));
     expect(erased.get(open)).toBeNull();
-  }, 30_000);
+  });
 });
 
 describe('the entry point opens the store — #780 (from #861: every identity route answered 503)', () => {
   it('signs a rider in, mints a ticket over HTTP, and a room worker admits it once — the second time closes 4003', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
+    // The operator's command, run in this process rather than spawned: the
+    // same `room-open`, without a second Node starting (#2550).
     expect(
-      cli(path, 'room-open', 'ride-1', '--kind', 'ride', '--length', '10000', '--countdown', '0')
-        .status,
+      await runCommand(
+        ['room-open', 'ride-1', '--kind', 'ride', '--length', '10000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const { instance } = await start(path);
 
@@ -379,26 +403,19 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
     clients.push(replay);
     expect(await replay.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     // The replay changed nothing: still one seat in the room.
-    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', 15_000);
+    await until(() => rider.messages.some((m) => m.type === 'frame'), 'a frame', WAIT_MS);
     const frame = rider.messages.find((m) => m.type === 'frame');
     expect(frame?.type === 'frame' && frame.riders.length).toBe(1);
-  }, 60_000);
+  });
 
   it('serves /metrics after a populated fixture with no athlete id, display name, room id or coordinate in it — #791', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     expect(
-      cli(
-        path,
-        'room-open',
-        'secret-room-7',
-        '--kind',
-        'ride',
-        '--length',
-        '10000',
-        '--countdown',
-        '0',
-      ).status,
+      await runCommand(
+        ['room-open', 'secret-room-7', '--kind', 'ride', '--length', '10000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const token = 't'.repeat(40);
     const { instance } = await start(path, { metrics: true, metricsToken: token });
@@ -456,14 +473,14 @@ describe('the entry point opens the store — #780 (from #861: every identity ro
       0,
     );
     expect(connected).toBe(2);
-  }, 60_000);
+  });
 
   it('does not serve /metrics unless the operator turned it on', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     const { instance } = await start(path);
     expect((await fetch(`${instance.url}/metrics`)).status).toBe(404);
-  }, 60_000);
+  });
 });
 
 describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
@@ -482,7 +499,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
     });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
-  }, 60_000);
+  });
 
   it('says in its startup log that analysis is off, and why, for a refused model address (#1096)', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -505,7 +522,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       'instance: analysis is off: OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because',
     );
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
-  }, 60_000);
+  });
 
   it('is not ready — and admits no room — while a migration is running, and is once it has finished', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -536,7 +553,7 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       status: 'ready',
       checks: { database: true, migrations: 'at-head', rooms: true },
     });
-  }, 60_000);
+  });
 });
 
 describe('a race rider who drops mid-race rejoins it — #895 review B1', () => {
@@ -544,17 +561,10 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     expect(
-      cli(
-        path,
-        'room-open',
-        'race-rejoin',
-        '--kind',
-        'race',
-        '--length',
-        '100000',
-        '--countdown',
-        '0',
-      ).status,
+      await runCommand(
+        ['room-open', 'race-rejoin', '--kind', 'race', '--length', '100000', '--countdown', '0'],
+        { database: path },
+      ),
     ).toBe(0);
     const { instance } = await start(path);
     const ann = await signIn(instance.url, 'Ann');
@@ -580,7 +590,7 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
     await until(
       () => bobSocket.messages.some((m) => m.type === 'frame'),
       'the race running',
-      15_000,
+      WAIT_MS,
     );
     // The race has left its lobby, and the store says so.
     const fresh = openServingStore(path);
@@ -601,14 +611,14 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
       await ticket(instance.url, ann.sessionToken, 'race-rejoin'),
     );
     clients.push(annAgain);
-    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', 15_000);
+    await until(() => annAgain.messages.length > 0, 'an answer to the rejoin', WAIT_MS);
     expect(annAgain.messages[0]).toMatchObject({ type: 'welcome', riderId: annSeat });
     await until(
       () => annAgain.messages.some((m) => m.type === 'frame'),
       'frames after the rejoin',
-      15_000,
+      WAIT_MS,
     );
-  }, 60_000);
+  });
 });
 
 describe('graceful shutdown drains rooms — #780 criterion 6', () => {
@@ -616,10 +626,21 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     const dir = await freshDirectory();
     const path = join(dir, 'instance.sqlite');
     await migrateForDeploy(path);
-    expect(
-      cli(path, 'room-open', 'race-1', '--kind', 'race', '--length', '40', '--countdown', '0')
-        .status,
-    ).toBe(0);
+    // The operator's command, run in this process rather than spawned: the
+    // same `room-open` without a second Node starting, which took 0.3 to 5.4 s
+    // of this case locally (#2551). The instance below is still its own process.
+    // It reports as JSON on stdout; keep that out of the run's output.
+    const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(
+        await runCommand(
+          ['room-open', 'race-1', '--kind', 'race', '--length', '2', '--countdown', '0'],
+          { database: path },
+        ),
+      ).toBe(0);
+    } finally {
+      report.mockRestore();
+    }
     // The operating system's choice, never a random one: #954.
     const port = await freeLoopbackPort();
     const child = spawn(process.execPath, [MAIN], {
@@ -642,7 +663,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       for (let i = 0; ; i += 1) {
         const ready = await fetch(`${url}/ready`).catch(() => undefined);
         if (ready?.status === 200) break;
-        if (i > 200) throw new Error('the instance did not become ready');
+        if (i > 60) throw new Error('the instance did not become ready');
         await new Promise((done) => setTimeout(done, 50));
       }
       ann = await signIn(url, 'Ann');
@@ -658,13 +679,21 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
         await ticket(url, bob.sessionToken, 'race-1'),
       );
       clients.push(annSocket, bobSocket);
-      await until(() => bobSocket.messages.length > 0 && annSocket.messages.length > 0, 'welcomes');
+      await until(
+        () => bobSocket.messages.length > 0 && annSocket.messages.length > 0,
+        'welcomes',
+        WELCOMES_WAIT_MS,
+      );
       const started = await fetch(`${url}/v1/rooms/race-1/start`, {
         method: 'POST',
         headers: { authorization: `Bearer ${ann.sessionToken}` },
       });
       expect(started.status).toBe(200);
-      // Ann rides hard enough to cross 40 m in a few seconds; Bob does not ride.
+      // Ann rides; Bob does not. The course is 2 m (#2551): a room sends a frame
+      // a second, and Ann at 800 W has ridden 2.8 m by the first, so she
+      // has finished one frame after the start: a longer course costs a
+      // second of the case per frame. The phases below are bounded inside
+      // the case's own 5 s so that a slow one fails by name.
       let sequence = 0;
       const pedal = setInterval(() => {
         sequence += 1;
@@ -677,10 +706,10 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
               (m) =>
                 m.type === 'frame' &&
                 m.riders[0]?.decimetres !== undefined &&
-                m.riders[0].decimetres >= 400,
+                m.riders[0].decimetres >= 20,
             ),
           'Ann across the line',
-          15_000,
+          ACROSS_THE_LINE_WAIT_MS,
         );
       } finally {
         clearInterval(pedal);
@@ -689,7 +718,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       const store = openServingStore(path);
       try {
         for (let i = 0; (await store.listRoomResults('race-1')).length === 0; i += 1) {
-          if (i > 100) throw new Error('no result was written');
+          if (i > 20) throw new Error('no result was written');
           await new Promise((done) => setTimeout(done, 50));
         }
       } finally {
@@ -713,7 +742,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
     } finally {
       await fresh.close();
     }
-  }, 90_000);
+  });
 });
 
 describe('the metrics token — #895 review N3', () => {
@@ -941,7 +970,7 @@ describe('the history index on the running instance — #835', () => {
     await instance.stop();
     running = undefined;
     expect(pending).toStrictEqual([]);
-  }, 30_000);
+  });
 });
 
 describe('the analysis model on the running instance — #1096', () => {
@@ -1211,7 +1240,12 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const ann = await signIn(url, 'Ann');
     const bob = await signIn(url, 'Bob');
     const cat = await signIn(url, 'Cat');
-    const made = await call('POST', '/v1/rooms', ann.sessionToken, roomBody({ lengthMetres: 40 }));
+    // A 2 m course (#2552): a room sends a frame a second, and on 40 m the
+    // finish came seven seconds after the start was asked for, of a case that
+    // took 7.5 s on CI under coverage. At 900 and 700 W both riders are past
+    // 2 m on the race's first frame, so both still finish and both results
+    // are still the race's.
+    const made = await call('POST', '/v1/rooms', ann.sessionToken, roomBody({ lengthMetres: 2 }));
     expect(made.status).toBe(200);
     const room = made.body as { roomId: string; code: string; routeSha256: string };
     const routeFile = join(
@@ -1260,7 +1294,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(
       () => [annSocket, bobSocket].every((s) => s.messages.some((m) => m.type === 'countdown')),
       'the countdown said to both',
-      5_000,
+      RACE_PHASE_WAIT_MS,
     );
     for (const socket of [annSocket, bobSocket]) {
       const told = socket.messages.find((m) => m.type === 'countdown');
@@ -1276,7 +1310,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       await until(
         () => annSocket.messages.some((m) => m.type === 'finish'),
         'the race finished',
-        30_000,
+        RACE_PHASE_WAIT_MS,
       );
     } finally {
       clearInterval(pedal);
@@ -1285,7 +1319,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     for (let i = 0; ; i += 1) {
       const got = await call('GET', `/v1/rooms/${room.roomId}/results`, ann.sessionToken);
       if (got.status === 200 && (got.body as { rows: unknown[] }).rows.length === 2) break;
-      if (i > 100) throw new Error('the results were never written');
+      if (i > 40) throw new Error('the results were never written');
       await new Promise((done) => setTimeout(done, 50));
     }
     expect((await call('GET', `/v1/rooms/${room.roomId}/results`, cat.sessionToken)).status).toBe(
@@ -1295,7 +1329,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // The riders leave; the room is over, and lets its route go.
     annSocket.socket.close();
     bobSocket.socket.close();
-    await until(() => !existsSync(routeFile), 'the route deleted', 10_000);
+    await until(() => !existsSync(routeFile), 'the route deleted', RACE_PHASE_WAIT_MS);
     expect((await call('GET', `/v1/rooms/${room.roomId}/route`, ann.sessionToken)).status).toBe(
       404,
     );
@@ -1306,12 +1340,15 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // And no line the instance wrote carries the code.
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(line).not.toContain(room.code.replace(/-/g, ''));
-  }, 90_000);
+  });
 
   it('never opens a group ride that is over as a lobby again', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
-    const { instance } = await start(path);
+    // One room worker, not the two `serverConfig` gives (#2553): one room
+    // needs one, and each worker is a forked Node process, so a second one
+    // is a fork this case waits for and does not use.
+    const { instance } = await start(path, { roomWorkers: 1 });
     const ann = await signIn(instance.url, 'Ann');
     const made = await fetch(`${instance.url}/v1/rooms`, {
       method: 'POST',
@@ -1339,7 +1376,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const late = await joinRoom(wsUrl(instance.url), roomId, undefined);
     clients.push(late);
     expect(await late.closed).toMatchObject({ code: 4005 });
-  }, 30_000);
+  });
 
   it('ends, as it opens, a race a restart interrupted, and lets its route go — a lobby nobody started it keeps', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -1374,21 +1411,21 @@ describe('a rider’s race on the running instance — #784, #785', () => {
 
     const second = await start(path);
     await second.instance.opened;
-    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
+    await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', WAIT_MS);
     const fresh = openServingStore(path);
     try {
       // #948 N-b: the route goes first, and the close that commits follows it.
       await vi.waitFor(
         async () =>
           expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull(),
-        { timeout: 10_000 },
+        { timeout: WAIT_MS },
       );
       expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
     } finally {
       await fresh.close();
     }
     expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
-  }, 30_000);
+  });
 });
 
 /** A secret, so the running instance makes its keys and seals its sealed-only routes (#1189). */

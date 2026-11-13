@@ -601,6 +601,14 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The animation in {@link REALISTIC_RIDER} that is the body's own fall and
+ * get-up in a Delivery crash — #2493, made by `tools/realistic/blender/
+ * process_rider.py` from `rider_crash.py`'s moments on #2475's timeline, and
+ * blended in by `three-renderer.ts` §`RealisticRiderBelt` (`RiderMarker.crash`).
+ */
+export const REALISTIC_RIDER_CRASH_CLIP = 'crash';
+
+/**
  * The rider's three maps — #623, drawn and baked by
  * `tools/realistic/blender/process_rider.py` onto the body's own texture
  * coordinates, dedicated `CC0-1.0` with the MakeHuman skin and eyebrow they

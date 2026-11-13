@@ -664,8 +664,9 @@ function Harness(): JSX.Element {
                     round,
                     week: { day, houses: 12, score: 0 },
                     score: roundTally(round).score,
-                    // #2453: the next house, so the layout cases measure its field too.
-                    next: { side: 'right', metres: 120 },
+                    // #2453: the next house, so the layout cases measure its field too;
+                    // nearly over, inside its window (#2513), so they measure "Throw now,".
+                    next: { side: 'right', metres: stage === 'end' ? 0 : 120 },
                   }
             }
           />
@@ -729,7 +730,9 @@ const DRAFT_STAGES = [
  * dashed field is on it, with no round (`none`, what the others are compared
  * with), with the largest round at its start (`12 left`, day 7), and with it
  * nearly over (`10 delivered, 2 missed`, a score of 10): the widest value and
- * the widest phrase each field can show. Their own attribute, so no other
+ * the widest phrase each field can show. Nearly over, the next house is inside
+ * its throw window, so *Next house* reads "Throw now," (#2513), its widest
+ * value. Their own attribute, so no other
  * measurement on this page counts them.
  */
 const DELIVERY_STAGES: readonly {

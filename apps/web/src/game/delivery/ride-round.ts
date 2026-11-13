@@ -105,7 +105,9 @@
  * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
  * standing. The assist still places fewer or none. A level round is kept
  * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
- * is never written to `delivery-progress.ts`. The level's throw window is not
+ * is never written to `delivery-progress.ts`. Reached, its end keeps the
+ * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens
+ * the next level in the picker. The level's throw window is not
  * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
  * may (`level-file.ts`), and the later levels that tighten it read it
  * (#2367, which draws them). Its mailbox and no-delivery shares, weather and light are
@@ -127,6 +129,7 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { readLevelProgress, withLevelFinished, writeLevelProgress } from './level-progress';
 import type { LevelRound } from './levels/level-file';
 import {
   clearOfParkedCars,
@@ -195,6 +198,8 @@ export interface DeliveryRide {
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
   readonly onLevel: boolean;
+  /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
+  readonly levelId: string | undefined;
 }
 
 /** What a round needs at the press. */
@@ -225,7 +230,11 @@ export interface DeliveryRideStart {
    * rider's route.
    */
   readonly level?:
-    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & { readonly lengthMetres: number })
+    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & {
+        readonly lengthMetres: number;
+        /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
+        readonly id: string;
+      })
     | undefined;
 }
 
@@ -285,6 +294,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     along: input.riderDistance,
     outcome: undefined,
     onLevel: input.level !== undefined,
+    levelId: input.level?.id,
   };
 }
 
@@ -444,20 +454,37 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
  * the road, and how far ahead along it, so the HUD can say where to throw
  * without the rider having to spot the house's marker. A side and a distance
  * from the rider, never a place (DL11).
+ *
+ * ⚠️ **Since #2513 the distance is to the THROW POINT, not to the house.** The
+ * owner's frame of 2026-11-12 read "Next house 0 ft on the right" level with
+ * the house, which is beside and behind the chase camera and out of frame:
+ * the countdown pointed the rider at the one place the house cannot be seen,
+ * and a parcel thrown there is thrown late. It now counts down to where the
+ * house's throw window opens (`throw.ts` §`THROW_WINDOW_BEFORE_METRES`, 20 m
+ * before it), and reaches nought there; from there until the window closes
+ * the HUD says to throw (the owner's ruling of 2026-11-12 on #2513).
  */
 export interface NextHouse {
   readonly side: ThrowSide;
-  /** Metres along the road from the rider to the house; nought once the rider is level with it or past. */
+  /**
+   * Metres along the road from the rider to where the house's throw window
+   * opens; nought once the rider is inside the window, until it closes
+   * behind them. A reviewer who remembers this as the distance to the house
+   * is reading the file before #2513.
+   */
   readonly metres: number;
 }
 
 /**
  * The next house still expecting a parcel, in route order, from where the
- * rider is after the last step that ran — #2453. A house the rider has just
- * passed stays the next one, at nought metres, until its window closes behind
- * them and the round counts it missed (`throw.ts`
+ * rider is after the last step that ran — #2453. A house the rider is level
+ * with or has just passed stays the next one, at nought metres, until its
+ * window closes behind them and the round counts it missed (`throw.ts`
  * §`THROW_WINDOW_AFTER_METRES`): it can still be delivered to. `undefined`
- * when no house on the round is still expecting one.
+ * when no house on the round is still expecting one. Its distance is to the
+ * window's opening edge, {@link THROW_WINDOW_BEFORE_METRES} before the house
+ * (#2513), which the assist's wider windows do not move (`throw.ts` §"Wider
+ * windows").
  */
 export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   let next: DeliveryTarget | undefined;
@@ -468,7 +495,7 @@ export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   if (next === undefined) return undefined;
   return {
     side: next.side === 1 ? 'right' : 'left',
-    metres: Math.max(0, next.distance - ride.along),
+    metres: Math.max(0, next.distance - THROW_WINDOW_BEFORE_METRES - ride.along),
   };
 }
 
@@ -485,4 +512,20 @@ export function keepDeliveryWeek(
 ): boolean {
   if (ride?.onLevel === true) return false;
   return writeDeliveryProgress(storage, outcome.next);
+}
+
+/**
+ * Keep a built-in level finished, from a round that reached its own end —
+ * #2363, ADR 0065 D-9: every house on it settled, delivered or missed, with
+ * the assisted setting on or off (D-9.1, DL10). The level's id only, in
+ * `level-progress.ts`, and never the week's counts (D-9.3). `false` for a
+ * round on a rider's own route, a round not yet at its end (a ride ended
+ * first finishes no level), and a device that refused.
+ */
+export function keepLevelFinished(
+  storage: PreferenceStorage | undefined,
+  ride: Pick<DeliveryRide, 'levelId' | 'outcome'>,
+): boolean {
+  if (ride.levelId === undefined || ride.outcome === undefined) return false;
+  return writeLevelProgress(storage, withLevelFinished(readLevelProgress(storage), ride.levelId));
 }

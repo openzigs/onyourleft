@@ -16,6 +16,7 @@ import { roadCorridor } from '../terrain';
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery-progress';
 import { deliveryTown } from './delivery-town-testing';
+import { LEVEL_PROGRESS_STORAGE_KEY, NO_LEVEL_FINISHED, readLevelProgress } from './level-progress';
 import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
@@ -32,6 +33,7 @@ import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  keepLevelFinished,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -43,6 +45,7 @@ import {
   FIRST_DAY_HOUSES,
   FRESH_WEEK,
   roundTally,
+  type RoundOutcome,
   type WeekProgress,
 } from './round';
 import type { DeliveryTarget } from './targets';
@@ -54,6 +57,7 @@ import {
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
   TARGET_CATCH_RADIUS_METRES,
   THROW_WINDOW_AFTER_METRES,
+  THROW_WINDOW_BEFORE_METRES,
   type ThrowTarget,
 } from './throw';
 
@@ -479,13 +483,15 @@ describe('a round ridden, step by step — #1816', () => {
 });
 
 describe('the next house, for the HUD — #2453', () => {
-  it('is the first house on the round, on its own side, the road between it and the rider away', () => {
+  it('is the first house on the round, on its own side, the road between the rider and its throw point away — #2513', () => {
     const ride = withoutObstacles(started());
     const [first] = ride.targets;
     if (first === undefined) throw new Error('the town gave no house');
+    // #2513: to where the window opens, 20 m before the house, never to the house.
+    expect(THROW_WINDOW_BEFORE_METRES).toBe(20);
     expect(nextHouse(ride)).toEqual({
       side: first.side === 1 ? 'right' : 'left',
-      metres: first.distance - ride.along,
+      metres: first.distance - THROW_WINDOW_BEFORE_METRES - ride.along,
     });
     // Both sides are said as the side the throw goes to.
     const sides = new Set(ride.targets.map((target) => target.side));
@@ -496,9 +502,28 @@ describe('the next house, for the HUD — #2453', () => {
         ride.throwTargets.find((each) => each.position === target.position)?.side,
       );
     }
-    // Ridden part of the way, it is that much nearer.
+    // Ridden to 30 m before the house, its throw point is 10 m on.
     const nearer = rideTo(ride, first.distance - 30).ride;
-    expect(nextHouse(nearer)?.metres).toBeCloseTo(30, 6);
+    expect(nextHouse(nearer)?.metres).toBeCloseTo(30 - THROW_WINDOW_BEFORE_METRES, 6);
+  });
+
+  it('reaches nought where the house’s window opens, and stays there through the window — #2513', () => {
+    const ride = withoutObstacles(started());
+    const first = ride.targets[0] as DeliveryTarget;
+    const opens = first.distance - THROW_WINDOW_BEFORE_METRES;
+    // Just short of the window: still a distance, however small.
+    const short = rideTo(ride, opens - 0.5).ride;
+    expect(nextHouse(short)?.metres).toBeCloseTo(0.5, 6);
+    // At its opening edge, half way through and level with the house: nought,
+    // on the house's side, for the HUD to say to throw.
+    for (const along of [opens, opens + THROW_WINDOW_BEFORE_METRES / 2, first.distance]) {
+      const inside = rideTo(ride, along).ride;
+      expect(inside.round.houses[first.position]).toBe('expecting');
+      expect(nextHouse(inside)).toEqual({
+        side: first.side === 1 ? 'right' : 'left',
+        metres: 0,
+      });
+    }
   });
 
   it('moves on to the next house once one is delivered, read off the round the throw changed', () => {
@@ -510,7 +535,7 @@ describe('the next house, for the HUD — #2453', () => {
     const second = ride.targets[1] as DeliveryTarget;
     expect(nextHouse(thrown.ride)).toEqual({
       side: second.side === 1 ? 'right' : 'left',
-      metres: second.distance - thrown.ride.along,
+      metres: Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - thrown.ride.along),
     });
   });
 
@@ -522,7 +547,10 @@ describe('the next house, for the HUD — #2453', () => {
     const past = rideTo(atClose, first.distance + THROW_WINDOW_AFTER_METRES + 0.2).ride;
     expect(past.round.houses[first.position]).toBe('missed');
     const second = ride.targets[1] as DeliveryTarget;
-    expect(nextHouse(past)?.metres).toBeCloseTo(second.distance - past.along, 6);
+    expect(nextHouse(past)?.metres).toBeCloseTo(
+      Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - past.along),
+      6,
+    );
   });
 
   it('is none once no house on the round expects a parcel', () => {
@@ -849,6 +877,7 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     houses: FIRST_DAY_HOUSES + 2,
     hazardsPerKilometre: { static: 4, moving: 0 },
     lengthMetres: 3000,
+    id: 'test-level',
   } as const;
 
   function onLevel(storage = storageOf()): DeliveryRide {
@@ -918,5 +947,55 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     // The week's own round is kept, as before.
     const own = started(storage);
     expect(keepDeliveryWeek(storage, endDeliveryRide(own), own)).toBe(true);
+  });
+
+  describe('keeps the level finished when its round reaches its end — #2363, ADR 0065 D-9', () => {
+    /** The round ridden to its own end: past every house's window, with every house settled. */
+    function finished(ride: DeliveryRide): DeliveryRide {
+      const end = rideTo(ride, town.profile.totalDistance - 1).ride;
+      expect(end.outcome).toBeDefined();
+      return end;
+    }
+
+    it('keeps its id, read back from the device, and the week as it was (D-9.2, D-9.3)', () => {
+      const week: WeekProgress = { day: 4, houses: FIRST_DAY_HOUSES, score: 6 };
+      const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+      const weekBefore = readDeliveryProgress(storage);
+      const ride = finished(withoutObstacles(onLevel(storage)));
+      expect(ride.levelId).toBe(LEVEL.id);
+      expect(keepDeliveryWeek(storage, ride.outcome as RoundOutcome, ride)).toBe(false);
+      expect(keepLevelFinished(storage, ride)).toBe(true);
+      expect(readLevelProgress(storage)).toStrictEqual({ finished: [LEVEL.id] });
+      expect(readDeliveryProgress(storage)).toStrictEqual(weekBefore);
+      expect(readDeliveryProgress(storage)).toStrictEqual(week);
+    });
+
+    it('counts a round ridden with the assisted setting on (D-9.1, the owner’s answer to Q2)', () => {
+      const assist: DeliveryAssist = { obstacles: 'fewer', widerWindows: true, noFail: true };
+      const storage = storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist });
+      const ride = finished(withoutObstacles(onLevel(storage)));
+      expect(ride.widerWindows).toBe(true);
+      expect(ride.round.assisted).toBe(true);
+      expect(keepLevelFinished(storage, ride)).toBe(true);
+      expect(readLevelProgress(storage).finished).toStrictEqual([LEVEL.id]);
+    });
+
+    it('finishes nothing on a ride ended before the round’s end', () => {
+      const storage = storageOf();
+      const ride = rideTo(withoutObstacles(onLevel(storage)), 10).ride;
+      expect(ride.outcome).toBeUndefined();
+      endDeliveryRide(ride);
+      expect(keepLevelFinished(storage, ride)).toBe(false);
+      expect(readLevelProgress(storage)).toStrictEqual(NO_LEVEL_FINISHED);
+      expect(storage.items.has(LEVEL_PROGRESS_STORAGE_KEY)).toBe(false);
+    });
+
+    it('finishes no level on a rider’s own route', () => {
+      const storage = storageOf();
+      const own = finished(withoutObstacles(started(storage)));
+      expect(own.levelId).toBeUndefined();
+      expect(keepLevelFinished(storage, own)).toBe(false);
+      expect(storage.items.has(LEVEL_PROGRESS_STORAGE_KEY)).toBe(false);
+    });
   });
 });

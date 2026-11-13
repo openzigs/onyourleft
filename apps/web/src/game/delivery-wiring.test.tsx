@@ -79,6 +79,7 @@ import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { parseLevelFile } from './delivery/levels/level-file';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
+import { SHIPPED_LEVELS } from './shipped-levels';
 import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
@@ -86,6 +87,7 @@ import { LANE_OFFSETS_METRES, startSteer, steerToward, type SteerIntent } from '
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
+  THROW_WINDOW_BEFORE_METRES,
   type ThrowSide,
 } from './delivery/throw';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
@@ -93,9 +95,11 @@ import type { PadSnapshot } from './gamepad-port';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
+import { NEXT_HOUSE_TEXT } from './hud/fields';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
-import type { GameRenderer, SceneFrame } from './port';
+import type { GameRenderer, RiderMarker, SceneFrame } from './port';
+import { CRASH_SECONDS } from './delivery/crash-look';
 import { LINE_LIMIT_METRES, lineOffsetAt, racingLine } from './racing-line';
 import { DELIVERY_VILLAGE_DRAW_CALLS, villageDrawCallCeiling } from './realistic-budget';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -131,6 +135,8 @@ vi.mock('./hud/announce', async (importOriginal) => {
 const roundFaults = vi.hoisted(() => ({ on: false }));
 /** Every round `GameView` started, as `startDeliveryRide` returned it (#1853). */
 const startedRounds = vi.hoisted((): unknown[] => []);
+/** Where the rider was after each round step `GameView` ran, metres along (#2513). */
+const steppedAlong = vi.hoisted((): number[] => []);
 vi.mock('./delivery/ride-round', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./delivery/ride-round')>();
   return {
@@ -142,7 +148,9 @@ vi.mock('./delivery/ride-round', async (importOriginal) => {
     },
     stepDeliveryRide: (...args: Parameters<typeof actual.stepDeliveryRide>) => {
       if (roundFaults.on) throw new RangeError('the round faulted');
-      return actual.stepDeliveryRide(...args);
+      const stepped = actual.stepDeliveryRide(...args);
+      steppedAlong.push(stepped.ride.along);
+      return stepped;
     },
   };
 });
@@ -166,6 +174,8 @@ const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
  * that forgot it draws a lane change as a slide.
  */
 const swayInputs = vi.hoisted((): (number | undefined)[] => []);
+/** #2494: the rider's drawn steer on every frame `sceneFrame` made, in order. */
+const steerOutputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -174,7 +184,9 @@ vi.mock('./scene', async (importOriginal) => {
       steeredInputs.push(args[0].steeredLateral);
       cameraInputs.push(args[0].cameraLateral);
       swayInputs.push(args[0].steeredSway);
-      return actual.sceneFrame(...args);
+      const frame = actual.sceneFrame(...args);
+      steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
+      return frame;
     },
   };
 });
@@ -434,6 +446,13 @@ const SKIPPED = 1;
 const FRAMES = 330;
 
 /**
+ * The most frames #2513's case rides to the first house's window: the
+ * default town's first house stands about 50 m in, and a frame here rides
+ * about a metre. The loop stops at the window, so it rides fewer.
+ */
+const THROW_NOW_FRAMES = 120;
+
+/**
  * The lane keys pressed after each frame's tick, by frame index — #1853: from
  * the lane the line starts in, two to the left, then back across the road and
  * once past its edge, so the ride is steered into every lane and through the
@@ -593,6 +612,8 @@ interface RideResult {
   readonly steered: ReadonlyMap<number, number | undefined>;
   /** Every round `GameView` started on the ride. */
   readonly started: readonly unknown[];
+  /** The Score field's phrase after each frame, in order (#2454: "Crashed" while a crash is drawn). */
+  readonly scoreDetails: readonly (string | undefined)[];
 }
 
 /** The scripted ride, start to *End ride*, read and unmounted. */
@@ -606,9 +627,20 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   const drawn: SceneFrame[] = [];
   const steered = new Map<number, number | undefined>();
   startedRounds.length = 0;
-  await rideTheTrace({ delivery, trainer: trainerPort(writes), drawn, steered });
+  const scoreDetails: (string | undefined)[] = [];
+  await rideTheTrace({
+    delivery,
+    trainer: trainerPort(writes),
+    drawn,
+    steered,
+    onFrame: () => {
+      scoreDetails.push(field('Score')?.detail);
+      return Promise.resolve();
+    },
+  });
   const read = {
     steered,
+    scoreDetails,
     started: [...startedRounds],
     houses: field('Houses'),
     score: field('Score'),
@@ -910,6 +942,234 @@ describe('a Delivery round inside a game ride — #1816', () => {
   });
 });
 
+describe('a crash drawn inside a game ride — #2454', () => {
+  const DEGREE = Math.PI / 180;
+  /** The rider's drawn lean on each frame, in degrees either way. */
+  const riderLeans = (drawn: readonly SceneFrame[]): number[] =>
+    drawn.map(
+      (frame) =>
+        Math.abs(frame.markers.find((marker) => marker.kind === 'rider')?.lean ?? Number.NaN) /
+        DEGREE,
+    );
+  /** Each frame drawn on a pump, by its rider's lean, with the Score field's phrase after it. */
+  interface Sight {
+    readonly lean: number;
+    readonly detail: string | undefined;
+  }
+  /** An `onFrame` that records a {@link Sight} for every pump that drew a frame into `drawn`. */
+  const watching = (
+    drawn: readonly SceneFrame[],
+    sights: Sight[],
+    then?: (index: number) => Promise<void>,
+  ): ((index: number) => Promise<void>) => {
+    let seen = drawn.length;
+    return async (index) => {
+      if (drawn.length > seen) {
+        sights.push({
+          lean: riderLeans(drawn.slice(-1))[0] ?? Number.NaN,
+          detail: field('Score')?.detail,
+        });
+      }
+      seen = drawn.length;
+      await then?.(index);
+    };
+  };
+  /** How many times the Score field's phrase turned to "Crashed". */
+  const crashesShown = (details: readonly (string | undefined)[]): number =>
+    details.filter((detail, index) => detail === 'Crashed' && details[index - 1] !== 'Crashed')
+      .length;
+
+  it(
+    'draws the rider going down and back up on the bike, and says “Crashed” on the HUD once a crash',
+    SHARED_RIDE,
+    async () => {
+      const round = await withRound();
+      const plain = await without();
+      const leans = riderLeans(round.drawn);
+      // Down: the bicycle on its side (75°), which no ride's own lean comes near (38.7° at most).
+      expect(Math.max(...leans)).toBeGreaterThan(70);
+      // Falling, not cut to the ground: a frame between upright and down.
+      expect(leans.some((lean) => lean > 45 && lean < 70)).toBe(true);
+      // Back up on the bike by the end of the ride, and never down on a ride with no round.
+      expect(leans.at(-1)).toBeLessThan(45);
+      expect(Math.max(...riderLeans(plain.drawn))).toBeLessThan(45);
+      // "Crashed" under the score, at least once and never more often than there were crashes.
+      expect(crashesShown(round.scoreDetails)).toBeGreaterThan(0);
+      expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
+      expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
+      expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
+      // #2493: every frame drawn down hands the realistic rider the crash's
+      // time and side, for its crash clip, inside the crash's 1.5 s; a ride
+      // with no round never does.
+      const rider = (frame: SceneFrame): RiderMarker | undefined =>
+        frame.markers.find((marker) => marker.kind === 'rider');
+      const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
+      expect(timed.length).toBeGreaterThan(0);
+      for (const crash of timed) {
+        expect(crash.seconds).toBeGreaterThanOrEqual(0);
+        expect(crash.seconds).toBeLessThan(CRASH_SECONDS);
+        expect(Math.abs(crash.side)).toBe(1);
+      }
+      for (const frame of round.drawn) {
+        if (Math.abs(rider(frame)?.lean ?? 0) > 70 * DEGREE)
+          expect(rider(frame)?.crash).toBeDefined();
+      }
+      expect(plain.drawn.every((frame) => rider(frame)?.crash === undefined)).toBe(true);
+    },
+  );
+
+  it('draws a still crash pose under reduced motion: down or up, never falling between', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const drawn: SceneFrame[] = [];
+    const sights: Sight[] = [];
+    await rideTheTrace({ delivery: true, drawn, onFrame: watching(drawn, sights) });
+    const leans = riderLeans(drawn);
+    expect(Math.max(...leans)).toBeGreaterThan(74.9);
+    expect(leans.every((lean) => lean < 45 || lean > 74.9)).toBe(true);
+    // #2493: and no crash clip — #2475's still pose, unchanged.
+    expect(
+      drawn.every(
+        (frame) => frame.markers.find((marker) => marker.kind === 'rider')?.crash === undefined,
+      ),
+    ).toBe(true);
+    // #2454's review: "Crashed" for exactly as long as the rider is drawn down — never upright.
+    expect(sights.some((sight) => sight.detail === 'Crashed')).toBe(true);
+    for (const sight of sights) expect(sight.detail === 'Crashed').toBe(sight.lean > 74.9);
+  });
+
+  it(
+    'keeps a rider who paused while down still down on resume, and gets them back up after',
+    SHARED_RIDE,
+    async () => {
+      const drawn: SceneFrame[] = [];
+      const sights: Sight[] = [];
+      let resumedAt: number | undefined;
+      await rideTheTrace({
+        delivery: true,
+        drawn,
+        onFrame: watching(drawn, sights, async () => {
+          const down = sights.at(-1);
+          if (resumedAt !== undefined || down === undefined || down.lean < 70) return;
+          // Down: pause for longer than a whole crash, and ride on.
+          await clickThrough(buttonStarting('Pause'));
+          // The paused loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+          pending = [];
+          nowMs += 3_000;
+          await clickThrough(buttonStarting('Resume'));
+          resumedAt = sights.length;
+        }),
+      });
+      expect(resumedAt).toBeDefined();
+      const after = sights.slice(resumedAt);
+      // Still down on the first frame after the pause, and "Crashed" says so…
+      expect(after[0]?.lean).toBeGreaterThan(70);
+      expect(after[0]?.detail).toBe('Crashed');
+      // …then on the way up, still "Crashed", and back on the bike within the
+      // crash's 1.5 s, with "Crashed" gone.
+      const up = after.findIndex((sight) => sight.detail !== 'Crashed');
+      expect(up).toBeGreaterThan(1);
+      expect(up).toBeLessThanOrEqual(8);
+      expect(after.slice(1, up).some((sight) => sight.lean < 70)).toBe(true);
+      expect(after[up]?.lean).toBeLessThan(45);
+      expect(after[up]?.detail).toMatch(/^Day \d of 7$/u);
+    },
+  );
+
+  it(
+    'starts the next ride upright, with no “Crashed”, after a ride ended while down',
+    SHARED_RIDE,
+    async () => {
+      const drawn: SceneFrame[] = [];
+      const sights: Sight[] = [];
+      stubSeed(script.seed);
+      mounted = await mount(
+        <GameView
+          port={port()}
+          renderer={() => Promise.resolve(capturingRenderer(drawn))}
+          now={() => nowMs}
+          delivery
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      const watch = watching(drawn, sights);
+      for (let index = 0; index < FRAMES; index += 1) {
+        await pump();
+        await watch(index);
+        if ((sights.at(-1)?.lean ?? 0) > 70) break;
+        const side = script.throws.get(index);
+        if (side !== undefined) await pressThrow(side);
+        const intent = STEERS.get(index);
+        if (intent !== undefined) await pressSteer(intent);
+      }
+      // Down, and the ride ended there.
+      expect(sights.at(-1)?.lean).toBeGreaterThan(70);
+      expect(sights.at(-1)?.detail).toBe('Crashed');
+      await clickThrough(buttonStarting('End ride'));
+      await clickThrough(endRideAnswer(document, 'End ride'));
+      // The ended loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+      pending = [];
+      nowMs += 60_000;
+      stubSeed(script.seed);
+      await clickThrough(buttonStarting('Ride '));
+      const next: Sight[] = [];
+      const watchNext = watching(drawn, next);
+      for (let index = 0; index < 5; index += 1) {
+        await pump();
+        await watchNext(index);
+      }
+      expect(next.length).toBeGreaterThan(2);
+      for (const sight of next) {
+        expect(sight.lean).toBeLessThan(45);
+        expect(sight.detail).not.toBe('Crashed');
+      }
+    },
+  );
+
+  it(
+    'says “Crashed” on the HUD while the world is still being prepared, and stops once it is over',
+    SHARED_RIDE,
+    async () => {
+      const details: (string | undefined)[] = [];
+      stubSeed(script.seed);
+      mounted = await mount(
+        <GameView
+          port={port()}
+          renderer={() => {
+            const plain = capturingRenderer([]);
+            return Promise.resolve({
+              ...plain,
+              create: (canvas, settings) => ({
+                ...plain.create(canvas, settings),
+                // A view that never finishes preparing: the world is never drawn.
+                prepare: () => new Promise<void>(() => undefined),
+              }),
+            });
+          }}
+          now={() => nowMs}
+          delivery
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 0; index < FRAMES; index += 1) {
+        await pump();
+        details.push(field('Score')?.detail);
+        const side = script.throws.get(index);
+        if (side !== undefined) await pressThrow(side);
+        const intent = STEERS.get(index);
+        if (intent !== undefined) await pressSteer(intent);
+      }
+      expect(crashesShown(details)).toBeGreaterThan(0);
+      expect(details.at(-1)).toMatch(/^Day \d of 7$/u);
+    },
+  );
+});
+
 describe('lane steering inside a game ride — #1853', () => {
   it(
     'hands every frame of the round the offset the shadow round steered to, on the steps that ran',
@@ -1010,6 +1270,15 @@ describe('lane steering inside a game ride — #1853', () => {
     expect(Math.min(...swayed)).toBeGreaterThanOrEqual(0);
     expect(swayInputs.at(-1)).toBe(0);
     expect(steeredInputs.at(-1)).toBe(LANE_OFFSETS_METRES[1]);
+    // #2494: the bars turned into the move and back out of it, then straight.
+    const steers = steerOutputs.slice(pressed).map((each) => (each ?? 0) * side);
+    expect(Math.max(...steers)).toBeGreaterThan(0.1);
+    expect(Math.min(...steers)).toBeLessThan(-0.1);
+    // Into the move first: the first turn of the bars after the press has the
+    // move's own sign, not the opposite (the max and min above are symmetric).
+    const first = steers.find((each) => Math.abs(each) > 0.1);
+    expect(first).toBeGreaterThan(0);
+    expect(steerOutputs.at(-1)).toBeUndefined();
   });
 });
 
@@ -1634,6 +1903,40 @@ describe('offered in the chooser, with the short round and the no-round fallback
     }
   });
 
+  it('counts the next house down to its throw point, then says “Throw now” on its side — #2513', async () => {
+    startedRounds.length = 0;
+    steppedAlong.length = 0;
+    await chooseAndRide({ choose: true, frames: 1 });
+    const first = (startedRounds[0] as DeliveryRide | undefined)?.targets[0];
+    if (first === undefined) throw new Error('the ride started no round');
+    const side = first.side === 1 ? 'on the right' : 'on the left';
+    // Where the first house's window opens: the throw point the HUD counts to.
+    const opens = first.distance - THROW_WINDOW_BEFORE_METRES;
+    const seen: { readonly along: number; readonly value: string; readonly detail: string }[] = [];
+    for (let frame = 0; frame < THROW_NOW_FRAMES; frame += 1) {
+      const next = field('Next house');
+      const along = steppedAlong.at(-1);
+      if (next !== undefined && along !== undefined) seen.push({ along, ...next });
+      if (next?.value === NEXT_HOUSE_TEXT.throwNow) break;
+      await pump();
+    }
+    const counted = seen.filter((each) => each.value !== NEXT_HOUSE_TEXT.throwNow);
+    const throwNow = seen.at(-1);
+    // Not vacuous: it counted down on the way, and reached the window.
+    expect(counted.length).toBeGreaterThan(1);
+    expect(throwNow?.value).toBe(NEXT_HOUSE_TEXT.throwNow);
+    // Every count was short of the window, to the throw point, never to the house.
+    for (const each of counted) {
+      expect(each.along).toBeLessThan(opens);
+      expect(each.detail).toBe(side);
+      expect(Number(each.value)).toBe(Math.round(opens - each.along));
+    }
+    // "Throw now," on the house's side, once the rider is inside its window, and the house still ahead.
+    expect(throwNow?.along).toBeGreaterThanOrEqual(opens);
+    expect(throwNow?.along).toBeLessThan(first.distance);
+    expect(throwNow?.detail).toBe(side);
+  });
+
   it('starts an ordinary ride, saying nothing of Delivery, when it is not chosen', async () => {
     await chooseAndRide({ choose: false, frames: 5 });
     expect(field('Houses')).toBeUndefined();
@@ -2127,7 +2430,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
         riderDistance: 0,
         lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
         storage: undefined,
-        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres },
+        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres, id: LEVEL.id },
       });
       vi.restoreAllMocks();
       if (ride === undefined) continue;
@@ -2173,6 +2476,8 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     const writes: Write[] = [];
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
+      // The listing must name the level: an unlisted one is not read (#2363).
+      listDeliveryLevels: () => Promise.resolve([{ ...SHIPPED_LEVELS.list()[0]!, id: LEVEL.id }]),
       loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({

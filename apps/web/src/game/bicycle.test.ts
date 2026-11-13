@@ -65,6 +65,8 @@ import {
   stanceOf,
   STANDING_BICYCLE_ROCK_RADIANS,
   turningCadence,
+  STEERING_AXIS,
+  steeredPoint,
   type DrawnPosture,
   type LimbBone,
   type RiderPart,
@@ -1496,5 +1498,85 @@ describe('the body’s motion grows with effort, and a standing rider rocks the 
     // Stale, and never paired: the HUD shows a dash for both.
     expect(turningCadence({ value: 88, live: false, paired: true })).toBeUndefined();
     expect(turningCadence({ value: undefined, live: false, paired: false })).toBeUndefined();
+  });
+});
+
+describe('the bars turn about the head tube — #2494', () => {
+  const partNamed = (name: string): RiderPart => {
+    const found = RIDER_BODY_PARTS.find((each) => each.name === name);
+    if (found === undefined) throw new Error(`no ${name}`);
+    return found;
+  };
+  const distanceToAxis = (point: { x: number; y: number; z: number }): number => {
+    const { point: on, direction } = STEERING_AXIS;
+    const offset = [point.x - on.x, point.y - on.y, point.z - on.z];
+    const along =
+      (offset[0] ?? 0) * direction.x +
+      (offset[1] ?? 0) * direction.y +
+      (offset[2] ?? 0) * direction.z;
+    return Math.hypot(
+      (offset[0] ?? 0) - along * direction.x,
+      (offset[1] ?? 0) - along * direction.y,
+      (offset[2] ?? 0) - along * direction.z,
+    );
+  };
+
+  it('turns about a 72° head tube, drawn on the axis, that passes through the front hub', () => {
+    const { direction } = STEERING_AXIS;
+    expect(Math.hypot(direction.x, direction.y, direction.z)).toBeCloseTo(1, 12);
+    // 72° from the road, pointing down the tube.
+    expect(Math.atan2(-direction.y, direction.z)).toBeCloseTo((72 * Math.PI) / 180, 12);
+    // The head tube is drawn along it: its middle is on the axis and it is tipped by it.
+    const headTube = partNamed('head tube');
+    expect(distanceToAxis(headTube)).toBeLessThan(1e-9);
+    expect(headTube.pitch).toBeCloseTo(Math.atan2(direction.z, direction.y) - Math.PI, 9);
+    // The front wheel turns about its own middle, within 5 mm.
+    expect(distanceToAxis(partNamed('front wheel'))).toBeLessThan(0.005);
+  });
+
+  it('turns the fork, the front wheel and the whole bar, the arms toward their hands, and nothing else', () => {
+    const whole = RIDER_BODY_PARTS.filter((each) => each.steers === 'whole').map(
+      (each) => each.name,
+    );
+    expect(whole.sort()).toEqual(
+      [
+        'front wheel',
+        'fork -1',
+        'fork 1',
+        'bar tops',
+        'bar bend -1',
+        'bar bend 1',
+        'bar drop -1',
+        'bar drop 1',
+        'bar hood -1',
+        'bar hood 1',
+      ].sort(),
+    );
+    const graded = RIDER_BODY_PARTS.filter((each) => each.steers === 'toward-end');
+    expect(graded.map((each) => each.name).sort()).toEqual(['arm -1', 'arm 1']);
+    for (const name of ['rear wheel', 'head tube', 'top tube', 'down tube', 'saddle', 'torso']) {
+      expect(partNamed(name).steers, name).toBeUndefined();
+    }
+  });
+
+  it('turns a point about the axis by the steer, to the rider’s right for a positive one, keeping its distance', () => {
+    const tip = { x: 0.2, y: 0.91, z: 0.34 };
+    const turned = steeredPoint(tip, 0.3, { x: 0, y: 0, z: 0 });
+    // The left (`+X`) end of the bar comes forward and the bar points right.
+    expect(turned.z).toBeGreaterThan(tip.z);
+    expect(turned.x).toBeLessThan(tip.x);
+    expect(distanceToAxis(turned)).toBeCloseTo(distanceToAxis(tip), 12);
+    const { point } = STEERING_AXIS;
+    const from = (each: { x: number; y: number; z: number }): number =>
+      Math.hypot(each.x - point.x, each.y - point.y, each.z - point.z);
+    expect(from(turned)).toBeCloseTo(from(tip), 12);
+    // A point on the axis stays, and a nought steer moves nothing.
+    expect(steeredPoint(point, 0.4, { x: 0, y: 0, z: 0 })).toEqual(point);
+    expect(steeredPoint(tip, 0, { x: 0, y: 0, z: 0 })).toEqual(tip);
+    // And back by the opposite steer.
+    const back = steeredPoint(turned, -0.3, { x: 0, y: 0, z: 0 });
+    expect(back.x).toBeCloseTo(tip.x, 12);
+    expect(back.y).toBeCloseTo(tip.y, 12);
+    expect(back.z).toBeCloseTo(tip.z, 12);
   });
 });

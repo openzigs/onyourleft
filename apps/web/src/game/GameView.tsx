@@ -245,17 +245,20 @@ import {
   type ListedLevel,
 } from './delivery/levels/levels';
 import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
+import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
+  keepLevelFinished,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
   type DeliveryRide,
 } from './delivery/ride-round';
 import { sidewaysSpeedOf, steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
+import { crashFrom, crashShare, crashSideFor, type DrawnCrash } from './delivery/crash-look';
 import { dampedSway } from './lane-change-lean';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
@@ -1816,6 +1819,21 @@ function GameScreen({
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
   /**
+   * #2454: the rider's latest crash in the round — when, by the frame clock,
+   * and which side they fall to — while it is drawn (`delivery/crash-look.ts`).
+   * A crash during one already drawn does not restart it: the rider is down.
+   */
+  const crashRef = useRef<DrawnCrash | undefined>(undefined);
+  /** #2454: how far into the crash pose the last frame was, for the HUD's "Crashed". */
+  const crashShownRef = useRef<number | undefined>(undefined);
+  /**
+   * #2454's review: the clock a crash is timed on, in ms — the frames the loop
+   * ran and nothing else, so a pause, when it does not run, does not use up a
+   * crash the rider is down in. The frame clock and the ride's `elapsed` both
+   * count the pause.
+   */
+  const crashClockRef = useRef(0);
+  /**
    * The lap race this ride runs, while it runs one — #1906. A ref for
    * {@link deliveryRef}'s reason. Set at the press and held for the ride;
    * `undefined` on every other ride. A ride that ends mid-race has nothing of
@@ -2037,10 +2055,20 @@ function GameScreen({
     // #2362: the level the Delivery picker opened this on, read with the
     // routes for the same reason, so its card is there when the chooser is.
     const levelId = openedOn.current === undefined ? undefined : levelOfRouteId(openedOn.current);
+    // #2363, ADR 0065 D-9.1: a level still locked on this device is not read,
+    // so an address typed by hand rides no round the picker would not offer.
     const levelRead = (
       levelId === undefined
         ? Promise.resolve(undefined)
-        : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined))
+        : (port.listDeliveryLevels?.() ?? Promise.resolve([])).then((listed) => {
+            const order = listed.map((each) => each.id);
+            // A level the listing does not name has no place in the order, so
+            // nothing says it is open: it is not read (fails closed).
+            return !order.includes(levelId) ||
+              levelStanding(order, readLevelProgress(deviceStorage()), levelId).state === 'locked'
+              ? undefined
+              : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined));
+          })
     ).catch((): undefined => undefined);
     void Promise.all([port.listRoutes(), builtIn, levelRead]).then(
       ([found, circuitsFound, levelFound]) => {
@@ -2740,6 +2768,10 @@ function GameScreen({
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current = undefined;
+      // #2454's review: a ride ended while down starts the next one upright.
+      crashRef.current = undefined;
+      crashShownRef.current = undefined;
+      crashClockRef.current = 0;
       deliveryWaitingRef.current = undefined;
       setNoRound(undefined);
       setTownLoading(false);
@@ -2778,7 +2810,11 @@ function GameScreen({
                 level:
                   levelRidden === undefined
                     ? undefined
-                    : { ...levelRidden.file.round, lengthMetres: levelRidden.file.lengthMetres },
+                    : {
+                        ...levelRidden.file.round,
+                        lengthMetres: levelRidden.file.lengthMetres,
+                        id: levelRidden.file.id,
+                      },
               });
         const noRoundText: string | undefined =
           deliveryRef.current !== undefined
@@ -3556,6 +3592,7 @@ function GameScreen({
       // trainer is sent (DL5): the gradient above samples the simulation alone, and
       // is sampled BEFORE this, so a fault in the round cannot stop the loop
       // short of this frame's grade write.
+      const crashClock = (crashClockRef.current += Math.max(0, at - lastFrameAt));
       const delivery = deliveryRef.current;
       if (delivery !== undefined && stepsRun > 0) {
         // The rider's steering is stepped in it, and its offset is where the
@@ -3570,6 +3607,16 @@ function GameScreen({
         deliveryRef.current = stepped.ride;
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        // #2454: and drawn — the rider goes down where they are and gets back
+        // up. A drawing only: nothing here is read by the simulation above.
+        if (stepped.crashes > 0) {
+          crashRef.current = crashFrom(
+            crashRef.current,
+            crashClock,
+            crashSideFor(stepped.ride.steer.offset),
+            reducedMotionRef.current,
+          );
+        }
         // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
         if (stepped.ride.onLevel) {
           owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
@@ -3580,9 +3627,21 @@ function GameScreen({
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
           keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
+          // #2363, ADR 0065 D-9: a level's round, reached its end, opens the next level.
+          keepLevelFinished(deviceStorage(), stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
+      // #2454: how far into a crash the rider is, while one is — on every frame,
+      // drawn or not, as the HUD's "Crashed" reads it.
+      const crashed = crashRef.current;
+      const crashSeconds = crashed === undefined ? 0 : (crashClock - crashed.atMs) / 1000;
+      const crashAt =
+        crashed === undefined || deliveryRef.current === undefined
+          ? undefined
+          : crashShare(crashSeconds, reducedMotionRef.current);
+      if (crashAt === undefined) crashRef.current = undefined;
+      crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
       // as the round above: AFTER the grade is sampled, from the simulation's
       // odometer, which is the rider's effort distance (ADR 0060 D-3.1). It
@@ -3622,7 +3681,20 @@ function GameScreen({
       const view = viewRef.current;
       const prepared = view !== undefined && view === preparedViewRef.current;
       const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
-      if (drawn !== undefined && view !== undefined && !waiting) {
+      // #2524: a prepared view with no drawing context is handed no more
+      // frames. It would draw none of them — `three-renderer.ts` §`render`
+      // returns at once without a renderer, and `hasContext` is fixed when the
+      // view is built (`port.ts` §`hasContext`) — so the frame below, most of a
+      // frame's work and none of it the trainer's, was built for nobody.
+      // Everything above it still runs: the simulation, the grade, the round
+      // and the race. The block's other writes are its two dampers, which only
+      // this view's frames read, and the name tags, which it lays empty for a
+      // view with no context: one view draws a whole ride (`teardown` destroys
+      // it, and the next ride's stage mounts a new layer), so the layer under a
+      // view with no context has never held a tag. The view is still prepared
+      // with one frame, below, so `preparedViewRef` moves exactly as before.
+      const blind = prepared && !view.hasContext;
+      if (drawn !== undefined && view !== undefined && !waiting && !blind) {
         // #1906: a lap race draws the rider at their race position, effort
         // distance plus race offset (ADR 0060 D-3.3), and its bots beside
         // them. The drawing only: the grade above was read at the odometer.
@@ -3658,12 +3730,12 @@ function GameScreen({
           (deliverySteered === undefined || deliveryRef.current === undefined
             ? 0
             : sidewaysSpeedOf(deliveryRef.current.steer));
-        steeredSway = dampedSway(
-          steeredSway,
-          steeringSpeed,
-          steeredSwayAt === undefined ? 0 : (at - steeredSwayAt) / 1000,
-        );
+        const swaySeconds = steeredSwayAt === undefined ? 0 : (at - steeredSwayAt) / 1000;
+        const swayBefore = steeredSway;
+        steeredSway = dampedSway(steeredSway, steeringSpeed, swaySeconds);
         steeredSwayAt = at;
+        // #2494: how fast the sway moved over the frame, which turns the bars.
+        const steeredSwayRate = swaySeconds > 0 ? (steeredSway - swayBefore) / swaySeconds : 0;
         const unturned = sceneFrame({
           profile: chosen.profile,
           origin,
@@ -3732,6 +3804,9 @@ function GameScreen({
           // the bicycle into a lane change. Optional the unsafe way round too,
           // so the wiring tests read it back off the frames of a lane change.
           steeredSway,
+          // #2494: and how fast that is changing, which turns the bars into
+          // the move and out of it. Optional the unsafe way round too.
+          steeredSwayRate,
           // #2396: and the camera's eye moved off any parked car it is
           // alongside, so it never passes through one. A drawing only.
           // Optional the unsafe way round (`scene.ts`), so
@@ -3749,6 +3824,20 @@ function GameScreen({
             : {
                 raceBots: raceDrawn.raceBots,
                 ...(raceDrawn.riderHit === undefined ? {} : { riderHit: raceDrawn.riderHit }),
+              }),
+          // #2454: the round's crash, drawn as a fall and a getting back up.
+          // Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          // #2493: and how long ago, for the realistic rider's crash clip —
+          // never under reduced motion, which keeps #2475's still pose.
+          ...(crashAt === undefined || crashed === undefined
+            ? {}
+            : {
+                riderCrash: {
+                  share: crashAt,
+                  side: crashed.side,
+                  ...(reducedMotionRef.current ? {} : { seconds: crashSeconds }),
+                },
               }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
@@ -3871,7 +3960,15 @@ function GameScreen({
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
-        const next = nextWorldQuality(previous, sample);
+        // #2513: a Delivery round's houses are mapped buildings, which only the
+        // realistic world draws, so while one runs the ladder holds realism's
+        // floor rather than leaving it (`quality.ts` §`nextWorldQuality`).
+        const running = deliveryRef.current;
+        const next = nextWorldQuality(
+          previous,
+          sample,
+          running !== undefined && running.outcome === undefined,
+        );
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
           previous,
@@ -4473,6 +4570,8 @@ function GameScreen({
                 round: deliveryRef.current.round,
                 week: deliveryRef.current.week,
                 score: deliveryRef.current.score,
+                // #2454: "Crashed" on the HUD while a crash is drawn.
+                crashed: crashShownRef.current !== undefined,
                 // #2453: where the next house is, so the rider knows where to throw.
                 next: nextHouse(deliveryRef.current),
               },
