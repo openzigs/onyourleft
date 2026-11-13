@@ -797,7 +797,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pupil, iris and white, in the HELMET's mesh (so on the
                         head bone, no draw call), its 168 triangles taken out
                         of the body's share (`rider-eyes.test.ts`). The pack's
-                        rider (#2485) keeps flat ones. ⚠️ The jersey's main colour is in NO
+                        rider (#2485) keeps flat ones. ⚠️ **Since #2493 the
+                        file carries a CRASH CLIP** (`crash`, made by
+                        step 10 from `rider_crash.py` on `delivery/
+                        crash-look.ts`' times): `RealisticRiderBelt` blends
+                        the body toward it by the crash's share whenever a
+                        marker carries `crash`, never under reduced motion,
+                        and the stylised world keeps #2475's roll alone. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the

@@ -3635,10 +3635,11 @@ function GameScreen({
       // #2454: how far into a crash the rider is, while one is — on every frame,
       // drawn or not, as the HUD's "Crashed" reads it.
       const crashed = crashRef.current;
+      const crashSeconds = crashed === undefined ? 0 : (crashClock - crashed.atMs) / 1000;
       const crashAt =
         crashed === undefined || deliveryRef.current === undefined
           ? undefined
-          : crashShare((crashClock - crashed.atMs) / 1000, reducedMotionRef.current);
+          : crashShare(crashSeconds, reducedMotionRef.current);
       if (crashAt === undefined) crashRef.current = undefined;
       crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
@@ -3827,9 +3828,17 @@ function GameScreen({
           // #2454: the round's crash, drawn as a fall and a getting back up.
           // Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          // #2493: and how long ago, for the realistic rider's crash clip —
+          // never under reduced motion, which keeps #2475's still pose.
           ...(crashAt === undefined || crashed === undefined
             ? {}
-            : { riderCrash: { share: crashAt, side: crashed.side } }),
+            : {
+                riderCrash: {
+                  share: crashAt,
+                  side: crashed.side,
+                  ...(reducedMotionRef.current ? {} : { seconds: crashSeconds }),
+                },
+              }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
         // the wall clock between them, so a corridor that jumps turns the view

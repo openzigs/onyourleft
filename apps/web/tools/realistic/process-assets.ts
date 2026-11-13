@@ -53,6 +53,12 @@
  * `pose`), and writes the vertex-animation texture beside the GLB — a second
  * file with no KTX2 step, copied as it was written.
  *
+ * ## The rider's crash clip is posed from `bicycle.ts` too — #2493
+ *
+ * The rider's run is handed the riding joints and #2475's timeline
+ * (`rider-crash.ts` §`riderCrashPose`, a recipe's `crash`), and writes the
+ * clip into the GLB it made.
+ *
  * ## Some trees are generated, not scanned — #1283
  *
  * ADR 0049 D-1. `ez-tree.ts` loads the pinned generator — a tool, like the two
@@ -99,6 +105,7 @@ import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from
 import { loadEzTree, stageGeneratedLevel, type EzTreeModule } from './ez-tree';
 import { LOCK, RAW } from './fetch-assets';
 import { packPose } from './rider-pack';
+import { riderCrashPose } from './rider-crash';
 import {
   GENERATED_TREES,
   geometryDigest,
@@ -256,6 +263,12 @@ function make(
     const pose = join(stage, `${output.file}.pose.json`);
     writeFileSync(pose, JSON.stringify(packPose(recipe.pose)));
     extra.push(pose);
+  }
+  // #2493: the riding pose and the timeline the rider's crash clip is made on.
+  if (recipe.crash === true) {
+    const crash = join(stage, `${output.file}.crash.json`);
+    writeFileSync(crash, JSON.stringify(riderCrashPose()));
+    extra.push(crash);
   }
   blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args, ...extra]);
   if (recipe.ktx2 !== undefined) {

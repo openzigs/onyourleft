@@ -8,7 +8,7 @@ Run by `process-assets.ts`, never by hand:
 
     Blender -b --factory-startup --python process_rider.py -- \
         <makehuman-dir> <out.glb> <report.json> <target-tris> <texture-pixels> \
-        <colour.png> <normal.png> <orm.png> <system-assets-dir> <mark.png>
+        <colour.png> <normal.png> <orm.png> <system-assets-dir> <mark.png> <crash.json>
 
 or, for the pack's rider (#2485, the bake half of #681):
 
@@ -57,6 +57,11 @@ What it does:
    shoulder) to the baked normal map, and write the three maps as PNGs for
    `encode-ktx2.ts`.
 9. Export a skinned GLB in MakeHuman's rest pose, the helmet beside the body.
+10. THE CRASH CLIP (#2493): read the GLB back, pose its skeleton at each of
+   `rider_crash.py`'s moments from the riding joints and #2475's timeline in
+   <crash.json> (`rider-crash.ts`), exactly as the pack's phases are posed, and
+   write the poses into it as one animation, `crash` -- each kept bone's
+   rotation and the root's position, in the file's own node frames.
 
 THE PACK (#2485): with `lod`, steps 1 to 5 run as above with a cheaper helmet
 and the body cut to what it leaves of <target-tris>; there is no bake and no
@@ -74,6 +79,8 @@ derives -- the hips on the saddle, the hands on the hoods, and each knee and
 foot from `legBones(crankAngle)`. One source for where a leg is, rather than a
 pose baked here that `bicycle.ts` could drift from; and the legs therefore turn
 exactly when the HUD shows a cadence, which is #349's rule.
+The crash clip (step 10) is the one pose made here, for a Delivery crash only,
+and it is made FROM those joints: it starts and ends on the riding pose.
 
 ADR 0026 D-5: the inputs are pinned by `inputs.lock.json` (MakeHuman at one
 commit, MakeHuman's CC0 system assets pack by its archive's digest) and the
@@ -98,6 +105,7 @@ from mathutils.bvhtree import BVHTree
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rider_kit as KIT  # noqa: E402
+import rider_crash as CRASH_KIT  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 MH_DIR, OUT_GLB, OUT_REPORT = args[:3]
@@ -113,6 +121,8 @@ else:
     COLOUR_PNG, NORMAL_PNG, ORM_PNG = (os.path.join(os.path.dirname(OUT_GLB), name) for name in args[5:8])
     SYSTEM_DIR = args[8]
     MARK_PNG = args[9]
+    # #2493: the riding pose and #2475's timeline the crash clip is made on.
+    CRASH_JSON = args[10]
 # MakeHuman's unit is the decimetre.
 UNIT = 0.1
 
@@ -687,6 +697,225 @@ body_tris = len(body.data.polygons)
 if body_tris + helmet_tris > TARGET_TRIS:
     raise RuntimeError(f"the rider is {body_tris} + {helmet_tris} triangles, over {TARGET_TRIS}")
 
+# --- reading an exported GLB back, and posing its skeleton -------------------
+# Shared by THE PACK (#2485), which poses the body at every crank angle into
+# its vertex-animation texture, and by the rider's crash clip (#2493, step 10),
+# which poses it at each moment of a crash.
+
+COMPONENTS = {5121: "<u1", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
+WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+
+
+def read_glb(path):
+    """A GLB's JSON document and its binary chunk."""
+    with open(path, "rb") as handle:
+        glb = handle.read()
+    document, binary, at = None, None, 12
+    while at + 8 <= len(glb):
+        length, kind = struct.unpack_from("<II", glb, at)
+        chunk = glb[at + 8 : at + 8 + length]
+        if kind == 0x4E4F534A:
+            document = json.loads(chunk)
+        elif kind == 0x004E4942:
+            binary = chunk
+        at += 8 + length + (-length % 4)
+    return document, binary
+
+
+def read_accessor(document, binary, index):
+    accessor = document["accessors"][index]
+    view = document["bufferViews"][accessor["bufferView"]]
+    kind = np.dtype(COMPONENTS[accessor["componentType"]])
+    width = WIDTH[accessor["type"]]
+    if view.get("byteStride", kind.itemsize * width) != kind.itemsize * width:
+        raise RuntimeError("the exporter interleaved an accessor")
+    values = np.frombuffer(
+        binary,
+        dtype=kind,
+        count=accessor["count"] * width,
+        offset=view.get("byteOffset", 0) + accessor.get("byteOffset", 0),
+    ).reshape(accessor["count"], width)
+    values = values.astype(np.float64)
+    if accessor.get("normalized"):
+        values /= np.iinfo(kind).max
+    return values
+
+
+def skinned_vertices(document, binary, mesh_names):
+    """Every vertex of the named meshes, primitive by primitive in the file's
+    order: rest positions, normals, and each one's four bones (as `KEEP`
+    indices) and weights."""
+    rest_parts, normal_parts, joint_parts, weight_parts = [], [], [], []
+    for mesh_index, gltf_mesh in enumerate(document["meshes"]):
+        node = next(n for n in document["nodes"] if n.get("mesh") == mesh_index)
+        if node["name"] not in mesh_names:
+            continue
+        names = [document["nodes"][j]["name"] for j in document["skins"][node["skin"]]["joints"]]
+        bone_of = np.array([KEEP.index(name) for name in names])
+        for primitive in gltf_mesh["primitives"]:
+            attributes = primitive["attributes"]
+            rest_parts.append(read_accessor(document, binary, attributes["POSITION"]))
+            normal_parts.append(read_accessor(document, binary, attributes["NORMAL"]))
+            joint_parts.append(bone_of[read_accessor(document, binary, attributes["JOINTS_0"]).astype(int)])
+            weight_parts.append(read_accessor(document, binary, attributes["WEIGHTS_0"]))
+    return (
+        np.concatenate(rest_parts),
+        np.concatenate(normal_parts),
+        np.concatenate(joint_parts),
+        np.concatenate(weight_parts),
+    )
+
+
+def rotation(axis, angle):
+    """A turn by `angle` about `axis`, right-handed -- three's `setFromAxisAngle`."""
+    x, y, z = axis / np.linalg.norm(axis)
+    c, s, k = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
+    return np.array([
+        [c + x * x * k, x * y * k - z * s, x * z * k + y * s],
+        [y * x * k + z * s, c + y * y * k, y * z * k - x * s],
+        [z * x * k - y * s, z * y * k + x * s, c + z * z * k],
+    ])
+
+
+def between(a, b):
+    """The least turn taking direction `a` to `b` -- three's `setFromUnitVectors`."""
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    cross = np.cross(a, b)
+    sine = np.linalg.norm(cross)
+    if sine < 1e-12:
+        if a @ b > 0:
+            return np.eye(3)
+        raise RuntimeError("a bone asked to turn right round")
+    return rotation(cross, math.atan2(sine, float(np.clip(a @ b, -1, 1))))
+
+
+def two_bone_joint(root, target, upper, lower, pole):
+    """`three-renderer.ts` section twoBoneJoint, line for line."""
+    reach = target - root
+    full = max(float(np.linalg.norm(reach)), 1e-6)
+    distance = min(full, upper + lower - 1e-4)
+    along = reach / full
+    cosine = min(1.0, max(-1.0, (upper * upper + distance * distance - lower * lower) / (2 * upper * distance)))
+    bend = pole - (pole @ along) * along
+    bend_length = float(np.linalg.norm(bend))
+    bend = np.array([0.0, 0.0, 1.0]) if bend_length < 1e-9 else bend / bend_length
+    sine = math.sqrt(1 - cosine * cosine)
+    return root + upper * (cosine * along + sine * bend)
+
+
+ACROSS = np.array([1.0, 0.0, 0.0])
+FORWARD = np.array([0.0, 0.0, 1.0])
+
+
+class Poser:
+    """The kept skeleton in the GLB's frame (Blender's (x, y, z) is glTF's
+    (x, z, -y)), scaled as `RealisticRiderBelt` scales the body -- its rest leg
+    stretched to `leg`, `bicycle.ts`' thigh and shin -- and each bone's turn
+    and shift from the rest pose, in the bicycle's frame."""
+
+    def __init__(self, leg, rest, joints, weights):
+        self.index = {name: index for index, name in enumerate(KEEP)}
+        unscaled = np.array([(HEAD[name].x, HEAD[name].z, -HEAD[name].y) for name in KEEP])
+        rest_leg = np.linalg.norm(
+            unscaled[self.index["upperleg01.L"]] - unscaled[self.index["lowerleg01.L"]]
+        ) + np.linalg.norm(unscaled[self.index["lowerleg01.L"]] - unscaled[self.index["foot.L"]])
+        self.scale = leg / rest_leg
+        self.J = unscaled * self.scale
+        self.rest = rest * self.scale
+        parent_of = {name: kept_ancestor(bones[name]["parent"]) for name in KEEP}
+
+        def descends(name, ancestor):
+            while name is not None:
+                if name == ancestor:
+                    return True
+                name = parent_of[name]
+            return False
+
+        self.beneath = {name: [self.index[k] for k in KEEP if descends(k, name)] for name in KEEP}
+        # Each hand, as `RealisticRiderBelt` measures it off the rest pose: the
+        # middle of the vertices whose heaviest weight is the wrist, and which
+        # way that is from the wrist.
+        heaviest = joints[np.arange(len(self.rest)), np.argmax(weights, axis=1)]
+        self.hand_reach, self.hand_along = [], []
+        for side in "LR":
+            wrist_index = self.index[f"wrist.{side}"]
+            offset = self.rest[heaviest == wrist_index].mean(axis=0) - self.J[wrist_index]
+            self.hand_reach.append(float(np.linalg.norm(offset)))
+            self.hand_along.append(offset / np.linalg.norm(offset))
+        self.turns = np.zeros((len(KEEP), 3, 3))
+        self.shifts = np.zeros((len(KEEP), 3))
+
+    def at(self, name):
+        """Where a bone's head is now."""
+        index = self.index[name]
+        return self.turns[index] @ self.J[index] + self.shifts[index]
+
+    def turn(self, name, by, pivot):
+        """Turns a bone and everything under it about `pivot`."""
+        for index in self.beneath[name]:
+            self.turns[index] = by @ self.turns[index]
+            self.shifts[index] = by @ (self.shifts[index] - pivot) + pivot
+
+    def aim(self, name, child, direction):
+        """`RealisticRiderBelt`'s aim: the bone turned so `child`'s head lies along `direction`."""
+        head = self.at(name)
+        self.turn(name, between(self.at(child) - head, direction), head)
+
+    def span(self, a, b):
+        return float(np.linalg.norm(self.at(a) - self.at(b)))
+
+    def pose(self, hips, shoulders, grip, foot, stance, nod):
+        """Every bone posed onto the joints, as `RealisticRiderBelt` poses the
+        rider: the hips on `hips`, the back at `shoulders`, the head turned by
+        `nod` (half at the neck, half at the head), each hand's middle on its
+        `grip` along its own line and each foot on its `foot` -- index 0 the
+        `+X` (`.L`) side. Returns how far short of a foot the legs fell."""
+        self.turns[:] = np.eye(3)
+        self.shifts[:] = 0.0
+        shortfall = 0.0
+        # The whole body, moved so its hips sit on the saddle.
+        self.shifts += hips - (self.at("upperleg01.L") + self.at("upperleg01.R")) / 2
+        # The back, from the hips towards the shoulders.
+        self.aim("spine05", "neck01", shoulders - hips)
+        # The head, turned: half at the neck, half at the head.
+        if nod != 0:
+            for name in ("neck01", "head"):
+                self.turn(name, rotation(ACROSS, nod), self.at(name))
+        for index, side in enumerate("LR"):
+            sign = 1 if index == 0 else -1
+            # The arm: shoulder to the wrist behind the grip, on the hand's line.
+            shoulder = self.at(f"upperarm01.{side}")
+            upper = self.span(f"upperarm01.{side}", f"lowerarm01.{side}")
+            fore = self.span(f"lowerarm01.{side}", f"wrist.{side}")
+            along = np.array([0.0, -math.sin(stance["handDown"]), math.cos(stance["handDown"])])
+            wrist = grip[index] - along * self.hand_reach[index]
+            out = stance["elbowOut"]
+            pole = np.array([
+                sign * math.sin(out),
+                -math.cos(out) * math.cos(stance["elbowBack"]),
+                -math.cos(out) * math.sin(stance["elbowBack"]),
+            ])
+            elbow = two_bone_joint(shoulder, wrist, upper, fore, pole)
+            self.aim(f"upperarm01.{side}", f"lowerarm01.{side}", elbow - shoulder)
+            self.aim(f"lowerarm01.{side}", f"wrist.{side}", wrist - elbow)
+            hand_now = self.turns[self.index[f"wrist.{side}"]] @ self.hand_along[index]
+            self.turn(f"wrist.{side}", between(hand_now, along), self.at(f"wrist.{side}"))
+            # The leg: hip to the pedal, the knee forward.
+            hip = self.at(f"upperleg01.{side}")
+            thigh = self.span(f"upperleg01.{side}", f"lowerleg01.{side}")
+            shin = self.span(f"lowerleg01.{side}", f"foot.{side}")
+            knee = two_bone_joint(hip, foot[index], thigh, shin, FORWARD)
+            self.aim(f"upperleg01.{side}", f"lowerleg01.{side}", knee - hip)
+            self.aim(f"lowerleg01.{side}", f"foot.{side}", foot[index] - knee)
+            shortfall = max(shortfall, float(np.linalg.norm(self.at(f"foot.{side}") - foot[index])))
+        return shortfall
+
+
+def point(joint):
+    return np.array([joint["x"], joint["y"], joint["z"]])
+
+
 # --- THE PACK (#2485): exported, read back, posed at every phase, baked ------
 # The rest of this script is the rider's own bake; the pack wears its maps.
 if LOD:
@@ -716,199 +945,29 @@ if LOD:
     # Read back what the exporter WROTE -- its vertex order, its four weights
     # a vertex -- because that is what a renderer draws and skins, and the
     # texture's columns have to be the file's vertices, not Blender's.
-    with open(OUT_GLB, "rb") as handle:
-        glb = handle.read()
-    document, binary, at = None, None, 12
-    while at + 8 <= len(glb):
-        length, kind = struct.unpack_from("<II", glb, at)
-        chunk = glb[at + 8 : at + 8 + length]
-        if kind == 0x4E4F534A:
-            document = json.loads(chunk)
-        elif kind == 0x004E4942:
-            binary = chunk
-        at += 8 + length + (-length % 4)
-    COMPONENTS = {5121: "<u1", 5123: "<u2", 5125: "<u4", 5126: "<f4"}
-    WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
-
-    def read(index):
-        accessor = document["accessors"][index]
-        view = document["bufferViews"][accessor["bufferView"]]
-        kind = np.dtype(COMPONENTS[accessor["componentType"]])
-        width = WIDTH[accessor["type"]]
-        if view.get("byteStride", kind.itemsize * width) != kind.itemsize * width:
-            raise RuntimeError("the exporter interleaved an accessor")
-        values = np.frombuffer(
-            binary,
-            dtype=kind,
-            count=accessor["count"] * width,
-            offset=view.get("byteOffset", 0) + accessor.get("byteOffset", 0),
-        ).reshape(accessor["count"], width)
-        values = values.astype(np.float64)
-        if accessor.get("normalized"):
-            values /= np.iinfo(kind).max
-        return values
-
-    # Every vertex, mesh by mesh and primitive by primitive in the file's order.
-    rest_parts, normal_parts, joint_parts, weight_parts = [], [], [], []
-    for mesh_index, gltf_mesh in enumerate(document["meshes"]):
-        node = next(n for n in document["nodes"] if n.get("mesh") == mesh_index)
-        names = [document["nodes"][j]["name"] for j in document["skins"][node["skin"]]["joints"]]
-        bone_of = np.array([KEEP.index(name) for name in names])
-        for primitive in gltf_mesh["primitives"]:
-            attributes = primitive["attributes"]
-            rest_parts.append(read(attributes["POSITION"]))
-            normal_parts.append(read(attributes["NORMAL"]))
-            joint_parts.append(bone_of[read(attributes["JOINTS_0"]).astype(int)])
-            weight_parts.append(read(attributes["WEIGHTS_0"]))
-    rest = np.concatenate(rest_parts)
-    rest_normals = np.concatenate(normal_parts)
-    joints = np.concatenate(joint_parts)
-    weights = np.concatenate(weight_parts)
+    document, binary = read_glb(OUT_GLB)
+    rest, rest_normals, joints, weights = skinned_vertices(document, binary, ("rider", "helmet"))
     VERTICES = len(rest)
     if VERTICES >= 1 << 16:
         raise RuntimeError(f"{VERTICES} vertices: the moving list is uint16")
 
-    # The skeleton, in the GLB's frame (Blender's (x, y, z) is glTF's
-    # (x, z, -y)), scaled as `RealisticRiderBelt` scales the body: its rest
-    # leg stretched to `bicycle.ts`' thigh and shin.
-    INDEX = {name: index for index, name in enumerate(KEEP)}
-    unscaled = np.array([(HEAD[name].x, HEAD[name].z, -HEAD[name].y) for name in KEEP])
-    rest_leg = np.linalg.norm(
-        unscaled[INDEX["upperleg01.L"]] - unscaled[INDEX["lowerleg01.L"]]
-    ) + np.linalg.norm(unscaled[INDEX["lowerleg01.L"]] - unscaled[INDEX["foot.L"]])
-    scale = POSE["leg"] / rest_leg
-    J = unscaled * scale
-    rest = rest * scale
-    parent_of = {name: kept_ancestor(bones[name]["parent"]) for name in KEEP}
-
-    def descends(name, ancestor):
-        while name is not None:
-            if name == ancestor:
-                return True
-            name = parent_of[name]
-        return False
-
-    beneath = {name: [INDEX[k] for k in KEEP if descends(k, name)] for name in KEEP}
-
-    # Each hand, as `RealisticRiderBelt` measures it off the rest pose: the
-    # middle of the vertices whose heaviest weight is the wrist, and which way
-    # that is from the wrist.
-    heaviest = joints[np.arange(VERTICES), np.argmax(weights, axis=1)]
-    hand_reach, hand_along = [], []
-    for side in "LR":
-        wrist_index = INDEX[f"wrist.{side}"]
-        offset = rest[heaviest == wrist_index].mean(axis=0) - J[wrist_index]
-        hand_reach.append(float(np.linalg.norm(offset)))
-        hand_along.append(offset / np.linalg.norm(offset))
-
-    def rotation(axis, angle):
-        """A turn by `angle` about `axis`, right-handed -- three's `setFromAxisAngle`."""
-        x, y, z = axis / np.linalg.norm(axis)
-        c, s, k = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
-        return np.array([
-            [c + x * x * k, x * y * k - z * s, x * z * k + y * s],
-            [y * x * k + z * s, c + y * y * k, y * z * k - x * s],
-            [z * x * k - y * s, z * y * k + x * s, c + z * z * k],
-        ])
-
-    def between(a, b):
-        """The least turn taking direction `a` to `b` -- three's `setFromUnitVectors`."""
-        a = a / np.linalg.norm(a)
-        b = b / np.linalg.norm(b)
-        cross = np.cross(a, b)
-        sine = np.linalg.norm(cross)
-        if sine < 1e-12:
-            if a @ b > 0:
-                return np.eye(3)
-            raise RuntimeError("a bone asked to turn right round")
-        return rotation(cross, math.atan2(sine, float(np.clip(a @ b, -1, 1))))
-
-    def two_bone_joint(root, target, upper, lower, pole):
-        """`three-renderer.ts` section twoBoneJoint, line for line."""
-        reach = target - root
-        full = max(float(np.linalg.norm(reach)), 1e-6)
-        distance = min(full, upper + lower - 1e-4)
-        along = reach / full
-        cosine = min(1.0, max(-1.0, (upper * upper + distance * distance - lower * lower) / (2 * upper * distance)))
-        bend = pole - (pole @ along) * along
-        bend_length = float(np.linalg.norm(bend))
-        bend = np.array([0.0, 0.0, 1.0]) if bend_length < 1e-9 else bend / bend_length
-        sine = math.sqrt(1 - cosine * cosine)
-        return root + upper * (cosine * along + sine * bend)
-
-    # Each bone's turn and shift from the rest pose, in the bicycle's frame.
-    turns = np.zeros((len(KEEP), 3, 3))
-    shifts = np.zeros((len(KEEP), 3))
-
-    def at(name):
-        """Where a bone's head is now."""
-        index = INDEX[name]
-        return turns[index] @ J[index] + shifts[index]
-
-    def turn(name, by, pivot):
-        """Turns a bone and everything under it about `pivot`."""
-        for index in beneath[name]:
-            turns[index] = by @ turns[index]
-            shifts[index] = by @ (shifts[index] - pivot) + pivot
-
-    def aim(name, child, direction):
-        """`RealisticRiderBelt`'s aim: the bone turned so `child`'s head lies along `direction`."""
-        head = at(name)
-        turn(name, between(at(child) - head, direction), head)
-
-    def span(a, b):
-        return float(np.linalg.norm(at(a) - at(b)))
-
-    def point(joint):
-        return np.array([joint["x"], joint["y"], joint["z"]])
-
-    ACROSS = np.array([1.0, 0.0, 0.0])
-    FORWARD = np.array([0.0, 0.0, 1.0])
+    poser = Poser(POSE["leg"], rest, joints, weights)
+    scale = poser.scale
+    rest = poser.rest
     stance = POSE["stance"]
     PHASES = len(POSE["phases"])
     samples = np.zeros((PHASES, VERTICES, 6))
     shortfall = 0.0
     for phase_index, phase in enumerate(POSE["phases"]):
-        turns[:] = np.eye(3)
-        shifts[:] = 0.0
-        # The whole body, moved so its hips sit on the saddle.
-        hips = (at("upperleg01.L") + at("upperleg01.R")) / 2
-        shifts += point(phase["hips"]) - hips
-        # The back, from the hips towards the shoulders.
-        aim("spine05", "neck01", point(phase["shoulders"]) - point(phase["hips"]))
-        # The head, turned by the position: half at the neck, half at the head.
-        nod = stance["headPitch"] / 2
-        if nod != 0:
-            for name in ("neck01", "head"):
-                turn(name, rotation(ACROSS, nod), at(name))
-        for index, side in enumerate("LR"):
-            sign = 1 if index == 0 else -1
-            # The arm: shoulder to the wrist behind the grip, on the hand's line.
-            shoulder = at(f"upperarm01.{side}")
-            upper = span(f"upperarm01.{side}", f"lowerarm01.{side}")
-            fore = span(f"lowerarm01.{side}", f"wrist.{side}")
-            along = np.array([0.0, -math.sin(stance["handDown"]), math.cos(stance["handDown"])])
-            wrist = point(phase["grip"][index]) - along * hand_reach[index]
-            out = stance["elbowOut"]
-            pole = np.array([
-                sign * math.sin(out),
-                -math.cos(out) * math.cos(stance["elbowBack"]),
-                -math.cos(out) * math.sin(stance["elbowBack"]),
-            ])
-            elbow = two_bone_joint(shoulder, wrist, upper, fore, pole)
-            aim(f"upperarm01.{side}", f"lowerarm01.{side}", elbow - shoulder)
-            aim(f"lowerarm01.{side}", f"wrist.{side}", wrist - elbow)
-            hand_now = turns[INDEX[f"wrist.{side}"]] @ hand_along[index]
-            turn(f"wrist.{side}", between(hand_now, along), at(f"wrist.{side}"))
-            # The leg: hip to the pedal, the knee forward.
-            hip = at(f"upperleg01.{side}")
-            foot = point(phase["foot"][index])
-            thigh = span(f"upperleg01.{side}", f"lowerleg01.{side}")
-            shin = span(f"lowerleg01.{side}", f"foot.{side}")
-            knee = two_bone_joint(hip, foot, thigh, shin, FORWARD)
-            aim(f"upperleg01.{side}", f"lowerleg01.{side}", knee - hip)
-            aim(f"lowerleg01.{side}", f"foot.{side}", foot - knee)
-            shortfall = max(shortfall, float(np.linalg.norm(at(f"foot.{side}") - foot)))
+        shortfall = max(shortfall, poser.pose(
+            point(phase["hips"]),
+            point(phase["shoulders"]),
+            [point(each) for each in phase["grip"]],
+            [point(each) for each in phase["foot"]],
+            stance,
+            stance["headPitch"] / 2,
+        ))
+        turns, shifts = poser.turns, poser.shifts
         # Skinned as a renderer skins: each vertex by its four weights.
         posed = np.zeros((VERTICES, 3))
         normals = np.zeros((VERTICES, 3))
@@ -1550,6 +1609,143 @@ bpy.ops.export_scene.gltf(
     export_image_format="NONE",
     export_yup=True,
 )
+
+# --- 10. the crash clip (#2493): the body's own fall and get-up --------------
+# `rider_crash.py`'s moments, each posed exactly as `RealisticRiderBelt` poses
+# the rider onto a bicycle -- read back off the file just written, with the
+# joints of the riding pose `bicycle.ts` gives (`rider-crash.ts`) -- and
+# written into it as one animation, `crash`: every kept bone's rotation, and
+# the root's position, at each moment, in the file's own node frames. The
+# runtime blends the riding body toward it by `crash-look.ts`' share.
+CRASH = json.load(open(CRASH_JSON))
+document, binary = read_glb(OUT_GLB)
+rest, _, vertex_bones, vertex_weights = skinned_vertices(document, binary, ("rider",))
+poser = Poser(CRASH["leg"], rest, vertex_bones, vertex_weights)
+nodes = document["nodes"]
+node_of = {node["name"]: index for index, node in enumerate(nodes) if node.get("name") in KEEP}
+parent_node = {child: index for index, node in enumerate(nodes) for child in node.get("children", [])}
+
+
+def matrix_of(q):
+    """A glTF rotation (x, y, z, w) as a matrix."""
+    x, y, z, w = q
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+
+
+def quaternion_of(m):
+    """A rotation matrix as a glTF rotation (x, y, z, w), w not negative."""
+    w = math.sqrt(max(0.0, 1 + m[0, 0] + m[1, 1] + m[2, 2])) / 2
+    x = math.copysign(math.sqrt(max(0.0, 1 + m[0, 0] - m[1, 1] - m[2, 2])) / 2, m[2, 1] - m[1, 2])
+    y = math.copysign(math.sqrt(max(0.0, 1 - m[0, 0] + m[1, 1] - m[2, 2])) / 2, m[0, 2] - m[2, 0])
+    z = math.copysign(math.sqrt(max(0.0, 1 - m[0, 0] - m[1, 1] + m[2, 2])) / 2, m[1, 0] - m[0, 1])
+    q = np.array([x, y, z, w])
+    return q / np.linalg.norm(q)
+
+
+def rest_world(index):
+    """A node's rotation and position at rest, through its parents, unscaled."""
+    node = nodes[index]
+    turn = matrix_of(node.get("rotation", (0.0, 0.0, 0.0, 1.0)))
+    move = np.array(node.get("translation", (0.0, 0.0, 0.0)))
+    if index not in parent_node:
+        return turn, move
+    parent_turn, parent_move = rest_world(parent_node[index])
+    return parent_turn @ turn, parent_turn @ move + parent_move
+
+
+REST_TURN = {name: rest_world(node_of[name])[0] for name in KEEP}
+# The file's skeleton is the one posed: every bone's head where `Poser` has it.
+rest_mismatch = max(
+    float(np.linalg.norm(rest_world(node_of[name])[1] * poser.scale - poser.J[poser.index[name]]))
+    for name in KEEP
+)
+if rest_mismatch > 1e-4:
+    raise RuntimeError(f"the file's skeleton is {rest_mismatch} m off the posed one")
+skeleton_node = parent_node[node_of["root"]]
+skeleton_turn, skeleton_move = rest_world(skeleton_node)
+ANCHORS = {"start": 0.0, "fall": CRASH["fall"], "riseAt": CRASH["riseAt"], "end": CRASH["end"]}
+FOLLOWING = {"start": "fall", "fall": "riseAt", "riseAt": "end", "end": "end"}
+riding = CRASH["riding"]
+crash_times, crash_turns, crash_root, crash_shortfall = [], {name: [] for name in KEEP}, [], 0.0
+for _, (anchor, share), moment in CRASH_KIT.CRASH_MOMENTS:
+    crash_times.append(ANCHORS[anchor] + share * (ANCHORS[FOLLOWING[anchor]] - ANCHORS[anchor]))
+    if moment == CRASH_KIT.RIDING:
+        joints = (
+            point(riding["hips"]),
+            point(riding["shoulders"]),
+            [point(each) for each in riding["grip"]],
+            [point(each) for each in riding["foot"]],
+            CRASH["stance"]["headPitch"] / 2,
+        )
+    else:
+        joints = (
+            np.array(moment["hips"]),
+            np.array(moment["shoulders"]),
+            [np.array(each) for each in moment["hands"]],
+            [np.array(each) for each in moment["feet"]],
+            moment["nod"],
+        )
+    crash_shortfall = max(crash_shortfall, poser.pose(*joints[:4], CRASH["stance"], joints[4]))
+    for name in KEEP:
+        index = poser.index[name]
+        parent = parent_node[node_of[name]]
+        parent_name = nodes[parent].get("name")
+        parent_turn = (
+            poser.turns[poser.index[parent_name]] @ REST_TURN[parent_name]
+            if parent_name in REST_TURN
+            else rest_world(parent)[0]
+        )
+        local = quaternion_of(parent_turn.T @ poser.turns[index] @ REST_TURN[name])
+        # The short way from the moment before, so a blend between them never
+        # goes round the long way.
+        previous = crash_turns[name][-1] if crash_turns[name] else local
+        crash_turns[name].append(-local if local @ previous < 0 else local)
+    root = poser.index["root"]
+    posed_root = poser.turns[root] @ poser.J[root] + poser.shifts[root]
+    crash_root.append(skeleton_turn.T @ (posed_root / poser.scale - skeleton_move))
+
+# Written into the file: one buffer view and accessor a channel, appended.
+blobs = bytearray(binary)
+
+
+def appended(values, kind, extremes=False):
+    data = np.ascontiguousarray(np.array(values, dtype="<f4"))
+    document["bufferViews"].append({"buffer": 0, "byteOffset": len(blobs), "byteLength": data.nbytes})
+    blobs.extend(data.tobytes())
+    accessor = {
+        "bufferView": len(document["bufferViews"]) - 1,
+        "componentType": 5126,
+        "count": len(values),
+        "type": kind,
+    }
+    if extremes:
+        accessor["min"] = [float(data.min())]
+        accessor["max"] = [float(data.max())]
+    document["accessors"].append(accessor)
+    return len(document["accessors"]) - 1
+
+
+crash_input = appended(crash_times, "SCALAR", extremes=True)
+samplers, channels = [], []
+for name in KEEP:
+    samplers.append({"input": crash_input, "output": appended(crash_turns[name], "VEC4"), "interpolation": "LINEAR"})
+    channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[name], "path": "rotation"}})
+samplers.append({"input": crash_input, "output": appended(crash_root, "VEC3"), "interpolation": "LINEAR"})
+channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of["root"], "path": "translation"}})
+document["animations"] = [{"name": "crash", "channels": channels, "samplers": samplers}]
+document["buffers"][0]["byteLength"] = len(blobs)
+text = json.dumps(document, separators=(",", ":")).encode("utf8")
+text += b" " * (-len(text) % 4)
+blobs.extend(b"\0" * (-len(blobs) % 4))
+with open(OUT_GLB, "wb") as handle:
+    handle.write(struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(text) + 8 + len(blobs)))
+    handle.write(struct.pack("<II", len(text), 0x4E4F534A) + text)
+    handle.write(struct.pack("<II", len(blobs), 0x004E4942) + bytes(blobs))
+
 with open(OUT_REPORT, "w") as handle:
     json.dump(
         {
@@ -1563,6 +1759,9 @@ with open(OUT_REPORT, "w") as handle:
             "eyeTriangles": eye_tris,
             "triangles": body_tris + helmet_tris,
             "heightMetres": height_m,
+            "crashMoments": len(crash_times),
+            "crashSeconds": round(crash_times[-1], 6),
+            "crashShortfallMetres": round(crash_shortfall, 5),
             "textures": 3,
             "texturePixels": PIXELS,
             "coveredShare": round(float(covered.mean()), 4),
