@@ -11,20 +11,23 @@
  * ticks its race lasts, so the courses here are the shortest that still let
  * each case happen inside the race. Every run's own limit
  * is {@link RUN_LIMIT_MS}, under the case's, so a race that never ends fails
- * on `raceOver` and not on the case's timeout.
+ * on `raceOver` and not on the case's timeout. The room and the load accounts
+ * are made by the operator commands' own functions, in this process: a
+ * process of the CLI's for each cost more than a tick on a CI runner, and
+ * `operator/commands.test.ts` and `operator/load-accounts.test.ts` run the CLI.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 
+import { DEFAULT_LIMITS } from '../src/auth/identity.ts';
 import { startInstance, type StartedInstance } from '../src/instance.ts';
 import { freeLoopbackPort, testConfig } from '../src/instance-testing.ts';
+import { loadAccountsAdd, roomOpen } from '../src/operator/commands.ts';
 import { readServerConfig } from '../src/server-config.ts';
 import { migrateForDeploy } from '../src/store/serving.ts';
 import {
@@ -35,8 +38,6 @@ import {
   raceLoad,
   riderProfile,
 } from './race-load-run.ts';
-
-const CLI = fileURLToPath(new URL('../src/operator/cli.ts', import.meta.url));
 
 /** The longest any run here may take: under the case's 5 s, so a run that never ends fails on its report. */
 const RUN_LIMIT_MS = 4_000;
@@ -77,35 +78,12 @@ async function instanceWithRace(
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-race-load-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
+  const paths = { database: path, blobs: join(directory, 'blobs') };
   if (loadAccounts.length > 0) {
     // As the owner's run did (#1383): approved throwaway accounts, not open registration.
-    const added = spawnSync(process.execPath, [CLI, 'load-accounts', 'add'], {
-      encoding: 'utf8',
-      input: `${loadAccounts.join('\n')}\n`,
-      env: {
-        ...process.env,
-        OYL_INSTANCE_DATABASE: path,
-        OYL_INSTANCE_BLOBS: join(directory, 'blobs'),
-      },
-    });
-    expect(added.status, added.stderr).toBe(0);
+    await loadAccountsAdd(paths, `${loadAccounts.join('\n')}\n`);
   }
-  const opened = spawnSync(
-    process.execPath,
-    [
-      CLI,
-      'room-open',
-      'race',
-      '--kind',
-      'race',
-      '--length',
-      String(lengthMetres),
-      '--countdown',
-      '0',
-    ],
-    { encoding: 'utf8', env: { ...process.env, OYL_INSTANCE_DATABASE: path } },
-  );
-  expect(opened.status, opened.stderr).toBe(0);
+  await roomOpen(paths, 'race', { kind: 'race', lengthMetres, countdownMs: 0 });
   const port = await freeLoopbackPort();
   const origin = `http://127.0.0.1:${String(port)}`;
   const server = readServerConfig({ database: path, origin, roomWorkers: '1' }, 1);
@@ -225,7 +203,7 @@ function holdAnswers(socket: WebSocket): void {
  * Every sealed request carrying a session (a ticket, the start) for which
  * `slow()` says so is answered {@link SLOW_MS} late. With `addresses`, every
  * request names a client address in {@link ADDRESS_HEADER}, and the address
- * moves on after each `429` the instance answers: see the fifty-rider case.
+ * moves on after each `429` the instance answers: see the sign-in limit's case.
  */
 function throughATunnel(
   slow: () => boolean,
@@ -319,8 +297,15 @@ describe('a rider says hello before anything else, and only then reports — #14
     expect(rejoin?.sent).toContain('report');
   });
 
-  it('seats fifty riders through a slow ticket on an instance that holds keys, with no close at all, inside the sign-in limit', async () => {
-    const keys = await newRiderKeys(50);
+  it('seats a field one rider over the sign-in limit through a slow ticket on an instance that holds keys, with no close at all, waiting the limit out', async () => {
+    // The instance takes `sessionlessSealedPerAddress` sealed sign-ins an
+    // address a minute (30), so this field from one address meets that limit
+    // at its last rider, and the run must wait it out and not stop. The
+    // owner's run was fifty (#1400); one over the limit is the fewest that meet
+    // it, and each rider more cost a sealed sign-in, a ticket and a socket that
+    // this case's 5 s could not spare on a CI runner (#2569).
+    const riders = DEFAULT_LIMITS.sessionlessSealedPerAddress.limit + 1;
+    const keys = await newRiderKeys(riders);
     const url = await instanceWithRace(
       ONE_TICK_METRES,
       'approval',
@@ -328,14 +313,11 @@ describe('a rider says hello before anything else, and only then reports — #14
       keys.map((key) => key.publicKey),
       ADDRESS_HEADER,
     );
-    // Fifty tickets come late; the start, the fifty-first session call, does not.
-    let sessionCalls = 0;
-    // The instance takes 30 sealed sign-ins an address a minute
-    // (`sessionlessSealedPerAddress`), so fifty from one address meet that
-    // limit at the thirty-first, and the run must wait it out and not stop. The
-    // refusal is the instance's own; the address moving on after it stands
+    // Every ticket comes late; the start, the session call after them, does not.
+    // The refusal is the instance's own; the address moving on after it stands
     // for the minute running out, which here would be the case's whole cost.
-    const tunnel = throughATunnel(() => (sessionCalls += 1) <= 50, true);
+    let sessionCalls = 0;
+    const tunnel = throughATunnel(() => (sessionCalls += 1) <= riders, true);
     const report = await raceLoad({
       url,
       roomId: 'race',
@@ -348,7 +330,7 @@ describe('a rider says hello before anything else, and only then reports — #14
     expect(report.abortReason).toBeNull();
     expect(report.disconnects).toEqual([]);
     expect(report.raceOver).toBe(true);
-    expect(report.finishers).toBe(50);
+    expect(report.finishers).toBe(riders);
   });
 });
 

@@ -7,25 +7,24 @@
  * owner's, through the real tunnel (issue #733).
  *
  * Each case runs inside Vitest's 5 s default (#1688, #2569): a room sends a
- * frame a second, so the soak lasts only as long as its frames take, and each
- * instance opens only the room its case rides.
+ * frame a second, so the soak lasts only as long as its frames take. Each
+ * instance opens only the room its case rides, by the operator command's own
+ * function in this process: the CLI's process cost more than the probe on a
+ * CI runner, and `operator/commands.test.ts` runs the CLI.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startInstance, type StartedInstance } from '../src/instance.ts';
 import { freeLoopbackPort, testConfig } from '../src/instance-testing.ts';
+import { roomOpen } from '../src/operator/commands.ts';
 import { readServerConfig } from '../src/server-config.ts';
 import { migrateForDeploy } from '../src/store/serving.ts';
 import { idleProbe, soak } from './tunnel-soak-run.ts';
-
-const CLI = fileURLToPath(new URL('../src/operator/cli.ts', import.meta.url));
 
 /**
  * How long the soak rides: past the room's second frame, which comes two
@@ -54,12 +53,11 @@ async function instance(room: string, kind: 'ride' | 'race', pingIntervalMs = 0)
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-soak-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
-  const opened = spawnSync(
-    process.execPath,
-    [CLI, 'room-open', room, '--kind', kind, '--length', '10000', '--countdown', '0'],
-    { encoding: 'utf8', env: { ...process.env, OYL_INSTANCE_DATABASE: path } },
-  );
-  expect(opened.status, opened.stderr).toBe(0);
+  await roomOpen({ database: path, blobs: join(directory, 'blobs') }, room, {
+    kind,
+    lengthMetres: 10_000,
+    countdownMs: 0,
+  });
   // The origin is filled in once the port is known: a device signs it. The
   // port is the operating system's choice, never a random one (#954).
   const port = await freeLoopbackPort();
