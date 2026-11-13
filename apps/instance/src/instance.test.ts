@@ -1316,9 +1316,8 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
     // One room worker, not the two `serverConfig` gives (#2553): one room
-    // needs one, and each worker is a Node process to fork and load. It took
-    // 0.4 to 0.8 s alone and up to 8.3 s beside the rest of this file on a
-    // loaded machine, where every fork waits for a CPU.
+    // needs one, and each worker is a forked Node process, so a second one
+    // is a fork this case waits for and does not use.
     const { instance } = await start(path, { roomWorkers: 1 });
     const ann = await signIn(instance.url, 'Ann');
     const made = await fetch(`${instance.url}/v1/rooms`, {
