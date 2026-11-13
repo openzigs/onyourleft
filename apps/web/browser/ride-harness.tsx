@@ -550,6 +550,15 @@ const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 const CIRCUITS =
   AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
 
+/**
+ * `ride.html?power=lost` — #2546: a rider whose power meter is paired and has
+ * gone quiet, so the HUD's *Power* reads "— W Sensor lost". On a race's start
+ * line that makes the HUD's primary panel taller at 736×360, which is the case §"#1407" in
+ * `ride-room.browser.spec.ts` must survive. Until #2546 a held rider read
+ * that whatever they pedalled; now they read their power.
+ */
+const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
+
 const GAME: GamePort = {
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
@@ -585,7 +594,9 @@ const GAME: GamePort = {
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
-    rider: { power: watts(342), live: true, paired: true },
+    rider: POWER_LOST
+      ? { power: watts(0), live: false, paired: true }
+      : { power: watts(342), live: true, paired: true },
     cadence: { value: 92, live: true, paired: true },
     heartRate: { value: 168, live: true, paired: true },
   }),
