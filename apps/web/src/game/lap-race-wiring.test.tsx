@@ -546,6 +546,8 @@ interface RideOptions {
   /** A `k` trace to ride the rider at, one a call of `advanceTo`. */
   readonly replay?: readonly number[] | undefined;
   readonly frames?: number | undefined;
+  /** A view with no drawing context, so no frame is built: for a case that reads none (#2524). */
+  readonly blind?: boolean | undefined;
 }
 
 /** The scripted ride, start to *End ride*, with the network refused, read and unmounted. */
@@ -575,6 +577,7 @@ async function rideOnce(
     seen,
     drafted: options.drafted,
     frames: options.frames,
+    blind: options.blind,
     // Mid-race, half way round the first lap: every racer still riding.
     onFrame: (index) => {
       if (index === 30) midRace = standings();
@@ -719,14 +722,17 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // The device's default, the switch on: every racer drafts, the rider
     // included. Over the first lap and a half, which is cheaper than the whole
     // trace and still writes every grade the loop has (#1688: no timeout).
+    // Blind, as #2524 rides the cases that read no frame: this one reads the
+    // writes and the `k` trace alone. Drawn, its three rides took 5.0 s under
+    // coverage on CI (the nightly of 2026-11-13 on #2561's branch).
     const frames = DRAFTED_FRAMES;
-    const off = await rideOnce(ITEMS_OFF, { drafted: true, frames });
-    const on = await rideOnce(RACE, { drafted: true, frames });
+    const off = await rideOnce(ITEMS_OFF, { drafted: true, frames, blind: true });
+    const on = await rideOnce(RACE, { drafted: true, frames, blind: true });
     // Items move race offsets and never effort distances, which is all the
     // draft reads (D-3.2): one `k` trace for both, so one ordinary ride.
     expect(on.trace).toStrictEqual(off.trace);
     // An ordinary ride, no race, ridden at the races' `k` trace.
-    const replay = await rideOnce(undefined, { replay: off.trace, frames });
+    const replay = await rideOnce(undefined, { replay: off.trace, frames, blind: true });
     // Non-vacuity: the rider sat in a bot's draft for a good part of the race,
     // the replay rode at it, and the road's grades climb and fall.
     expect(off.trace.filter((k) => k < 0.9).length).toBeGreaterThan(20);
