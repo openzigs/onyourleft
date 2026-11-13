@@ -302,6 +302,10 @@ describe('the #867 rules hold between two connections on one file (#889)', () =>
    * load the store, so a case each halves what one case waits for on a
    * loaded runner. Each keeps its own race whole: the same sixty athletes,
    * the same barrier, and the same requirement that it go wrong somewhere.
+   *
+   * After, under coverage at load about 2.5: revoke 184-190 ms and rename
+   * 146-166 ms, against 343 ms for the one case it replaces. The total work
+   * is unchanged; only what one case waits for is halved.
    */
   it.each(['revoke', 'rename'] as const)(
     'is a test that can fail: with DEFERRED transactions the %s race goes wrong (the control)',
