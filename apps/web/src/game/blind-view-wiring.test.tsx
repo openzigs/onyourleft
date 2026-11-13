@@ -108,6 +108,21 @@ function powerAt(nowMs: number): number {
   return 260 + 80 * Math.sin((nowMs - START_MS) / 2_000);
 }
 
+/**
+ * The device's time of day both rides are ridden at — #2573. The HUD's
+ * `Clock` field reads `Date` (`design/time-of-day.ts`), not the ride's
+ * injected clock, so a minute that turned between the drawing ride and the
+ * blind one changed that field and nothing else, and the HUD comparison went
+ * red on a ride that was the same. `Date`, and only `Date`, is faked and frozen
+ * here: the frames, the trainer and the simulation stay on `nowMs`, and every
+ * timer stays real. The instant is a tenth of a second before a minute turns,
+ * so a clock that is not frozen crosses that minute in every run and fails at
+ * once, rather than once in a long while.
+ */
+const TIME_OF_DAY = new Date(2026, 10, 12, 4, 43, 59, 900);
+/** {@link TIME_OF_DAY} as the HUD shows it. */
+const CLOCK_SHOWN = 'Clock04:43';
+
 let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
@@ -116,6 +131,8 @@ beforeEach(() => {
   pending = [];
   nowMs = START_MS;
   localStorage.clear();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(TIME_OF_DAY);
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
     return pending.length;
@@ -126,6 +143,7 @@ beforeEach(() => {
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -342,6 +360,9 @@ describe('a view with no drawing context — #2524', () => {
       expect(blind.odometer).toBe(drawing.odometer);
       expect(blind.soloDraft).toStrictEqual(drawing.soloDraft);
       expect(drawing.hud.every((line) => line.length > 0)).toBe(true);
+      // The clock is still compared, and both rides read the frozen time of
+      // day on every frame (#2573), so the comparison below sees the ride only.
+      expect(drawing.hud.every((line) => line.split(' | ').includes(CLOCK_SHOWN))).toBe(true);
       expect(blind.hud).toEqual(drawing.hud);
     },
   );
