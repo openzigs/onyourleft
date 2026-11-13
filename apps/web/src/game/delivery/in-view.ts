@@ -75,6 +75,7 @@
 
 import type {
   DeliveryInView,
+  DeliveryMarkerPiece,
   DeliveryObstaclePiece,
   DeliveryPiece,
   DeliveryWeatherFrame,
@@ -119,6 +120,12 @@ export interface DeliveryDrawInput {
   /** The round's obstacles, as #1811 placed them, and where each stands. */
   readonly obstacles: readonly Obstacle[];
   readonly obstacleState: ObstacleState;
+  /**
+   * The houses on a level that must not get a parcel (#2365): each wears its
+   * own marker for the whole round, in rain or at dusk once the rider is
+   * within the reveal distance as a house's is (#2366). None unless given.
+   */
+  readonly noDelivery?: readonly DeliveryTarget[];
   /**
    * #2366: the rider's distance after the last step that ran, metres, and how
    * near a house they must be for its marker to be drawn. Without a reveal
@@ -195,14 +202,24 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const { centre } = input.corridor;
   const sinceStep = Math.min(1, Math.max(0, input.sinceStep ?? 0));
 
-  const markers: DeliveryPiece[] = [];
+  const markers: DeliveryMarkerPiece[] = [];
   const { revealMetres, riderAlong } = input;
   for (const target of input.targets) {
     if (input.round.houses[target.position] !== 'expecting') continue;
     if (onCorridor(centre, target.distance) === undefined) continue;
     // #2366: in rain or at dusk, only once the rider is close enough to see it.
     if (!revealed(target.distance, riderAlong, revealMetres)) continue;
-    markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw });
+    // #2365: a mailbox wears its own marker, at the kerb where it stands.
+    const kind = target.mailbox === true ? 'mailbox' : 'house';
+    markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw, kind });
+  }
+  // #2365: a house that must not get a parcel wears its sign for the whole round.
+  for (const house of input.noDelivery ?? []) {
+    if (onCorridor(centre, house.distance) === undefined) continue;
+    // #2366, the owner's ruling of 2026-11-12: in rain or at dusk its sign is
+    // revealed as a house's marker is, only once the rider is that near it.
+    if (!revealed(house.distance, riderAlong, revealMetres)) continue;
+    markers.push({ x: house.x, y: house.y, z: house.z, yaw: house.yaw, kind: 'no-delivery' });
   }
 
   const parcels: DeliveryPiece[] = [];

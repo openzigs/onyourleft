@@ -112,7 +112,12 @@
  * the next level in the picker. The level's throw window is not
  * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
  * may (`level-file.ts`), and the later levels that tighten it read it
- * (#2367, which draws them). Its mailbox and no-delivery shares are #2365's.
+ * (#2367, which draws them). Its mailbox and no-delivery shares are read
+ * (#2365): the pick makes that share of its houses mailboxes at the kerb, and
+ * that share houses that must not get a parcel, apart from the round
+ * ({@link DeliveryRide.noDeliveryTargets}); a parcel one catches takes
+ * `throw.ts` §`NO_DELIVERY_SCORE_DELTA` off the round's score, or nothing with
+ * the assist's no fail on, and never reaches the week.
  * Its weather and light (#2366) are read here for the drawing only
  * ({@link DeliveryRide.weather}, {@link DeliveryRide.revealMetres}): they
  * change where a marker is drawn from, never the round, the throw, the
@@ -170,6 +175,7 @@ import {
   ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
   DELIVERY_TICK_SECONDS,
+  NO_DELIVERY_SCORE_DELTA,
   NO_PARCELS,
   stepThrows,
   THROW_WINDOW_AFTER_METRES,
@@ -205,6 +211,18 @@ export interface DeliveryRide {
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
   readonly onLevel: boolean;
+  /**
+   * The houses on a level that must not get a parcel (#2365), for the drawing
+   * and the warning; never on the round. Each `position` is its place here.
+   */
+  readonly noDeliveryTargets: readonly DeliveryTarget[];
+  /** The same houses as the throw reads them. */
+  readonly throwNoDelivery: readonly ThrowTarget[];
+  /**
+   * A parcel at one of them costs {@link NO_DELIVERY_SCORE_DELTA} (#2365);
+   * `false` with the assist's no fail on, when it costs nothing (DL10).
+   */
+  readonly noDeliveryCosts: boolean;
   /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
   readonly levelId: string | undefined;
   /**
@@ -256,7 +274,7 @@ export interface DeliveryRideStart {
    */
   readonly level?:
     | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> &
-        Partial<Pick<LevelRound, 'weather' | 'light'>> & {
+        Partial<Pick<LevelRound, 'mailboxShare' | 'noDeliveryShare' | 'weather' | 'light'>> & {
           readonly lengthMetres: number;
           /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
           readonly id: string;
@@ -282,6 +300,14 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       origin: input.origin,
       riderDistance: input.riderDistance,
       houses: input.level?.houses ?? week.houses,
+      // #2365: a level's mailboxes and houses that get no parcel, from this seed.
+      shares:
+        input.level === undefined
+          ? undefined
+          : {
+              mailbox: input.level.mailboxShare ?? 0,
+              noDelivery: input.level.noDeliveryShare ?? 0,
+            },
     },
     seed,
   );
@@ -289,12 +315,13 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
   if (last === undefined || (!pick.complete && pick.targets.length < FEWEST_DELIVERY_HOUSES)) {
     return undefined;
   }
+  const furthest = Math.max(last.distance, pick.noDelivery.at(-1)?.distance ?? 0);
   const weather: DeliveryWeather = {
     rain: input.level?.weather === 'rain',
     dusk: input.level?.light === 'dusk',
   };
   const obstacles = placeObstacles(
-    { from: input.riderDistance, to: last.distance + TARGET_WINDOW_HALF_METRES },
+    { from: input.riderDistance, to: furthest + TARGET_WINDOW_HALF_METRES },
     seed,
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
@@ -304,12 +331,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
   return {
     week,
     targets: pick.targets,
-    throwTargets: pick.targets.map((target): ThrowTarget => ({
-      position: target.position,
-      along: target.distance,
-      side: target.side === 1 ? 'right' : 'left',
-      clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
-    })),
+    throwTargets: pick.targets.map(throwTargetOf),
     round: startRound(pick.targets.length, {
       assisted: assist.noFail,
       dayHouses: input.level?.houses ?? week.houses,
@@ -324,11 +346,25 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     along: input.riderDistance,
     outcome: undefined,
     onLevel: input.level !== undefined,
+    noDeliveryTargets: pick.noDelivery,
+    throwNoDelivery: pick.noDelivery.map(throwTargetOf),
+    noDeliveryCosts: !assist.noFail,
     levelId: input.level?.id,
     weather,
     // #2366: a marker shows only once the rider is closer, unless the assist widens the windows.
     revealMetres:
       (weather.rain || weather.dusk) && !assist.widerWindows ? LOW_LIGHT_REVEAL_METRES : undefined,
+  };
+}
+
+/** A picked house as the throw reads it: its doorstep, or its mailbox (#2365). */
+function throwTargetOf(target: DeliveryTarget): ThrowTarget {
+  return {
+    position: target.position,
+    along: target.distance,
+    side: target.side === 1 ? 'right' : 'left',
+    clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
+    ...(target.mailbox === true ? { mailbox: true } : {}),
   };
 }
 
@@ -351,6 +387,8 @@ export interface DeliveryRideStepped {
   readonly crashes: number;
   /** The throw asked for was taken: `false` when none was, or the cool-down refused it. */
   readonly thrown: boolean;
+  /** Parcels a house that must not get one caught on these steps (#2365); nought once the round is over. */
+  readonly noDeliveries: number;
 }
 
 /** The throw left the rider inside the target's window: `throw.ts`' own test, restated. */
@@ -392,7 +430,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   if (!Number.isInteger(ticks) || ticks < 0) {
     throw new RangeError('a Delivery ride step runs a whole number of ticks, 0 or more');
   }
-  if (ticks === 0) return { ride, crashes: 0, thrown: false };
+  if (ticks === 0) return { ride, crashes: 0, thrown: false, noDeliveries: 0 };
   const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
   const from = ride.along;
   // Never backwards: a room's correction does not run on a Delivery ride
@@ -401,6 +439,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   let { round, throws, obstacleState, outcome, steer } = ride;
   const changes = [...ride.changes];
   let crashes = 0;
+  let noDeliveries = 0;
   let thrown = false;
   let before = from;
   for (let tick = 1; tick <= ticks; tick += 1) {
@@ -411,6 +450,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       round,
       ...(tick === 1 && step.throwTo !== undefined ? { throwTo: step.throwTo } : {}),
       widerWindows: ride.widerWindows,
+      noDelivery: ride.throwNoDelivery,
     });
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
@@ -444,6 +484,11 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     if (outcome !== undefined) continue;
     for (const landing of thrownNow.landings) {
       if (landing.kind === 'delivery') changes.push('delivery');
+      // #2365: a parcel at a house that must not get one costs, and never pays.
+      if (landing.kind === 'no-delivery') {
+        noDeliveries += 1;
+        if (ride.noDeliveryCosts) changes.push({ scoreDelta: NO_DELIVERY_SCORE_DELTA });
+      }
     }
     changes.push(...obstaclesNow.crashes);
     crashes += obstaclesNow.crashes.length;
@@ -464,6 +509,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     },
     crashes,
     thrown,
+    noDeliveries,
   };
 }
 

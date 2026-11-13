@@ -60,6 +60,14 @@
  * coming the other way, in the left lane." — where it comes from, as the
  * rider faces it.
  *
+ * ## A house ahead that must not get a parcel, on a level (#2365, ADR 0065 D-10.5)
+ *
+ * Said the same way, once it is within {@link SKIP_HOUSE_AHEAD_METRES}: "Skip
+ * the next house, on the left. It gets no parcel." — before its throw window
+ * opens, by its side, never a place. Always said, as the obstacle ahead is
+ * (`announce.ts` §`ALWAYS_SPOKEN`): it is told apart in words, never by its
+ * sign alone.
+ *
  * ## The words are this project's own (DL1), for the owner's approval
  *
  * Every sentence below is new rider-facing wording, proposed in #1812's pull
@@ -98,6 +106,10 @@ export interface DeliveryOwed {
   readonly ahead: { readonly index: number; readonly text: string } | undefined;
   /** The standing obstacles already said, by their index on the round. */
   readonly warned: readonly number[];
+  /** A house ahead that must not get a parcel (#2365), by its place in the round's list, until said or passed. */
+  readonly skip: { readonly index: number; readonly text: string } | undefined;
+  /** The houses that must not get a parcel already said, by their place in the round's list. */
+  readonly skipped: readonly number[];
 }
 
 /** Nothing owed: the start of a round. */
@@ -109,6 +121,8 @@ export const NOTHING_OWED: DeliveryOwed = Object.freeze({
   roundOver: undefined,
   ahead: undefined,
   warned: Object.freeze([]),
+  skip: undefined,
+  skipped: Object.freeze([]),
 });
 
 /**
@@ -197,6 +211,55 @@ export function oweObstacleAhead(
     }
   }
   return ahead === owed.ahead ? owed : { ...owed, ahead };
+}
+
+/**
+ * How far ahead a house that must not get a parcel is said, metres — #2365:
+ * **45**, so it is said before its throw window opens `throw.ts`
+ * §`THROW_WINDOW_BEFORE_METRES` (20 m) ahead of it, two seconds earlier at
+ * 12 m/s, and after the house before it has gone by: the round's houses are
+ * at least `targets.ts` §`TARGET_SPACING_METRES` (50 m) apart, so it is the
+ * next house. This project's own number.
+ */
+export const SKIP_HOUSE_AHEAD_METRES = 45;
+
+/** `Skip the next house, on the left. It gets no parcel.`: which side, never a place (#2365). */
+export function skipHouseSentence(side: 'left' | 'right'): string {
+  return `Skip the next house, on the ${side}. It gets no parcel.`;
+}
+
+/**
+ * Owe the nearest house that must not get a parcel within
+ * {@link SKIP_HOUSE_AHEAD_METRES} of the rider at `along` that has not been
+ * said (#2365, ADR 0065 D-10.5), and drop one still owed that the rider has
+ * passed. `houses` are each a distance and a side. After the round's end,
+ * nothing.
+ */
+export function oweSkipHouse(
+  owed: DeliveryOwed,
+  houses: readonly { readonly distance: number; readonly side: 1 | -1 }[],
+  along: number,
+): DeliveryOwed {
+  if (owed.roundOver !== undefined) return owed;
+  let skip = owed.skip;
+  if (skip !== undefined && !((houses[skip.index]?.distance ?? -Infinity) > along)) {
+    skip = undefined;
+  }
+  if (skip === undefined) {
+    let nearest: number | undefined;
+    houses.forEach((house, index) => {
+      if (owed.skipped.includes(index)) return;
+      if (house.distance <= along || house.distance - along > SKIP_HOUSE_AHEAD_METRES) return;
+      if (nearest === undefined || house.distance < (houses[nearest]?.distance ?? Infinity)) {
+        nearest = index;
+      }
+    });
+    if (nearest !== undefined) {
+      const side = houses[nearest]?.side === 1 ? 'right' : 'left';
+      skip = { index: nearest, text: skipHouseSentence(side) };
+    }
+  }
+  return skip === owed.skip ? owed : { ...owed, skip };
 }
 
 /** `1st`, `2nd`, `3rd`, `4th` … `11th`, `12th`, `13th`, `21st`. */
@@ -359,6 +422,9 @@ export function deliveryEvents(owed: DeliveryOwed): readonly AnnouncementEvent[]
   if (owed.ahead !== undefined) {
     events.push({ kind: 'delivery-obstacle-ahead', text: owed.ahead.text });
   }
+  if (owed.skip !== undefined) {
+    events.push({ kind: 'delivery-skip-house', text: owed.skip.text });
+  }
   if (owed.roundOver !== undefined) {
     events.push({ kind: 'delivery-round-over', text: owed.roundOver });
   }
@@ -400,6 +466,10 @@ export function deliverySpoken(
       return owed.ahead === undefined
         ? owed
         : { ...owed, ahead: undefined, warned: [...owed.warned, owed.ahead.index] };
+    case 'delivery-skip-house':
+      return owed.skip === undefined
+        ? owed
+        : { ...owed, skip: undefined, skipped: [...owed.skipped, owed.skip.index] };
     case 'delivery-round-over':
       return { ...owed, roundOver: undefined };
     case 'delivery-crash':

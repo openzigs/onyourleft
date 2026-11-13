@@ -65,7 +65,7 @@ import {
   type ObstacleKind,
 } from '../src/game/delivery/obstacles';
 import { startRound } from '../src/game/delivery/round';
-import type { DeliveryTarget } from '../src/game/delivery/targets';
+import { MAILBOX_FROM_KERB_METRES, type DeliveryTarget } from '../src/game/delivery/targets';
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   NO_PARCELS,
@@ -131,6 +131,7 @@ declare global {
       pullingOut(world: 'stylised' | 'realistic'): PullingOutReading;
       showcase(): void;
       carsShowcase(): void;
+      mailboxShowcase(): void;
       pullingOutShowcase(): void;
       inLane(
         kind: ObstacleKind,
@@ -597,6 +598,41 @@ function showcase(): void {
 }
 
 /**
+ * #2507: the owner's photograph of a mailbox from where its throw window
+ * opens, on the tablet's 1280×800: a mailbox at the right-hand kerb
+ * `throw.ts` §`THROW_WINDOW_BEFORE_METRES` (20 m) ahead, and a doorstep's
+ * marker 25 m beyond it to compare, through a real view and the real
+ * `deliveryInView`.
+ */
+function mailboxShowcase(): void {
+  const shown = canvas(1280, 800);
+  shown.id = 'delivery-mailbox';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  const frame = frameAt(RIDER);
+  const [mailbox, house] = housesOn(frame, [RIDER + 20, RIDER + 45]) as [
+    DeliveryTarget,
+    DeliveryTarget,
+  ];
+  const fromRoad = CARRIAGEWAY_HALF_WIDTH_METRES + MAILBOX_FROM_KERB_METRES;
+  const targets: DeliveryTarget[] = [
+    { ...mailbox, mailbox: true, fromRoad, x: mailbox.x + mailbox.fromRoad - fromRoad },
+    house,
+  ];
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets,
+      round: startRound(2),
+      throws: NO_PARCELS,
+      obstacles: [],
+      obstacleState: startObstacles([]),
+    }),
+  });
+}
+
+/**
  * #2362, round 5: the owner's photograph of the parked cars, three in a row
  * at the right-hand kerb ahead of the rider, one of each paint, on a real
  * frame of the stylised world.
@@ -1024,6 +1060,7 @@ window.__oylDelivery = {
   markerOnScreen,
   pastCarShowcase,
   carsShowcase,
+  mailboxShowcase,
   pullingOutShowcase,
   viewCalls,
   markerLeaves,

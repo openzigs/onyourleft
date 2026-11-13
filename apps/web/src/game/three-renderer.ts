@@ -191,6 +191,7 @@ import {
   Quaternion,
   ClampToEdgeWrapping,
   RepeatWrapping,
+  RingGeometry,
   Scene,
   ShaderMaterial,
   ShadowMaterial,
@@ -668,6 +669,8 @@ import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from '
 import type {
   CameraPose,
   DeliveryInView,
+  DeliveryMarkerKind,
+  DeliveryMarkerPiece,
   DeliveryObstacleKind,
   DeliveryObstaclePiece,
   DeliveryPiece,
@@ -11267,8 +11270,11 @@ export interface DrawnDeliveryPiece {
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
-  readonly kind: DeliveryObstacleKind | undefined;
+  /**
+   * Which of the roster, for an obstacle; which marker, for a marker (#2365);
+   * `undefined` for a parcel.
+   */
+  readonly kind: DeliveryObstacleKind | DeliveryMarkerKind | undefined;
   /** For a parked car or a car pulling out (#2506), which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
   /** How large it was drawn: the instance matrix's scale. Above 1 only for a far marker (#2453). */
@@ -11410,22 +11416,368 @@ function withObstacleKinds<M extends Material>(material: M): M {
       'vertex',
       spliced,
     );
+    // #2507: an untoned part leaves the tone mapping with its own paint.
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${DELIVERY_UNTONED_ATTRIBUTE};\nvarying float vOylUntoned;`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n\tvOylUntoned = ${DELIVERY_UNTONED_ATTRIBUTE};`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylUntoned;',
+        'fragment',
+        spliced,
+      ),
+      '#include <tonemapping_fragment>',
+      '#include <tonemapping_fragment>\n\tgl_FragColor.rgb = mix( gl_FragColor.rgb, diffuseColor.rgb, vOylUntoned );',
+      'fragment',
+      spliced,
+    );
   };
   material.customProgramCacheKey = () => `${earlierKey}|oyl-delivery-kinds`;
   return material;
 }
+
+/**
+ * The vertex attribute that marks a Delivery part as drawn in its own paint
+ * PAST the tone mapping — #2507, the owner's ruling on PR #2518: the
+ * realistic world's AgX tone mapping (`realistic-light.ts`) turns a glowing
+ * amber into tan, and no amber paint survives it saturated (the most it gives
+ * a bright amber is about half saturation). 1 replaces the tone-mapped colour
+ * with the part's paint, before the output's colour space and the fog, as
+ * the stylised world (no tone mapping) draws every part; 0 changes nothing.
+ * Only a mailbox's diamond carries it. Spliced by {@link withObstacleKinds},
+ * so it is the belt's alone, in the calls the belt already makes.
+ */
+const DELIVERY_UNTONED_ATTRIBUTE = 'oylUntoned';
 
 /** One part of a Delivery piece: placed in the piece's own frame (its `+z` along the road), painted, glowing or not. */
 interface DeliveryPart {
   readonly made: BufferGeometry;
   readonly colour: number;
   readonly glows?: boolean;
+  /** Drawn in its own paint past the tone mapping (#2507). @see DELIVERY_UNTONED_ATTRIBUTE */
+  readonly untoned?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
   /** For an obstacle: a second kind whose instance also draws it, by index (#2506). */
   readonly also?: number;
   /** For a parked car's body: its colour is the instance's paint (#2362). */
   readonly painted?: boolean;
+}
+
+/** The unit normal of the triangle whose first corner is `first` in `array` (9 floats a triangle, three's front face), or `undefined` for one of no area. */
+function triangleNormal(
+  array: ArrayLike<number>,
+  first: number,
+): readonly [number, number, number] | undefined {
+  const at = first * 3;
+  const [ax, ay, az] = [array[at] as number, array[at + 1] as number, array[at + 2] as number];
+  const [ux, uy, uz] = [
+    (array[at + 3] as number) - ax,
+    (array[at + 4] as number) - ay,
+    (array[at + 5] as number) - az,
+  ];
+  const [vx, vy, vz] = [
+    (array[at + 6] as number) - ax,
+    (array[at + 7] as number) - ay,
+    (array[at + 8] as number) - az,
+  ];
+  const [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const length = Math.hypot(nx, ny, nz);
+  return length > 0 ? [nx / length, ny / length, nz / length] : undefined;
+}
+
+/** How far a point may be outside a plane and still count as on it, metres: a float's slack. */
+const DELIVERY_SOLID_SLACK_METRES = 1e-5;
+
+/**
+ * A part that is a closed convex solid, as the planes of its faces (each its
+ * outward unit normal and its distance from the origin along it) — PR #2518:
+ * a box, a closed wheel, an octahedron, a hazard marker's closed cone. A face
+ * of another part wholly inside it can never be seen ({@link hiddenInside}).
+ * `undefined` for a part that is not closed (an open cone, a ring, a flat
+ * plate) or not convex (the car's rounded body), which hides nothing.
+ */
+function solidOf(flat: BufferGeometry): readonly (readonly number[])[] | undefined {
+  const array = flat.getAttribute('position').array;
+  const corners = array.length / 3;
+  const key = (corner: number): string =>
+    [0, 1, 2].map((axis) => Math.round((array[corner * 3 + axis] as number) * 1e5)).join(',');
+  // Closed: every edge is two faces'.
+  const edges = new Map<string, number>();
+  for (let first = 0; first < corners; first += 3) {
+    for (let side = 0; side < 3; side += 1) {
+      const [a, b] = [key(first + side), key(first + ((side + 1) % 3))];
+      const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edges.set(edge, (edges.get(edge) ?? 0) + 1);
+    }
+  }
+  if ([...edges.values()].some((count) => count !== 2)) return undefined;
+  const planes: number[][] = [];
+  for (let first = 0; first < corners; first += 3) {
+    const normal = triangleNormal(array, first);
+    if (normal === undefined) continue;
+    const [nx, ny, nz] = normal;
+    const distance =
+      nx * (array[first * 3] as number) +
+      ny * (array[first * 3 + 1] as number) +
+      nz * (array[first * 3 + 2] as number);
+    // Convex: every corner on the inside of every face.
+    for (let corner = 0; corner < corners; corner += 1) {
+      const out =
+        nx * (array[corner * 3] as number) +
+        ny * (array[corner * 3 + 1] as number) +
+        nz * (array[corner * 3 + 2] as number) -
+        distance;
+      if (out > DELIVERY_SOLID_SLACK_METRES) return undefined;
+    }
+    planes.push([nx, ny, nz, distance]);
+  }
+  return planes;
+}
+
+/**
+ * Whether the triangle at `first` of `array` lies wholly inside `solid`
+ * ({@link solidOf}), so a solid drawn whenever it is hides it from every
+ * eye — PR #2518: the top of a bin's body under its lid, a dog's legs' tops
+ * inside its body, the inner face of a bin's wheel inside the bin. A
+ * triangle lying on one of the solid's faces is inside only when it faces
+ * into the solid; facing out, it is that face's twin and is kept.
+ */
+function hiddenInside(
+  array: ArrayLike<number>,
+  first: number,
+  solid: readonly (readonly number[])[],
+): boolean {
+  const normal = triangleNormal(array, first);
+  if (normal === undefined) return false;
+  for (const [nx, ny, nz, distance] of solid as readonly (readonly [
+    number,
+    number,
+    number,
+    number,
+  ])[]) {
+    let on = 0;
+    for (let corner = first; corner < first + 3; corner += 1) {
+      const out =
+        nx * (array[corner * 3] as number) +
+        ny * (array[corner * 3 + 1] as number) +
+        nz * (array[corner * 3 + 2] as number) -
+        distance;
+      if (out > DELIVERY_SOLID_SLACK_METRES) return false;
+      if (out > -DELIVERY_SOLID_SLACK_METRES) on += 1;
+    }
+    if (on === 3 && nx * normal[0] + ny * normal[1] + nz * normal[2] >= 0) return false;
+  }
+  return true;
+}
+
+/** Whether `part` is drawn by exactly the instances that draw `other`: the same kind, and the same second kind (#2506). */
+function drawnTogether(part: DeliveryPart, other: DeliveryPart): boolean {
+  return part.kind === other.kind && (part.also ?? -1) === (other.also ?? -1);
+}
+
+/** The parts three makes with a flat cap fanned about its middle: a wheel's ends, a hazard marker's base, a rim's disc. */
+const DELIVERY_CAPPED_TYPES: ReadonlySet<string> = new Set([
+  'CylinderGeometry',
+  'ConeGeometry',
+  'CircleGeometry',
+]);
+
+/**
+ * `triangles` (9 floats each, three's front face) with every flat cap that
+ * three fans about its middle drawn as its outline's own polygon — PR #2518:
+ * three draws an 8-sided wheel's end as 8 triangles about its axle, where the
+ * octagon is 6, and a half-round end of a mailbox's roof as 4, where it is 3.
+ * The same corners, the same plane and the same normal, so the same pixels.
+ * A fan is a run of coplanar triangles sharing one corner, their far edges a
+ * chain or a loop whose polygon is convex; anything else is left as it is.
+ * Returns the triangles' positions and normals, the caps' replaced.
+ */
+function withCapsAsPolygons(
+  positions: readonly number[],
+  normals: readonly number[],
+): { readonly positions: number[]; readonly normals: number[] } {
+  const count = positions.length / 9;
+  const key = (value: number): number => Math.round(value * 1e5);
+  const pointKey = (corner: number): string =>
+    `${key(positions[corner * 3] as number)},${key(positions[corner * 3 + 1] as number)},${key(positions[corner * 3 + 2] as number)}`;
+  const planes = new Map<string, number[]>();
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    const normal = triangleNormal(positions, triangle * 3);
+    if (normal === undefined) continue;
+    const distance =
+      normal[0] * (positions[triangle * 9] as number) +
+      normal[1] * (positions[triangle * 9 + 1] as number) +
+      normal[2] * (positions[triangle * 9 + 2] as number);
+    const plane = `${normal.map((each) => Math.round(each * 1e4)).join(',')}|${key(distance)}`;
+    planes.set(plane, [...(planes.get(plane) ?? []), triangle]);
+  }
+  const replaced = new Set<number>();
+  const added: { readonly corners: number[][]; readonly normal: number[] }[] = [];
+  for (const group of planes.values()) {
+    if (group.length < 3) continue;
+    const firstNormal = triangleNormal(positions, (group[0] as number) * 3) as readonly number[];
+    // The one corner every triangle of the run shares: the fan's middle.
+    const shared = [0, 1, 2]
+      .map((corner) => pointKey((group[0] as number) * 3 + corner))
+      .find((middle) =>
+        group.every((triangle) =>
+          [0, 1, 2].some((corner) => pointKey(triangle * 3 + corner) === middle),
+        ),
+      );
+    if (shared === undefined) continue;
+    // Each triangle's far edge, in its own winding: middle → from → to.
+    const next = new Map<string, string>();
+    const point = new Map<string, number[]>();
+    let middle: number[] = [];
+    let chained = true;
+    for (const triangle of group) {
+      const at = [0, 1, 2].findIndex((corner) => pointKey(triangle * 3 + corner) === shared);
+      const [from, to] = [(at + 1) % 3, (at + 2) % 3].map((corner) => triangle * 3 + corner) as [
+        number,
+        number,
+      ];
+      const [fromKey, toKey] = [pointKey(from), pointKey(to)];
+      if (next.has(fromKey)) chained = false;
+      next.set(fromKey, toKey);
+      for (const corner of [from, to, triangle * 3 + at]) {
+        point.set(pointKey(corner), [
+          positions[corner * 3] as number,
+          positions[corner * 3 + 1] as number,
+          positions[corner * 3 + 2] as number,
+        ]);
+      }
+      middle = point.get(shared) as number[];
+    }
+    if (!chained) continue;
+    const targets = new Set(next.values());
+    const starts = [...next.keys()].filter((from) => !targets.has(from));
+    const loop = starts.length === 0;
+    if (!loop && starts.length !== 1) continue;
+    const chain: string[] = [loop ? ([...next.keys()][0] as string) : (starts[0] as string)];
+    while (chain.length <= group.length) {
+      const after = next.get(chain[chain.length - 1] as string);
+      if (after === undefined || after === chain[0]) break;
+      chain.push(after);
+    }
+    if (chain.length !== (loop ? group.length : group.length + 1)) continue;
+    let outline = chain.map((each) => point.get(each) as number[]);
+    if (!loop) outline = [middle, ...outline];
+    // Drop the corners on a straight run (a half-round end's middle on its chord).
+    const turn = (a: number[], b: number[], c: number[]): number => {
+      const [ux, uy, uz] = [
+        (b[0] as number) - (a[0] as number),
+        (b[1] as number) - (a[1] as number),
+        (b[2] as number) - (a[2] as number),
+      ];
+      const [vx, vy, vz] = [
+        (c[0] as number) - (b[0] as number),
+        (c[1] as number) - (b[1] as number),
+        (c[2] as number) - (b[2] as number),
+      ];
+      return (
+        (uy * vz - uz * vy) * (firstNormal[0] as number) +
+        (uz * vx - ux * vz) * (firstNormal[1] as number) +
+        (ux * vy - uy * vx) * (firstNormal[2] as number)
+      );
+    };
+    const turns = outline.map((corner, index) =>
+      turn(
+        outline[(index + outline.length - 1) % outline.length] as number[],
+        corner,
+        outline[(index + 1) % outline.length] as number[],
+      ),
+    );
+    if (turns.some((each) => each < -1e-9)) continue;
+    outline = outline.filter((_, index) => (turns[index] as number) > 1e-9);
+    if (outline.length < 3 || outline.length - 2 >= group.length) continue;
+    const normal = [0, 1, 2].map((axis) => normals[(group[0] as number) * 9 + axis] as number);
+    for (let index = 1; index + 1 < outline.length; index += 1) {
+      added.push({
+        corners: [outline[0], outline[index], outline[index + 1]] as number[][],
+        normal,
+      });
+    }
+    for (const triangle of group) replaced.add(triangle);
+  }
+  const kept = { positions: [] as number[], normals: [] as number[] };
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    if (replaced.has(triangle)) continue;
+    kept.positions.push(...positions.slice(triangle * 9, triangle * 9 + 9));
+    kept.normals.push(...normals.slice(triangle * 9, triangle * 9 + 9));
+  }
+  for (const { corners, normal } of added) {
+    for (const corner of corners) {
+      kept.positions.push(...corner);
+      kept.normals.push(...normal);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The triangles of `flat` (unindexed, `part`'s) that can be seen, as a new
+ * geometry of its position and normal, the two {@link deliveryShape} reads —
+ * PR #2518's trim for the village frame's triangles, as the owner's ruling of
+ * 2026-11-13 left it: none wholly inside a solid drawn with it
+ * ({@link hiddenInside}), and a cap fanned about its middle as its own
+ * polygon ({@link withCapsAsPolygons}). Neither changes a pixel from any eye,
+ * and `delivery-trim.test.ts` casts the tablet's pixels to hold it so. `flat`
+ * itself when nothing changes.
+ *
+ * ⚠️ **Every face that looks down is kept, the bottom of a bin and a post's
+ * foot too.** The trim first left out every face looking straight down from
+ * under the chase camera's 2 m eye, on the reasoning that the eye sees such a
+ * face from behind. But a piece is turned about the vertical only, so up a
+ * climb one stands above the eye and the eye sees its underside from in
+ * front: on `busy-round.json` near 1 770 m a parked car 44 m ahead stands
+ * 3.18 m above the eye's road, and with its underside gone a band of road
+ * about 2 px tall showed through it (the review of 2026-11-13). A face on the
+ * road shows too: its foot stays level while the road under it slopes, and
+ * from 80 m down that climb the tablet's pixels find a row of a bin's bottom.
+ */
+function trimmedPart(
+  part: DeliveryPart,
+  flat: BufferGeometry,
+  solids: readonly {
+    readonly part: DeliveryPart;
+    readonly planes: readonly (readonly number[])[];
+  }[],
+): BufferGeometry {
+  const position = flat.getAttribute('position') as BufferAttribute;
+  const normal = flat.getAttribute('normal') as BufferAttribute;
+  const hiders = solids.filter((solid) => solid.part !== part && drawnTogether(part, solid.part));
+  const positions: number[] = [];
+  const normals: number[] = [];
+  let changed = false;
+  for (let first = 0; first < position.count; first += 3) {
+    if (hiders.some((solid) => hiddenInside(position.array, first, solid.planes))) {
+      changed = true;
+      continue;
+    }
+    positions.push(...position.array.subarray(first * 3, first * 3 + 9));
+    normals.push(...normal.array.subarray(first * 3, first * 3 + 9));
+  }
+  const capped = DELIVERY_CAPPED_TYPES.has(part.made.type)
+    ? withCapsAsPolygons(positions, normals)
+    : { positions, normals };
+  if (!changed && capped.positions.length === positions.length) return flat;
+  const trimmed = new BufferGeometry();
+  trimmed.setAttribute('position', new BufferAttribute(new Float32Array(capped.positions), 3));
+  trimmed.setAttribute('normal', new BufferAttribute(new Float32Array(capped.normals), 3));
+  return trimmed;
 }
 
 /**
@@ -11435,10 +11787,28 @@ interface DeliveryPart {
  * in), and, where any part names a kind, each vertex's kind. The parts'
  * geometries are disposed.
  */
-function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
-  const flats = parts.map((part) =>
+function deliveryShape(
+  parts: readonly DeliveryPart[],
+  /** PR #2518: leave out what no eye can see ({@link trimmedPart}); for the obstacles and the markers. */
+  trim: 'keep' | 'trim' = 'keep',
+): BufferGeometry {
+  const whole = parts.map((part) =>
     part.made.index === null ? part.made : part.made.toNonIndexed(),
   );
+  const solids =
+    trim === 'keep'
+      ? []
+      : parts.flatMap((part, index) => {
+          const planes = solidOf(whole[index] as BufferGeometry);
+          return planes === undefined ? [] : [{ part, planes }];
+        });
+  const flats = parts.map((part, index) => {
+    const flat = whole[index] as BufferGeometry;
+    if (trim === 'keep') return flat;
+    const trimmed = trimmedPart(part, flat, solids);
+    if (trimmed !== flat && flat !== part.made) flat.dispose();
+    return trimmed;
+  });
   const vertices = flats.reduce((sum, flat) => sum + flat.getAttribute('position').count, 0);
   const positions = new Float32Array(vertices * 3);
   const normals = new Float32Array(vertices * 3);
@@ -11447,6 +11817,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const kinds = new Float32Array(vertices);
   const also = new Float32Array(vertices);
   const painted = new Float32Array(vertices);
+  const untoned = new Float32Array(vertices);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
@@ -11463,6 +11834,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       kinds[corner] = part.kind ?? 0;
       also[corner] = part.also ?? -1;
       painted[corner] = part.painted === true ? 1 : 0;
+      untoned[corner] = part.untoned === true ? 1 : 0;
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -11477,6 +11849,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
     geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
     geometry.setAttribute(DELIVERY_PIECE_ALSO_ATTRIBUTE, new BufferAttribute(also, 1));
     geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
+    geometry.setAttribute(DELIVERY_UNTONED_ATTRIBUTE, new BufferAttribute(untoned, 1));
   }
   geometry.computeBoundingSphere();
   return geometry;
@@ -11546,6 +11919,59 @@ const DELIVERY_PAINT = {
   riderLegs: 0x2b2f36,
   riderSkin: 0xd2a07c,
   riderFrame: 0x7d848c,
+  // #2365: a mailbox's slate box, this project's own. #2507: its raised red
+  // flag, and its diamond's amber, deeper and more orange than a doorstep's
+  // gold (`glow`), drawn untoned so it stays amber in the realistic world.
+  mailbox: 0x3d5a73,
+  mailboxFlag: 0xc0392b,
+  mailboxGlow: 0xff8a00,
+} as const;
+
+/**
+ * The markers a house wears, in order: a marker's kind is its index in both
+ * attributes ({@link withObstacleKinds}) — #2365.
+ */
+const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox', 'no-delivery'];
+
+/**
+ * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
+ * project's own. A mailbox: a box `box` long and 0.6 of that across and tall
+ * on a `post` post at the kerb, a glowing diamond `diamond` across over it,
+ * and a ring `ring` round its foot, the box, diamond and ring smaller than a
+ * doorstep's, as its catch is (the post, since #2507, thicker). A house that must not get a parcel: a `signPost` post with a
+ * glowing red ring `sign` across crossed by a bar, standing upright and
+ * facing the road, and **no** ring on the step, so it reads as a refusal by
+ * its shape and not only its colour.
+ *
+ * #2507, the owner's ruling on PR #2500: the mailbox was hard to pick out at
+ * 12 m and beyond, so it is drawn bigger: the box from 0.45 m long to 0.9 m
+ * (0.27 m to 0.54 m across and tall), the diamond from 0.45 m to 0.72 m
+ * across and the ring from 0.28 m to 0.42 m, and its 1 m post from 0.08 m
+ * thick, a doorstep's, to `postThick`, 0.14 m. From where
+ * its throw window opens, 20 m short of it, the whole mark stood about 77
+ * pixels tall on the owner's 1280×800 tablet, up from 58, and the box about
+ * 16, up from 8. Only the drawing grew: the catch is still
+ * `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
+ *
+ * The owner's second ruling on PR #2518 (2026-11-12): **the whole mailbox
+ * stands below a house marker's top**, now that #2530 stands that marker low
+ * on its step, its top about 1.86 m (a 0.6 m post under a 0.9 m diamond
+ * stretched 1.4). So the post came down from 1 m to 0.5 m, the diamond from
+ * 0.72 m across to 0.5 m, and its gap over the roof from 0.1 m to
+ * `diamondGap`, 0.05 m: the top from 2.65 m to 1.79 m. The box keeps its
+ * 0.9 m, what makes it read as a mailbox at 12 m to 20 m: the whole mark now
+ * stands about 62 pixels at 12 m and 52 at 20 m, the box 19 and 16
+ * (`delivery-belt.test.ts` §"#2507").
+ */
+const OTHER_MARKER_METRES = {
+  post: 0.5,
+  postThick: 0.14,
+  box: 0.9,
+  diamond: 0.5,
+  diamondGap: 0.05,
+  ring: 0.42,
+  signPost: 2.4,
+  sign: 0.8,
 } as const;
 
 /**
@@ -11665,6 +12091,42 @@ function parcelShape(): BufferGeometry {
  */
 const MARKER_METRES = { post: 0.6, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
 
+/**
+ * A mailbox's raised flag, metres — #2507: a red plate this tall and long at
+ * its side, standing over its roof toward its back.
+ */
+const MAILBOX_FLAG_METRES = { height: 0.45, length: 0.22 } as const;
+
+/**
+ * A glowing ring lying on the step, `radius` to the middle of its band and
+ * `band` either side — #2507: flat, 24 triangles, where a torus of 3 by 12
+ * was 72 the same size from above; every marker instance submits it, twice
+ * (a doorstep's and a mailbox's), so the frame's triangles fit.
+ */
+function stepRing(radius: number, band: number): BufferGeometry {
+  return new RingGeometry(radius - band, radius + band, 12, 1)
+    .rotateX(-Math.PI / 2)
+    .translate(0, 0.04, 0);
+}
+
+/**
+ * A no-delivery sign's ring, standing upright across the road's line,
+ * `radius` to the middle of its band and `band` either side — #2507: flat,
+ * **32 triangles**, where the torus of 3 by 12 it replaces was 72. Two faces
+ * back to back, 8 sides each: the markers' materials draw front faces only,
+ * and a house's yaw turns toward the road, so the face an oncoming rider
+ * sees is the front on one side of the road and the back on the other. One
+ * face of 12 sides, 24 triangles, would vanish for every sign on one side.
+ */
+function signRing(radius: number, band: number): BufferGeometry {
+  const face = new RingGeometry(radius - band, radius + band, 8, 1).rotateY(Math.PI / 2);
+  const back = face.clone().rotateY(Math.PI);
+  const both = mergeGeometries([face.toNonIndexed(), back.toNonIndexed()]);
+  face.dispose();
+  back.dispose();
+  return both;
+}
+
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
@@ -11686,25 +12148,128 @@ export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; 
     top: MARKER_METRES.post + MARKER_METRES.diamond * MARKER_DIAMOND_STRETCH,
   });
 
-/** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
-function markerShape(): BufferGeometry {
+/**
+ * The markers, every kind in one geometry, each standing on its spot at the
+ * origin (#2365, {@link DELIVERY_MARKER_ORDER}, each vertex marked with its
+ * kind as the obstacles' are, {@link withObstacleKinds}): a doorstep's post, a
+ * diamond at its head and a ring on the step; a mailbox's box on a short post
+ * with a smaller diamond and ring; and a no-delivery sign, a crossed ring on a
+ * post with no ring on the step ({@link OTHER_MARKER_METRES}).
+ */
+function markerShape(trim = true): BufferGeometry {
   const { post, postThick, diamond, ring } = MARKER_METRES;
   const half = diamond / 2;
-  return deliveryShape([
-    { made: deliveryBox(postThick, post, postThick, 0, post / 2, 0), colour: DELIVERY_PAINT.post },
+  const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
+  const other = OTHER_MARKER_METRES;
+  const box = other.box;
+  const boxAcross = box * 0.6;
+  const mailboxHalf = other.diamond / 2;
+  const parts: readonly DeliveryPart[] = [
+    {
+      made: deliveryBox(postThick, post, postThick, 0, post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('house'),
+    },
     {
       made: new OctahedronGeometry(half, 0)
         .scale(1, MARKER_DIAMOND_STRETCH, 1)
         .translate(0, post + half * MARKER_DIAMOND_STRETCH, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
     },
     {
-      made: new TorusGeometry(ring, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      made: stepRing(ring, 0.035),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
     },
-  ]);
+    // #2365: a mailbox at the kerb, on a sturdier post than a doorstep's since #2507.
+    {
+      made: deliveryBox(other.postThick, other.post, other.postThick, 0, other.post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('mailbox'),
+    },
+    // #2507, the owner's ruling on PR #2518: a mailbox's shape, not a cube. Its
+    // lower half a box, its upper a half-round roof along its length, so it
+    // stands 0.6 of its length across and tall as before, and a red flag
+    // raised at its side, standing above the roof.
+    {
+      made: deliveryBox(boxAcross, boxAcross / 2, box, 0, other.post + boxAcross / 4, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind: kind('mailbox'),
+    },
+    {
+      made: new CylinderGeometry(
+        boxAcross / 2,
+        boxAcross / 2,
+        box,
+        4,
+        1,
+        false,
+        Math.PI / 2,
+        Math.PI,
+      )
+        .rotateX(Math.PI / 2)
+        .translate(0, other.post + boxAcross / 2, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind: kind('mailbox'),
+    },
+    {
+      made: deliveryBox(
+        0.03,
+        MAILBOX_FLAG_METRES.height,
+        MAILBOX_FLAG_METRES.length,
+        boxAcross / 2 + 0.02,
+        other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
+        -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
+      ),
+      colour: DELIVERY_PAINT.mailboxFlag,
+      kind: kind('mailbox'),
+    },
+    // Its diamond: the mailbox's own amber, untoned (DELIVERY_UNTONED_ATTRIBUTE).
+    {
+      made: new OctahedronGeometry(mailboxHalf, 0)
+        .scale(1, MARKER_DIAMOND_STRETCH, 1)
+        .translate(
+          0,
+          other.post + boxAcross + other.diamondGap + mailboxHalf * MARKER_DIAMOND_STRETCH,
+          0,
+        ),
+      colour: DELIVERY_PAINT.mailboxGlow,
+      glows: true,
+      untoned: true,
+      kind: kind('mailbox'),
+    },
+    {
+      made: stepRing(other.ring, 0.03),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+      kind: kind('mailbox'),
+    },
+    // #2365: a house that must not get a parcel: a crossed ring, upright, facing the road.
+    {
+      made: deliveryBox(postThick, other.signPost, postThick, 0, other.signPost / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('no-delivery'),
+    },
+    {
+      // #2507, trimmed to fit the frame's triangles: a flat ring, not a torus.
+      made: signRing(other.sign / 2, 0.06).translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
+    },
+    {
+      made: deliveryBox(0.06, other.sign * 0.9, 0.06, 0, 0, 0)
+        .rotateX(Math.PI / 4)
+        .translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
+    },
+  ];
+  return deliveryShape(parts, trim ? 'trim' : 'keep');
 }
 
 /**
@@ -11961,7 +12526,7 @@ function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
  * Each kind also carries its hazard marker overhead ({@link
  * obstacleHazardMarker}, #2396), inside that footprint.
  */
-function obstacleShape(): BufferGeometry {
+function obstacleShape(trim = true): BufferGeometry {
   const parts: DeliveryPart[] = [];
   const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
     parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
@@ -12065,7 +12630,23 @@ function obstacleShape(): BufferGeometry {
       painted: colour === body,
     });
   }
-  return deliveryShape(parts);
+  return deliveryShape(parts, trim ? 'trim' : 'keep');
+}
+
+/**
+ * The obstacles' or the markers' one geometry, trimmed as the belt draws it
+ * or, with `trimmed` false, every triangle its parts were made with — PR
+ * #2518, the owner's ruling of 2026-11-13 that the trim be invisible.
+ *
+ * @test-facing `delivery-belt.test.ts` casts the tablet's pixels at both, up
+ * the steepest shipped level and on the flat, and holds every pixel equal;
+ * the product builds only the trimmed one, in {@link DeliveryBelt}
+ */
+export function deliveryPieceShape(
+  what: 'obstacles' | 'markers',
+  trimmed: boolean,
+): BufferGeometry {
+  return what === 'obstacles' ? obstacleShape(trimmed) : markerShape(trimmed);
 }
 
 /**
@@ -12079,7 +12660,18 @@ function obstacleShape(): BufferGeometry {
  * under `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (it was
  * 206 318 at 1 770, 20 obstacles each submitting all of these): each of the
  * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
- * A car pulling out's
+ * Then **1 598**, PR #2518's trim when its markers met these obstacles (the
+ * village frame 206 234, over that limit): the 76 faces that look straight
+ * down from under the eye, left out as never seen. And then **1 596**, the
+ * owner's ruling of 2026-11-13 that the trim be invisible, since up a climb
+ * the eye sees those faces from below: all 76 back, and instead
+ * ({@link trimmedPart}) the 22 wholly inside a solid drawn with them (a bin's
+ * body's top under its lid and most of its wheels' inner ends inside it, a
+ * dog's legs' tops and its muzzle's back, two triangles of a car's side
+ * windows inside its middle pillars) and 56
+ * of the caps three fans about their middles, each now its own polygon (a
+ * wheel's 8-sided end in 6, a car's 12-sided tyre end in 10 and rim in 6, a
+ * hazard marker's square base in 2). A car pulling out's
  * body is the parked car's, drawn by its instance too ({@link
  * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
@@ -12089,7 +12681,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_674;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_596;
 
 /**
  * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
@@ -12212,6 +12804,26 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+/**
+ * The triangles in the markers' one geometry — #2507: **180**, a doorstep's
+ * 44, a mailbox's 80 and a no-delivery sign's 56. It was 184 (the sign's 96
+ * until its torus became {@link signRing}'s flat ring, 40 fewer); PR #2518's
+ * trim for the village frame left out the 10 faces that look straight down
+ * from under the eye, 174, until the owner's ruling of 2026-11-13 that the
+ * trim be invisible put them back, since a far marker is drawn enlarged and up
+ * a climb one stands above the eye. What it leaves out now
+ * ({@link trimmedPart}): the mailbox's post's top, inside its box, and one
+ * triangle of each half-round end of its roof (three's fan of 4, drawn as the
+ * half-octagon's 3). Every marker instance submits all
+ * of them (the kind collapse is per vertex, as the obstacles' is), so a
+ * Delivery frame's markers cost this many times the instances drawn in
+ * vertex work.
+ *
+ * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
+ * builds the geometry and does not read this number
+ */
+export const DELIVERY_MARKER_TRIANGLES = 180;
+
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
 
@@ -12251,6 +12863,18 @@ export class DeliveryBelt {
   readonly #meshes: Readonly<Record<DeliveryPieceKind, InstancedMesh>>;
   readonly #materials: { readonly lit: Material; readonly flat: Material };
   readonly #obstacleMaterials: { readonly lit: Material; readonly flat: Material };
+  /** The markers' materials (#2365), taught their kinds as the obstacles' are. */
+  readonly #markerMaterials: { readonly lit: Material; readonly flat: Material };
+  /** Each marker instance's kind (#2365), by its index in {@link DELIVERY_MARKER_ORDER}. */
+  readonly #markerKinds = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY),
+    1,
+  );
+  /** The paint attribute the kind splice declares; a marker wears none, so it stays nought. */
+  readonly #markerPaints = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY * 3),
+    3,
+  );
   /** Each obstacle instance's kind, by its index in the roster. */
   readonly #kinds = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY), 1);
   /** Each obstacle instance's body paint (#2362), and which of the paints it is, for {@link drawn}. */
@@ -12280,6 +12904,16 @@ export class DeliveryBelt {
       lit,
       flat: obstacle.flat === obstacle.lit ? lit : withObstacleKinds(obstacle.flat),
     };
+    const marker = decorationMaterials(world);
+    const markerLit = withObstacleKinds(marker.lit);
+    this.#markerMaterials = {
+      lit: markerLit,
+      flat: marker.flat === marker.lit ? markerLit : withObstacleKinds(marker.flat),
+    };
+    const markers = markerShape();
+    this.#markerKinds.setUsage(DynamicDrawUsage);
+    markers.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#markerKinds);
+    markers.setAttribute(DELIVERY_OBSTACLE_PAINT_ATTRIBUTE, this.#markerPaints);
     const obstacles = obstacleShape();
     this.#kinds.setUsage(DynamicDrawUsage);
     obstacles.setAttribute(DELIVERY_OBSTACLE_KIND_ATTRIBUTE, this.#kinds);
@@ -12297,7 +12931,7 @@ export class DeliveryBelt {
     this.#rain.visible = false;
     this.#meshes = {
       parcels: made(parcelShape(), this.#materials.lit),
-      markers: made(markerShape(), this.#materials.lit),
+      markers: made(markers, this.#markerMaterials.lit),
       obstacles: made(obstacles, this.#obstacleMaterials.lit),
     };
   }
@@ -12376,7 +13010,7 @@ export class DeliveryBelt {
   /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#meshes.parcels.material = this.#materials[shading];
-    this.#meshes.markers.material = this.#materials[shading];
+    this.#meshes.markers.material = this.#markerMaterials[shading];
     this.#meshes.obstacles.material = this.#obstacleMaterials[shading];
   }
 
@@ -12403,7 +13037,14 @@ export class DeliveryBelt {
       this.#rain.position.set(eye.x, (eye.y ?? 0) - CAMERA_ABOVE_METRES - fall, eye.z);
     }
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
-    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
+    const markers: readonly DeliveryMarkerPiece[] = view?.markers ?? NO_DELIVERY_PIECES;
+    this.#place(this.#meshes.markers, markers, eye);
+    // #2365: each marker's kind, a doorstep's unless it says otherwise.
+    const markerKinds = this.#markerKinds.array as Float32Array;
+    for (let at = 0; at < this.#meshes.markers.count; at += 1) {
+      markerKinds[at] = DELIVERY_MARKER_ORDER.indexOf(markers[at]?.kind ?? 'house');
+    }
+    if (this.#meshes.markers.count > 0) this.#markerKinds.needsUpdate = true;
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
     this.#place(this.#meshes.obstacles, obstacles);
     const kinds = this.#kinds.array as Float32Array;
@@ -12459,11 +13100,19 @@ export class DeliveryBelt {
     if (!mesh.visible) return [];
     const matrices = mesh.instanceMatrix.array;
     const kinds = this.#kinds.array;
+    const markerKinds = this.#markerKinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
-      const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
-      const paint =
-        kind !== undefined && isCarKind(kind) ? (this.#paintOf[at] as number) : undefined;
+      const kind =
+        what === 'obstacles'
+          ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number]
+          : what === 'markers'
+            ? DELIVERY_MARKER_ORDER[markerKinds[at] as number]
+            : undefined;
+      // #2506: a car's paint; a marker's kind is never a car's (#2365).
+      const car =
+        what === 'obstacles' && kind !== undefined && isCarKind(kind as DeliveryObstacleKind);
+      const paint = car ? (this.#paintOf[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
@@ -12490,7 +13139,7 @@ export class DeliveryBelt {
     this.#rain.removeFromParent();
     this.#rain.geometry.dispose();
     (this.#rain.material as Material).dispose();
-    for (const materials of [this.#materials, this.#obstacleMaterials]) {
+    for (const materials of [this.#materials, this.#obstacleMaterials, this.#markerMaterials]) {
       materials.lit.dispose();
       if (materials.flat !== materials.lit) materials.flat.dispose();
     }
