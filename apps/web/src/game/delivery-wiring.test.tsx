@@ -2526,20 +2526,41 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
   /** The first seed whose level round the unsteered rider crashes into a parked car on. */
   const CRASHING_SEED = crashingSeed(LEVEL, 'parked-car');
 
+  /** #2366: the fixture level in rain and at dusk, read through the app's reader. */
+  const WET_LEVEL = parseLevelFile(
+    {
+      ...JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            'delivery/levels/fixtures/fixture-level.json',
+          ),
+          'utf8',
+        ),
+      ),
+      round: { ...LEVEL.round, weather: 'rain', light: 'dusk' },
+    },
+    'fixture-level',
+  );
+
   /** The scripted power trace on the fixture level, opened as the Delivery picker's link opens it. */
   async function rideLevel(
     obstacles: 'normal' | 'none',
     level: LevelFile = LEVEL,
     seed = CRASHING_SEED,
     frames = FRAMES,
+    /** #1688: each frame's length; the ride is the same `frames` in fewer, longer ones. */
+    frameMs = FRAME_MS,
   ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
+    readonly said: readonly string[];
     readonly started: readonly unknown[];
   }> {
     pending = [];
     nowMs = START_MS;
     offered.length = 0;
+    said.length = 0;
     startedRounds.length = 0;
     writeRealisticWorldChoice(localStorage, true);
     localStorage.setItem(
@@ -2576,9 +2597,9 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     );
     await settle();
     await clickThrough(buttonStarting('Ride '));
-    for (let index = 0; index < frames; index += 1) await pump();
+    for (let index = 0; index < (frames * FRAME_MS) / frameMs; index += 1) await pump(frameMs);
     await settle();
-    const ridden = { writes, offered: [...offered], started: [...startedRounds] };
+    const ridden = { writes, offered: [...offered], said: [...said], started: [...startedRounds] };
     mounted.unmount();
     mounted = undefined;
     globalThis.location.hash = '';
@@ -2630,6 +2651,27 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
       expect(withHazards.writes).toStrictEqual(without.writes);
     },
   );
+
+  // #1688's ruling: cheaper, never a longer timeout. Both rides are the
+  // level's same 66 s in frames of 1 s, not 330 of 200 ms: the simulation's
+  // steps are fixed at 0.05 s whatever the frame. On this Mac, Node 26, in
+  // its block, two runs each at load averages of 16 to 28: 2.4–4.2 s →
+  // 0.52–0.78 s without coverage, 4.5–5.1 s → 1.1–1.7 s with `--coverage`.
+  it('sends the same writes at the same times, and says the same words in the same order, in rain and at dusk as in clear daylight — #2366', async () => {
+    const clear = await rideLevel('normal', LEVEL, CRASHING_SEED, FRAMES, 1_000);
+    const wet = await rideLevel('normal', WET_LEVEL, CRASHING_SEED, FRAMES, 1_000);
+    // Not vacuous: the wet ride's round was in rain and at dusk, its markers hidden until nearer.
+    const [round] = wet.started as (DeliveryRide | undefined)[];
+    expect(round?.weather).toStrictEqual({ rain: true, dusk: true });
+    expect(round?.revealMetres).toBeGreaterThan(0);
+    const [clearRound] = clear.started as (DeliveryRide | undefined)[];
+    expect(clearRound?.revealMetres).toBeUndefined();
+    expect(clear.writes.length).toBeGreaterThan(20);
+    expect(wet.writes).toStrictEqual(clear.writes);
+    // The live region's words, text and order, are a clear round's.
+    expect(clear.said.length).toBeGreaterThan(0);
+    expect(wet.said).toStrictEqual(clear.said);
+  });
 
   it(
     'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',
