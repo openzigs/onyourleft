@@ -53,7 +53,7 @@ beforeAll(async () => {
   } finally {
     await room.dispose();
   }
-}, 60_000);
+});
 
 describe('a lap race read back from the frames a client decodes, over the real socket — #1909', () => {
   it('welcomes both riders to a lap race of three laps with items, and never says its seed', () => {
@@ -139,7 +139,7 @@ describe('every adapter sends byte-identical lap-race frames for the same inputs
       } finally {
         await room.dispose();
       }
-    }, 60_000);
+    });
   }
 
   it('is a race with items in it, so the comparison is not of empty frames', () => {

@@ -24,6 +24,13 @@ import {
   type RouterHarness,
 } from './router-testing.ts';
 
+/**
+ * The bound of a wait inside a case that has Vitest's 5 s (#2567). It is a
+ * cap under the case's budget: a wait reached late in a case fails as
+ * Vitest's timeout rather than by name.
+ */
+const WAIT_MS = 3_000;
+
 let harness: RouterHarness | undefined;
 const clients: RoomClient[] = [];
 afterEach(async () => {
@@ -61,14 +68,14 @@ describe('every room of one id lands on one worker — #780 criterion 2', () => 
     await until(
       () => pairs.every(([a, b]) => framesWith(a, 2).length > 0 && framesWith(b, 2).length > 0),
       'every rider to see the other',
-      30_000,
+      WAIT_MS,
     );
     const pids = new Set(rooms.map((roomId) => harness?.router.placementOf(roomId)));
     expect(pids.has(undefined)).toBe(false);
     expect(pids.size).toBeGreaterThanOrEqual(2);
     for (const [a] of pairs)
       expect(framesWith(a, 2)[0]?.riders.map((r) => r.riderId)).toEqual([0, 1]);
-  }, 60_000);
+  });
 
   it('spreads room ids by a stable hash', () => {
     expect(roomHash('room-1')).toBe(roomHash('room-1'));
@@ -83,7 +90,9 @@ describe('a worker that dies — #780 criterion 3', () => {
     harness = await startRouter({ workers: 2 });
     const ann = await join('doomed', 'ticket-ann');
     const bob = await join('doomed', 'ticket-bob');
-    await until(() => framesWith(ann, 2).length > 0, 'the room to run', 15_000);
+    // Both seated on one worker: a welcome is the room's, sent from the worker
+    // that holds it (#2567: a frame waited a real tick for the same proof).
+    await until(() => ann.messages.length > 0 && bob.messages.length > 0, 'both welcomes', WAIT_MS);
     const deadPid = harness.router.placementOf('doomed');
     expect(deadPid).toBeDefined();
     process.kill(deadPid as number, 'SIGKILL');
@@ -93,23 +102,23 @@ describe('a worker that dies — #780 criterion 3', () => {
     await until(
       () => (harness?.router.workers() ?? []).every((w) => w.alive && w.pid !== deadPid),
       'a replacement worker',
-      5_000,
+      WAIT_MS,
     );
     // New rooms, and the lost room opened again, land only on live workers.
-    // All four at once (#1076): each waits a real tick for its first frame,
-    // and four rooms in turn waited four of them for one claim.
+    // All four at once (#1076), each to its welcome: the room's, from a live
+    // worker (#2567: its first frame waited a real tick more).
     const roomIds = ['doomed', 'fresh-1', 'fresh-2', 'fresh-3'];
     const riders = await Promise.all(roomIds.map((roomId) => join(roomId, `ticket-${roomId}`)));
     await Promise.all(
       riders.map((rider, index) =>
-        until(() => framesWith(rider, 1).length > 0, `${String(roomIds[index])} to run`, 15_000),
+        until(() => rider.messages.length > 0, `${String(roomIds[index])}'s welcome`, WAIT_MS),
       ),
     );
     for (const roomId of roomIds) {
       expect(harness.router.placementOf(roomId)).toBeDefined();
       expect(harness.router.placementOf(roomId)).not.toBe(deadPid);
     }
-  }, 60_000);
+  });
 
   it('with no replacement started, places every new room on the workers still alive', async () => {
     harness = await startRouter({ workers: 2, respawn: false });
@@ -118,15 +127,15 @@ describe('a worker that dies — #780 criterion 3', () => {
     await until(
       () => harness?.router.workers()[0]?.alive === false,
       'the death to be seen',
-      15_000,
+      WAIT_MS,
     );
     for (let i = 0; i < 6; i += 1) {
       const roomId = `after-${String(i)}`;
       const rider = await join(roomId, `ticket-${roomId}`);
-      await until(() => rider.messages.length > 0, `${roomId}'s welcome`, 15_000);
+      await until(() => rider.messages.length > 0, `${roomId}'s welcome`, WAIT_MS);
       expect(harness.router.placementOf(roomId)).toBe(second?.pid);
     }
-  }, 60_000);
+  });
 
   it('settles every request a dying worker had not answered — #895 review N4', async () => {
     harness = await startRouter({
@@ -144,7 +153,7 @@ describe('a worker that dies — #780 criterion 3', () => {
     expect(await start).toBe(false);
     expect(await metrics).toEqual([]);
     socket.terminate();
-  }, 20_000);
+  });
 
   it('writes the close frame a client can read: unmasked, 1011, the reason', () => {
     expect([...closeFrameBytes({ code: 1011, reason: 'room-lost' })]).toEqual([
@@ -174,7 +183,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const ann = await join('real', 'ticket-ann');
     await until(() => ann.messages.length > 0, 'a welcome');
     expect(ann.messages[0]?.type).toBe('welcome');
-  }, 30_000);
+  });
 
   it('tells a rider rejoining a race that has ended — or was interrupted — that it is closed, in words', async () => {
     harness = await startRouter({ workers: 1, lookup: () => Promise.resolve({ kind: 'ended' }) });
@@ -227,7 +236,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(await rejoin.closed).toEqual({ code: 4005, reason: 'room-closed' });
     expect(rejoin.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
     expect(lookups).toBe(2);
-  }, 30_000);
+  });
 
   it('closes a hello with no ticket, a bad ticket, and a spent ticket with their documented codes — and seats nobody', async () => {
     const spent = new Set<string>();
@@ -251,7 +260,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const reused = await join('gate', 'good');
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
-  }, 30_000);
+  });
 
   it('logs each socket a room closed for a protocol reason, with the room, the reason and a count — #1400, #1402', async () => {
     // Through the operator's real sink, as `instance.ts` wires it (#1402):
@@ -286,7 +295,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     // And the operator's metrics count it beside the refusals.
     const [worker] = await harness.router.metrics();
     expect(worker?.refusals).toMatchObject({ 'hello-expected': 2, 'ticket-refused': 1 });
-  }, 30_000);
+  });
 });
 
 describe('a lap race’s item events in the operator’s log — #1909', () => {
@@ -295,13 +304,14 @@ describe('a lap race’s item events in the operator’s log — #1909', () => {
     const room = 'a0a1a2a3a4a5a6a7a8a9aaabacadaeaf';
     harness = await startRouter({
       workers: 1,
-      // A 40 m loop, so a pick-up is a couple of real seconds away.
+      // A 20 m loop, so the first pick-up is two real ticks away (#2567: 40 m
+      // took four, most of the case's 5 s).
       lookup: (roomId) =>
         Promise.resolve({
           kind: 'open',
           plan: ridePlan(roomId, {
             kind: 'race',
-            lengthMetres: 40,
+            lengthMetres: 20,
             lapRace: { laps: 3, items: true, seed: 2 },
           }),
         }),
@@ -325,7 +335,7 @@ describe('a lap race’s item events in the operator’s log — #1909', () => {
       await until(
         () => lines.some((line) => line.includes('"room-item-event"')),
         'an item event in the log',
-        20_000,
+        WAIT_MS,
       );
     } finally {
       clearInterval(pedal);
@@ -352,7 +362,7 @@ describe('a lap race’s item events in the operator’s log — #1909', () => {
       event: logged[0]?.itemEvent,
       item: logged[0]?.item,
     });
-  }, 30_000);
+  });
 });
 
 describe('the rooms’ sweep and a socket agree on a room — #948', () => {
@@ -373,7 +383,7 @@ describe('the rooms’ sweep and a socket agree on a room — #948', () => {
     expect(await late.closed).toEqual({ code: 4005, reason: 'room-closed' });
     expect(late.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
     expect(harness.router.holds('ending')).toBe(false);
-  }, 30_000);
+  });
 
   it('forgets a released room once no lookup is in flight, and will not claim a room a worker holds', async () => {
     harness = await startRouter({ workers: 1 });
@@ -387,7 +397,7 @@ describe('the rooms’ sweep and a socket agree on a room — #948', () => {
     // Now a worker holds it, and the sweep may not have it.
     expect(harness.router.holds('kept')).toBe(true);
     expect(harness.router.claimForEnding('kept')).toBe(false);
-  }, 30_000);
+  });
 });
 
 describe('compression is off unless the operator turns it on — #780 criterion 5, ruling Q16', () => {

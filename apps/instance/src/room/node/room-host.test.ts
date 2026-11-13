@@ -19,6 +19,12 @@ import { serveHost, until } from './node-room-testing.ts';
 import type { RaceStarter } from '../room-plan.ts';
 import { RoomHost, type HostOptions, type RoomResult } from './room-host.ts';
 
+/**
+ * The bound of a wait inside a case that has Vitest's 5 s (#2567). A wait
+ * reached late in a case fails as Vitest's timeout rather than by name.
+ */
+const WAIT_MS = 3_000;
+
 const admit = admitByTable();
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -151,7 +157,7 @@ describe('backpressure — #780 criterion 4', () => {
     await until(
       () => readers.every((r) => r.frames.length >= ticks),
       'every frame to arrive',
-      10_000,
+      WAIT_MS,
     );
     // …and no tick waited on the stalled socket. A 100-rider tick is about
     // 10 ms of physics on a developer's machine (measured: median 10.5 ms,
@@ -161,7 +167,7 @@ describe('backpressure — #780 criterion 4', () => {
     // drain would miss by the whole stall.
     tickMs.sort((a, b) => a - b);
     expect(tickMs[Math.floor(tickMs.length * 0.99)]).toBeLessThan(500);
-  }, 60_000);
+  });
 });
 
 /** A TCP proxy that closes both sides after `idleMs` with no byte in either direction. */
@@ -218,27 +224,31 @@ async function idleClosingProxy(target: string, idleMs: number) {
 
 describe('the keepalive — #780 criterion 8, through a proxy that closes idle sockets', () => {
   const lobby = () => roomSettings({ kind: 'race', ridingPosition: 'hoods', course: FLAT_COURSE });
+  /** The proxy's idle timeout, in wall milliseconds. */
+  const PROXY_IDLE_MS = 400;
 
   it('pings often enough that a quiet lobby’s socket outlives the proxy’s idle timeout several times over', async () => {
-    const { url } = await hosted(lobby(), { pingIntervalMs: 250 });
-    const proxy = await idleClosingProxy(url, 1_000);
+    // #2567: a 100 ms ping through a 400 ms idle timeout, for three of them —
+    // the ratios of 250 ms through 1 s for 3 s, in two fifths of the time.
+    const { url } = await hosted(lobby(), { pingIntervalMs: 100 });
+    const proxy = await idleClosingProxy(url, PROXY_IDLE_MS);
     const rider = client(proxy.url);
     await rider.open;
     rider.socket.send(helloText('ticket-ann'));
-    await new Promise((done) => setTimeout(done, 3_000));
+    await new Promise((done) => setTimeout(done, 3 * PROXY_IDLE_MS));
     expect(rider.closed).toBeUndefined();
     expect(proxy.closedForIdle).toBe(0);
-  }, 10_000);
+  });
 
   it('control: with no ping, the same proxy closes the same quiet socket', async () => {
     const { url } = await hosted(lobby(), { pingIntervalMs: 0 });
-    const proxy = await idleClosingProxy(url, 1_000);
+    const proxy = await idleClosingProxy(url, PROXY_IDLE_MS);
     const rider = client(proxy.url);
     await rider.open;
     rider.socket.send(helloText('ticket-ann'));
     await until(() => rider.closed !== undefined, 'the proxy to close it', 4_000);
     expect(proxy.closedForIdle).toBe(1);
-  }, 10_000);
+  });
 
   it('terminates a peer that stops answering pings, and the room holds its seat', async () => {
     const { host, url } = await hosted(
@@ -251,7 +261,7 @@ describe('the keepalive — #780 criterion 8, through a proxy that closes idle s
     await until(() => silent.closed !== undefined, 'the silent peer to be let go', 3_000);
     expect(silent.closed?.code).toBe(1006);
     await until(() => host.view('conformance')?.seats[0]?.state === 'held', 'the seat to be held');
-  }, 10_000);
+  });
 });
 
 describe('who may start a race — the owner’s ruling of 2026-09-30', () => {
@@ -288,21 +298,21 @@ describe('who may start a race — the owner’s ruling of 2026-09-30', () => {
     // Ann made it, and is on the line.
     expect(host.start('conformance', 'ann')).toBe(true);
     expect(host.view('conformance')?.phase).toBe('countdown');
-  }, 10_000);
+  });
 
   it('refuses everybody in a rider’s room whose creator is gone — it fails closed', async () => {
     const host = await onTheLine({ creator: null });
     expect(host.start('conformance', 'ann')).toBe(false);
     expect(host.start('conformance', 'bob')).toBe(false);
     expect(host.view('conformance')?.phase).toBe('lobby');
-  }, 10_000);
+  });
 
   it('lets any rider on the line start a room an operator opened, which has no creator', async () => {
     const host = await onTheLine('any-seated-rider');
     expect(host.start('conformance', 'cat')).toBe(false);
     expect(host.start('conformance', 'bob')).toBe(true);
     expect(host.view('conformance')?.phase).toBe('countdown');
-  }, 10_000);
+  });
 });
 
 describe('results — handed on as each becomes final, not at the end', () => {
@@ -343,7 +353,7 @@ describe('results — handed on as each becomes final, not at the end', () => {
       Object.keys(results[0] ?? {}).some((key) => /watts(?!PerKilogram)|power/i.test(key)),
     ).toBe(false);
     expect(host.view('conformance')?.phase).toBe('running');
-  }, 10_000);
+  });
 
   it('says a race is over once, when the last rider is off the road — and not while one finisher waits', async () => {
     const finished: string[] = [];
@@ -385,5 +395,5 @@ describe('results — handed on as each becomes final, not at the end', () => {
     expect(host.view('conformance')?.phase).toBe('finished');
     host.tick('conformance');
     expect(finished).toEqual(['conformance']);
-  }, 10_000);
+  });
 });
