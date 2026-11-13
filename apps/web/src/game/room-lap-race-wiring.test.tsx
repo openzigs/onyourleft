@@ -15,6 +15,11 @@
  * effort distance for each frame, as a real room re-simulating the same
  * physics would (`apps/instance` §`room.ts`), so the rider is never corrected
  * and any difference in what the trainer is sent is the race's alone.
+ *
+ * Since #2546 a solo race counts down {@link COUNTDOWN_FRAMES} frames on its
+ * line before Go, so the room's race #1911 holds equal to it is given the
+ * room's own countdown of the same length first, and its shadow is held on
+ * the line for it.
  */
 
 import { act } from 'react';
@@ -37,6 +42,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { LANE_OFFSETS_METRES } from './lanes';
+import { LAP_RACE_COUNTDOWN_MS } from './lap-race/ride-race';
 import type { LapRaceChoice } from './lap-race/choice';
 import type { GameRenderer, SceneFrame } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -88,6 +94,8 @@ const MASS = kilograms(72);
 const FRAME_MS = 500;
 const START_MS = 1_000_000;
 const FRAMES = 80;
+/** A race's countdown in frames (#2546): a solo race's, and the one the room is given to match it. */
+const COUNTDOWN_FRAMES = LAP_RACE_COUNTDOWN_MS / FRAME_MS;
 
 function powerAt(nowMs: number): number {
   return 290 + 70 * Math.sin((nowMs - START_MS) / 6_000);
@@ -232,8 +240,11 @@ function itemShown(): string | undefined {
   return raceFields().find((text) => text.startsWith('Item'));
 }
 
-/** The shadow: the rider's odometer and speed after each frame, as `GameView` advances it. */
-function shadowRide(frames: number): { along: number; speed: number }[] {
+/**
+ * The shadow: the rider's odometer and speed after each frame, as `GameView`
+ * advances it — held on the line for its first `held` frames (#2546).
+ */
+function shadowRide(frames: number, held = 0): { along: number; speed: number }[] {
   const simulation = new GameSimulation({
     profile: CIRCUIT,
     conditions: rideConditionsFor(MASS, DEFAULT_RIDING_POSITION),
@@ -242,13 +253,16 @@ function shadowRide(frames: number): { along: number; speed: number }[] {
   for (let frame = 1; frame <= frames; frame += 1) {
     const at = START_MS + frame * FRAME_MS;
     const input: RiderInput = { power: watts(powerAt(at)), live: true };
-    simulation.advanceTo(at, input);
+    if (frame <= held) simulation.holdAt(at);
+    else simulation.advanceTo(at, input);
     out.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
   }
   return out;
 }
 
 const SHADOW = shadowRide(FRAMES + 10);
+/** The shadow of a ride held through a countdown first (#2546). */
+const HELD_SHADOW = shadowRide(COUNTDOWN_FRAMES + FRAMES + 10, COUNTDOWN_FRAMES);
 
 /** What the scripted room says of THIS rider on a frame. */
 interface OwnSlots {
@@ -257,15 +271,22 @@ interface OwnSlots {
   readonly lane: number;
 }
 
-/** The room's frame after `frame` frames: the rider where the shadow is, a second rider behind. */
+/**
+ * The room's frame after `frame` frames: the rider where the shadow is, a
+ * second rider behind. `held` frames of countdown came first (#2546), and the
+ * shadow is then the one held through them.
+ */
 function roomFrame(
   room: ScriptedRoom,
   tick: number,
   frame: number,
   own: OwnSlots,
   events: readonly ItemEvent[] = [],
+  held = 0,
 ): void {
-  const at = frame === 0 ? { along: 0, speed: 0 } : (SHADOW[frame - 1] ?? { along: 0, speed: 0 });
+  const shadow = held === 0 ? SHADOW : HELD_SHADOW;
+  const at =
+    frame === 0 ? { along: 0, speed: 0 } : (shadow[held + frame - 1] ?? { along: 0, speed: 0 });
   const riders: FrameRider[] = [
     lapFrameRider(0, at.along, own, at.speed),
     lapFrameRider(1, Math.max(0, at.along - 40), { held: 'none' }, at.speed),
@@ -338,7 +359,8 @@ const soloWrites = (): Promise<readonly Write[]> =>
   (soloRide ??= (async () => {
     const solo: Write[] = [];
     await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo, blind: true });
-    for (let index = 0; index < FRAMES; index += 1) await pump();
+    // Its countdown (#2546), then the race.
+    for (let index = 0; index < COUNTDOWN_FRAMES + FRAMES; index += 1) await pump();
     await clickThrough(buttonStarting('End ride'));
     await clickThrough(endRideAnswer(document, 'End ride'));
     mounted?.unmount();
@@ -365,7 +387,19 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
     const room = new ScriptedRoom();
     const inRoom: Write[] = [];
     await mountRide({ room, writes: inRoom });
-    await joinedLapRace(room, HOLDING_TAILWIND);
+    // #2546: the room counts down as long as the solo race does, and its
+    // first frame comes after the frame its countdown ends on, as Go's.
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'on' });
+      room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
+      await Promise.resolve();
+    });
+    for (let index = 0; index < COUNTDOWN_FRAMES; index += 1) await pump();
+    await act(async () => {
+      roomFrame(room, 0, 0, HOLDING_TAILWIND, [], COUNTDOWN_FRAMES);
+      await Promise.resolve();
+    });
     // The room's word on the rider, frame by frame: what it overrules each use with.
     const script = (frame: number): { own: OwnSlots; events: ItemEvent[] } => {
       // 1st use at frame 10: the room never makes it — the tailwind is still held.
@@ -393,7 +427,7 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
       if (index % 2 === 1) {
         const { own, events } = script(index + 1);
         await act(async () => {
-          roomFrame(room, (index + 1) / 2, index + 1, own, events);
+          roomFrame(room, (index + 1) / 2, index + 1, own, events, COUNTDOWN_FRAMES);
           await Promise.resolve();
         });
       }

@@ -937,7 +937,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         bots are split as a room's riders are (#783), and
                         it rides without the pacer a rider chose. Started at
                         the press (assist read from the device, ONE seed
-                        nothing keeps), stepped one
+                        nothing keeps), then held on its line for a 10 s
+                        countdown of unpaused frames (#2546:
+                        §`countLapRaceDown`, read as a room's race through
+                        `room-ride.ts` §`countdownRace`, so the hold, the
+                        *Race* notice and the region are the room's; nothing
+                        steps before Go), stepped one
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`: a field of
                         mixed personalities from the seed, at the `canny`
@@ -951,7 +956,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the grade is still sampled at the simulation's
                         odometer, BEFORE the race steps;
                         `game/lap-race-wiring.test.tsx` rides one power trace
-                        as an ordinary ride and as a race with items off and
+                        as an ordinary ride (standing still on the line
+                        through the countdown, #2546) and as a race with items off and
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
                         The bots ride still air on a windy ride: stated

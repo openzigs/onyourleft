@@ -554,6 +554,15 @@ const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 const CIRCUITS =
   AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
 
+/**
+ * `ride.html?power=lost` — #2546: a rider whose power meter is paired and has
+ * gone quiet, so the HUD's *Power* reads "— W Sensor lost". On a race's start
+ * line that makes the HUD's primary panel taller at 736×360, which is the case §"#1407" in
+ * `ride-room.browser.spec.ts` must survive. Until #2546 a held rider read
+ * that whatever they pedalled; now they read their power.
+ */
+const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
+
 const GAME: GamePort = {
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
@@ -589,7 +598,9 @@ const GAME: GamePort = {
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
-    rider: { power: watts(342), live: true, paired: true },
+    rider: POWER_LOST
+      ? { power: watts(0), live: false, paired: true }
+      : { power: watts(342), live: true, paired: true },
     cadence: { value: 92, live: true, paired: true },
     heartRate: { value: 168, live: true, paired: true },
   }),
@@ -1720,6 +1731,15 @@ async function run(): Promise<void> {
           ),
         );
       }
+      // #2546: and past its Go. "Go." stands on the *Race* notice for
+      // `RACE_GO_SHOWN_MS` from the room's first frame, and on a phone a
+      // notice takes the route panel's cell while it is up, as a lap's does
+      // (`ride-laps.browser.spec.ts` §`NOTICE_HAS_THE_ROUTE_CELL`). This page
+      // is a race under way, with a lap done and its standings drawn, so it is
+      // measured once that notice has stood down.
+      await until('Go. to stand down', () =>
+        document.querySelector('.oyl-hud__race') === null ? true : undefined,
+      );
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }
