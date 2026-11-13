@@ -1504,8 +1504,10 @@ function ridersOnTheRoad(
     // getting back up, on top of the lean the ride asks for.
     const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
     const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
-    // #2494: the bars turned by the steer the drawn path's turn asks for.
-    const steer = drawnSteer(rider, bend);
+    // #2494: the bars turned by the steer the drawn path's turn asks for —
+    // #2493: and let go of as the rider falls, straight on the ground and back
+    // as they rise, as the stroke is.
+    const steer = drawnSteer(rider, bend) * (1 - (crash?.share ?? 0));
     const placed = markerAt(corridor, rider.distance, rider.kind, across, roll, line, {
       // #625: the stroke's motion, faded out as a bend parks the cranks.
       pedalling: rider.pedalling ? pedallingShare(roll.bicycle) * (1 - (crash?.share ?? 0)) : 0,
