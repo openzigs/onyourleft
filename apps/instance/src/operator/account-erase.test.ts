@@ -36,6 +36,12 @@ import { authorised, corpusFile, syncWorld, uploadBody } from '../sync/sync-test
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
 const FILES = ['nominal-outdoor-ride.fit', 'nominal-ride.gpx', 'nominal-ride.tcx'] as const;
+/**
+ * The longest one run of the command may take (#2568, #1688): below the
+ * case's 5 s default, so a child that hangs is killed rather than left
+ * running after Vitest gives up on the case. One run takes 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
 
 let world: IdentityInstance | undefined;
 let directory: string | undefined;
@@ -70,7 +76,7 @@ function run(data: Data, input: string, ...args: string[]) {
         OYL_INSTANCE_DATABASE: data.database,
         OYL_INSTANCE_BLOBS: data.blobs,
       },
-      timeout: 30_000,
+      timeout: CHILD_WAIT_MS,
     });
     let stdout = '';
     let stderr = '';
@@ -280,31 +286,55 @@ describe('account-erase — one rider’s account, by the recovery code they ema
     expect(again.status).toBe(1);
     expect(again.stderr).toMatch(/No account on this instance holds that recovery code/);
     expect(leaks(again.stdout + again.stderr, code)).toBe(false);
-  }, 90_000);
+  });
 
-  it('erases nothing, and says why, for a code that is malformed, matches no account, or was used — and never prints it', async () => {
-    const { w, data, anna, ben, cara } = await populated();
-    const used = anna.recoveryCodes[0] as string;
-    // Spent, as a recovery spends it: by its hash, read as the identity reads one.
-    await w.freshRead((store) =>
-      sha256Hex(used.replace(/-/g, '')).then((sha) => store.takeRecoveryCode(sha, 1)),
-    );
-    const before = [anna, ben, cara].map((rider) => athleteRows(w.path, rider.athleteId));
-
-    const cases: [string, string, RegExp][] = [
-      ['nothing', '', /does not hold a recovery code/],
-      ['words', 'please delete my account\n', /does not hold a recovery code/],
-      ['a letter no code has', 'abcd-efgh-jkmn-pqr0\n', /does not hold a recovery code/],
-      ['too short', 'abcd-efgh-jkmn\n', /does not hold a recovery code/],
-      [
-        'two codes',
-        `${anna.recoveryCodes[1] ?? ''}\n${ben.recoveryCodes[1] ?? ''}\n`,
-        /does not hold a recovery code/,
-      ],
-      ['nobody’s code', 'abcd-efgh-jkmn-pqrs\n', /No account on this instance holds/],
-      ['a used code', `${used}\n`, /already used/],
-    ];
-    for (const [what, input, problem] of cases) {
+  // One case per input (#2568): fourteen child processes in one case took
+  // 6.3 s under coverage on CI (nightly 43413444621), past Vitest's 5 s
+  // default. Each case is a fresh world and the same two runs of the command.
+  type Rider = Awaited<ReturnType<typeof populated>>['anna'];
+  const refusals: [
+    string,
+    (riders: { w: IdentityInstance; anna: Rider; ben: Rider }) => Promise<string>,
+    RegExp,
+  ][] = [
+    ['nothing', () => Promise.resolve(''), /does not hold a recovery code/],
+    ['words', () => Promise.resolve('please delete my account\n'), /does not hold a recovery code/],
+    [
+      'a letter no code has',
+      () => Promise.resolve('abcd-efgh-jkmn-pqr0\n'),
+      /does not hold a recovery code/,
+    ],
+    ['too short', () => Promise.resolve('abcd-efgh-jkmn\n'), /does not hold a recovery code/],
+    [
+      'two codes',
+      ({ anna, ben }) =>
+        Promise.resolve(`${anna.recoveryCodes[1] ?? ''}\n${ben.recoveryCodes[1] ?? ''}\n`),
+      /does not hold a recovery code/,
+    ],
+    [
+      'nobody’s code',
+      () => Promise.resolve('abcd-efgh-jkmn-pqrs\n'),
+      /No account on this instance holds/,
+    ],
+    [
+      'a used code',
+      async ({ w, anna }) => {
+        const used = anna.recoveryCodes[0] as string;
+        // Spent, as a recovery spends it: by its hash, read as the identity reads one.
+        await w.freshRead((store) =>
+          sha256Hex(used.replace(/-/g, '')).then((sha) => store.takeRecoveryCode(sha, 1)),
+        );
+        return `${used}\n`;
+      },
+      /already used/,
+    ],
+  ];
+  it.each(refusals)(
+    'erases nothing, and says why, for %s — and never prints it',
+    async (what, inputOf, problem) => {
+      const { w, data, anna, ben, cara } = await populated();
+      const input = await inputOf({ w, anna, ben });
+      const before = [anna, ben, cara].map((rider) => athleteRows(w.path, rider.athleteId));
       for (const confirm of [[], ['--confirm']]) {
         const refused = await run(data, input, 'account-erase', ...confirm);
         expect(refused.status, what).toBe(1);
@@ -314,9 +344,11 @@ describe('account-erase — one rider’s account, by the recovery code they ema
           expect(leaks(refused.stdout + refused.stderr, line.trim()), what).toBe(false);
         }
       }
-    }
-    expect([anna, ben, cara].map((rider) => athleteRows(w.path, rider.athleteId))).toEqual(before);
-  }, 90_000);
+      expect([anna, ben, cara].map((rider) => athleteRows(w.path, rider.athleteId))).toEqual(
+        before,
+      );
+    },
+  );
 
   it('takes the code from standard input only: one on the command line is refused, never echoed, and erases nothing', async () => {
     const { w, data, anna } = await populated();
@@ -329,7 +361,7 @@ describe('account-erase — one rider’s account, by the recovery code they ema
       expect(leaks(refused.stdout + refused.stderr, code)).toBe(false);
     }
     expect(athleteRows(w.path, anna.athleteId)).toEqual(before);
-  }, 60_000);
+  });
 
   it('refuses where there is no database, and creates none', async () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-account-erase-'));
@@ -338,5 +370,5 @@ describe('account-erase — one rider’s account, by the recovery code they ema
     expect(refused.status).toBe(1);
     expect(refused.stderr).toMatch(/There is no database here/);
     expect(existsSync(data.database)).toBe(false);
-  }, 30_000);
+  });
 });

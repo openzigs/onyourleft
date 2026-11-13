@@ -24,6 +24,12 @@ import { ATHLETE_A, activityRecordFixture, seedWorld } from '../store/testing/in
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+/**
+ * The longest one command's child process may take (#2568, #1688). Vitest
+ * cannot interrupt a synchronous child, so this is what stops a hung one,
+ * and it is below the case's 5 s default. One command takes about 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
 
 let directory: string | undefined;
 afterEach(async () => {
@@ -36,7 +42,7 @@ function run(data: { database: string; blobs: string }, ...args: string[]) {
     cwd: INSTANCE,
     encoding: 'utf8',
     env: { ...process.env, OYL_INSTANCE_DATABASE: data.database, OYL_INSTANCE_BLOBS: data.blobs },
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   const report =
     result.status === 0
@@ -115,7 +121,7 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
       rows: backup.report.rows,
       blobs: 2,
     });
-  }, 30_000);
+  });
 
   it('refuses a restore over a database in place without --force, and a snapshot whose database was changed', async () => {
     const { directory: root, live, store } = await populated();
@@ -146,7 +152,7 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     const tampered = run(empty, 'restore', path);
     expect(tampered.status).toBe(1);
     expect(existsSync(empty.database)).toBe(false);
-  }, 30_000);
+  });
 
   it('keeps the newest N snapshots, and copies each to a second place — the off-box copy', async () => {
     const { directory: root, live, store } = await populated();
@@ -166,7 +172,7 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     }
     expect(await readdir(join(root, 'on-box'))).toHaveLength(2);
     expect(await readdir(join(root, 'usb'))).toEqual(await readdir(join(root, 'on-box')));
-  }, 30_000);
+  });
 });
 
 describe('a restore is checked before it replaces anything — #895 review N1, N2', () => {
@@ -187,7 +193,7 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
     expect(failed.stderr).toContain('Nothing in place was changed');
     expect(run(live, 'verify').report).toEqual(before);
     expect(existsSync(`${live.database}.restoring`)).toBe(false);
-  }, 30_000);
+  });
 
   it('replaces the blob directory rather than merging into it', async () => {
     const { directory: root, live, store } = await populated();
@@ -200,7 +206,7 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
     const restored = run(live, 'restore', join(root, 'backups', snapshot ?? ''), '--force');
     expect(restored.status, restored.stderr).toBe(0);
     expect(run(live, 'verify').report.blobs).toBe(2);
-  }, 30_000);
+  });
 
   it('refuses --keep that is not a whole number of at least one', async () => {
     const { directory: root, live, store } = await populated();
@@ -210,7 +216,7 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
       expect(taken.status, keep).toBe(1);
       expect(taken.stderr).toContain('--keep');
     }
-  }, 30_000);
+  });
 });
 
 describe('room-open — a room until #784 and #785 let a rider make one', () => {
@@ -231,5 +237,5 @@ describe('room-open — a room until #784 and #785 let a rider make one', () => 
     expect(run(data, 'room-open', 'x', '--kind', 'party', '--length', '1').status).toBe(1);
     expect(run(data, 'room-open', 'x', '--kind', 'race', '--length', '-5').status).toBe(1);
     expect(run(data, 'sideways').status).toBe(2);
-  }, 30_000);
+  });
 });

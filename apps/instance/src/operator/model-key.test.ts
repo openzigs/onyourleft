@@ -47,6 +47,12 @@ import {
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+/**
+ * The longest one command's child process may take (#2568, #1688). Vitest
+ * cannot interrupt a synchronous child, so this is what stops a hung one,
+ * and it is below the case's 5 s default. One command takes about 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
 const URL_TEXT = 'https://models.example/v1';
 const SECRET = secretText(11);
 const OTHER_SECRET = secretText(12);
@@ -110,7 +116,7 @@ function cli(
     encoding: 'utf8',
     env,
     input: options.input ?? '',
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   const report =
     result.status === 0
@@ -340,14 +346,21 @@ describe('backups hold ciphertext only (#1097)', () => {
       readable: false,
       problem: HOSTED_KEY_UNREADABLE,
     });
-    expect(cli(elsewhere, ['model-key', 'status'], { secret: SECRET }).report).toMatchObject({
-      readable: true,
-    });
-    // Five child processes: 3 456 ms on green `main` (38337365635, EPYC 7763)
-    // and 3 355 ms under coverage (nightly 38384633205, EPYC 7763), 69 % of
-    // Vitest's 5 s default. About three times the slowest CI figure
-    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
-  }, 11_000);
+    // The control: the same restored row opens under the secret it was sealed
+    // under. Read through the store, as the other cases here read a key,
+    // rather than by a fifth child process (#2568): five took 3 456 ms on
+    // green `main` (38337365635) and 2 936 ms under coverage (nightly
+    // 43413444621), with an 11 s case timeout that is now gone.
+    const store = openServingStore(elsewhere.database);
+    try {
+      expect(await hostedKeyState(store, await secretKeyOf(SECRET))).toMatchObject({
+        kind: 'held',
+        key: MARKER_KEY,
+      });
+    } finally {
+      await store.close();
+    }
+  });
 });
 
 describe('model-key clear (#1097)', () => {

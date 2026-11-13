@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { newRiderKeys, raceLoad } from '../../tools/race-load-run.ts';
 import { signIn, ticketFor } from '../../tools/tunnel-soak-run.ts';
@@ -31,9 +31,23 @@ import { readServerConfig } from '../server-config.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import { ATHLETES, seedWorld } from '../store/testing/index.ts';
+import { runCommand } from './run.ts';
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+/**
+ * The longest one command's child process may take (#2568, #1688). Vitest
+ * cannot interrupt a synchronous child, so this is what stops a hung one,
+ * and it is below the case's 5 s default. One command takes 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
+/**
+ * The longest the load run may race for (#2568). With no countdown and a
+ * one-metre course the race is over at its first tick, one second after the
+ * start; a run that is not over by this bound reports `raceOver: false`
+ * inside the case, below its 5 s default.
+ */
+const RACE_WAIT_MS = 3_000;
 
 let running: StartedInstance | undefined;
 let directory: string | undefined;
@@ -55,7 +69,7 @@ function run(data: Data, input: string, ...args: string[]) {
     encoding: 'utf8',
     input,
     env: { ...process.env, OYL_INSTANCE_DATABASE: data.database, OYL_INSTANCE_BLOBS: data.blobs },
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   const report =
     result.status === 0
@@ -75,8 +89,23 @@ async function populated(): Promise<Data> {
   } finally {
     await store.close();
   }
-  const opened = run(data, '', 'room-open', 'race', '--kind', 'race', '--length', '20');
-  expect(opened.status, opened.stderr).toBe(0);
+  // The operator's command, run in this process rather than spawned: the
+  // same `room-open` without a second Node starting (#2568, as #2550 did). It
+  // is set-up here; this file's own commands still run as child processes.
+  // No countdown and a one-metre course: the race is over at its first tick
+  // rather than after the room core's ten-second countdown and a second tick.
+  // It reports as JSON on stdout; keep that out of the run's output.
+  const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    expect(
+      await runCommand(
+        ['room-open', 'race', '--kind', 'race', '--length', '1', '--countdown', '0'],
+        { database: data.database, blobs: data.blobs },
+      ),
+    ).toBe(0);
+  } finally {
+    report.mockRestore();
+  }
   return data;
 }
 
@@ -205,7 +234,7 @@ describe('load-accounts add and erase — #1383', () => {
       roomId: 'race',
       keys,
       namePrefix: 'Load',
-      maximumMs: 45_000,
+      maximumMs: RACE_WAIT_MS,
     });
     expect(report.abortReason).toBeNull();
     expect(report.raceOver).toBe(true);
@@ -247,7 +276,7 @@ describe('load-accounts add and erase — #1383', () => {
 
     const again = run(data, '', 'load-accounts', 'erase');
     expect(again.report).toEqual({ command: 'load-accounts erase', erased: 0, remaining: 0 });
-  }, 90_000);
+  });
 
   it('refuses a key an account it did not make already holds, and writes nothing', async () => {
     const data = await populated();
@@ -285,7 +314,7 @@ describe('load-accounts add and erase — #1383', () => {
     const twice = run(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add');
     expect(twice.status).toBe(1);
     expect(await loadAthletes(data)).toHaveLength(1);
-  }, 30_000);
+  });
 
   it.each([
     ['nothing', '', /holds no public keys/],
