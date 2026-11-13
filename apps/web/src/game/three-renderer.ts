@@ -11476,6 +11476,310 @@ interface DeliveryPart {
   readonly painted?: boolean;
 }
 
+/** The unit normal of the triangle whose first corner is `first` in `array` (9 floats a triangle, three's front face), or `undefined` for one of no area. */
+function triangleNormal(
+  array: ArrayLike<number>,
+  first: number,
+): readonly [number, number, number] | undefined {
+  const at = first * 3;
+  const [ax, ay, az] = [array[at] as number, array[at + 1] as number, array[at + 2] as number];
+  const [ux, uy, uz] = [
+    (array[at + 3] as number) - ax,
+    (array[at + 4] as number) - ay,
+    (array[at + 5] as number) - az,
+  ];
+  const [vx, vy, vz] = [
+    (array[at + 6] as number) - ax,
+    (array[at + 7] as number) - ay,
+    (array[at + 8] as number) - az,
+  ];
+  const [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const length = Math.hypot(nx, ny, nz);
+  return length > 0 ? [nx / length, ny / length, nz / length] : undefined;
+}
+
+/** How far a point may be outside a plane and still count as on it, metres: a float's slack. */
+const DELIVERY_SOLID_SLACK_METRES = 1e-5;
+
+/**
+ * A part that is a closed convex solid, as the planes of its faces (each its
+ * outward unit normal and its distance from the origin along it) — PR #2518:
+ * a box, a closed wheel, an octahedron, a hazard marker's closed cone. A face
+ * of another part wholly inside it can never be seen ({@link hiddenInside}).
+ * `undefined` for a part that is not closed (an open cone, a ring, a flat
+ * plate) or not convex (the car's rounded body), which hides nothing.
+ */
+function solidOf(flat: BufferGeometry): readonly (readonly number[])[] | undefined {
+  const array = flat.getAttribute('position').array;
+  const corners = array.length / 3;
+  const key = (corner: number): string =>
+    [0, 1, 2].map((axis) => Math.round((array[corner * 3 + axis] as number) * 1e5)).join(',');
+  // Closed: every edge is two faces'.
+  const edges = new Map<string, number>();
+  for (let first = 0; first < corners; first += 3) {
+    for (let side = 0; side < 3; side += 1) {
+      const [a, b] = [key(first + side), key(first + ((side + 1) % 3))];
+      const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edges.set(edge, (edges.get(edge) ?? 0) + 1);
+    }
+  }
+  if ([...edges.values()].some((count) => count !== 2)) return undefined;
+  const planes: number[][] = [];
+  for (let first = 0; first < corners; first += 3) {
+    const normal = triangleNormal(array, first);
+    if (normal === undefined) continue;
+    const [nx, ny, nz] = normal;
+    const distance =
+      nx * (array[first * 3] as number) +
+      ny * (array[first * 3 + 1] as number) +
+      nz * (array[first * 3 + 2] as number);
+    // Convex: every corner on the inside of every face.
+    for (let corner = 0; corner < corners; corner += 1) {
+      const out =
+        nx * (array[corner * 3] as number) +
+        ny * (array[corner * 3 + 1] as number) +
+        nz * (array[corner * 3 + 2] as number) -
+        distance;
+      if (out > DELIVERY_SOLID_SLACK_METRES) return undefined;
+    }
+    planes.push([nx, ny, nz, distance]);
+  }
+  return planes;
+}
+
+/**
+ * Whether the triangle at `first` of `array` lies wholly inside `solid`
+ * ({@link solidOf}), so a solid drawn whenever it is hides it from every
+ * eye — PR #2518: the top of a bin's body under its lid, a dog's legs' tops
+ * inside its body, the inner face of a bin's wheel inside the bin. A
+ * triangle lying on one of the solid's faces is inside only when it faces
+ * into the solid; facing out, it is that face's twin and is kept.
+ */
+function hiddenInside(
+  array: ArrayLike<number>,
+  first: number,
+  solid: readonly (readonly number[])[],
+): boolean {
+  const normal = triangleNormal(array, first);
+  if (normal === undefined) return false;
+  for (const [nx, ny, nz, distance] of solid as readonly (readonly [
+    number,
+    number,
+    number,
+    number,
+  ])[]) {
+    let on = 0;
+    for (let corner = first; corner < first + 3; corner += 1) {
+      const out =
+        nx * (array[corner * 3] as number) +
+        ny * (array[corner * 3 + 1] as number) +
+        nz * (array[corner * 3 + 2] as number) -
+        distance;
+      if (out > DELIVERY_SOLID_SLACK_METRES) return false;
+      if (out > -DELIVERY_SOLID_SLACK_METRES) on += 1;
+    }
+    if (on === 3 && nx * normal[0] + ny * normal[1] + nz * normal[2] >= 0) return false;
+  }
+  return true;
+}
+
+/** Whether `part` is drawn by exactly the instances that draw `other`: the same kind, and the same second kind (#2506). */
+function drawnTogether(part: DeliveryPart, other: DeliveryPart): boolean {
+  return part.kind === other.kind && (part.also ?? -1) === (other.also ?? -1);
+}
+
+/** The parts three makes with a flat cap fanned about its middle: a wheel's ends, a hazard marker's base, a rim's disc. */
+const DELIVERY_CAPPED_TYPES: ReadonlySet<string> = new Set([
+  'CylinderGeometry',
+  'ConeGeometry',
+  'CircleGeometry',
+]);
+
+/**
+ * `triangles` (9 floats each, three's front face) with every flat cap that
+ * three fans about its middle drawn as its outline's own polygon — PR #2518:
+ * three draws an 8-sided wheel's end as 8 triangles about its axle, where the
+ * octagon is 6, and a half-round end of a mailbox's roof as 4, where it is 3.
+ * The same corners, the same plane and the same normal, so the same pixels.
+ * A fan is a run of coplanar triangles sharing one corner, their far edges a
+ * chain or a loop whose polygon is convex; anything else is left as it is.
+ * Returns the triangles' positions and normals, the caps' replaced.
+ */
+function withCapsAsPolygons(
+  positions: readonly number[],
+  normals: readonly number[],
+): { readonly positions: number[]; readonly normals: number[] } {
+  const count = positions.length / 9;
+  const key = (value: number): number => Math.round(value * 1e5);
+  const pointKey = (corner: number): string =>
+    `${key(positions[corner * 3] as number)},${key(positions[corner * 3 + 1] as number)},${key(positions[corner * 3 + 2] as number)}`;
+  const planes = new Map<string, number[]>();
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    const normal = triangleNormal(positions, triangle * 3);
+    if (normal === undefined) continue;
+    const distance =
+      normal[0] * (positions[triangle * 9] as number) +
+      normal[1] * (positions[triangle * 9 + 1] as number) +
+      normal[2] * (positions[triangle * 9 + 2] as number);
+    const plane = `${normal.map((each) => Math.round(each * 1e4)).join(',')}|${key(distance)}`;
+    planes.set(plane, [...(planes.get(plane) ?? []), triangle]);
+  }
+  const replaced = new Set<number>();
+  const added: { readonly corners: number[][]; readonly normal: number[] }[] = [];
+  for (const group of planes.values()) {
+    if (group.length < 3) continue;
+    const firstNormal = triangleNormal(positions, (group[0] as number) * 3) as readonly number[];
+    // The one corner every triangle of the run shares: the fan's middle.
+    const shared = [0, 1, 2]
+      .map((corner) => pointKey((group[0] as number) * 3 + corner))
+      .find((middle) =>
+        group.every((triangle) =>
+          [0, 1, 2].some((corner) => pointKey(triangle * 3 + corner) === middle),
+        ),
+      );
+    if (shared === undefined) continue;
+    // Each triangle's far edge, in its own winding: middle → from → to.
+    const next = new Map<string, string>();
+    const point = new Map<string, number[]>();
+    let middle: number[] = [];
+    let chained = true;
+    for (const triangle of group) {
+      const at = [0, 1, 2].findIndex((corner) => pointKey(triangle * 3 + corner) === shared);
+      const [from, to] = [(at + 1) % 3, (at + 2) % 3].map((corner) => triangle * 3 + corner) as [
+        number,
+        number,
+      ];
+      const [fromKey, toKey] = [pointKey(from), pointKey(to)];
+      if (next.has(fromKey)) chained = false;
+      next.set(fromKey, toKey);
+      for (const corner of [from, to, triangle * 3 + at]) {
+        point.set(pointKey(corner), [
+          positions[corner * 3] as number,
+          positions[corner * 3 + 1] as number,
+          positions[corner * 3 + 2] as number,
+        ]);
+      }
+      middle = point.get(shared) as number[];
+    }
+    if (!chained) continue;
+    const targets = new Set(next.values());
+    const starts = [...next.keys()].filter((from) => !targets.has(from));
+    const loop = starts.length === 0;
+    if (!loop && starts.length !== 1) continue;
+    const chain: string[] = [loop ? ([...next.keys()][0] as string) : (starts[0] as string)];
+    while (chain.length <= group.length) {
+      const after = next.get(chain[chain.length - 1] as string);
+      if (after === undefined || after === chain[0]) break;
+      chain.push(after);
+    }
+    if (chain.length !== (loop ? group.length : group.length + 1)) continue;
+    let outline = chain.map((each) => point.get(each) as number[]);
+    if (!loop) outline = [middle, ...outline];
+    // Drop the corners on a straight run (a half-round end's middle on its chord).
+    const turn = (a: number[], b: number[], c: number[]): number => {
+      const [ux, uy, uz] = [
+        (b[0] as number) - (a[0] as number),
+        (b[1] as number) - (a[1] as number),
+        (b[2] as number) - (a[2] as number),
+      ];
+      const [vx, vy, vz] = [
+        (c[0] as number) - (b[0] as number),
+        (c[1] as number) - (b[1] as number),
+        (c[2] as number) - (b[2] as number),
+      ];
+      return (
+        (uy * vz - uz * vy) * (firstNormal[0] as number) +
+        (uz * vx - ux * vz) * (firstNormal[1] as number) +
+        (ux * vy - uy * vx) * (firstNormal[2] as number)
+      );
+    };
+    const turns = outline.map((corner, index) =>
+      turn(
+        outline[(index + outline.length - 1) % outline.length] as number[],
+        corner,
+        outline[(index + 1) % outline.length] as number[],
+      ),
+    );
+    if (turns.some((each) => each < -1e-9)) continue;
+    outline = outline.filter((_, index) => (turns[index] as number) > 1e-9);
+    if (outline.length < 3 || outline.length - 2 >= group.length) continue;
+    const normal = [0, 1, 2].map((axis) => normals[(group[0] as number) * 9 + axis] as number);
+    for (let index = 1; index + 1 < outline.length; index += 1) {
+      added.push({
+        corners: [outline[0], outline[index], outline[index + 1]] as number[][],
+        normal,
+      });
+    }
+    for (const triangle of group) replaced.add(triangle);
+  }
+  const kept = { positions: [] as number[], normals: [] as number[] };
+  for (let triangle = 0; triangle < count; triangle += 1) {
+    if (replaced.has(triangle)) continue;
+    kept.positions.push(...positions.slice(triangle * 9, triangle * 9 + 9));
+    kept.normals.push(...normals.slice(triangle * 9, triangle * 9 + 9));
+  }
+  for (const { corners, normal } of added) {
+    for (const corner of corners) {
+      kept.positions.push(...corner);
+      kept.normals.push(...normal);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The triangles of `flat` (unindexed, `part`'s) that can be seen, as a new
+ * geometry of its position and normal, the two {@link deliveryShape} reads —
+ * PR #2518's trim for the village frame's triangles, as the owner's ruling of
+ * 2026-11-13 left it: none wholly inside a solid drawn with it
+ * ({@link hiddenInside}), and a cap fanned about its middle as its own
+ * polygon ({@link withCapsAsPolygons}). Neither changes a pixel from any eye,
+ * and `delivery-trim.test.ts` casts the tablet's pixels to hold it so. `flat`
+ * itself when nothing changes.
+ *
+ * ⚠️ **Every face that looks down is kept, the bottom of a bin and a post's
+ * foot too.** The trim first left out every face looking straight down from
+ * under the chase camera's 2 m eye, on the reasoning that the eye sees such a
+ * face from behind. But a piece is turned about the vertical only, so up a
+ * climb one stands above the eye and the eye sees its underside from in
+ * front: on `busy-round.json` near 1 770 m a parked car 44 m ahead stands
+ * 3.18 m above the eye's road, and with its underside gone a band of road
+ * about 2 px tall showed through it (the review of 2026-11-13). A face on the
+ * road shows too: its foot stays level while the road under it slopes, and
+ * from 80 m down that climb the tablet's pixels find a row of a bin's bottom.
+ */
+function trimmedPart(
+  part: DeliveryPart,
+  flat: BufferGeometry,
+  solids: readonly {
+    readonly part: DeliveryPart;
+    readonly planes: readonly (readonly number[])[];
+  }[],
+): BufferGeometry {
+  const position = flat.getAttribute('position') as BufferAttribute;
+  const normal = flat.getAttribute('normal') as BufferAttribute;
+  const hiders = solids.filter((solid) => solid.part !== part && drawnTogether(part, solid.part));
+  const positions: number[] = [];
+  const normals: number[] = [];
+  let changed = false;
+  for (let first = 0; first < position.count; first += 3) {
+    if (hiders.some((solid) => hiddenInside(position.array, first, solid.planes))) {
+      changed = true;
+      continue;
+    }
+    positions.push(...position.array.subarray(first * 3, first * 3 + 9));
+    normals.push(...normal.array.subarray(first * 3, first * 3 + 9));
+  }
+  const capped = DELIVERY_CAPPED_TYPES.has(part.made.type)
+    ? withCapsAsPolygons(positions, normals)
+    : { positions, normals };
+  if (!changed && capped.positions.length === positions.length) return flat;
+  const trimmed = new BufferGeometry();
+  trimmed.setAttribute('position', new BufferAttribute(new Float32Array(capped.positions), 3));
+  trimmed.setAttribute('normal', new BufferAttribute(new Float32Array(capped.normals), 3));
+  return trimmed;
+}
+
 /**
  * Parts as ONE unindexed geometry — #1814: positions, normals, the paint in
  * the vertex colour, the glow in {@link DECORATION_GLOW_ATTRIBUTE} (the
@@ -11483,69 +11787,25 @@ interface DeliveryPart {
  * in), and, where any part names a kind, each vertex's kind. The parts'
  * geometries are disposed.
  */
-/**
- * Whether the triangle at `first` (its three corners from there) faces
- * straight down and lies wholly under the chase camera's eye — #2507, PR
- * #2518's trim: from an eye `camera.ts` §`CAMERA_ABOVE_METRES` over the road
- * such a face is always seen from behind, and Delivery's materials draw front
- * faces only (`decorationMaterials`) and cast no shadow, so it is culled on
- * every frame and drawing it costs a triangle for no pixel: the bottom of a
- * bin, a cone's foot or a post standing on the road, a car's underside and
- * the underside of a mailbox's box. Facing down is the winding's normal,
- * three's front face, within a degree or so of straight down.
- */
-function isUnderside(position: BufferAttribute, first: number): boolean {
-  const [ax, ay, az] = [position.getX(first), position.getY(first), position.getZ(first)];
-  const [ux, uy, uz] = [
-    position.getX(first + 1) - ax,
-    position.getY(first + 1) - ay,
-    position.getZ(first + 1) - az,
-  ];
-  const [vx, vy, vz] = [
-    position.getX(first + 2) - ax,
-    position.getY(first + 2) - ay,
-    position.getZ(first + 2) - az,
-  ];
-  const [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
-  const length = Math.hypot(nx, ny, nz);
-  const highest = Math.max(ay, position.getY(first + 1), position.getY(first + 2));
-  return length > 0 && ny / length < -0.99 && highest < CAMERA_ABOVE_METRES;
-}
-
-/**
- * Only the triangles of `flat` (unindexed) that are not an {@link isUnderside},
- * as a new geometry of its position and normal — the two {@link deliveryShape}
- * reads. `flat` itself when none is.
- */
-function withoutUndersides(flat: BufferGeometry): BufferGeometry {
-  const position = flat.getAttribute('position') as BufferAttribute;
-  const normal = flat.getAttribute('normal') as BufferAttribute;
-  const kept: number[] = [];
-  for (let first = 0; first < position.count; first += 3) {
-    if (!isUnderside(position, first)) kept.push(first);
-  }
-  if (kept.length * 3 === position.count) return flat;
-  const positions = new Float32Array(kept.length * 9);
-  const normals = new Float32Array(kept.length * 9);
-  kept.forEach((first, index) => {
-    positions.set(position.array.subarray(first * 3, first * 3 + 9), index * 9);
-    normals.set(normal.array.subarray(first * 3, first * 3 + 9), index * 9);
-  });
-  const trimmed = new BufferGeometry();
-  trimmed.setAttribute('position', new BufferAttribute(positions, 3));
-  trimmed.setAttribute('normal', new BufferAttribute(normals, 3));
-  return trimmed;
-}
-
 function deliveryShape(
   parts: readonly DeliveryPart[],
-  /** #2507: leave out every {@link isUnderside}; for pieces that stand on the road. */
-  undersides: 'keep' | 'drop' = 'keep',
+  /** PR #2518: leave out what no eye can see ({@link trimmedPart}); for the obstacles and the markers. */
+  trim: 'keep' | 'trim' = 'keep',
 ): BufferGeometry {
-  const flats = parts.map((part) => {
-    const flat = part.made.index === null ? part.made : part.made.toNonIndexed();
-    if (undersides === 'keep') return flat;
-    const trimmed = withoutUndersides(flat);
+  const whole = parts.map((part) =>
+    part.made.index === null ? part.made : part.made.toNonIndexed(),
+  );
+  const solids =
+    trim === 'keep'
+      ? []
+      : parts.flatMap((part, index) => {
+          const planes = solidOf(whole[index] as BufferGeometry);
+          return planes === undefined ? [] : [{ part, planes }];
+        });
+  const flats = parts.map((part, index) => {
+    const flat = whole[index] as BufferGeometry;
+    if (trim === 'keep') return flat;
+    const trimmed = trimmedPart(part, flat, solids);
     if (trimmed !== flat && flat !== part.made) flat.dispose();
     return trimmed;
   });
@@ -11896,7 +12156,7 @@ export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; 
  * with a smaller diamond and ring; and a no-delivery sign, a crossed ring on a
  * post with no ring on the step ({@link OTHER_MARKER_METRES}).
  */
-function markerShape(): BufferGeometry {
+function markerShape(trim = true): BufferGeometry {
   const { post, postThick, diamond, ring } = MARKER_METRES;
   const half = diamond / 2;
   const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
@@ -12009,7 +12269,7 @@ function markerShape(): BufferGeometry {
       kind: kind('no-delivery'),
     },
   ];
-  return deliveryShape(parts, 'drop');
+  return deliveryShape(parts, trim ? 'trim' : 'keep');
 }
 
 /**
@@ -12266,7 +12526,7 @@ function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
  * Each kind also carries its hazard marker overhead ({@link
  * obstacleHazardMarker}, #2396), inside that footprint.
  */
-function obstacleShape(): BufferGeometry {
+function obstacleShape(trim = true): BufferGeometry {
   const parts: DeliveryPart[] = [];
   const add = (kind: DeliveryObstacleKind, made: BufferGeometry, colour: number): void => {
     parts.push({ made, colour, kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind) });
@@ -12370,7 +12630,23 @@ function obstacleShape(): BufferGeometry {
       painted: colour === body,
     });
   }
-  return deliveryShape(parts, 'drop');
+  return deliveryShape(parts, trim ? 'trim' : 'keep');
+}
+
+/**
+ * The obstacles' or the markers' one geometry, trimmed as the belt draws it
+ * or, with `trimmed` false, every triangle its parts were made with — PR
+ * #2518, the owner's ruling of 2026-11-13 that the trim be invisible.
+ *
+ * @test-facing `delivery-belt.test.ts` casts the tablet's pixels at both, up
+ * the steepest shipped level and on the flat, and holds every pixel equal;
+ * the product builds only the trimmed one, in {@link DeliveryBelt}
+ */
+export function deliveryPieceShape(
+  what: 'obstacles' | 'markers',
+  trimmed: boolean,
+): BufferGeometry {
+  return what === 'obstacles' ? obstacleShape(trimmed) : markerShape(trimmed);
 }
 
 /**
@@ -12386,7 +12662,16 @@ function obstacleShape(): BufferGeometry {
  * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
  * Then **1 598**, PR #2518's trim when its markers met these obstacles (the
  * village frame 206 234, over that limit): the 76 faces that look straight
- * down from under the eye, never drawn ({@link isUnderside}). A car pulling out's
+ * down from under the eye, left out as never seen. And then **1 596**, the
+ * owner's ruling of 2026-11-13 that the trim be invisible, since up a climb
+ * the eye sees those faces from below: all 76 back, and instead
+ * ({@link trimmedPart}) the 22 wholly inside a solid drawn with them (a bin's
+ * body's top under its lid and most of its wheels' inner ends inside it, a
+ * dog's legs' tops and its muzzle's back, two triangles of a car's side
+ * windows inside its middle pillars) and 56
+ * of the caps three fans about their middles, each now its own polygon (a
+ * wheel's 8-sided end in 6, a car's 12-sided tyre end in 10 and rim in 6, a
+ * hazard marker's square base in 2). A car pulling out's
  * body is the parked car's, drawn by its instance too ({@link
  * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
@@ -12396,7 +12681,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_598;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_596;
 
 /**
  * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
@@ -12520,12 +12805,16 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * The triangles in the markers' one geometry — #2507: **174**, a doorstep's
- * 42, a mailbox's 78 and a no-delivery sign's 54. It was 184 (44, 84 and 56;
- * the sign's 96 until its torus became {@link signRing}'s flat ring, 40
- * fewer), and then PR #2518's trim for the village frame left out the 10
- * faces that look straight down from under the eye ({@link isUnderside}):
- * each post's foot, and the mailbox's box's and flag's undersides. Every marker instance submits all
+ * The triangles in the markers' one geometry — #2507: **180**, a doorstep's
+ * 44, a mailbox's 80 and a no-delivery sign's 56. It was 184 (the sign's 96
+ * until its torus became {@link signRing}'s flat ring, 40 fewer); PR #2518's
+ * trim for the village frame left out the 10 faces that look straight down
+ * from under the eye, 174, until the owner's ruling of 2026-11-13 that the
+ * trim be invisible put them back, since a far marker is drawn enlarged and up
+ * a climb one stands above the eye. What it leaves out now
+ * ({@link trimmedPart}): the mailbox's post's top, inside its box, and one
+ * triangle of each half-round end of its roof (three's fan of 4, drawn as the
+ * half-octagon's 3). Every marker instance submits all
  * of them (the kind collapse is per vertex, as the obstacles' is), so a
  * Delivery frame's markers cost this many times the instances drawn in
  * vertex work.
@@ -12533,7 +12822,7 @@ function prefersReducedMotion(): boolean {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_MARKER_TRIANGLES = 174;
+export const DELIVERY_MARKER_TRIANGLES = 180;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

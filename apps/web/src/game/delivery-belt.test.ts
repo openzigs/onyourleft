@@ -50,6 +50,7 @@ import {
   DELIVERY_PIECE_CAPACITY,
   DeliveryBelt,
   deliveryObstacleVertexDrawn,
+  deliveryPieceShape,
   MARKER_MOST_SCALE,
   MARKER_DIAMOND_HEIGHTS,
   MARKER_TRUE_SIZE_WITHIN_METRES,
@@ -992,7 +993,8 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     const geometry = belt.meshOf('obstacles').geometry;
     // One car: every vertex's kind is one of the drawn roster's, none a second
     // or third car — #2506's car pulling out draws this one, and of its own
-    // holds only its marker and its two indicators, 8 + 2 × 2 triangles.
+    // holds only its marker and its two indicators, 6 + 2 × 2 triangles (the
+    // marker's base one quad of 2 since PR #2518's trim, not three's fan of 4).
     const kinds = geometry.getAttribute('oylPieceKind');
     const seen = new Set<number>();
     let pullingOutOwn = 0;
@@ -1001,7 +1003,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
       if (kinds.getX(at) === ROSTER.indexOf('car-pulling-out')) pullingOutOwn += 1;
     }
     expect([...seen].sort()).toEqual(ROSTER.map((_, index) => index));
-    expect(pullingOutOwn / 3).toBe(8 + 2 * 2);
+    expect(pullingOutOwn / 3).toBe(6 + 2 * 2);
     // Its body, and only its body, takes the instance's paint.
     const painted = geometry.getAttribute('oylPainted');
     const car = carVertices(belt, CAR_KIND);
@@ -1083,7 +1085,10 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // stay under 205 000 triangles, trims the car's rims to one outward disc
     // each (32 to 8), 1 674; its tyres stay round in 12 (above). PR #2518's
     // trim, when its markers met these: no face looking straight down from
-    // under the eye, 76 fewer, 1 598. A change
+    // under the eye, 76 fewer, 1 598; and since the owner's ruling of
+    // 2026-11-13 that it be invisible, every such face back (+76), no face
+    // wholly inside a solid drawn with it (−22) and each cap three fans about
+    // its middle drawn as its own polygon (−56): 1 596. A change
     // past this is for the owner and the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
@@ -1209,19 +1214,29 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
       perKind[kind] = (perKind[kind] ?? 0) + 1;
     }
     expect(position.count / 3).toBe(DELIVERY_MARKER_TRIANGLES);
-    // A doorstep's 42, a mailbox's 78, a no-delivery sign's 54: its torus (72) a flat
-    // ring (32), and PR #2518's trim, no face looking down from under the eye (2, 6, 2).
-    expect(perKind.map((each) => each / 3)).toEqual([42, 78, 54]);
-    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(174);
+    // A doorstep's 44, a mailbox's 80, a no-delivery sign's 56: its torus (72) a flat
+    // ring (32). PR #2518's trim, as the owner's ruling of 2026-11-13 left it,
+    // leaves out only the mailbox's post's top, inside its box, and draws each
+    // half-round end of its roof in 3 triangles, not three's fan of 4 (−4).
+    expect(perKind.map((each) => each / 3)).toEqual([44, 80, 56]);
+    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(180);
     belt.dispose();
   });
 
-  it('draws no face of an obstacle or a marker that looks straight down from under the eye, and keeps a parcel’s — PR #2518’s trim', () => {
-    // Seen from the chase camera's eye, CAMERA_ABOVE_METRES over the road, such
-    // a face is always seen from behind and culled: it cost a triangle a frame
-    // for no pixel. A parcel flies and turns, so it keeps its own (the control).
-    const undersides = (belt: DeliveryBelt, what: 'obstacles' | 'markers' | 'parcels'): number => {
-      const position = belt.meshOf(what).geometry.getAttribute('position');
+  it('keeps every face of an obstacle or a marker that looks straight down — the owner’s ruling of 2026-11-13 on PR #2518', () => {
+    // PR #2518 first left out every such face under the chase camera's eye, as
+    // seen from behind. Up a climb a piece stands above the eye, which then sees
+    // that face from in front (delivery-trim.test.ts): every one is drawn, in
+    // both worlds, as many as every triangle the parts were made with holds.
+    const undersides = (shape: {
+      getAttribute(name: string): {
+        count: number;
+        getX(at: number): number;
+        getY(at: number): number;
+        getZ(at: number): number;
+      };
+    }): number => {
+      const position = shape.getAttribute('position');
       let count = 0;
       for (let at = 0; at < position.count; at += 3) {
         const [ax, ay, az] = [position.getX(at), position.getY(at), position.getZ(at)];
@@ -1237,16 +1252,17 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
         ];
         const ny = uz * vx - ux * vz;
         const length = Math.hypot(uy * vz - uz * vy, ny, ux * vy - uy * vx);
-        const highest = Math.max(ay, position.getY(at + 1), position.getY(at + 2));
-        if (ny / length < -0.99 && highest < CAMERA_ABOVE_METRES) count += 1;
+        if (ny / length < -0.99) count += 1;
       }
       return count;
     };
     for (const world of ['stylised', 'realistic'] as const) {
       const belt = new DeliveryBelt(world);
-      expect(undersides(belt, 'obstacles'), world).toBe(0);
-      expect(undersides(belt, 'markers'), world).toBe(0);
-      expect(undersides(belt, 'parcels'), world).toBeGreaterThan(0);
+      for (const what of ['obstacles', 'markers'] as const) {
+        const whole = undersides(deliveryPieceShape(what, false));
+        expect(whole, `${world} ${what}`).toBeGreaterThan(0);
+        expect(undersides(belt.meshOf(what).geometry), `${world} ${what}`).toBe(whole);
+      }
       belt.dispose();
     }
   });
