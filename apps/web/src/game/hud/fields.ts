@@ -417,7 +417,12 @@ export interface ChosenRider {
  */
 export interface NextHouseHud {
   readonly side: 'left' | 'right';
-  /** Metres along the road to the house; nought once the rider is level with it. */
+  /**
+   * Metres along the road to where the house's throw window opens; nought
+   * once the rider is inside the window — #2513. Not to the house: level with
+   * it, the house is out of frame and the throw is late. At nought the field
+   * says to throw ({@link NEXT_HOUSE_TEXT}).
+   */
   readonly metres: number;
 }
 
@@ -446,6 +451,13 @@ export interface DeliveryHud {
    * ahead, from the rider, never where. `undefined` once none is expecting one.
    */
   readonly next: NextHouseHud | undefined;
+  /**
+   * Whether a crash is being drawn — #2454, `delivery/crash-look.ts`: the
+   * Score field says "Crashed" under it for as long as the rider is drawn
+   * down, once per crash. The live region's sentence is `delivery-announce.ts`
+   * §`deliveryEvents`', as before. Absent is not crashed.
+   */
+  readonly crashed?: boolean | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -1204,13 +1216,17 @@ export const DELIVERY_SCORE_KEY = 'delivery-score';
 export const DELIVERY_NEXT_KEY = 'delivery-next';
 
 /**
- * The words of the next-house field — #2453. ⚠️ Proposed to the owner in the
- * pull request (old → new); this project's own (DL1), naming no place.
+ * The words of the next-house field — #2453; this project's own (DL1), naming
+ * no place. Since #2513 the field counts down to the throw point, and inside
+ * the house's window its value is {@link NEXT_HOUSE_TEXT}`.throwNow` over the
+ * side, read as "Throw now, on the right": the owner's approved wording of
+ * 2026-11-12, in place of a count that reached nought beside the house.
  */
 export const NEXT_HOUSE_TEXT = {
   label: 'Next house',
   left: 'on the left',
   right: 'on the right',
+  throwNow: 'Throw now,',
 } as const;
 
 /** Whether a reading is one of a Delivery round's — #1812. */
@@ -1255,24 +1271,44 @@ function deliveryReadings(
           unit: smallDistanceUnit(units),
           stale: false,
         }
-      : {
-          ...measured(
-            DELIVERY_NEXT_KEY,
-            NEXT_HOUSE_TEXT.label,
-            formatSmallDistance(next.metres, units),
-          ),
-          detail: NEXT_HOUSE_TEXT[next.side],
-        },
+      : next.metres > 0
+        ? {
+            ...measured(
+              DELIVERY_NEXT_KEY,
+              NEXT_HOUSE_TEXT.label,
+              formatSmallDistance(next.metres, units),
+            ),
+            detail: NEXT_HOUSE_TEXT[next.side],
+          }
+        : {
+            // #2513: inside the house's window, a word and the side, never "0 ft".
+            key: DELIVERY_NEXT_KEY,
+            label: NEXT_HOUSE_TEXT.label,
+            value: NEXT_HOUSE_TEXT.throwNow,
+            unit: '',
+            stale: false,
+            word: true,
+            detail: NEXT_HOUSE_TEXT[next.side],
+          },
     {
       key: DELIVERY_SCORE_KEY,
       label: 'Score',
       value: String(delivery.score),
       unit: '',
       stale: false,
-      detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+      detail:
+        delivery.crashed === true
+          ? CRASHED_TEXT
+          : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
     },
   ];
 }
+
+/**
+ * What the Score field says under the score while a crash is drawn — #2454,
+ * new rider-facing wording for the owner's approval.
+ */
+export const CRASHED_TEXT = 'Crashed';
 
 /** What the draft field is called (#787). */
 export const DRAFT_LABEL = 'Draft';

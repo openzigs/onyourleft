@@ -281,8 +281,14 @@ describe('the realistic files and the pipeline that makes them', () => {
         expect(callsTheImporter(source), file).toBe(false);
       }
     }
-    // #1283: and `impostor.py`, the one strip both kinds of tree are rendered by.
-    expect([...imported].sort()).toEqual(['gltf_import.py', 'impostor.py', 'rider_kit.py']);
+    // #1283: and `impostor.py`, the one strip both kinds of tree are rendered by;
+    // #2493: and `rider_crash.py`, the rider's crash clip's moments.
+    expect([...imported].sort()).toEqual([
+      'gltf_import.py',
+      'impostor.py',
+      'rider_crash.py',
+      'rider_kit.py',
+    ]);
     for (const file of imported) {
       const source = readFileSync(join(directory, file), 'utf8');
       expect(source.split('\n').slice(0, 5).join('\n'), file).toContain(

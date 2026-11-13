@@ -229,9 +229,11 @@ describe('the pack’s bake matches the runtime’s own IK — #2485, #681', () 
     );
     expect(drift).toBeLessThanOrEqual(FOOT_TOLERANCE_METRES);
     // And the point they keep it from is the ankle, not somewhere beside the
-    // bicycle: within 7 cm of the shoe's nearest vertex (62 mm measured: the
-    // vertices round the ankle itself are shared with the shin, so not here).
-    expect(reach).toBeLessThan(0.07);
+    // bicycle: within 8 cm of the shoe's nearest vertex (74 mm measured: the
+    // vertices round the ankle itself are shared with the shin, so not here;
+    // 62 mm before #2504's shoe, whose smooth last the decimator cuts to fewer
+    // vertices round the heel).
+    expect(reach).toBeLessThan(0.08);
   });
 
   it('fails the same measure with the VAT shifted by one phase either way — the control', () => {

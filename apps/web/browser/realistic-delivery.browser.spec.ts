@@ -51,6 +51,24 @@
  * off the frame it draws again (`nightly-split.test.ts` holds this shard to
  * the loads it has). The stylised world's, on the same page and road, is
  * required, so the size cannot shrink back unseen.
+ *
+ * ## #2513 — every house of a real round, drawn with its marker
+ *
+ * The owner, on the tablet's realistic world, 2026-11-12: "I still don't see
+ * the houses I am supposed to deliver to", the HUD reading "Next house 0 ft on
+ * the right" beside an empty country road. Read off the #2362 load once its
+ * ceilings hold, so it pays for no load of its own: the product's own round
+ * on the fixture level (`realistic/round.ts`), its rider held
+ * {@link ROUND_LEADS_METRES} before each house in turn, in route order. At
+ * every one the frame must have DRAWN the house — selected by the mapped
+ * buildings' refill and not hidden — and a marker on its front step, both on
+ * the side of the road the HUD names, and the HUD must say the road to the house's throw point,
+ * the lead less {@link THROW_WINDOW_BEFORE_METRES}, or nought inside its window. The
+ * shipped levels are not drawn here: a frame of one is a Produced Work of its
+ * file (ADR 0065 D-7.5), so the fixture stands in for them. The stylised
+ * world draws no mapped building at all, which is what the tablet's round met
+ * when its ride left realism; that half is `quality.ts` §`nextWorldQuality`'s
+ * hold, held in the required suite by `delivery-waits-for-town.test.tsx`.
  */
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
@@ -61,6 +79,7 @@ import {
   REALISTIC_VILLAGE_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
+import { THROW_WINDOW_BEFORE_METRES } from '../src/game/delivery/throw';
 
 import { NIGHTLY } from './nightly';
 import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
@@ -133,6 +152,19 @@ const PIECES = 20;
 /** #1689's frame, exactly as `realistic-town.browser.spec.ts` §`DECORATED` writes it, with a round. */
 const DELIVERING = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31&delivery=${String(PIECES)}`;
 
+/**
+ * #2513: how far before each house the rider is held: #2453's sighting
+ * distance, half way to the window, the throw window's opening
+ * (`throw.ts` §`THROW_WINDOW_BEFORE_METRES`) and level with the house.
+ */
+const ROUND_LEADS_METRES = [100, 60, THROW_WINDOW_BEFORE_METRES, 0] as const;
+
+/** #2513: the houses on the fixture level's round (`fixture-level.json` §`round.houses`). */
+const FIXTURE_ROUND_HOUSES = 6;
+
+/** #2513: the farthest a drawn marker may stand from its house's front step, metres. */
+const MARKER_ON_STEP_METRES = 0.5;
+
 /** #2362: on the fixture level, half way along, its footprints either side (ADR 0065 D-7.5). */
 const LEVEL_HOLD_METRES = 1000;
 const ON_THE_LEVEL = `?ladder=0&panel=0&seconds=1&at=${String(LEVEL_HOLD_METRES)}&town=level&delivery=${String(PIECES)}`;
@@ -189,6 +221,38 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
     expect(level.result.lastFrame.calls).toBeLessThanOrEqual(DELIVERY_VILLAGE_DRAW_CALLS);
     expect(level.result.lastFrame.triangles).toBeLessThanOrEqual(DELIVERY_VILLAGE_FRAME_TRIANGLES);
     expect(level.result.drawCalls).toBe(level.result.lastFrame.calls);
+    // #2513: the same load, a real round on it, sighted before each of its houses.
+    const { houses, sightings: sighted } = await page.evaluate((leads) => {
+      const round = window.__oylRealisticRound;
+      if (round === undefined) throw new Error('the page published no round');
+      return round(leads);
+    }, ROUND_LEADS_METRES);
+    console.log(
+      `#2513 town=level, ${String(houses)} houses at leads ${JSON.stringify(ROUND_LEADS_METRES)}: ` +
+        JSON.stringify(
+          sighted.map((each) => [each.position, each.lead, each.houseDrawn, each.hud?.side]),
+        ),
+    );
+    // Not vacuous: every house of the fixture's round, at every lead, and houses on both sides.
+    expect(houses).toBe(FIXTURE_ROUND_HOUSES);
+    expect(sighted).toHaveLength(houses * ROUND_LEADS_METRES.length);
+    expect(new Set(sighted.map((each) => each.position)).size).toBe(houses);
+    expect(new Set(sighted.map((each) => each.hud?.side)).size).toBe(2);
+    for (const each of sighted) {
+      const where = `house ${String(each.position)}, ${String(each.lead)} m before it`;
+      // To the throw point, 20 m before the house, and nought inside its window (#2513's fix).
+      expect(each.hud?.metres, `${where}: the HUD's distance`).toBeCloseTo(
+        Math.max(0, each.lead - THROW_WINDOW_BEFORE_METRES),
+        6,
+      );
+      expect(each.plan, `${where}: its plan`).toBeGreaterThanOrEqual(0);
+      expect(each.houseDrawn, `${where}: the house drawn`).toBe(true);
+      expect(each.houseSide, `${where}: the house's side`).toBe(each.hud?.side);
+      expect(each.markerFromStep, `${where}: a marker on its step`).toBeLessThanOrEqual(
+        MARKER_ON_STEP_METRES,
+      );
+      expect(each.markerSide, `${where}: the marker's side`).toBe(each.hud?.side);
+    }
   });
 });
 
