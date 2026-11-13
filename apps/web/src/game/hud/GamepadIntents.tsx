@@ -67,6 +67,12 @@ export interface GamepadIntentsProps {
   readonly items?: ItemInputPort | undefined;
   /** The pads to poll. Absent is the platform's, through `window`. */
   readonly pads?: GamepadPort | undefined;
+  /**
+   * Told `true` the first time a connected pad asks for anything, and `false`
+   * when no pad is connected any more — #2514: a pad in use, so the HUD may
+   * give its throw buttons' room back to the road.
+   */
+  readonly onPadInUse?: ((inUse: boolean) => void) | undefined;
 }
 
 const isThrow = (intent: string): intent is ThrowIntent =>
@@ -74,21 +80,24 @@ const isThrow = (intent: string): intent is ThrowIntent =>
 
 /** @see the module header */
 export function GamepadIntents(props: GamepadIntentsProps): null {
-  const { throwing, steering, items, pads } = props;
+  const { throwing, steering, items, pads, onPadInUse } = props;
   const held = useRef(NO_PADS_HELD);
   const throwingRef = useRef(throwing);
   const steeringRef = useRef(steering);
   const itemsRef = useRef(items);
   const padsRef = useRef(pads);
+  const inUseRef = useRef(onPadInUse);
   useEffect(() => {
     throwingRef.current = throwing;
     steeringRef.current = steering;
     itemsRef.current = items;
     padsRef.current = pads;
+    inUseRef.current = onPadInUse;
   });
   useEffect(() => {
     const platform = navigatorGamepads(window, isNativeShell(platformCapacitor()));
     let frame: number | undefined;
+    let inUse = false;
     const poll = (): void => {
       frame = undefined;
       const now = (padsRef.current ?? platform).pads();
@@ -100,7 +109,13 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
           itemsRef.current?.useItem();
         } else steeringRef.current?.steer(intent);
       }
-      if (now.some((pad) => pad?.connected === true)) frame = window.requestAnimationFrame(poll);
+      const connected = now.some((pad) => pad?.connected === true);
+      // #2514: in use from its first press, until no pad is connected.
+      if (inUse !== (connected && (inUse || read.intents.length > 0))) {
+        inUse = !inUse;
+        inUseRef.current?.(inUse);
+      }
+      if (connected) frame = window.requestAnimationFrame(poll);
     };
     const wake = (): void => {
       if (frame === undefined) frame = window.requestAnimationFrame(poll);

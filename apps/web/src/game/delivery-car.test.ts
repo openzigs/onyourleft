@@ -42,6 +42,7 @@ import {
   MOST_STEER_RADIANS,
   deliveryCarGeometryOf,
   deliveryCarPose,
+  deliveryPieceShape,
   indicatorLit,
   type DeliveryCarGeometry,
 } from './three-renderer';
@@ -297,11 +298,11 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
       belt.meshOf('obstacles').geometry.getAttribute('position').count / 3;
     const realistic = new DeliveryBelt('realistic', GEOMETRY);
     expect(triangles(realistic)).toBe(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES);
-    // Kenney's car less the 48 of its body's undersides (PR #2518's trim; a
-    // wheel keeps its own, as it rolls), in place of this file's car less its
-    // 38 and #2506's two indicators of 2.
+    // Kenney's car whole (PR #2518's trim keeps every underside, the owner's
+    // ruling of 2026-11-13), in place of this file's car less the 26 its trim
+    // hides or draws as fewer (1 146) and #2506's two indicators of 2.
     expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES).toBe(
-      1_192 - 48 - (1_172 - 38) - 4,
+      1_192 - (1_172 - 26) - 4,
     );
     // The stylised world keeps its simple car, handed Kenney's or not.
     const stylised = new DeliveryBelt('stylised', GEOMETRY);
@@ -312,14 +313,47 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     realistic.dispose();
     stylised.dispose();
     bare.dispose();
-    // The nightly gate's frame of twenty of each piece measured 204 514 with
-    // the stylised car, on #2518's head with #2512's and #2502's pieces (PR
-    // #2548's merge of them); every instance submits the roster, so twenty of
-    // Kenney's add twenty times the difference, and the frame is still under
-    // the owner's limit (trim to fit, not raise).
+    // The nightly gate's frame of twenty of each piece measured 204 594 with
+    // the stylised car, on #2518's head after its invisible trim (the owner's
+    // ruling of 2026-11-13) and before this PR's hexagonal small wheels; every
+    // instance submits the roster, so twenty of Kenney's add twenty times the
+    // difference, and the small wheels take twenty times their 28 back. The
+    // frame is still under the owner's limit (trim to fit, not raise).
     expect(
-      204_514 + 20 * (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES),
+      204_594 + 20 * (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - (DELIVERY_OBSTACLE_TRIANGLES + 28)),
     ).toBeLessThan(DELIVERY_VILLAGE_FRAME_TRIANGLES);
+  });
+
+  it('draws every face of Kenney’s car that looks down, its underside too — the owner’s ruling of 2026-11-13 on PR #2518', () => {
+    // Up a climb a parked car stands above the chase camera's eye, which then
+    // sees its underside from in front (delivery-trim.test.ts): the first trim
+    // left out these 48 and drew a band of road through the car.
+    const downward = (trimmed: boolean): number => {
+      const shape = deliveryPieceShape('obstacles', trimmed, GEOMETRY);
+      const position = shape.getAttribute('position');
+      const piece = shape.getAttribute('oylPiece');
+      let count = 0;
+      for (let at = 0; at < position.count; at += 3) {
+        if (piece.getZ(at) === 0) continue;
+        const [ax, ay, az] = [position.getX(at), position.getY(at), position.getZ(at)];
+        const [ux, uy, uz] = [
+          position.getX(at + 1) - ax,
+          position.getY(at + 1) - ay,
+          position.getZ(at + 1) - az,
+        ];
+        const [vx, vy, vz] = [
+          position.getX(at + 2) - ax,
+          position.getY(at + 2) - ay,
+          position.getZ(at + 2) - az,
+        ];
+        const ny = uz * vx - ux * vz;
+        if (ny / Math.hypot(uy * vz - uz * vy, ny, ux * vy - uy * vx) < -0.99) count += 1;
+      }
+      return count;
+    };
+    // Its floor (28), its wheel arches' tops (16), its bumpers' (4) and its mirrors' (4) at least.
+    expect(downward(false)).toBeGreaterThanOrEqual(48);
+    expect(downward(true)).toBe(downward(false));
   });
 
   it('marks each car vertex with its part, its indicator and its pivot, and paints only its paint per instance', () => {
@@ -341,17 +375,19 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     // part / lamp / painted / glowing, in vertices: the body, the paint, the
     // two indicators and the wheels; and everything that is not the car.
     expect(Object.fromEntries(counts)).toEqual({
-      // The body and its paint less their undersides (PR #2518's trim): 44 and 4.
-      '1/0/0/0': (570 - 44) * 3,
-      '1/0/1/0': (134 - 4) * 3,
+      // The body and its paint whole: PR #2518's trim keeps every underside
+      // (the owner's ruling of 2026-11-13), and hides nothing of Kenney's.
+      '1/0/0/0': 570 * 3,
+      '1/0/1/0': 134 * 3,
       '1/1/0/1': 4 * 3,
       '1/2/0/1': 4 * 3,
       '2/0/0/0': 2 * 120 * 3,
       '3/0/0/0': 2 * 120 * 3,
-      // Everything else: the hazard markers glow, 8 each over #2396's three
-      // kinds, #2364's dog and rider and #2506's car pulling out.
-      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - (1_192 - 48) - 48) * 3,
-      '0/0/0/1': 48 * 3,
+      // Everything else: the hazard markers glow, 6 each over #2396's three
+      // kinds, #2364's dog and rider and #2506's car pulling out (each square
+      // base one quad since PR #2518's trim, not three's fan of 4).
+      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - 1_192 - 36) * 3,
+      '0/0/0/1': 36 * 3,
     });
     belt.dispose();
   });

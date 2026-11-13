@@ -34,6 +34,7 @@ import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { stripComments } from '../../units/no-inline-units';
 import { GameView, type GamePort, type RidableRoute } from '../GameView';
 import { DEFAULT_LAP_RACE_CHOICE } from '../lap-race/choice';
+import { LAP_RACE_COUNTDOWN_MS } from '../lap-race/ride-race';
 import type { GameRenderer } from '../port';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import type { SceneInput } from '../scene';
@@ -291,7 +292,8 @@ describe('a ride on a built-in circuit — #2293, ADR 0064 D-5.3 and D-8', () =>
     await pressRide();
     await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
     let missing = 0;
-    for (let frame = 0; frame < 40; frame += 1) {
+    // #2546: the race's countdown, then ten seconds of it.
+    for (let frame = 0; frame < LAP_RACE_COUNTDOWN_MS / FRAME_MS + 40; frame += 1) {
       await pump(1);
       if (!stageText().includes(OSM_ATTRIBUTION)) missing += 1;
     }

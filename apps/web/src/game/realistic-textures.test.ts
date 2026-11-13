@@ -45,8 +45,11 @@ import {
   steeredPoint,
   KIT_PALETTE,
   PACER_KIT,
+  RIDER_BICYCLE_PARTS,
+  RIDER_CRANK_PARTS,
   RIDER_HALF_WIDTH_METRES,
   type RiderKit,
+  type RiderPart,
 } from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
 import {
@@ -2021,6 +2024,357 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(over.crash).toBeUndefined();
       const riding = drawn(riders, over).ends;
       for (const each of apart(riding, before)) expect(each).toBeLessThan(1e-9);
+    });
+
+    /**
+     * #2505: the second pass, from the screenshot review of #2501. Landed and
+     * down — 0.45 s to 1.2 s — the body is drawn as `RealisticRiderBelt` draws
+     * it, every vertex skinned by three as the GPU skins it, and read back in
+     * the bicycle's own frame against the bicycle's own solids
+     * (`bicycle.ts` §`RIDER_BICYCLE_PARTS`, and §`RIDER_CRANK_PARTS` where the
+     * belt turned the cranks). A tube is its capsule; a box the capsule round
+     * its longest side, so a little fatter than the box; a wheel its tyre and
+     * the disc of its spokes, as thick as its tyre.
+     */
+    describe('keeps the body clear of the bicycle, out of the road, and lets it settle — #2505', () => {
+      /** The least gap the body keeps from every part of the bicycle. */
+      const LEAST_GAP_METRES = 0.03;
+      /** How far a body lying on the road may press into it: flesh, not a limb through it. */
+      const DEEPEST_METRES = 0.045;
+      /** Landed to down, every twentieth of a second: a blend that swings through between three instants is seen. */
+      const LYING_SECONDS = Array.from(
+        { length: Math.round((CRASH_RISE_AT_SECONDS - CRASH_FALL_SECONDS) / 0.05) + 1 },
+        (_, i) => CRASH_FALL_SECONDS + i * 0.05,
+      ).filter((t) => t <= CRASH_RISE_AT_SECONDS + 1e-9);
+      /** The arm on the road's side when falling to the right: three drops the dot. */
+      const LOW_ARM = ['upperarm01R', 'lowerarm01R', 'wristR'];
+
+      type Point = readonly [number, number, number];
+      type Solid =
+        | { readonly name: string; readonly a: Point; readonly b: Point; readonly radius: number }
+        | {
+            readonly name: string;
+            readonly centre: Point;
+            readonly axis: Point;
+            readonly radius: number;
+            readonly thickness: number;
+          };
+      const minus = (p: Point, q: Point): Point => [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+      const dot = (p: Point, q: Point): number => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+      const length = (p: Point): number => Math.sqrt(dot(p, p));
+
+      /** A point of a part, in the part's own frame, placed as `placedPart` places it. */
+      const placed = (part: RiderPart, [x, y, z]: Point): Point => {
+        const [cx, sx] = [Math.cos(part.pitch), Math.sin(part.pitch)];
+        const [y1, z1] = [cx * y - sx * z, sx * y + cx * z];
+        const [cy, sy] = [Math.cos(part.yaw), Math.sin(part.yaw)];
+        const [x2, z2] = [cy * x + sy * z1, -sy * x + cy * z1];
+        const [cz, sz] = [Math.cos(part.roll), Math.sin(part.roll)];
+        return [cz * x2 - sz * y1 + part.x, sz * x2 + cz * y1 + part.y, z2 + part.z];
+      };
+      /** The solids one part is, through `place` from the bicycle's model frame to its own. */
+      const solidsOf = (part: RiderPart, place: (p: Point) => Point): Solid[] => {
+        const solid = part.solid;
+        const put = (p: Point): Point => place(placed(part, p));
+        if (solid.shape === 'ring') {
+          const centre = put([0, 0, 0]);
+          const axis = minus(put([0, 0, 1]), centre);
+          return [
+            { name: part.name, centre, axis, radius: solid.radius, thickness: solid.thickness },
+          ];
+        }
+        if (solid.shape === 'tube') {
+          const half = solid.length / 2;
+          return [
+            { name: part.name, a: put([0, -half, 0]), b: put([0, half, 0]), radius: solid.radius },
+          ];
+        }
+        if (solid.shape === 'box') {
+          const sides = [solid.width, solid.height, solid.depth];
+          const longest = sides.indexOf(Math.max(...sides));
+          const [p, q] = sides.filter((_, index) => index !== longest) as [number, number];
+          const radius = Math.hypot(p / 2, q / 2);
+          const end = [0, 0, 0];
+          end[longest] = Math.max(0, (sides[longest] as number) / 2 - radius);
+          const [ex, ey, ez] = end as [number, number, number];
+          return [{ name: part.name, a: put([-ex, -ey, -ez]), b: put([ex, ey, ez]), radius }];
+        }
+        if (solid.shape === 'bend') {
+          const points = Array.from({ length: 13 }, (_, step): Point => {
+            const angle = solid.start + (solid.sweep * step) / 12;
+            return put([solid.radius * Math.cos(angle), solid.radius * Math.sin(angle), 0]);
+          });
+          return points.slice(1).map((b, step) => ({
+            name: part.name,
+            a: points[step] as Point,
+            b,
+            radius: solid.thickness,
+          }));
+        }
+        throw new Error(`a ${solid.shape} on the bicycle is not measured`);
+      };
+      /** Every solid of the first rider's bicycle, in its own frame, the cranks as drawn. */
+      const bicycleSolids = (riders: Riders): Solid[] => {
+        const cranks = riders.group.children[3];
+        if (cranks === undefined || !('instanceMatrix' in cranks)) throw new Error('no cranks');
+        const m = (cranks as { instanceMatrix: { array: ArrayLike<number> } }).instanceMatrix.array;
+        const crankToWorld = ([x, y, z]: Point): readonly number[] =>
+          [0, 1, 2].map(
+            (row) =>
+              (m[row] ?? 0) * x +
+              (m[4 + row] ?? 0) * y +
+              (m[8 + row] ?? 0) * z +
+              (m[12 + row] ?? 0),
+          );
+        const crankToBicycle = (p: Point): Point => inBicycle(riders, crankToWorld(p)) as Point;
+        return [
+          ...RIDER_BICYCLE_PARTS.flatMap((part) => solidsOf(part, (p) => p)),
+          ...RIDER_CRANK_PARTS.flatMap((part) => solidsOf(part, crankToBicycle)),
+        ];
+      };
+      /** How far a point is from a solid's surface: negative inside it. */
+      const gap = (p: Point, solid: Solid): number => {
+        if ('a' in solid) {
+          const ab = minus(solid.b, solid.a);
+          const t = Math.min(
+            1,
+            Math.max(0, dot(minus(p, solid.a), ab) / Math.max(dot(ab, ab), 1e-12)),
+          );
+          return (
+            length(
+              minus(p, [solid.a[0] + t * ab[0], solid.a[1] + t * ab[1], solid.a[2] + t * ab[2]]),
+            ) - solid.radius
+          );
+        }
+        const q = minus(p, solid.centre);
+        const axial = dot(q, solid.axis);
+        const radial = length(
+          minus(q, [axial * solid.axis[0], axial * solid.axis[1], axial * solid.axis[2]]),
+        );
+        const tyre = Math.hypot(radial - solid.radius, axial) - solid.thickness;
+        return radial <= solid.radius ? Math.min(tyre, Math.abs(axial) - solid.thickness) : tyre;
+      };
+      /** The drawn body's vertices in the world, each one's heaviest bone, and its triangles. */
+      const bodyNow = (
+        riders: Riders,
+      ): { points: Point[]; heaviest: string[]; triangles: ArrayLike<number> } => {
+        const body = riders.bodies[0];
+        if (body === undefined) throw new Error('no body');
+        body.updateMatrixWorld(true);
+        const carried = body.geometry.getAttribute('skinIndex');
+        const weights = body.geometry.getAttribute('skinWeight');
+        const index = body.geometry.index;
+        if (index === null) throw new Error('the body has no triangles');
+        const vertex = body.position.clone();
+        const points: Point[] = [];
+        const heaviest: string[] = [];
+        for (let each = 0; each < carried.count; each += 1) {
+          body.getVertexPosition(each, vertex).applyMatrix4(body.matrixWorld);
+          points.push([vertex.x, vertex.y, vertex.z]);
+          let most = 0;
+          let bone = -1;
+          for (let slot = 0; slot < 4; slot += 1) {
+            if (weights.getComponent(each, slot) > most) {
+              most = weights.getComponent(each, slot);
+              bone = carried.getComponent(each, slot);
+            }
+          }
+          heaviest.push(body.skeleton.bones[bone]?.name ?? '');
+        }
+        return { points, heaviest, triangles: index.array };
+      };
+      /** The road's height under the first rider: its bicycle's own origin. */
+      const roadOf = (riders: Riders): number => {
+        const frame = riders.group.children[0];
+        if (frame === undefined || !('instanceMatrix' in frame)) throw new Error('no frame');
+        return (
+          (frame as { instanceMatrix: { array: ArrayLike<number> } }).instanceMatrix.array[13] ?? 0
+        );
+      };
+      /** Whether a line straight up from `from` meets a triangle of the body not wholly of `own` bones. */
+      const coveredFromAbove = (
+        from: Point,
+        body: ReturnType<typeof bodyNow>,
+        own: readonly string[],
+      ): boolean => {
+        for (let first = 0; first < body.triangles.length; first += 3) {
+          const corners = [0, 1, 2].map((k) => body.triangles[first + k] as number);
+          if (corners.every((corner) => own.includes(body.heaviest[corner] ?? ''))) continue;
+          const [a, b, c] = corners.map((corner) => body.points[corner] as Point) as [
+            Point,
+            Point,
+            Point,
+          ];
+          // Möller–Trumbore, the line going up `+Y`.
+          const e1 = minus(b, a);
+          const e2 = minus(c, a);
+          const p: Point = [e2[2], 0, -e2[0]];
+          const determinant = dot(e1, p);
+          if (Math.abs(determinant) < 1e-12) continue;
+          const s = minus(from, a);
+          const u = dot(s, p) / determinant;
+          if (u < 0 || u > 1) continue;
+          const q: Point = [
+            s[1] * e1[2] - s[2] * e1[1],
+            s[2] * e1[0] - s[0] * e1[2],
+            s[0] * e1[1] - s[1] * e1[0],
+          ];
+          const v = q[1] / determinant;
+          if (v < 0 || u + v > 1) continue;
+          if (dot(e2, q) / determinant > 1e-4) return true;
+        }
+        return false;
+      };
+
+      it('keeps every vertex of the body landed and down at least 3 cm from every part of the bicycle, either side', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        const lines: string[] = [];
+        for (const side of [1, -1] as const) {
+          for (const seconds of LYING_SECONDS) {
+            drawn(riders, crashMarker(seconds, side));
+            const solids = bicycleSolids(riders);
+            // Non-vacuity: both wheels, the frame's tubes and the cranks.
+            expect(solids.length).toBeGreaterThan(40);
+            const { points, heaviest } = bodyNow(riders);
+            let worst = Infinity;
+            let where = '';
+            points.forEach((point, vertex) => {
+              const inFrame = inBicycle(riders, point) as Point;
+              for (const solid of solids) {
+                const each = gap(inFrame, solid);
+                if (each < worst) {
+                  worst = each;
+                  where = `${heaviest[vertex] ?? ''} against the ${solid.name}`;
+                }
+              }
+            });
+            lines.push(
+              `${String(side)} ${String(seconds)} s ${(worst * 100).toFixed(1)} cm (${where})`,
+            );
+            expect(
+              worst,
+              `side ${String(side)}, ${String(seconds)} s: ${where}`,
+            ).toBeGreaterThanOrEqual(LEAST_GAP_METRES);
+          }
+        }
+        console.log(`#2505: the body's least gap from the bicycle — ${lines.join('; ')}`);
+      });
+
+      it('keeps every limb out of the road: nothing more than 4 cm into it', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        for (const seconds of LYING_SECONDS) {
+          drawn(riders, crashMarker(seconds, 1));
+          const road = roadOf(riders);
+          const { points, heaviest } = bodyNow(riders);
+          const deepest = points.reduce(
+            (low, point, vertex) => (point[1] < low.y ? { y: point[1], vertex } : low),
+            { y: Infinity, vertex: -1 },
+          );
+          expect(
+            road - deepest.y,
+            `${String(seconds)} s: ${heaviest[deepest.vertex] ?? ''}`,
+          ).toBeLessThan(DEEPEST_METRES);
+        }
+      });
+
+      it('shows the low arm from above, its elbow and the upper arm by the shoulder, not under the torso', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        for (const seconds of LYING_SECONDS) {
+          const { pose } = drawn(riders, crashMarker(seconds, 1));
+          const body = bodyNow(riders);
+          const shoulder = at(pose, 'upperarm01R') as Point;
+          const elbow = at(pose, 'lowerarm01R') as Point;
+          const byShoulder: Point = [0, 1, 2].map(
+            (axis) =>
+              (shoulder[axis] as number) +
+              0.35 * ((elbow[axis] as number) - (shoulder[axis] as number)),
+          ) as unknown as Point;
+          // Above the road, where the eye can be.
+          expect(elbow[1] - roadOf(riders), `${String(seconds)} s`).toBeGreaterThan(0.05);
+          expect(coveredFromAbove(elbow, body, LOW_ARM), `${String(seconds)} s: the elbow`).toBe(
+            false,
+          );
+          expect(
+            coveredFromAbove(byShoulder, body, LOW_ARM),
+            `${String(seconds)} s: by the shoulder`,
+          ).toBe(false);
+        }
+        // Non-vacuity: the same measure finds the torso over its own spine.
+        const { pose } = drawn(riders, crashMarker(CRASH_RISE_AT_SECONDS, 1));
+        expect(coveredFromAbove(at(pose, 'spine02') as Point, bodyNow(riders), [])).toBe(true);
+      });
+
+      it('settles between landing and lying down: four joints move 10 cm or more, one 20 cm', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        const landed = drawn(riders, crashMarker(CRASH_FALL_SECONDS, 1)).pose;
+        const down = drawn(riders, crashMarker(CRASH_RISE_AT_SECONDS, 1)).pose;
+        const moved = [...landed.keys()].map((name) => ({
+          name,
+          by: distance(at(landed, name), at(down, name)),
+        }));
+        moved.sort((p, q) => q.by - p.by);
+        console.log(
+          `#2505: landed to down — ${moved
+            .slice(0, 6)
+            .map((each) => `${each.name} ${(each.by * 100).toFixed(0)} cm`)
+            .join(', ')}`,
+        );
+        expect(moved.filter((each) => each.by >= 0.1).length).toBeGreaterThanOrEqual(4);
+        expect(moved[0]?.by ?? 0).toBeGreaterThanOrEqual(0.2);
+      });
+
+      it('lays the top leg on its side as it lands, partly bent: its knee is not pointed at the sky', () => {
+        const riders = renderer.realisticRidersOfLoadedWorld();
+        if (riders === undefined) throw new Error('no world');
+        /** The angle between two directions, in degrees. */
+        const degrees = (a: readonly number[], b: readonly number[]): number =>
+          (Math.acos(
+            Math.min(
+              1,
+              Math.max(-1, dot(a as Point, b as Point) / (length(a as Point) * length(b as Point))),
+            ),
+          ) *
+            180) /
+          Math.PI;
+        const lines: string[] = [];
+        const measured: { side: number; fromUp: number; bent: number }[] = [];
+        for (const side of [1, -1] as const) {
+          const { pose } = drawn(riders, crashMarker(CRASH_FALL_SECONDS, side));
+          // The top leg: the one whose knee is the higher off the road.
+          const legs = (['L', 'R'] as const).map((each) => ({
+            hip: at(pose, `upperleg01${each}`) as Point,
+            knee: at(pose, `lowerleg01${each}`) as Point,
+            foot: at(pose, `foot${each}`) as Point,
+          }));
+          const [top, low] = [...legs].sort((p, q) => q.knee[1] - p.knee[1]) as [
+            (typeof legs)[number],
+            (typeof legs)[number],
+          ];
+          expect(top.knee[1]).toBeGreaterThan(low.knee[1]);
+          const thigh = minus(top.knee, top.hip);
+          // The thigh's angle from straight up, and how far the knee is bent
+          // (0° a straight leg).
+          const fromUp = degrees(thigh, [0, 1, 0]);
+          const bent = degrees(thigh, minus(top.foot, top.knee));
+          lines.push(
+            `${String(side)}: the thigh ${fromUp.toFixed(0)}° from up, the knee bent ${bent.toFixed(0)}°`,
+          );
+          measured.push({ side, fromUp, bent });
+        }
+        console.log(`#2505: the landed top leg — ${lines.join('; ')}`);
+        for (const { side, fromUp, bent } of measured) {
+          // Lying on its side, the thigh lies nearer the road than the sky:
+          // more than 50° from straight up.
+          expect(fromUp, `side ${String(side)}`).toBeGreaterThan(50);
+          // And the knee partly bent, not folded double nor locked straight.
+          expect(bent, `side ${String(side)}`).toBeGreaterThan(20);
+          expect(bent, `side ${String(side)}`).toBeLessThan(110);
+        }
+      });
     });
 
     describe('refuses a crash clip it could not sample', () => {
