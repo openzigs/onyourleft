@@ -259,8 +259,27 @@ const SPREAD_RACE: LapRaceChoice = {
 /** The rider's steady pace, metres per second: about the bots', so the field stays near them. */
 const RIDER_SPEED = 8.5;
 
+/** A race's samples: the leader's lap, and every bot's gap as the standings write it. */
+type GapSamples = readonly { readonly lap: number; readonly gaps: readonly string[] }[];
+
+/**
+ * {@link rideGaps} for `seed`, ridden once by the first case that asks and
+ * read by every other: a whole three-lap race of seven bots is the cost of
+ * these cases, and the second reads seed 1 again (#1688's ruling: a slow case
+ * is made cheaper, never given a longer timeout).
+ */
+const gapsBySeed = new Map<number, GapSamples>();
+function sampledGaps(seed: number): GapSamples {
+  let samples = gapsBySeed.get(seed);
+  if (samples === undefined) {
+    samples = rideGaps(seed);
+    gapsBySeed.set(seed, samples);
+  }
+  return samples;
+}
+
 /** The race under `seed`, and every bot's gap as the standings write it, every two seconds. */
-function sampledGaps(seed: number): { readonly lap: number; readonly gaps: readonly string[] }[] {
+function rideGaps(seed: number): GapSamples {
   vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
     <T extends ArrayBufferView>(array: T): T => {
       (array as unknown as Uint32Array)[0] = seed;
@@ -388,21 +407,25 @@ describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067
 });
 
 describe('the field spreads into a race: the bots ride apart (#2455)', () => {
-  it('reads at least four different gaps among the seven bots over a lap, on a seeded race', () => {
-    for (const seed of [1, 2, 3]) {
+  // One seed a case, so no case rides more than one race: the three in one
+  // case took 5.0 s under coverage on CI once the pack stack stepped each tick
+  // (the nightly of 2026-11-13 on #2561's branch).
+  it.each([1, 2, 3])(
+    'reads at least four different gaps among the seven bots over a lap, on a seeded race (seed %i)',
+    (seed) => {
       const samples = sampledGaps(seed);
       const lastLap = samples.filter((sample) => sample.lap === 2);
-      expect(lastLap.length, `seed ${String(seed)}`).toBeGreaterThan(30);
+      expect(lastLap.length).toBeGreaterThan(30);
       // Every gap the standings showed over the last lap, bot by bot.
       const most = Math.max(...lastLap.map((sample) => new Set(sample.gaps).size));
-      expect(most, `seed ${String(seed)}`).toBeGreaterThanOrEqual(4);
+      expect(most).toBeGreaterThanOrEqual(4);
       // And never one stacked group once the first lap is ridden.
       const stacked = samples.filter(
         (sample) => sample.lap >= 1 && new Set(sample.gaps).size === 1,
       );
-      expect(stacked, `seed ${String(seed)}`).toEqual([]);
-    }
-  });
+      expect(stacked).toEqual([]);
+    },
+  );
 
   it('changes the gaps as it goes: the spread between the first and the last bot grows and shrinks', () => {
     const seconds = (gap: string): number => {
