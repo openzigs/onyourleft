@@ -70,9 +70,12 @@ function bend(
   };
 }
 
+/** Where the sweeps start on the hairpin, 60 m before it; the solo ride draws from here too (#2571). */
+const HAIRPIN_FROM = 340;
+
 const BENDS: readonly Bend[] = [
   // 400 m north, a 10 m hairpin, and back south.
-  bend('a 10 m hairpin', hairpinRoute(10), 320, 340, 640),
+  bend('a 10 m hairpin', hairpinRoute(10), 320, HAIRPIN_FROM, 640),
   // 1 500 m north and a 120° corner at one sample (#2422).
   bend('a 120° corner drawn at one sample', plannerCornerRoute(120), 1_420, 1_440, 1_760),
 ];
@@ -250,7 +253,9 @@ describe('the drawn order is the odometer order, every frame, every kind — #24
     '$where.name: the rider at $kmh km/h and a pacer, a ghost or a room’s rider, ahead or behind, at 20–50 km/h',
     ({ where, riderSpeed }) => {
       const kinds: readonly Other['kind'][] = ['bot', 'ghost', 'remote'];
-      let combination = 0;
+      // Started at the rider's own speed's place, so the four rider speeds do not
+      // all deal the same kinds: each (speed, gap, side) still meets all three.
+      let combination = SPEEDS.indexOf(riderSpeed);
       let checked = 0;
       let leanest = { lean: 0, said: 'nobody leant' };
       const met = new Set<string>();
@@ -425,7 +430,7 @@ describe('only the drawing changes — #2427', () => {
     // there differs from an uneased one only by the drawn path (#2422). And a
     // frame is nearly all scenery: `sceneFrame` was 2.0 s of this case's 2.1 s
     // under coverage (#1688). Every frame is still advanced and traced.
-    const drawFrom = (BENDS[0] as Bend).from;
+    const drawFrom = HAIRPIN_FROM;
     const ride = (uneased: boolean): { trace: number[]; drawn: number[]; framesDrawn: number } => {
       const route = hairpinRoute(10);
       const simulation = new GameSimulation({
