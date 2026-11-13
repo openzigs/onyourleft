@@ -11376,18 +11376,46 @@ function parcelShape(): BufferGeometry {
 }
 
 /**
- * A house marker's sizes at its true size, metres — #2453: a white post
- * `post` tall, so its head clears a garden hedge, a front fence and a parked
- * car, with a glowing amber diamond `diamond` across standing on it, and a
- * glowing ring on the step. Until #2453 the post was 1.5 m and the diamond
- * 0.4 m across: from 100 m up the road on the owner's 1280×800 tablet that
- * changed 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
+ * A house marker's sizes at its true size, metres — #2453, lowered by #2513:
+ * a white post `post` tall with a glowing amber diamond `diamond` across
+ * standing on it, and a glowing ring on the step.
+ *
+ * ⚠️ **Low, at the doorstep, never over the house — #2513.** Until #2513 the
+ * post was 2.4 m, so its head cleared a hedge; but {@link markerScaleAt}
+ * enlarges a far marker about its foot, so the diamond rose with distance,
+ * about 15 m above the step at 100 m, and on the owner's 1280×800 tablet it
+ * stood behind the top-right HUD panel from about 100 m to 7 m out (the
+ * owner's frames of 2026-11-12). The diamond's middle is now at about a
+ * rider's eye height, so enlarged it stays near the horizon, under every
+ * panel's bottom edge: `browser/delivery.browser.spec.ts` §"#2513" projects
+ * it from 100 m to 20 m before a house at every overlay tablet and holds it
+ * outside every HUD panel. Before #2513 the post was 2.4 m; before #2453 it
+ * was 1.5 m and the diamond 0.4 m across, which from 100 m up the road changed
+ * 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
  * §"#2453").
  */
-const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
+const MARKER_METRES = { post: 0.6, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
 
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
+
+/**
+ * Where a house marker's glowing diamond is, metres above its step at its
+ * true size — #2513: its bottom, its middle and its top. Enlarged by
+ * {@link markerScaleAt}, each is that many times higher, because a marker is
+ * scaled about its foot. `delivery-belt.test.ts` holds the drawn geometry to
+ * these, and the browser gate projects them.
+ *
+ * @test-facing `browser/delivery-harness.ts` projects the drawn diamond to the
+ * screen from a marker's instance; the product draws the geometry, never asks
+ * where it is
+ */
+export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; top: number }> =
+  Object.freeze({
+    bottom: MARKER_METRES.post,
+    middle: MARKER_METRES.post + (MARKER_METRES.diamond / 2) * MARKER_DIAMOND_STRETCH,
+    top: MARKER_METRES.post + MARKER_METRES.diamond * MARKER_DIAMOND_STRETCH,
+  });
 
 /** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
 function markerShape(): BufferGeometry {
@@ -20002,6 +20030,21 @@ export class MappedBuildingBelt {
     return this.#stats;
   }
 
+  /**
+   * The plans drawn on the last frame: selected at the last refill and not
+   * hidden by {@link clearOf} — #2513. Indices into {@link buildings}' plans.
+   * None while the belt is not {@link drawing} (not shown, switched off or not
+   * carried): a selection nothing draws is not a drawn house.
+   */
+  drawnPlans(): readonly number[] {
+    if (!this.drawing) return [];
+    const drawn: number[] = [];
+    for (let at = 0; at < this.#selection.count; at += 1) {
+      if (this.#hidden[at] !== 1) drawn.push(this.#selection.plans[at] as number);
+    }
+    return drawn;
+  }
+
   /** How many refills this belt has run — for the tests' count over a ride. */
   get refills(): number {
     return this.#refills;
@@ -22056,6 +22099,20 @@ export function mappedBuildingStatsOf(
 ): { readonly stats: MappedBuildingStats; readonly refills: number } | undefined {
   const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
   return belt === undefined ? undefined : { stats: belt.stats, refills: belt.refills };
+}
+
+/**
+ * Which of a view's buildings from map data its last frame drew — #2513:
+ * the plans its last refill selected, less any the near plane hid. Indices
+ * into the plans the frame carried. Empty before a realistic frame has
+ * carried any, and on a stylised view, which draws none.
+ *
+ * @test-facing read by `browser/realistic-harness.ts` §`__oylRealisticRound`,
+ * whose spec finds each Delivery target's house drawn; the product never asks
+ */
+export function mappedBuildingsDrawnOf(view: GameView): readonly number[] {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt?.drawnPlans() ?? [];
 }
 
 /**

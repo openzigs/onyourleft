@@ -70,9 +70,12 @@ function bend(
   };
 }
 
+/** Where the sweeps start on the hairpin, 60 m before it; the solo ride draws from here too (#2571). */
+const HAIRPIN_FROM = 340;
+
 const BENDS: readonly Bend[] = [
   // 400 m north, a 10 m hairpin, and back south.
-  bend('a 10 m hairpin', hairpinRoute(10), 320, 340, 640),
+  bend('a 10 m hairpin', hairpinRoute(10), 320, HAIRPIN_FROM, 640),
   // 1 500 m north and a 120° corner at one sample (#2422).
   bend('a 120° corner drawn at one sample', plannerCornerRoute(120), 1_420, 1_440, 1_760),
 ];
@@ -140,11 +143,18 @@ function frame(
  * within the 40 m before `odometer` (a marker is never drawn past it, nor more
  * than 30 m behind it), refined along the path's heading there. A marker drawn
  * level with another is beside the path, across it, which this reads past.
+ *
+ * #2571: the search is a metre a step and the refining six passes, where it was
+ * a quarter-metre and three. Each pass takes about three quarters off the
+ * error in a 10 m hairpin, so six from a metre agree with twelve from a
+ * quarter-metre to 0.1 mm over every marker this file reads, where the old
+ * three were up to 1.8 mm off them. Under a third of the `drawnLineAt` calls, which
+ * the sweeps make millions of (#1688).
  */
 function drawnAlong(line: DrawnLine, marker: RiderMarker, odometer: number): number {
   let best = odometer;
   let nearest = Number.POSITIVE_INFINITY;
-  for (let at = odometer - MAX_LAG_METRES - 10; at <= odometer + 1; at += 0.25) {
+  for (let at = odometer - MAX_LAG_METRES - 10; at <= odometer + 1; at += 1) {
     const point = drawnLineAt(line, at);
     const away = Math.hypot(marker.x - point.x, marker.z - point.z);
     if (away < nearest) {
@@ -152,7 +162,7 @@ function drawnAlong(line: DrawnLine, marker: RiderMarker, odometer: number): num
       best = at;
     }
   }
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 6; pass += 1) {
     const point = drawnLineAt(line, best);
     best += (marker.x - point.x) * point.headingX + (marker.z - point.z) * point.headingZ;
   }
@@ -231,47 +241,64 @@ const SPEEDS = [20, 30, 40, 50].map((each) => each * KMH);
 const GAPS = [0.05, 2, 8, 20, 30];
 
 describe('the drawn order is the odometer order, every frame, every kind — #2427', () => {
-  it.each(BENDS)(
-    '$name: the rider and a pacer, a ghost or a room’s rider, ahead or behind, at 20–50 km/h',
-    (where) => {
+  // #2571: one case a bend AND a speed of the rider's, where it was one a bend:
+  // the same 160 combinations and the same frames, a quarter of them a case, so
+  // no case comes near Vitest's 5 s under coverage on the slowest nightly
+  // runner (#1688). Each case holds the lean bound over its own quarter.
+  it.each(
+    BENDS.flatMap((where) =>
+      SPEEDS.map((riderSpeed) => ({ where, riderSpeed, kmh: Math.round(riderSpeed / KMH) })),
+    ),
+  )(
+    '$where.name: the rider at $kmh km/h and a pacer, a ghost or a room’s rider, ahead or behind, at 20–50 km/h',
+    ({ where, riderSpeed }) => {
       const kinds: readonly Other['kind'][] = ['bot', 'ghost', 'remote'];
+      // Started at the rider's own speed's place, so the four rider speeds do not
+      // all deal the same kinds: each (speed, gap, side) still meets all three.
+      let combination = SPEEDS.indexOf(riderSpeed);
       let checked = 0;
       let leanest = { lean: 0, said: 'nobody leant' };
-      for (const riderSpeed of SPEEDS) {
-        for (const otherSpeed of SPEEDS) {
-          for (const gap of GAPS) {
-            for (const side of [1, -1]) {
-              // One kind a combination, in turn, so all three meet every speed and side.
-              const kind = kinds[checked % kinds.length] as Other['kind'];
-              const frames = through(
-                where,
-                riderSpeed,
-                { kind, gap: side * gap, speed: otherSpeed },
-                4,
+      const met = new Set<string>();
+      for (const otherSpeed of SPEEDS) {
+        for (const gap of GAPS) {
+          for (const side of [1, -1]) {
+            // One kind a combination, in turn, so all three meet every speed and side.
+            // (#2571: counted by combination. Counted by frame, as it was, the
+            // corner's 81 frames a combination left every one of them a pacer.)
+            const kind = kinds[combination % kinds.length] as Other['kind'];
+            combination += 1;
+            met.add(`${kind} ${String(otherSpeed)} ${String(side)}`);
+            const frames = through(
+              where,
+              riderSpeed,
+              { kind, gap: side * gap, speed: otherSpeed },
+              4,
+            );
+            for (const each of frames) {
+              const odometerGap = side * gap;
+              const drawnGap = each.other - each.rider;
+              const said = `${kind} ${side > 0 ? 'ahead' : 'behind'} by ${String(gap)} m at ${(otherSpeed / KMH).toFixed(0)} km/h, the rider at ${(riderSpeed / KMH).toFixed(0)} km/h, at ${String(each.at)} m: drawn gap ${drawnGap.toFixed(3)}`;
+              expect(Math.sign(drawnGap), said).toBe(side);
+              expect(Math.abs(drawnGap - odometerGap), said).toBeLessThanOrEqual(
+                MAX_LAG_METRES + 1e-6,
               );
-              for (const each of frames) {
-                const odometerGap = side * gap;
-                const drawnGap = each.other - each.rider;
-                const said = `${kind} ${side > 0 ? 'ahead' : 'behind'} by ${String(gap)} m at ${(otherSpeed / KMH).toFixed(0)} km/h, the rider at ${(riderSpeed / KMH).toFixed(0)} km/h, at ${String(each.at)} m: drawn gap ${drawnGap.toFixed(3)}`;
-                expect(Math.sign(drawnGap), said).toBe(side);
-                expect(Math.abs(drawnGap - odometerGap), said).toBeLessThanOrEqual(
-                  MAX_LAG_METRES + 1e-6,
-                );
-                // Never past its own odometer, never more than 30 m behind it.
-                const odometer = each.at + odometerGap;
-                expect(each.other, said).toBeLessThanOrEqual(odometer + 1e-6);
-                expect(each.other, said).toBeGreaterThanOrEqual(odometer - MAX_LAG_METRES - 1e-6);
-                if (each.lean > leanest.lean) leanest = { lean: each.lean, said };
-                checked += 1;
-              }
+              // Never past its own odometer, never more than 30 m behind it.
+              const odometer = each.at + odometerGap;
+              expect(each.other, said).toBeLessThanOrEqual(odometer + 1e-6);
+              expect(each.other, said).toBeGreaterThanOrEqual(odometer - MAX_LAG_METRES - 1e-6);
+              if (each.lean > leanest.lean) leanest = { lean: each.lean, said };
+              checked += 1;
             }
           }
         }
       }
-      expect(checked).toBeGreaterThan(10_000);
+      // Every kind met every speed of the other's and both sides.
+      expect(met.size).toBe(kinds.length * SPEEDS.length * 2);
+      expect(checked).toBeGreaterThan(2_500);
       // Held in order, a rider is drawn no faster than the steady-turn speed
       // where it is held (`bend-easing.ts` §`steadyTurnSpeed`), so it leans no
-      // further than the easing's 25°. Without that cap it leant 27.5° here.
+      // further than the easing's 25°. Without that cap it leant 27.5° here when
+      // #2480 measured it; on 2026-11-12 (#2571) every case leant 29.5–35°.
       expect(leanest.lean, leanest.said).toBeLessThanOrEqual(EASED_LEAN_RADIANS + LEAN_SLACK);
     },
   );
@@ -395,7 +422,16 @@ describe('only the drawing changes — #2427', () => {
   });
 
   it('keeps every odometer and the solo draft’s k to the bit: a solo ride behind the pacer through a hairpin, drawn in order or not drawn eased at all', () => {
-    const ride = (uneased: boolean): { trace: number[]; drawn: number[] } => {
+    // #2571: drawn only from where the sweeps above start on this hairpin, 60 m
+    // before it, once the rider or the pacer is there: 97 frames of each ride's
+    // 301. Short of that both are on straight road beyond any bend's reach
+    // (`bend-easing.ts` §`easedPlace`, under 20 m at these speeds), so nobody is
+    // eased off their odometer and there is no order to keep: an eased frame
+    // there differs from an uneased one only by the drawn path (#2422). And a
+    // frame is nearly all scenery: `sceneFrame` was 2.0 s of this case's 2.1 s
+    // under coverage (#1688). Every frame is still advanced and traced.
+    const drawFrom = HAIRPIN_FROM;
+    const ride = (uneased: boolean): { trace: number[]; drawn: number[]; framesDrawn: number } => {
       const route = hairpinRoute(10);
       const simulation = new GameSimulation({
         profile: route,
@@ -406,6 +442,7 @@ describe('only the drawing changes — #2427', () => {
       const origin = corridorOrigin(route);
       const trace: number[] = [];
       const drawn: number[] = [];
+      let framesDrawn = 0;
       // Advanced and drawn in the order `GameView`'s loop does it, a frame every 300 ms.
       // 90 s is enough: at 260 W up the 4 % the rider is past 510 m by then, beyond the
       // hairpin's end and 50 m more (the bound read below), and the drawing is what
@@ -413,14 +450,17 @@ describe('only the drawing changes — #2427', () => {
       for (let now = 0; now <= 90_000; now += 300) {
         simulation.advanceTo(now, { power: watts(260), live: true });
         const state = simulation.state;
-        const frame = sceneFrame({
-          profile: route,
-          origin,
-          state,
-          botDistance: state.bot?.state.distance,
-          uneased,
-        });
-        for (const marker of frame.markers) drawn.push(marker.x, marker.z);
+        if (Math.max(state.ride.distance, state.bot?.state.distance ?? 0) >= drawFrom) {
+          const frame = sceneFrame({
+            profile: route,
+            origin,
+            state,
+            botDistance: state.bot?.state.distance,
+            uneased,
+          });
+          for (const marker of frame.markers) drawn.push(marker.x, marker.z);
+          framesDrawn += 1;
+        }
         trace.push(
           state.ride.distance,
           state.ride.speed,
@@ -431,10 +471,13 @@ describe('only the drawing changes — #2427', () => {
         );
       }
       expect(simulation.state.ride.distance).toBeGreaterThan(400 + 10 * Math.PI + 50);
-      return { trace, drawn };
+      return { trace, drawn, framesDrawn };
     };
     const eased = ride(false);
     const plain = ride(true);
+    // Drawn into, through and out of the hairpin, the same frames in both rides.
+    expect(eased.framesDrawn).toBe(plain.framesDrawn);
+    expect(eased.framesDrawn).toBeGreaterThan(90);
     expect(eased.trace).toEqual(plain.trace);
     // Drafted somewhere: the solo k was not 1 throughout.
     expect(eased.trace.some((value, index) => index % 6 === 3 && value < 1)).toBe(true);
