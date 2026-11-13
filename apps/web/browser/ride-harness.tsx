@@ -535,6 +535,10 @@ const HUD_FOCUS = new URLSearchParams(window.location.search).get('arrangement')
 /** #2387: `?totals=strip`, the totals strip along the bottom of the road. */
 const HUD_TOTALS = new URLSearchParams(window.location.search).get('totals') === 'strip';
 
+/** #2514: `?deliveryview=everything`, a Delivery round's HUD as it was before the game strip. */
+const HUD_DELIVERY_EVERYTHING =
+  new URLSearchParams(window.location.search).get('deliveryview') === 'everything';
+
 /** #2079: `?hide=readings,route`, the HUD's panels turned off. */
 const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
   (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
@@ -1502,12 +1506,19 @@ async function run(): Promise<void> {
   // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
   // written where Settings writes them, read as the ride starts.
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
-  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0 || HUD_FOCUS || HUD_TOTALS) {
+  if (
+    HUD_TEXT !== undefined ||
+    HUD_HIDDEN.length > 0 ||
+    HUD_FOCUS ||
+    HUD_TOTALS ||
+    HUD_DELIVERY_EVERYTHING
+  ) {
     writeHudLayout(localStorage, {
       textSize: HUD_TEXT ?? 'normal',
       hidden: HUD_HIDDEN,
       arrangement: HUD_FOCUS ? 'focus' : 'full',
       totalsStrip: HUD_TOTALS,
+      delivery: HUD_DELIVERY_EVERYTHING ? 'everything' : 'game',
     });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.

@@ -106,6 +106,9 @@ export function createSteeringController(port: SteeringControllerPort): Steering
     get state() {
       return state;
     },
+    get paired() {
+      return state.kind === 'connected';
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
