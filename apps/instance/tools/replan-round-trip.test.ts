@@ -493,9 +493,12 @@ const FIRST_OF_THE_CLEAN_UP = 11;
 
 /**
  * The bound of a wait inside an interrupted run's case, which has Vitest's
- * 5 s (#2550's review, F3): under the case's budget, so a wait that never
- * ends, or an interruption that waited for the 20 s run in flight, fails on
- * its own assertion rather than as "Test timed out in 5000ms".
+ * 5 s (#2550's review, F3). A warm-up that never reaches the hosted service
+ * fails on its own `waitFor`. The interruption's own check catches an
+ * interruption slower than this and quicker than what is left of the case.
+ * An interruption that waits for the whole 20 s run in flight never returns
+ * inside the case, so it fails as "Test timed out in 5000ms" (#2570's review,
+ * F1): still red, but not by name.
  */
 const WAIT_MS = 3_000;
 

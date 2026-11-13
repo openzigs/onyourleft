@@ -71,10 +71,23 @@ const CLI = fileURLToPath(new URL('./operator/cli.ts', import.meta.url));
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 /**
  * The bound of a wait inside a case that has Vitest's 5 s (#2550's review,
- * F3): under the case's budget, so a wait that never ends fails naming what
- * it waited for, not as "Test timed out in 5000ms".
+ * F3). It is a cap under the case's budget, not a promise of how a wait that
+ * never ends fails. It fails naming what it waited for only when the case
+ * reaches the wait with more than this left of its 5 s. Where earlier steps
+ * have spent that, as after the second start in 'ends, as it opens' or at
+ * the third of 'rejoins'' waits in a row, it fails as "Test timed out in
+ * 5000ms" instead (#2570's review, F1).
  */
 const WAIT_MS = 3_000;
+/**
+ * The phase bounds of 'on SIGTERM mid-race' (#2551) and 'started by its
+ * creator alone' (#2552): shorter than `WAIT_MS` because each of those cases
+ * waits through several phases. The same caveat holds: a phase reached late
+ * in the case's 5 s fails as Vitest's timeout, not by name.
+ */
+const WELCOMES_WAIT_MS = 1_000;
+const ACROSS_THE_LINE_WAIT_MS = 2_500;
+const RACE_PHASE_WAIT_MS = 2_000;
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -669,7 +682,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       await until(
         () => bobSocket.messages.length > 0 && annSocket.messages.length > 0,
         'welcomes',
-        1_000,
+        WELCOMES_WAIT_MS,
       );
       const started = await fetch(`${url}/v1/rooms/race-1/start`, {
         method: 'POST',
@@ -696,7 +709,7 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
                 m.riders[0].decimetres >= 20,
             ),
           'Ann across the line',
-          2_500,
+          ACROSS_THE_LINE_WAIT_MS,
         );
       } finally {
         clearInterval(pedal);
@@ -1281,7 +1294,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(
       () => [annSocket, bobSocket].every((s) => s.messages.some((m) => m.type === 'countdown')),
       'the countdown said to both',
-      2_000,
+      RACE_PHASE_WAIT_MS,
     );
     for (const socket of [annSocket, bobSocket]) {
       const told = socket.messages.find((m) => m.type === 'countdown');
@@ -1297,7 +1310,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       await until(
         () => annSocket.messages.some((m) => m.type === 'finish'),
         'the race finished',
-        2_000,
+        RACE_PHASE_WAIT_MS,
       );
     } finally {
       clearInterval(pedal);
@@ -1316,7 +1329,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // The riders leave; the room is over, and lets its route go.
     annSocket.socket.close();
     bobSocket.socket.close();
-    await until(() => !existsSync(routeFile), 'the route deleted', 2_000);
+    await until(() => !existsSync(routeFile), 'the route deleted', RACE_PHASE_WAIT_MS);
     expect((await call('GET', `/v1/rooms/${room.roomId}/route`, ann.sessionToken)).status).toBe(
       404,
     );
