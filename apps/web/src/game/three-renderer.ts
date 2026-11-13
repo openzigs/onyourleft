@@ -152,6 +152,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   type CompressedTexture,
   ConeGeometry,
@@ -11268,7 +11269,7 @@ export interface DrawnDeliveryPiece {
   readonly z: number;
   /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
   readonly kind: DeliveryObstacleKind | undefined;
-  /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
+  /** For a parked car or a car pulling out (#2506), which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
   /** How large it was drawn: the instance matrix's scale. Above 1 only for a far marker (#2453). */
   readonly scale: number;
@@ -11285,6 +11286,32 @@ const DELIVERY_PIECE_KIND_ATTRIBUTE = 'oylPieceKind';
 const DELIVERY_OBSTACLE_KIND_ATTRIBUTE = 'oylObstacleKind';
 
 /**
+ * The vertex attribute naming a second kind whose instance also draws the
+ * vertex, by its index in the roster, or `-1` for none — #2506: a parked
+ * car's vertices are drawn by a car pulling out's instance too, so the one car
+ * in the geometry is both cars' body, and a car pulling out adds only its own
+ * hazard marker and indicators. @see withObstacleKinds
+ */
+const DELIVERY_PIECE_ALSO_ATTRIBUTE = 'oylPieceAlso';
+
+/**
+ * Which of the roster's instances draw a vertex of the obstacle geometry, as
+ * {@link withObstacleKinds}' vertex shader decides it: an instance of its own
+ * kind, and one of the kind it names in {@link DELIVERY_PIECE_ALSO_ATTRIBUTE}.
+ * The shader's rule restated, so the jsdom suite can say what an instance of a
+ * kind draws; `delivery-belt.test.ts` holds the shader's text to it.
+ *
+ * @test-facing the product draws through the shader and does not call this
+ */
+export function deliveryObstacleVertexDrawn(
+  pieceKind: number,
+  pieceAlso: number,
+  instanceKind: number,
+): boolean {
+  return Math.abs(pieceKind - instanceKind) < 0.5 || Math.abs(pieceAlso - instanceKind) < 0.5;
+}
+
+/**
  * Each obstacle's footprint, metres: `delivery/obstacles.ts` §`OBSTACLE_KINDS`'
  * half sizes, along the road and across it, so what the rider sees is what
  * the rider hits. ⚠️ **Restated, not imported**: nothing the view reaches
@@ -11299,6 +11326,9 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
   trolley: { halfLength: 0.25, halfWidth: 0.3 },
   cone: { halfLength: 0.2, halfWidth: 0.2 },
   'parked-car': { halfLength: 2.2, halfWidth: 0.9 },
+  dog: { halfLength: 0.2, halfWidth: 0.45 },
+  'car-pulling-out': { halfLength: 2.2, halfWidth: 0.9 },
+  'oncoming-rider': { halfLength: 0.85, halfWidth: 0.3 },
 };
 
 /** The roster, in order: a kind's index is its number in both attributes. */
@@ -11323,6 +11353,11 @@ const DELIVERY_PAINTED_ATTRIBUTE = 'oylPainted';
 /** The instanced attribute holding each obstacle instance's body paint, linear RGB. @see PARKED_CAR_PAINTS */
 const DELIVERY_OBSTACLE_PAINT_ATTRIBUTE = 'oylObstaclePaint';
 
+/** Whether a kind is drawn with the car's body, and so wears one of {@link PARKED_CAR_PAINTS}: a parked car, and a car pulling out (#2506). */
+function isCarKind(kind: DeliveryObstacleKind): boolean {
+  return kind === 'parked-car' || kind === 'car-pulling-out';
+}
+
 /** Which of {@link PARKED_CAR_PAINTS} a car piece wears: by its place on the round, so it keeps its colour for the ride. */
 function parkedCarPaint(piece: DeliveryObstaclePiece): number {
   return (piece.index ?? 0) % PARKED_CAR_PAINTS.length;
@@ -11332,8 +11367,9 @@ function parkedCarPaint(piece: DeliveryObstaclePiece): number {
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
  * — #1814. Every obstacle instance carries every kind's triangles, each
  * vertex marked with its kind ({@link DELIVERY_PIECE_KIND_ATTRIBUTE}); a vertex
- * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE})
- * is collapsed to the instance's origin, so its triangles have no area and
+ * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_KIND_ATTRIBUTE}),
+ * and whose second kind ({@link DELIVERY_PIECE_ALSO_ATTRIBUTE}, #2506) is not
+ * either, is collapsed to the instance's origin, so its triangles have no area and
  * draw no pixel. That is what lets a wheelie bin, a hand trolley and a cone
  * share one instanced call: an instanced draw is ONE geometry, and three's
  * `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's page's
@@ -11356,12 +11392,13 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PAINTED_ATTRIBUTE};\nattribute vec3 ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE};`,
+        `#include <common>\nattribute float ${DELIVERY_PIECE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PIECE_ALSO_ATTRIBUTE};\nattribute float ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE};\nattribute float ${DELIVERY_PAINTED_ATTRIBUTE};\nattribute vec3 ${DELIVERY_OBSTACLE_PAINT_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) );`,
+      // #2506: or of the kind it also belongs to (deliveryObstacleVertexDrawn).
+      `#include <begin_vertex>\n\ttransformed *= max( 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_KIND_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) ), 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_ALSO_ATTRIBUTE} - ${DELIVERY_OBSTACLE_KIND_ATTRIBUTE} ) ) );`,
       'vertex',
       spliced,
     );
@@ -11385,6 +11422,8 @@ interface DeliveryPart {
   readonly glows?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
+  /** For an obstacle: a second kind whose instance also draws it, by index (#2506). */
+  readonly also?: number;
   /** For a parked car's body: its colour is the instance's paint (#2362). */
   readonly painted?: boolean;
 }
@@ -11406,6 +11445,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
   const kinds = new Float32Array(vertices);
+  const also = new Float32Array(vertices);
   const painted = new Float32Array(vertices);
   const paint = new Color();
   let at = 0;
@@ -11421,6 +11461,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       colours[corner * 3 + 2] = paint.b;
       glow[corner] = part.glows === true ? 1 : 0;
       kinds[corner] = part.kind ?? 0;
+      also[corner] = part.also ?? -1;
       painted[corner] = part.painted === true ? 1 : 0;
     }
     at += count;
@@ -11434,6 +11475,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_KIND_ATTRIBUTE, new BufferAttribute(kinds, 1));
+    geometry.setAttribute(DELIVERY_PIECE_ALSO_ATTRIBUTE, new BufferAttribute(also, 1));
     geometry.setAttribute(DELIVERY_PAINTED_ATTRIBUTE, new BufferAttribute(painted, 1));
   }
   geometry.computeBoundingSphere();
@@ -11494,6 +11536,16 @@ const DELIVERY_PAINT = {
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
   hazard: 0xe8432f,
+  // #2506: a car pulling out's lit indicators, amber.
+  indicator: 0xf59a1b,
+  // #2364: a brown dog with a darker muzzle and tail, and another rider in a
+  // teal jacket and dark legs on a grey bicycle, this project's own.
+  dogCoat: 0x8a5a35,
+  dogDark: 0x4a2f1c,
+  riderJacket: 0x2a8c8c,
+  riderLegs: 0x2b2f36,
+  riderSkin: 0xd2a07c,
+  riderFrame: 0x7d848c,
 } as const;
 
 /**
@@ -11527,8 +11579,33 @@ const HAZARD_MARKER_HEIGHT_METRES = 0.36;
  */
 const HAZARD_MARKER_REACH_METRES = 0.2;
 
-/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
-const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+/**
+ * A car pulling out's hazard marker, in metres — #2506, the owner's ruling of
+ * 2026-11-12: the small kinds' 0.36 m marker, 2.7 m up, was 8 to 10 pixels
+ * from the chase camera at 20 m on the tablet's 1280×800, too small to read.
+ * A car is 1.8 m wide, so its marker may be wider than the cone's reach
+ * allows the small kinds': **1.2 m tall and 1.2 m across**, its middle
+ * **3.2 m** up, so its bottom (2.6 m) stays over the camera's near reach
+ * as {@link HAZARD_MARKER_MIDDLE_METRES} argues, and its top stands well above
+ * any parked car in front of it. The same four-sided pyramid, the same 8
+ * triangles: it is larger and costs nothing more. `delivery-belt.test.ts`
+ * holds its projected height on that frame from 20 m.
+ */
+const CAR_HAZARD_MARKER = { middle: 3.2, height: 1.2, reach: 0.6 } as const;
+
+/**
+ * The kinds that carry {@link obstacleHazardMarker}: those narrower than the
+ * rider's shoulders' reach, and since #2506 a car pulling out, which moves:
+ * every moving hazard carries one, and a parked car does not.
+ */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = [
+  'bin',
+  'trolley',
+  'cone',
+  'dog',
+  'car-pulling-out',
+  'oncoming-rider',
+];
 
 /**
  * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
@@ -11543,12 +11620,20 @@ const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 
  * drawing and decides nothing: no collision reads it. **Not on a parked
  * car** ({@link HAZARD_MARKED_KINDS}): 1.8 m wide, a car is never behind a
  * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
- * the street does not have.
+ * the street does not have. **On a car pulling out** (#2506): it moves into
+ * the road, and with no marker it was drawn as an ordinary parked car.
  */
-function obstacleHazardMarker(): BufferGeometry {
-  return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
-    .rotateX(Math.PI)
-    .translate(0, HAZARD_MARKER_MIDDLE_METRES, 0);
+function obstacleHazardMarker(kind: DeliveryObstacleKind): BufferGeometry {
+  // #2506: a car pulling out's is larger (CAR_HAZARD_MARKER).
+  const { middle, height, reach } =
+    kind === 'car-pulling-out'
+      ? CAR_HAZARD_MARKER
+      : {
+          middle: HAZARD_MARKER_MIDDLE_METRES,
+          height: HAZARD_MARKER_HEIGHT_METRES,
+          reach: HAZARD_MARKER_REACH_METRES,
+        };
+  return new ConeGeometry(reach, height, 4, 1).rotateX(Math.PI).translate(0, middle, 0);
 }
 
 /** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
@@ -11712,7 +11797,9 @@ function fittedToFootprint(
  * body's paint; head lamps, tail lamps, a grille, bumpers, number plates and
  * door mirrors. Its nose is along `+z`; it stands about 1.45 m tall, and
  * {@link fittedToFootprint} holds it to `obstacles.ts`' 4.4 m by 1.8 m.
- * `paint` is the body's.
+ * `paint` is the body's. Since #2506 the parts also hold an amber indicator
+ * under each tail lamp, in {@link DELIVERY_PAINT}'s `indicator`, which only a
+ * car pulling out draws ({@link obstacleShape}).
  */
 function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, number])[] {
   const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'];
@@ -11772,10 +11859,29 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
     // Lamps: a head lamp each side of the grille, a tail lamp each side of the boot.
     parts.push([deliveryBox(0.36, 0.12, 0.04, side * 0.55, 0.62, nose), DELIVERY_PAINT.carLamp]);
     parts.push([deliveryBox(0.32, 0.14, 0.04, side * 0.58, 0.7, -nose), DELIVERY_PAINT.carTail]);
+    // #2506: an amber indicator under each tail lamp, a hair proud of the
+    // tail and facing back, one quad, as only a rider behind the car sees it.
+    // Fitted with the car, then drawn by a car pulling out alone
+    // (obstacleShape routes this paint to it).
+    parts.push([
+      new PlaneGeometry(0.3, 0.1).rotateY(Math.PI).translate(side * 0.58, 0.55, -nose - 0.01),
+      DELIVERY_PAINT.indicator,
+    ]);
     for (const along of [rear, front]) {
       const x = side * (halfWidth - 0.14);
+      // #2506, trimmed to fit the village frame's 205 000 triangles: the rim
+      // is one disc on the tyre's outside face, a hair proud of it and facing
+      // out, 8 triangles (it was a closed 8-sided cylinder, 32, whose wall
+      // sat inside the tyre and whose inner face looked under the car). The
+      // tyre stays round in 12: one in 10 has no corner straight down and,
+      // fitted to the road, sinks the car (round 6's finding).
       parts.push([deliveryWheel(radius, 0.22, x, radius, along, 12), DELIVERY_PAINT.black]);
-      parts.push([deliveryWheel(0.2, 0.23, x, radius, along, 8), DELIVERY_PAINT.carRim]);
+      parts.push([
+        new CircleGeometry(0.2, 8)
+          .rotateY((side * Math.PI) / 2)
+          .translate(x + side * 0.115, radius, along),
+        DELIVERY_PAINT.carRim,
+      ]);
     }
   }
   // The grille, the bumpers' dark strips and the number plates, front and back,
@@ -11789,6 +11895,61 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
   trim(0.5, 0.11, 0.46, nose + 0.005, DELIVERY_PAINT.carPlate);
   trim(0.5, 0.11, 0.5, -nose - 0.005, DELIVERY_PAINT.carPlate);
   return fittedToFootprint(parts, halfWidth, halfLength);
+}
+
+/**
+ * A dog, side on — #2364, this project's own: a brown body on its front and
+ * hind legs, a head with a darker muzzle, and a tail, about 0.65 m tall, in
+ * six boxes, because every obstacle instance submits every kind's triangles
+ * ({@link DELIVERY_OBSTACLE_TRIANGLES}). It runs
+ * across the road, so its length is across it: its head is along `+x`, the
+ * rider's left as drawn (`delivery/in-view.ts` §`obstacleTurn` turns it to
+ * face the way it runs). Upright and whole: a contact is never drawn as harm
+ * (ADR 0065 D-10.6). {@link fittedToFootprint} holds it to `obstacles.ts`'
+ * 0.9 m across by 0.4 m along.
+ */
+function dogParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.dog;
+  return fittedToFootprint(
+    [
+      [deliveryBox(0.58, 0.24, 0.24, 0, 0.42, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.2, 0.22, 0.18, 0.34, 0.58, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.1, 0.09, 0.12, 0.47, 0.52, 0), DELIVERY_PAINT.dogDark],
+      [deliveryBox(0.18, 0.05, 0.05, -0.38, 0.52, 0), DELIVERY_PAINT.dogDark],
+      // The front legs and the hind legs, each pair one box.
+      [deliveryBox(0.07, 0.32, 0.2, 0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.07, 0.32, 0.2, -0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+    ],
+    halfWidth,
+    halfLength,
+  );
+}
+
+/**
+ * Another rider coming the other way — #2364, this project's own: a grey
+ * bicycle on two black wheels, a rider in a teal jacket with dark legs and a
+ * bare head, about 1.7 m tall, the bicycle's nose along `+z` (`in-view.ts`
+ * §`obstacleTurn` turns them to face the rider). A drawn figure of the level,
+ * never the pacer, a bot or another rider's data (ADR 0065 D-10.7), and never
+ * drawn hurt. {@link fittedToFootprint} holds it to `obstacles.ts`' 1.7 m
+ * along by 0.6 m across.
+ */
+function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['oncoming-rider'];
+  const radius = 0.33;
+  return fittedToFootprint(
+    [
+      [deliveryWheel(radius, 0.04, 0, radius, -0.52), DELIVERY_PAINT.black],
+      [deliveryWheel(radius, 0.04, 0, radius, 0.52), DELIVERY_PAINT.black],
+      [deliveryBox(0.05, 0.05, 1.0, 0, 0.6, 0), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.56, 0.04, 0.04, 0, 1.0, 0.46), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.28, 0.5, 0.12, 0, 0.62, -0.12), DELIVERY_PAINT.riderLegs],
+      [deliveryBox(0.34, 0.55, 0.26, 0, 1.15, 0.0), DELIVERY_PAINT.riderJacket],
+      [deliveryBox(0.2, 0.22, 0.2, 0, 1.55, 0.08), DELIVERY_PAINT.riderSkin],
+    ],
+    halfWidth,
+    halfLength,
+  );
 }
 
 /**
@@ -11808,7 +11969,7 @@ function obstacleShape(): BufferGeometry {
   // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
   for (const kind of HAZARD_MARKED_KINDS) {
     parts.push({
-      made: obstacleHazardMarker(),
+      made: obstacleHazardMarker(kind),
       colour: DELIVERY_PAINT.hazard,
       glows: true,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
@@ -11883,13 +12044,24 @@ function obstacleShape(): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
-  // One car: its body's vertices take the instance's paint (round 6).
+  // #2364: the moving hazards' own figures; a car pulling out is drawn as the car below.
+  for (const [made, colour] of dogParts()) add('dog', made, colour);
+  for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
+  // One car: its body's vertices take the instance's paint (round 6). #2506: a
+  // car pulling out's instance draws it too, and its lit indicators are that
+  // kind's alone, so a parked car shows none.
   const body = PARKED_CAR_PAINTS[0] as number;
+  const pullingOut = DELIVERY_OBSTACLE_ORDER.indexOf('car-pulling-out');
   for (const [made, colour] of parkedCarParts(body)) {
+    if (colour === DELIVERY_PAINT.indicator) {
+      parts.push({ made, colour, glows: true, kind: pullingOut });
+      continue;
+    }
     parts.push({
       made,
       colour,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+      also: pullingOut,
       painted: colour === body,
     });
   }
@@ -11900,7 +12072,16 @@ function obstacleShape(): BufferGeometry {
  * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
  * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
  * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
- * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
+ * the bin, the trolley and the cone; since #2364 **1 758**, adding a dog's 72
+ * and another rider's 124, each with its marker's 8; since #2506 **1 770**, a
+ * car pulling out's marker's 8 and its two indicators' 4, one quad each; then
+ * **1 674**, the owner's ruling of 2026-11-12 that the village frame stay
+ * under `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (it was
+ * 206 318 at 1 770, 20 obstacles each submitting all of these): each of the
+ * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
+ * A car pulling out's
+ * body is the parked car's, drawn by its instance too ({@link
+ * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
  * obstacles cost this many times the instances drawn in vertex work, and no
  * fragment for the collapsed ones.
@@ -11908,7 +12089,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_674;
 
 /**
  * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
@@ -12231,7 +12412,8 @@ export class DeliveryBelt {
     for (let at = 0; at < count; at += 1) {
       const piece = obstacles[at] as DeliveryObstaclePiece;
       kinds[at] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
-      const paint = piece.kind === 'parked-car' ? parkedCarPaint(piece) : -1;
+      // #2506: a car pulling out wears a parked car's paints, its body being one.
+      const paint = isCarKind(piece.kind) ? parkedCarPaint(piece) : -1;
       this.#paintOf[at] = paint;
       DELIVERY_PAINT_COLOUR.set(PARKED_CAR_PAINTS[Math.max(0, paint)] as number);
       paints[at * 3] = DELIVERY_PAINT_COLOUR.r;
@@ -12280,7 +12462,8 @@ export class DeliveryBelt {
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
       const kind = what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[kinds[at] as number] : undefined;
-      const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
+      const paint =
+        kind !== undefined && isCarKind(kind) ? (this.#paintOf[at] as number) : undefined;
       drawn.push({
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
@@ -12374,7 +12557,9 @@ export function deliveryCallsProbe(
  * nearly square-on — #1814: whether each of `points` (the obstacle's own
  * metres, `x` across and `y` up) reads back as the background or as painted.
  * The browser gate's proof that {@link withObstacleKinds} draws only the
- * instance's own kind.
+ * instance's own kind. The eye looks level at `aim` metres above the road,
+ * 0.6 unless given, and sees about 0.87 m above and below it: #2506 raises it
+ * to a hazard marker's height.
  *
  * @test-facing read by `browser/delivery-harness.ts`; the product draws
  * obstacles through {@link DeliveryBelt} only
@@ -12384,6 +12569,7 @@ export function deliveryKindProbe(
   world: 'stylised' | 'realistic',
   kind: DeliveryObstacleKind,
   points: readonly (readonly [number, number])[],
+  aim = 0.6,
 ): readonly boolean[] {
   const size = 256;
   const background = 0xff00ff;
@@ -12399,8 +12585,8 @@ export function deliveryKindProbe(
   sun.position.set(0, 1, 1);
   scene.add(sun);
   const eye = new PerspectiveCamera(2, 1, 1, 200);
-  eye.position.set(0, 0.6, 50);
-  eye.lookAt(0, 0.6, 0);
+  eye.position.set(0, aim, 50);
+  eye.lookAt(0, aim, 0);
   eye.updateMatrixWorld();
   renderer.render(scene, eye);
   const gl = renderer.getContext();

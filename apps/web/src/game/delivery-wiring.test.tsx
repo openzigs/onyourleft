@@ -78,6 +78,7 @@ import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
+import { MOVING_HAZARD_KINDS, type ObstacleKind } from './delivery/obstacles';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { SHIPPED_LEVELS } from './shipped-levels';
 import { pickRoundTargets } from './delivery/targets';
@@ -2405,8 +2406,28 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     return mappedBuildingsOf(plans);
   })();
 
-  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
-  const CRASHING_SEED = ((): number => {
+  /**
+   * #2364: the fixture level with moving hazards in its round as well, as a
+   * level that asks for them carries them. Read through the app's reader.
+   */
+  const MOVING_LEVEL = parseLevelFile(
+    {
+      ...JSON.parse(
+        readFileSync(
+          join(
+            dirname(fileURLToPath(import.meta.url)),
+            'delivery/levels/fixtures/fixture-level.json',
+          ),
+          'utf8',
+        ),
+      ),
+      round: { ...LEVEL.round, hazardsPerKilometre: { static: 1, moving: 4 } },
+    },
+    'fixture-level',
+  );
+
+  /** The ride's frames, as the simulation steps the scripted power trace on the level. */
+  const LEVEL_FRAMES = ((): readonly ShadowFrame[] => {
     const simulation = new GameSimulation({
       profile: LEVEL_PROFILE,
       conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
@@ -2421,7 +2442,47 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
         speed: simulation.state.ride.speed,
       });
     }
-    for (let seed = 1; seed < 400; seed += 1) {
+    return frames;
+  })();
+
+  /**
+   * How many frames past a crash a moving-hazards case rides — #2364: 4 s,
+   * two of `announce.ts` §`ANNOUNCE_WINDOW_SECONDS`' windows, for the crash
+   * to be said behind anything already owed.
+   */
+  const CRASH_SAID_FRAMES = 20;
+
+  /**
+   * Where each moving-hazards case starts {@link crashingRide}'s scan — #2364:
+   * a seed whose crash into that kind comes early in the ride (about frame 70
+   * to 80 of 330 when chosen), found once by scanning the first 120 seeds, so
+   * the case rides about a third of a round. It is a starting point, not an
+   * answer: if a change to the round stops that seed crashing, the scan goes
+   * on to the next one that does, and the case only rides longer.
+   */
+  const EARLY_CRASH_SEEDS: Readonly<Partial<Record<ObstacleKind, number>>> = {
+    dog: 110,
+    'car-pulling-out': 102,
+    'oncoming-rider': 55,
+  };
+
+  /** The first seed whose round on `level` the unsteered rider crashes into a `kind` on. */
+  function crashingSeed(level: LevelFile, kind: ObstacleKind): number {
+    return crashingRide(level, kind).seed;
+  }
+
+  /**
+   * The first seed from `from` whose round on `level` the unsteered rider
+   * crashes into a `kind` on, and the frame of the ride on which they first
+   * do, counted as {@link LEVEL_FRAMES} counts them (#2364: so a case may ride
+   * only that far).
+   */
+  function crashingRide(
+    level: LevelFile,
+    kind: ObstacleKind,
+    from = 1,
+  ): { readonly seed: number; readonly frame: number } {
+    for (let seed = from; seed < 600; seed += 1) {
       stubSeed(seed);
       let ride = startDeliveryRide({
         buildings: LEVEL_BUILDINGS,
@@ -2430,32 +2491,40 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
         riderDistance: 0,
         lineOffset: lineOffsetAt(racingLine(LEVEL_PROFILE), 0),
         storage: undefined,
-        level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres, id: LEVEL.id },
+        level: { ...level.round, lengthMetres: level.lengthMetres, id: level.id },
       });
       vi.restoreAllMocks();
       if (ride === undefined) continue;
-      if (!ride.obstacles.some((obstacle) => obstacle.kind === 'parked-car')) continue;
+      if (!ride.obstacles.some((obstacle) => obstacle.kind === kind)) continue;
       let crashes = 0;
-      for (const frame of frames) {
+      let first: number | undefined;
+      for (const [at, frame] of LEVEL_FRAMES.entries()) {
         if (frame.steps === 0) continue;
         const stepped = stepDeliveryRide(ride, {
           ticks: frame.steps,
           along: frame.along,
           speed: frame.speed,
         });
-        ride = stepped.ride;
+        const now = stepped.ride;
+        ride = now;
         crashes += stepped.crashes;
+        const intoKind = now.obstacles.some(
+          (obstacle, index) => obstacle.kind === kind && now.obstacleState.crashed[index] === true,
+        );
+        if (first === undefined && intoKind) first = at + 1;
       }
-      // A crash into a parked car itself (#2362, round 2), so the ride below
-      // also draws the rider moved clear of it.
-      const intoCar = ride.obstacles.some(
-        (obstacle, index) =>
-          obstacle.kind === 'parked-car' && ride.obstacleState.crashed[index] === true,
+      // A crash into a `kind` itself (#2362, round 2): for a parked car, so the
+      // ride below also draws the rider moved clear of it.
+      const into = ride.obstacles.some(
+        (obstacle, index) => obstacle.kind === kind && ride.obstacleState.crashed[index] === true,
       );
-      if (crashes > 0 && intoCar) return seed;
+      if (crashes > 0 && into && first !== undefined) return { seed, frame: first };
     }
-    throw new Error('no seed put the unsteered rider into a parked car');
-  })();
+    throw new Error(`no seed put the unsteered rider into a ${kind}`);
+  }
+
+  /** The first seed whose level round the unsteered rider crashes into a parked car on. */
+  const CRASHING_SEED = crashingSeed(LEVEL, 'parked-car');
 
   /** #2366: the fixture level in rain and at dusk, read through the app's reader. */
   const WET_LEVEL = parseLevelFile(
@@ -2478,7 +2547,9 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
   async function rideLevel(
     obstacles: 'normal' | 'none',
     level: LevelFile = LEVEL,
-    /** #1688: each frame's length; the ride is the same 66 s in fewer frames. */
+    seed = CRASHING_SEED,
+    frames = FRAMES,
+    /** #1688: each frame's length; the ride is the same `frames` in fewer, longer ones. */
     frameMs = FRAME_MS,
   ): Promise<{
     readonly writes: readonly Write[];
@@ -2501,7 +2572,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     const levelPort: GamePort = {
       listRoutes: () => Promise.resolve([]),
       // The listing must name the level: an unlisted one is not read (#2363).
-      listDeliveryLevels: () => Promise.resolve([{ ...SHIPPED_LEVELS.list()[0]!, id: LEVEL.id }]),
+      listDeliveryLevels: () => Promise.resolve([{ ...SHIPPED_LEVELS.list()[0]!, id: level.id }]),
       loadDeliveryLevel: (id) => Promise.resolve(id === level.id ? level : undefined),
       loadGhost: () => Promise.resolve(undefined),
       readSensors: () => ({
@@ -2510,7 +2581,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
         heartRate: { value: 142, live: true, paired: true },
       }),
     };
-    stubSeed(CRASHING_SEED);
+    stubSeed(seed);
     mounted = await mount(
       <GameView
         port={levelPort}
@@ -2526,7 +2597,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     );
     await settle();
     await clickThrough(buttonStarting('Ride '));
-    for (let index = 0; index < (FRAMES * FRAME_MS) / frameMs; index += 1) await pump(frameMs);
+    for (let index = 0; index < (frames * FRAME_MS) / frameMs; index += 1) await pump(frameMs);
     await settle();
     const ridden = { writes, offered: [...offered], said: [...said], started: [...startedRounds] };
     mounted.unmount();
@@ -2556,14 +2627,39 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     },
   );
 
+  it.each(MOVING_HAZARD_KINDS)(
+    'sends the same writes at the same times with a level’s moving hazards as with none, a crash into a %s among them — #2364',
+    async (kind) => {
+      // Ridden only to the crash and on far enough for it to be said, both
+      // rides alike, not the whole round: two whole rounds a kind took about
+      // 13 s, past the suite's per-case limit, and no timeout is raised (#1688).
+      const { seed, frame } = crashingRide(MOVING_LEVEL, kind, EARLY_CRASH_SEEDS[kind] ?? 1);
+      const frames = Math.min(FRAMES, frame + CRASH_SAID_FRAMES);
+      const without = await rideLevel('none', MOVING_LEVEL, seed, frames);
+      const withHazards = await rideLevel('normal', MOVING_LEVEL, seed, frames);
+      const [round] = withHazards.started as (DeliveryRide | undefined)[];
+      const [bare] = without.started as (DeliveryRide | undefined)[];
+      expect(round?.onLevel).toBe(true);
+      expect(round?.obstacles.some((obstacle) => obstacle.kind === kind)).toBe(true);
+      expect(bare?.obstacles).toEqual([]);
+      // The rider rode into one, so a crash was counted and said.
+      expect(withHazards.offered).toContain('delivery-crash');
+      expect(without.offered).not.toContain('delivery-crash');
+      // Non-vacuity: the trainer was written to all along (about one write a
+      // ten frames on this third of a round).
+      expect(without.writes.length).toBeGreaterThan(5);
+      expect(withHazards.writes).toStrictEqual(without.writes);
+    },
+  );
+
   // #1688's ruling: cheaper, never a longer timeout. Both rides are the
   // level's same 66 s in frames of 1 s, not 330 of 200 ms: the simulation's
   // steps are fixed at 0.05 s whatever the frame. On this Mac, Node 26, in
   // its block, two runs each at load averages of 16 to 28: 2.4–4.2 s →
   // 0.52–0.78 s without coverage, 4.5–5.1 s → 1.1–1.7 s with `--coverage`.
   it('sends the same writes at the same times, and says the same words in the same order, in rain and at dusk as in clear daylight — #2366', async () => {
-    const clear = await rideLevel('normal', LEVEL, 1_000);
-    const wet = await rideLevel('normal', WET_LEVEL, 1_000);
+    const clear = await rideLevel('normal', LEVEL, CRASHING_SEED, FRAMES, 1_000);
+    const wet = await rideLevel('normal', WET_LEVEL, CRASHING_SEED, FRAMES, 1_000);
     // Not vacuous: the wet ride's round was in rain and at dusk, its markers hidden until nearer.
     const [round] = wet.started as (DeliveryRide | undefined)[];
     expect(round?.weather).toStrictEqual({ rain: true, dusk: true });

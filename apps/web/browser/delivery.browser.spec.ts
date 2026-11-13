@@ -220,6 +220,16 @@ test.describe('Delivery’s belt — #1814', () => {
       // #2362: a parked car's body, and the road under it between its wheels.
       expect(read?.['parked-car']).toEqual([true, false, true]);
     });
+
+    test(`#2506: draws a car pulling out as a parked car's body with a hazard marker over it, and no marker over a parked car, in the ${world} world’s materials`, async ({
+      page,
+    }) => {
+      await open(page);
+      const read = await page.evaluate((w) => window.__oylDelivery?.pullingOut(w), world);
+      console.log(`#2506 ${world} car pulling out: ${JSON.stringify(read)}`);
+      expect(read?.body).toEqual([true, false, true]);
+      expect(read?.marker).toEqual({ 'parked-car': false, 'car-pulling-out': true });
+    });
   }
 
   test('draws a level’s rain in one call, and none under prefers-reduced-motion — #2366', async ({
@@ -329,6 +339,17 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(reading?.delivered).toBe(true);
     expect(reading?.before).toEqual({ markers: 2, first: true, second: true });
     expect(reading?.after).toEqual({ markers: 1, first: false, second: true });
+  });
+
+  test('photographs a parked car and a car about to pull out for the owner — #2506', async ({
+    page,
+  }, testInfo) => {
+    await open(page);
+    await page.evaluate(() => window.__oylDelivery?.pullingOutShowcase());
+    const shot = await page.locator('#delivery-pulling-out').screenshot();
+    await testInfo.attach('delivery-pulling-out', { body: shot, contentType: 'image/png' });
+    expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(shot.byteLength).toBeGreaterThan(5000);
   });
 
   test('photographs the parked cars for the owner — #2362, round 5', async ({ page }, testInfo) => {

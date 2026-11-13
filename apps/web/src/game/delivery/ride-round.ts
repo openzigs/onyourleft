@@ -101,9 +101,11 @@
  * ## A round on a built-in level (#2362, ADR 0065)
  *
  * {@link DeliveryRideStart.level} is the level's round: its `houses` are the
- * round's, in place of the week's, and its static hazards set the obstacles
- * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
- * standing. The assist still places fewer or none. A level round is kept
+ * round's, in place of the week's, and its hazards set the obstacles
+ * (`obstacles.ts` §`levelObstacleMix`): its static ones parked cars and bins,
+ * every one standing, and since #2364 its moving ones a dog, a car pulling
+ * out or another rider coming the other way, each stepped only on a step that
+ * ran, as every obstacle is. The assist still places fewer or none. A level round is kept
  * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
  * is never written to `delivery-progress.ts`. Reached, its end keeps the
  * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens

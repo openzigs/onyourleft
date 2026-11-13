@@ -54,13 +54,25 @@
  * lane, or in the middle of the road (the owner's ruling of 2026-11-09), never a
  * place.
  *
+ * Since #2364 a level's **moving hazard** is said the same way, once it is
+ * within {@link MOVING_HAZARD_AHEAD_METRES}, where it is set going: "A dog
+ * ahead, from the left.", "A car pulling out ahead, on the right.", "A rider
+ * coming the other way, in the left lane." — where it comes from, as the
+ * rider faces it.
+ *
  * ## The words are this project's own (DL1), for the owner's approval
  *
  * Every sentence below is new rider-facing wording, proposed in #1812's pull
  * request: "on the round", a house, a parcel; never a subscriber or a paper.
  */
 
-import { OBSTACLE_SIGHT_METRES, type Obstacle, type ObstacleKind } from '../delivery/obstacles';
+import {
+  MOVING_HAZARD_KINDS,
+  MOVING_HAZARD_SIGHT_METRES,
+  OBSTACLE_SIGHT_METRES,
+  type Obstacle,
+  type ObstacleKind,
+} from '../delivery/obstacles';
 import {
   FEWEST_DELIVERY_HOUSES,
   roundTally,
@@ -108,12 +120,23 @@ export const NOTHING_OWED: DeliveryOwed = Object.freeze({
  */
 export const OBSTACLE_AHEAD_METRES = OBSTACLE_SIGHT_METRES;
 
+/**
+ * How far ahead a moving hazard is said, metres — #2364: `obstacles.ts`
+ * §`MOVING_HAZARD_SIGHT_METRES`, 90 m, the distance it is set going at, so it
+ * is said as it starts to move and at least `MOVING_HAZARD_WARNING_SECONDS`
+ * before it can touch the rider at any avoidable speed (`moving-hazards.test.ts`).
+ */
+export const MOVING_HAZARD_AHEAD_METRES = MOVING_HAZARD_SIGHT_METRES;
+
 /** What each kind is called aloud. */
 const OBSTACLE_SAID: Readonly<Record<ObstacleKind, string>> = {
   'parked-car': 'A parked car',
   bin: 'A bin',
   trolley: 'A trolley',
   cone: 'A cone',
+  dog: 'A dog',
+  'car-pulling-out': 'A car pulling out',
+  'oncoming-rider': 'A rider coming the other way',
 };
 
 /**
@@ -122,6 +145,16 @@ const OBSTACLE_SAID: Readonly<Record<ObstacleKind, string>> = {
  * "the middle lane": the owner's ruling of 2026-11-09 on PR #2378.
  */
 export function obstacleAheadSentence(obstacle: Obstacle): string {
+  // #2364: a moving hazard is said by where it comes from, as the rider faces it.
+  if (obstacle.from !== undefined && MOVING_HAZARD_KINDS.includes(obstacle.kind)) {
+    if (obstacle.kind === 'oncoming-rider') {
+      return `${OBSTACLE_SAID[obstacle.kind]}, in the ${obstacle.from} lane.`;
+    }
+    if (obstacle.kind === 'car-pulling-out') {
+      return `${OBSTACLE_SAID[obstacle.kind]} ahead, on the ${obstacle.from}.`;
+    }
+    return `${OBSTACLE_SAID[obstacle.kind]} ahead, from the ${obstacle.from}.`;
+  }
   const across = obstacle.stands ?? 0;
   const where =
     across < 0
@@ -133,8 +166,9 @@ export function obstacleAheadSentence(obstacle: Obstacle): string {
 }
 
 /**
- * Owe the nearest standing obstacle within {@link OBSTACLE_AHEAD_METRES} of
- * the rider at `along` that has not been said, and drop one still owed that
+ * Owe the nearest standing obstacle within {@link OBSTACLE_AHEAD_METRES}, or
+ * moving hazard within {@link MOVING_HAZARD_AHEAD_METRES} (#2364), of the
+ * rider at `along` that has not been said, and drop one still owed that
  * the rider has passed. After the round's end, nothing.
  */
 export function oweObstacleAhead(
@@ -150,8 +184,10 @@ export function oweObstacleAhead(
   if (ahead === undefined) {
     let nearest: number | undefined;
     obstacles.forEach((obstacle, index) => {
-      if (obstacle.stands === undefined || owed.warned.includes(index)) return;
-      if (obstacle.along <= along || obstacle.along - along > OBSTACLE_AHEAD_METRES) return;
+      const moving = MOVING_HAZARD_KINDS.includes(obstacle.kind);
+      if ((obstacle.stands === undefined && !moving) || owed.warned.includes(index)) return;
+      const reach = moving ? MOVING_HAZARD_AHEAD_METRES : OBSTACLE_AHEAD_METRES;
+      if (obstacle.along <= along || obstacle.along - along > reach) return;
       if (nearest === undefined || obstacle.along < (obstacles[nearest] as Obstacle).along) {
         nearest = index;
       }

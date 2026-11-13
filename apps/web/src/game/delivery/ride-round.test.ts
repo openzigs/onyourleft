@@ -19,8 +19,12 @@ import { deliveryTown } from './delivery-town-testing';
 import { LEVEL_PROGRESS_STORAGE_KEY, NO_LEVEL_FINISHED, readLevelProgress } from './level-progress';
 import {
   CRASH_SCORE_DELTA,
+  MOVING_HAZARD_KINDS,
+  MOVING_HAZARD_SIGHT_METRES,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  obstacleAcross,
+  obstacleAlong,
   PARKED_CAR_CLEARANCE_METRES,
   parkedCarStands,
   RIDER_AHEAD_METRES,
@@ -143,6 +147,17 @@ function throwPoint(target: ThrowTarget): number {
 /** The ride with no obstacle on it, so a test of the throw is not also one of a crash. */
 function withoutObstacles(ride: DeliveryRide): DeliveryRide {
   return { ...ride, obstacles: [], obstacleState: { tick: 0, startedAt: [], crashed: [] } };
+}
+
+/** The round with only its obstacle at `index`, none set going. */
+function withoutOthers(ride: DeliveryRide, index: number): DeliveryRide {
+  const kept = ride.obstacles.slice(index, index + 1);
+  return { ...ride, obstacles: kept, obstacleState: startObstacles(kept) };
+}
+
+/** The round with the rider already in lane `lane`, steering to it. */
+function steered(ride: DeliveryRide, lane: number): DeliveryRide {
+  return { ...ride, steer: { lane, offset: LANE_OFFSETS_METRES[lane] as number } };
 }
 
 describe('a round at the press — #1816', () => {
@@ -927,6 +942,53 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     // A rider's own route is the week's round, as before.
     expect(started().onLevel).toBe(false);
     expect(started().targets).toHaveLength(FIRST_DAY_HOUSES);
+  });
+
+  it('moves no moving hazard, and scores no crash, on a step the simulation did not run — #2364', () => {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      level: { ...LEVEL, hazardsPerKilometre: { static: 0, moving: 4 } },
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    const index = ride.obstacles.findIndex(
+      (obstacle) => obstacle.kind === 'oncoming-rider' && obstacle.to !== undefined,
+    );
+    expect(ride.obstacles.every((obstacle) => MOVING_HAZARD_KINDS.includes(obstacle.kind))).toBe(
+      true,
+    );
+    expect(index).toBeGreaterThanOrEqual(0);
+    const hazard = ride.obstacles[index] as Obstacle;
+    // Ridden in its lane until it is set going and coming on, well short of it.
+    const lane = LANE_OFFSETS_METRES.indexOf(hazard.to as number);
+    let riding = withoutOthers(steered(ride, lane), index);
+    riding = rideTo(riding, hazard.along - MOVING_HAZARD_SIGHT_METRES + 20).ride;
+    const started = riding.obstacleState.startedAt[0];
+    expect(started).toBeDefined();
+    const seconds = (riding.obstacleState.tick - (started ?? 0)) * DELIVERY_TICK_SECONDS;
+    const where = obstacleAlong(hazard, seconds);
+    expect(where).toBeLessThan(hazard.along);
+    // Paused: many frames, the odometer handed on, and no step run.
+    let paused = riding;
+    for (let frame = 0; frame < 400; frame += 1) {
+      const stepped = stepDeliveryRide(paused, {
+        ticks: 0,
+        along: hazard.along + frame,
+        speed: 8,
+      });
+      expect(stepped.crashes).toBe(0);
+      paused = stepped.ride;
+    }
+    expect(paused).toBe(riding);
+    expect(paused.obstacleState.crashed).toStrictEqual([false]);
+    expect(obstacleAlong(hazard, seconds)).toBe(where);
+    expect(obstacleAcross(hazard, seconds)).toBe(hazard.to);
+    // Ridden on, it comes on and is met: a crash, which the pause had not scored.
+    expect(rideTo(paused, hazard.along).crashes).toBe(1);
   });
 
   it('places no obstacle with the assist at none', () => {

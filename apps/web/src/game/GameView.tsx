@@ -3873,6 +3873,7 @@ function GameScreen({
                   deliveryRef.current.obstacles,
                   drawn.riderDistance,
                   deliverySteered,
+                  deliveryRef.current.obstacleState,
                 ),
           ...(raceDrawn === undefined
             ? {}
