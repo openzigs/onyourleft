@@ -325,7 +325,7 @@ describe('priority is an ORDER, not a politeness', () => {
     // #551: the three safety statuses, then the side camera's lost link —
     // spoken to everyone, and ranked below the climb (see below).
     // #782: and the room's lost connection, for the same reason.
-    // #785: and a race's countdown, start and end.
+    // #785: and a race's end (#2546: not its countdown or its start).
     // #1812: and none of a Delivery round's four, by the owner's ruling of
     // 2026-10-28 (`delivery-announce.test.ts`). That ruling is not about `lap-ended`.
     expect(ALWAYS_SPOKEN).toEqual([
@@ -400,16 +400,26 @@ describe('priority is an ORDER, not a politeness', () => {
 describe('a room’s race and its riders — #784, #785', () => {
   it('ranks the race below the lost room, then a rider coming and going, all above every reading', () => {
     expect(PRIORITY.indexOf('room-race')).toBe(PRIORITY.indexOf('room-lost') + 1);
-    expect(PRIORITY.indexOf('room-rider')).toBe(PRIORITY.indexOf('room-race') + 1);
+    // #2546: the countdown and "Go" just below the end, rank 5a″ both.
+    expect(PRIORITY.indexOf('race-start')).toBe(PRIORITY.indexOf('room-race') + 1);
+    expect(PRIORITY.indexOf('room-rider')).toBe(PRIORITY.indexOf('race-start') + 1);
     for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
       expect(PRIORITY.indexOf('room-rider')).toBeLessThan(PRIORITY.indexOf(reading));
     }
   });
 
-  it('says a race’s start with announcements off, and a rider joining only with them on', () => {
-    const race = { kind: 'room-race', text: 'Go.' } as const;
+  it('says a race’s end with announcements off, and its start and a rider joining only with them on', () => {
+    const over = { kind: 'room-race', text: 'The race is over.' } as const;
+    const go = { kind: 'race-start', text: 'Go.' } as const;
     const joined = { kind: 'room-rider', text: 'A rider joined the room.' } as const;
-    expect(run([{ now: 0, events: [race] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual(['Go.']);
+    expect(run([{ now: 0, events: [over] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
+      'The race is over.',
+    ]);
+    // #2546, the owner's ruling of 2026-11-12: off is silence for the countdown and "Go".
+    expect(run([{ now: 0, events: [go] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([undefined]);
+    expect(run([{ now: 0, events: [go] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual([
+      'Go.',
+    ]);
     expect(run([{ now: 0, events: [joined] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
       undefined,
     ]);

@@ -441,3 +441,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that there can be no rule on racing strategy. Read ADR 0067 D-0 and D-1 for what replaces them;
   D-14 Q4's *"No"* is kept as ADR 0067 D-1 reads it (no bot's capacity changes with its place). This
   entry only points there; nothing else in this ADR changes.
+- **2026-11-12** — **D-2.4 is read as the recorded ride after Go**, on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/issues/2546#issuecomment-6833555799)
+  on #2546 (its option (a)). A solo lap race now holds the rider on its line for a 10 s countdown
+  before Go, as a room's race has held its riders since #785 and #1911, so the same power trace
+  ridden as an ordinary ride is no longer the same ride on the game's odometer. The recording is
+  unchanged by the mode: it starts at the press as before, the countdown's seconds are in it as the
+  trainer reported them, and from Go on it is what the same ride without the mode records. The race
+  result (its clock, laps, place and finish time) starts at Go. D-2.1's behavioural half is held the
+  same way: the race is compared with an ordinary ride whose rider stood still on the line for the
+  countdown's seconds and then rode the same trace (`lap-race-wiring.test.tsx`). The countdown
+  itself sends the trainer nothing but the line's grade and has no path to a trainer command.
+  Nothing else in this ADR changes.
