@@ -1281,6 +1281,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(
       () => [annSocket, bobSocket].every((s) => s.messages.some((m) => m.type === 'countdown')),
       'the countdown said to both',
+      2_000,
     );
     for (const socket of [annSocket, bobSocket]) {
       const told = socket.messages.find((m) => m.type === 'countdown');
@@ -1293,7 +1294,11 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       bobSocket.report(sequence, 700);
     }, 250);
     try {
-      await until(() => annSocket.messages.some((m) => m.type === 'finish'), 'the race finished');
+      await until(
+        () => annSocket.messages.some((m) => m.type === 'finish'),
+        'the race finished',
+        2_000,
+      );
     } finally {
       clearInterval(pedal);
     }
@@ -1301,7 +1306,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     for (let i = 0; ; i += 1) {
       const got = await call('GET', `/v1/rooms/${room.roomId}/results`, ann.sessionToken);
       if (got.status === 200 && (got.body as { rows: unknown[] }).rows.length === 2) break;
-      if (i > 100) throw new Error('the results were never written');
+      if (i > 40) throw new Error('the results were never written');
       await new Promise((done) => setTimeout(done, 50));
     }
     expect((await call('GET', `/v1/rooms/${room.roomId}/results`, cat.sessionToken)).status).toBe(
@@ -1311,7 +1316,7 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     // The riders leave; the room is over, and lets its route go.
     annSocket.socket.close();
     bobSocket.socket.close();
-    await until(() => !existsSync(routeFile), 'the route deleted');
+    await until(() => !existsSync(routeFile), 'the route deleted', 2_000);
     expect((await call('GET', `/v1/rooms/${room.roomId}/route`, ann.sessionToken)).status).toBe(
       404,
     );
