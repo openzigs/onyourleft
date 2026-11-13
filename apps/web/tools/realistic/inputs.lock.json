@@ -1924,6 +1924,40 @@
           "sha256": "fb85792551e86ceefcb49f681d3717894c976002cfebdc27b2d362b9844477b5"
         }
       ]
+    },
+    {
+      "id": "kenney-car-kit",
+      "licence": "CC0-1.0",
+      "licencePage": "https://kenney.nl/assets/car-kit",
+      "evidence": "Creative Commons CC0",
+      "read": "2026-11-12",
+      "authors": "Kenney",
+      "files": [
+        {
+          "path": "kenney-car-kit.zip",
+          "url": "https://kenney.nl/assets/car-kit",
+          "bytes": 4814237,
+          "sha256": "fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4"
+        },
+        {
+          "path": "Models/GLB format/sedan.glb",
+          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/sedan.glb",
+          "bytes": 172216,
+          "sha256": "b532ea7d2c59f7f6b22b138cf1955218a2c1898f1cea932af4d3fd563c3959b7"
+        },
+        {
+          "path": "Models/GLB format/Textures/colormap.png",
+          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/Textures/colormap.png",
+          "bytes": 12371,
+          "sha256": "f3622a03a20c6696065cae9cbe391351be873508af190c2ebd1d420c055787a5"
+        },
+        {
+          "path": "License.txt",
+          "url": "https://kenney.nl/assets/car-kit#License.txt",
+          "bytes": 696,
+          "sha256": "c33b7f6453d134deae7b1b8493717d9ccfa754c25ab97f6de89b88f8fda19b00"
+        }
+      ]
     }
   ]
 }

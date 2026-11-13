@@ -157,7 +157,7 @@ interface ObstacleVertex {
 function drawnBy(belt: DeliveryBelt, kind: DeliveryObstacleKind): ObstacleVertex[] {
   const geometry = belt.meshOf('obstacles').geometry;
   const position = geometry.getAttribute('position');
-  const kinds = geometry.getAttribute('oylPieceKind');
+  const kinds = geometry.getAttribute('oylPiece');
   const also = geometry.getAttribute('oylPieceAlso');
   const glow = geometry.getAttribute('oylGlow');
   const colour = geometry.getAttribute('color');
@@ -434,7 +434,7 @@ describe('Delivery’s belt — #1814', () => {
     const geometry = belt.meshOf('obstacles').geometry;
     const position = geometry.getAttribute('position');
     const normal = geometry.getAttribute('normal');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const glow = geometry.getAttribute('oylGlow');
     const colour = geometry.getAttribute('color');
     const pullingOut = ROSTER.indexOf('car-pulling-out');
@@ -469,7 +469,7 @@ describe('Delivery’s belt — #1814', () => {
     const position = geometry.getAttribute('position');
     const glow = geometry.getAttribute('oylGlow');
     // #2365: a doorstep's marker, kind 0; a mailbox's and a no-delivery sign are their own.
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const diamond = { xs: [] as number[], ys: [] as number[] };
     for (let at = 0; at < position.count; at += 1) {
       // The ring lies on the step, under 0.1 m; the diamond is the glowing part
@@ -627,7 +627,7 @@ describe('Delivery’s belt — #1814', () => {
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const glow = geometry.getAttribute('oylGlow');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     /** The highest vertex of marker kind `kind`, and whether any of its glowing parts lies on the step. */
     const shapeOf = (kind: number): { top: number; ringOnStep: boolean; vertices: number } => {
       let top = -Infinity;
@@ -731,8 +731,8 @@ describe('Delivery’s belt — #1814', () => {
     const drawn = belt.drawn('obstacles');
     expect(drawn.map((each) => each.kind)).toEqual([...ROSTER]);
     expect(drawn.map((each) => each.z)).toEqual(obstacles.map((each) => each.along));
-    const kinds = belt.meshOf('obstacles').geometry.getAttribute('oylObstacleKind');
-    expect([0, 1, 2].map((at) => kinds.getX(at))).toEqual([0, 1, 2]);
+    const kinds = belt.meshOf('obstacles').geometry.getAttribute('oylObstacle');
+    expect([0, 1, 2].map((at) => kinds.getW(at))).toEqual([0, 1, 2]);
     belt.dispose();
   });
 
@@ -745,7 +745,7 @@ describe('Delivery’s belt — #1814', () => {
       belt.meshOf('parcels').instanceMatrix.version,
       belt.meshOf('markers').instanceMatrix.version,
       belt.meshOf('obstacles').instanceMatrix.version,
-      (belt.meshOf('obstacles').geometry.getAttribute('oylObstacleKind') as { version: number })
+      (belt.meshOf('obstacles').geometry.getAttribute('oylObstacle') as { version: number })
         .version,
     ];
     const start = versions();
@@ -788,25 +788,29 @@ describe('Delivery’s belt — #1814', () => {
         belt.setShading(shading);
         const material = belt.meshOf('obstacles').material as unknown as Compilable;
         const shader = compiled(material);
-        expect(shader.vertexShader).toContain('attribute float oylPieceKind;');
-        expect(shader.vertexShader).toContain('attribute float oylObstacleKind;');
-        expect(shader.vertexShader).toContain('attribute float oylPieceAlso;');
+        expect(shader.vertexShader).toContain('attribute vec4 oylPiece;');
+        expect(shader.vertexShader).toContain('attribute vec4 oylObstacle;');
+        expect(shader.vertexShader).toContain('attribute vec2 oylPieceAlso;');
         // #2506: a vertex of the instance's kind, or of the kind it also belongs to.
         const collapse = shader.vertexShader.indexOf(
-          'transformed *= max( 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) ), 1.0 - step( 0.5, abs( oylPieceAlso - oylObstacleKind ) ) );',
+          'transformed *= max( 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) ), 1.0 - step( 0.5, abs( oylPieceAlso.x - oylObstacle.w ) ) );',
         );
         expect(collapse).toBeGreaterThan(shader.vertexShader.indexOf('#include <begin_vertex>'));
+        // The paint mix reads the painted flag (y), not the car part (z): PR #2548 review.
+        expect(shader.vertexShader).toContain(
+          'vColor.xyz = mix( vColor.xyz, oylObstacle.xyz, oylPiece.y );',
+        );
         expect(material.customProgramCacheKey()).toContain('oyl-delivery-kinds');
         // The parcels' program is not taught it: a parcel carries no kind. The
         // markers' is, since #2365: a doorstep's, a mailbox's and a no-delivery sign.
         const plain = belt.meshOf('parcels').material as unknown as Compilable;
-        expect(compiled(plain).vertexShader).not.toContain('oylObstacleKind');
+        expect(compiled(plain).vertexShader).not.toContain('oylObstacle');
         belt.setShading(shading);
         const markers = belt.meshOf('markers').material as unknown as Compilable;
         // The obstacles' program (#2506's second kind): a marker's is −1, so
         // only its own kind's instance draws it.
         expect(compiled(markers).vertexShader).toContain(
-          'transformed *= max( 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) ), 1.0 - step( 0.5, abs( oylPieceAlso - oylObstacleKind ) ) );',
+          'transformed *= max( 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) ), 1.0 - step( 0.5, abs( oylPieceAlso.x - oylObstacle.w ) ) );',
         );
       }
       belt.dispose();
@@ -832,7 +836,7 @@ describe('Delivery’s belt — #1814', () => {
       const colour = geometry.getAttribute('color');
       const glow = geometry.getAttribute('oylGlow');
       const position = geometry.getAttribute('position');
-      const kinds = what === 'obstacles' ? geometry.getAttribute('oylPieceKind') : undefined;
+      const kinds = what === 'obstacles' ? geometry.getAttribute('oylPiece') : undefined;
       for (let at = 0; at < colour.count; at += 1) {
         if (glow.getX(at) === 1) {
           glowing += 1;
@@ -914,7 +918,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     const geometry = belt.meshOf('obstacles').geometry;
     const position = geometry.getAttribute('position');
     const colour = geometry.getAttribute('color');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const found = [];
     for (let at = 0; at < position.count; at += 1) {
       if (kinds.getX(at) !== kind) continue;
@@ -973,7 +977,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('obstacles').geometry;
     const normal = geometry.getAttribute('normal');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const facing = new Set<string>();
     for (let at = 0; at < normal.count; at += 1) {
       if (kinds.getX(at) !== CAR_KIND) continue;
@@ -995,7 +999,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // or third car — #2506's car pulling out draws this one, and of its own
     // holds only its marker and its two indicators, 6 + 2 × 2 triangles (the
     // marker's base one quad of 2 since PR #2518's trim, not three's fan of 4).
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const seen = new Set<number>();
     let pullingOutOwn = 0;
     for (let at = 0; at < kinds.count; at += 1) {
@@ -1005,14 +1009,14 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     expect([...seen].sort()).toEqual(ROSTER.map((_, index) => index));
     expect(pullingOutOwn / 3).toBe(6 + 2 * 2);
     // Its body, and only its body, takes the instance's paint.
-    const painted = geometry.getAttribute('oylPainted');
+    const painted = geometry.getAttribute('oylPiece');
     const car = carVertices(belt, CAR_KIND);
     const counts = new Map<string, number>();
     for (const each of car) counts.set(each.paint, (counts.get(each.paint) ?? 0) + 1);
     const body = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
     let paintedBody = 0;
     for (let at = 0; at < painted.count; at += 1) {
-      if (painted.getX(at) !== 1) continue;
+      if (painted.getY(at) !== 1) continue;
       expect(kinds.getX(at)).toBe(CAR_KIND);
       paintedBody += 1;
     }
@@ -1030,7 +1034,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([0, 1, 2, 0, 1]);
     expect(belt.drawn('obstacles').every((each) => each.kind === 'parked-car')).toBe(true);
     // The instances' paints, as uploaded: three different colours, the fourth the first's.
-    const paints = geometry.getAttribute('oylObstaclePaint');
+    const paints = geometry.getAttribute('oylObstacle');
     const rgb = (at: number): string =>
       [paints.getX(at), paints.getY(at), paints.getZ(at)].map((each) => each.toFixed(4)).join(',');
     expect(new Set([0, 1, 2].map(rgb)).size).toBe(3);
@@ -1072,6 +1076,38 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     belt.dispose();
   });
 
+  it('draws a bin’s and a trolley’s small wheels in six sides, a corner on the road — PR #2548, trimmed to fit', () => {
+    const belt = new DeliveryBelt('stylised');
+    for (const kind of ['bin', 'trolley'] as const) {
+      const vertices = carVertices(belt, ROSTER.indexOf(kind));
+      // The wheels are the kind's darkest paint, black.
+      const darkness = (paint: string): number =>
+        paint.split(',').reduce((sum, each) => sum + Number(each), 0);
+      const black = vertices.reduce((dark, each) =>
+        darkness(each.paint) < darkness(dark.paint) ? each : dark,
+      ).paint;
+      // The wheel on the kind's left, `+x`.
+      const wheel = vertices.filter((each) => each.paint === black && each.x > 0);
+      const [low, high] = [Math.min(...wheel.map((e) => e.y)), Math.max(...wheel.map((e) => e.y))];
+      const [back, front] = [
+        Math.min(...wheel.map((e) => e.z)),
+        Math.max(...wheel.map((e) => e.z)),
+      ];
+      const radius = (high - low) / 2;
+      // A corner on the road, so the wheel stands on it as its octagon did.
+      expect(low, kind).toBeCloseTo(0, 6);
+      const angles = new Set(
+        wheel
+          .filter((e) => Math.hypot(e.y - radius, e.z - (back + front) / 2) > radius / 2)
+          .map((e) =>
+            Math.round((Math.atan2(e.y - radius, e.z - (back + front) / 2) * 180) / Math.PI),
+          ),
+      );
+      expect(angles.size, kind).toBe(6);
+    }
+    belt.dispose();
+  });
+
   it('holds the obstacle geometry to its triangle budget, which every obstacle instance submits (round 6)', () => {
     // The kind collapse is per vertex, so EVERY obstacle instance, a bin's or a
     // cone's too, runs every kind's triangles through the vertex shader. Round 5
@@ -1088,7 +1124,9 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // under the eye, 76 fewer, 1 598; and since the owner's ruling of
     // 2026-11-13 that it be invisible, every such face back (+76), no face
     // wholly inside a solid drawn with it (−22) and each cap three fans about
-    // its middle drawn as its own polygon (−56): 1 596. A change
+    // its middle drawn as its own polygon (−56): 1 596. PR #2548, fitting
+    // Kenney's car's undersides into the same frame: a bin's and a trolley's
+    // small wheels in 6 sides, not 8 (−28), 1 568. A change
     // past this is for the owner and the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
@@ -1136,8 +1174,9 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const position = geometry.getAttribute('position');
     const colour = geometry.getAttribute('color');
     const glow = geometry.getAttribute('oylGlow');
-    const kinds = geometry.getAttribute('oylPieceKind');
-    const untoned = geometry.getAttribute('oylUntoned');
+    const kinds = geometry.getAttribute('oylPiece');
+    // #2507's untoned flag, packed in the second piece attribute's `y` (#2540's slots).
+    const untoned = geometry.getAttribute('oylPieceAlso');
     const found = [];
     for (let at = 0; at < position.count; at += 1) {
       if (kinds.getX(at) !== kind) continue;
@@ -1151,7 +1190,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
         dark: Math.max(...rgb) < 0.3,
         pale: Math.min(...rgb) > 0.5,
         rgb,
-        untoned: untoned.getX(at) === 1,
+        untoned: untoned.getY(at) === 1,
       });
     }
     return found;
@@ -1207,7 +1246,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     const perKind = [0, 0, 0];
     for (let at = 0; at < position.count; at += 1) {
       const kind = kinds.getX(at);
@@ -1275,7 +1314,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const glow = geometry.getAttribute('oylGlow');
-    const kinds = geometry.getAttribute('oylPieceKind');
+    const kinds = geometry.getAttribute('oylPiece');
     /** The sign's glowing triangles' facings along its local x, +1 or −1; one edge-on is left out. */
     const facings: number[] = [];
     for (let at = 0; at < position.count; at += 3) {
@@ -1385,8 +1424,8 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
       for (const shading of ['lit', 'flat'] as const) {
         belt.setShading(shading);
         const shader = compiled(belt.meshOf('markers').material as unknown as Compilable);
-        expect(shader.vertexShader).toContain('attribute float oylUntoned;');
-        expect(shader.vertexShader).toContain('vOylUntoned = oylUntoned;');
+        expect(shader.vertexShader).toContain('attribute vec2 oylPieceAlso;');
+        expect(shader.vertexShader).toContain('vOylUntoned = oylPieceAlso.y;');
         const fragment = shader.fragmentShader;
         const mix = fragment.indexOf(
           'gl_FragColor.rgb = mix( gl_FragColor.rgb, diffuseColor.rgb, vOylUntoned );',

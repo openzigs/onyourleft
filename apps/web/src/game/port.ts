@@ -577,6 +577,37 @@ export interface DeliveryObstaclePiece extends DeliveryPiece {
    * it, so a car keeps its colour. Absent, the first paint.
    */
   readonly index?: number;
+  /**
+   * How a car is moving this frame — #2540: what its wheels, body and
+   * indicators show in the realistic world, which draws Kenney's car with its
+   * wheels apart (`three-renderer.ts` §`deliveryCarPose`). Absent, as for
+   * every parked car, nothing on it moves. Read for a car only.
+   */
+  readonly car?: DeliveryCarMotion;
+}
+
+/**
+ * How a car among Delivery's obstacles is moving — #2540. Numbers in the
+ * car's own terms; the view turns them into a pose and nothing else reads
+ * them. The car pulling out (#2364, #2506) is what hands one.
+ */
+export interface DeliveryCarMotion {
+  /** How far it has moved since it was set going, in metres: its wheels roll through this. */
+  readonly travelledMetres: number;
+  /** Its speed, in metres a second: with its steer, how far its body leans. */
+  readonly speedMetresPerSecond: number;
+  /** Its front wheels' angle, in radians, positive to the car's own left. */
+  readonly steerRadians: number;
+  /** How hard it is braking, `0` to `1`: its nose dips. */
+  readonly braking: number;
+  /** Which indicator is on, if either. */
+  readonly indicator?: 'left' | 'right';
+  /**
+   * How long the indicator has been on, in seconds: it flashes from then.
+   * Absent, an indicator that is on is lit steadily — what a frame hands
+   * under `prefers-reduced-motion`, as the lap race's hit effect is steady.
+   */
+  readonly indicatorSeconds?: number;
 }
 
 /**

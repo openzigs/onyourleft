@@ -114,7 +114,7 @@ interface Shape {
 function drawnOf(shape: Shape, kind: number, matrix: ArrayLike<number>): readonly Drawn[] {
   const position = shape.getAttribute('position');
   const colour = shape.getAttribute('color');
-  const kinds = shape.getAttribute('oylPieceKind');
+  const kinds = shape.getAttribute('oylPiece');
   const also = shape.getAttribute('oylPieceAlso');
   const m = Array.from({ length: 16 }, (_, at) => matrix[at] as number);
   const placed = (at: number): Vector => {
