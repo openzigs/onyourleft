@@ -174,9 +174,11 @@ describe('the committed car, read back off its GLB — #2540', () => {
   it('is one level of detail under the owner’s budget a car, its triangles counted as the roster draws them', () => {
     expect(CAR.nodes.map((each) => each.name).sort()).toEqual(PARTS);
     // Every node's triangles, a shared wheel's four times: what each obstacle
-    // instance submits. The owner's ruling: about 1 450 a car, trimmed to fit.
+    // instance submits. The owner's ruling: about 1 450 a car, trimmed to fit;
+    // 1 376 until PR #2548 met #2512's and #2518's pieces on the frame, then
+    // its wheels 166 to 120 each, so the frame of twenty fits (1 192).
     const triangles = CAR.nodes.reduce((sum, each) => sum + each.geometry.triangles, 0);
-    expect(triangles).toBe(1_376);
+    expect(triangles).toBe(1_192);
     expect(triangles).toBeLessThanOrEqual(DELIVERY_CAR_TRIANGLES);
     // One level: no node is a second copy of the body at another detail.
     expect(CAR.nodes.filter((each) => each.name.startsWith('body'))).toHaveLength(1);
@@ -271,7 +273,7 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
       'indicator-right',
       'paint',
     ]);
-    expect(GEOMETRY.triangles).toBe(1_376);
+    expect(GEOMETRY.triangles).toBe(1_192);
     expect(GEOMETRY.wheelRadius).toBeCloseTo(node('wheel-front-left').translation[1], 5);
     expect(GEOMETRY.wheelbase).toBeCloseTo(
       node('wheel-front-left').translation[2] - node('wheel-back-left').translation[2],
@@ -299,7 +301,7 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     // wheel keeps its own, as it rolls), in place of this file's car less its
     // 38 and #2506's two indicators of 2.
     expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES).toBe(
-      1_376 - 48 - (1_172 - 38) - 4,
+      1_192 - 48 - (1_172 - 38) - 4,
     );
     // The stylised world keeps its simple car, handed Kenney's or not.
     const stylised = new DeliveryBelt('stylised', GEOMETRY);
@@ -344,11 +346,11 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
       '1/0/1/0': (134 - 4) * 3,
       '1/1/0/1': 4 * 3,
       '1/2/0/1': 4 * 3,
-      '2/0/0/0': 2 * 166 * 3,
-      '3/0/0/0': 2 * 166 * 3,
+      '2/0/0/0': 2 * 120 * 3,
+      '3/0/0/0': 2 * 120 * 3,
       // Everything else: the hazard markers glow, 8 each over #2396's three
       // kinds, #2364's dog and rider and #2506's car pulling out.
-      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - (1_376 - 48) - 48) * 3,
+      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - (1_192 - 48) - 48) * 3,
       '0/0/0/1': 48 * 3,
     });
     belt.dispose();

@@ -593,9 +593,12 @@ export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
  * §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`), so this car's share of
  * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}' 3 644 of room on the frame of
  * twenty that measured 201 356 is 182 an instance over the stylised car's
- * 1 268. Kenney's sedan is 1 376 (`tools/realistic/sources.ts`
- * §`DELIVERY_CAR_SOURCE`), with ONE level of detail: a second would be more
- * triangles in the roster every instance submits, never fewer.
+ * 1 268. Kenney's sedan was 1 376 (`tools/realistic/sources.ts`
+ * §`DELIVERY_CAR_SOURCE`); since its PR met #2512's and #2518's pieces on
+ * the same frame (204 514 with the stylised car), its wheels are 120 each,
+ * not 166, and it is 1 192, so the frame still fits. ONE level of detail: a
+ * second would be more triangles in the roster every instance submits, never
+ * fewer.
  *
  * @test-facing held by `delivery-car.test.ts`, which reads the committed GLB
  * back; the product builds the roster and does not read this number

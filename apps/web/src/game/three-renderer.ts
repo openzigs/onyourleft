@@ -12975,20 +12975,22 @@ function prefersReducedMotion(): boolean {
 export const DELIVERY_MARKER_TRIANGLES = 174;
 
 /**
- * The triangles in the realistic world's obstacle geometry — #2540: **1 788**,
+ * The triangles in the realistic world's obstacle geometry — #2540: **1 604**,
  * {@link DELIVERY_OBSTACLE_TRIANGLES} with Kenney's car in place of this file's
- * car and #2506's two indicator quads. Kenney's is 1 376 (its body 570, its
- * paint 134, four wheels of 166 and two indicators of 4), less the 48 of its
+ * car and #2506's two indicator quads. Kenney's is 1 192 (its body 570, its
+ * paint 134, four wheels of 120 and two indicators of 4), less the 48 of its
  * body's and paint's undersides ({@link isUnderside}; a wheel keeps its own,
- * as it rolls): 1 328, where this file's is 1 134 and the quads 4. So 190
- * more an obstacle instance, 3 800 on the nightly gate's frame of twenty,
- * which measured 204 514 against `realistic-budget.ts`
- * §`DELIVERY_VILLAGE_FRAME_TRIANGLES`' 205 000 with this file's car.
+ * as it rolls): 1 144, where this file's is 1 134 and the quads 4. So 6 more
+ * an obstacle instance, 120 on the nightly gate's frame of twenty, which
+ * measured 204 514 against `realistic-budget.ts`
+ * §`DELIVERY_VILLAGE_FRAME_TRIANGLES`' 205 000 with this file's car. Until
+ * PR #2548 met #2512's and #2518's pieces it was 1 654, with wheels of 166:
+ * trimmed to fit, not raised (the owner's ruling).
  *
  * @test-facing `delivery-car.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_788;
+export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_604;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

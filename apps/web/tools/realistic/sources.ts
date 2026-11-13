@@ -1504,7 +1504,7 @@ export const DELIVERY_CAR_SOURCE = {
   model: 'Models/GLB format/sedan.glb',
   colourMap: 'Models/GLB format/Textures/colormap.png',
   licenceFile: 'License.txt',
-  wheelTriangles: 166,
+  wheelTriangles: 120,
   lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
   widthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfWidth,
   heightMetres: 1.45,
@@ -2118,11 +2118,11 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   // #2540: the car, part by part. A run that cut a wheel differently, or
   // split the paint off another swatch, is not this one.
   [REALISTIC_DELIVERY_CAR]: {
-    triangles: 1376,
+    triangles: 1192,
     bodyTriangles: 570,
     paintTriangles: 134,
     glassTriangles: 10,
-    wheelTriangles: 166,
+    wheelTriangles: 120,
     wheels: 4,
     indicatorTriangles: 8,
     levelsOfDetail: 1,
