@@ -39,6 +39,13 @@
  * 8. **`pastParkedCar(eyeAheads, width, height)`** — #2396: the rider back in
  *    the right-hand lane just past a parked car, the camera still beside it,
  *    and how much of the road under the rider the car covers at each place.
+ * 9. **`markerOnScreen(aspect, leads)`** — #2513: four houses abreast, a
+ *    doorstep near the road and one as deep as a target may be on each side,
+ *    and the rider held each of `leads` before them in each of the three
+ *    lanes; where each marker's diamond lands on the frame, projected from
+ *    the instance the view's belt drew (`three-renderer.ts`
+ *    §`deliveryDrawnOf`, its foot and its scale) through the camera's own
+ *    projection (`camera.ts` §`projectToFrame`).
  */
 
 import { metres } from '@onyourleft/domain';
@@ -76,9 +83,13 @@ import {
   deliveryDrawnOf,
   deliveryWeatherOf,
   deliveryKindProbe,
+  MARKER_DIAMOND_HEIGHTS,
   threeGameRenderer,
   type DeliveryCalls,
 } from '../src/game/three-renderer';
+import { cameraRig, projectToFrame } from '../src/game/camera';
+import { LANE_OFFSETS_METRES } from '../src/game/lanes';
+import { TARGET_MOST_FROM_ROAD_METRES } from '../src/game/delivery/targets';
 
 import { drawCounter } from './realistic/draws';
 
@@ -127,6 +138,7 @@ declare global {
         width: number,
         height: number,
       ): readonly PastCarSample[];
+      markerOnScreen(aspect: number, leads: readonly number[]): readonly MarkerOnScreenSample[];
     };
   }
 }
@@ -679,8 +691,119 @@ function pastCarShowcase(eyeAhead: number, behind: boolean): void {
   });
 }
 
+/** Where one marker's diamond landed on one frame {@link markerOnScreen} drew. */
+export interface MarkerOnScreenSample {
+  /** How far before the houses the rider was held, metres along the road. */
+  readonly lead: number;
+  /** The lane the rider was steered into, metres right of the centre line (`lanes.ts`). */
+  readonly lane: number;
+  /** Which house: its side, and its doorstep near the road or as deep as a target may be. */
+  readonly house: string;
+  /** How large the belt drew it (`three-renderer.ts` §`markerScaleAt`). */
+  readonly scale: number;
+  /**
+   * The diamond's middle and top, and the marker's foot, as fractions of the
+   * frame's width and height from its top left (`camera.ts` §`FramePoint`);
+   * `undefined` for a point behind the eye.
+   */
+  readonly middle: { readonly left: number; readonly top: number } | undefined;
+  readonly top: { readonly left: number; readonly top: number } | undefined;
+  readonly foot: { readonly left: number; readonly top: number } | undefined;
+}
+
+/** Where #2513's four houses stand: this far along {@link ROUTE}, abreast. */
+const ABREAST_ALONG = RIDER + 200;
+
+/**
+ * #2513: where a house marker lands on the screen as a rider rides up to it.
+ * Four houses abreast, {@link ABREAST_ALONG} metres along: on each side, a
+ * doorstep 1.5 m off the carriageway and one {@link TARGET_MOST_FROM_ROAD_METRES}
+ * from the road's centre, the deepest a round's target may be (`targets.ts`).
+ * The rider is held each of `leads` before them in each lane, the camera
+ * following as `scene.ts` has it; the real `in-view.ts` §`deliveryInView`
+ * places the markers and a real view (`threeGameRenderer.create`) draws each
+ * frame, so the belt scales each marker by its distance from the eye. Each
+ * marker's foot and scale are read back off the belt's instances, its diamond
+ * raised by `scale` times {@link MARKER_DIAMOND_HEIGHTS} (it is scaled about
+ * its foot), and projected through `camera.ts` §`projectToFrame`, the
+ * projection the view sets up. The frame is drawn small: where a point lands,
+ * as a share of the frame, is the aspect's and not the size's.
+ */
+function markerOnScreen(aspect: number, leads: readonly number[]): readonly MarkerOnScreenSample[] {
+  const height = 120;
+  const width = Math.round(height * aspect);
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const start = atStartLine(ROUTE);
+  const houses = [
+    { house: 'right, near the road', side: 1, fromRoad: CARRIAGEWAY_HALF_WIDTH_METRES + 1.5 },
+    { house: 'right, deepest', side: 1, fromRoad: TARGET_MOST_FROM_ROAD_METRES },
+    { house: 'left, near the road', side: -1, fromRoad: CARRIAGEWAY_HALF_WIDTH_METRES + 1.5 },
+    { house: 'left, deepest', side: -1, fromRoad: TARGET_MOST_FROM_ROAD_METRES },
+  ] as const;
+  const samples: MarkerOnScreenSample[] = [];
+  for (const lane of LANE_OFFSETS_METRES) {
+    for (const lead of leads) {
+      const frame = sceneFrame({
+        profile: ROUTE,
+        origin: ORIGIN,
+        state: { ...start, ride: { ...start.ride, distance: metres(ABREAST_ALONG - lead) } },
+        steeredLateral: lane,
+      });
+      const point = pointNear(frame, ABREAST_ALONG);
+      // Riding north the rider's right is east, `−x`.
+      const targets: DeliveryTarget[] = houses.map((each, position) => ({
+        position,
+        distance: point.along,
+        side: each.side,
+        fromRoad: each.fromRoad,
+        kind: 'doorstep',
+        x: point.x - each.side * each.fromRoad,
+        y: point.y,
+        z: point.z,
+        yaw: (-each.side * Math.PI) / 2,
+      }));
+      view.render({
+        ...frame,
+        delivery: deliveryInView({
+          corridor: frame.corridor,
+          targets,
+          round: startRound(houses.length),
+          throws: NO_PARCELS,
+          obstacles: [],
+          obstacleState: startObstacles([]),
+        }),
+      });
+      const rig = cameraRig(frame.camera);
+      const at = (x: number, y: number, z: number) => {
+        const projected = projectToFrame(rig, aspect, { x, y, z });
+        return projected === undefined ? undefined : { left: projected.left, top: projected.top };
+      };
+      for (const drawn of deliveryDrawnOf(view, 'markers')) {
+        const target = targets.find(
+          (each) => Math.abs(each.x - drawn.x) < 1e-3 && Math.abs(each.z - drawn.z) < 1e-3,
+        );
+        if (target === undefined) throw new Error('the belt drew a marker on no house');
+        samples.push({
+          lead,
+          lane,
+          house: houses[target.position]?.house ?? '',
+          scale: drawn.scale,
+          middle: at(drawn.x, drawn.y + MARKER_DIAMOND_HEIGHTS.middle * drawn.scale, drawn.z),
+          top: at(drawn.x, drawn.y + MARKER_DIAMOND_HEIGHTS.top * drawn.scale, drawn.z),
+          foot: at(drawn.x, drawn.y, drawn.z),
+        });
+      }
+    }
+  }
+  view.destroy();
+  return samples;
+}
+
 window.__oylDelivery = {
   ready: true,
+  markerOnScreen,
   pastCarShowcase,
   carsShowcase,
   viewCalls,
