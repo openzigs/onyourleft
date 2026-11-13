@@ -118,12 +118,17 @@ function port(): GamePort {
   };
 }
 
-function capturingRenderer(frames: SceneFrame[]): GameRenderer {
+/**
+ * A view that keeps every frame it is handed. `blind` makes it a view with no
+ * drawing context, which `GameView` prepares with one frame and hands no more
+ * (#2524): for a ride whose case reads no frame and no frame's input.
+ */
+function capturingRenderer(frames: SceneFrame[], blind = false): GameRenderer {
   return {
     loadRealisticWorld: () =>
       Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
     create: () => ({
-      hasContext: true,
+      hasContext: !blind,
       prepare: () => Promise.resolve(),
       render: (frame: SceneFrame) => {
         frames.push(frame);
@@ -300,6 +305,8 @@ async function mountRide(options: {
   readonly writes?: Write[] | undefined;
   readonly drawn?: SceneFrame[] | undefined;
   readonly races?: RoomRaceFact[] | undefined;
+  /** A view with no drawing context, so no frame is built: for a ride no case reads a frame of (#2524). */
+  readonly blind?: boolean | undefined;
 }): Promise<void> {
   mounted = await mount(
     <GameView
@@ -307,7 +314,7 @@ async function mountRide(options: {
       {...(options.writes === undefined && options.races === undefined
         ? {}
         : { trainer: trainerPort(options.writes ?? [], options.races) })}
-      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
+      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? [], options.blind))}
       now={() => nowMs}
       riderMass={MASS}
       {...(options.lapRace === undefined ? {} : { lapRace: options.lapRace })}
@@ -339,91 +346,109 @@ async function joinedLapRace(room: ScriptedRoom, own: OwnSlots): Promise<void> {
 
 const HOLDING_TAILWIND: OwnSlots = { held: 'tailwind', offsetMetres: 0, lane: 1 };
 
-describe('a lap race in a room, inside a game ride — #1911', () => {
-  it(
-    'sends the trainer the same grades at the same times as a solo race with items off, while the room overrules three predicted outcomes (D-2.1)',
-    { timeout: 20_000 },
-    async () => {
-      // The solo race with items off, on the same power trace: its countdown, then the race.
-      const solo: Write[] = [];
-      await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo });
-      for (let index = 0; index < COUNTDOWN_FRAMES + FRAMES; index += 1) await pump();
-      await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'End ride'));
-      mounted?.unmount();
-      mounted = undefined;
+/**
+ * The solo race with items off, on the same power trace: ridden once, by the
+ * first case that asks, so the room's case below pays for its own ride alone
+ * (#2524, #1688's ruling: a slow case is made cheaper, never given a longer
+ * timeout). The two rides were one case of 1.8 s, and 2.4 s under
+ * --coverage, locally on an Apple M4 Pro at a load average of 13 to 23;
+ * after, at 10 to 15, 1.2 s and 0.47 s, and 1.4 s and 1.0 s under --coverage.
+ */
+let soloRide: Promise<readonly Write[]> | undefined;
+const soloWrites = (): Promise<readonly Write[]> =>
+  (soloRide ??= (async () => {
+    const solo: Write[] = [];
+    await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo, blind: true });
+    // Its countdown (#2546), then the race.
+    for (let index = 0; index < COUNTDOWN_FRAMES + FRAMES; index += 1) await pump();
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    mounted?.unmount();
+    mounted = undefined;
+    return solo;
+  })());
 
-      // The room's race: three presses of *Use item*, each predicted, each overruled.
-      pending = [];
-      nowMs = START_MS;
-      clock = new ManualClock();
-      inputs.length = 0;
-      const room = new ScriptedRoom();
-      const inRoom: Write[] = [];
-      await mountRide({ room, writes: inRoom });
-      // #2546: the room counts down as long as the solo race does, and its
-      // first frame comes after the frame its countdown ends on, as Go's.
-      await act(async () => {
-        room.accept();
-        room.welcome(0, 'race', 'off', { laps: 2, items: 'on' });
-        room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
-        await Promise.resolve();
-      });
-      for (let index = 0; index < COUNTDOWN_FRAMES; index += 1) await pump();
-      await act(async () => {
-        roomFrame(room, 0, 0, HOLDING_TAILWIND, [], COUNTDOWN_FRAMES);
-        await Promise.resolve();
-      });
-      // The room's word on the rider, frame by frame: what it overrules each use with.
-      const script = (frame: number): { own: OwnSlots; events: ItemEvent[] } => {
-        // 1st use at frame 10: the room never makes it — the tailwind is still held.
-        if (frame < 32) return { own: HOLDING_TAILWIND, events: [] };
-        // 2nd use at frame 30: made, and a gust the client did not see coming took them back.
-        if (frame < 52) {
-          return {
-            own: { held: 'tailwind', offsetMetres: -3, lane: 1 },
-            events:
-              frame === 34
-                ? [
-                    { riderId: 0, event: 'use', item: 'tailwind' },
-                    { riderId: 0, event: 'hit', item: 'crosswind-gust' },
-                  ]
-                : [],
-          };
-        }
-        // 3rd use at frame 50: made, and a puddle ridden through — further back still.
-        return { own: { held: 'none', offsetMetres: -7.5, lane: 1 }, events: [] };
-      };
-      const predicted: number[] = [];
-      for (let index = 0; index < FRAMES; index += 1) {
-        await pump();
-        // A frame from the room every second: every second pump.
-        if (index % 2 === 1) {
-          const { own, events } = script(index + 1);
-          await act(async () => {
-            roomFrame(room, (index + 1) / 2, index + 1, own, events, COUNTDOWN_FRAMES);
-            await Promise.resolve();
-          });
-        }
-        const drawn = inputs.at(-1);
-        if (drawn !== undefined) predicted.push(drawn.riderDistance - drawn.odometer);
-        if (index === 10 || index === 30 || index === 50) await press('item');
+describe('a lap race in a room, inside a game ride — #1911', () => {
+  it('writes the road’s grades to the trainer in a solo race with items off, on the same power trace', async () => {
+    const solo = await soloWrites();
+    // The road climbs and falls, and is written many times.
+    expect(solo.length).toBeGreaterThan(20);
+    expect(Math.max(...solo.map((each) => each.parameters.grade))).toBeGreaterThan(1);
+  });
+
+  it('sends the trainer the same grades at the same times as a solo race with items off, while the room overrules three predicted outcomes (D-2.1)', async () => {
+    const solo = await soloWrites();
+
+    // The room's race: three presses of *Use item*, each predicted, each overruled.
+    pending = [];
+    nowMs = START_MS;
+    clock = new ManualClock();
+    inputs.length = 0;
+    const room = new ScriptedRoom();
+    const inRoom: Write[] = [];
+    await mountRide({ room, writes: inRoom });
+    // #2546: the room counts down as long as the solo race does, and its
+    // first frame comes after the frame its countdown ends on, as Go's.
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off', { laps: 2, items: 'on' });
+      room.send({ type: 'countdown', startsInMs: LAP_RACE_COUNTDOWN_MS });
+      await Promise.resolve();
+    });
+    for (let index = 0; index < COUNTDOWN_FRAMES; index += 1) await pump();
+    await act(async () => {
+      roomFrame(room, 0, 0, HOLDING_TAILWIND, [], COUNTDOWN_FRAMES);
+      await Promise.resolve();
+    });
+    // The room's word on the rider, frame by frame: what it overrules each use with.
+    const script = (frame: number): { own: OwnSlots; events: ItemEvent[] } => {
+      // 1st use at frame 10: the room never makes it — the tailwind is still held.
+      if (frame < 32) return { own: HOLDING_TAILWIND, events: [] };
+      // 2nd use at frame 30: made, and a gust the client did not see coming took them back.
+      if (frame < 52) {
+        return {
+          own: { held: 'tailwind', offsetMetres: -3, lane: 1 },
+          events:
+            frame === 34
+              ? [
+                  { riderId: 0, event: 'use', item: 'tailwind' },
+                  { riderId: 0, event: 'hit', item: 'crosswind-gust' },
+                ]
+              : [],
+        };
       }
-      // Non-vacuity: the three uses were sent as inputs, and nothing else was.
-      const sent = room.socket.sent.map((m) => m.type);
-      expect(sent.filter((type) => type === 'item-use')).toHaveLength(3);
-      expect(new Set(sent)).toEqual(new Set(['hello', 'report', 'item-use']));
-      // A tailwind was predicted (drawn ahead of the odometer) and then overruled
-      // (drawn behind it, at the room's offset).
-      expect(Math.max(...predicted)).toBeGreaterThan(0.5);
-      expect(Math.min(...predicted)).toBeLessThan(-7);
-      // The road climbs and falls, and is written many times.
-      expect(solo.length).toBeGreaterThan(20);
-      expect(Math.max(...solo.map((each) => each.parameters.grade))).toBeGreaterThan(1);
-      // And the trainer felt none of it.
-      expect(inRoom).toStrictEqual(solo);
-    },
-  );
+      // 3rd use at frame 50: made, and a puddle ridden through — further back still.
+      return { own: { held: 'none', offsetMetres: -7.5, lane: 1 }, events: [] };
+    };
+    const predicted: number[] = [];
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      // A frame from the room every second: every second pump.
+      if (index % 2 === 1) {
+        const { own, events } = script(index + 1);
+        await act(async () => {
+          roomFrame(room, (index + 1) / 2, index + 1, own, events, COUNTDOWN_FRAMES);
+          await Promise.resolve();
+        });
+      }
+      const drawn = inputs.at(-1);
+      if (drawn !== undefined) predicted.push(drawn.riderDistance - drawn.odometer);
+      if (index === 10 || index === 30 || index === 50) await press('item');
+    }
+    // Non-vacuity: the three uses were sent as inputs, and nothing else was.
+    const sent = room.socket.sent.map((m) => m.type);
+    expect(sent.filter((type) => type === 'item-use')).toHaveLength(3);
+    expect(new Set(sent)).toEqual(new Set(['hello', 'report', 'item-use']));
+    // A tailwind was predicted (drawn ahead of the odometer) and then overruled
+    // (drawn behind it, at the room's offset).
+    expect(Math.max(...predicted)).toBeGreaterThan(0.5);
+    expect(Math.min(...predicted)).toBeLessThan(-7);
+    // The road climbs and falls, and is written many times.
+    expect(solo.length).toBeGreaterThan(20);
+    expect(Math.max(...solo.map((each) => each.parameters.grade))).toBeGreaterThan(1);
+    // And the trainer felt none of it.
+    expect(inRoom).toStrictEqual(solo);
+  });
 
   it('rolls a use the room never made back to the room’s item within one frame interval after the next frame, on the HUD', async () => {
     const room = new ScriptedRoom();

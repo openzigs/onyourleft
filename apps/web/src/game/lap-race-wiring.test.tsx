@@ -200,14 +200,23 @@ function port(route: RidableRoute = ROUTE, power: (at: number) => number = power
   };
 }
 
-function capturingRenderer(frames: SceneFrame[], realistic?: { asked: number }): GameRenderer {
+/**
+ * A view that keeps every frame it is handed. `blind` makes it a view with no
+ * drawing context, which `GameView` prepares with one frame and hands no more
+ * (#2524): for a ride whose case reads no frame and no frame's input.
+ */
+function capturingRenderer(
+  frames: SceneFrame[],
+  realistic?: { asked: number },
+  blind = false,
+): GameRenderer {
   return {
     loadRealisticWorld: () => {
       if (realistic !== undefined) realistic.asked += 1;
       return Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' });
     },
     create: () => ({
-      hasContext: true,
+      hasContext: !blind,
       prepare: () => Promise.resolve(),
       render: (frame: SceneFrame) => {
         frames.push(frame);
@@ -456,13 +465,17 @@ async function rideTheTrace(options: {
   readonly pacerIntensity?: string | undefined;
   /** The presses to make, {@link PRESSES} unless given. */
   readonly presses?: ReadonlyMap<number, SteerIntent | 'item'> | undefined;
+  /** A view with no drawing context, so no frame is built: for a case that reads none (#2524). */
+  readonly blind?: boolean | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
     <GameView
       port={port(options.route, options.power)}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
-      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic))}
+      renderer={() =>
+        Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic, options.blind))
+      }
       now={() => nowMs}
       {...(options.race === undefined ? {} : { lapRace: options.race })}
       {...(options.delivery === undefined ? {} : { delivery: options.delivery })}
@@ -556,15 +569,18 @@ const plain = (): Promise<RideResult> => (plainRide ??= rideOnce(undefined));
 const itemsOff = (): Promise<RideResult> => (offRide ??= rideOnce(ITEMS_OFF));
 const itemsOn = (): Promise<RideResult> => (onRide ??= rideOnce(RACE));
 
-/**
- * A case that may ride the shared rides, which the first to ask pays for:
- * about three times their cost under coverage, as `docs/agents/ci.md` §4c
- * asks of a case slow under coverage. Measured 2026-10-31 on an Apple M-series
- * Mac without coverage: the first case, paying for two rides, 472 ms; the
- * D-2.1 case, paying for the third, 214 ms. The CI runners' figures are not
- * measured yet.
+/*
+ * #2524, #1688's ruling (a slow case is made cheaper, never given a longer
+ * timeout): the cases below are in the order that has each pay for at most
+ * one of the shared rides. The ordinary ride's case comes first, so the
+ * shadow's case rides only the race; the recorded rides are a case each.
+ * Before, locally on an Apple M4 Pro at a load average of 13 to 23: the
+ * shadow's case, paying for two rides, 2.2 s, and 3.7 s under --coverage;
+ * the recorded pair 1.8 s, and 8.0 s under --coverage. After, at a load
+ * average of 10 to 15: the ordinary ride's case 1.3 s, the shadow's 0.59 s,
+ * D-2.1's 0.50 s and the recorded rides 0.68 s and 0.75 s; under --coverage
+ * 2.1 s, 1.7 s, 1.5 s, 1.7 s and 1.7 s.
  */
-const SHARED_RIDE = { timeout: 10_000 } as const;
 
 describe('a solo lap race inside a game ride — #1906', () => {
   it('fixture: the shadow race hits the rider twice and finishes inside the trace', () => {
@@ -575,133 +591,115 @@ describe('a solo lap race inside a game ride — #1906', () => {
     expect(LAP_RACE_TICK_SECONDS).toBe(SIMULATION_STEP_SECONDS);
   });
 
-  it(
-    'runs the race the shadow predicts: its finish said, its racers drawn, the rider drawn at the race position',
-    SHARED_RIDE,
-    async () => {
-      const ride = await itemsOn();
-      const ordinary = await plain();
-      const me = script.ride.race.racers.find((entry) => entry.racer.id === LAP_RACE_RIDER_ID);
-      if (me === undefined || me.racer.finishedAtMs === null)
-        throw new Error('the shadow rider did not finish');
-      // #2546: the race's clock started at Go, not at the press: its finish
-      // time is the frame it was crossed on less the countdown.
-      const finishedFrame = script.finishedFrame ?? Number.NaN;
-      const raceClockThen = (finishedFrame + 1) * FRAME_MS - LAP_RACE_COUNTDOWN_MS;
-      expect(me.racer.finishedAtMs).toBeLessThanOrEqual(raceClockThen);
-      expect(me.racer.finishedAtMs).toBeGreaterThan(raceClockThen - FRAME_MS);
-      // The finish the shadow predicts is the one the real ride says, once.
-      const finishes = ride.said.filter((text) => text.startsWith('Finished, '));
-      expect(script.ride.owed.finish).toMatch(/^Finished, \d of 8, in /u);
-      expect(finishes).toEqual([script.ride.owed.finish]);
-      // A hit and a lap were said through the one region.
-      expect(
-        ride.said.some((text) => /^(Hit by a crosswind gust|Rode through a puddle)/u.test(text)),
-      ).toBe(true);
-      expect(ride.said.some((text) => text.startsWith('Lap 1 of 2 done.'))).toBe(true);
-      // The standings name the bots by pace (#2455) and give W/kg, the rider's own included, never watts.
-      expect(ride.standings).toContain(
-        botName(botFieldPaces(script.seed, RACE.bots)[0]?.style ?? 'even', 1),
-      );
-      const perKilogram = [...ride.standings.matchAll(/(\d+\.\d) W\/kg/gu)].map((each) =>
-        Number(each[1]),
-      );
-      expect(perKilogram.length).toBeGreaterThan(1);
-      // A W/kg a person or a bot of these tiers rides at, never a figure in watts.
-      for (const value of perKilogram) expect(value).toBeGreaterThan(1);
-      for (const value of perKilogram) expect(value).toBeLessThan(8);
-      expect(ride.standings).not.toMatch(/\d W\b(?!\/)/u);
-      // The HUD's place field says the rider is over the line.
-      expect(
-        ride.fields.some((text) => text.startsWith('Place') && text.includes('Finished')),
-      ).toBe(true);
-      // Every drawn frame carried the race and its seven bots' inputs.
-      expect(ride.drawn.length).toBeGreaterThan(100);
-      expect(ride.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
-      // So every frame of the race is held to its own ceiling (#1903, ADR 0060 D-10.2).
-      for (const frame of ride.drawn) {
-        expect(stylisedSceneDrawCallCeiling(frame)).toBe(LAP_RACE_SCENE_DRAW_CALLS);
-      }
-      const drawnInputs = [...ride.inputs.values()];
-      expect(drawnInputs.every((input) => input.bots !== undefined)).toBe(true);
-      expect(drawnInputs.some((input) => input.bots === 7)).toBe(true);
-      expect(ride.drawn[0]?.lapRace?.pickUps.length).toBeGreaterThan(0);
-      expect(ride.inputs.size).toBeGreaterThan(100);
-      for (const [index, input] of ride.inputs) {
-        // Steered as the shadow steered: each frame's lateral, from the race's own steering.
-        expect(input.steeredLateral, `frame ${String(index)}`).toBe(script.steered[index]);
-        // Drawn at effort distance plus race offset: where the ordinary ride
-        // drew the rider, moved by the shadow's offset, on the same odometer.
-        const was = ordinary.inputs.get(index);
-        expect(input.odometer, `frame ${String(index)}`).toBe(was?.odometer);
-        expect(input.riderDistance - (was?.riderDistance ?? Number.NaN)).toBeCloseTo(
-          script.offsets[index] ?? Number.NaN,
-          9,
-        );
-      }
-      // The offset was not nought throughout: some frame drew the rider off their odometer.
-      expect(script.offsets.some((offset) => Math.abs(offset) > 1)).toBe(true);
-    },
-  );
+  it('runs nothing of a race without the option: no field, no bots, no pick-ups, nothing said', async () => {
+    const ordinary = await plain();
+    expect(ordinary.drawn.length).toBeGreaterThan(100);
+    expect(ordinary.drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
+    // An ordinary ride's frame keeps the stylised world's own budget.
+    for (const frame of ordinary.drawn) {
+      expect(stylisedSceneDrawCallCeiling(frame)).toBe(STYLISED_SCENE_DRAW_CALLS);
+    }
+    expect([...ordinary.inputs.values()].every((input) => input.bots === undefined)).toBe(true);
+    expect(ordinary.fields).toEqual([]);
+    expect(ordinary.said.filter((text) => /^(Finished|Lap \d of \d done)/u.test(text))).toEqual([]);
+  });
 
-  it(
-    'sends the trainer the same writes, each grade at the same time, as an ordinary ride, a race with items off and one with the rider hit (D-2.1)',
-    SHARED_RIDE,
-    async () => {
-      const ordinary = await plain();
-      const off = await itemsOff();
-      const on = await itemsOn();
-      // Non-vacuity: the road climbs and falls, the writes are many, and the
-      // items-on race moved the rider off their effort distance.
-      expect(ordinary.writes.length).toBeGreaterThan(30);
-      const grades = ordinary.writes.map((each) => each.parameters.grade);
-      expect(Math.max(...grades)).toBeGreaterThan(1);
-      expect(Math.min(...grades)).toBeLessThan(-1);
-      // #2546: and written both while the countdown held the rider on the
-      // line, the line's grade, and after Go.
-      const goAt = START_MS + LAP_RACE_COUNTDOWN_MS;
-      expect(ordinary.writes.filter((each) => each.atMs <= goAt).length).toBeGreaterThan(0);
-      expect(ordinary.writes.filter((each) => each.atMs > goAt).length).toBeGreaterThan(30);
-      // The items-off race ran, and drew no pick-up point: nothing is picked up there.
-      expect(off.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
-      expect(off.drawn.every((frame) => frame.lapRace?.pickUps.length === 0)).toBe(true);
-      expect(on.drawn.some((frame) => (frame.lapRace?.pickUps.length ?? 0) > 0)).toBe(true);
-      expect(script.hits).toBeGreaterThanOrEqual(2);
-      expect(off.writes).toStrictEqual(ordinary.writes);
-      expect(on.writes).toStrictEqual(ordinary.writes);
-    },
-  );
-
-  it(
-    'runs a whole race with every network primitive refused, and reaches none (D-7.3)',
-    SHARED_RIDE,
-    async () => {
-      const on = await itemsOn();
-      const off = await itemsOff();
-      expect(on.said.filter((text) => text.startsWith('Finished, '))).toHaveLength(1);
-      expect(on.reached).toEqual([]);
-      expect(off.reached).toEqual([]);
-    },
-  );
-
-  it(
-    'runs nothing of a race without the option: no field, no bots, no pick-ups, nothing said',
-    SHARED_RIDE,
-    async () => {
-      const ordinary = await plain();
-      expect(ordinary.drawn.length).toBeGreaterThan(100);
-      expect(ordinary.drawn.every((frame) => frame.lapRace === undefined)).toBe(true);
-      // An ordinary ride's frame keeps the stylised world's own budget.
-      for (const frame of ordinary.drawn) {
-        expect(stylisedSceneDrawCallCeiling(frame)).toBe(STYLISED_SCENE_DRAW_CALLS);
-      }
-      expect([...ordinary.inputs.values()].every((input) => input.bots === undefined)).toBe(true);
-      expect(ordinary.fields).toEqual([]);
-      expect(ordinary.said.filter((text) => /^(Finished|Lap \d of \d done)/u.test(text))).toEqual(
-        [],
+  it('runs the race the shadow predicts: its finish said, its racers drawn, the rider drawn at the race position', async () => {
+    const ride = await itemsOn();
+    const ordinary = await plain();
+    const me = script.ride.race.racers.find((entry) => entry.racer.id === LAP_RACE_RIDER_ID);
+    if (me === undefined || me.racer.finishedAtMs === null)
+      throw new Error('the shadow rider did not finish');
+    // #2546: the race's clock started at Go, not at the press: its finish
+    // time is the frame it was crossed on less the countdown.
+    const finishedFrame = script.finishedFrame ?? Number.NaN;
+    const raceClockThen = (finishedFrame + 1) * FRAME_MS - LAP_RACE_COUNTDOWN_MS;
+    expect(me.racer.finishedAtMs).toBeLessThanOrEqual(raceClockThen);
+    expect(me.racer.finishedAtMs).toBeGreaterThan(raceClockThen - FRAME_MS);
+    // The finish the shadow predicts is the one the real ride says, once.
+    const finishes = ride.said.filter((text) => text.startsWith('Finished, '));
+    expect(script.ride.owed.finish).toMatch(/^Finished, \d of 8, in /u);
+    expect(finishes).toEqual([script.ride.owed.finish]);
+    // A hit and a lap were said through the one region.
+    expect(
+      ride.said.some((text) => /^(Hit by a crosswind gust|Rode through a puddle)/u.test(text)),
+    ).toBe(true);
+    expect(ride.said.some((text) => text.startsWith('Lap 1 of 2 done.'))).toBe(true);
+    // The standings name the bots by pace (#2455) and give W/kg, the rider's own included, never watts.
+    expect(ride.standings).toContain(
+      botName(botFieldPaces(script.seed, RACE.bots)[0]?.style ?? 'even', 1),
+    );
+    const perKilogram = [...ride.standings.matchAll(/(\d+\.\d) W\/kg/gu)].map((each) =>
+      Number(each[1]),
+    );
+    expect(perKilogram.length).toBeGreaterThan(1);
+    // A W/kg a person or a bot of these tiers rides at, never a figure in watts.
+    for (const value of perKilogram) expect(value).toBeGreaterThan(1);
+    for (const value of perKilogram) expect(value).toBeLessThan(8);
+    expect(ride.standings).not.toMatch(/\d W\b(?!\/)/u);
+    // The HUD's place field says the rider is over the line.
+    expect(ride.fields.some((text) => text.startsWith('Place') && text.includes('Finished'))).toBe(
+      true,
+    );
+    // Every drawn frame carried the race and its seven bots' inputs.
+    expect(ride.drawn.length).toBeGreaterThan(100);
+    expect(ride.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
+    // So every frame of the race is held to its own ceiling (#1903, ADR 0060 D-10.2).
+    for (const frame of ride.drawn) {
+      expect(stylisedSceneDrawCallCeiling(frame)).toBe(LAP_RACE_SCENE_DRAW_CALLS);
+    }
+    const drawnInputs = [...ride.inputs.values()];
+    expect(drawnInputs.every((input) => input.bots !== undefined)).toBe(true);
+    expect(drawnInputs.some((input) => input.bots === 7)).toBe(true);
+    expect(ride.drawn[0]?.lapRace?.pickUps.length).toBeGreaterThan(0);
+    expect(ride.inputs.size).toBeGreaterThan(100);
+    for (const [index, input] of ride.inputs) {
+      // Steered as the shadow steered: each frame's lateral, from the race's own steering.
+      expect(input.steeredLateral, `frame ${String(index)}`).toBe(script.steered[index]);
+      // Drawn at effort distance plus race offset: where the ordinary ride
+      // drew the rider, moved by the shadow's offset, on the same odometer.
+      const was = ordinary.inputs.get(index);
+      expect(input.odometer, `frame ${String(index)}`).toBe(was?.odometer);
+      expect(input.riderDistance - (was?.riderDistance ?? Number.NaN)).toBeCloseTo(
+        script.offsets[index] ?? Number.NaN,
+        9,
       );
-    },
-  );
+    }
+    // The offset was not nought throughout: some frame drew the rider off their odometer.
+    expect(script.offsets.some((offset) => Math.abs(offset) > 1)).toBe(true);
+  });
+
+  it('sends the trainer the same writes, each grade at the same time, as an ordinary ride, a race with items off and one with the rider hit (D-2.1)', async () => {
+    const ordinary = await plain();
+    const off = await itemsOff();
+    const on = await itemsOn();
+    // Non-vacuity: the road climbs and falls, the writes are many, and the
+    // items-on race moved the rider off their effort distance.
+    expect(ordinary.writes.length).toBeGreaterThan(30);
+    const grades = ordinary.writes.map((each) => each.parameters.grade);
+    expect(Math.max(...grades)).toBeGreaterThan(1);
+    expect(Math.min(...grades)).toBeLessThan(-1);
+    // #2546: and written both while the countdown held the rider on the
+    // line, the line's grade, and after Go.
+    const goAt = START_MS + LAP_RACE_COUNTDOWN_MS;
+    expect(ordinary.writes.filter((each) => each.atMs <= goAt).length).toBeGreaterThan(0);
+    expect(ordinary.writes.filter((each) => each.atMs > goAt).length).toBeGreaterThan(30);
+    // The items-off race ran, and drew no pick-up point: nothing is picked up there.
+    expect(off.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
+    expect(off.drawn.every((frame) => frame.lapRace?.pickUps.length === 0)).toBe(true);
+    expect(on.drawn.some((frame) => (frame.lapRace?.pickUps.length ?? 0) > 0)).toBe(true);
+    expect(script.hits).toBeGreaterThanOrEqual(2);
+    expect(off.writes).toStrictEqual(ordinary.writes);
+    expect(on.writes).toStrictEqual(ordinary.writes);
+  });
+
+  it('runs a whole race with every network primitive refused, and reaches none (D-7.3)', async () => {
+    const on = await itemsOn();
+    const off = await itemsOff();
+    expect(on.said.filter((text) => text.startsWith('Finished, '))).toHaveLength(1);
+    expect(on.reached).toEqual([]);
+    expect(off.reached).toEqual([]);
+  });
 
   it('ends the race cleanly when End ride comes mid-race, and the next ride starts a fresh one', async () => {
     const rejected: unknown[] = [];
@@ -711,7 +709,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     process.on('unhandledRejection', onRejection);
     try {
       // Past the first lap's line, on the last lap.
-      await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 70 });
+      await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 70, blind: true });
       expect(raceFields()[0]).toMatch(/Lap 2 of 2/u);
       await clickThrough(buttonStarting('End ride'));
       await clickThrough(endRideAnswer(document, 'End ride'));
@@ -770,7 +768,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
       JSON.stringify({ itemsOff: true, autoUse: false, noKnockBack: false, gentlerBots: true }),
     );
     // Past the countdown, so the bots are riding and have a figure each.
-    await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 6 });
+    await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 6, blind: true });
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
     // One tier below the chosen 'hard', read off the bots' figures (#2455: a
@@ -805,6 +803,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     await rideTheTrace({
       race: RACE,
       frames: 40,
+      blind: true,
       onFrame: () => {
         read.push(
           queryAll<HTMLElement>(
@@ -1061,6 +1060,7 @@ describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () =>
       trainer: gameTrainerPortOver(controller),
       // #2546: the race's ordinary twin stands on the line through the countdown.
       ...(race === undefined ? { power: standingAt } : {}),
+      blind: true,
       // The bench keeps whole seconds, so it runs one a frame: twice the
       // game's clock, which both rides share, and fine enough that a lap line
       // crossed a frame later is a lap a second longer (the race offset's
@@ -1104,34 +1104,45 @@ describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () =>
     };
   }
 
-  it(
-    'stores the same power, cadence, heart rate, speed, distance, moving time and laps with the race as without it',
-    // Two recorded rides: 596 ms on the same Mac without coverage.
-    SHARED_RIDE,
-    async () => {
-      const without = await recordedRide(undefined);
-      const raced = await recordedRide(RACE);
-      // Non-vacuity: a ride was recorded with power, distance and both laps of
-      // the loop in it, and the second ran its race to the line while it was.
-      expect(without.recorded.power.length).toBeGreaterThan(30);
-      expect(without.recorded.distance).toBeGreaterThan(0);
-      expect(without.recorded.movingSeconds).toBeGreaterThan(30);
-      expect(without.recorded.laps.length).toBeGreaterThanOrEqual(2);
-      expect(without.fields).toEqual([]);
-      expect(raced.fields.some((text) => text.includes('Finished'))).toBe(true);
-      expect(raced.recorded).toStrictEqual(without.recorded);
-      // #2546, the owner's ruling of 2026-11-12: the countdown's seconds are
-      // in the recorded ride, as the trainer reported them. The bench keeps a
-      // second a frame, so they are its first COUNTDOWN_FRAMES seconds: power
-      // and speed in every one after the first sample, and every one of them
-      // moving time — a rider pedalling a trainer on the line is moving on it.
-      const countdown = raced.recorded.power.slice(1, COUNTDOWN_FRAMES + 1);
-      expect(countdown).toHaveLength(COUNTDOWN_FRAMES);
-      for (const power of countdown) expect(power).toBeGreaterThan(0);
-      for (const speed of raced.recorded.speed.slice(1, COUNTDOWN_FRAMES + 1)) {
-        expect(speed).toBeGreaterThan(0);
-      }
-      expect(raced.recorded.movingSeconds).toBe(raced.recorded.power.length - 1);
-    },
-  );
+  /** Each recorded ride, ridden once by the first case that asks: a case pays for one. */
+  let withoutRide: ReturnType<typeof recordedRide> | undefined;
+  let racedRide: ReturnType<typeof recordedRide> | undefined;
+  const recordedWithout = (): ReturnType<typeof recordedRide> =>
+    (withoutRide ??= recordedRide(undefined));
+  const recordedRaced = (): ReturnType<typeof recordedRide> => (racedRide ??= recordedRide(RACE));
+
+  it('stores a ride with power, distance, moving time and both laps of the loop in it, with no race', async () => {
+    const without = await recordedWithout();
+    expect(without.recorded.power.length).toBeGreaterThan(30);
+    expect(without.recorded.distance).toBeGreaterThan(0);
+    expect(without.recorded.movingSeconds).toBeGreaterThan(30);
+    expect(without.recorded.laps.length).toBeGreaterThanOrEqual(2);
+    expect(without.fields).toEqual([]);
+  });
+
+  it('stores the same power, cadence, heart rate, speed, distance, moving time and laps with the race as without it', async () => {
+    const without = await recordedWithout();
+    const raced = await recordedRaced();
+    // Non-vacuity: a ride was recorded with power, distance and both laps of
+    // the loop in it, and the second ran its race to the line while it was.
+    expect(without.recorded.power.length).toBeGreaterThan(30);
+    expect(without.recorded.distance).toBeGreaterThan(0);
+    expect(without.recorded.movingSeconds).toBeGreaterThan(30);
+    expect(without.recorded.laps.length).toBeGreaterThanOrEqual(2);
+    expect(without.fields).toEqual([]);
+    expect(raced.fields.some((text) => text.includes('Finished'))).toBe(true);
+    expect(raced.recorded).toStrictEqual(without.recorded);
+    // #2546, the owner's ruling of 2026-11-12: the countdown's seconds are
+    // in the recorded ride, as the trainer reported them. The bench keeps a
+    // second a frame, so they are its first COUNTDOWN_FRAMES seconds: power
+    // and speed in every one after the first sample, and every one of them
+    // moving time — a rider pedalling a trainer on the line is moving on it.
+    const countdown = raced.recorded.power.slice(1, COUNTDOWN_FRAMES + 1);
+    expect(countdown).toHaveLength(COUNTDOWN_FRAMES);
+    for (const power of countdown) expect(power).toBeGreaterThan(0);
+    for (const speed of raced.recorded.speed.slice(1, COUNTDOWN_FRAMES + 1)) {
+      expect(speed).toBeGreaterThan(0);
+    }
+    expect(raced.recorded.movingSeconds).toBe(raced.recorded.power.length - 1);
+  });
 });

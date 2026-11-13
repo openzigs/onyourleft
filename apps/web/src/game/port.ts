@@ -136,6 +136,16 @@ export interface RidingInputs {
   readonly speed: number;
 }
 
+/** A crash being drawn on a rider — #2493. @see RiderMarker.crash */
+export interface RiderCrashLook {
+  /** Seconds since the crash, by the frames the loop ran. */
+  readonly seconds: number;
+  /** Which way they fall: the rider's right (`1`) or left (`-1`). */
+  readonly side: 1 | -1;
+  /** How far into the crash pose they are: 0 on the bike, 1 on the ground. */
+  readonly share: number;
+}
+
 /** A marker on the road: the rider, the bot (#92), the ghost (#93), or another real rider in a room (#783). */
 export interface RiderMarker {
   /**
@@ -327,6 +337,16 @@ export interface RiderMarker {
    * call. Absent on every ordinary ride and on a racer nothing has hit.
    */
   readonly hit?: RaceHitLook | undefined;
+  /**
+   * The rider's crash in a Delivery round, while one is drawn and motion is
+   * not reduced — #2493: how long ago it was, which side they fall to, and
+   * how far into the crash pose they are (`delivery/crash-look.ts`). The
+   * realistic rider plays its file's crash clip with it, on top of the roll
+   * {@link lean} already carries; the stylised rider has no clip and keeps the
+   * roll. Absent on every other rider and frame, and under reduced motion,
+   * which keeps #2475's still pose.
+   */
+  readonly crash?: RiderCrashLook | undefined;
   /**
    * How far this rider's bars are drawn turned, in radians, positive to the
    * rider's right — #2494: the fork, the front wheel and the bar turned about

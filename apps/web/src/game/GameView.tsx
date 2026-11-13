@@ -3690,10 +3690,11 @@ function GameScreen({
       // #2454: how far into a crash the rider is, while one is — on every frame,
       // drawn or not, as the HUD's "Crashed" reads it.
       const crashed = crashRef.current;
+      const crashSeconds = crashed === undefined ? 0 : (crashClock - crashed.atMs) / 1000;
       const crashAt =
         crashed === undefined || deliveryRef.current === undefined
           ? undefined
-          : crashShare((crashClock - crashed.atMs) / 1000, reducedMotionRef.current);
+          : crashShare(crashSeconds, reducedMotionRef.current);
       if (crashAt === undefined) crashRef.current = undefined;
       crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
@@ -3735,7 +3736,20 @@ function GameScreen({
       const view = viewRef.current;
       const prepared = view !== undefined && view === preparedViewRef.current;
       const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
-      if (drawn !== undefined && view !== undefined && !waiting) {
+      // #2524: a prepared view with no drawing context is handed no more
+      // frames. It would draw none of them — `three-renderer.ts` §`render`
+      // returns at once without a renderer, and `hasContext` is fixed when the
+      // view is built (`port.ts` §`hasContext`) — so the frame below, most of a
+      // frame's work and none of it the trainer's, was built for nobody.
+      // Everything above it still runs: the simulation, the grade, the round
+      // and the race. The block's other writes are its two dampers, which only
+      // this view's frames read, and the name tags, which it lays empty for a
+      // view with no context: one view draws a whole ride (`teardown` destroys
+      // it, and the next ride's stage mounts a new layer), so the layer under a
+      // view with no context has never held a tag. The view is still prepared
+      // with one frame, below, so `preparedViewRef` moves exactly as before.
+      const blind = prepared && !view.hasContext;
+      if (drawn !== undefined && view !== undefined && !waiting && !blind) {
         // #1906: a lap race draws the rider at their race position, effort
         // distance plus race offset (ADR 0060 D-3.3), and its bots beside
         // them. The drawing only: the grade above was read at the odometer.
@@ -3869,9 +3883,17 @@ function GameScreen({
           // #2454: the round's crash, drawn as a fall and a getting back up.
           // Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          // #2493: and how long ago, for the realistic rider's crash clip —
+          // never under reduced motion, which keeps #2475's still pose.
           ...(crashAt === undefined || crashed === undefined
             ? {}
-            : { riderCrash: { share: crashAt, side: crashed.side } }),
+            : {
+                riderCrash: {
+                  share: crashAt,
+                  side: crashed.side,
+                  ...(reducedMotionRef.current ? {} : { seconds: crashSeconds }),
+                },
+              }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
         // the wall clock between them, so a corridor that jumps turns the view
@@ -3993,7 +4015,15 @@ function GameScreen({
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
-        const next = nextWorldQuality(previous, sample);
+        // #2513: a Delivery round's houses are mapped buildings, which only the
+        // realistic world draws, so while one runs the ladder holds realism's
+        // floor rather than leaving it (`quality.ts` §`nextWorldQuality`).
+        const running = deliveryRef.current;
+        const next = nextWorldQuality(
+          previous,
+          sample,
+          running !== undefined && running.outcome === undefined,
+        );
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
           previous,

@@ -492,6 +492,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
@@ -668,6 +669,7 @@ import type {
   GameView,
   LapRaceInView,
   LapRacePiece,
+  RiderCrashLook,
   RiderMarker,
   SceneFrame,
 } from './port';
@@ -6569,7 +6571,11 @@ export function compressedRealisticLoaders(
     model: async (url) => {
       const manager = new LoadingManager();
       manager.setURLModifier(realisticResourceUrl(url));
-      return (await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url)).scene;
+      const gltf = await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url);
+      // #2493: a model's clips travel on its scene, where three keeps them:
+      // the rider's crash clip is read off it by `RealisticRiderBelt`.
+      gltf.scene.animations = gltf.animations;
+      return gltf.scene;
     },
     texture: (url) => ktx2.loadAsync(url),
     sky: (url) => new HDRLoader().loadAsync(url),
@@ -11370,18 +11376,46 @@ function parcelShape(): BufferGeometry {
 }
 
 /**
- * A house marker's sizes at its true size, metres — #2453: a white post
- * `post` tall, so its head clears a garden hedge, a front fence and a parked
- * car, with a glowing amber diamond `diamond` across standing on it, and a
- * glowing ring on the step. Until #2453 the post was 1.5 m and the diamond
- * 0.4 m across: from 100 m up the road on the owner's 1280×800 tablet that
- * changed 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
+ * A house marker's sizes at its true size, metres — #2453, lowered by #2513:
+ * a white post `post` tall with a glowing amber diamond `diamond` across
+ * standing on it, and a glowing ring on the step.
+ *
+ * ⚠️ **Low, at the doorstep, never over the house — #2513.** Until #2513 the
+ * post was 2.4 m, so its head cleared a hedge; but {@link markerScaleAt}
+ * enlarges a far marker about its foot, so the diamond rose with distance,
+ * about 15 m above the step at 100 m, and on the owner's 1280×800 tablet it
+ * stood behind the top-right HUD panel from about 100 m to 7 m out (the
+ * owner's frames of 2026-11-12). The diamond's middle is now at about a
+ * rider's eye height, so enlarged it stays near the horizon, under every
+ * panel's bottom edge: `browser/delivery.browser.spec.ts` §"#2513" projects
+ * it from 100 m to 20 m before a house at every overlay tablet and holds it
+ * outside every HUD panel. Before #2513 the post was 2.4 m; before #2453 it
+ * was 1.5 m and the diamond 0.4 m across, which from 100 m up the road changed
+ * 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
  * §"#2453").
  */
-const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
+const MARKER_METRES = { post: 0.6, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
 
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
+
+/**
+ * Where a house marker's glowing diamond is, metres above its step at its
+ * true size — #2513: its bottom, its middle and its top. Enlarged by
+ * {@link markerScaleAt}, each is that many times higher, because a marker is
+ * scaled about its foot. `delivery-belt.test.ts` holds the drawn geometry to
+ * these, and the browser gate projects them.
+ *
+ * @test-facing `browser/delivery-harness.ts` projects the drawn diamond to the
+ * screen from a marker's instance; the product draws the geometry, never asks
+ * where it is
+ */
+export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; top: number }> =
+  Object.freeze({
+    bottom: MARKER_METRES.post,
+    middle: MARKER_METRES.post + (MARKER_METRES.diamond / 2) * MARKER_DIAMOND_STRETCH,
+    top: MARKER_METRES.post + MARKER_METRES.diamond * MARKER_DIAMOND_STRETCH,
+  });
 
 /** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
 function markerShape(): BufferGeometry {
@@ -14121,8 +14155,9 @@ const REALISTIC_ANISOTROPY = 8;
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and
- * coloured per vertex — carried on the head bone in the one instanced mesh the
- * sphere cap was, so they cost no draw call.
+ * coloured per vertex, and since #2495 an eyeball in each socket — carried on
+ * the head bone in the one instanced mesh the sphere cap was, so they cost no
+ * draw call.
  *
  * ⚠️ **One allocation a rider a frame, and it is `legBones`'**: the knee solve
  * returns a two-number object, as it already does for the stylised rider.
@@ -14186,6 +14221,11 @@ export class RealisticRiderBelt {
   readonly #handWanted = new Vector3();
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
+  /** #2493: the body's own fall and get-up, read off the file. @see crashClipOf */
+  readonly #crash: RiderCrashClip;
+  readonly #crashSample: number[] = [0, 0, 0, 0];
+  readonly #crashTurn = new Quaternion();
+  readonly #crashAt = new Vector3();
   /** #2494's scratch: a grip where the turned bars hold it, and its hand's tip. */
   readonly #steeredGrip = { x: 0, y: 0, z: 0 };
   readonly #handTip = { x: 0, y: 0, z: 0 };
@@ -14283,6 +14323,8 @@ export class RealisticRiderBelt {
       });
     }
     this.#scale = scale;
+    // #2493: the crash clip, by bone, in the clones' own bone order.
+    this.#crash = crashClipOf(body.animations, (this.#riders[0] as RealisticRiderSlot).ordered);
     this.#group.visible = false;
   }
 
@@ -14492,6 +14534,8 @@ export class RealisticRiderBelt {
       stance,
       marker.steer ?? 0,
     );
+    // #2493: a Delivery crash, the body's own part of it, on top of the roll.
+    if (marker.crash !== undefined) this.#crashPose(rider, marker.crash);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -14680,6 +14724,46 @@ export class RealisticRiderBelt {
   }
 
   /**
+   * The body's own fall and get-up in a Delivery crash — #2493: every bone
+   * turned from the riding pose `#pose` left toward the crash clip's pose at
+   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
+   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * right; a fall to the left reads each bone's mirror image (its other
+   * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
+   * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
+   * Allocates nothing.
+   */
+  #crashPose(rider: RealisticRiderSlot, crash: RiderCrashLook): void {
+    const clip = this.#crash;
+    const times = clip.times;
+    const last = times.length - 1;
+    const seconds = Math.min(Math.max(crash.seconds, times[0] ?? 0), times[last] ?? 0);
+    let key = 0;
+    while (key < last - 1 && seconds >= (times[key + 1] ?? 0)) key += 1;
+    const span = (times[key + 1] ?? 0) - (times[key] ?? 0);
+    const along = span > 0 ? (seconds - (times[key] ?? 0)) / span : 0;
+    const mirrored = crash.side < 0;
+    for (let index = 0; index < rider.ordered.length; index += 1) {
+      const values = clip.turns[mirrored ? (clip.mirror[index] ?? index) : index];
+      if (values === undefined) continue;
+      Quaternion.slerpFlat(this.#crashSample, 0, values, key * 4, values, key * 4 + 4, along);
+      const [x, y, z, w] = this.#crashSample as [number, number, number, number];
+      this.#crashTurn.set(x, mirrored ? -y : y, mirrored ? -z : z, w);
+      (rider.ordered[index] as Bone).quaternion.slerp(this.#crashTurn, crash.share);
+    }
+    const root = rider.ordered[clip.root] as Bone;
+    const at = clip.rootAt;
+    const x = (at[key * 3] ?? 0) + ((at[key * 3 + 3] ?? 0) - (at[key * 3] ?? 0)) * along;
+    this.#crashAt.set(
+      mirrored ? -x : x,
+      (at[key * 3 + 1] ?? 0) + ((at[key * 3 + 4] ?? 0) - (at[key * 3 + 1] ?? 0)) * along,
+      (at[key * 3 + 2] ?? 0) + ((at[key * 3 + 5] ?? 0) - (at[key * 3 + 2] ?? 0)) * along,
+    );
+    root.position.lerp(this.#crashAt, crash.share);
+    rider.root.updateMatrixWorld(true);
+  }
+
+  /**
    * Turns `bone` by `angle` about `axis`, both in world space, and updates it
    * and everything under it — #625. Nothing at a zero angle. Allocates nothing.
    */
@@ -14754,6 +14838,75 @@ const LIMB_BONES = [
     foot: 'footR',
   },
 ] as const;
+
+/**
+ * The rider's crash clip, read once off the file — #2493: `rider.glb`'s
+ * animation `crash`, which `tools/realistic/blender/process_rider.py` poses
+ * from `rider_crash.py`'s moments. Every array is by the body's bone order.
+ */
+interface RiderCrashClip {
+  /** The moments, in seconds after the crash. */
+  readonly times: Float32Array;
+  /** Each bone's rotation at each moment, four numbers a moment; a bone the clip does not turn has none. */
+  readonly turns: readonly (number[] | undefined)[];
+  /** Each bone's mirror image across `x = 0`: its other side's index, or its own. */
+  readonly mirror: readonly number[];
+  /** Which bone is the skeleton's root, and where it is at each moment. */
+  readonly root: number;
+  readonly rootAt: Float32Array;
+}
+
+/** The part of three's `AnimationClip` that {@link crashClipOf} reads, so a test can hand it plain data. */
+interface CrashClipSource {
+  readonly name: string;
+  readonly tracks: readonly {
+    readonly name: string;
+    readonly times: ArrayLike<number>;
+    readonly values: ArrayLike<number>;
+  }[];
+}
+
+/**
+ * Reads the crash clip's tracks into {@link RiderCrashClip}, by the order of
+ * `ordered`. Every track shares one set of times, as the pipeline writes them,
+ * and a clip that does not is refused rather than mis-sampled.
+ */
+export function crashClipOf(
+  clips: readonly CrashClipSource[],
+  ordered: readonly { readonly name: string }[],
+): RiderCrashClip {
+  const clip = clips.find((each) => each.name === REALISTIC_RIDER_CRASH_CLIP);
+  if (clip === undefined) throw new Error('the rider model holds no crash clip');
+  const names = ordered.map((bone) => bone.name);
+  let times: Float32Array | undefined;
+  const turns: (number[] | undefined)[] = names.map(() => undefined);
+  let rootAt: Float32Array | undefined;
+  const root = names.indexOf('root');
+  for (const track of clip.tracks) {
+    const dot = track.name.lastIndexOf('.');
+    const bone = names.indexOf(track.name.slice(0, dot));
+    const property = track.name.slice(dot + 1);
+    if (bone === -1) throw new Error(`the crash clip moves ${track.name}, which is no bone`);
+    const own = Float32Array.from(track.times);
+    if (times !== undefined && own.join() !== times.join()) {
+      throw new Error(`the crash clip's ${track.name} is timed apart from the rest`);
+    }
+    times = own;
+    if (property === 'quaternion') turns[bone] = Array.from(track.values);
+    else if (property === 'position' && bone === root) rootAt = Float32Array.from(track.values);
+    else throw new Error(`the crash clip moves ${track.name}, which it may not`);
+  }
+  if (times === undefined || rootAt === undefined || root === -1) {
+    throw new Error('the crash clip is missing its times or its root');
+  }
+  const mirror = names.map((name, index) => {
+    const side = name.at(-1);
+    if (side !== 'L' && side !== 'R') return index;
+    const other = names.indexOf(`${name.slice(0, -1)}${side === 'L' ? 'R' : 'L'}`);
+    return other === -1 ? index : other;
+  });
+  return { times, turns, mirror, root, rootAt };
+}
 
 /** One realistic rider: its body, its bones at rest, and its held crank angle. */
 interface RealisticRiderSlot {
@@ -19877,6 +20030,21 @@ export class MappedBuildingBelt {
     return this.#stats;
   }
 
+  /**
+   * The plans drawn on the last frame: selected at the last refill and not
+   * hidden by {@link clearOf} — #2513. Indices into {@link buildings}' plans.
+   * None while the belt is not {@link drawing} (not shown, switched off or not
+   * carried): a selection nothing draws is not a drawn house.
+   */
+  drawnPlans(): readonly number[] {
+    if (!this.drawing) return [];
+    const drawn: number[] = [];
+    for (let at = 0; at < this.#selection.count; at += 1) {
+      if (this.#hidden[at] !== 1) drawn.push(this.#selection.plans[at] as number);
+    }
+    return drawn;
+  }
+
   /** How many refills this belt has run — for the tests' count over a ride. */
   get refills(): number {
     return this.#refills;
@@ -21931,6 +22099,20 @@ export function mappedBuildingStatsOf(
 ): { readonly stats: MappedBuildingStats; readonly refills: number } | undefined {
   const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
   return belt === undefined ? undefined : { stats: belt.stats, refills: belt.refills };
+}
+
+/**
+ * Which of a view's buildings from map data its last frame drew — #2513:
+ * the plans its last refill selected, less any the near plane hid. Indices
+ * into the plans the frame carried. Empty before a realistic frame has
+ * carried any, and on a stylised view, which draws none.
+ *
+ * @test-facing read by `browser/realistic-harness.ts` §`__oylRealisticRound`,
+ * whose spec finds each Delivery target's house drawn; the product never asks
+ */
+export function mappedBuildingsDrawnOf(view: GameView): readonly number[] {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt?.drawnPlans() ?? [];
 }
 
 /**
