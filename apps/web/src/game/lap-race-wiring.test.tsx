@@ -731,11 +731,14 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // The device's default, the switch on: every racer drafts, the rider
     // included. Over the first lap and a half, which is cheaper than the whole
     // trace and still writes every grade the loop has (#1688: no timeout).
-    // Blind, as #2524 rides the cases that read no frame: this one reads the
-    // writes and the `k` trace alone. Drawn, its three rides took 5.0 s under
+    // The items-off race draws; the items-on race and the replay ride blind,
+    // as #2524 rides the cases that read no frame. The drawn ride is this draft
+    // source's drawing-view check (`blind-view-wiring.test.tsx`'s header): a
+    // frame-to-trainer coupling that exists only in a drafted lap race makes it
+    // write other than the blind replay. Drawn, all three rides took 5.0 s under
     // coverage on CI (the nightly of 2026-11-13 on #2561's branch).
     const frames = DRAFTED_FRAMES;
-    const off = await rideOnce(ITEMS_OFF, { drafted: true, frames, blind: true });
+    const off = await rideOnce(ITEMS_OFF, { drafted: true, frames });
     const on = await rideOnce(RACE, { drafted: true, frames, blind: true });
     // Items move race offsets and never effort distances, which is all the
     // draft reads (D-3.2): one `k` trace for both, so one ordinary ride.
