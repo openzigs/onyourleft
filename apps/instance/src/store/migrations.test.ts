@@ -695,10 +695,9 @@ describe('the migrations (#769)', () => {
 
   it('takes both analysis tables away with 0020, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
     const path = await freshPath();
-    // Up to 0020 and no further (#2555). This case went up to the newest
-    // migration and then down, one at a time, to 0020: nineteen downs on top
-    // of thirty-nine ups, for a schema the walk above already holds is the
-    // same either way. It took 5.6 s under coverage on a loaded machine.
+    // Stop at 0020 (#2555): the per-migration walk already proves that the
+    // downs of 0021 onward restore the schema, so going to the newest and back
+    // down would reach this same schema at several times the cost.
     await withKysely(path, (db) =>
       migrateToLatest(
         db,
