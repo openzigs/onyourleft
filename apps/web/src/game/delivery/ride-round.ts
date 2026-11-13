@@ -110,8 +110,12 @@
  * the next level in the picker. The level's throw window is not
  * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
  * may (`level-file.ts`), and the later levels that tighten it read it
- * (#2367, which draws them). Its mailbox and no-delivery shares, weather and light are
- * #2365's and #2366's.
+ * (#2367, which draws them). Its mailbox and no-delivery shares are #2365's.
+ * Its weather and light (#2366) are read here for the drawing only
+ * ({@link DeliveryRide.weather}, {@link DeliveryRide.revealMetres}): they
+ * change where a marker is drawn from, never the round, the throw, the
+ * obstacles, the announcements, the ride record or the trainer (ADR 0065
+ * D-11: rain and dusk are a drawing and never a grade).
  *
  * ## Nothing here leaves the ride (DL11)
  *
@@ -129,6 +133,7 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { LOW_LIGHT_REVEAL_METRES } from './in-view';
 import { readLevelProgress, withLevelFinished, writeLevelProgress } from './level-progress';
 import type { LevelRound } from './levels/level-file';
 import {
@@ -200,6 +205,24 @@ export interface DeliveryRide {
   readonly onLevel: boolean;
   /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
   readonly levelId: string | undefined;
+  /**
+   * The level's weather and light (#2366, ADR 0065 D-10.4), for the drawing
+   * only: rain and dusk. Clear daylight on a rider's own route.
+   */
+  readonly weather: DeliveryWeather;
+  /**
+   * How near a house the rider must be for its marker to be drawn, metres
+   * (#2366): `in-view.ts` §`LOW_LIGHT_REVEAL_METRES` in rain or at dusk,
+   * `undefined` — no nearer than the corridor draws — in clear daylight or
+   * with the assist's wider windows on (DL10: no hidden targets).
+   */
+  readonly revealMetres: number | undefined;
+}
+
+/** A round's weather and light, as the drawing reads them (#2366). */
+export interface DeliveryWeather {
+  readonly rain: boolean;
+  readonly dusk: boolean;
 }
 
 /** What a round needs at the press. */
@@ -230,11 +253,12 @@ export interface DeliveryRideStart {
    * rider's route.
    */
   readonly level?:
-    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & {
-        readonly lengthMetres: number;
-        /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
-        readonly id: string;
-      })
+    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> &
+        Partial<Pick<LevelRound, 'weather' | 'light'>> & {
+          readonly lengthMetres: number;
+          /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
+          readonly id: string;
+        })
     | undefined;
 }
 
@@ -263,6 +287,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
   if (last === undefined || (!pick.complete && pick.targets.length < FEWEST_DELIVERY_HOUSES)) {
     return undefined;
   }
+  const weather: DeliveryWeather = {
+    rain: input.level?.weather === 'rain',
+    dusk: input.level?.light === 'dusk',
+  };
   const obstacles = placeObstacles(
     { from: input.riderDistance, to: last.distance + TARGET_WINDOW_HALF_METRES },
     seed,
@@ -295,6 +323,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     outcome: undefined,
     onLevel: input.level !== undefined,
     levelId: input.level?.id,
+    weather,
+    // #2366: a marker shows only once the rider is closer, unless the assist widens the windows.
+    revealMetres:
+      (weather.rain || weather.dusk) && !assist.widerWindows ? LOW_LIGHT_REVEAL_METRES : undefined,
   };
 }
 

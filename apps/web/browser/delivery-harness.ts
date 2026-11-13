@@ -81,6 +81,7 @@ import { corridorOrigin } from '../src/game/terrain';
 import {
   deliveryCallsProbe,
   deliveryDrawnOf,
+  deliveryWeatherOf,
   deliveryKindProbe,
   MARKER_DIAMOND_HEIGHTS,
   threeGameRenderer,
@@ -118,6 +119,7 @@ declare global {
       viewCalls(count: number): DeliveryViewCalls;
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
+      rainCalls(): DeliveryRainCalls;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
@@ -234,6 +236,35 @@ function viewCalls(count: number): DeliveryViewCalls {
   view.destroy();
   return { without, with: withDelivery, empty, drawn };
 }
+
+/** #2366: what a level's rain costs a frame, and whether it was drawn at all. */
+export interface DeliveryRainCalls {
+  /** Calls for a frame with a round in clear weather. */
+  readonly clear: number;
+  /** Calls for the same frame with the round in rain. */
+  readonly rain: number;
+  /** Whether the view drew the rain on that frame. */
+  readonly rainShown: boolean;
+}
+
+/** #2366: the same Delivery frame in clear weather and in rain, counted. */
+function rainCalls(): DeliveryRainCalls {
+  const view = threeGameRenderer.create(canvas(), qualitySettings(0));
+  view.resize(320, 180);
+  const frame = frameAt(RIDER);
+  const delivery = piecesOn(frame, 2);
+  const clear = callsOf(view, { ...frame, delivery: { ...delivery, weather: CLEAR } });
+  const rain = callsOf(view, {
+    ...frame,
+    delivery: { ...delivery, weather: { rain: true, dusk: false } },
+  });
+  const rainShown = deliveryWeatherOf(view).rain;
+  view.destroy();
+  return { clear, rain, rainShown };
+}
+
+/** Clear daylight. */
+const CLEAR = { rain: false, dusk: false } as const;
 
 /** Two houses on the rider's right, a doorstep 1.5 m off the carriageway, at `distances`. */
 function housesOn(frame: SceneFrame, distances: readonly number[]): DeliveryTarget[] {
@@ -778,6 +809,7 @@ window.__oylDelivery = {
   viewCalls,
   markerLeaves,
   probeCalls,
+  rainCalls,
   kinds,
   showcase,
   inLane,

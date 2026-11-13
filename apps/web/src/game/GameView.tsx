@@ -3876,6 +3876,11 @@ function GameScreen({
                   throws: round.throws,
                   obstacles: round.obstacles,
                   obstacleState: round.obstacleState,
+                  // #2366: in rain or at dusk a marker shows once the rider is closer,
+                  // and the frame carries the weather for the rain and the light.
+                  riderAlong: round.along,
+                  revealMetres: round.revealMetres,
+                  weather: round.weather,
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                 }),
               };

@@ -75,6 +75,16 @@ export const AGX_WHITE_INPUT = 2 ** 4.026069;
  */
 export const REALISTIC_EXPOSURE = 1;
 
+/**
+ * How much of {@link REALISTIC_EXPOSURE} a Delivery level at dusk is drawn
+ * with — #2366, ADR 0065 D-10.4: **0.45**, so the town reads as late evening
+ * and a house's marker, which glows, stands out of it. A lighting change and
+ * no draw call; applied by the view on a frame whose round is at dusk, and on
+ * no other. This project's own number, for the owner's approval in #2366's
+ * pull request.
+ */
+export const REALISTIC_DUSK_EXPOSURE_SHARE = 0.45;
+
 /** A half-precision float's value. IEEE 754-2008 binary16. */
 export function halfToFloat(half: number): number {
   const sign = half & 0x8000 ? -1 : 1;

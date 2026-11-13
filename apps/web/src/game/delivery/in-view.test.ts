@@ -15,6 +15,7 @@ import { corridorOrigin, roadCorridor, type CorridorPoint } from '../terrain';
 
 import {
   deliveryInView,
+  LOW_LIGHT_REVEAL_METRES,
   PARCEL_HAND_METRES,
   PARCEL_LOB_METRES,
   type DeliveryDrawInput,
@@ -109,6 +110,37 @@ describe('a Delivery frame’s pieces — #1814', () => {
     expect(after.markers).toEqual([
       { x: targets[1]?.x, y: targets[1]?.y, z: targets[1]?.z, yaw: targets[1]?.yaw },
     ]);
+  });
+
+  it('hides a marker beyond the reveal distance and shows it inside it, and in clear weather draws every one — #2366', () => {
+    const targets = [targetAt(0, RIDER + 30), targetAt(1, RIDER + 41), targetAt(2, RIDER + 200)];
+    const round = startRound(3);
+    const dusk = deliveryInView(
+      input({
+        targets,
+        round,
+        riderAlong: RIDER,
+        revealMetres: LOW_LIGHT_REVEAL_METRES,
+        weather: { rain: false, dusk: true },
+      }),
+    );
+    expect(LOW_LIGHT_REVEAL_METRES).toBe(40);
+    expect(dusk.markers.map((marker) => marker.z)).toEqual([targets[0]?.z]);
+    expect(dusk.weather).toEqual({ rain: false, dusk: true });
+    // Exactly at the reveal distance it shows.
+    const edge = deliveryInView(
+      input({
+        targets: [targetAt(0, RIDER + LOW_LIGHT_REVEAL_METRES)],
+        round: startRound(1),
+        riderAlong: RIDER,
+        revealMetres: LOW_LIGHT_REVEAL_METRES,
+      }),
+    );
+    expect(edge.markers).toHaveLength(1);
+    // Clear weather: no reveal distance, every marker on the corridor, and no weather on the frame.
+    const clear = deliveryInView(input({ targets, round, riderAlong: RIDER }));
+    expect(clear.markers).toHaveLength(3);
+    expect(clear.weather).toBeUndefined();
   });
 
   it('draws nothing off the frame’s corridor: no house, parcel or obstacle past either end', () => {

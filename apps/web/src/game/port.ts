@@ -584,6 +584,18 @@ export interface DeliveryInView {
   readonly parcels: readonly DeliveryPiece[];
   readonly markers: readonly DeliveryPiece[];
   readonly obstacles: readonly DeliveryObstaclePiece[];
+  /** A level's rain and dusk (#2366), for the drawing only. Absent, clear daylight. */
+  readonly weather?: DeliveryWeatherFrame;
+}
+
+/**
+ * A Delivery level's weather and light, as the view draws them — #2366, ADR
+ * 0065 D-10.4: falling rain in one call, unless the rider asked for reduced
+ * motion, and a dimmer light at dusk, which costs no call.
+ */
+export interface DeliveryWeatherFrame {
+  readonly rain: boolean;
+  readonly dusk: boolean;
 }
 
 /** What {@link SceneFrame.terrain} carries. */
