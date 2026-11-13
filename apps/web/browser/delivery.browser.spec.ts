@@ -239,6 +239,87 @@ test.describe('Delivery’s belt — #1814', () => {
     expect(still?.rain).toBe(still?.clear);
   });
 
+  test('draws a level’s dusk darker and warmer than clear daylight, and its rain greyer, read back from a real frame — #2508', async ({
+    page,
+  }) => {
+    await open(page);
+    const read = await page.evaluate(() => window.__oylDelivery?.weatherLook());
+    console.log(`#2508 weather look: ${JSON.stringify(read)}`);
+    const clear = read?.clear;
+    const dusk = read?.dusk;
+    const rain = read?.rain;
+    expect(clear).toBeDefined();
+    // Dusk: well under three-quarters of clear daylight's luma, and warmer —
+    // more red against its blue than the day has.
+    expect(dusk?.luma ?? Infinity).toBeLessThan((clear?.luma ?? 0) * 0.75);
+    expect((dusk?.red ?? 0) / (dusk?.blue ?? 1)).toBeGreaterThan(
+      ((clear?.red ?? 0) / (clear?.blue ?? 1)) * 1.1,
+    );
+    // Rain: darker than clear, and greyer — its channels closer together.
+    const spread = (look: typeof clear): number =>
+      Math.max(look?.red ?? 0, look?.green ?? 0, look?.blue ?? 0) -
+      Math.min(look?.red ?? 0, look?.green ?? 0, look?.blue ?? 0);
+    expect(rain?.luma ?? Infinity).toBeLessThan(clear?.luma ?? 0);
+    expect(spread(rain)).toBeLessThan(spread(clear));
+  });
+
+  test('shades the scenery at dusk as the ground, lights the rain with the scene, and lays none by the camera, read back from real frames — PR #2522', async ({
+    page,
+  }) => {
+    await open(page);
+    const back = await page.evaluate(() => window.__oylDelivery?.weatherReadback());
+    console.log(`PR #2522 weather readback: ${JSON.stringify(back)}`);
+    const clear = back?.clear;
+    const dusk = back?.dusk;
+    const rain = back?.rain;
+    const both = back?.['rain-dusk'];
+    if (clear === undefined || dusk === undefined || rain === undefined || both === undefined) {
+      throw new Error('a weather drew no frame to read back');
+    }
+    // Clear daylight: the scenery is its own colour.
+    expect(clear.sceneryShade).toEqual([1, 1, 1]);
+    // Dusk: each channel of the scenery goes down within 5 % of the ground's own darkening.
+    for (const channel of [0, 1, 2] as const) {
+      const ground = dusk.ground[channel] / clear.ground[channel];
+      expect(Math.abs(dusk.sceneryShade[channel] / ground - 1)).toBeLessThan(0.05);
+      expect(Math.abs(both.sceneryShade[channel] / ground - 1)).toBeLessThan(0.05);
+    }
+    // The rain: lit by the scene, greyer in daytime rain than its paint, dimmer and warm at dusk.
+    const paint = [0xb4, 0xc4, 0xd2].map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    const luma = (colour: readonly number[] | undefined): number =>
+      0.2126 * (colour?.[0] ?? Infinity) +
+      0.7152 * (colour?.[1] ?? Infinity) +
+      0.0722 * (colour?.[2] ?? Infinity);
+    expect(luma(rain.rainColour)).toBeLessThan(luma(paint) * 0.8);
+    expect(luma(both.rainColour)).toBeLessThan(luma(rain.rainColour) * 0.75);
+    const warmth = (colour: readonly number[] | undefined): number =>
+      (colour?.[0] ?? 0) / (colour?.[2] ?? Infinity);
+    expect(warmth(both.rainColour)).toBeGreaterThan(warmth(rain.rainColour) * 1.2);
+    // No streak stands nearer the camera than 2.5 m.
+    for (const frame of [rain, both]) {
+      expect(frame.rainClearance ?? 0).toBeGreaterThanOrEqual(2.5);
+    }
+  });
+
+  for (const weather of ['clear', 'dusk', 'rain', 'rain-dusk'] as const) {
+    test(`photographs a level in ${weather} on the tablet for the owner — #2508`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((w) => window.__oylDelivery?.weatherShowcase(w), weather);
+      const shot = await page.locator(`#delivery-weather-${weather}`).screenshot();
+      await testInfo.attach(`delivery-weather-${weather}`, {
+        body: shot,
+        contentType: 'image/png',
+      });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+
   test('takes a marker off its house on the frame after a parcel is delivered there, read from what the view drew', async ({
     page,
   }) => {

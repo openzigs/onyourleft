@@ -42,6 +42,12 @@ import {
   MARKER_DIAMOND_HEIGHTS,
   MARKER_TRUE_SIZE_WITHIN_METRES,
   markerScaleAt,
+  RAIN_CLEAR_METRES,
+  RAIN_COLOUR,
+  RAIN_STREAK_METRES,
+  RAIN_STREAK_WIDTH_METRES,
+  RAIN_STREAKS,
+  RAIN_TRIANGLES,
   type DeliveryPieceKind,
 } from './three-renderer';
 import { PEAK_IRRADIANCE } from './world';
@@ -332,6 +338,89 @@ describe('Delivery’s belt — #1814', () => {
     // Hidden with the belt.
     belt.setShown(false);
     expect(belt.rainShown()).toBe(false);
+    belt.dispose();
+  });
+
+  it('draws heavier rain: 1 500 streaks 0.6 m long and 12 mm wide, each two crossed quads, in its one mesh — #2508', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_STREAKS).toBe(1_500);
+    expect(RAIN_STREAK_METRES).toBe(0.6);
+    expect(RAIN_STREAK_WIDTH_METRES).toBe(0.012);
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.rainGeometry();
+    const position = geometry.getAttribute('position');
+    // Unindexed: three corners a triangle, two triangles a quad, two quads a streak, laid out twice.
+    expect(geometry.index).toBeNull();
+    expect(position.count / 3).toBe(RAIN_TRIANGLES);
+    expect(RAIN_TRIANGLES).toBe(RAIN_STREAKS * 2 * 2 * 2);
+    // Read back, quad by quad: 0.6 m tall and 12 mm across, one across x and one across z.
+    const quads = position.count / 6;
+    let acrossX = 0;
+    let acrossZ = 0;
+    for (let quad = 0; quad < quads; quad += 1) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const zs: number[] = [];
+      for (let corner = 0; corner < 6; corner += 1) {
+        xs.push(position.getX(quad * 6 + corner));
+        ys.push(position.getY(quad * 6 + corner));
+        zs.push(position.getZ(quad * 6 + corner));
+      }
+      const span = (values: number[]): number => Math.max(...values) - Math.min(...values);
+      expect(span(ys)).toBeCloseTo(RAIN_STREAK_METRES, 5);
+      expect(Math.max(span(xs), span(zs))).toBeCloseTo(RAIN_STREAK_WIDTH_METRES, 5);
+      expect(Math.min(span(xs), span(zs))).toBe(0);
+      if (span(xs) > 0) acrossX += 1;
+      else acrossZ += 1;
+    }
+    expect(acrossX).toBe(RAIN_STREAKS * 2);
+    expect(acrossZ).toBe(RAIN_STREAKS * 2);
+    belt.dispose();
+  });
+
+  it('lays no streak nearer the camera than RAIN_CLEAR_METRES across the ground, on any frame — PR #2522', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_CLEAR_METRES).toBe(2.5);
+    const belt = new DeliveryBelt('stylised');
+    const view = { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } };
+    let nearest = Number.POSITIVE_INFINITY;
+    const frames: readonly (readonly [{ x: number; y: number; z: number }, number])[] = [
+      [{ x: 3, y: 12, z: 40 }, 0],
+      [{ x: -250, y: 4, z: 1_200 }, 0.37],
+      [{ x: 0, y: 0, z: 0 }, 9.9],
+    ];
+    for (const [eye, seconds] of frames) {
+      belt.update(view, eye, seconds);
+      expect(belt.rainShown()).toBe(true);
+      const clearance = belt.rainClearanceFrom(eye);
+      expect(clearance).toBeGreaterThanOrEqual(RAIN_CLEAR_METRES);
+      nearest = Math.min(nearest, clearance);
+    }
+    // And the rain is still there round the clear circle, not pushed out of view.
+    expect(nearest).toBeLessThan(RAIN_CLEAR_METRES + 0.5);
+    belt.dispose();
+  });
+
+  it('lights the rain with the scene: its paint times the frame’s share of the route’s light — PR #2522', () => {
+    const belt = new DeliveryBelt('stylised');
+    const paint = [(RAIN_COLOUR >> 16) & 0xff, (RAIN_COLOUR >> 8) & 0xff, RAIN_COLOUR & 0xff].map(
+      (channel) => {
+        const c = channel / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      },
+    );
+    belt.setRainShare([1, 1, 1]);
+    belt.rainColour().forEach((channel, at) => expect(channel).toBeCloseTo(paint[at] ?? 0, 6));
+    const dusk = [0.3, 0.16, 0.12] as const;
+    belt.setRainShare(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
+    // Each frame from the paint, never from the last frame's colour.
+    belt.setRainShare(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
     belt.dispose();
   });
 

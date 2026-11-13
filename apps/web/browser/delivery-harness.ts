@@ -86,6 +86,7 @@ import {
   MARKER_DIAMOND_HEIGHTS,
   threeGameRenderer,
   type DeliveryCalls,
+  type DeliveryWeatherReadback,
 } from '../src/game/three-renderer';
 import { cameraRig, projectToFrame } from '../src/game/camera';
 import { LANE_OFFSETS_METRES } from '../src/game/lanes';
@@ -120,6 +121,9 @@ declare global {
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
       rainCalls(): DeliveryRainCalls;
+      weatherLook(): Readonly<Record<WeatherName, WeatherLook>>;
+      weatherShowcase(weather: WeatherName): void;
+      weatherReadback(): Readonly<Record<WeatherName, DeliveryWeatherReadback | undefined>>;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
       showcase(): void;
       carsShowcase(): void;
@@ -265,6 +269,149 @@ function rainCalls(): DeliveryRainCalls {
 
 /** Clear daylight. */
 const CLEAR = { rain: false, dusk: false } as const;
+
+/** #2508: the weathers a level is drawn in. */
+type WeatherName = 'clear' | 'dusk' | 'rain' | 'rain-dusk';
+
+const WEATHERS: Readonly<Record<WeatherName, { readonly rain: boolean; readonly dusk: boolean }>> =
+  {
+    clear: CLEAR,
+    dusk: { rain: false, dusk: true },
+    rain: { rain: true, dusk: false },
+    'rain-dusk': { rain: true, dusk: true },
+  };
+
+/**
+ * #2508: a whole frame's look, read off the drawing buffer — its mean sRGB
+ * channels, 0 to 255, their Rec. 709 luma, and the hue of the mean colour in
+ * degrees (0 red, 30 orange, 210 sky blue, 240 blue).
+ */
+export interface WeatherLook {
+  readonly red: number;
+  readonly green: number;
+  readonly blue: number;
+  readonly luma: number;
+  readonly hue: number;
+}
+
+/** The hue of an sRGB colour, degrees in [0, 360). */
+function hueOf(red: number, green: number, blue: number): number {
+  const high = Math.max(red, green, blue);
+  const low = Math.min(red, green, blue);
+  if (high === low) return 0;
+  const span = high - low;
+  const sector =
+    high === red
+      ? ((green - blue) / span + 6) % 6
+      : high === green
+        ? (blue - red) / span + 2
+        : (red - green) / span + 4;
+  return sector * 60;
+}
+
+/** #2508's frame: the rider on the level's road, two houses ahead, a parked car, in `weather`. */
+function weatherFrame(weather: WeatherName): SceneFrame {
+  const frame = frameAt(RIDER);
+  const obstacles: Obstacle[] = [
+    { kind: 'parked-car', along: RIDER + 14, stands: parkedCarStands('right') },
+  ];
+  return {
+    ...frame,
+    delivery: {
+      ...deliveryInView({
+        corridor: frame.corridor,
+        targets: housesOn(frame, [RIDER + 18, RIDER + 32]),
+        round: startRound(2),
+        throws: NO_PARCELS,
+        obstacles,
+        obstacleState: startObstacles(obstacles),
+      }),
+      weather: WEATHERS[weather],
+    },
+  };
+}
+
+/**
+ * #2508: the same frame of the stylised world in each weather, through a
+ * real view, read back whole: how dark and how warm each is.
+ */
+function weatherLook(): Record<WeatherName, WeatherLook> {
+  const width = 640;
+  const height = 400;
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const gl = shown.getContext('webgl2');
+  if (gl === null) throw new Error('#2508: the view drew into no WebGL2 context');
+  const pixels = new Uint8Array(width * height * 4);
+  const look = (weather: WeatherName): WeatherLook => {
+    const frame = weatherFrame(weather);
+    view.render(frame);
+    view.render(frame);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    for (let at = 0; at < pixels.length; at += 4) {
+      red += pixels[at] ?? 0;
+      green += pixels[at + 1] ?? 0;
+      blue += pixels[at + 2] ?? 0;
+    }
+    const count = width * height;
+    [red, green, blue] = [red / count, green / count, blue / count];
+    return {
+      red,
+      green,
+      blue,
+      luma: 0.2126 * red + 0.7152 * green + 0.0722 * blue,
+      hue: hueOf(red, green, blue),
+    };
+  };
+  const read = {
+    clear: look('clear'),
+    dusk: look('dusk'),
+    rain: look('rain'),
+    'rain-dusk': look('rain-dusk'),
+  };
+  view.destroy();
+  return read;
+}
+
+/**
+ * PR #2522: the same frame of the stylised world in each weather, through a
+ * real view, and what each frame was drawn with read back off the view's own
+ * materials: the ground's colour, the scenery's shade, the rain's colour and
+ * how near the camera its nearest streak stood (`three-renderer.ts`
+ * §`deliveryWeatherOf`).
+ */
+function weatherReadback(): Record<WeatherName, DeliveryWeatherReadback | undefined> {
+  const shown = canvas(640, 400);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(640, 400);
+  const read = (weather: WeatherName): DeliveryWeatherReadback | undefined => {
+    const frame = weatherFrame(weather);
+    view.render(frame);
+    view.render(frame);
+    return deliveryWeatherOf(view).readback;
+  };
+  const back = {
+    clear: read('clear'),
+    dusk: read('dusk'),
+    rain: read('rain'),
+    'rain-dusk': read('rain-dusk'),
+  };
+  view.destroy();
+  return back;
+}
+
+/** #2508's photographs for the owner: {@link weatherFrame} on the tablet's 1280×800, in `weather`. */
+function weatherShowcase(weather: WeatherName): void {
+  const shown = canvas(1280, 800);
+  shown.id = `delivery-weather-${weather}`;
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  view.render(weatherFrame(weather));
+}
 
 /** Two houses on the rider's right, a doorstep 1.5 m off the carriageway, at `distances`. */
 function housesOn(frame: SceneFrame, distances: readonly number[]): DeliveryTarget[] {
@@ -810,6 +957,9 @@ window.__oylDelivery = {
   markerLeaves,
   probeCalls,
   rainCalls,
+  weatherLook,
+  weatherShowcase,
+  weatherReadback,
   kinds,
   showcase,
   inLane,
