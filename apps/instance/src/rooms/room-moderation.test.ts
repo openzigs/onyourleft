@@ -19,8 +19,10 @@
  * (#2567). A flag needs five room seconds over the 5 s ceiling, and the case
  * waited for eight: at the wall's rate that alone was 8 s of a case that now
  * has Vitest's 5 s. The worker is the production module, forked by the
- * production router; only its `Date.now` and `setTimeout` are faster, as
- * `RoomHost`'s `setTimer` says a test may make them. The riders stamp their
+ * production router; only its global `Date.now` and `setTimeout` are faster
+ * (not `setInterval`, so not the host's pinger), which reaches further than
+ * the faster timer `RoomHost`'s `setTimer` lets a test inject: `ws`'s own
+ * timers and the host's stop grace run at that rate too. The riders stamp their
  * reports on a clock of the same rate, so the room admits them as it would
  * an honest client's (`room/core/clock.ts`).
  */
@@ -97,6 +99,7 @@ async function world(moderator: TestDevice) {
   await migrateForDeploy(path);
   const server = readServerConfig({ database: path, origin: TEST_ORIGIN, roomWorkers: '1' }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));
+  const unlent = [...process.execArgv];
   process.execArgv.push(FAST_ROOM_CLOCK);
   try {
     running = await startInstance({
@@ -118,8 +121,11 @@ async function world(moderator: TestDevice) {
     });
     await running.opened;
   } finally {
-    process.execArgv.splice(process.execArgv.indexOf(FAST_ROOM_CLOCK), 1);
+    // Only the flag lent above: `indexOf`'s -1 would take Vitest's last flag.
+    const lent = process.execArgv.indexOf(FAST_ROOM_CLOCK);
+    if (lent !== -1) process.execArgv.splice(lent, 1);
   }
+  expect(process.execArgv, 'Vitest’s own flags, as they were').toEqual(unlent);
   const url = running.url;
   const call = async (method: string, route: string, token: string, body?: unknown) => {
     const response = await fetch(`${url}${route}`, {

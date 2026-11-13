@@ -46,6 +46,9 @@ async function join(roomId: string, ticket: string | undefined, perMessageDeflat
   return client;
 }
 
+/** Whether the room has welcomed `client`: its answer to a seat, where a refusal is not. */
+const welcomed = (client: RoomClient): boolean => client.messages.some((m) => m.type === 'welcome');
+
 function framesWith(client: RoomClient, riders: number): Frame[] {
   return client.messages.filter(
     (m): m is Frame => m.type === 'frame' && m.riders.length === riders,
@@ -91,8 +94,9 @@ describe('a worker that dies — #780 criterion 3', () => {
     const ann = await join('doomed', 'ticket-ann');
     const bob = await join('doomed', 'ticket-bob');
     // Both seated on one worker: a welcome is the room's, sent from the worker
-    // that holds it (#2567: a frame waited a real tick for the same proof).
-    await until(() => ann.messages.length > 0 && bob.messages.length > 0, 'both welcomes', WAIT_MS);
+    // that holds it (#2567: a frame waited a real tick for the same proof). A
+    // welcome, not any first message: a refusal is an answer too.
+    await until(() => welcomed(ann) && welcomed(bob), 'both welcomes', WAIT_MS);
     const deadPid = harness.router.placementOf('doomed');
     expect(deadPid).toBeDefined();
     process.kill(deadPid as number, 'SIGKILL');
@@ -111,7 +115,7 @@ describe('a worker that dies — #780 criterion 3', () => {
     const riders = await Promise.all(roomIds.map((roomId) => join(roomId, `ticket-${roomId}`)));
     await Promise.all(
       riders.map((rider, index) =>
-        until(() => rider.messages.length > 0, `${String(roomIds[index])}'s welcome`, WAIT_MS),
+        until(() => welcomed(rider), `${String(roomIds[index])}'s welcome`, WAIT_MS),
       ),
     );
     for (const roomId of roomIds) {
