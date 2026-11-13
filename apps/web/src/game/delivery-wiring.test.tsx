@@ -2807,7 +2807,6 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     expect(wet.said).toStrictEqual(clear.said);
   });
 
-
   // #1688's ruling: cheaper, never a longer timeout. Both rides pump the same
   // frames (`frameSteps`): 1 s at once away from the throws, and frames of
   // 200 ms within 1.6 s of each, the presses chosen on a shadow pumped the
@@ -2818,9 +2817,25 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
   it('sends the same writes at the same times with parcels thrown at houses that must not get one as with none thrown â€” #2365', async () => {
     const { throws: script, fine } = skipThrowScript(CRASHING_SEED);
     expect(script.size).toBeGreaterThan(0);
-    const without = await rideLevel('none', SKIP_LEVEL, CRASHING_SEED, FRAMES, FRAME_MS, new Map(), fine);
+    const without = await rideLevel(
+      'none',
+      SKIP_LEVEL,
+      CRASHING_SEED,
+      FRAMES,
+      FRAME_MS,
+      new Map(),
+      fine,
+    );
     noDeliveries.count = 0;
-    const thrown = await rideLevel('none', SKIP_LEVEL, CRASHING_SEED, FRAMES, FRAME_MS, script, fine);
+    const thrown = await rideLevel(
+      'none',
+      SKIP_LEVEL,
+      CRASHING_SEED,
+      FRAMES,
+      FRAME_MS,
+      script,
+      fine,
+    );
     // Non-vacuity: the round had such houses, and a parcel thrown came down on one.
     const [round] = thrown.started as (DeliveryRide | undefined)[];
     expect(round?.noDeliveryTargets.length).toBeGreaterThan(0);
