@@ -28,6 +28,9 @@
  * trace per draft source: none, the gate's draft pinned with
  * `draftWith(DRAFTED)`, the bot pacer with the solo draft on, and the rider's
  * own ghost with the solo draft on. A new draft source adds its trace here.
+ * The rider drafting lap-race bots (#2461) is covered by
+ * `lap-race-wiring.test.tsx`'s D-3.6 case instead: its items-off race draws and
+ * must write what the blind replay writes.
  */
 
 import { act } from 'react';
