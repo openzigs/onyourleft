@@ -49,7 +49,13 @@ import type { SqlStore } from '../store/sql-store.ts';
 import { roomBody } from './rooms-testing.ts';
 import { wholeModerationLog } from '../store/testing/index.ts';
 
-/** How many times the wall's rate the room worker's clock runs. */
+/**
+ * How many times the wall's rate the room worker's clock runs. It shrinks the
+ * room's 5 s report slack (`DEFAULT_REPORT_SLACK.lateMs`) to 1 s of wall time
+ * as well: a report that late is refused and its rider coasts. The latest one
+ * measured on a nightly runner (EPYC 7763, six runs of this case, run
+ * 43497542957) was 135 room ms, 27 ms of the wall's (#2567).
+ */
 const ROOM_CLOCK_RATE = 5;
 
 /**
