@@ -87,6 +87,7 @@ import { LANE_OFFSETS_METRES, startSteer, steerToward, type SteerIntent } from '
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
+  THROW_WINDOW_BEFORE_METRES,
   type ThrowSide,
 } from './delivery/throw';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
@@ -94,6 +95,7 @@ import type { PadSnapshot } from './gamepad-port';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { HOUSES_NOT_READY_TEXT, TOO_FEW_HOUSES_TEXT } from './hud/delivery-announce';
+import { NEXT_HOUSE_TEXT } from './hud/fields';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameRenderer, SceneFrame } from './port';
@@ -132,6 +134,8 @@ vi.mock('./hud/announce', async (importOriginal) => {
 const roundFaults = vi.hoisted(() => ({ on: false }));
 /** Every round `GameView` started, as `startDeliveryRide` returned it (#1853). */
 const startedRounds = vi.hoisted((): unknown[] => []);
+/** Where the rider was after each round step `GameView` ran, metres along (#2513). */
+const steppedAlong = vi.hoisted((): number[] => []);
 vi.mock('./delivery/ride-round', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./delivery/ride-round')>();
   return {
@@ -143,7 +147,9 @@ vi.mock('./delivery/ride-round', async (importOriginal) => {
     },
     stepDeliveryRide: (...args: Parameters<typeof actual.stepDeliveryRide>) => {
       if (roundFaults.on) throw new RangeError('the round faulted');
-      return actual.stepDeliveryRide(...args);
+      const stepped = actual.stepDeliveryRide(...args);
+      steppedAlong.push(stepped.ride.along);
+      return stepped;
     },
   };
 });
@@ -437,6 +443,13 @@ const SKIPPED = 1;
  * §`ANNOUNCE_WINDOW_SECONDS`.
  */
 const FRAMES = 330;
+
+/**
+ * The most frames #2513's case rides to the first house's window: the
+ * default town's first house stands about 50 m in, and a frame here rides
+ * about a metre. The loop stops at the window, so it rides fewer.
+ */
+const THROW_NOW_FRAMES = 120;
 
 /**
  * The lane keys pressed after each frame's tick, by frame index — #1853: from
@@ -1864,6 +1877,40 @@ describe('offered in the chooser, with the short round and the no-round fallback
     for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
       expect(notices()).not.toContain(text);
     }
+  });
+
+  it('counts the next house down to its throw point, then says “Throw now” on its side — #2513', async () => {
+    startedRounds.length = 0;
+    steppedAlong.length = 0;
+    await chooseAndRide({ choose: true, frames: 1 });
+    const first = (startedRounds[0] as DeliveryRide | undefined)?.targets[0];
+    if (first === undefined) throw new Error('the ride started no round');
+    const side = first.side === 1 ? 'on the right' : 'on the left';
+    // Where the first house's window opens: the throw point the HUD counts to.
+    const opens = first.distance - THROW_WINDOW_BEFORE_METRES;
+    const seen: { readonly along: number; readonly value: string; readonly detail: string }[] = [];
+    for (let frame = 0; frame < THROW_NOW_FRAMES; frame += 1) {
+      const next = field('Next house');
+      const along = steppedAlong.at(-1);
+      if (next !== undefined && along !== undefined) seen.push({ along, ...next });
+      if (next?.value === NEXT_HOUSE_TEXT.throwNow) break;
+      await pump();
+    }
+    const counted = seen.filter((each) => each.value !== NEXT_HOUSE_TEXT.throwNow);
+    const throwNow = seen.at(-1);
+    // Not vacuous: it counted down on the way, and reached the window.
+    expect(counted.length).toBeGreaterThan(1);
+    expect(throwNow?.value).toBe(NEXT_HOUSE_TEXT.throwNow);
+    // Every count was short of the window, to the throw point, never to the house.
+    for (const each of counted) {
+      expect(each.along).toBeLessThan(opens);
+      expect(each.detail).toBe(side);
+      expect(Number(each.value)).toBe(Math.round(opens - each.along));
+    }
+    // "Throw now," on the house's side, once the rider is inside its window, and the house still ahead.
+    expect(throwNow?.along).toBeGreaterThanOrEqual(opens);
+    expect(throwNow?.along).toBeLessThan(first.distance);
+    expect(throwNow?.detail).toBe(side);
   });
 
   it('starts an ordinary ride, saying nothing of Delivery, when it is not chosen', async () => {
