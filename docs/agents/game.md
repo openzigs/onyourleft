@@ -786,7 +786,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ **Since #2495 it has EYES**, and
+                        8 998 triangles. ⚠️ The helmet's material is
+                        single-sided: a lens wound towards the face is culled
+                        from the front (#2504). `rider-gear.test.ts` reads the
+                        lenses, the closed vents, the straps on the skin and
+                        the shoes back out of the file. ⚠️ **Since #2495 it has EYES**, and
                         a reviewer who remembers flat skin under the glasses
                         is reading the old file: a ball in each socket at
                         MakeHuman's own eye, drawn in `rider_kit.py`'s
