@@ -6,8 +6,9 @@
  * src/operator/cli.ts …` in a child process, the public keys on standard
  * input — against a real database that riders' accounts are already in.
  * The race case runs the same commands in this process ({@link runHere}),
- * which `cli.ts` only calls, so it starts no second Node (#2568); every other
- * case still runs them as child processes, standard input included.
+ * which `cli.ts` only calls, so it starts no second Node (#2568). The other
+ * cases run them as child processes, standard input included, among them an
+ * add and an erase that each write ('refuses a key …').
  *
  * The accounts are proved by their real consumer: `tools/race-load.ts`'s own
  * riders race a room on an instance whose registration is `approval`, and a
@@ -84,8 +85,8 @@ function run(data: Data, input: string, ...args: string[]) {
 /**
  * The same command in this process: `runCommand`, which `cli.ts` only calls
  * with its environment and standard input. A Node start is the slowest part
- * of a run (#2568: 0.2 s locally, 0.5–0.8 s under coverage on CI), so set-up
- * and the race case use this; the rest of the file spawns {@link run}.
+ * of a run (#2568: 0.2 s locally, 0.5–0.8 s under coverage on CI), so set-up,
+ * the race case and one refusal use this; the rest of the file spawns {@link run}.
  */
 async function runHere(data: Data, input: string, ...args: string[]) {
   let stdout = '';
@@ -333,17 +334,22 @@ describe('load-accounts add and erase — #1383', () => {
     expect(await loadAthletes(data)).toEqual([]);
     expect(deviceKeysHeld(data.database, [fresh!.publicKey])).toBe(0);
 
-    // An account named like a load rider is still not one: erase leaves it.
-    const erased = run(data, '', 'load-accounts', 'erase');
-    expect(erased.report).toEqual({ command: 'load-accounts erase', erased: 0, remaining: 0 });
-    expect(rowsNaming(data.database, ['rider-d'])['athlete rider-d']).toBe(1);
-
-    // Nor does a second add take a key an earlier run already holds. The
-    // earlier run is set-up, in this process (#2568); the refusal is spawned.
-    expect((await runHere(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add')).status).toBe(0);
-    const twice = run(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add');
-    expect(twice.status).toBe(1);
+    // The key alone is added, as an operator adds one: the file's one add and
+    // one erase that write anything through `cli.ts` in a child (#2568).
+    const added = run(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add');
+    expect(added.report).toEqual({ command: 'load-accounts add', added: 1, held: 1 });
+    expect(deviceKeysHeld(data.database, [fresh!.publicKey])).toBe(1);
+    // Nor does a second add take a key an earlier run already holds.
+    expect((await runHere(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add')).status).toBe(1);
     expect(await loadAthletes(data)).toHaveLength(1);
+
+    // The erase takes the load account, and an account named like a load
+    // rider is still not one: it leaves that.
+    const erased = run(data, '', 'load-accounts', 'erase');
+    expect(erased.report).toEqual({ command: 'load-accounts erase', erased: 1, remaining: 0 });
+    expect(await loadAthletes(data)).toEqual([]);
+    expect(deviceKeysHeld(data.database, [fresh!.publicKey])).toBe(0);
+    expect(rowsNaming(data.database, ['rider-d'])['athlete rider-d']).toBe(1);
   });
 
   it.each([

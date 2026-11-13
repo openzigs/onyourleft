@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toHex } from '@onyourleft/domain';
 
@@ -32,6 +32,7 @@ import { madeRoom, ROOM_GPX } from '../rooms/rooms-testing.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { sha256Bytes } from '../sync/sync.ts';
 import { authorised, corpusFile, syncWorld, uploadBody } from '../sync/sync-testing.ts';
+import { runCommand } from './run.ts';
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
@@ -92,6 +93,33 @@ function run(data: Data, input: string, ...args: string[]) {
     });
     child.stdin.end(input);
   });
+}
+
+/**
+ * The command in this process: `runCommand`, which `cli.ts` only calls with its
+ * arguments, environment and standard input. A Node start is most of a spawned
+ * run (#2568: 0.5–0.8 s under coverage on CI), so a case about how `run.ts`
+ * reads its arguments spawns one form and runs the rest here.
+ */
+async function runHere(data: Data, input: string, ...args: string[]) {
+  let output = '';
+  const capture = (chunk: unknown): boolean => {
+    output += String(chunk);
+    return true;
+  };
+  const out = vi.spyOn(process.stdout, 'write').mockImplementation(capture);
+  const err = vi.spyOn(process.stderr, 'write').mockImplementation(capture);
+  try {
+    const status = await runCommand(args, {
+      database: data.database,
+      blobs: data.blobs,
+      readStandardInput: () => Promise.resolve(input),
+    });
+    return { status, output };
+  } finally {
+    out.mockRestore();
+    err.mockRestore();
+  }
 }
 
 /** Every table with a foreign key to `athlete`, and the athlete row: how many name `athleteId`. */
@@ -183,6 +211,20 @@ async function populated() {
     annasRoom,
     carasRoom,
   };
+}
+
+/**
+ * Anna alone, with nothing synced and no room: for a refusal that reads none
+ * of it (#2568: the whole of {@link populated} is a third of a case on CI).
+ */
+async function oneRider() {
+  directory = await mkdtemp(join(tmpdir(), 'oyl-instance-account-erase-'));
+  const blobs = join(directory, 'blobs');
+  const setup = await syncWorld(1, { blobStoreSeenBy: () => createDiskBlobStore(blobs) });
+  world = setup.world;
+  const [anna] = setup.riders;
+  if (anna === undefined) throw new Error('no rider');
+  return { w: setup.world, data: { database: setup.world.path, blobs } satisfies Data, anna };
 }
 
 /** Every form of a code a report or a refusal could leak it in. */
@@ -351,14 +393,24 @@ describe('account-erase — one rider’s account, by the recovery code they ema
   );
 
   it('takes the code from standard input only: one on the command line is refused, never echoed, and erases nothing', async () => {
-    const { w, data, anna } = await populated();
+    const { w, data, anna } = await oneRider();
     const code = anna.recoveryCodes[2] as string;
     const before = athleteRows(w.path, anna.athleteId);
-    for (const args of [[code], ['--confirm', code], [code, '--confirm']]) {
-      const refused = await run(data, `${code}\n`, 'account-erase', ...args);
-      expect(refused.status).toBe(1);
-      expect(refused.stderr).toMatch(/standard input, never from the command line/);
-      expect(leaks(refused.stdout + refused.stderr, code)).toBe(false);
+    // As an operator might type it, through `cli.ts`; the two other orders are
+    // `run.ts`'s alone, so they run in this process (#2568).
+    const spawned = await run(data, `${code}\n`, 'account-erase', code, '--confirm');
+    const refusals = [
+      { args: 'code --confirm', status: spawned.status, output: spawned.stdout + spawned.stderr },
+      { args: 'code', ...(await runHere(data, `${code}\n`, 'account-erase', code)) },
+      {
+        args: '--confirm code',
+        ...(await runHere(data, `${code}\n`, 'account-erase', '--confirm', code)),
+      },
+    ];
+    for (const refused of refusals) {
+      expect(refused.status, refused.args).toBe(1);
+      expect(refused.output, refused.args).toMatch(/standard input, never from the command line/);
+      expect(leaks(refused.output, code), refused.args).toBe(false);
     }
     expect(athleteRows(w.path, anna.athleteId)).toEqual(before);
   });
