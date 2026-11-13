@@ -152,6 +152,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   type CompressedTexture,
   ConeGeometry,
@@ -190,6 +191,7 @@ import {
   Quaternion,
   ClampToEdgeWrapping,
   RepeatWrapping,
+  RingGeometry,
   Scene,
   ShaderMaterial,
   ShadowMaterial,
@@ -492,6 +494,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
@@ -633,7 +636,12 @@ import {
   halfToFloat,
   HORIZON_AZIMUTH_BINS,
   PHOTOGRAPHIC_ROAD_GRAIN,
+  REALISTIC_DUSK_EXPOSURE_SHARE,
   REALISTIC_EXPOSURE,
+  REALISTIC_RAIN_SKY_SHARE,
+  duskSkyTexel,
+  rainSkyTexel,
+  skyRowElevation,
   REALISTIC_FOG_DIRECTION_SHARE,
   REALISTIC_HORIZON_BAND,
   REALISTIC_HORIZON_HAZE_SHARE,
@@ -663,13 +671,17 @@ import type {
   CameraPose,
   DeliveryCarMotion,
   DeliveryInView,
+  DeliveryMarkerKind,
+  DeliveryMarkerPiece,
   DeliveryObstacleKind,
   DeliveryObstaclePiece,
   DeliveryPiece,
+  DeliveryWeatherFrame,
   GameRenderer,
   GameView,
   LapRaceInView,
   LapRacePiece,
+  RiderCrashLook,
   RiderMarker,
   SceneFrame,
 } from './port';
@@ -724,6 +736,7 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
+import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
 import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
@@ -2445,8 +2458,10 @@ export class WorldLamps {
    * the shadow MAP's frame, on the one rung that has one, and
    * {@link aimShadowAt} moves both ends for that rung after this has run.
    */
-  apply(sun: SunStyle, ambientShare = 1): void {
+  apply(sun: SunStyle, ambientShare = 1, colour = 0xffffff): void {
     this.#sun.target.position.set(0, 0, 0);
+    // #2508: warm at a Delivery level's dusk (`weather-look.ts` §`sunColourIn`), white otherwise.
+    this.#sun.color.setHex(colour);
     // ⚠️ `ambientShare` is 0 in the realistic world (ADR 0026 D-9): the
     // environment map IS the ambient term there, solved to give a horizontal
     // surface exactly `sun.ambient` (`realistic-light.ts`), and an ambient lamp
@@ -2926,6 +2941,25 @@ export class ScatterBelt {
           ? this.#fold.materials[shading]
           : this.#materials[shading];
     }
+  }
+
+  /**
+   * Shades every item the belt draws by `shade`, linear, each channel — PR
+   * #2522: the stylised world's scenery at a Delivery level's dusk, which
+   * goes down with the ground it stands on (`weather-look.ts`
+   * §`sceneryShadeIn`); white otherwise. Its vertex colours are multiplied
+   * by the material's colour, lit or flat, so this is two colour writes and
+   * no draw call. @see shade
+   */
+  setShade(shade: readonly [number, number, number]): void {
+    this.#materials.lit.color.setRGB(shade[0], shade[1], shade[2]);
+    this.#materials.flat.color.setRGB(shade[0], shade[1], shade[2]);
+  }
+
+  /** PR #2522: the shade the belt's materials were last given, linear. For the jsdom suite. */
+  shade(): readonly [number, number, number] {
+    const { r, g, b } = this.#materials.lit.color;
+    return [r, g, b];
   }
 
   /**
@@ -4831,6 +4865,12 @@ export class TerrainBelt {
     this.#applyRange();
   }
 
+  /** PR #2522: the ground's colour as last drawn, linear, lit material. For the browser gate. */
+  colour(): readonly [number, number, number] {
+    const { r, g, b } = this.#materials.lit.color;
+    return [r, g, b];
+  }
+
   /**
    * This frame's ground, in the world's ground colour. Grows its buffers and
    * never shrinks them, for the road's reason (#240's NFR-3).
@@ -6177,7 +6217,7 @@ export interface RealisticShape {
 }
 
 /** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
-interface RealisticSky {
+export interface RealisticSky {
   readonly texture: DataTexture;
   /** The cosine-weighted mean radiance of its upper hemisphere. */
   readonly upward: number;
@@ -6578,7 +6618,11 @@ export function compressedRealisticLoaders(
     model: async (url) => {
       const manager = new LoadingManager();
       manager.setURLModifier(realisticResourceUrl(url));
-      return (await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url)).scene;
+      const gltf = await new GLTFLoader(manager).setKTX2Loader(ktx2).loadAsync(url);
+      // #2493: a model's clips travel on its scene, where three keeps them:
+      // the rider's crash clip is read off it by `RealisticRiderBelt`.
+      gltf.scene.animations = gltf.animations;
+      return gltf.scene;
     },
     texture: (url) => ktx2.loadAsync(url),
     sky: (url) => new HDRLoader().loadAsync(url),
@@ -7435,6 +7479,7 @@ function surfaceMapsOf(world: RealisticWorld): readonly Texture[] {
 /** Releases a realistic world that another has replaced. */
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
+  releaseWeatheredSkies(world.sky);
   world.banners?.texture.dispose();
   world.wordmark.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
@@ -7467,6 +7512,88 @@ function skyPixelsOf(texture: DataTexture): SkyPixels {
       return half ? halfToFloat(value) : value;
     },
   };
+}
+
+/** Each loaded sky's weathers, each graded once, by {@link weatherKey}. @see weatheredSkyOf */
+const WEATHERED_SKIES = new WeakMap<RealisticSky, Map<string, RealisticSky>>();
+
+/** Which grade a weather asks of the sky: `dusk`, `rain` or both. */
+function weatherKey(weather: DeliveryWeatherFrame): string {
+  return `${weather.dusk ? 'dusk' : ''}|${weather.rain ? 'rain' : ''}`;
+}
+
+/**
+ * `sky` in a Delivery level's dusk or rain — #2508: its photograph graded
+ * texel by texel (`realistic-light.ts` §`duskSkyTexel`, then
+ * §`rainSkyTexel`), into a texture of its own format, and every band the view
+ * reads off a sky read again off the graded one, so the haze, the horizon
+ * ring and the water converge on the sky drawn behind them. Built once a sky
+ * and a weather, on its first frame, and kept until the world is released
+ * ({@link releaseWeatheredSkies}). Its `upward` is the daytime sky's: the
+ * environment that lights the surfaces is still the daytime one, dimmed by
+ * the weather's ambient share (`weather-look.ts`). The sky itself in clear
+ * daylight.
+ */
+export function weatheredSkyOf(
+  sky: RealisticSky,
+  weather: DeliveryWeatherFrame | undefined,
+): RealisticSky {
+  if (weather === undefined || (!weather.dusk && !weather.rain)) return sky;
+  const key = weatherKey(weather);
+  const made = WEATHERED_SKIES.get(sky)?.get(key);
+  if (made !== undefined) return made;
+  const source = sky.texture;
+  const image = source.image as { width: number; height: number; data: ArrayLike<number> };
+  const { width, height, data } = image;
+  const half = source.type === HalfFloatType;
+  const graded = half ? new Uint16Array(data.length) : new Float32Array(data.length);
+  const read = (index: number): number => {
+    const value = data[index] ?? 0;
+    return half ? DataUtils.fromHalfFloat(value) : value;
+  };
+  for (let row = 0; row < height; row += 1) {
+    const elevation = skyRowElevation(row, height);
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      let [r, g, b] = [read(at), read(at + 1), read(at + 2)];
+      if (weather.dusk) [r, g, b] = duskSkyTexel(r, g, b, elevation, sky.upward);
+      if (weather.rain) [r, g, b] = rainSkyTexel(r, g, b);
+      graded[at] = half ? DataUtils.toHalfFloat(r) : r;
+      graded[at + 1] = half ? DataUtils.toHalfFloat(g) : g;
+      graded[at + 2] = half ? DataUtils.toHalfFloat(b) : b;
+      graded[at + 3] = data[at + 3] ?? 0;
+    }
+  }
+  const texture = new DataTexture(graded, width, height, RGBAFormat, source.type);
+  texture.mapping = source.mapping;
+  texture.colorSpace = source.colorSpace;
+  texture.flipY = source.flipY;
+  texture.minFilter = source.minFilter;
+  texture.magFilter = source.magFilter;
+  texture.generateMipmaps = source.generateMipmaps;
+  texture.needsUpdate = true;
+  const pixels = skyPixelsOf(texture);
+  const directions = skyHorizonTable(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]);
+  const weathered: RealisticSky = {
+    texture,
+    upward: sky.upward,
+    sunU: sky.sunU,
+    zenith: skyBandRadiance(pixels, WATER_ZENITH_BAND[0], WATER_ZENITH_BAND[1]),
+    horizon: skyBandRadiance(pixels, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]),
+    skyline: skyBandRadiance(pixels, REALISTIC_HORIZON_BAND[0], REALISTIC_HORIZON_BAND[1]),
+    directions,
+    flatDirections: flattenedTable(directions),
+  };
+  const weathers = WEATHERED_SKIES.get(sky) ?? new Map<string, RealisticSky>();
+  weathers.set(key, weathered);
+  WEATHERED_SKIES.set(sky, weathers);
+  return weathered;
+}
+
+/** Releases every weather `sky` was graded for. @see weatheredSkyOf */
+export function releaseWeatheredSkies(sky: RealisticSky): void {
+  for (const each of WEATHERED_SKIES.get(sky)?.values() ?? []) each.texture.dispose();
+  WEATHERED_SKIES.delete(sky);
 }
 
 /**
@@ -8588,10 +8715,7 @@ function withAutumn(material: Material): void {
           IMPOSTOR_TINT_LINE,
           'gl_FragColor = vec4(oylAutumnOf(oylTinted(texel.rgb, vOylTint), oylAutumn), 1.0);',
         ]
-      : [
-          MESH_TINT_LINE,
-          `${MESH_TINT_LINE}\ndiffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);`,
-        ];
+      : [MESH_TINT_LINE, `${MESH_TINT_LINE}\n${MESH_AUTUMN_LINE}`];
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   material.onBeforeCompile = (shader, renderer) => {
@@ -8619,6 +8743,64 @@ const MESH_TINT_LINE = 'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint)
 
 /** The line a tree's impostor applies #621's tint at. @see impostorMaterial */
 const IMPOSTOR_TINT_LINE = 'gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);';
+
+/** The line a broadleaf's mesh turns its autumn at, after its tint. @see withAutumn */
+const MESH_AUTUMN_LINE = 'diffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);';
+
+/** The materials {@link withWeatherShade} has taught. */
+const WEATHER_SHADED = new WeakSet<Material>();
+
+/**
+ * Whether a material is shaded by a Delivery level's weather — PR #2522.
+ *
+ * @test-facing held by `seasonal-nature.test.ts` §"PR #2522", which asserts the
+ * vegetation, the hedge and every realistic house are taught it
+ */
+export function shadedByWeather(material: Material): boolean {
+  return WEATHER_SHADED.has(material);
+}
+
+/**
+ * Teaches a realistic plant's, hedge's or house's material the weather's
+ * shade — the owner's ruling on PR #2522: at dusk the trees "stay bright
+ * green and look pasted on" against a ground that `weather-look.ts` darkens
+ * and warms, and (2026-11-12) the houses go down with them. Its
+ * surface colour is multiplied by {@link FOLIAGE}'s `oylWeatherShade` — at
+ * dusk the ground's own darkening, white otherwise — after its seeded tint
+ * and its autumn, before its light, so the sun and the sky light it as they
+ * light the ground. A uniform and a multiply: no draw call.
+ *
+ * The material must already have been taught its tint
+ * ({@link withInstanceChannels} or {@link withVertexTint}); spliced after the last of its tint lines,
+ * and throws at compile, as the tint does, if neither is there. Idempotent.
+ */
+function withWeatherShade(material: Material): void {
+  if (WEATHER_SHADED.has(material)) return;
+  WEATHER_SHADED.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms['oylWeatherShade'] = FOLIAGE.oylWeatherShade;
+    const after = shader.fragmentShader.includes(MESH_AUTUMN_LINE)
+      ? MESH_AUTUMN_LINE
+      : MESH_TINT_LINE;
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform vec3 oylWeatherShade;',
+        'fragment',
+        "PR #2522's weather shade",
+      ),
+      after,
+      `${after}\ndiffuseColor.rgb *= oylWeatherShade;`,
+      'fragment',
+      "PR #2522's weather shade",
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-weather-shade`;
+}
 
 /**
  * What each material {@link withInstanceChannels} has taught reads: `true`
@@ -8940,6 +9122,18 @@ const FOLIAGE = {
   oylImpostorLit: { value: 1 },
   /** 1 in the product; 0 holds every plant still. @see foliageStillOf */
   oylSwayScale: { value: 1 },
+  /**
+   * PR #2522: the vegetation's and the hedges' shade under a Delivery level's
+   * weather, linear — at dusk the ground's own darkening, white otherwise
+   * (`weather-look.ts` §`sceneryShadeIn`). @see withWeatherShade
+   */
+  oylWeatherShade: { value: new Vector3(1, 1, 1) },
+  /**
+   * PR #2522: how much of the route's own light the frame's sun gives, linear
+   * (`weather-look.ts` §`sunShareIn`) — read by the impostors alone, whose
+   * relight is a ratio and so never dims with the sun the meshes are lit by.
+   */
+  oylImpostorSun: { value: new Vector3(1, 1, 1) },
 };
 
 /** Which layers of a merged tree material are leaves — #630. @see mergeShapeMaterials */
@@ -11091,9 +11285,12 @@ export interface DrawnDeliveryPiece {
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Which of the roster, for an obstacle; `undefined` for a parcel or a marker. */
-  readonly kind: DeliveryObstacleKind | undefined;
-  /** For a parked car, which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
+  /**
+   * Which of the roster, for an obstacle; which marker, for a marker (#2365);
+   * `undefined` for a parcel.
+   */
+  readonly kind: DeliveryObstacleKind | DeliveryMarkerKind | undefined;
+  /** For a parked car or a car pulling out (#2506), which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
   /** For a car in a belt drawing Kenney's (#2540), the pose its instance was given; else `undefined`. */
   readonly pose?: DeliveryCarPose | undefined;
@@ -11129,6 +11326,48 @@ const DELIVERY_PIECE_ATTRIBUTE = 'oylPiece';
 const DELIVERY_OBSTACLE_ATTRIBUTE = 'oylObstacle';
 
 /**
+ * The vertex attribute packing two more things about each vertex in one
+ * `vec2`, each in a component of its own, so #2540's realistic car program
+ * stays inside `realistic-budget.ts` §`DELIVERY_MOST_VERTEX_ATTRIBUTES` (one
+ * slot, where two one-float attributes would take two; see
+ * {@link DELIVERY_PIECE_ATTRIBUTE} for why slots are counted):
+ *
+ * - `x`: a second kind whose instance also draws the vertex, by its index in
+ *   the roster, or `-1` for none — #2506: a parked car's vertices are drawn
+ *   by a car pulling out's instance too, so the one car in the geometry is
+ *   both cars' body, and a car pulling out adds only its own hazard marker
+ *   and indicators.
+ * - `y`: 1 where the part is drawn in its own paint PAST the tone mapping —
+ *   #2507, the owner's ruling on PR #2518: the realistic world's AgX tone
+ *   mapping (`realistic-light.ts`) turns a glowing amber into tan, and no
+ *   amber paint survives it saturated (the most it gives a bright amber is
+ *   about half saturation). 1 replaces the tone-mapped colour with the
+ *   part's paint, before the output's colour space and the fog, as the
+ *   stylised world (no tone mapping) draws every part; 0 changes nothing.
+ *   Only a mailbox's diamond carries it.
+ *
+ * @see withObstacleKinds
+ */
+const DELIVERY_PIECE_ALSO_ATTRIBUTE = 'oylPieceAlso';
+
+/**
+ * Which of the roster's instances draw a vertex of the obstacle geometry, as
+ * {@link withObstacleKinds}' vertex shader decides it: an instance of its own
+ * kind, and one of the kind it names in {@link DELIVERY_PIECE_ALSO_ATTRIBUTE}.
+ * The shader's rule restated, so the jsdom suite can say what an instance of a
+ * kind draws; `delivery-belt.test.ts` holds the shader's text to it.
+ *
+ * @test-facing the product draws through the shader and does not call this
+ */
+export function deliveryObstacleVertexDrawn(
+  pieceKind: number,
+  pieceAlso: number,
+  instanceKind: number,
+): boolean {
+  return Math.abs(pieceKind - instanceKind) < 0.5 || Math.abs(pieceAlso - instanceKind) < 0.5;
+}
+
+/**
  * Each obstacle's footprint, metres: `delivery/obstacles.ts` §`OBSTACLE_KINDS`'
  * half sizes, along the road and across it, so what the rider sees is what
  * the rider hits. ⚠️ **Restated, not imported**: nothing the view reaches
@@ -11143,6 +11382,9 @@ const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<
   trolley: { halfLength: 0.25, halfWidth: 0.3 },
   cone: { halfLength: 0.2, halfWidth: 0.2 },
   'parked-car': { halfLength: 2.2, halfWidth: 0.9 },
+  dog: { halfLength: 0.2, halfWidth: 0.45 },
+  'car-pulling-out': { halfLength: 2.2, halfWidth: 0.9 },
+  'oncoming-rider': { halfLength: 0.85, halfWidth: 0.3 },
 };
 
 /** The roster, in order: a kind's index is its number in both attributes. */
@@ -11161,6 +11403,11 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
  */
 const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
 
+/** Whether a kind is drawn with the car's body, and so wears one of {@link PARKED_CAR_PAINTS}: a parked car, and a car pulling out (#2506). */
+function isCarKind(kind: DeliveryObstacleKind): boolean {
+  return kind === 'parked-car' || kind === 'car-pulling-out';
+}
+
 /** Which of {@link PARKED_CAR_PAINTS} a car piece wears: by its place on the round, so it keeps its colour for the ride. */
 function parkedCarPaint(piece: DeliveryObstaclePiece): number {
   return (piece.index ?? 0) % PARKED_CAR_PAINTS.length;
@@ -11170,8 +11417,9 @@ function parkedCarPaint(piece: DeliveryObstaclePiece): number {
  * Teaches a material to draw ONE of the obstacle roster's shapes per instance
  * — #1814. Every obstacle instance carries every kind's triangles, each
  * vertex marked with its kind ({@link DELIVERY_PIECE_ATTRIBUTE}'s `x`); a vertex
- * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_ATTRIBUTE}'s `w`)
- * is collapsed to the instance's origin, so its triangles have no area and
+ * whose kind is not the instance's ({@link DELIVERY_OBSTACLE_ATTRIBUTE}'s `w`),
+ * and whose second kind ({@link DELIVERY_PIECE_ALSO_ATTRIBUTE}'s `x`, #2506) is not
+ * either, is collapsed to the instance's origin, so its triangles have no area and
  * draw no pixel. That is what lets a wheelie bin, a hand trolley and a cone
  * share one instanced call: an instanced draw is ONE geometry, and three's
  * `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's page's
@@ -11194,12 +11442,13 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute vec4 ${DELIVERY_PIECE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_OBSTACLE_ATTRIBUTE};`,
+        `#include <common>\nattribute vec4 ${DELIVERY_PIECE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_OBSTACLE_ATTRIBUTE};\nattribute vec2 ${DELIVERY_PIECE_ALSO_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed *= 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_ATTRIBUTE}.x - ${DELIVERY_OBSTACLE_ATTRIBUTE}.w ) );`,
+      // #2506: or of the kind it also belongs to (deliveryObstacleVertexDrawn).
+      `#include <begin_vertex>\n\ttransformed *= max( 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_ATTRIBUTE}.x - ${DELIVERY_OBSTACLE_ATTRIBUTE}.w ) ), 1.0 - step( 0.5, abs( ${DELIVERY_PIECE_ALSO_ATTRIBUTE}.x - ${DELIVERY_OBSTACLE_ATTRIBUTE}.w ) ) );`,
       'vertex',
       spliced,
     );
@@ -11209,6 +11458,33 @@ function withObstacleKinds<M extends Material>(material: M): M {
       '#include <color_vertex>',
       `#include <color_vertex>\n\tvColor.xyz = mix( vColor.xyz, ${DELIVERY_OBSTACLE_ATTRIBUTE}.xyz, ${DELIVERY_PIECE_ATTRIBUTE}.y );`,
       'vertex',
+      spliced,
+    );
+    // #2507: an untoned part leaves the tone mapping with its own paint.
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylUntoned;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n\tvOylUntoned = ${DELIVERY_PIECE_ALSO_ATTRIBUTE}.y;`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylUntoned;',
+        'fragment',
+        spliced,
+      ),
+      '#include <tonemapping_fragment>',
+      '#include <tonemapping_fragment>\n\tgl_FragColor.rgb = mix( gl_FragColor.rgb, diffuseColor.rgb, vOylUntoned );',
+      'fragment',
       spliced,
     );
   };
@@ -11221,8 +11497,12 @@ interface DeliveryPart {
   readonly made: BufferGeometry;
   readonly colour: number;
   readonly glows?: boolean;
+  /** Drawn in its own paint past the tone mapping (#2507). @see DELIVERY_PIECE_ALSO_ATTRIBUTE */
+  readonly untoned?: boolean;
   /** For an obstacle: which of the roster, by index. */
   readonly kind?: number;
+  /** For an obstacle: a second kind whose instance also draws it, by index (#2506). */
+  readonly also?: number;
   /** For a parked car's body: its colour is the instance's paint (#2362). */
   readonly painted?: boolean;
   /** Each corner's own colour, linear RGB, in place of {@link colour} — #2540, Kenney's car. */
@@ -11240,28 +11520,109 @@ interface DeliveryPart {
  * in), and, where any part names a kind, each vertex's kind. The parts'
  * geometries are disposed.
  */
-function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
-  const flats = parts.map((part) =>
-    part.made.index === null ? part.made : part.made.toNonIndexed(),
+/**
+ * Whether the triangle at `first` (its three corners from there) faces
+ * straight down and lies wholly under the chase camera's eye — #2507, PR
+ * #2518's trim: from an eye `camera.ts` §`CAMERA_ABOVE_METRES` over the road
+ * such a face is always seen from behind, and Delivery's materials draw front
+ * faces only (`decorationMaterials`) and cast no shadow, so it is culled on
+ * every frame and drawing it costs a triangle for no pixel: the bottom of a
+ * bin, a cone's foot or a post standing on the road, a car's underside and
+ * the underside of a mailbox's box. Facing down is the winding's normal,
+ * three's front face, within a degree or so of straight down.
+ */
+function isUnderside(position: BufferAttribute, first: number): boolean {
+  const [ax, ay, az] = [position.getX(first), position.getY(first), position.getZ(first)];
+  const [ux, uy, uz] = [
+    position.getX(first + 1) - ax,
+    position.getY(first + 1) - ay,
+    position.getZ(first + 1) - az,
+  ];
+  const [vx, vy, vz] = [
+    position.getX(first + 2) - ax,
+    position.getY(first + 2) - ay,
+    position.getZ(first + 2) - az,
+  ];
+  const [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const length = Math.hypot(nx, ny, nz);
+  const highest = Math.max(ay, position.getY(first + 1), position.getY(first + 2));
+  return length > 0 && ny / length < -0.99 && highest < CAMERA_ABOVE_METRES;
+}
+
+/**
+ * Only the triangles of `flat` (unindexed) that are not an {@link isUnderside},
+ * as a new geometry of its position and normal — the two {@link deliveryShape}
+ * reads — with `colours`, a part's own per-corner colours (#2540), kept in
+ * step. `flat` and `colours` themselves when none is.
+ */
+function withoutUndersides(
+  flat: BufferGeometry,
+  colours: Float32Array | undefined,
+): { readonly flat: BufferGeometry; readonly colours: Float32Array | undefined } {
+  const position = flat.getAttribute('position') as BufferAttribute;
+  const normal = flat.getAttribute('normal') as BufferAttribute;
+  const kept: number[] = [];
+  for (let first = 0; first < position.count; first += 3) {
+    if (!isUnderside(position, first)) kept.push(first);
+  }
+  if (kept.length * 3 === position.count) return { flat, colours };
+  const positions = new Float32Array(kept.length * 9);
+  const normals = new Float32Array(kept.length * 9);
+  const keptColours = colours === undefined ? undefined : new Float32Array(kept.length * 9);
+  kept.forEach((first, index) => {
+    positions.set(position.array.subarray(first * 3, first * 3 + 9), index * 9);
+    normals.set(normal.array.subarray(first * 3, first * 3 + 9), index * 9);
+    keptColours?.set(colours?.subarray(first * 3, first * 3 + 9) ?? [], index * 9);
+  });
+  const trimmed = new BufferGeometry();
+  trimmed.setAttribute('position', new BufferAttribute(positions, 3));
+  trimmed.setAttribute('normal', new BufferAttribute(normals, 3));
+  return { flat: trimmed, colours: keptColours };
+}
+
+/** Whether a part turns on its own, so that a face down now is not down a moment on: Kenney's car's wheels (#2540). */
+function turnsOnItsOwn(part: DeliveryPart): boolean {
+  return (
+    part.carPart === DELIVERY_CAR_PART_CODES['front-wheel'] ||
+    part.carPart === DELIVERY_CAR_PART_CODES['back-wheel']
   );
-  const vertices = flats.reduce((sum, flat) => sum + flat.getAttribute('position').count, 0);
+}
+
+function deliveryShape(
+  parts: readonly DeliveryPart[],
+  /**
+   * #2507: leave out every {@link isUnderside}; for pieces that stand on the
+   * road. Not of a part that turns on its own ({@link turnsOnItsOwn}): a
+   * rolling wheel's underside is soon its side.
+   */
+  undersides: 'keep' | 'drop' = 'keep',
+): BufferGeometry {
+  const flats = parts.map((part) => {
+    const flat = part.made.index === null ? part.made : part.made.toNonIndexed();
+    if (undersides === 'keep' || turnsOnItsOwn(part)) return { flat, colours: part.colours };
+    const trimmed = withoutUndersides(flat, part.colours);
+    if (trimmed.flat !== flat && flat !== part.made) flat.dispose();
+    return trimmed;
+  });
+  const vertices = flats.reduce((sum, each) => sum + each.flat.getAttribute('position').count, 0);
   const positions = new Float32Array(vertices * 3);
   const normals = new Float32Array(vertices * 3);
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
   const pieces = new Float32Array(vertices * 4);
   const pivots = new Float32Array(vertices * 3);
+  const more = new Float32Array(vertices * 2);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
-    const flat = flats[index] as BufferGeometry;
+    const { flat, colours: own } = flats[index] as (typeof flats)[number];
     const count = flat.getAttribute('position').count;
     positions.set(flat.getAttribute('position').array, at * 3);
     normals.set(flat.getAttribute('normal').array, at * 3);
     paint.set(part.colour);
-    if (part.colours !== undefined) colours.set(part.colours, at * 3);
+    if (own !== undefined) colours.set(own, at * 3);
     for (let corner = at; corner < at + count; corner += 1) {
-      if (part.colours === undefined) {
+      if (own === undefined) {
         colours[corner * 3] = paint.r;
         colours[corner * 3 + 1] = paint.g;
         colours[corner * 3 + 2] = paint.b;
@@ -11274,6 +11635,8 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
       pivots[corner * 3] = part.pivot?.[0] ?? 0;
       pivots[corner * 3 + 1] = part.pivot?.[1] ?? 0;
       pivots[corner * 3 + 2] = part.pivot?.[2] ?? 0;
+      more[corner * 2] = part.also ?? -1;
+      more[corner * 2 + 1] = part.untoned === true ? 1 : 0;
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -11286,6 +11649,7 @@ function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_ATTRIBUTE, new BufferAttribute(pieces, 4));
+    geometry.setAttribute(DELIVERY_PIECE_ALSO_ATTRIBUTE, new BufferAttribute(more, 2));
   }
   // #2540: Kenney's car's pivots, for withDeliveryCarPose; its parts and indicators are in the piece's `zw`.
   if (parts.some((part) => part.carPart !== undefined)) {
@@ -11349,6 +11713,69 @@ const DELIVERY_PAINT = {
   carPlate: 0xe9e9e4,
   black: 0x1e1e1e,
   hazard: 0xe8432f,
+  // #2506: a car pulling out's lit indicators, amber.
+  indicator: 0xf59a1b,
+  // #2364: a brown dog with a darker muzzle and tail, and another rider in a
+  // teal jacket and dark legs on a grey bicycle, this project's own.
+  dogCoat: 0x8a5a35,
+  dogDark: 0x4a2f1c,
+  riderJacket: 0x2a8c8c,
+  riderLegs: 0x2b2f36,
+  riderSkin: 0xd2a07c,
+  riderFrame: 0x7d848c,
+  // #2365: a mailbox's slate box, this project's own. #2507: its raised red
+  // flag, and its diamond's amber, deeper and more orange than a doorstep's
+  // gold (`glow`), drawn untoned so it stays amber in the realistic world.
+  mailbox: 0x3d5a73,
+  mailboxFlag: 0xc0392b,
+  mailboxGlow: 0xff8a00,
+} as const;
+
+/**
+ * The markers a house wears, in order: a marker's kind is its index in both
+ * attributes ({@link withObstacleKinds}) — #2365.
+ */
+const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox', 'no-delivery'];
+
+/**
+ * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
+ * project's own. A mailbox: a box `box` long and 0.6 of that across and tall
+ * on a `post` post at the kerb, a glowing diamond `diamond` across over it,
+ * and a ring `ring` round its foot, the box, diamond and ring smaller than a
+ * doorstep's, as its catch is (the post, since #2507, thicker). A house that must not get a parcel: a `signPost` post with a
+ * glowing red ring `sign` across crossed by a bar, standing upright and
+ * facing the road, and **no** ring on the step, so it reads as a refusal by
+ * its shape and not only its colour.
+ *
+ * #2507, the owner's ruling on PR #2500: the mailbox was hard to pick out at
+ * 12 m and beyond, so it is drawn bigger: the box from 0.45 m long to 0.9 m
+ * (0.27 m to 0.54 m across and tall), the diamond from 0.45 m to 0.72 m
+ * across and the ring from 0.28 m to 0.42 m, and its 1 m post from 0.08 m
+ * thick, a doorstep's, to `postThick`, 0.14 m. From where
+ * its throw window opens, 20 m short of it, the whole mark stood about 77
+ * pixels tall on the owner's 1280×800 tablet, up from 58, and the box about
+ * 16, up from 8. Only the drawing grew: the catch is still
+ * `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
+ *
+ * The owner's second ruling on PR #2518 (2026-11-12): **the whole mailbox
+ * stands below a house marker's top**, now that #2530 stands that marker low
+ * on its step, its top about 1.86 m (a 0.6 m post under a 0.9 m diamond
+ * stretched 1.4). So the post came down from 1 m to 0.5 m, the diamond from
+ * 0.72 m across to 0.5 m, and its gap over the roof from 0.1 m to
+ * `diamondGap`, 0.05 m: the top from 2.65 m to 1.79 m. The box keeps its
+ * 0.9 m, what makes it read as a mailbox at 12 m to 20 m: the whole mark now
+ * stands about 62 pixels at 12 m and 52 at 20 m, the box 19 and 16
+ * (`delivery-belt.test.ts` §"#2507").
+ */
+const OTHER_MARKER_METRES = {
+  post: 0.5,
+  postThick: 0.14,
+  box: 0.9,
+  diamond: 0.5,
+  diamondGap: 0.05,
+  ring: 0.42,
+  signPost: 2.4,
+  sign: 0.8,
 } as const;
 
 /**
@@ -11382,8 +11809,33 @@ const HAZARD_MARKER_HEIGHT_METRES = 0.36;
  */
 const HAZARD_MARKER_REACH_METRES = 0.2;
 
-/** The kinds that carry {@link obstacleHazardMarker}: those narrower than the rider's shoulders' reach. */
-const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone'];
+/**
+ * A car pulling out's hazard marker, in metres — #2506, the owner's ruling of
+ * 2026-11-12: the small kinds' 0.36 m marker, 2.7 m up, was 8 to 10 pixels
+ * from the chase camera at 20 m on the tablet's 1280×800, too small to read.
+ * A car is 1.8 m wide, so its marker may be wider than the cone's reach
+ * allows the small kinds': **1.2 m tall and 1.2 m across**, its middle
+ * **3.2 m** up, so its bottom (2.6 m) stays over the camera's near reach
+ * as {@link HAZARD_MARKER_MIDDLE_METRES} argues, and its top stands well above
+ * any parked car in front of it. The same four-sided pyramid, the same 8
+ * triangles: it is larger and costs nothing more. `delivery-belt.test.ts`
+ * holds its projected height on that frame from 20 m.
+ */
+const CAR_HAZARD_MARKER = { middle: 3.2, height: 1.2, reach: 0.6 } as const;
+
+/**
+ * The kinds that carry {@link obstacleHazardMarker}: those narrower than the
+ * rider's shoulders' reach, and since #2506 a car pulling out, which moves:
+ * every moving hazard carries one, and a parked car does not.
+ */
+const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = [
+  'bin',
+  'trolley',
+  'cone',
+  'dog',
+  'car-pulling-out',
+  'oncoming-rider',
+];
 
 /**
  * An obstacle's hazard marker — #2396: a glowing red pyramid pointing down
@@ -11398,12 +11850,20 @@ const HAZARD_MARKED_KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 
  * drawing and decides nothing: no collision reads it. **Not on a parked
  * car** ({@link HAZARD_MARKED_KINDS}): 1.8 m wide, a car is never behind a
  * rider 0.4 m wide, and a red sign over an ordinary parked car is a sign
- * the street does not have.
+ * the street does not have. **On a car pulling out** (#2506): it moves into
+ * the road, and with no marker it was drawn as an ordinary parked car.
  */
-function obstacleHazardMarker(): BufferGeometry {
-  return new ConeGeometry(HAZARD_MARKER_REACH_METRES, HAZARD_MARKER_HEIGHT_METRES, 4, 1)
-    .rotateX(Math.PI)
-    .translate(0, HAZARD_MARKER_MIDDLE_METRES, 0);
+function obstacleHazardMarker(kind: DeliveryObstacleKind): BufferGeometry {
+  // #2506: a car pulling out's is larger (CAR_HAZARD_MARKER).
+  const { middle, height, reach } =
+    kind === 'car-pulling-out'
+      ? CAR_HAZARD_MARKER
+      : {
+          middle: HAZARD_MARKER_MIDDLE_METRES,
+          height: HAZARD_MARKER_HEIGHT_METRES,
+          reach: HAZARD_MARKER_REACH_METRES,
+        };
+  return new ConeGeometry(reach, height, 4, 1).rotateX(Math.PI).translate(0, middle, 0);
 }
 
 /** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
@@ -11415,38 +11875,205 @@ function parcelShape(): BufferGeometry {
 }
 
 /**
- * A house marker's sizes at its true size, metres — #2453: a white post
- * `post` tall, so its head clears a garden hedge, a front fence and a parked
- * car, with a glowing amber diamond `diamond` across standing on it, and a
- * glowing ring on the step. Until #2453 the post was 1.5 m and the diamond
- * 0.4 m across: from 100 m up the road on the owner's 1280×800 tablet that
- * changed 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
+ * A house marker's sizes at its true size, metres — #2453, lowered by #2513:
+ * a white post `post` tall with a glowing amber diamond `diamond` across
+ * standing on it, and a glowing ring on the step.
+ *
+ * ⚠️ **Low, at the doorstep, never over the house — #2513.** Until #2513 the
+ * post was 2.4 m, so its head cleared a hedge; but {@link markerScaleAt}
+ * enlarges a far marker about its foot, so the diamond rose with distance,
+ * about 15 m above the step at 100 m, and on the owner's 1280×800 tablet it
+ * stood behind the top-right HUD panel from about 100 m to 7 m out (the
+ * owner's frames of 2026-11-12). The diamond's middle is now at about a
+ * rider's eye height, so enlarged it stays near the horizon, under every
+ * panel's bottom edge: `browser/delivery.browser.spec.ts` §"#2513" projects
+ * it from 100 m to 20 m before a house at every overlay tablet and holds it
+ * outside every HUD panel. Before #2513 the post was 2.4 m; before #2453 it
+ * was 1.5 m and the diamond 0.4 m across, which from 100 m up the road changed
+ * 2 pixels of the frame (`browser/realistic-delivery.browser.spec.ts`
  * §"#2453").
  */
-const MARKER_METRES = { post: 2.4, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
+const MARKER_METRES = { post: 0.6, postThick: 0.08, diamond: 0.9, ring: 0.5 } as const;
+
+/**
+ * A mailbox's raised flag, metres — #2507: a red plate this tall and long at
+ * its side, standing over its roof toward its back.
+ */
+const MAILBOX_FLAG_METRES = { height: 0.45, length: 0.22 } as const;
+
+/**
+ * A glowing ring lying on the step, `radius` to the middle of its band and
+ * `band` either side — #2507: flat, 24 triangles, where a torus of 3 by 12
+ * was 72 the same size from above; every marker instance submits it, twice
+ * (a doorstep's and a mailbox's), so the frame's triangles fit.
+ */
+function stepRing(radius: number, band: number): BufferGeometry {
+  return new RingGeometry(radius - band, radius + band, 12, 1)
+    .rotateX(-Math.PI / 2)
+    .translate(0, 0.04, 0);
+}
+
+/**
+ * A no-delivery sign's ring, standing upright across the road's line,
+ * `radius` to the middle of its band and `band` either side — #2507: flat,
+ * **32 triangles**, where the torus of 3 by 12 it replaces was 72. Two faces
+ * back to back, 8 sides each: the markers' materials draw front faces only,
+ * and a house's yaw turns toward the road, so the face an oncoming rider
+ * sees is the front on one side of the road and the back on the other. One
+ * face of 12 sides, 24 triangles, would vanish for every sign on one side.
+ */
+function signRing(radius: number, band: number): BufferGeometry {
+  const face = new RingGeometry(radius - band, radius + band, 8, 1).rotateY(Math.PI / 2);
+  const back = face.clone().rotateY(Math.PI);
+  const both = mergeGeometries([face.toNonIndexed(), back.toNonIndexed()]);
+  face.dispose();
+  back.dispose();
+  return both;
+}
 
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
-/** A marker, standing on the step at the origin: a post, a diamond at its head and a ring on the step. */
+/**
+ * Where a house marker's glowing diamond is, metres above its step at its
+ * true size — #2513: its bottom, its middle and its top. Enlarged by
+ * {@link markerScaleAt}, each is that many times higher, because a marker is
+ * scaled about its foot. `delivery-belt.test.ts` holds the drawn geometry to
+ * these, and the browser gate projects them.
+ *
+ * @test-facing `browser/delivery-harness.ts` projects the drawn diamond to the
+ * screen from a marker's instance; the product draws the geometry, never asks
+ * where it is
+ */
+export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; top: number }> =
+  Object.freeze({
+    bottom: MARKER_METRES.post,
+    middle: MARKER_METRES.post + (MARKER_METRES.diamond / 2) * MARKER_DIAMOND_STRETCH,
+    top: MARKER_METRES.post + MARKER_METRES.diamond * MARKER_DIAMOND_STRETCH,
+  });
+
+/**
+ * The markers, every kind in one geometry, each standing on its spot at the
+ * origin (#2365, {@link DELIVERY_MARKER_ORDER}, each vertex marked with its
+ * kind as the obstacles' are, {@link withObstacleKinds}): a doorstep's post, a
+ * diamond at its head and a ring on the step; a mailbox's box on a short post
+ * with a smaller diamond and ring; and a no-delivery sign, a crossed ring on a
+ * post with no ring on the step ({@link OTHER_MARKER_METRES}).
+ */
 function markerShape(): BufferGeometry {
   const { post, postThick, diamond, ring } = MARKER_METRES;
   const half = diamond / 2;
-  return deliveryShape([
-    { made: deliveryBox(postThick, post, postThick, 0, post / 2, 0), colour: DELIVERY_PAINT.post },
+  const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
+  const other = OTHER_MARKER_METRES;
+  const box = other.box;
+  const boxAcross = box * 0.6;
+  const mailboxHalf = other.diamond / 2;
+  const parts: readonly DeliveryPart[] = [
+    {
+      made: deliveryBox(postThick, post, postThick, 0, post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('house'),
+    },
     {
       made: new OctahedronGeometry(half, 0)
         .scale(1, MARKER_DIAMOND_STRETCH, 1)
         .translate(0, post + half * MARKER_DIAMOND_STRETCH, 0),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
     },
     {
-      made: new TorusGeometry(ring, 0.035, 3, 12).rotateX(-Math.PI / 2).translate(0, 0.04, 0),
+      made: stepRing(ring, 0.035),
       colour: DELIVERY_PAINT.glow,
       glows: true,
+      kind: kind('house'),
     },
-  ]);
+    // #2365: a mailbox at the kerb, on a sturdier post than a doorstep's since #2507.
+    {
+      made: deliveryBox(other.postThick, other.post, other.postThick, 0, other.post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('mailbox'),
+    },
+    // #2507, the owner's ruling on PR #2518: a mailbox's shape, not a cube. Its
+    // lower half a box, its upper a half-round roof along its length, so it
+    // stands 0.6 of its length across and tall as before, and a red flag
+    // raised at its side, standing above the roof.
+    {
+      made: deliveryBox(boxAcross, boxAcross / 2, box, 0, other.post + boxAcross / 4, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind: kind('mailbox'),
+    },
+    {
+      made: new CylinderGeometry(
+        boxAcross / 2,
+        boxAcross / 2,
+        box,
+        4,
+        1,
+        false,
+        Math.PI / 2,
+        Math.PI,
+      )
+        .rotateX(Math.PI / 2)
+        .translate(0, other.post + boxAcross / 2, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind: kind('mailbox'),
+    },
+    {
+      made: deliveryBox(
+        0.03,
+        MAILBOX_FLAG_METRES.height,
+        MAILBOX_FLAG_METRES.length,
+        boxAcross / 2 + 0.02,
+        other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
+        -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
+      ),
+      colour: DELIVERY_PAINT.mailboxFlag,
+      kind: kind('mailbox'),
+    },
+    // Its diamond: the mailbox's own amber, untoned (DELIVERY_PIECE_ALSO_ATTRIBUTE's `y`).
+    {
+      made: new OctahedronGeometry(mailboxHalf, 0)
+        .scale(1, MARKER_DIAMOND_STRETCH, 1)
+        .translate(
+          0,
+          other.post + boxAcross + other.diamondGap + mailboxHalf * MARKER_DIAMOND_STRETCH,
+          0,
+        ),
+      colour: DELIVERY_PAINT.mailboxGlow,
+      glows: true,
+      untoned: true,
+      kind: kind('mailbox'),
+    },
+    {
+      made: stepRing(other.ring, 0.03),
+      colour: DELIVERY_PAINT.glow,
+      glows: true,
+      kind: kind('mailbox'),
+    },
+    // #2365: a house that must not get a parcel: a crossed ring, upright, facing the road.
+    {
+      made: deliveryBox(postThick, other.signPost, postThick, 0, other.signPost / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind: kind('no-delivery'),
+    },
+    {
+      // #2507, trimmed to fit the frame's triangles: a flat ring, not a torus.
+      made: signRing(other.sign / 2, 0.06).translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
+    },
+    {
+      made: deliveryBox(0.06, other.sign * 0.9, 0.06, 0, 0, 0)
+        .rotateX(Math.PI / 4)
+        .translate(0, other.signPost + other.sign / 2, 0),
+      colour: DELIVERY_PAINT.hazard,
+      glows: true,
+      kind: kind('no-delivery'),
+    },
+  ];
+  return deliveryShape(parts, 'drop');
 }
 
 /**
@@ -11539,7 +12166,9 @@ function fittedToFootprint(
  * body's paint; head lamps, tail lamps, a grille, bumpers, number plates and
  * door mirrors. Its nose is along `+z`; it stands about 1.45 m tall, and
  * {@link fittedToFootprint} holds it to `obstacles.ts`' 4.4 m by 1.8 m.
- * `paint` is the body's.
+ * `paint` is the body's. Since #2506 the parts also hold an amber indicator
+ * under each tail lamp, in {@link DELIVERY_PAINT}'s `indicator`, which only a
+ * car pulling out draws ({@link obstacleShape}).
  */
 function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, number])[] {
   const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['parked-car'];
@@ -11599,10 +12228,29 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
     // Lamps: a head lamp each side of the grille, a tail lamp each side of the boot.
     parts.push([deliveryBox(0.36, 0.12, 0.04, side * 0.55, 0.62, nose), DELIVERY_PAINT.carLamp]);
     parts.push([deliveryBox(0.32, 0.14, 0.04, side * 0.58, 0.7, -nose), DELIVERY_PAINT.carTail]);
+    // #2506: an amber indicator under each tail lamp, a hair proud of the
+    // tail and facing back, one quad, as only a rider behind the car sees it.
+    // Fitted with the car, then drawn by a car pulling out alone
+    // (obstacleShape routes this paint to it).
+    parts.push([
+      new PlaneGeometry(0.3, 0.1).rotateY(Math.PI).translate(side * 0.58, 0.55, -nose - 0.01),
+      DELIVERY_PAINT.indicator,
+    ]);
     for (const along of [rear, front]) {
       const x = side * (halfWidth - 0.14);
+      // #2506, trimmed to fit the village frame's 205 000 triangles: the rim
+      // is one disc on the tyre's outside face, a hair proud of it and facing
+      // out, 8 triangles (it was a closed 8-sided cylinder, 32, whose wall
+      // sat inside the tyre and whose inner face looked under the car). The
+      // tyre stays round in 12: one in 10 has no corner straight down and,
+      // fitted to the road, sinks the car (round 6's finding).
       parts.push([deliveryWheel(radius, 0.22, x, radius, along, 12), DELIVERY_PAINT.black]);
-      parts.push([deliveryWheel(0.2, 0.23, x, radius, along, 8), DELIVERY_PAINT.carRim]);
+      parts.push([
+        new CircleGeometry(0.2, 8)
+          .rotateY((side * Math.PI) / 2)
+          .translate(x + side * 0.115, radius, along),
+        DELIVERY_PAINT.carRim,
+      ]);
     }
   }
   // The grille, the bumpers' dark strips and the number plates, front and back,
@@ -11616,6 +12264,61 @@ function parkedCarParts(paint: number): readonly (readonly [BufferGeometry, numb
   trim(0.5, 0.11, 0.46, nose + 0.005, DELIVERY_PAINT.carPlate);
   trim(0.5, 0.11, 0.5, -nose - 0.005, DELIVERY_PAINT.carPlate);
   return fittedToFootprint(parts, halfWidth, halfLength);
+}
+
+/**
+ * A dog, side on — #2364, this project's own: a brown body on its front and
+ * hind legs, a head with a darker muzzle, and a tail, about 0.65 m tall, in
+ * six boxes, because every obstacle instance submits every kind's triangles
+ * ({@link DELIVERY_OBSTACLE_TRIANGLES}). It runs
+ * across the road, so its length is across it: its head is along `+x`, the
+ * rider's left as drawn (`delivery/in-view.ts` §`obstacleTurn` turns it to
+ * face the way it runs). Upright and whole: a contact is never drawn as harm
+ * (ADR 0065 D-10.6). {@link fittedToFootprint} holds it to `obstacles.ts`'
+ * 0.9 m across by 0.4 m along.
+ */
+function dogParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.dog;
+  return fittedToFootprint(
+    [
+      [deliveryBox(0.58, 0.24, 0.24, 0, 0.42, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.2, 0.22, 0.18, 0.34, 0.58, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.1, 0.09, 0.12, 0.47, 0.52, 0), DELIVERY_PAINT.dogDark],
+      [deliveryBox(0.18, 0.05, 0.05, -0.38, 0.52, 0), DELIVERY_PAINT.dogDark],
+      // The front legs and the hind legs, each pair one box.
+      [deliveryBox(0.07, 0.32, 0.2, 0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+      [deliveryBox(0.07, 0.32, 0.2, -0.22, 0.16, 0), DELIVERY_PAINT.dogCoat],
+    ],
+    halfWidth,
+    halfLength,
+  );
+}
+
+/**
+ * Another rider coming the other way — #2364, this project's own: a grey
+ * bicycle on two black wheels, a rider in a teal jacket with dark legs and a
+ * bare head, about 1.7 m tall, the bicycle's nose along `+z` (`in-view.ts`
+ * §`obstacleTurn` turns them to face the rider). A drawn figure of the level,
+ * never the pacer, a bot or another rider's data (ADR 0065 D-10.7), and never
+ * drawn hurt. {@link fittedToFootprint} holds it to `obstacles.ts`' 1.7 m
+ * along by 0.6 m across.
+ */
+function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS['oncoming-rider'];
+  const radius = 0.33;
+  return fittedToFootprint(
+    [
+      [deliveryWheel(radius, 0.04, 0, radius, -0.52), DELIVERY_PAINT.black],
+      [deliveryWheel(radius, 0.04, 0, radius, 0.52), DELIVERY_PAINT.black],
+      [deliveryBox(0.05, 0.05, 1.0, 0, 0.6, 0), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.56, 0.04, 0.04, 0, 1.0, 0.46), DELIVERY_PAINT.riderFrame],
+      [deliveryBox(0.28, 0.5, 0.12, 0, 0.62, -0.12), DELIVERY_PAINT.riderLegs],
+      [deliveryBox(0.34, 0.55, 0.26, 0, 1.15, 0.0), DELIVERY_PAINT.riderJacket],
+      [deliveryBox(0.2, 0.22, 0.2, 0, 1.55, 0.08), DELIVERY_PAINT.riderSkin],
+    ],
+    halfWidth,
+    halfLength,
+  );
 }
 
 /**
@@ -11637,7 +12340,7 @@ function obstacleShape(car?: DeliveryCarGeometry): BufferGeometry {
   // #2396: each small kind's hazard marker, over its own shape and collapsed with it.
   for (const kind of HAZARD_MARKED_KINDS) {
     parts.push({
-      made: obstacleHazardMarker(),
+      made: obstacleHazardMarker(kind),
       colour: DELIVERY_PAINT.hazard,
       glows: true,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
@@ -11712,22 +12415,41 @@ function obstacleShape(car?: DeliveryCarGeometry): BufferGeometry {
       DELIVERY_PAINT.coneBand,
     );
   }
-  // #2540: the realistic world's car, Kenney's, where it is given.
+  // #2364: the moving hazards' own figures; a car pulling out is drawn as the car below.
+  for (const [made, colour] of dogParts()) add('dog', made, colour);
+  for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
+  // #2540: the realistic world's car, Kenney's, where it is given. #2506: a car
+  // pulling out's instance draws it too; its indicators are Kenney's own, lit
+  // by the instance's lamps (DeliveryBelt.update).
   if (car !== undefined) {
-    parts.push(...realisticCarParts(car, DELIVERY_OBSTACLE_ORDER.indexOf('parked-car')));
-    return deliveryShape(parts);
+    parts.push(
+      ...realisticCarParts(
+        car,
+        DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+        DELIVERY_OBSTACLE_ORDER.indexOf('car-pulling-out'),
+      ),
+    );
+    return deliveryShape(parts, 'drop');
   }
-  // One car: its body's vertices take the instance's paint (round 6).
+  // One car: its body's vertices take the instance's paint (round 6). #2506: a
+  // car pulling out's instance draws it too, and its lit indicators are that
+  // kind's alone, so a parked car shows none.
   const body = PARKED_CAR_PAINTS[0] as number;
+  const pullingOut = DELIVERY_OBSTACLE_ORDER.indexOf('car-pulling-out');
   for (const [made, colour] of parkedCarParts(body)) {
+    if (colour === DELIVERY_PAINT.indicator) {
+      parts.push({ made, colour, glows: true, kind: pullingOut });
+      continue;
+    }
     parts.push({
       made,
       colour,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+      also: pullingOut,
       painted: colour === body,
     });
   }
-  return deliveryShape(parts);
+  return deliveryShape(parts, 'drop');
 }
 
 /**
@@ -11857,6 +12579,14 @@ const PARKED_CAR_POSE: DeliveryCarPose = {
   left: 0,
   right: 0,
 };
+
+/**
+ * A car pulling out's pose when the frame gives it no motion (#2506 with
+ * #2540): its two indicators lit, as #2506's own car draws its two lit
+ * amber quads, so Kenney's car pulling out shows the same signal in the
+ * realistic world. A parked car's lenses stay unlit ({@link PARKED_CAR_POSE}).
+ */
+const PULLING_OUT_CAR_POSE: DeliveryCarPose = { ...PARKED_CAR_POSE, left: 1, right: 1 };
 
 /**
  * How often an indicator flashes — #2540: **1.5 a second**, 90 a minute, the
@@ -12056,7 +12786,12 @@ function withDeliveryCarPose<M extends Material>(material: M): M {
  * (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`), so it is not fitted
  * again: fitting would move it off its pivots.
  */
-function realisticCarParts(car: DeliveryCarGeometry, kind: number): readonly DeliveryPart[] {
+function realisticCarParts(
+  car: DeliveryCarGeometry,
+  kind: number,
+  /** #2506: a second kind whose instance draws the car too, a car pulling out. */
+  also?: number,
+): readonly DeliveryPart[] {
   return car.parts.map((part) => {
     const made = new BufferGeometry();
     made.setAttribute('position', new BufferAttribute(part.position.slice(), 3));
@@ -12067,6 +12802,7 @@ function realisticCarParts(car: DeliveryCarGeometry, kind: number): readonly Del
       colour: 0xffffff,
       colours: part.colour,
       kind,
+      ...(also === undefined ? {} : { also }),
       painted: part.role === 'paint',
       glows: indicator,
       carPart: DELIVERY_CAR_PART_CODES[part.role],
@@ -12080,7 +12816,18 @@ function realisticCarParts(car: DeliveryCarGeometry, kind: number): readonly Del
  * The triangles in the obstacles' one geometry — #2362, round 6 of PR #2378's
  * review: **1 546**, the bin's 88, the trolley's 124, the cone's 42, one
  * parked car's 1 268, and since #2396 the 8 of a hazard marker over each of
- * the bin, the trolley and the cone. Every obstacle instance submits all of them (the kind
+ * the bin, the trolley and the cone; since #2364 **1 758**, adding a dog's 72
+ * and another rider's 124, each with its marker's 8; since #2506 **1 770**, a
+ * car pulling out's marker's 8 and its two indicators' 4, one quad each; then
+ * **1 674**, the owner's ruling of 2026-11-12 that the village frame stay
+ * under `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (it was
+ * 206 318 at 1 770, 20 obstacles each submitting all of these): each of the
+ * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
+ * Then **1 598**, PR #2518's trim when its markers met these obstacles (the
+ * village frame 206 234, over that limit): the 76 faces that look straight
+ * down from under the eye, never drawn ({@link isUnderside}). A car pulling out's
+ * body is the parked car's, drawn by its instance too ({@link
+ * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
  * obstacles cost this many times the instances drawn in vertex work, and no
  * fragment for the collapsed ones.
@@ -12088,20 +12835,160 @@ function realisticCarParts(car: DeliveryCarGeometry, kind: number): readonly Del
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_546;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_598;
 
 /**
- * The triangles in the realistic world's obstacle geometry — #2540: **1 654**,
- * {@link DELIVERY_OBSTACLE_TRIANGLES} with Kenney's car's 1 376 (its body 570,
- * its paint 134, four wheels of 166 and two indicators of 4) in place of this
- * file's car's 1 268: 108 more an obstacle instance, so 2 160 more on the
- * browser gate's frame of twenty, which measured 201 356 against
- * `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES`' 205 000 before it.
+ * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
+ * streaks {@link RAIN_STREAK_METRES} long in a box {@link RAIN_BOX_METRES}
+ * across, falling at {@link RAIN_FALL_METRES_PER_SECOND}, drawn as ONE call
+ * round the camera's eye. The streaks are laid out twice, one box above the
+ * other, so moving the whole set down by up to one box's height and back is
+ * seamless: no streak is placed per frame.
+ *
+ * #2508, the owner's ruling on PR #2502 ("thin, sparse streaks"): **1 500**
+ * streaks, from 700, **0.6 m** long, from 0.45, and each
+ * {@link RAIN_STREAK_WIDTH_METRES} wide. A WebGL line is one pixel wide
+ * whatever it is asked, so a streak is two thin quads crossed at right angles
+ * about its own vertical, which reads as a streak from every bearing: 4
+ * triangles a streak, 12 000 for the rain, still one triangles call
+ * ({@link RAIN_TRIANGLES}). The rain's grey sky and thicker haze are the
+ * world's (`weather-look.ts`), and cost no call. This project's own numbers,
+ * for the owner's approval in #2508's pull request.
+ */
+export const RAIN_STREAKS = 1_500;
+export const RAIN_STREAK_METRES = 0.6;
+/**
+ * How wide a streak is, metres — #2508: **0.012**, about a pixel and a half
+ * 5 m off on the owner's 1280×800 tablet and three pixels 2 m off.
+ */
+export const RAIN_STREAK_WIDTH_METRES = 0.012;
+const RAIN_BOX_METRES = { across: 24, high: 10 } as const;
+
+/**
+ * How near the camera a streak may fall, metres, measured across the ground
+ * from the eye — the owner's ruling on PR #2522: one streak right by the
+ * camera drew "as a bar about 8 px wide and hundreds of px tall, like a
+ * pole". **2.5**: a streak 12 mm wide is about three pixels across there on
+ * the 1280×800 tablet, and its 0.6 m a couple of hundred down, as a near drop
+ * reads. The box is placed on the eye every frame and nothing in it moves
+ * across the ground, so a streak laid outside this circle is outside it on
+ * every frame: none is placed per frame. Measured across the ground, so no
+ * streak is nearer the camera than this in any direction.
+ */
+export const RAIN_CLEAR_METRES = 2.5;
+const RAIN_FALL_METRES_PER_SECOND = 8;
+
+/**
+ * The triangles the rain draws in its one call — #2508: two crossed quads a
+ * streak, the streaks laid out twice. @test-facing `delivery-belt.test.ts`
+ * holds the geometry to it; the product builds the geometry and does not read
+ * this number
+ */
+export const RAIN_TRIANGLES = RAIN_STREAKS * 2 * 2 * 2;
+
+/**
+ * The rain's paint, sRGB, and how opaque a streak is. PR #2522: the paint in
+ * the route's own light; each frame it is multiplied by how much of that
+ * light the frame's sun gives (`weather-look.ts` §`sunShareIn`), so a
+ * streak is lit with the scene — greyer in daytime rain, dim and warm at dusk
+ * — where an unlit one glowed white whatever the light. @see DeliveryBelt.setRainShare
+ */
+export const RAIN_COLOUR = 0xb4c4d2;
+const RAIN_OPACITY = 0.55;
+
+/** The streaks, twice over, seeded so every view draws the same rain. */
+function rainShape(): BufferGeometry {
+  // Two quads a streak, two triangles a quad, three corners a triangle, unindexed.
+  const positions = new Float32Array(RAIN_TRIANGLES * 3 * 3);
+  let state = 0x2366;
+  const next = (): number => {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+  const { across, high } = RAIN_BOX_METRES;
+  const half = RAIN_STREAK_WIDTH_METRES / 2;
+  let at = 0;
+  const corner = (x: number, y: number, z: number): void => {
+    positions[at] = x;
+    positions[at + 1] = y;
+    positions[at + 2] = z;
+    at += 3;
+  };
+  // A streak's nearest edge is its half-width nearer than its middle.
+  const clear = RAIN_CLEAR_METRES + half;
+  for (let streak = 0; streak < RAIN_STREAKS; streak += 1) {
+    // PR #2522: drawn again until it stands clear of the camera, so the
+    // count, and the call's triangles, are unchanged. @see RAIN_CLEAR_METRES
+    let x = (next() - 0.5) * across;
+    let z = (next() - 0.5) * across;
+    while (Math.hypot(x, z) < clear) {
+      x = (next() - 0.5) * across;
+      z = (next() - 0.5) * across;
+    }
+    const y = next() * high;
+    for (const copy of [0, 1]) {
+      const foot = y + copy * high;
+      const head = foot + RAIN_STREAK_METRES;
+      // One quad across x, one across z.
+      for (const [dx, dz] of [
+        [half, 0],
+        [0, half],
+      ] as const) {
+        corner(x - dx, foot, z - dz);
+        corner(x + dx, foot, z + dz);
+        corner(x + dx, head, z + dz);
+        corner(x - dx, foot, z - dz);
+        corner(x + dx, head, z + dz);
+        corner(x - dx, head, z - dz);
+      }
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Whether the rider asked for reduced motion: no falling rain is drawn for them (#2366). */
+function prefersReducedMotion(): boolean {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The triangles in the markers' one geometry — #2507: **174**, a doorstep's
+ * 42, a mailbox's 78 and a no-delivery sign's 54. It was 184 (44, 84 and 56;
+ * the sign's 96 until its torus became {@link signRing}'s flat ring, 40
+ * fewer), and then PR #2518's trim for the village frame left out the 10
+ * faces that look straight down from under the eye ({@link isUnderside}):
+ * each post's foot, and the mailbox's box's and flag's undersides. Every marker instance submits all
+ * of them (the kind collapse is per vertex, as the obstacles' is), so a
+ * Delivery frame's markers cost this many times the instances drawn in
+ * vertex work.
+ *
+ * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
+ * builds the geometry and does not read this number
+ */
+export const DELIVERY_MARKER_TRIANGLES = 174;
+
+/**
+ * The triangles in the realistic world's obstacle geometry — #2540: **1 788**,
+ * {@link DELIVERY_OBSTACLE_TRIANGLES} with Kenney's car in place of this file's
+ * car and #2506's two indicator quads. Kenney's is 1 376 (its body 570, its
+ * paint 134, four wheels of 166 and two indicators of 4), less the 48 of its
+ * body's and paint's undersides ({@link isUnderside}; a wheel keeps its own,
+ * as it rolls): 1 328, where this file's is 1 134 and the quads 4. So 190
+ * more an obstacle instance, 3 800 on the nightly gate's frame of twenty,
+ * which measured 204 514 against `realistic-budget.ts`
+ * §`DELIVERY_VILLAGE_FRAME_TRIANGLES`' 205 000 with this file's car.
  *
  * @test-facing `delivery-car.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_654;
+export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_788;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
@@ -12147,6 +13034,13 @@ export class DeliveryBelt {
     new Float32Array(DELIVERY_PIECE_CAPACITY * 4),
     4,
   );
+  /** The markers' materials (#2365), taught their kinds as the obstacles' are. */
+  readonly #markerMaterials: { readonly lit: Material; readonly flat: Material };
+  /** Each marker instance's kind (#2365), in {@link DELIVERY_OBSTACLE_ATTRIBUTE}'s `w`; a marker wears no paint. */
+  readonly #markerKinds = new InstancedBufferAttribute(
+    new Float32Array(DELIVERY_PIECE_CAPACITY * 4),
+    4,
+  );
   /** Which of the paints each obstacle instance wears, for {@link drawn}. */
   readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
   /** Kenney's car (#2540), where the belt draws it; its parked cars are this file's own otherwise. */
@@ -12155,6 +13049,20 @@ export class DeliveryBelt {
   readonly #poses = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 4), 4);
   /** Each obstacle instance's indicators, left and right, lit 1 or not 0 (#2540). */
   readonly #lamps = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 2), 2);
+  /** #2366: a level's rain, one call, shown only on a frame whose round is in rain. #2508: streaks of width. */
+  readonly #rain = new Mesh(
+    rainShape(),
+    new MeshBasicMaterial({
+      color: RAIN_COLOUR,
+      transparent: true,
+      opacity: RAIN_OPACITY,
+      depthWrite: false,
+      side: DoubleSide,
+      // three draws a transparent two-sided material in two passes, back faces
+      // then front, unless told not to: that is a second call (#2508).
+      forceSinglePass: true,
+    }),
+  );
   #shown = true;
 
   /**
@@ -12173,6 +13081,15 @@ export class DeliveryBelt {
       lit,
       flat: obstacle.flat === obstacle.lit ? lit : posed(withObstacleKinds(obstacle.flat)),
     };
+    const marker = decorationMaterials(world);
+    const markerLit = withObstacleKinds(marker.lit);
+    this.#markerMaterials = {
+      lit: markerLit,
+      flat: marker.flat === marker.lit ? markerLit : withObstacleKinds(marker.flat),
+    };
+    const markers = markerShape();
+    this.#markerKinds.setUsage(DynamicDrawUsage);
+    markers.setAttribute(DELIVERY_OBSTACLE_ATTRIBUTE, this.#markerKinds);
     const obstacles = obstacleShape(this.#car);
     this.#obstacles.setUsage(DynamicDrawUsage);
     obstacles.setAttribute(DELIVERY_OBSTACLE_ATTRIBUTE, this.#obstacles);
@@ -12190,15 +13107,73 @@ export class DeliveryBelt {
       mesh.visible = false;
       return mesh;
     };
+    this.#rain.frustumCulled = false;
+    this.#rain.visible = false;
     this.#meshes = {
       parcels: made(parcelShape(), this.#materials.lit),
-      markers: made(markerShape(), this.#materials.lit),
+      markers: made(markers, this.#markerMaterials.lit),
       obstacles: made(obstacles, this.#obstacleMaterials.lit),
     };
   }
 
   addTo(scene: Scene): void {
     for (const mesh of Object.values(this.#meshes)) scene.add(mesh);
+    scene.add(this.#rain);
+  }
+
+  /** #2366: whether the last frame drew the rain. For the jsdom suite and the browser gate. */
+  rainShown(): boolean {
+    return this.#rain.visible;
+  }
+
+  /**
+   * Gives the rain the scene's light — PR #2522: its paint
+   * ({@link RAIN_COLOUR}, linear) times `light`, linear, each channel. A colour
+   * write and no draw call.
+   */
+  setRainShare(light: readonly [number, number, number]): void {
+    const material = this.#rain.material;
+    material.color.setHex(RAIN_COLOUR);
+    material.color.setRGB(
+      material.color.r * light[0],
+      material.color.g * light[1],
+      material.color.b * light[2],
+    );
+  }
+
+  /** PR #2522: the rain's colour as last lit, linear. For the jsdom suite. */
+  rainColour(): readonly [number, number, number] {
+    const { r, g, b } = this.#rain.material.color;
+    return [r, g, b];
+  }
+
+  /**
+   * PR #2522: the nearest any streak's corner stands to `eye` across the
+   * ground, metres, the rain as last placed — read off the geometry three
+   * draws. For the jsdom suite and the browser gate. @see RAIN_CLEAR_METRES
+   */
+  rainClearanceFrom(eye: { readonly x: number; readonly z: number }): number {
+    const position = this.#rain.geometry.getAttribute('position');
+    const { x, z } = this.#rain.position;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let corner = 0; corner < position.count; corner += 1) {
+      const across = Math.hypot(
+        position.getX(corner) + x - eye.x,
+        position.getZ(corner) + z - eye.z,
+      );
+      if (across < nearest) nearest = across;
+    }
+    return nearest;
+  }
+
+  /** #2508: the rain's geometry, for the jsdom suite to read its streaks back. */
+  rainGeometry(): BufferGeometry {
+    return this.#rain.geometry;
+  }
+
+  /** #2366: the rain's foot, in world y, as last placed. For the jsdom suite. */
+  rainFootY(): number {
+    return this.#rain.position.y;
   }
 
   /** One kind's mesh. For the jsdom suite and the browser gate's probes. */
@@ -12209,12 +13184,13 @@ export class DeliveryBelt {
   setShown(on: boolean): void {
     this.#shown = on;
     if (!on) for (const mesh of Object.values(this.#meshes)) mesh.visible = false;
+    if (!on) this.#rain.visible = false;
   }
 
   /** Shades the pieces, or stops shading them — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#meshes.parcels.material = this.#materials[shading];
-    this.#meshes.markers.material = this.#materials[shading];
+    this.#meshes.markers.material = this.#markerMaterials[shading];
     this.#meshes.obstacles.material = this.#obstacleMaterials[shading];
   }
 
@@ -12224,16 +13200,39 @@ export class DeliveryBelt {
    * {@link MARKER_TRUE_SIZE_WITHIN_METRES} is drawn larger
    * ({@link markerScaleAt}). Without one, every marker is its true size.
    */
-  update(view: DeliveryInView | undefined, eye?: { readonly x: number; readonly z: number }): void {
+  update(
+    view: DeliveryInView | undefined,
+    eye?: { readonly x: number; readonly y?: number; readonly z: number },
+    seconds = 0,
+  ): void {
+    // #2366: rain round the eye, falling with the ride's clock, unless the
+    // rider asked for reduced motion; no frame without a round in rain draws it.
+    const raining = view?.weather?.rain === true && !prefersReducedMotion();
+    this.#rain.visible = this.#shown && raining && eye !== undefined;
+    if (this.#rain.visible && eye !== undefined) {
+      const { high } = RAIN_BOX_METRES;
+      const fall = (((seconds * RAIN_FALL_METRES_PER_SECOND) % high) + high) % high;
+      // The box's foot is the road, not the eye: the streaks are laid out in [0, 2 * high],
+      // so the eye sits 2 m up from the foot and 18 m of rain always stands above it.
+      this.#rain.position.set(eye.x, (eye.y ?? 0) - CAMERA_ABOVE_METRES - fall, eye.z);
+    }
     this.#place(this.#meshes.parcels, view?.parcels ?? NO_DELIVERY_PIECES);
-    this.#place(this.#meshes.markers, view?.markers ?? NO_DELIVERY_PIECES, eye);
+    const markers: readonly DeliveryMarkerPiece[] = view?.markers ?? NO_DELIVERY_PIECES;
+    this.#place(this.#meshes.markers, markers, eye);
+    // #2365: each marker's kind, a doorstep's unless it says otherwise.
+    const markerKinds = this.#markerKinds.array as Float32Array;
+    for (let at = 0; at < this.#meshes.markers.count; at += 1) {
+      markerKinds[at * 4 + 3] = DELIVERY_MARKER_ORDER.indexOf(markers[at]?.kind ?? 'house');
+    }
+    if (this.#meshes.markers.count > 0) this.#markerKinds.needsUpdate = true;
     const obstacles = view?.obstacles ?? NO_DELIVERY_OBSTACLES;
     this.#place(this.#meshes.obstacles, obstacles);
     const count = this.#meshes.obstacles.count;
     const packed = this.#obstacles.array as Float32Array;
     for (let at = 0; at < count; at += 1) {
       const piece = obstacles[at] as DeliveryObstaclePiece;
-      const paint = piece.kind === 'parked-car' ? parkedCarPaint(piece) : -1;
+      // #2506: a car pulling out wears a parked car's paints, its body being one.
+      const paint = isCarKind(piece.kind) ? parkedCarPaint(piece) : -1;
       this.#paintOf[at] = paint;
       DELIVERY_PAINT_COLOUR.set(PARKED_CAR_PAINTS[Math.max(0, paint)] as number);
       packed[at * 4] = DELIVERY_PAINT_COLOUR.r;
@@ -12243,7 +13242,11 @@ export class DeliveryBelt {
       // #2540: a car's pose, from how it moves; anything else, and a parked car, at rest.
       if (this.#car !== undefined) {
         const pose =
-          piece.kind === 'parked-car' ? deliveryCarPose(piece.car, this.#car) : PARKED_CAR_POSE;
+          piece.kind === 'car-pulling-out' && piece.car === undefined
+            ? PULLING_OUT_CAR_POSE
+            : isCarKind(piece.kind)
+              ? deliveryCarPose(piece.car, this.#car)
+              : PARKED_CAR_POSE;
         const poses = this.#poses.array as Float32Array;
         const lamps = this.#lamps.array as Float32Array;
         poses[at * 4] = pose.roll;
@@ -12296,15 +13299,23 @@ export class DeliveryBelt {
     if (!mesh.visible) return [];
     const matrices = mesh.instanceMatrix.array;
     const packed = this.#obstacles.array;
+    const markerKinds = this.#markerKinds.array;
     const drawn: DrawnDeliveryPiece[] = [];
     for (let at = 0; at < mesh.count; at += 1) {
       const kind =
-        what === 'obstacles' ? DELIVERY_OBSTACLE_ORDER[packed[at * 4 + 3] as number] : undefined;
-      const paint = kind === 'parked-car' ? (this.#paintOf[at] as number) : undefined;
+        what === 'obstacles'
+          ? DELIVERY_OBSTACLE_ORDER[packed[at * 4 + 3] as number]
+          : what === 'markers'
+            ? DELIVERY_MARKER_ORDER[markerKinds[at * 4 + 3] as number]
+            : undefined;
+      // #2506: a car's paint and pose; a marker's kind is never a car's (#2365).
+      const car =
+        what === 'obstacles' && kind !== undefined && isCarKind(kind as DeliveryObstacleKind);
+      const paint = car ? (this.#paintOf[at] as number) : undefined;
       const poses = this.#poses.array;
       const lamps = this.#lamps.array;
       const pose =
-        kind === 'parked-car' && this.#car !== undefined
+        car && this.#car !== undefined
           ? {
               roll: poses[at * 4] as number,
               steer: poses[at * 4 + 1] as number,
@@ -12338,7 +13349,10 @@ export class DeliveryBelt {
       mesh.geometry.dispose();
       mesh.dispose();
     }
-    for (const materials of [this.#materials, this.#obstacleMaterials]) {
+    this.#rain.removeFromParent();
+    this.#rain.geometry.dispose();
+    (this.#rain.material as Material).dispose();
+    for (const materials of [this.#materials, this.#obstacleMaterials, this.#markerMaterials]) {
       materials.lit.dispose();
       if (materials.flat !== materials.lit) materials.flat.dispose();
     }
@@ -12481,7 +13495,9 @@ export function deliveryProgramsProbe(
  * nearly square-on — #1814: whether each of `points` (the obstacle's own
  * metres, `x` across and `y` up) reads back as the background or as painted.
  * The browser gate's proof that {@link withObstacleKinds} draws only the
- * instance's own kind.
+ * instance's own kind. The eye looks level at `aim` metres above the road,
+ * 0.6 unless given, and sees about 0.87 m above and below it: #2506 raises it
+ * to a hazard marker's height.
  *
  * @test-facing read by `browser/delivery-harness.ts`; the product draws
  * obstacles through {@link DeliveryBelt} only
@@ -12491,6 +13507,7 @@ export function deliveryKindProbe(
   world: 'stylised' | 'realistic',
   kind: DeliveryObstacleKind,
   points: readonly (readonly [number, number])[],
+  aim = 0.6,
 ): readonly boolean[] {
   const size = 256;
   const background = 0xff00ff;
@@ -12506,8 +13523,8 @@ export function deliveryKindProbe(
   sun.position.set(0, 1, 1);
   scene.add(sun);
   const eye = new PerspectiveCamera(2, 1, 1, 200);
-  eye.position.set(0, 0.6, 50);
-  eye.lookAt(0, 0.6, 0);
+  eye.position.set(0, aim, 50);
+  eye.lookAt(0, aim, 0);
   eye.updateMatrixWorld();
   renderer.render(scene, eye);
   const gl = renderer.getContext();
@@ -13086,6 +14103,8 @@ function impostorMaterial(
       uniform float oylSunAmbient;
       uniform float oylSunDirect;
       uniform float oylImpostorLit;
+      uniform vec3 oylWeatherShade;
+      uniform vec3 oylImpostorSun;
       varying vec2 vStripUv;
       varying vec2 vOylKeep;
       varying vec3 vOylTint;
@@ -13135,6 +14154,9 @@ function impostorMaterial(
         #endif
         // #621: the same tint the tree's meshes wear, on the light it was baked with.
         ${IMPOSTOR_TINT_LINE}
+        // PR #2522: the weather's shade, as the tree's meshes wear it, and the
+        // sun's dimming, which the ratio above takes out and the meshes keep.
+        gl_FragColor.rgb *= oylWeatherShade * oylImpostorSun;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -13148,6 +14170,8 @@ function impostorMaterial(
   material.uniforms['oylSunAmbient'] = FOLIAGE.oylSunAmbient;
   material.uniforms['oylSunDirect'] = FOLIAGE.oylSunDirect;
   material.uniforms['oylImpostorLit'] = FOLIAGE.oylImpostorLit;
+  material.uniforms['oylWeatherShade'] = FOLIAGE.oylWeatherShade;
+  material.uniforms['oylImpostorSun'] = FOLIAGE.oylImpostorSun;
   material.uniforms['oylWindTime'] = FOLIAGE.oylWindTime;
   material.uniforms['oylWindDirection'] = FOLIAGE.oylWindDirection;
   material.uniforms['oylSwayScale'] = FOLIAGE.oylSwayScale;
@@ -13426,6 +14450,8 @@ export class RealisticVegetationBelt {
           if (kind === 'tree-broadleaf') withAutumn(part.material);
           // #1523: a fir is drawn after a depth pre-pass.
           if (kind === 'tree-conifer') withDepthPrepass(part.material);
+          // PR #2522: and every plant goes down at dusk with the ground it stands on.
+          withWeatherShade(part.material);
         }
       }
       if (kind === 'tree-broadleaf') {
@@ -14724,6 +15750,11 @@ export class RealisticRiderBelt {
   readonly #handWanted = new Vector3();
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
+  /** #2493: the body's own fall and get-up, read off the file. @see crashClipOf */
+  readonly #crash: RiderCrashClip;
+  readonly #crashSample: number[] = [0, 0, 0, 0];
+  readonly #crashTurn = new Quaternion();
+  readonly #crashAt = new Vector3();
   /** #2494's scratch: a grip where the turned bars hold it, and its hand's tip. */
   readonly #steeredGrip = { x: 0, y: 0, z: 0 };
   readonly #handTip = { x: 0, y: 0, z: 0 };
@@ -14821,6 +15852,8 @@ export class RealisticRiderBelt {
       });
     }
     this.#scale = scale;
+    // #2493: the crash clip, by bone, in the clones' own bone order.
+    this.#crash = crashClipOf(body.animations, (this.#riders[0] as RealisticRiderSlot).ordered);
     this.#group.visible = false;
   }
 
@@ -15030,6 +16063,8 @@ export class RealisticRiderBelt {
       stance,
       marker.steer ?? 0,
     );
+    // #2493: a Delivery crash, the body's own part of it, on top of the roll.
+    if (marker.crash !== undefined) this.#crashPose(rider, marker.crash);
     const world = rider.root.matrixWorld;
     for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
       mesh.setMatrixAt(slot, world);
@@ -15218,6 +16253,46 @@ export class RealisticRiderBelt {
   }
 
   /**
+   * The body's own fall and get-up in a Delivery crash — #2493: every bone
+   * turned from the riding pose `#pose` left toward the crash clip's pose at
+   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
+   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * right; a fall to the left reads each bone's mirror image (its other
+   * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
+   * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
+   * Allocates nothing.
+   */
+  #crashPose(rider: RealisticRiderSlot, crash: RiderCrashLook): void {
+    const clip = this.#crash;
+    const times = clip.times;
+    const last = times.length - 1;
+    const seconds = Math.min(Math.max(crash.seconds, times[0] ?? 0), times[last] ?? 0);
+    let key = 0;
+    while (key < last - 1 && seconds >= (times[key + 1] ?? 0)) key += 1;
+    const span = (times[key + 1] ?? 0) - (times[key] ?? 0);
+    const along = span > 0 ? (seconds - (times[key] ?? 0)) / span : 0;
+    const mirrored = crash.side < 0;
+    for (let index = 0; index < rider.ordered.length; index += 1) {
+      const values = clip.turns[mirrored ? (clip.mirror[index] ?? index) : index];
+      if (values === undefined) continue;
+      Quaternion.slerpFlat(this.#crashSample, 0, values, key * 4, values, key * 4 + 4, along);
+      const [x, y, z, w] = this.#crashSample as [number, number, number, number];
+      this.#crashTurn.set(x, mirrored ? -y : y, mirrored ? -z : z, w);
+      (rider.ordered[index] as Bone).quaternion.slerp(this.#crashTurn, crash.share);
+    }
+    const root = rider.ordered[clip.root] as Bone;
+    const at = clip.rootAt;
+    const x = (at[key * 3] ?? 0) + ((at[key * 3 + 3] ?? 0) - (at[key * 3] ?? 0)) * along;
+    this.#crashAt.set(
+      mirrored ? -x : x,
+      (at[key * 3 + 1] ?? 0) + ((at[key * 3 + 4] ?? 0) - (at[key * 3 + 1] ?? 0)) * along,
+      (at[key * 3 + 2] ?? 0) + ((at[key * 3 + 5] ?? 0) - (at[key * 3 + 2] ?? 0)) * along,
+    );
+    root.position.lerp(this.#crashAt, crash.share);
+    rider.root.updateMatrixWorld(true);
+  }
+
+  /**
    * Turns `bone` by `angle` about `axis`, both in world space, and updates it
    * and everything under it — #625. Nothing at a zero angle. Allocates nothing.
    */
@@ -15292,6 +16367,75 @@ const LIMB_BONES = [
     foot: 'footR',
   },
 ] as const;
+
+/**
+ * The rider's crash clip, read once off the file — #2493: `rider.glb`'s
+ * animation `crash`, which `tools/realistic/blender/process_rider.py` poses
+ * from `rider_crash.py`'s moments. Every array is by the body's bone order.
+ */
+interface RiderCrashClip {
+  /** The moments, in seconds after the crash. */
+  readonly times: Float32Array;
+  /** Each bone's rotation at each moment, four numbers a moment; a bone the clip does not turn has none. */
+  readonly turns: readonly (number[] | undefined)[];
+  /** Each bone's mirror image across `x = 0`: its other side's index, or its own. */
+  readonly mirror: readonly number[];
+  /** Which bone is the skeleton's root, and where it is at each moment. */
+  readonly root: number;
+  readonly rootAt: Float32Array;
+}
+
+/** The part of three's `AnimationClip` that {@link crashClipOf} reads, so a test can hand it plain data. */
+interface CrashClipSource {
+  readonly name: string;
+  readonly tracks: readonly {
+    readonly name: string;
+    readonly times: ArrayLike<number>;
+    readonly values: ArrayLike<number>;
+  }[];
+}
+
+/**
+ * Reads the crash clip's tracks into {@link RiderCrashClip}, by the order of
+ * `ordered`. Every track shares one set of times, as the pipeline writes them,
+ * and a clip that does not is refused rather than mis-sampled.
+ */
+export function crashClipOf(
+  clips: readonly CrashClipSource[],
+  ordered: readonly { readonly name: string }[],
+): RiderCrashClip {
+  const clip = clips.find((each) => each.name === REALISTIC_RIDER_CRASH_CLIP);
+  if (clip === undefined) throw new Error('the rider model holds no crash clip');
+  const names = ordered.map((bone) => bone.name);
+  let times: Float32Array | undefined;
+  const turns: (number[] | undefined)[] = names.map(() => undefined);
+  let rootAt: Float32Array | undefined;
+  const root = names.indexOf('root');
+  for (const track of clip.tracks) {
+    const dot = track.name.lastIndexOf('.');
+    const bone = names.indexOf(track.name.slice(0, dot));
+    const property = track.name.slice(dot + 1);
+    if (bone === -1) throw new Error(`the crash clip moves ${track.name}, which is no bone`);
+    const own = Float32Array.from(track.times);
+    if (times !== undefined && own.join() !== times.join()) {
+      throw new Error(`the crash clip's ${track.name} is timed apart from the rest`);
+    }
+    times = own;
+    if (property === 'quaternion') turns[bone] = Array.from(track.values);
+    else if (property === 'position' && bone === root) rootAt = Float32Array.from(track.values);
+    else throw new Error(`the crash clip moves ${track.name}, which it may not`);
+  }
+  if (times === undefined || rootAt === undefined || root === -1) {
+    throw new Error('the crash clip is missing its times or its root');
+  }
+  const mirror = names.map((name, index) => {
+    const side = name.at(-1);
+    if (side !== 'L' && side !== 'R') return index;
+    const other = names.indexOf(`${name.slice(0, -1)}${side === 'L' ? 'R' : 'L'}`);
+    return other === -1 ? index : other;
+  });
+  return { times, turns, mirror, root, rootAt };
+}
 
 /** One realistic rider: its body, its bones at rest, and its held crank angle. */
 interface RealisticRiderSlot {
@@ -17151,6 +18295,9 @@ function structureMaterials(
       ),
     ),
   );
+  // PR #2522: a hedge goes down at dusk with the trees, and (the owner's
+  // ruling of 2026-11-12) a house with the scenery it stands among.
+  withWeatherShade(lit);
   return {
     // #1665: a lit pane shows #1662's room behind it.
     lit: surface === 'glass' ? withLotGlass(lit) : lit,
@@ -20173,12 +21320,15 @@ function mappedBuildingMaterial(
       ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
     }),
   );
-  return withAtmosphere(
+  const built = withAtmosphere(
     withFacade(
       withVertexTint(maps === undefined ? material : withTextureLodBias(material)),
       surface,
     ),
   );
+  // PR #2522: and it goes down at dusk with the scenery, as a village house does.
+  withWeatherShade(built);
+  return built;
 }
 
 /**
@@ -20196,9 +21346,12 @@ function houseModelMaterial(atlas: Texture | undefined): MeshStandardMaterial {
     }),
   );
   // #1686: and the snow on their roofs, as the mapped roofs beside them carry it.
-  return withRoofSnow(
+  const built = withRoofSnow(
     withAtmosphere(withVertexTint(atlas === undefined ? material : withTextureLodBias(material))),
   );
+  // PR #2522: and they go down at dusk with the scenery.
+  withWeatherShade(built);
+  return built;
 }
 
 /**
@@ -20413,6 +21566,21 @@ export class MappedBuildingBelt {
   /** What the last refill drew. */
   get stats(): MappedBuildingStats {
     return this.#stats;
+  }
+
+  /**
+   * The plans drawn on the last frame: selected at the last refill and not
+   * hidden by {@link clearOf} — #2513. Indices into {@link buildings}' plans.
+   * None while the belt is not {@link drawing} (not shown, switched off or not
+   * carried): a selection nothing draws is not a drawn house.
+   */
+  drawnPlans(): readonly number[] {
+    if (!this.drawing) return [];
+    const drawn: number[] = [];
+    for (let at = 0; at < this.#selection.count; at += 1) {
+      if (this.#hidden[at] !== 1) drawn.push(this.#selection.plans[at] as number);
+    }
+    return drawn;
   }
 
   /** How many refills this belt has run — for the tests' count over a ride. */
@@ -21979,6 +23147,8 @@ export function evictRealisticWorldFromGpu(): void {
   const world = realisticWorld;
   if (world === undefined) return;
   world.sky.texture.dispose();
+  // #2508: and its weathers', which three uploads again if a frame in one asks for it.
+  for (const each of WEATHERED_SKIES.get(world.sky)?.values() ?? []) each.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
@@ -22472,6 +23642,20 @@ export function mappedBuildingStatsOf(
 }
 
 /**
+ * Which of a view's buildings from map data its last frame drew — #2513:
+ * the plans its last refill selected, less any the near plane hid. Indices
+ * into the plans the frame carried. Empty before a realistic frame has
+ * carried any, and on a stylised view, which draws none.
+ *
+ * @test-facing read by `browser/realistic-harness.ts` §`__oylRealisticRound`,
+ * whose spec finds each Delivery target's house drawn; the product never asks
+ */
+export function mappedBuildingsDrawnOf(view: GameView): readonly number[] {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt?.drawnPlans() ?? [];
+}
+
+/**
  * Draws a view's village houses and main-street blocks as #1585's models, or
  * as their kinds — #1566. The owner's page's lever
  * (`&levers=-village-models`): off, every plot is drawn as its procedural
@@ -22878,6 +24062,52 @@ export function deliveryDrawnOf(
 }
 
 /**
+ * A level's weather as a view last drew it — #2366: whether it drew the rain,
+ * and the exposure its frame was drawn at (dimmer at dusk in the realistic
+ * world). `undefined` exposure on a view with no renderer.
+ *
+ * @test-facing read by `browser/delivery-harness.ts`, whose spec holds the
+ * rain undrawn under `prefers-reduced-motion`; the product never asks
+ */
+export function deliveryWeatherOf(view: GameView): {
+  readonly rain: boolean;
+  readonly exposure: number | undefined;
+  /** PR #2522: the shades and the lights the frame was drawn with. */
+  readonly readback?: DeliveryWeatherReadback;
+} {
+  return view instanceof ThreeGameView
+    ? {
+        rain: view.deliveryRainShown(),
+        exposure: view.exposure(),
+        readback: view.weatherReadback(),
+      }
+    : { rain: false, exposure: undefined };
+}
+
+/**
+ * PR #2522: a level's weather as a view last drew it, linear colours each
+ * channel. @see deliveryWeatherOf
+ *
+ * @test-facing read by `browser/delivery-harness.ts` and
+ * `browser/realistic-harness.ts`, whose specs hold the dusk's shade, the
+ * rain's light and its clearance; the product never asks
+ */
+export interface DeliveryWeatherReadback {
+  /** The ground's colour, the terrain's lit material's. */
+  readonly ground: readonly [number, number, number];
+  /** The stylised scenery's shade, its belt's materials' colour. */
+  readonly sceneryShade: readonly [number, number, number];
+  /** The realistic vegetation's and hedges' shade, the uniform they read. */
+  readonly foliageShade: readonly [number, number, number];
+  /** The realistic impostors' share of the route's light, the uniform they read. */
+  readonly impostorSun: readonly [number, number, number];
+  /** The rain's colour, its material's; absent before a frame carried a round. */
+  readonly rainColour: readonly [number, number, number] | undefined;
+  /** The nearest any streak stands to the camera across the ground, metres; absent with no rain drawn. */
+  readonly rainClearance: number | undefined;
+}
+
+/**
  * What a view's lap-race belt drew of `what` on its last frame — #1902, read
  * back off the instance buffers three uploads, not off the frame the view
  * was handed. Nothing on a view that has drawn no lap race.
@@ -23176,6 +24406,10 @@ class ThreeGameView implements GameView {
   #realistic: RealisticDrawing | undefined;
   /** Which world the last frame was drawn in. Never `'realistic'` without {@link #realistic}. */
   #drawing: QualitySettings['world'] = 'stylised';
+  /** This frame's Delivery weather, if its round has any — #2508. @see render */
+  #weather: DeliveryWeatherFrame | undefined;
+  /** PR #2522: this frame's shade of the scenery and share of the route's light. @see WeatherShading */
+  readonly #weatherShading = new WeatherShading();
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -23272,10 +24506,26 @@ class ThreeGameView implements GameView {
     this.setQuality(settings);
   }
 
-  render(frame: SceneFrame): void {
+  render(given: SceneFrame): void {
     if (this.#renderer === undefined) {
       return;
     }
+    // #2508: a Delivery level's dusk and rain re-light the world the frame is
+    // drawn in — the sky, the haze, the sun and the ground — in both worlds,
+    // for no draw call. `weather-look.ts` has the colours.
+    this.#weather = given.delivery?.weather;
+    const frame =
+      this.#weather === undefined
+        ? given
+        : { ...given, world: weatheredWorld(given.world, this.#weather) };
+    // And the stylised road, whose colours are unlit, painted down with it.
+    this.#roadMaterial.color.setRGB(...roadTintIn(this.#weather));
+    // PR #2522: the scenery goes down at dusk with the ground it stands on,
+    // and what the lamps do not reach — the far impostors and the rain — is
+    // lit by the share of the route's light the frame's sun gives.
+    this.#weatherShading.update(given.world, this.#weather);
+    const { shade, share } = this.#weatherShading;
+    this.#scatter.setShade(shade);
     this.#stage(frame);
     // #619 lever 2: this view's rung, written into the one uniform every
     // textured realistic material reads — here, because several views share
@@ -23295,6 +24545,9 @@ class ThreeGameView implements GameView {
         .normalize();
       FOLIAGE.oylSunAmbient.value = frame.world.sun.ambient;
       FOLIAGE.oylSunDirect.value = frame.world.sun.direct;
+      // PR #2522: and the weather's shade and light, for the plants and the hedges.
+      FOLIAGE.oylWeatherShade.value.set(shade[0], shade[1], shade[2]);
+      FOLIAGE.oylImpostorSun.value.set(share[0], share[1], share[2]);
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -23343,8 +24596,8 @@ class ThreeGameView implements GameView {
       frame.water.surface,
       frame.world,
       frame.water.seconds,
-      // #475: on the realistic rungs the water reflects the realistic sky.
-      this.#drawing === 'realistic' ? realisticWorld?.sky : undefined,
+      // #475: on the realistic rungs the water reflects the realistic sky; #2508, the one drawn.
+      this.#drawnSky(),
     );
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
@@ -23424,7 +24677,7 @@ class ThreeGameView implements GameView {
     this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
     // #1814: and a Delivery round's pieces, on a frame that carries one;
     // #2453: its far markers enlarged by their distance from the eye.
-    this.#updateDelivery(frame.delivery, rig.eye);
+    this.#updateDelivery(frame.delivery, rig.eye, frame.water.seconds);
     // #1902: and a lap race's pieces and its racers' hit effects, likewise.
     this.#updateLapRace(frame.lapRace, frame.markers);
     this.#updateMarkers(
@@ -23444,7 +24697,8 @@ class ThreeGameView implements GameView {
    */
   #updateDelivery(
     view: DeliveryInView | undefined,
-    eye: { readonly x: number; readonly z: number },
+    eye: { readonly x: number; readonly y: number; readonly z: number },
+    seconds: number,
   ): void {
     if (view !== undefined && this.#delivery === undefined) {
       // #2540: in the realistic world, its parked cars are its own car.
@@ -23455,7 +24709,53 @@ class ThreeGameView implements GameView {
       this.#delivery.setShading(this.#quality.shading);
       this.#delivery.addTo(this.#scene);
     }
-    this.#delivery?.update(view, eye);
+    this.#delivery?.setRainShare(this.#weatherShading.share);
+    this.#delivery?.update(view, eye, seconds);
+    // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
+    if (this.#renderer !== undefined && this.#drawing === 'realistic') {
+      this.#renderer.toneMappingExposure =
+        REALISTIC_EXPOSURE * (view?.weather?.dusk === true ? REALISTIC_DUSK_EXPOSURE_SHARE : 1);
+    }
+  }
+
+  /**
+   * The realistic sky this frame draws — #2508: the loaded one, or in a
+   * Delivery level's dusk or rain its graded copy ({@link weatheredSkyOf}).
+   * `undefined` in the stylised world, or with no realistic world loaded.
+   */
+  #drawnSky(): RealisticSky | undefined {
+    const loaded = realisticWorld;
+    if (this.#drawing !== 'realistic' || loaded === undefined) return undefined;
+    return weatheredSkyOf(loaded.sky, this.#weather);
+  }
+
+  /** #2366: whether the last frame drew a Delivery level's rain. @see DeliveryBelt.rainShown */
+  deliveryRainShown(): boolean {
+    return this.#delivery?.rainShown() ?? false;
+  }
+
+  /** #2366: the exposure the last frame was drawn at. For the jsdom suite and the browser gate. */
+  exposure(): number | undefined {
+    return this.#renderer?.toneMappingExposure;
+  }
+
+  /**
+   * PR #2522: how the last frame lit what the lamps do not reach and shaded
+   * the scenery, read off the materials and uniforms it was drawn with. For
+   * the browser gate. @see deliveryWeatherOf
+   */
+  weatherReadback(): DeliveryWeatherReadback {
+    return {
+      ground: this.#terrain.colour(),
+      sceneryShade: this.#scatter.shade(),
+      foliageShade: FOLIAGE.oylWeatherShade.value.toArray(),
+      impostorSun: FOLIAGE.oylImpostorSun.value.toArray(),
+      rainColour: this.#delivery?.rainColour(),
+      rainClearance:
+        this.#delivery?.rainShown() === true
+          ? this.#delivery.rainClearanceFrom(this.#camera.position)
+          : undefined,
+    };
   }
 
   /**
@@ -24342,10 +25642,15 @@ class ThreeGameView implements GameView {
       // ADR 0026 D-9: the sky is the ambient term, solved to give a horizontal
       // surface exactly `world.ts`'s ambient share, and turned so its sun
       // stands where `world.ts`'s does. `realistic-light.ts` has the arithmetic.
-      this.#lighting.apply(world.sun, 0);
+      this.#lighting.apply(world.sun, 0, sunColourIn(this.#weather));
       const intensity = environmentIntensity(world.sun.ambient, loaded.sky.upward);
       this.#scene.environmentIntensity = intensity;
-      this.#scene.backgroundIntensity = intensity;
+      // #2508: in a level's dusk or rain the photograph graded to it, and in its rain darker.
+      const sky = this.#drawnSky() ?? loaded.sky;
+      const skyIntensity =
+        intensity * (this.#weather?.rain === true ? REALISTIC_RAIN_SKY_SHARE : 1);
+      this.#scene.background = sky.texture;
+      this.#scene.backgroundIntensity = skyIntensity;
       const turn = skyRotation(loaded.sky.sunU, world.sun.x, world.sun.z);
       this.#scene.backgroundRotation.set(0, turn, 0);
       this.#scene.environmentRotation.set(0, turn, 0);
@@ -24355,12 +25660,12 @@ class ThreeGameView implements GameView {
       // whole horizon ring used to converge on the pale one — a white film in
       // front of a grey sky, with a hard edge wherever it met either.
       if (this.#horizonFromSky) {
-        this.#horizonColour.setRGB(...drawnHorizonColour(loaded.sky.skyline, intensity));
+        this.#horizonColour.setRGB(...drawnHorizonColour(sky.skyline, skyIntensity));
         this.#horizonIsSky = true;
-        this.#air = this.#airFor(loaded.sky, intensity, turn);
+        this.#air = this.#airFor(sky, skyIntensity, turn);
       }
     } else {
-      this.#lighting.apply(world.sun);
+      this.#lighting.apply(world.sun, 1, sunColourIn(this.#weather));
     }
     this.#fog.color.copy(this.#horizonColour);
   }

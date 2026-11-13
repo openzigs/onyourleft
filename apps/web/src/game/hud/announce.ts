@@ -317,6 +317,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'lap-ended'; readonly text: string }
   | { readonly kind: 'room-draft'; readonly text: string }
   | { readonly kind: 'delivery-obstacle-ahead'; readonly text: string }
+  | { readonly kind: 'delivery-skip-house'; readonly text: string }
   | { readonly kind: 'delivery-round-over'; readonly text: string }
   | { readonly kind: 'delivery-crash'; readonly text: string }
   | { readonly kind: 'delivery-missed'; readonly text: string }
@@ -369,6 +370,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // #2362: a standing obstacle ahead on a level, first among them, because it
   // is the one a rider has seconds to act on and is dropped once passed.
   'delivery-obstacle-ahead',
+  // #2365: a house ahead that must not get a parcel, next, for the same reason.
+  'delivery-skip-house',
   'delivery-round-over',
   'delivery-crash',
   'delivery-missed',
@@ -403,6 +406,9 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   // #2362: a standing obstacle ahead on a level, ALWAYS said: the owner's ruling of
   // 2026-11-08 on PR #2378, as ADR 0065 D-10.9 requires (no hazard warned by sight alone).
   'delivery-obstacle-ahead',
+  // #2365: a house ahead that must not get a parcel, ALWAYS said, for the same
+  // reason: ADR 0065 D-10.5 tells it apart in words, never by sight alone.
+  'delivery-skip-house',
   // #1812: and no other Delivery kind. The owner's ruling of 2026-10-28: a
   // delivery, a miss, a crash and the round's end follow the setting. Rank 5g.
   // #1904: and no lap-race kind, on that ruling. Rank 5h.

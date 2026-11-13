@@ -295,7 +295,12 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
       belt.meshOf('obstacles').geometry.getAttribute('position').count / 3;
     const realistic = new DeliveryBelt('realistic', GEOMETRY);
     expect(triangles(realistic)).toBe(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES);
-    expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES).toBe(1_376 - 1_268);
+    // Kenney's car less the 48 of its body's undersides (PR #2518's trim; a
+    // wheel keeps its own, as it rolls), in place of this file's car less its
+    // 38 and #2506's two indicators of 2.
+    expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES).toBe(
+      1_376 - 48 - (1_172 - 38) - 4,
+    );
     // The stylised world keeps its simple car, handed Kenney's or not.
     const stylised = new DeliveryBelt('stylised', GEOMETRY);
     expect(triangles(stylised)).toBe(DELIVERY_OBSTACLE_TRIANGLES);
@@ -305,11 +310,13 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     realistic.dispose();
     stylised.dispose();
     bare.dispose();
-    // The browser gate's frame of twenty obstacles measured 201 356 with the
-    // stylised car; every instance submits the roster, so twenty of Kenney's
-    // add 20 × 108, and the frame is still under the owner's limit.
+    // The nightly gate's frame of twenty of each piece measured 204 514 with
+    // the stylised car, on #2518's head with #2512's and #2502's pieces (PR
+    // #2548's merge of them); every instance submits the roster, so twenty of
+    // Kenney's add twenty times the difference, and the frame is still under
+    // the owner's limit (trim to fit, not raise).
     expect(
-      201_356 + 20 * (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES),
+      204_514 + 20 * (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES),
     ).toBeLessThan(DELIVERY_VILLAGE_FRAME_TRIANGLES);
   });
 
@@ -332,14 +339,17 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
     // part / lamp / painted / glowing, in vertices: the body, the paint, the
     // two indicators and the wheels; and everything that is not the car.
     expect(Object.fromEntries(counts)).toEqual({
-      '1/0/0/0': 570 * 3,
-      '1/0/1/0': 134 * 3,
+      // The body and its paint less their undersides (PR #2518's trim): 44 and 4.
+      '1/0/0/0': (570 - 44) * 3,
+      '1/0/1/0': (134 - 4) * 3,
       '1/1/0/1': 4 * 3,
       '1/2/0/1': 4 * 3,
       '2/0/0/0': 2 * 166 * 3,
       '3/0/0/0': 2 * 166 * 3,
-      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - 1_376 - 24) * 3,
-      '0/0/0/1': 24 * 3,
+      // Everything else: the hazard markers glow, 8 each over #2396's three
+      // kinds, #2364's dog and rider and #2506's car pulling out.
+      '0/0/0/0': (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - (1_376 - 48) - 48) * 3,
+      '0/0/0/1': 48 * 3,
     });
     belt.dispose();
   });
@@ -366,6 +376,7 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
         '#include <fog_pars_fragment>',
         'void main() {',
         '#include <opaque_fragment>',
+        '#include <tonemapping_fragment>',
         '#include <fog_fragment>',
         '}',
       ].join('\n'),
@@ -380,7 +391,7 @@ describe('Kenney’s car in Delivery’s belt — #2540', () => {
       'transformed = oylCarPivot + oylCarTurn( transformed - oylCarPivot, oylPiece.z, oylCarPose );',
     );
     const collapse = text.indexOf(
-      'transformed *= 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) );',
+      'transformed *= max( 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) ), 1.0 - step( 0.5, abs( oylPieceAlso.x - oylObstacle.w ) ) );',
     );
     expect(pose).toBeGreaterThan(text.indexOf('#include <begin_vertex>'));
     expect(collapse).toBeGreaterThan(pose);
@@ -441,6 +452,7 @@ function vertexSlots(mesh: SlotMesh): number {
       '#include <fog_pars_fragment>',
       'void main() {',
       '#include <opaque_fragment>',
+      '#include <tonemapping_fragment>',
       '#include <fog_fragment>',
       '}',
     ].join('\n'),
@@ -463,7 +475,7 @@ function vertexSlots(mesh: SlotMesh): number {
 }
 
 describe('the belt’s programs fit WebGL’s vertex attributes — PR #2548', () => {
-  it(`uses at most ${String(DELIVERY_MOST_VERTEX_ATTRIBUTES)} of WebGL’s ${String(WEBGL_VERTEX_ATTRIBUTES)} slots in every program, Kenney’s car’s obstacles at 13`, () => {
+  it(`uses at most ${String(DELIVERY_MOST_VERTEX_ATTRIBUTES)} of WebGL’s ${String(WEBGL_VERTEX_ATTRIBUTES)} slots in every program, Kenney’s car’s obstacles at 14`, () => {
     const realistic = new DeliveryBelt('realistic', GEOMETRY);
     const counted: Record<string, number> = {};
     for (const [name, belt] of [
@@ -484,10 +496,13 @@ describe('the belt’s programs fit WebGL’s vertex attributes — PR #2548', (
     }
     expect(DELIVERY_MOST_VERTEX_ATTRIBUTES).toBeLessThan(WEBGL_VERTEX_ATTRIBUTES);
     // Measured: the instance matrix's 4, position, normal, colour and glow,
-    // the piece and the pivot, and the instance's obstacle, pose and indicators.
-    expect(counted['realistic, Kenney’s car lit obstacles']).toBe(13);
-    expect(counted['realistic, no car lit obstacles']).toBe(10);
-    expect(counted['realistic, Kenney’s car lit markers']).toBe(8);
+    // the piece, its second kind and untoned flag (#2506's and #2507's, one
+    // vec2) and the pivot, and the instance's obstacle, pose and indicators:
+    // 14, the ceiling. The markers carry the kinds since #2365: the matrix,
+    // the four, the piece, the vec2 and the instance's obstacle, 11.
+    expect(counted['realistic, Kenney’s car lit obstacles']).toBe(14);
+    expect(counted['realistic, no car lit obstacles']).toBe(11);
+    expect(counted['realistic, Kenney’s car lit markers']).toBe(11);
   });
 });
 
@@ -496,6 +511,27 @@ describe('a car’s pose — #2540', () => {
     const [parked] = drawnPoses([carAt(0)]);
     expect(parked).toEqual({ roll: 0, steer: 0, pitch: 0, lean: 0, left: 0, right: 0 });
     expect(deliveryCarPose(undefined, GEOMETRY)).toEqual(parked);
+  });
+
+  it('draws a car pulling out as Kenney’s car with both its indicators lit, and a parked car with neither — #2506 with #2540', () => {
+    // #2506's own car lights an amber quad each side of its tail on a car
+    // pulling out; in the realistic world the car is Kenney's, so its two
+    // indicators are lit instead, as the frame gives no motion of its own.
+    const pullingOut: DeliveryObstaclePiece = { ...carAt(40), kind: 'car-pulling-out' };
+    const [parked, pulling] = drawnPoses([carAt(0), pullingOut]);
+    expect(parked).toMatchObject({ left: 0, right: 0 });
+    expect(pulling).toMatchObject({ left: 1, right: 1 });
+    // And Kenney's car is what a car pulling out's instance draws, as a parked car's does.
+    const belt = new DeliveryBelt('realistic', GEOMETRY);
+    const geometry = belt.meshOf('obstacles').geometry;
+    const piece = geometry.getAttribute('oylPiece');
+    const also = geometry.getAttribute('oylPieceAlso');
+    const carKinds = new Set<number>();
+    for (let at = 0; at < piece.count; at += 1) {
+      if (piece.getZ(at) >= 1) carKinds.add(also.getX(at));
+    }
+    expect([...carKinds]).toEqual([Object.keys(OBSTACLE_KINDS).indexOf('car-pulling-out')]);
+    belt.dispose();
   });
 
   it('rolls its wheels through the distance it moves, so they turn with its speed', () => {
