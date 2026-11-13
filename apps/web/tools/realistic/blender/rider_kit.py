@@ -53,6 +53,18 @@ SOCK_CUFF = 0.025
 SHOE_COLLAR = 0.012
 # The sole's upper edge, above the lowest point of the foot.
 SOLE_HEIGHT = 0.014
+# The shoe's last (#2504): MakeHuman's foot is bare, with five toes, so each
+# foot below the ankle is drawn out onto its own convex hull -- one smooth toe
+# box and a flat sole -- and stood this far off it, the upper's thickness. The
+# change fades to nothing over this height below the ankle joint, so the leg
+# above is not moved.
+SHOE_THICKNESS = 0.003
+SHOE_BLEND = 0.03
+# The toe box: the foot's vertices further than this share of the way from
+# the heel to the toes are relaxed over the hull this many times, so the gaps
+# between the toes spread into an even skin rather than folding.
+SHOE_TOE_BOX = 0.55
+SHOE_RELAX = 60
 
 # --- the jersey's panels ---------------------------------------------------------
 # Round the torso, in degrees from the front centre line (0) to the back (180).
@@ -102,6 +114,27 @@ SKIN_PICTURE = ("skins", "young_caucasian_male", "young_lightskinned_male_diffus
 BROW_DIRECTORY = ("eyebrows", "eyebrow001")
 # How far the pack's detail may move the tone, either way.
 SKIN_DETAIL_RANGE = (0.55, 1.45)
+
+# --- the eyes (#2495) ------------------------------------------------------------
+# Each eye is the front of a ball at MakeHuman's own eye, drawn in bands round
+# its gaze: (from, to) in degrees off the gaze, and the colour at each edge,
+# LINEAR light. The pupil; a brown iris darkening to its rim (the limbal ring);
+# and a white that is not white -- a pure one stares out of the socket -- and
+# greys towards the lids, which the occlusion bake does not reach because the
+# eyes are in the helmet's mesh.
+EYE_PUPIL = (0.008, 0.008, 0.008)
+EYE_IRIS = (0.12, 0.06, 0.025)
+EYE_IRIS_RIM = (0.035, 0.022, 0.015)
+EYE_WHITE = (0.60, 0.56, 0.52)
+EYE_WHITE_SHADED = (0.36, 0.30, 0.27)
+EYE_BANDS = (
+    (0.0, 7.0, EYE_PUPIL, EYE_PUPIL),
+    (7.0, 26.0, EYE_IRIS, EYE_IRIS_RIM),
+    (26.0, 55.0, EYE_WHITE, EYE_WHITE),
+    (55.0, 90.0, EYE_WHITE, EYE_WHITE_SHADED),
+)
+# Segments round the gaze.
+EYE_SEGMENTS = 12
 
 # --- roughness ---------------------------------------------------------------
 ROUGHNESS = {

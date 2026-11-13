@@ -39,6 +39,7 @@ import {
   DELIVERY_PIECE_CAPACITY,
   DeliveryBelt,
   MARKER_MOST_SCALE,
+  MARKER_DIAMOND_HEIGHTS,
   MARKER_TRUE_SIZE_WITHIN_METRES,
   markerScaleAt,
   RAIN_CLEAR_METRES,
@@ -281,22 +282,34 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
-  it('stands a house marker’s glowing diamond 0.9 m across on a 2.4 m post, above a hedge, a fence and a parked car — #2453', () => {
+  it('stands a house marker’s glowing diamond 0.9 m across low on the step, its middle under a rider’s helmet — #2453, #2513', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const glow = geometry.getAttribute('oylGlow');
     const diamond = { xs: [] as number[], ys: [] as number[] };
     for (let at = 0; at < position.count; at += 1) {
-      // The ring lies on the step; the diamond is the glowing part above it.
-      if (glow.getX(at) !== 1 || position.getY(at) < 1) continue;
+      // The ring lies on the step, under 0.1 m; the diamond is the glowing part above it.
+      if (glow.getX(at) !== 1 || position.getY(at) < 0.3) continue;
       diamond.xs.push(position.getX(at));
       diamond.ys.push(position.getY(at));
     }
     const span = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
-    // Until #2453, 0.4 m across from 1.52 m up: hidden by a garden hedge, and 2 pixels at 100 m.
+    // Until #2453, 0.4 m across: 2 pixels at 100 m.
     expect(span(diamond.xs)).toBeGreaterThanOrEqual(0.9 - 1e-6);
-    expect(Math.min(...diamond.ys)).toBeGreaterThanOrEqual(2.4 - 1e-6);
+    // The heights the browser gate projects are the drawn diamond's own.
+    expect(Math.min(...diamond.ys)).toBeCloseTo(MARKER_DIAMOND_HEIGHTS.bottom, 6);
+    expect(Math.max(...diamond.ys)).toBeCloseTo(MARKER_DIAMOND_HEIGHTS.top, 6);
+    expect((Math.min(...diamond.ys) + Math.max(...diamond.ys)) / 2).toBeCloseTo(
+      MARKER_DIAMOND_HEIGHTS.middle,
+      6,
+    );
+    // #2513: low. Its middle under the rider's helmet, and the whole of it under
+    // the chase camera's eye, so enlarged about its foot it stays near the
+    // horizon. Until #2513 its middle was 3.03 m up a 2.4 m post, and at 100 m
+    // stood behind the tablet's top-right HUD panel.
+    expect(MARKER_DIAMOND_HEIGHTS.middle).toBeLessThan(RIDER_HEIGHT_METRES);
+    expect(MARKER_DIAMOND_HEIGHTS.top).toBeLessThan(CAMERA_ABOVE_METRES);
     belt.dispose();
   });
 

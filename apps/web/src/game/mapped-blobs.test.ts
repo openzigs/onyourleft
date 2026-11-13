@@ -333,6 +333,23 @@ describe('a ground blob under every drawn mapped building — #1657', () => {
   });
 });
 
+describe('the plans the belt reports drawn — #2513', () => {
+  it('reports none while the belt draws nothing, and the selection when it draws', () => {
+    const view = townFrame(1_500).mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    const mapped = kept(new MappedBuildingBelt(buildings, textures));
+    refillMappedBuildings(mapped, view, [], 0, REALISTIC_STRUCTURE_ITEMS);
+    const selected = drawnPlans(mapped);
+    expect(selected.length).toBeGreaterThan(0);
+    expect(mapped.drawnPlans()).toEqual(selected);
+    mapped.switchOn(false);
+    expect(mapped.drawnPlans()).toEqual([]);
+    mapped.switchOn(true);
+    mapped.setCarried(false);
+    expect(mapped.drawnPlans()).toEqual([]);
+  });
+});
+
 describe('the mapped list as the product assembles it — #1657', () => {
   it('hands the belt its own grounded list while shown, and none otherwise', () => {
     const view = townFrame(1_500).mappedBuildings;

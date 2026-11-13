@@ -77,6 +77,7 @@ import {
   HOUSE_KIT,
   LEG_BONE_COUNT,
   PACER_KIT,
+  STEERING_AXIS,
   UPPER_BODY_PIVOT,
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
@@ -1055,23 +1056,42 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * the bound's error is worst where the road bends hardest and a sweep that
    * stopped at 200 m would have called the box correct too.
    *
-   * ⚠️ **Fifteen seconds, and it is a ceiling rather than a budget — #651,
-   * #682.** It had Vitest's default of five, which nobody chose for it: ten
-   * sweeps of thirty-two whole scene frames each. Under coverage on the CI
-   * runner it took 4.2 s to 5.0 s on green runs (runs 36326090778,
-   * 36334163962, 36337270885 and 36338736850's first attempt) and 5.6 s on the
-   * red second attempt of that last run, on the same commit — the runner, not
-   * the code; #682 is that flake. Fifteen is three times the slowest green
-   * run: clear of the runner's spread, and still red for a real threefold
-   * slowdown, which thirty would hide. ⚠️ This used to say it was also red
-   * "for a cull that stops terminating", and it is not: the case is
-   * synchronous, Vitest cannot interrupt a synchronous case, and a cull that
-   * never returns is caught only by the CI job's own stop (docs/agents/ci.md §4c).
+   * ⚠️ **Each radius is a case of its own, and this one adds them up — #2524.**
+   * It was one case of ten sweeps of thirty-two whole scene frames each, with
+   * a fifteen-second timeout (#651, #682: 4.2 s to 5.6 s under coverage on the
+   * CI runner). #1688's ruling makes a slow case cheaper rather than giving it
+   * longer, so each sweep is ridden once, by its own case below, and this case
+   * reads the ten back and holds every assertion it held. Locally on an Apple
+   * M4 Pro at a load average of 13 to 23: 1.3 s, and 2.8 s under --coverage,
+   * before; after, at 10 to 15, at most 0.47 s a radius under --coverage, and
+   * this case a few milliseconds. The case is synchronous, so Vitest cannot interrupt it: a cull
+   * that never returns is caught only by the CI job's own stop
+   * (docs/agents/ci.md §4c).
    */
-  it('never drops an item that is on screen and not yet fogged out', { timeout: 15_000 }, () => {
+  const RADII = [null, 3000, 1000, 450, 300, 200, 150, 100, 75, 50] as const;
+  const sweeps = new Map<number | null, Sweep>();
+  const sweepAt = (radius: number | null): Sweep => {
+    let sweep = sweeps.get(radius);
+    if (sweep === undefined) {
+      sweep = keptAlongTheRoute(radius);
+      sweeps.set(radius, sweep);
+    }
+    return sweep;
+  };
+
+  it.each(RADII)(
+    'never drops an item that is on screen and not yet fogged out, on a bend of radius %s',
+    (radius) => {
+      const sweep = sweepAt(radius);
+      expect(sweep.onScreenAndClear).toBeGreaterThan(1000);
+      expect(sweep.onScreenButCulled).toBe(0);
+    },
+  );
+
+  it('never drops an item that is on screen and not yet fogged out', () => {
     let clear = 0;
-    for (const radius of [null, 3000, 1000, 450, 300, 200, 150, 100, 75, 50]) {
-      const sweep = keptAlongTheRoute(radius);
+    for (const radius of RADII) {
+      const sweep = sweepAt(radius);
 
       // Non-vacuity, per radius: a probe that found nothing on screen would
       // report no violations for entirely the wrong reason.
@@ -2865,8 +2885,11 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     const material = bodies.material as unknown as {
       onBeforeCompile: (shader: { vertexShader: string; uniforms: object }) => void;
     };
+    // #2494: and the chunks the steering is spliced after, which every
+    // material three builds holds.
     const shader = {
-      vertexShader: '#include <common>\nvoid main() {\n#include <color_vertex>\n}',
+      vertexShader:
+        '#include <common>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n}',
       uniforms: {},
     };
     material.onBeforeCompile(shader);
@@ -2876,9 +2899,82 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     );
     belt.setShading('flat');
     const flat = bodies.material as unknown as typeof material;
-    const flatShader = { ...shader, vertexShader: '#include <common>\n#include <color_vertex>' };
+    const flatShader = {
+      ...shader,
+      vertexShader:
+        '#include <common>\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>',
+    };
     flat.onBeforeCompile(flatShader);
     expect(flatShader.vertexShader).toContain('oylKitJersey');
+    belt.dispose();
+  });
+
+  it('#2494 — turns the bars, and the arms’ hands on them, by each rider’s own steer, in the shader and in no new mesh', () => {
+    const belt = new RiderBelt();
+    belt.place([{ ...riderAt(), steer: 0.25 }, riderAt({ x: 3 }, {}, undefined, 'bot')]);
+    const { bodies, torsos } = belt.meshes;
+    const at = (mesh: typeof bodies, name: string): ((index: number) => number) => {
+      const attribute = mesh.geometry.getAttribute(name);
+      return (index) => attribute.getX(index);
+    };
+    // Each instance is told its own steer: the rider's, and the bot's straight bars.
+    for (const mesh of [bodies, torsos]) {
+      expect(at(mesh, 'oylInstanceSteer')(0)).toBeCloseTo(0.25, 6);
+      expect(at(mesh, 'oylInstanceSteer')(1)).toBe(0);
+    }
+    // What turns on the bicycle: the front — the fork, the front wheel and the
+    // bar, all ahead of the seat — wholly, and nothing behind the bottom bracket.
+    const position = bodies.geometry.getAttribute('position');
+    const weight = at(bodies, 'oylSteer');
+    let turning = 0;
+    for (let index = 0; index < position.count; index += 1) {
+      const each = weight(index);
+      expect([0, 1]).toContain(each);
+      if (each === 1) {
+        turning += 1;
+        expect(position.getZ(index)).toBeGreaterThan(0.15);
+      }
+      if (position.getZ(index) < CRANK_AXIS_Z) expect(each).toBe(0);
+    }
+    expect(turning).toBeGreaterThan(100);
+    // The upper body: each arm turns wholly at the hand and not at all at the
+    // shoulder — a tube's two rings, so the arm between them follows the bar.
+    const upper = torsos.geometry.getAttribute('position');
+    const arms = at(torsos, 'oylSteer');
+    let hands = 0;
+    for (let index = 0; index < upper.count; index += 1) {
+      if (arms(index) === 0) continue;
+      hands += 1;
+      expect(arms(index)).toBe(1);
+      expect(upper.getZ(index)).toBeGreaterThan(0.3);
+      expect(upper.getY(index)).toBeLessThan(1);
+    }
+    expect(hands).toBeGreaterThan(6);
+    // The shader turns them about the head tube by weight times steer, in both materials.
+    for (const shading of ['lit', 'flat'] as const) {
+      belt.setShading(shading);
+      const material = bodies.material as unknown as {
+        onBeforeCompile: (shader: { vertexShader: string; uniforms: object }) => void;
+      };
+      const shader = {
+        vertexShader:
+          '#include <common>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n}',
+        uniforms: {},
+      };
+      material.onBeforeCompile(shader);
+      expect(shader.vertexShader).toContain('oylTurned(transformed');
+      expect(shader.vertexShader).toContain('oylTurned(objectNormal');
+      // The turn's direction is `steeredPoint`'s, which turns the realistic
+      // hands on the CPU: Rodrigues' k × v. A v × k would turn the bars the
+      // other way from the hands that hold them, and no jsdom frame shows it.
+      expect(shader.vertexShader).toContain(
+        'return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);',
+      );
+      expect(shader.vertexShader).toContain(STEERING_AXIS.direction.y.toFixed(9));
+      expect(shader.vertexShader).toContain(STEERING_AXIS.point.z.toFixed(9));
+    }
+    // No new mesh: the same four.
+    expect(belt.group.children).toHaveLength(4);
     belt.dispose();
   });
 

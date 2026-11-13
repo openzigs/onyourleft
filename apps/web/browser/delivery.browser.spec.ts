@@ -34,12 +34,26 @@
  * 7. **The owner's photographs** of #2396: a bin in the rider's lane, and a
  *    parked car being passed, before and after.
  *
+ * 8. **A house marker is never under a HUD panel on the way to it** (#2513):
+ *    the panels of the real ride stage with a round on (`ride.html?delivery=round`,
+ *    the real `GameView` and HUD) at the owner's 1280×800 tablet, a 4:3
+ *    tablet and an upright tablet; and where each marker's diamond lands on
+ *    the frame (`delivery-harness.ts` §`markerOnScreen`) from 100 m to 20 m
+ *    before its house, every 5 m, in every lane, for a doorstep near the road
+ *    and one as deep as a target may be on each side. Its middle and its top
+ *    must lie outside every panel. With #2453's 2.4 m post the diamond rose
+ *    with its enlargement and stood behind the top-right panel from about
+ *    100 m to 7 m out on the tablet, the owner's frames of 2026-11-12.
+ *
  * ⚠️ An ordinary ride's village frame is `realistic-town.browser.spec.ts`',
  * which this change does not touch: no view builds the belt until a frame
  * carries a round.
  */
 
 import { expect, test, type Page } from '@playwright/test';
+
+import type { Box, StageItem } from './ride-harness';
+import { OVERLAY_VIEWPORTS, describeItem, measure, openRide } from './ride-stage';
 
 async function open(page: Page): Promise<void> {
   const response = await page.goto('/delivery.html');
@@ -117,6 +131,38 @@ const IN_LANE_CASES = [
   { kind: 'cone', lane: 1.75 },
   { kind: 'bin', lane: 0 },
 ] as const;
+
+/**
+ * #2513: how far before a house the marker is sampled, metres: from #2453's
+ * sighting distance, 100 m, to the throw window's opening (`throw.ts`
+ * §`THROW_WINDOW_BEFORE_METRES`, 20 m), every 5 m — the stretch in which the
+ * rider looks for the house to throw to.
+ */
+const MARKER_LEADS: readonly number[] = Array.from({ length: 17 }, (_, index) => 100 - 5 * index);
+
+/** #2513's tablets, the overlay viewports the owner's issue names: 1280×800, 1024×768 and 800×1280. */
+const MARKER_VIEWPORTS = OVERLAY_VIEWPORTS.filter((viewport) =>
+  [
+    [1280, 800],
+    [1024, 768],
+    [800, 1280],
+  ].some(([width, height]) => viewport.width === width && viewport.height === height),
+);
+
+/**
+ * #2513: the tablets where no HUD panel is over the road ahead, so the marker
+ * is held clear of every panel: the owner's 1280×800 and the upright 800×1280.
+ * On a 4:3 tablet, 1024×768, the full HUD's secondary panel (y 8 to 370) is
+ * over the far road and every house on it, out to about 45 m before a house,
+ * at any marker height: there the marker is held clear of every other panel,
+ * and #2514's game strip (PR #2536) is what takes that panel off the road.
+ */
+const ROAD_CLEAR = new Set(['1280×800', '800×1280']);
+
+/** Whether a point on the screen, CSS pixels, lies inside a box. */
+function within(box: Box, x: number, y: number): boolean {
+  return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+}
 
 test.describe('Delivery’s belt — #1814', () => {
   test('adds the same calls to a real view’s frame for one of each piece as for twenty, and no more than three', async ({
@@ -407,6 +453,110 @@ test.describe('Delivery’s belt — #1814', () => {
       await testInfo.attach(`delivery-past-car-${when}`, { body: shot, contentType: 'image/png' });
       expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
       expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+});
+
+test.describe('a house marker on the way to its house — #2513', () => {
+  test('finds the three tablets it is held at', () => {
+    expect(MARKER_VIEWPORTS.map((each) => [each.width, each.height])).toEqual([
+      [1280, 800],
+      [1024, 768],
+      [800, 1280],
+    ]);
+  });
+
+  for (const viewport of MARKER_VIEWPORTS) {
+    test(`stands outside every HUD panel from 100 m to 20 m before its house — ${viewport.name}`, async ({
+      page,
+    }) => {
+      // The real stage with a round on: the HUD's panels as the rider has them. And
+      // the same stage on a loop, whose lap table a level's round draws too (the
+      // owner's frames of 2026-11-12): every panel of either is held.
+      const panels: StageItem[] = [];
+      let world: Box | undefined;
+      for (const query of ['?delivery=round', '?lap=riding']) {
+        await openRide(page, viewport, query);
+        const stage = await measure(page);
+        world ??= stage.world;
+        panels.push(
+          ...stage.panels
+            .filter((each) => each.box.width > 0 && each.box.height > 0)
+            .map((each) => ({ ...each, name: `${each.name} (${query})` })),
+        );
+      }
+      if (world === undefined) throw new Error('the ride stage has no world');
+      // Then where each marker lands on a frame of the world's own shape.
+      await open(page);
+      const samples = await page.evaluate(
+        ([aspect, leads]) => window.__oylDelivery?.markerOnScreen(aspect, leads) ?? [],
+        [world.width / world.height, MARKER_LEADS] as const,
+      );
+      // Not vacuous: four markers on every frame, every one of them in front of the eye,
+      // and each house's foot on the screen at 100 m, where it is first looked for.
+      expect(samples).toHaveLength(3 * MARKER_LEADS.length * 4);
+      expect(panels.length).toBeGreaterThanOrEqual(3);
+      const at = (point: { readonly left: number; readonly top: number }) => ({
+        x: world.left + point.left * world.width,
+        y: world.top + point.top * world.height,
+      });
+      // A panel over a house's doorstep, on the ground, 100 m out is over the road
+      // ahead and every house on it, whatever a marker's height: the HUD's layout
+      // (#2514), not the marker's. Named, and held to none on ROAD_CLEAR's tablets.
+      const overTheRoad = panels.filter((panel) =>
+        samples.some((each) => {
+          if (each.lead !== MARKER_LEADS[0] || each.foot === undefined) return false;
+          const foot = at(each.foot);
+          return within(panel.box, foot.x, foot.y);
+        }),
+      );
+      const held = panels.filter((panel) => !overTheRoad.includes(panel));
+      const under: string[] = [];
+      const overTheStep: string[] = [];
+      for (const each of samples) {
+        const where = `${each.house}, ${String(each.lead)} m before it, lane ${String(each.lane)}`;
+        const foot = each.foot === undefined ? undefined : at(each.foot);
+        for (const [part, point] of [
+          ['middle', each.middle],
+          ['top', each.top],
+        ] as const) {
+          expect(point, `${where}: its ${part}`).toBeDefined();
+          if (point === undefined) continue;
+          const { x, y } = at(point);
+          for (const panel of held.filter((one) => within(one.box, x, y))) {
+            // And a panel over the whole of this marker's column, from its step on
+            // the ground up to the diamond, is over the house there: no lower
+            // marker would come out from under it.
+            if (foot !== undefined && within(panel.box, x, foot.y)) {
+              overTheStep.push(`${where}: its step is under ${panel.name}`);
+              continue;
+            }
+            under.push(
+              `${where}: its diamond's ${part} at ${x.toFixed(0)},${y.toFixed(0)} is under ${panel.name}`,
+            );
+          }
+        }
+        if (each.lead === MARKER_LEADS[0]) {
+          // Not vacuous: at 100 m every house's step is in front of the eye and on the screen.
+          expect(each.foot, `${where}: its step`).toBeDefined();
+          expect(each.foot?.left, `${where}: its step on the screen`).toBeGreaterThan(0);
+          expect(each.foot?.left, `${where}: its step on the screen`).toBeLessThan(1);
+        }
+      }
+      console.log(
+        `#2513 ${viewport.name}: panels ${panels.map(describeItem).join('; ')}; ` +
+          `over the road ahead: ${overTheRoad.map((each) => each.name).join('; ') || 'none'}; ` +
+          `${String(samples.length)} markers sampled, ${String(under.length)} points under a panel` +
+          (under.length === 0 ? '' : `, the first: ${under[0] ?? ''}`) +
+          `; ${String(overTheStep.length)} with the house's own step under a panel` +
+          (overTheStep.length === 0 ? '' : `, the first: ${overTheStep[0] ?? ''}`),
+      );
+      expect(under).toEqual([]);
+      if (ROAD_CLEAR.has(`${String(viewport.width)}×${String(viewport.height)}`)) {
+        // On the owner's tablets no panel is over the road or a step, so every panel is held.
+        expect(overTheRoad.map((each) => each.name)).toEqual([]);
+        expect(overTheStep).toEqual([]);
+      }
     });
   }
 });

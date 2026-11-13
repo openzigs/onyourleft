@@ -486,20 +486,37 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
  * the road, and how far ahead along it, so the HUD can say where to throw
  * without the rider having to spot the house's marker. A side and a distance
  * from the rider, never a place (DL11).
+ *
+ * ⚠️ **Since #2513 the distance is to the THROW POINT, not to the house.** The
+ * owner's frame of 2026-11-12 read "Next house 0 ft on the right" level with
+ * the house, which is beside and behind the chase camera and out of frame:
+ * the countdown pointed the rider at the one place the house cannot be seen,
+ * and a parcel thrown there is thrown late. It now counts down to where the
+ * house's throw window opens (`throw.ts` §`THROW_WINDOW_BEFORE_METRES`, 20 m
+ * before it), and reaches nought there; from there until the window closes
+ * the HUD says to throw (the owner's ruling of 2026-11-12 on #2513).
  */
 export interface NextHouse {
   readonly side: ThrowSide;
-  /** Metres along the road from the rider to the house; nought once the rider is level with it or past. */
+  /**
+   * Metres along the road from the rider to where the house's throw window
+   * opens; nought once the rider is inside the window, until it closes
+   * behind them. A reviewer who remembers this as the distance to the house
+   * is reading the file before #2513.
+   */
   readonly metres: number;
 }
 
 /**
  * The next house still expecting a parcel, in route order, from where the
- * rider is after the last step that ran — #2453. A house the rider has just
- * passed stays the next one, at nought metres, until its window closes behind
- * them and the round counts it missed (`throw.ts`
+ * rider is after the last step that ran — #2453. A house the rider is level
+ * with or has just passed stays the next one, at nought metres, until its
+ * window closes behind them and the round counts it missed (`throw.ts`
  * §`THROW_WINDOW_AFTER_METRES`): it can still be delivered to. `undefined`
- * when no house on the round is still expecting one.
+ * when no house on the round is still expecting one. Its distance is to the
+ * window's opening edge, {@link THROW_WINDOW_BEFORE_METRES} before the house
+ * (#2513), which the assist's wider windows do not move (`throw.ts` §"Wider
+ * windows").
  */
 export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   let next: DeliveryTarget | undefined;
@@ -510,7 +527,7 @@ export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   if (next === undefined) return undefined;
   return {
     side: next.side === 1 ? 'right' : 'left',
-    metres: Math.max(0, next.distance - ride.along),
+    metres: Math.max(0, next.distance - THROW_WINDOW_BEFORE_METRES - ride.along),
   };
 }
 
