@@ -148,6 +148,28 @@ describe('a Delivery frame’s pieces — #1814', () => {
     ).toEqual(['no-delivery']);
   });
 
+  it('reveals a house’s sign that it gets no parcel as it reveals a house’s marker, in rain or at dusk — #2366, the owner’s ruling of 2026-11-12', () => {
+    const near = { ...targetAt(0, RIDER + 30), x: 6.5 };
+    const edge = { ...targetAt(1, RIDER + LOW_LIGHT_REVEAL_METRES), x: 6.5 };
+    const far = { ...targetAt(2, RIDER + 41), x: 6.5 };
+    const signs = (revealMetres: number | undefined): readonly (number | undefined)[] =>
+      deliveryInView(
+        input({
+          targets: [],
+          round: startRound(1),
+          noDelivery: [near, edge, far],
+          riderAlong: RIDER,
+          revealMetres,
+        }),
+      )
+        .markers.filter((marker) => marker.kind === 'no-delivery')
+        .map((marker) => marker.z);
+    // At dusk or in rain: those within the reveal distance, its edge included.
+    expect(signs(LOW_LIGHT_REVEAL_METRES)).toEqual([near.z, edge.z]);
+    // Clear daylight: every sign on the corridor, for the whole round.
+    expect(signs(undefined)).toEqual([near.z, edge.z, far.z]);
+  });
+
   it('hides a marker beyond the reveal distance and shows it inside it, and in clear weather draws every one — #2366', () => {
     const targets = [targetAt(0, RIDER + 30), targetAt(1, RIDER + 41), targetAt(2, RIDER + 200)];
     const round = startRound(3);
