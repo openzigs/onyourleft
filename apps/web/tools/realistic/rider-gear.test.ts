@@ -281,28 +281,42 @@ describe('the realistic rider’s glasses, helmet, straps and shoes — #2504', 
     const rimTop = Math.max(...rim.map((edge) => edge.height));
     const scalp = body.positions.filter((p) => p[1] > rimTop);
     expect(scalp.length).toBeGreaterThan(50);
-    const drawn = helmet.triangles.map((triangle) => ({
-      corners: corners(helmet, triangle),
-      facing: facing(helmet, triangle),
-    }));
+    // Every line here climbs (20° and up), so it can only meet a face with a
+    // corner above where it starts: a face wholly below the lowest scalp point
+    // (the eyes, the glasses, the lower straps) can hide none of it, and is
+    // left out so the case stays cheap (owner ruling #1688).
+    const lowest = Math.min(...scalp.map((p) => p[1]));
+    const drawn = helmet.triangles
+      .map((triangle) => ({
+        corners: corners(helmet, triangle),
+        facing: facing(helmet, triangle),
+      }))
+      .filter((face) => Math.max(...face.corners.map((corner) => corner[1])) > lowest);
     // A point is hidden from a viewer far off along `out` when the line to
     // them meets a face of the helmet turned towards them: the material is
     // single-sided, so a face turned away is not drawn and hides nothing.
     const seen: string[] = [];
-    for (const point of scalp) {
-      for (let elevation = 20; elevation <= 90; elevation += 5) {
-        for (let azimuth = 0; azimuth < (elevation === 90 ? 1 : 360); azimuth += 5) {
-          const up = (elevation * Math.PI) / 180;
-          const round = (azimuth * Math.PI) / 180;
-          const out: Vec3 = [
-            Math.cos(up) * Math.sin(round),
-            Math.sin(up),
-            Math.cos(up) * Math.cos(round),
-          ];
-          const hidden = drawn.some(
-            (face) => dot(face.facing, out) > 0 && rayHit(point, out, face.corners) !== undefined,
-          );
-          if (!hidden) {
+    // The face that last hid each point, tried first: the next viewer round
+    // is a few degrees away and is nearly always hidden by the same face.
+    const lastHid: (typeof drawn)[number][] = [];
+    for (let elevation = 20; elevation <= 90; elevation += 5) {
+      for (let azimuth = 0; azimuth < (elevation === 90 ? 1 : 360); azimuth += 5) {
+        const up = (elevation * Math.PI) / 180;
+        const round = (azimuth * Math.PI) / 180;
+        const out: Vec3 = [
+          Math.cos(up) * Math.sin(round),
+          Math.sin(up),
+          Math.cos(up) * Math.cos(round),
+        ];
+        // The faces turned towards this viewer, found once for every point.
+        const towards = drawn.filter((face) => dot(face.facing, out) > 0);
+        for (const [at, point] of scalp.entries()) {
+          const hides = (face: (typeof drawn)[number]): boolean =>
+            dot(face.facing, out) > 0 && rayHit(point, out, face.corners) !== undefined;
+          const last = lastHid[at];
+          const hider = last !== undefined && hides(last) ? last : towards.find(hides);
+          if (hider !== undefined) lastHid[at] = hider;
+          else {
             seen.push(
               `${point.map((value) => value.toFixed(3)).join(', ')} from ${String(elevation)}°, ${String(azimuth)}°`,
             );
