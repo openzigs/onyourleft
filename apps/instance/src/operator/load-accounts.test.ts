@@ -5,6 +5,9 @@
  * `load-accounts erase`, run as an operator runs them — `node
  * src/operator/cli.ts …` in a child process, the public keys on standard
  * input — against a real database that riders' accounts are already in.
+ * The race case runs the same commands in this process ({@link runHere}),
+ * which `cli.ts` only calls, so it starts no second Node (#2568); every other
+ * case still runs them as child processes, standard input included.
  *
  * The accounts are proved by their real consumer: `tools/race-load.ts`'s own
  * riders race a room on an instance whose registration is `approval`, and a
@@ -78,6 +81,41 @@ function run(data: Data, input: string, ...args: string[]) {
   return { status: result.status, stderr: result.stderr, report };
 }
 
+/**
+ * The same command in this process: `runCommand`, which `cli.ts` only calls
+ * with its environment and standard input. A Node start is the slowest part
+ * of a run (#2568: 0.2 s locally, 0.5–0.8 s under coverage on CI), so set-up
+ * and the race case use this; the rest of the file spawns {@link run}.
+ */
+async function runHere(data: Data, input: string, ...args: string[]) {
+  let stdout = '';
+  let stderr = '';
+  const out = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    stdout += String(chunk);
+    return true;
+  });
+  const err = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    stderr += String(chunk);
+    return true;
+  });
+  let status: number;
+  try {
+    status = await runCommand(args, {
+      database: data.database,
+      blobs: data.blobs,
+      readStandardInput: () => Promise.resolve(input),
+    });
+  } finally {
+    out.mockRestore();
+    err.mockRestore();
+  }
+  const report =
+    status === 0
+      ? (JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as Record<string, unknown>)
+      : {};
+  return { status, stderr, report };
+}
+
 /** A migrated database holding the three fixture riders' accounts and a race room. */
 async function populated(): Promise<Data> {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-load-accounts-'));
@@ -89,23 +127,14 @@ async function populated(): Promise<Data> {
   } finally {
     await store.close();
   }
-  // The operator's command, run in this process rather than spawned: the
-  // same `room-open` without a second Node starting (#2568, as #2550 did). It
-  // is set-up here; this file's own commands still run as child processes.
   // No countdown and a one-metre course: the race is over at its first tick
-  // rather than after the room core's ten-second countdown and a second tick.
-  // It reports as JSON on stdout; keep that out of the run's output.
-  const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-  try {
-    expect(
-      await runCommand(
-        ['room-open', 'race', '--kind', 'race', '--length', '1', '--countdown', '0'],
-        { database: data.database, blobs: data.blobs },
-      ),
-    ).toBe(0);
-  } finally {
-    report.mockRestore();
-  }
+  // rather than after the room core's ten-second countdown and more ticks.
+  const opened = await runHere(
+    data,
+    '',
+    ...['room-open', 'race', '--kind', 'race', '--length', '1', '--countdown', '0'],
+  );
+  expect(opened.status, opened.stderr).toBe(0);
   return data;
 }
 
@@ -214,7 +243,7 @@ describe('load-accounts add and erase — #1383', () => {
     const keys = await newRiderKeys(2);
     const publicKeys = keys.map((key) => key.publicKey);
 
-    const added = run(data, `${publicKeys.join('\n')}\n`, 'load-accounts', 'add');
+    const added = await runHere(data, `${publicKeys.join('\n')}\n`, 'load-accounts', 'add');
     expect(added.status, added.stderr).toBe(0);
     expect(added.report).toEqual({ command: 'load-accounts add', added: 2, held: 2 });
     const made = await loadAthletes(data);
@@ -255,7 +284,7 @@ describe('load-accounts add and erase — #1383', () => {
     expect(Object.values(riders).filter((n) => n > 0).length).toBeGreaterThan(ATHLETES.length);
     const ids = made.map((each) => each.id);
     expect(Object.values(rowsNaming(data.database, ids)).some((n) => n > 0)).toBe(true);
-    const erased = run(data, '', 'load-accounts', 'erase');
+    const erased = await runHere(data, '', 'load-accounts', 'erase');
     expect(erased.status, erased.stderr).toBe(0);
     expect(erased.report).toEqual({ command: 'load-accounts erase', erased: 2, remaining: 0 });
 
@@ -274,7 +303,7 @@ describe('load-accounts add and erase — #1383', () => {
       await store.close();
     }
 
-    const again = run(data, '', 'load-accounts', 'erase');
+    const again = await runHere(data, '', 'load-accounts', 'erase');
     expect(again.report).toEqual({ command: 'load-accounts erase', erased: 0, remaining: 0 });
   });
 
@@ -309,8 +338,9 @@ describe('load-accounts add and erase — #1383', () => {
     expect(erased.report).toEqual({ command: 'load-accounts erase', erased: 0, remaining: 0 });
     expect(rowsNaming(data.database, ['rider-d'])['athlete rider-d']).toBe(1);
 
-    // Nor does a second add take a key an earlier run already holds.
-    expect(run(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add').status).toBe(0);
+    // Nor does a second add take a key an earlier run already holds. The
+    // earlier run is set-up, in this process (#2568); the refusal is spawned.
+    expect((await runHere(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add')).status).toBe(0);
     const twice = run(data, `${fresh!.publicKey}\n`, 'load-accounts', 'add');
     expect(twice.status).toBe(1);
     expect(await loadAthletes(data)).toHaveLength(1);
