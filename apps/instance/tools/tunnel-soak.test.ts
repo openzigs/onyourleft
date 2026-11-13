@@ -31,9 +31,11 @@ import { idleProbe, soak } from './tunnel-soak-run.ts';
  * ends sooner, at each rider's second frame: about two seconds after they
  * join, so a rider dropped at the first has a frame either side of the drop.
  * The bound is past that by the join, the rejoin and a late frame on a busy
- * runner, and with the instance's start still under the case's 5 s.
+ * runner, and with the instance's start still under the case's 5 s. It
+ * stays at the 2 800 ms it was before #2569 (#1688: never raise a bound a
+ * failing run reaches); moving sign-in out of the timer widened it enough.
  */
-const SOAK_MS = 3_200;
+const SOAK_MS = 2_800;
 /** The room host's ping in the idle probe's case: often enough that the probe can be short. */
 const PING_MS = 200;
 
