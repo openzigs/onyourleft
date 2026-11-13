@@ -115,6 +115,7 @@ describe('the race load run — #464, raced locally', () => {
   it('seats every rider, starts the race, rides it to the line, and counts a dropped socket and its rejoin', async () => {
     const url = await instanceWithRace(TWO_TICK_METRES);
     let dropped = false;
+    const started = Date.now();
     const report = await raceLoad({
       url,
       roomId: 'race',
@@ -132,8 +133,10 @@ describe('the race load run — #464, raced locally', () => {
     });
     expect(report.riders).toBe(3);
     expect(report.raceOver).toBe(true);
-    // Over at the line, not at the time limit: the riders leave when the room says so.
-    expect(report.raceSeconds).toBeLessThan(RUN_LIMIT_MS / 1000);
+    // Over at the line, not at the time limit: the riders leave when the room
+    // says so. The whole run, not `raceSeconds`: that starts after seating, so
+    // a run stopped at its limit could still read under it.
+    expect(Date.now() - started).toBeLessThan(RUN_LIMIT_MS);
     expect(report.finishers).toBe(3);
     expect(report.disconnects).toEqual([
       { rider: 2, atSecond: expect.any(Number) as number, code: 1006 },

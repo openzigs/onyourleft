@@ -78,7 +78,10 @@ describe('the lint block for replan.ts — #1296', () => {
   let validator: readonly Finding[] = [];
   let neighbour: readonly Finding[] = [];
   beforeAll(() => {
-    [validator = [], neighbour = []] = lint([VALIDATOR, NEIGHBOUR]);
+    const results = lint([VALIDATOR, NEIGHBOUR]);
+    // By name, not as a default: a short result would hold every case below to nothing.
+    expect(results, 'one result for each path linted').toHaveLength(2);
+    [validator, neighbour] = results as readonly [readonly Finding[], readonly Finding[]];
   });
 
   const on = (findings: readonly Finding[], line: number): readonly Finding[] =>

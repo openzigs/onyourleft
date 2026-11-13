@@ -27,12 +27,13 @@ import { migrateForDeploy } from '../src/store/serving.ts';
 import { idleProbe, soak } from './tunnel-soak-run.ts';
 
 /**
- * How long the soak rides: past the room's second frame, which comes two
- * seconds after the riders sign in, so a rider dropped at the first has a frame
- * either side of the drop. 1 700 ms was too short to see it; the rest is slack
- * for signing in and a late frame on a busy runner.
+ * The longest the soak rides, from when the riders are signed in (#2569). It
+ * ends sooner, at each rider's second frame: about two seconds after they
+ * join, so a rider dropped at the first has a frame either side of the drop.
+ * The bound is past that by the join, the rejoin and a late frame on a busy
+ * runner, and with the instance's start still under the case's 5 s.
  */
-const SOAK_MS = 2_800;
+const SOAK_MS = 3_200;
 /** The room host's ping in the idle probe's case: often enough that the probe can be short. */
 const PING_MS = 200;
 
@@ -84,6 +85,7 @@ describe('the tunnel soak — #807’s measurement, ridden locally', () => {
       durationMs: SOAK_MS,
       riders: 2,
       keepaliveMs: 30_000,
+      until: (frames) => frames.length === 2 && frames.every((count) => count >= 2),
       onSocket: (rider, socket) => {
         if (rider === 1 && !dropped) {
           dropped = true;
