@@ -803,7 +803,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         crash-look.ts`' times): `RealisticRiderBelt` blends
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
-                        and the stylised world keeps #2475's roll alone. ⚠️ The jersey's main colour is in NO
+                        and the stylised world keeps #2475's roll alone.
+                        #2505: write a lying moment with `on_road`, not in the
+                        bicycle's `x`/`y`, and name its `elbows`/`knees`; the
+                        test reads the drawn body 3 cm clear of every part of
+                        the bicycle. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
