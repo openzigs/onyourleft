@@ -11483,10 +11483,72 @@ interface DeliveryPart {
  * in), and, where any part names a kind, each vertex's kind. The parts'
  * geometries are disposed.
  */
-function deliveryShape(parts: readonly DeliveryPart[]): BufferGeometry {
-  const flats = parts.map((part) =>
-    part.made.index === null ? part.made : part.made.toNonIndexed(),
-  );
+/**
+ * Whether the triangle at `first` (its three corners from there) faces
+ * straight down and lies wholly under the chase camera's eye — #2507, PR
+ * #2518's trim: from an eye `camera.ts` §`CAMERA_ABOVE_METRES` over the road
+ * such a face is always seen from behind, and Delivery's materials draw front
+ * faces only (`decorationMaterials`) and cast no shadow, so it is culled on
+ * every frame and drawing it costs a triangle for no pixel: the bottom of a
+ * bin, a cone's foot or a post standing on the road, a car's underside and
+ * the underside of a mailbox's box. Facing down is the winding's normal,
+ * three's front face, within a degree or so of straight down.
+ */
+function isUnderside(position: BufferAttribute, first: number): boolean {
+  const [ax, ay, az] = [position.getX(first), position.getY(first), position.getZ(first)];
+  const [ux, uy, uz] = [
+    position.getX(first + 1) - ax,
+    position.getY(first + 1) - ay,
+    position.getZ(first + 1) - az,
+  ];
+  const [vx, vy, vz] = [
+    position.getX(first + 2) - ax,
+    position.getY(first + 2) - ay,
+    position.getZ(first + 2) - az,
+  ];
+  const [nx, ny, nz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const length = Math.hypot(nx, ny, nz);
+  const highest = Math.max(ay, position.getY(first + 1), position.getY(first + 2));
+  return length > 0 && ny / length < -0.99 && highest < CAMERA_ABOVE_METRES;
+}
+
+/**
+ * Only the triangles of `flat` (unindexed) that are not an {@link isUnderside},
+ * as a new geometry of its position and normal — the two {@link deliveryShape}
+ * reads. `flat` itself when none is.
+ */
+function withoutUndersides(flat: BufferGeometry): BufferGeometry {
+  const position = flat.getAttribute('position') as BufferAttribute;
+  const normal = flat.getAttribute('normal') as BufferAttribute;
+  const kept: number[] = [];
+  for (let first = 0; first < position.count; first += 3) {
+    if (!isUnderside(position, first)) kept.push(first);
+  }
+  if (kept.length * 3 === position.count) return flat;
+  const positions = new Float32Array(kept.length * 9);
+  const normals = new Float32Array(kept.length * 9);
+  kept.forEach((first, index) => {
+    positions.set(position.array.subarray(first * 3, first * 3 + 9), index * 9);
+    normals.set(normal.array.subarray(first * 3, first * 3 + 9), index * 9);
+  });
+  const trimmed = new BufferGeometry();
+  trimmed.setAttribute('position', new BufferAttribute(positions, 3));
+  trimmed.setAttribute('normal', new BufferAttribute(normals, 3));
+  return trimmed;
+}
+
+function deliveryShape(
+  parts: readonly DeliveryPart[],
+  /** #2507: leave out every {@link isUnderside}; for pieces that stand on the road. */
+  undersides: 'keep' | 'drop' = 'keep',
+): BufferGeometry {
+  const flats = parts.map((part) => {
+    const flat = part.made.index === null ? part.made : part.made.toNonIndexed();
+    if (undersides === 'keep') return flat;
+    const trimmed = withoutUndersides(flat);
+    if (trimmed !== flat && flat !== part.made) flat.dispose();
+    return trimmed;
+  });
   const vertices = flats.reduce((sum, flat) => sum + flat.getAttribute('position').count, 0);
   const positions = new Float32Array(vertices * 3);
   const normals = new Float32Array(vertices * 3);
@@ -11626,10 +11688,10 @@ const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox'
  * (0.27 m to 0.54 m across and tall), the diamond from 0.45 m to 0.72 m
  * across and the ring from 0.28 m to 0.42 m, and its 1 m post from 0.08 m
  * thick, a doorstep's, to `postThick`, 0.14 m. From where
- * its throw window opens, 20 m short of it, the whole mark stands about 77
+ * its throw window opens, 20 m short of it, the whole mark stood about 77
  * pixels tall on the owner's 1280×800 tablet, up from 58, and the box about
- * 16, up from 8 (`delivery-belt.test.ts` §"#2507"). Only the drawing grew:
- * the catch is still `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
+ * 16, up from 8. Only the drawing grew: the catch is still
+ * `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
  *
  * The owner's second ruling on PR #2518 (2026-11-12): **the whole mailbox
  * stands below a house marker's top**, now that #2530 stands that marker low
@@ -11637,7 +11699,9 @@ const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox'
  * stretched 1.4). So the post came down from 1 m to 0.5 m, the diamond from
  * 0.72 m across to 0.5 m, and its gap over the roof from 0.1 m to
  * `diamondGap`, 0.05 m: the top from 2.65 m to 1.79 m. The box keeps its
- * 0.9 m, what makes it read as a mailbox at 12 m to 20 m.
+ * 0.9 m, what makes it read as a mailbox at 12 m to 20 m: the whole mark now
+ * stands about 62 pixels at 12 m and 52 at 20 m, the box 19 and 16
+ * (`delivery-belt.test.ts` §"#2507").
  */
 const OTHER_MARKER_METRES = {
   post: 0.5,
@@ -11824,7 +11888,6 @@ export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; 
     top: MARKER_METRES.post + MARKER_METRES.diamond * MARKER_DIAMOND_STRETCH,
   });
 
-
 /**
  * The markers, every kind in one geometry, each standing on its spot at the
  * origin (#2365, {@link DELIVERY_MARKER_ORDER}, each vertex marked with its
@@ -11841,7 +11904,7 @@ function markerShape(): BufferGeometry {
   const box = other.box;
   const boxAcross = box * 0.6;
   const mailboxHalf = other.diamond / 2;
-  return deliveryShape([
+  const parts: readonly DeliveryPart[] = [
     {
       made: deliveryBox(postThick, post, postThick, 0, post / 2, 0),
       colour: DELIVERY_PAINT.post,
@@ -11945,7 +12008,8 @@ function markerShape(): BufferGeometry {
       glows: true,
       kind: kind('no-delivery'),
     },
-  ]);
+  ];
+  return deliveryShape(parts, 'drop');
 }
 
 /**
@@ -12306,7 +12370,7 @@ function obstacleShape(): BufferGeometry {
       painted: colour === body,
     });
   }
-  return deliveryShape(parts);
+  return deliveryShape(parts, 'drop');
 }
 
 /**
@@ -12320,7 +12384,9 @@ function obstacleShape(): BufferGeometry {
  * under `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (it was
  * 206 318 at 1 770, 20 obstacles each submitting all of these): each of the
  * car's four rims one outward disc of 8, not a closed cylinder of 32 (−96).
- * A car pulling out's
+ * Then **1 598**, PR #2518's trim when its markers met these obstacles (the
+ * village frame 206 234, over that limit): the 76 faces that look straight
+ * down from under the eye, never drawn ({@link isUnderside}). A car pulling out's
  * body is the parked car's, drawn by its instance too ({@link
  * DELIVERY_PIECE_ALSO_ATTRIBUTE}), so it adds no car. Every obstacle instance submits all of them (the kind
  * collapse is per vertex, {@link withObstacleKinds}), so a Delivery frame's
@@ -12330,7 +12396,7 @@ function obstacleShape(): BufferGeometry {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_OBSTACLE_TRIANGLES = 1_674;
+export const DELIVERY_OBSTACLE_TRIANGLES = 1_598;
 
 /**
  * A Delivery level's rain — #2366, ADR 0065 D-10.4: {@link RAIN_STREAKS}
@@ -12454,9 +12520,12 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * The triangles in the markers' one geometry — #2507: **184**, a doorstep's
- * 44, a mailbox's 84 and a no-delivery sign's 56 (96 until its torus became
- * {@link signRing}'s flat ring, 40 fewer). Every marker instance submits all
+ * The triangles in the markers' one geometry — #2507: **174**, a doorstep's
+ * 42, a mailbox's 78 and a no-delivery sign's 54. It was 184 (44, 84 and 56;
+ * the sign's 96 until its torus became {@link signRing}'s flat ring, 40
+ * fewer), and then PR #2518's trim for the village frame left out the 10
+ * faces that look straight down from under the eye ({@link isUnderside}):
+ * each post's foot, and the mailbox's box's and flag's undersides. Every marker instance submits all
  * of them (the kind collapse is per vertex, as the obstacles' is), so a
  * Delivery frame's markers cost this many times the instances drawn in
  * vertex work.
@@ -12464,7 +12533,7 @@ function prefersReducedMotion(): boolean {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_MARKER_TRIANGLES = 184;
+export const DELIVERY_MARKER_TRIANGLES = 174;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();

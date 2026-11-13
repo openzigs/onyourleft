@@ -1081,7 +1081,9 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // marker (8) and two one-quad indicators (4), 1 770, inside that bound,
     // and then, on the owner's ruling of 2026-11-12 that the village frame
     // stay under 205 000 triangles, trims the car's rims to one outward disc
-    // each (32 to 8), 1 674; its tyres stay round in 12 (above). A change
+    // each (32 to 8), 1 674; its tyres stay round in 12 (above). PR #2518's
+    // trim, when its markers met these: no face looking straight down from
+    // under the eye, 76 fewer, 1 598. A change
     // past this is for the owner and the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
@@ -1174,31 +1176,24 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     belt.dispose();
   });
 
-  /**
-   * A house marker's top once #2530 lands, metres: its 0.6 m post under a
-   * 0.9 m diamond stretched 1.4 tall, **1.86**. #2530 is not on this branch,
-   * where the marker still stands on #2453's 2.4 m post (its top 3.66 m), so
-   * the bound is written down here from #2530's `MARKER_METRES`. When the two
-   * combine, the drawn house marker's top is this number, and the case below
-   * reads both: the mailbox under the drawn marker's top and under this one.
-   */
-  const HOUSE_MARKER_TOP_FROM_2530_METRES = 0.6 + 0.9 * 1.4;
-
   it('stands the whole mailbox, its diamond too, below a house marker’s top, #2530’s 1.86 m — the owner’s second ruling on PR #2518', () => {
     const belt = new DeliveryBelt('stylised');
     const top = (kind: number): number =>
       Math.max(...markerVertices(belt, kind).map((each) => each.y));
     const mailbox = top(MAILBOX);
-    // Under it by a margin a reader sees: at least 0.05 m.
-    expect(mailbox).toBeLessThanOrEqual(HOUSE_MARKER_TOP_FROM_2530_METRES - 0.05);
-    expect(mailbox).toBeLessThan(top(0));
+    // Under it by a margin a reader sees: at least 0.05 m, under #2530's
+    // stated top and under the drawn marker's, so a later change to either
+    // is checked here.
+    expect(MARKER_DIAMOND_HEIGHTS.top).toBeCloseTo(1.86, 6);
+    expect(mailbox).toBeLessThanOrEqual(MARKER_DIAMOND_HEIGHTS.top - 0.05);
+    expect(mailbox).toBeLessThanOrEqual(top(0) - 0.05);
     // 2.65 m until this ruling: over a 1.86 m house marker.
     expect(mailbox).toBeCloseTo(1.79, 6);
     // Every glowing part of the diamond lies under it too.
     const diamond = mailboxVertices(belt).filter((each) => each.glows && each.y > 0.2);
     expect(diamond.length).toBeGreaterThan(0);
     expect(Math.max(...diamond.map((each) => each.y))).toBeLessThanOrEqual(
-      HOUSE_MARKER_TOP_FROM_2530_METRES - 0.05,
+      MARKER_DIAMOND_HEIGHTS.top - 0.05,
     );
     belt.dispose();
   });
@@ -1214,10 +1209,46 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
       perKind[kind] = (perKind[kind] ?? 0) + 1;
     }
     expect(position.count / 3).toBe(DELIVERY_MARKER_TRIANGLES);
-    // A doorstep's 44, a mailbox's 84, a no-delivery sign's 56: its torus (72) a flat ring (32).
-    expect(perKind.map((each) => each / 3)).toEqual([44, 84, 56]);
-    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(184);
+    // A doorstep's 42, a mailbox's 78, a no-delivery sign's 54: its torus (72) a flat
+    // ring (32), and PR #2518's trim, no face looking down from under the eye (2, 6, 2).
+    expect(perKind.map((each) => each / 3)).toEqual([42, 78, 54]);
+    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(174);
     belt.dispose();
+  });
+
+  it('draws no face of an obstacle or a marker that looks straight down from under the eye, and keeps a parcel’s — PR #2518’s trim', () => {
+    // Seen from the chase camera's eye, CAMERA_ABOVE_METRES over the road, such
+    // a face is always seen from behind and culled: it cost a triangle a frame
+    // for no pixel. A parcel flies and turns, so it keeps its own (the control).
+    const undersides = (belt: DeliveryBelt, what: 'obstacles' | 'markers' | 'parcels'): number => {
+      const position = belt.meshOf(what).geometry.getAttribute('position');
+      let count = 0;
+      for (let at = 0; at < position.count; at += 3) {
+        const [ax, ay, az] = [position.getX(at), position.getY(at), position.getZ(at)];
+        const [ux, uy, uz] = [
+          position.getX(at + 1) - ax,
+          position.getY(at + 1) - ay,
+          position.getZ(at + 1) - az,
+        ];
+        const [vx, vy, vz] = [
+          position.getX(at + 2) - ax,
+          position.getY(at + 2) - ay,
+          position.getZ(at + 2) - az,
+        ];
+        const ny = uz * vx - ux * vz;
+        const length = Math.hypot(uy * vz - uz * vy, ny, ux * vy - uy * vx);
+        const highest = Math.max(ay, position.getY(at + 1), position.getY(at + 2));
+        if (ny / length < -0.99 && highest < CAMERA_ABOVE_METRES) count += 1;
+      }
+      return count;
+    };
+    for (const world of ['stylised', 'realistic'] as const) {
+      const belt = new DeliveryBelt(world);
+      expect(undersides(belt, 'obstacles'), world).toBe(0);
+      expect(undersides(belt, 'markers'), world).toBe(0);
+      expect(undersides(belt, 'parcels'), world).toBeGreaterThan(0);
+      belt.dispose();
+    }
   });
 
   it('draws a no-delivery sign’s ring with a face toward a rider coming either way along the road — #2507', () => {
@@ -1361,8 +1392,8 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     [THROW_WINDOW_BEFORE_METRES, { whole: 50, box: 15, diamond: 18 }],
   ] as const) {
     it(`stands at least ${floors.whole} pixels tall, its box ${floors.box} and its diamond ${floors.diamond}, on the tablet from ${ahead} m`, () => {
-      // The rider on the middle of the road, heading north, the throw window to a mailbox at the
-      // right-hand kerb just opening: the mailbox THROW_WINDOW_BEFORE_METRES ahead.
+      // The rider on the middle of the road, heading north, a mailbox at the right-hand kerb
+      // `ahead` metres ahead: where its throw window opens (20 m) and nearer (12 m).
       const pose = {
         x: 0,
         y: 0,
