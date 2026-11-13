@@ -166,6 +166,10 @@ interface Course {
   /** The level's round, on a level. */
   readonly level?:
     (LevelFile['round'] & { readonly lengthMetres: number; readonly id: string }) | undefined;
+  /** #2366: the level's file is served in rain and at dusk. */
+  readonly weather?: boolean;
+  /** #1688: each frame's length, when not `FRAME_MS`: the same ride in fewer frames. Divides a second. */
+  readonly frameMs?: number;
 }
 
 const TOWN: Course = { corridor: town.corridor, profile: town.profile, origin: ORIGIN };
@@ -210,7 +214,11 @@ function port(): GamePort {
 }
 
 /** #2362: the game's port for a rider with no route of their own, opening the fixture level. */
-function levelPort(): GamePort {
+function levelPort(weather = false): GamePort {
+  // #2366: the same level, in rain and at dusk.
+  const served: LevelFile = weather
+    ? { ...LEVEL, round: { ...LEVEL.round, weather: 'rain', light: 'dusk' } }
+    : LEVEL;
   return {
     listRoutes: () => Promise.resolve([]),
     // The listing names the level, first in the order so it is open: a level
@@ -225,7 +233,7 @@ function levelPort(): GamePort {
           routeId: levelRouteId(LEVEL.id),
         },
       ]),
-    loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? LEVEL : undefined),
+    loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? served : undefined),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
       rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
@@ -309,9 +317,10 @@ function throwScript(
     profile: course.profile,
     conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
   });
+  const frameMs = course.frameMs ?? FRAME_MS;
   const shadow: { along: number; speed: number }[] = [];
-  for (let frame = 1; frame <= FRAMES; frame += 1) {
-    const at = START_MS + frame * FRAME_MS;
+  for (let frame = 1; frame <= (FRAMES * FRAME_MS) / frameMs; frame += 1) {
+    const at = START_MS + frame * frameMs;
     simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
     shadow.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
   }
@@ -334,10 +343,10 @@ function throwScript(
   return throws;
 }
 
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const next = pending.shift();
   if (next === undefined) throw new Error('the ride asked for no frame');
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     next(nowMs);
     await Promise.resolve();
@@ -443,7 +452,7 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
       />
     ) : (
       <GameView
-        port={levelPort()}
+        port={levelPort(course.weather === true)}
         trainer={gameTrainerPortOver(controller)}
         renderer={() =>
           Promise.resolve({
@@ -461,10 +470,11 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
     await Promise.resolve();
   });
   await settle();
-  for (let index = 0; index < FRAMES; index += 1) {
-    await pump();
-    // The bench keeps whole seconds; five of the game's frames are one.
-    if (index % 5 === 4) {
+  const frameMs = course.frameMs ?? FRAME_MS;
+  for (let index = 0; index < (FRAMES * FRAME_MS) / frameMs; index += 1) {
+    await pump(frameMs);
+    // The bench keeps whole seconds; five of the game's frames are one (#1688: or one of 1 s).
+    if ((index + 1) % (1_000 / frameMs) === 0) {
       await act(async () => {
         bench.advance(seconds(1));
         await controller.tick(bench.now);
@@ -1280,6 +1290,63 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
       expect(levelProgressIn(() => [jsonOf(instance.sent)])).toStrictEqual([]);
     },
   );
+});
+
+describe('a ride on a level in rain and at dusk records what a clear one does — #2366, ADR 0065 D-11', () => {
+  // #1688's ruling: cheaper, never a longer timeout. The two rides compared
+  // are the level's same 66 s in frames of 1 s, not 330 of 200 ms, with the
+  // bench a second on each frame and the throws scripted on a shadow pumped
+  // the same way: the simulation's steps are fixed at 0.05 s whatever the
+  // frame. On this Mac, Node 26, two runs each at load averages of 16 to 28,
+  // in the file's run: 1.3–1.7 s → 0.77–1.0 s without coverage, 3.2–7.6 s →
+  // 1.5–2.6 s with `--coverage`; run alone, when it also pays the first
+  // ride's warm-up, 6.9–10.9 s → 5.0 s with `--coverage`.
+  it('stores the same ride, streams and laps as the same level ridden in clear daylight', async () => {
+    // Each ride on its own clock from the start line, as each case's would be.
+    const clear = await rideAndSave({ ...ON_LEVEL, frameMs: 1_000 });
+    pending = [];
+    nowMs = START_MS;
+    const wet = await rideAndSave({
+      ...ON_LEVEL,
+      level: {
+        ...LEVEL.round,
+        weather: 'rain',
+        light: 'dusk',
+        lengthMetres: LEVEL.lengthMetres,
+        id: LEVEL.id,
+      },
+      weather: true,
+      frameMs: 1_000,
+    });
+    try {
+      const readBack = (ride: Ridden) =>
+        ride.harness.read(async (store) => [
+          await store.getActivity(ATHLETE_A, RIDE_ID),
+          await store.getStreamSet(ATHLETE_A, RIDE_ID),
+          await store.listLaps(ATHLETE_A, RIDE_ID),
+        ]);
+      const [clearRead, wetRead] = [await readBack(clear), await readBack(wet)];
+      expect(clearRead[0]).toBeDefined();
+      expect(jsonOf(wetRead)).toBe(jsonOf(clearRead));
+      // The same round's houses, in the same order: the weather picked nothing.
+      expect(wet.targets).toStrictEqual(clear.targets);
+      // Not vacuous: the wet ride's frames were drawn in rain and at dusk, the clear one's not.
+      expect(wet.drawn.length).toBeGreaterThan(20);
+      expect(
+        wet.drawn.every(
+          (frame) => frame.delivery?.weather?.rain === true && frame.delivery.weather.dusk,
+        ),
+      ).toBe(true);
+      expect(clear.drawn.some((frame) => frame.delivery?.weather?.rain === true)).toBe(false);
+      // And its markers showed later: fewer of them on its first frame.
+      expect(wet.drawn[0]?.delivery?.markers.length ?? 0).toBeLessThan(
+        clear.drawn[0]?.delivery?.markers.length ?? 0,
+      );
+    } finally {
+      await clear.harness.destroy();
+      await wet.harness.destroy();
+    }
+  });
 });
 
 describe('the scan can go red — #1817', () => {

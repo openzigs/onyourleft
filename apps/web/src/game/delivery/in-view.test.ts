@@ -15,11 +15,18 @@ import { corridorOrigin, roadCorridor, type CorridorPoint } from '../terrain';
 
 import {
   deliveryInView,
+  LOW_LIGHT_REVEAL_METRES,
   PARCEL_HAND_METRES,
   PARCEL_LOB_METRES,
   type DeliveryDrawInput,
 } from './in-view';
-import { obstacleAcross, startObstacles, stepObstacles, type Obstacle } from './obstacles';
+import {
+  obstacleAcross,
+  obstacleAlong,
+  startObstacles,
+  stepObstacles,
+  type Obstacle,
+} from './obstacles';
 import { recordDelivery, recordMiss, startRound } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -141,6 +148,37 @@ describe('a Delivery frame’s pieces — #1814', () => {
     ).toEqual(['no-delivery']);
   });
 
+  it('hides a marker beyond the reveal distance and shows it inside it, and in clear weather draws every one — #2366', () => {
+    const targets = [targetAt(0, RIDER + 30), targetAt(1, RIDER + 41), targetAt(2, RIDER + 200)];
+    const round = startRound(3);
+    const dusk = deliveryInView(
+      input({
+        targets,
+        round,
+        riderAlong: RIDER,
+        revealMetres: LOW_LIGHT_REVEAL_METRES,
+        weather: { rain: false, dusk: true },
+      }),
+    );
+    expect(LOW_LIGHT_REVEAL_METRES).toBe(40);
+    expect(dusk.markers.map((marker) => marker.z)).toEqual([targets[0]?.z]);
+    expect(dusk.weather).toEqual({ rain: false, dusk: true });
+    // Exactly at the reveal distance it shows.
+    const edge = deliveryInView(
+      input({
+        targets: [targetAt(0, RIDER + LOW_LIGHT_REVEAL_METRES)],
+        round: startRound(1),
+        riderAlong: RIDER,
+        revealMetres: LOW_LIGHT_REVEAL_METRES,
+      }),
+    );
+    expect(edge.markers).toHaveLength(1);
+    // Clear weather: no reveal distance, every marker on the corridor, and no weather on the frame.
+    const clear = deliveryInView(input({ targets, round, riderAlong: RIDER }));
+    expect(clear.markers).toHaveLength(3);
+    expect(clear.weather).toBeUndefined();
+  });
+
   it('draws nothing off the frame’s corridor: no house, parcel or obstacle past either end', () => {
     const first = (CORRIDOR.centre[0] as CorridorPoint).along;
     const last = (CORRIDOR.centre[CORRIDOR.centre.length - 1] as CorridorPoint).along;
@@ -249,6 +287,58 @@ describe('a Delivery frame’s pieces — #1814', () => {
       obstacleAcross(obstacle, 0),
       3,
     );
+  });
+
+  it('draws each moving hazard where it is, facing the way it goes, a car pulling out as its own kind — #2364, #2506', () => {
+    const hazards: readonly Obstacle[] = [
+      { kind: 'dog', along: RIDER + 50, from: 'left', startAfter: 0 },
+      { kind: 'dog', along: RIDER + 55, from: 'right', startAfter: 0 },
+      {
+        kind: 'car-pulling-out',
+        along: RIDER + 70,
+        from: 'left',
+        startAfter: 0,
+        to: -2.4,
+        rides: 0,
+      },
+      {
+        kind: 'oncoming-rider',
+        along: RIDER + 80,
+        from: 'right',
+        startAfter: 0,
+        to: 1.75,
+        rides: -5,
+      },
+    ];
+    // Each set going on the first tick, the rider within sight of them all, then four seconds on.
+    let state = startObstacles(hazards);
+    for (let tick = 0; tick < 80; tick += 1) {
+      state = stepObstacles(state, {
+        rider: { along: RIDER, lateral: 0, speed: 0 },
+        obstacles: hazards,
+      }).state;
+    }
+    const seconds = (state.tick - (state.startedAt[3] ?? 0)) * DELIVERY_TICK_SECONDS;
+    const drawn = deliveryInView(input({ obstacles: hazards, obstacleState: state })).obstacles;
+    expect(drawn.map((piece) => piece.kind)).toStrictEqual([
+      'dog',
+      'dog',
+      'car-pulling-out',
+      'oncoming-rider',
+    ]);
+    // Another rider is drawn where they have ridden to, toward the rider: short of where they came out.
+    const rider = drawn[3];
+    expect(rider?.z).toBeCloseTo(obstacleAlong(hazards[3] as Obstacle, seconds), 6);
+    expect(rider?.z).toBeLessThan(RIDER + 80 - 10);
+    expect(rider?.x).toBeCloseTo(-1.75, 6);
+    // Facing the rider, and a dog the way it runs.
+    expect(rider?.yaw).toBeCloseTo(Math.PI, 6);
+    expect(drawn[0]?.yaw).toBeCloseTo(Math.PI, 6);
+    expect(drawn[1]?.yaw).toBeCloseTo(0, 6);
+    // A car pulling out out in its kerb lane, along the road, where it came out.
+    expect(drawn[2]?.yaw).toBeCloseTo(0, 6);
+    expect(drawn[2]?.z).toBeCloseTo(RIDER + 70, 6);
+    expect(drawn[2]?.x).toBeCloseTo(2.4, 6);
   });
 
   it('places on a bend by distance along the corridor, across its own normal, at the road’s height', () => {

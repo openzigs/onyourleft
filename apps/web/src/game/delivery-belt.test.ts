@@ -11,7 +11,7 @@
  * browser gate does: `delivery.browser.spec.ts`.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
 import {
@@ -42,22 +42,37 @@ import {
   type ThrowState,
   type ThrowTarget,
 } from './delivery/throw';
-import type { DeliveryInView, DeliveryPiece } from './port';
+import type { DeliveryInView, DeliveryObstacleKind, DeliveryPiece } from './port';
 import type { CorridorPoint } from './terrain';
 import {
   DELIVERY_MARKER_TRIANGLES,
   DELIVERY_OBSTACLE_TRIANGLES,
   DELIVERY_PIECE_CAPACITY,
   DeliveryBelt,
+  deliveryObstacleVertexDrawn,
   MARKER_MOST_SCALE,
+  MARKER_DIAMOND_HEIGHTS,
   MARKER_TRUE_SIZE_WITHIN_METRES,
   markerScaleAt,
+  RAIN_CLEAR_METRES,
+  RAIN_COLOUR,
+  RAIN_STREAK_METRES,
+  RAIN_STREAK_WIDTH_METRES,
+  RAIN_STREAKS,
+  RAIN_TRIANGLES,
   type DeliveryPieceKind,
 } from './three-renderer';
 import { PEAK_IRRADIANCE } from './world';
 
 const KINDS: readonly DeliveryPieceKind[] = ['parcels', 'markers', 'obstacles'];
-const ROSTER = Object.keys(OBSTACLE_KINDS) as readonly ObstacleKind[];
+/**
+ * The kinds the view draws, in the renderer's order: every one of
+ * `OBSTACLE_KINDS`, a car pulling out its own since #2506 (it was drawn as a
+ * parked car, #2364).
+ */
+const ROSTER: readonly DeliveryObstacleKind[] = Object.keys(
+  OBSTACLE_KINDS,
+) as readonly ObstacleKind[];
 
 /** `count` of each piece, a metre apart, every obstacle kind in turn. */
 function pieces(count: number): DeliveryInView {
@@ -67,7 +82,7 @@ function pieces(count: number): DeliveryInView {
     markers: Array.from({ length: count }, (_, index) => at(index)),
     obstacles: Array.from({ length: count }, (_, index) => ({
       ...at(index),
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as DeliveryObstacleKind,
     })),
   };
 }
@@ -124,16 +139,47 @@ function markerOn(belt: DeliveryBelt, target: DeliveryTarget): boolean {
     );
 }
 
-/** The bounding box of the vertices of `kind` in the obstacle mesh's geometry. */
-function kindBox(belt: DeliveryBelt, kind: ObstacleKind): { min: number[]; max: number[] } {
+/** A vertex of the obstacle geometry: where it is, whether it glows, and its paint's channels. */
+interface ObstacleVertex {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly glows: boolean;
+  readonly rgb: readonly [number, number, number];
+}
+
+/**
+ * The vertices an instance of `kind` draws, by the rule its vertex shader
+ * applies (`three-renderer.ts` §`deliveryObstacleVertexDrawn`, whose text the
+ * shader test below holds): the rest collapse to the instance's origin.
+ */
+function drawnBy(belt: DeliveryBelt, kind: DeliveryObstacleKind): ObstacleVertex[] {
   const geometry = belt.meshOf('obstacles').geometry;
   const position = geometry.getAttribute('position');
   const kinds = geometry.getAttribute('oylPieceKind');
+  const also = geometry.getAttribute('oylPieceAlso');
+  const glow = geometry.getAttribute('oylGlow');
+  const colour = geometry.getAttribute('color');
+  const found: ObstacleVertex[] = [];
+  for (let at = 0; at < position.count; at += 1) {
+    if (!deliveryObstacleVertexDrawn(kinds.getX(at), also.getX(at), ROSTER.indexOf(kind))) continue;
+    found.push({
+      x: position.getX(at),
+      y: position.getY(at),
+      z: position.getZ(at),
+      glows: glow.getX(at) === 1,
+      rgb: [colour.getX(at), colour.getY(at), colour.getZ(at)],
+    });
+  }
+  return found;
+}
+
+/** The bounding box of the vertices an instance of `kind` draws in the obstacle mesh's geometry. */
+function kindBox(belt: DeliveryBelt, kind: DeliveryObstacleKind): { min: number[]; max: number[] } {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
-  for (let at = 0; at < position.count; at += 1) {
-    if (kinds.getX(at) !== ROSTER.indexOf(kind)) continue;
-    const corner = [position.getX(at), position.getY(at), position.getZ(at)];
+  for (const vertex of drawnBy(belt, kind)) {
+    const corner = [vertex.x, vertex.y, vertex.z];
     corner.forEach((value, axis) => {
       min[axis] = Math.min(min[axis] as number, value);
       max[axis] = Math.max(max[axis] as number, value);
@@ -254,12 +300,8 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
-  it('carries a glowing hazard marker over each bin, trolley and cone, above the rider’s helmet and out of the camera’s near reach, and none over a parked car — #2396', () => {
+  it('carries a glowing hazard marker over each bin, trolley, cone and moving hazard, above the rider’s helmet and out of the camera’s near reach, and none over a parked car — #2396, #2506', () => {
     const belt = new DeliveryBelt('stylised');
-    const geometry = belt.meshOf('obstacles').geometry;
-    const position = geometry.getAttribute('position');
-    const kinds = geometry.getAttribute('oylPieceKind');
-    const glow = geometry.getAttribute('oylGlow');
     // The frustum nearer than the near plane reaches this far above the eye
     // at the widest lens a frame opens, so a lower marker would be cut
     // through by a camera passing over the obstacle.
@@ -267,26 +309,160 @@ describe('Delivery’s belt — #1814', () => {
       CAMERA_ABOVE_METRES +
       NEAR_PLANE_METRES * Math.tan(((MAXIMUM_FIELD_OF_VIEW_DEGREES / 2) * Math.PI) / 180);
     for (const kind of ROSTER) {
-      let glowing = 0;
-      let lowest = Infinity;
-      for (let at = 0; at < position.count; at += 1) {
-        if (kinds.getX(at) !== ROSTER.indexOf(kind) || glow.getX(at) !== 1) continue;
-        glowing += 1;
-        lowest = Math.min(lowest, position.getY(at));
-      }
+      // The marker: what an instance of the kind draws glowing in the hazard's red.
+      const marker = drawnBy(belt, kind).filter((vertex) => vertex.glows && isHazardRed(vertex));
       if (kind === 'parked-car') {
         // 1.8 m wide, never behind the rider: no sign over an ordinary parked car.
-        expect(glowing, kind).toBe(0);
+        expect(
+          drawnBy(belt, kind).filter((vertex) => vertex.glows),
+          kind,
+        ).toEqual([]);
         continue;
       }
-      expect(glowing, kind).toBeGreaterThan(0);
+      expect(marker.length, kind).toBeGreaterThan(0);
+      const lowest = Math.min(...marker.map((vertex) => vertex.y));
       expect(lowest, kind).toBeGreaterThan(RIDER_HEIGHT_METRES);
       expect(lowest, kind).toBeGreaterThan(nearReach);
     }
     belt.dispose();
   });
 
-  it('stands a house marker’s glowing diamond 0.9 m across on a 2.4 m post, above a hedge, a fence and a parked car — #2453', () => {
+  it('marks a car pulling out with a hazard marker and lit amber indicators, and a parked car with neither, in frames drawn from the round — #2506', () => {
+    // A parked car in the left kerb lane and, 40 m on, a car pulling out of
+    // the right kerb, through the real view, the frame before it is set going
+    // and four seconds after.
+    const obstacles: Obstacle[] = [
+      { kind: 'parked-car', along: 120, stands: -2.4 },
+      { kind: 'car-pulling-out', along: 160, from: 'right', startAfter: 0, to: 2.4, rides: 0 },
+    ];
+    const waiting = startObstacles(obstacles);
+    const going = { ...waiting, tick: 80, startedAt: [undefined, 0] };
+    const belt = new DeliveryBelt('stylised');
+    for (const obstacleState of [waiting, going]) {
+      belt.update(
+        deliveryInView({
+          corridor: CORRIDOR,
+          targets: [],
+          round: startRound(1),
+          throws: NO_PARCELS,
+          obstacles,
+          obstacleState,
+        }),
+      );
+      const drawn = belt.drawn('obstacles');
+      expect(drawn.map((each) => [each.kind, each.z])).toEqual([
+        ['parked-car', 120],
+        ['car-pulling-out', 160],
+      ]);
+      const [parked, pullingOut] = drawn.map((each) =>
+        drawnBy(belt, each.kind as DeliveryObstacleKind),
+      ) as [ObstacleVertex[], ObstacleVertex[]];
+      // The parked car: no marker, no lit lamp.
+      expect(parked.filter((vertex) => vertex.glows)).toEqual([]);
+      // The car pulling out: the parked car's whole body, and its own marker overhead…
+      expect(pullingOut.filter((vertex) => !vertex.glows)).toEqual(parked);
+      const marker = pullingOut.filter((vertex) => vertex.glows && isHazardRed(vertex));
+      expect(marker.length).toBeGreaterThan(0);
+      expect(Math.min(...marker.map((vertex) => vertex.y))).toBeGreaterThan(RIDER_HEIGHT_METRES);
+      // …and an amber indicator lit each side of its tail, which the rider behind it sees.
+      const lamps = pullingOut.filter((vertex) => vertex.glows && !isHazardRed(vertex));
+      expect(lamps.length).toBeGreaterThan(0);
+      for (const lamp of lamps) {
+        const [red, green, blue] = lamp.rgb;
+        expect(red).toBeGreaterThan(green);
+        expect(green).toBeGreaterThan(blue * 2);
+        expect(lamp.y).toBeLessThan(1);
+        expect(lamp.z).toBeLessThan(-2);
+      }
+      expect(lamps.some((lamp) => lamp.x < -0.4)).toBe(true);
+      expect(lamps.some((lamp) => lamp.x > 0.4)).toBe(true);
+    }
+    belt.dispose();
+  });
+
+  it('draws a car pulling out’s hazard marker at least 24 px tall on a 1280×800 frame from the chase camera, the car 20 m ahead of the rider, and the small kinds’ marker is not — #2506', () => {
+    // The owner's ruling of 2026-11-12: the marker was 8 to 10 px from 20 m.
+    // The product's camera (camera.ts §cameraRig, §projectToFrame) on a level
+    // straight, the rider at the origin heading +z, the car in their lane.
+    const width = 1280;
+    const height = 800;
+    const rig = cameraRig({
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+    });
+    const belt = new DeliveryBelt('stylised');
+    /** The marker's projected height in pixels, `kind`'s instance `metres` ahead of the rider. */
+    const pixelsTall = (kind: DeliveryObstacleKind, metres: number): number => {
+      const marker = drawnBy(belt, kind).filter((vertex) => vertex.glows && isHazardRed(vertex));
+      expect(marker.length, kind).toBeGreaterThan(0);
+      const tops = marker.map((vertex) => {
+        const seen = projectToFrame(rig, width / height, {
+          x: vertex.x,
+          y: vertex.y,
+          z: vertex.z + metres,
+        });
+        if (seen === undefined) throw new Error(`${kind}'s marker is not in front of the eye`);
+        // In the frame, not off its edge.
+        expect(seen.top).toBeGreaterThan(0);
+        expect(seen.left).toBeGreaterThan(0);
+        expect(seen.left).toBeLessThan(1);
+        return seen.top * height;
+      });
+      return Math.max(...tops) - Math.min(...tops);
+    };
+    expect(pixelsTall('car-pulling-out', 20)).toBeGreaterThanOrEqual(24);
+    expect(pixelsTall('car-pulling-out', 12)).toBeGreaterThanOrEqual(36);
+    // The control: the small kinds' marker, the size the owner could not read,
+    // is under the floor, so the floor tells the two apart.
+    expect(pixelsTall('bin', 20)).toBeLessThan(12);
+    belt.dispose();
+  });
+
+  it('turns a car pulling out’s indicators to face back, toward a rider behind it, not into its tail — #2506', () => {
+    // The car's nose is along +z, so a rider behind it looks along +z at its
+    // tail: a lamp is seen only if its triangles' front faces −z. The obstacle
+    // material draws front faces alone, which three decides by winding, so
+    // both the winding and the shading normal are read.
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('obstacles').geometry;
+    const position = geometry.getAttribute('position');
+    const normal = geometry.getAttribute('normal');
+    const kinds = geometry.getAttribute('oylPieceKind');
+    const glow = geometry.getAttribute('oylGlow');
+    const colour = geometry.getAttribute('color');
+    const pullingOut = ROSTER.indexOf('car-pulling-out');
+    const corner = (at: number): [number, number, number] => [
+      position.getX(at),
+      position.getY(at),
+      position.getZ(at),
+    ];
+    let lamps = 0;
+    for (let at = 0; at < position.count; at += 3) {
+      // A car pulling out's own lit part that is not its hazard marker: an indicator.
+      const ownKind = Math.abs(kinds.getX(at) - pullingOut) < 0.5;
+      const rgb: [number, number, number] = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+      const marker = isHazardRed({ x: 0, y: 0, z: 0, glows: true, rgb });
+      if (!ownKind || glow.getX(at) !== 1 || marker) continue;
+      lamps += 1;
+      const [a, b, c] = [corner(at), corner(at + 1), corner(at + 2)];
+      const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+      const [vx, vy] = [c[0] - a[0], c[1] - a[1]];
+      // The winding's normal, z component: (b − a) × (c − a).
+      expect(ux * vy - uy * vx).toBeLessThan(0);
+      for (const vertex of [at, at + 1, at + 2]) expect(normal.getZ(vertex)).toBeLessThan(0);
+    }
+    // Two indicators, one quad each.
+    expect(lamps).toBe(4);
+    belt.dispose();
+  });
+
+  it('stands a house marker’s glowing diamond 0.9 m across low on the step, its middle under a rider’s helmet — #2453, #2513', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
@@ -295,15 +471,153 @@ describe('Delivery’s belt — #1814', () => {
     const kinds = geometry.getAttribute('oylPieceKind');
     const diamond = { xs: [] as number[], ys: [] as number[] };
     for (let at = 0; at < position.count; at += 1) {
-      // The ring lies on the step; the diamond is the glowing part above it.
-      if (kinds.getX(at) !== 0 || glow.getX(at) !== 1 || position.getY(at) < 1) continue;
+      // The ring lies on the step, under 0.1 m; the diamond is the glowing part
+      // above it. A house's alone (#2365): a mailbox's and a sign's glow too.
+      if (kinds.getX(at) !== 0 || glow.getX(at) !== 1 || position.getY(at) < 0.3) continue;
       diamond.xs.push(position.getX(at));
       diamond.ys.push(position.getY(at));
     }
     const span = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
-    // Until #2453, 0.4 m across from 1.52 m up: hidden by a garden hedge, and 2 pixels at 100 m.
+    // Until #2453, 0.4 m across: 2 pixels at 100 m.
     expect(span(diamond.xs)).toBeGreaterThanOrEqual(0.9 - 1e-6);
-    expect(Math.min(...diamond.ys)).toBeGreaterThanOrEqual(2.4 - 1e-6);
+    // The heights the browser gate projects are the drawn diamond's own.
+    expect(Math.min(...diamond.ys)).toBeCloseTo(MARKER_DIAMOND_HEIGHTS.bottom, 6);
+    expect(Math.max(...diamond.ys)).toBeCloseTo(MARKER_DIAMOND_HEIGHTS.top, 6);
+    expect((Math.min(...diamond.ys) + Math.max(...diamond.ys)) / 2).toBeCloseTo(
+      MARKER_DIAMOND_HEIGHTS.middle,
+      6,
+    );
+    // #2513: low. Its middle under the rider's helmet, and the whole of it under
+    // the chase camera's eye, so enlarged about its foot it stays near the
+    // horizon. Until #2513 its middle was 3.03 m up a 2.4 m post, and at 100 m
+    // stood behind the tablet's top-right HUD panel.
+    expect(MARKER_DIAMOND_HEIGHTS.middle).toBeLessThan(RIDER_HEIGHT_METRES);
+    expect(MARKER_DIAMOND_HEIGHTS.top).toBeLessThan(CAMERA_ABOVE_METRES);
+    belt.dispose();
+  });
+
+  it('draws a level’s rain round the eye only on a frame in rain, and none under prefers-reduced-motion — #2366', () => {
+    const belt = new DeliveryBelt('stylised');
+    const eye = { x: 3, y: 12, z: 40 };
+    const pieces = { parcels: [], markers: [], obstacles: [] };
+    belt.update({ ...pieces, weather: { rain: false, dusk: true } }, eye, 1);
+    expect(belt.rainShown()).toBe(false);
+    belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+    expect(belt.rainShown()).toBe(true);
+    belt.update(undefined, eye, 1);
+    expect(belt.rainShown()).toBe(false);
+    // The rider asked for reduced motion: no falling rain at all.
+    const media = vi.fn((query: string) => ({ matches: query.includes('reduce') }));
+    vi.stubGlobal('matchMedia', media);
+    try {
+      belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+      expect(media).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)');
+      expect(belt.rainShown()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    belt.update({ ...pieces, weather: { rain: true, dusk: false } }, eye, 1);
+    expect(belt.rainShown()).toBe(true);
+    // Hidden with the belt.
+    belt.setShown(false);
+    expect(belt.rainShown()).toBe(false);
+    belt.dispose();
+  });
+
+  it('draws heavier rain: 1 500 streaks 0.6 m long and 12 mm wide, each two crossed quads, in its one mesh — #2508', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_STREAKS).toBe(1_500);
+    expect(RAIN_STREAK_METRES).toBe(0.6);
+    expect(RAIN_STREAK_WIDTH_METRES).toBe(0.012);
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.rainGeometry();
+    const position = geometry.getAttribute('position');
+    // Unindexed: three corners a triangle, two triangles a quad, two quads a streak, laid out twice.
+    expect(geometry.index).toBeNull();
+    expect(position.count / 3).toBe(RAIN_TRIANGLES);
+    expect(RAIN_TRIANGLES).toBe(RAIN_STREAKS * 2 * 2 * 2);
+    // Read back, quad by quad: 0.6 m tall and 12 mm across, one across x and one across z.
+    const quads = position.count / 6;
+    let acrossX = 0;
+    let acrossZ = 0;
+    for (let quad = 0; quad < quads; quad += 1) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const zs: number[] = [];
+      for (let corner = 0; corner < 6; corner += 1) {
+        xs.push(position.getX(quad * 6 + corner));
+        ys.push(position.getY(quad * 6 + corner));
+        zs.push(position.getZ(quad * 6 + corner));
+      }
+      const span = (values: number[]): number => Math.max(...values) - Math.min(...values);
+      expect(span(ys)).toBeCloseTo(RAIN_STREAK_METRES, 5);
+      expect(Math.max(span(xs), span(zs))).toBeCloseTo(RAIN_STREAK_WIDTH_METRES, 5);
+      expect(Math.min(span(xs), span(zs))).toBe(0);
+      if (span(xs) > 0) acrossX += 1;
+      else acrossZ += 1;
+    }
+    expect(acrossX).toBe(RAIN_STREAKS * 2);
+    expect(acrossZ).toBe(RAIN_STREAKS * 2);
+    belt.dispose();
+  });
+
+  it('lays no streak nearer the camera than RAIN_CLEAR_METRES across the ground, on any frame — PR #2522', () => {
+    // Written here, not read, so a change there is a red test and a line in the PR.
+    expect(RAIN_CLEAR_METRES).toBe(2.5);
+    const belt = new DeliveryBelt('stylised');
+    const view = { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } };
+    let nearest = Number.POSITIVE_INFINITY;
+    const frames: readonly (readonly [{ x: number; y: number; z: number }, number])[] = [
+      [{ x: 3, y: 12, z: 40 }, 0],
+      [{ x: -250, y: 4, z: 1_200 }, 0.37],
+      [{ x: 0, y: 0, z: 0 }, 9.9],
+    ];
+    for (const [eye, seconds] of frames) {
+      belt.update(view, eye, seconds);
+      expect(belt.rainShown()).toBe(true);
+      const clearance = belt.rainClearanceFrom(eye);
+      expect(clearance).toBeGreaterThanOrEqual(RAIN_CLEAR_METRES);
+      nearest = Math.min(nearest, clearance);
+    }
+    // And the rain is still there round the clear circle, not pushed out of view.
+    expect(nearest).toBeLessThan(RAIN_CLEAR_METRES + 0.5);
+    belt.dispose();
+  });
+
+  it('lights the rain with the scene: its paint times the frame’s share of the route’s light — PR #2522', () => {
+    const belt = new DeliveryBelt('stylised');
+    const paint = [(RAIN_COLOUR >> 16) & 0xff, (RAIN_COLOUR >> 8) & 0xff, RAIN_COLOUR & 0xff].map(
+      (channel) => {
+        const c = channel / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      },
+    );
+    belt.setRainShare([1, 1, 1]);
+    belt.rainColour().forEach((channel, at) => expect(channel).toBeCloseTo(paint[at] ?? 0, 6));
+    const dusk = [0.3, 0.16, 0.12] as const;
+    belt.setRainShare(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
+    // Each frame from the paint, never from the last frame's colour.
+    belt.setRainShare(dusk);
+    belt
+      .rainColour()
+      .forEach((channel, at) => expect(channel).toBeCloseTo((paint[at] ?? 0) * (dusk[at] ?? 0), 6));
+    belt.dispose();
+  });
+
+  it('stands the rain on the road below the eye, falling from there, so it covers the view above the eye — #2366', () => {
+    const belt = new DeliveryBelt('stylised');
+    const eye = { x: 3, y: 12, z: 40 };
+    const view = { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } };
+    // The camera rides 2 m above the road, so the foot of the box is at 10 m.
+    belt.update(view, eye, 0);
+    expect(belt.rainFootY()).toBeCloseTo(10, 6);
+    // One second later it has fallen 8 m; the 20 m box still reaches above the eye.
+    belt.update(view, eye, 1);
+    expect(belt.rainFootY()).toBeCloseTo(2, 6);
+    expect(belt.rainFootY() + 20).toBeGreaterThan(eye.y + 8);
     belt.dispose();
   });
 
@@ -475,8 +789,10 @@ describe('Delivery’s belt — #1814', () => {
         const shader = compiled(material);
         expect(shader.vertexShader).toContain('attribute float oylPieceKind;');
         expect(shader.vertexShader).toContain('attribute float oylObstacleKind;');
+        expect(shader.vertexShader).toContain('attribute float oylPieceAlso;');
+        // #2506: a vertex of the instance's kind, or of the kind it also belongs to.
         const collapse = shader.vertexShader.indexOf(
-          'transformed *= 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) );',
+          'transformed *= max( 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) ), 1.0 - step( 0.5, abs( oylPieceAlso - oylObstacleKind ) ) );',
         );
         expect(collapse).toBeGreaterThan(shader.vertexShader.indexOf('#include <begin_vertex>'));
         expect(material.customProgramCacheKey()).toContain('oyl-delivery-kinds');
@@ -486,13 +802,25 @@ describe('Delivery’s belt — #1814', () => {
         expect(compiled(plain).vertexShader).not.toContain('oylObstacleKind');
         belt.setShading(shading);
         const markers = belt.meshOf('markers').material as unknown as Compilable;
+        // The obstacles' program (#2506's second kind): a marker's is −1, so
+        // only its own kind's instance draws it.
         expect(compiled(markers).vertexShader).toContain(
-          'transformed *= 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) );',
+          'transformed *= max( 1.0 - step( 0.5, abs( oylPieceKind - oylObstacleKind ) ), 1.0 - step( 0.5, abs( oylPieceAlso - oylObstacleKind ) ) );',
         );
       }
       belt.dispose();
     });
   }
+
+  it('says which instances draw a vertex as the shader does: its own kind, and the kind it also belongs to — #2506', () => {
+    // `step( 0.5, abs( a - b ) )` is 0 within half a kind of `b`, so the vertex stays.
+    expect(deliveryObstacleVertexDrawn(3, -1, 3)).toBe(true);
+    expect(deliveryObstacleVertexDrawn(3, 5, 5)).toBe(true);
+    expect(deliveryObstacleVertexDrawn(3, 5, 4)).toBe(false);
+    expect(deliveryObstacleVertexDrawn(5, -1, 3)).toBe(false);
+    expect(deliveryObstacleVertexDrawn(0, -1, 0)).toBe(true);
+    expect(deliveryObstacleVertexDrawn(0, -1, 1)).toBe(false);
+  });
 
   it('lights no lit part past white, and glows only the marker’s diamond and ring, and each obstacle’s hazard marker overhead (#2396)', () => {
     const belt = new DeliveryBelt('stylised');
@@ -503,12 +831,16 @@ describe('Delivery’s belt — #1814', () => {
       const colour = geometry.getAttribute('color');
       const glow = geometry.getAttribute('oylGlow');
       const position = geometry.getAttribute('position');
+      const kinds = what === 'obstacles' ? geometry.getAttribute('oylPieceKind') : undefined;
       for (let at = 0; at < colour.count; at += 1) {
         if (glow.getX(at) === 1) {
           glowing += 1;
           expect(what).not.toBe('parcels');
-          // An obstacle's body does not glow: only the marker over the rider's helmet does.
-          if (what === 'obstacles') expect(position.getY(at)).toBeGreaterThan(RIDER_HEIGHT_METRES);
+          // An obstacle's body does not glow: only the marker over the rider's
+          // helmet does, and a car pulling out's indicators (#2506), which are its alone.
+          if (what === 'obstacles' && position.getY(at) <= RIDER_HEIGHT_METRES) {
+            expect(kinds?.getX(at)).toBe(ROSTER.indexOf('car-pulling-out'));
+          }
           continue;
         }
         lit += 1;
@@ -522,6 +854,12 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 });
+
+/** Whether a vertex wears the hazard marker's red (`three-renderer.ts` §`DELIVERY_PAINT.hazard`, 0xe8432f), linear. */
+function isHazardRed(vertex: ObstacleVertex): boolean {
+  const [red, green, blue] = vertex.rgb;
+  return red > 0.7 && green < 0.08 && blue < 0.04;
+}
 
 /** A material as the belt holds it: what the suite calls on it. @see compiled */
 interface Compilable {
@@ -652,11 +990,18 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
   it('paints its cars in three body colours from ONE car in the geometry, each instance its own paint by its place on the round (round 6)', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('obstacles').geometry;
-    // One car: every vertex's kind is one of the roster's four, none a second or third car.
+    // One car: every vertex's kind is one of the drawn roster's, none a second
+    // or third car — #2506's car pulling out draws this one, and of its own
+    // holds only its marker and its two indicators, 8 + 2 × 2 triangles.
     const kinds = geometry.getAttribute('oylPieceKind');
     const seen = new Set<number>();
-    for (let at = 0; at < kinds.count; at += 1) seen.add(kinds.getX(at));
-    expect([...seen].sort()).toEqual([0, 1, 2, 3]);
+    let pullingOutOwn = 0;
+    for (let at = 0; at < kinds.count; at += 1) {
+      seen.add(kinds.getX(at));
+      if (kinds.getX(at) === ROSTER.indexOf('car-pulling-out')) pullingOutOwn += 1;
+    }
+    expect([...seen].sort()).toEqual(ROSTER.map((_, index) => index));
+    expect(pullingOutOwn / 3).toBe(8 + 2 * 2);
     // Its body, and only its body, takes the instance's paint.
     const painted = geometry.getAttribute('oylPainted');
     const car = carVertices(belt, CAR_KIND);
@@ -691,6 +1036,20 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // The same car, a frame later and the first off the road: still its own paint.
     belt.update({ parcels: [], markers: [], obstacles: cars.slice(1) });
     expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([1, 2, 0, 1]);
+    // #2506: a car pulling out draws this car's body, so it wears a paint too, by its place.
+    belt.update({
+      parcels: [],
+      markers: [],
+      obstacles: [
+        { x: 0, y: 0, z: 0, yaw: 0, kind: 'car-pulling-out', index: 2 },
+        { x: 0, y: 0, z: 10, yaw: 0, kind: 'parked-car', index: 1 },
+      ],
+    });
+    expect(belt.drawn('obstacles').map((each) => [each.kind, each.paint])).toEqual([
+      ['car-pulling-out', 2],
+      ['parked-car', 1],
+    ]);
+    expect(rgb(0)).not.toBe(rgb(1));
     belt.dispose();
   });
 
@@ -716,12 +1075,18 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     // cone's too, runs every kind's triangles through the vertex shader. Round 5
     // held three whole cars (4 526); one painted car is 1 522: bin 88, trolley
     // 124, cone 42 and the car 1 268, and #2396 adds 8 for each of three hazard
-    // markers, 1 546. A change past this is for the owner and
-    // the tablet (#733), not a quiet drift.
+    // markers, 1 546. #2364 adds a dog (72) and another rider (124), each with
+    // a marker, 1 758, and raises this bound from 1 600 to 1 800 for the
+    // owner's approval in its pull request. #2506 adds a car pulling out's
+    // marker (8) and two one-quad indicators (4), 1 770, inside that bound,
+    // and then, on the owner's ruling of 2026-11-12 that the village frame
+    // stay under 205 000 triangles, trims the car's rims to one outward disc
+    // each (32 to 8), 1 674; its tyres stay round in 12 (above). A change
+    // past this is for the owner and the tablet (#733), not a quiet drift.
     const belt = new DeliveryBelt('stylised');
     const position = belt.meshOf('obstacles').geometry.getAttribute('position');
     expect(position.count / 3).toBe(DELIVERY_OBSTACLE_TRIANGLES);
-    expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_600);
+    expect(DELIVERY_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_800);
     belt.dispose();
   });
 });

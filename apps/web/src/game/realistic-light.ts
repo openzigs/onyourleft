@@ -75,6 +75,122 @@ export const AGX_WHITE_INPUT = 2 ** 4.026069;
  */
 export const REALISTIC_EXPOSURE = 1;
 
+/**
+ * How much of {@link REALISTIC_EXPOSURE} a Delivery level at dusk is drawn
+ * with — #2366, ADR 0065 D-10.4: 0.45, so the town reads as late evening
+ * and a house's marker, which glows, stands out of it. A lighting change and
+ * no draw call; applied by the view on a frame whose round is at dusk, and on
+ * no other. #2508, the owner's ruling on PR #2502 ("reads as an overcast
+ * day"): **0.7**, raised because the dusk is now also in the light itself —
+ * the sky's and the sun's shares (`weather-look.ts`) and the graded sky
+ * ({@link duskSkyTexel}) — and those at 0.45 left the road too dark to ride.
+ * This project's own number, for the owner's approval in #2508's pull request.
+ */
+export const REALISTIC_DUSK_EXPOSURE_SHARE = 0.7;
+
+/**
+ * How bright the photographed sky is drawn in rain, as a share of its
+ * daytime brightness — #2508: **0.7**, a darker sky under the rain cloud. The
+ * haze converges on the same darker sky. A lighting change and no draw call.
+ */
+export const REALISTIC_RAIN_SKY_SHARE = 0.7;
+
+/**
+ * How far the photographed sky is drawn toward a flat grey in rain — #2508:
+ * **0.8**, so the blue and the white clouds read as one overcast, each texel
+ * toward its own luminance in {@link RAIN_SKY_GREY_TINT}, a cool grey.
+ * @see rainSkyTexel
+ */
+export const RAIN_SKY_GREYING = 0.8;
+export const RAIN_SKY_GREY_TINT: LinearColour = [0.95, 1, 1.08];
+
+/** One texel of the photographed sky in rain, linear: toward its own grey. @see RAIN_SKY_GREYING */
+export function rainSkyTexel(r: number, g: number, b: number): LinearColour {
+  const grey = luminance(r, g, b);
+  const keep = 1 - RAIN_SKY_GREYING;
+  return [
+    keep * r + RAIN_SKY_GREYING * grey * RAIN_SKY_GREY_TINT[0],
+    keep * g + RAIN_SKY_GREYING * grey * RAIN_SKY_GREY_TINT[1],
+    keep * b + RAIN_SKY_GREYING * grey * RAIN_SKY_GREY_TINT[2],
+  ];
+}
+
+/**
+ * The photographed sky at dusk — #2508. Each texel is recoloured toward the
+ * dusk's own colour at its elevation, keeping its brightness, so a cloud is
+ * still a cloud but tinted, and the brightest of them, the white clouds the
+ * owner saw, are pressed down toward the sky around them:
+ *
+ * - **at the horizon** {@link DUSK_SKY_HORIZON}, an orange-pink;
+ * - **from {@link DUSK_SKY_TOP_DEGREES} up** {@link DUSK_SKY_ZENITH}, a deep
+ *   blue, much darker; smoothly between;
+ * - **below the horizon**, the photograph's field, only darker and warmer by
+ *   {@link DUSK_SKY_FIELD}: the drawn ground covers it, but not everywhere.
+ *
+ * Each is a colour of unit-ish luminance, the texel's own luminance
+ * multiplying it. {@link DUSK_SKY_RECOLOUR} of the result is that colour, the
+ * rest the texel's own hue, dimmed alike, so the photograph is not flattened.
+ * A cloud is pressed down by `1 / (1 + L / (DUSK_CLOUD_KNEE × upward))`, where
+ * `L` is its luminance and `upward` the sky's mean ({@link upwardRadiance}):
+ * a bright cloud, many times the mean, loses most; the blue sky, about the
+ * mean, less. This project's own numbers, for the owner's approval in #2508's
+ * pull request.
+ */
+export const DUSK_SKY_HORIZON: LinearColour = [2.6, 1.15, 0.62];
+export const DUSK_SKY_ZENITH: LinearColour = [0.1, 0.15, 0.42];
+export const DUSK_SKY_FIELD: LinearColour = [0.42, 0.33, 0.27];
+export const DUSK_SKY_TOP_DEGREES = 30;
+export const DUSK_SKY_RECOLOUR = 0.85;
+export const DUSK_CLOUD_KNEE = 1.5;
+
+/** The dusk's colour at `elevation` radians, above the horizon. @see DUSK_SKY_HORIZON */
+export function duskSkyAt(elevation: number): LinearColour {
+  const top = (DUSK_SKY_TOP_DEGREES * Math.PI) / 180;
+  const t = Math.min(1, Math.max(0, elevation / top));
+  const share = t * t * (3 - 2 * t);
+  return [0, 1, 2].map(
+    (channel) =>
+      (DUSK_SKY_HORIZON[channel] as number) * (1 - share) +
+      (DUSK_SKY_ZENITH[channel] as number) * share,
+  ) as unknown as LinearColour;
+}
+
+/**
+ * One texel of the photographed sky at dusk, in linear light: `r`, `g`, `b`
+ * at `elevation` radians, in a sky whose upper hemisphere's mean luminance is
+ * `upward`. @see DUSK_SKY_HORIZON
+ */
+export function duskSkyTexel(
+  r: number,
+  g: number,
+  b: number,
+  elevation: number,
+  upward: number,
+): LinearColour {
+  const light = luminance(r, g, b);
+  const pressed = 1 / (1 + Math.max(0, light) / (DUSK_CLOUD_KNEE * upward));
+  if (elevation < 0) {
+    return [
+      r * pressed * DUSK_SKY_FIELD[0],
+      g * pressed * DUSK_SKY_FIELD[1],
+      b * pressed * DUSK_SKY_FIELD[2],
+    ];
+  }
+  const dusk = duskSkyAt(elevation);
+  const dim = luminance(dusk[0], dusk[1], dusk[2]);
+  const keep = 1 - DUSK_SKY_RECOLOUR;
+  return [
+    pressed * (DUSK_SKY_RECOLOUR * light * dusk[0] + keep * dim * r),
+    pressed * (DUSK_SKY_RECOLOUR * light * dusk[1] + keep * dim * g),
+    pressed * (DUSK_SKY_RECOLOUR * light * dusk[2] + keep * dim * b),
+  ];
+}
+
+/** The elevation of row `row` of a sky `height` rows tall, radians. @see SkyPixels */
+export function skyRowElevation(row: number, height: number): number {
+  return elevationOf(row, height);
+}
+
 /** A half-precision float's value. IEEE 754-2008 binary16. */
 export function halfToFloat(half: number): number {
   const sign = half & 0x8000 ? -1 : 1;

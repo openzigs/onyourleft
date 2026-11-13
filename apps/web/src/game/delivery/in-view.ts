@@ -57,6 +57,16 @@
  * the browser gate's `delivery-harness.ts` hands it one too. The frame's
  * types are `port.ts`', so the view itself reaches none of Delivery's modules.
  *
+ * ## Rain and dusk: a marker shows once the rider is closer (#2366, ADR 0065 D-10.4)
+ *
+ * On a level in rain or at dusk, a house's marker is drawn only once the
+ * rider is within {@link LOW_LIGHT_REVEAL_METRES} of it
+ * ({@link DeliveryDrawInput.revealMetres}); in clear daylight, and with the
+ * assist's wider windows, as far as the corridor reaches, as before. A
+ * drawing only: the house is on the round, said and thrown at exactly as in
+ * clear weather. The frame also carries the round's weather
+ * ({@link DeliveryInView.weather}) for the renderer's rain and light.
+ *
  * ## Nothing here leaves the ride
  *
  * Positions are held in memory for the frame (DL11), and nothing here formats
@@ -68,10 +78,11 @@ import type {
   DeliveryMarkerPiece,
   DeliveryObstaclePiece,
   DeliveryPiece,
+  DeliveryWeatherFrame,
 } from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
-import { obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
+import { obstacleAcross, obstacleAlong, type Obstacle, type ObstacleState } from './obstacles';
 import type { Round } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -111,9 +122,19 @@ export interface DeliveryDrawInput {
   readonly obstacleState: ObstacleState;
   /**
    * The houses on a level that must not get a parcel (#2365): each wears its
-   * own marker for the whole round. None unless given.
+   * own marker for the whole round, in rain or at dusk once the rider is
+   * within the reveal distance as a house's is (#2366). None unless given.
    */
   readonly noDelivery?: readonly DeliveryTarget[];
+  /**
+   * #2366: the rider's distance after the last step that ran, metres, and how
+   * near a house they must be for its marker to be drawn. Without a reveal
+   * distance, every marker on the corridor is drawn.
+   */
+  readonly riderAlong?: number;
+  readonly revealMetres?: number | undefined;
+  /** #2366: the round's rain and dusk, handed on to the renderer. Clear daylight unless given. */
+  readonly weather?: DeliveryWeatherFrame;
   /**
    * How far the frame is past the last simulation step, in ticks: `0` to `1`.
    * The pieces move between ticks with it, so a parcel does not step at 20 Hz
@@ -182,9 +203,12 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const sinceStep = Math.min(1, Math.max(0, input.sinceStep ?? 0));
 
   const markers: DeliveryMarkerPiece[] = [];
+  const { revealMetres, riderAlong } = input;
   for (const target of input.targets) {
     if (input.round.houses[target.position] !== 'expecting') continue;
     if (onCorridor(centre, target.distance) === undefined) continue;
+    // #2366: in rain or at dusk, only once the rider is close enough to see it.
+    if (!revealed(target.distance, riderAlong, revealMetres)) continue;
     // #2365: a mailbox wears its own marker, at the kerb where it stands.
     const kind = target.mailbox === true ? 'mailbox' : 'house';
     markers.push({ x: target.x, y: target.y, z: target.z, yaw: target.yaw, kind });
@@ -192,6 +216,9 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   // #2365: a house that must not get a parcel wears its sign for the whole round.
   for (const house of input.noDelivery ?? []) {
     if (onCorridor(centre, house.distance) === undefined) continue;
+    // #2366, the owner's ruling of 2026-11-12: in rain or at dusk its sign is
+    // revealed as a house's marker is, only once the rider is that near it.
+    if (!revealed(house.distance, riderAlong, revealMetres)) continue;
     markers.push({ x: house.x, y: house.y, z: house.z, yaw: house.yaw, kind: 'no-delivery' });
   }
 
@@ -220,19 +247,54 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   const obstacles: DeliveryObstaclePiece[] = [];
   const { obstacleState } = input;
   input.obstacles.forEach((obstacle, index) => {
-    const at = onCorridor(centre, obstacle.along);
-    if (at === undefined) return;
     const started = obstacleState.startedAt[index];
     const seconds =
       started === undefined
         ? 0
         : (obstacleState.tick - started + sinceStep) * DELIVERY_TICK_SECONDS;
+    // #2364: another rider is drawn where they have ridden to.
+    const at = onCorridor(centre, obstacleAlong(obstacle, seconds));
+    if (at === undefined) return;
     obstacles.push({
-      ...placed(at, obstacleAcross(obstacle, seconds), 0, 0),
+      ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
       kind: obstacle.kind,
       index,
     });
   });
 
-  return { parcels, markers, obstacles };
+  return input.weather === undefined
+    ? { parcels, markers, obstacles }
+    : { parcels, markers, obstacles, weather: input.weather };
+}
+
+/**
+ * How near a house the rider must be for its marker to be drawn in rain or at
+ * dusk, metres — #2366: **40**. At `obstacles.ts`
+ * §`AVOIDABLE_FASTEST_METRES_PER_SECOND` (12 m/s) that is 3.4 s before the
+ * house's throw window closes (`throw.ts` §`THROW_WINDOW_AFTER_METRES`), and
+ * the window opens 20 m after the marker shows. This project's own number,
+ * for the owner's approval in #2366's pull request.
+ */
+export const LOW_LIGHT_REVEAL_METRES = 40;
+
+/** Whether a house at `distance` is near enough the rider to be drawn, with no reveal distance always. */
+function revealed(
+  distance: number,
+  riderAlong: number | undefined,
+  revealMetres: number | undefined,
+): boolean {
+  if (revealMetres === undefined || riderAlong === undefined) return true;
+  return distance - riderAlong <= revealMetres;
+}
+
+/**
+ * How an obstacle faces, from the road's heading — #2364: another rider faces
+ * the rider, coming the other way, and a dog faces where it runs: its drawn
+ * head is to its left (`three-renderer.ts` §`dogParts`), so a dog from the
+ * left kerb is turned about. Every other kind faces along the road.
+ */
+function obstacleTurn(obstacle: Obstacle): number {
+  if (obstacle.kind === 'oncoming-rider') return Math.PI;
+  if (obstacle.kind === 'dog' && obstacle.from === 'left') return Math.PI;
+  return 0;
 }
