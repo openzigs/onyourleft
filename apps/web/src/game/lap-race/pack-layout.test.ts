@@ -615,11 +615,11 @@ describe('every pass goes round: the rider and the bots never drawn through one 
 
   /**
    * The most a bot's drawn speed against its race speed changes in a tick,
-   * metres a second: **4**, `pack-layout.ts`'s 80 m/s² ease at the race's
+   * metres a second: **2**, `pack-layout.ts`'s 40 m/s² ease at the race's
    * 20 Hz tick. Written here, not imported, so a layout that eased less is
    * red rather than a bound that moved with it.
    */
-  const EASED_PER_TICK = 4;
+  const EASED_PER_TICK = 2;
 
   /**
    * Every bot's drawn speed, tick to tick, smooth (#2558's review, finding A):
@@ -801,6 +801,20 @@ describe('every pass goes round: the rider and the bots never drawn through one 
       );
     expect(early.length).toBeGreaterThan(10);
   });
+  it('draws no two bots inside each other while a rider who does not steer winds up off the line (seed 12345, #2558’s review, finding K)', () => {
+    // The rider winds up at 2 m/s² to 10 m/s and never steers. Before
+    // finding H's fix, two bots were drawn 43.8 cm inside each other for 7
+    // ticks, at 2.05 to 2.35 s.
+    const placed = rideFromTheGrid((at) => Math.min(10, 2 * at), 200, 12_345);
+    expectNeverInside(placed);
+    expectNeverAJump(placed);
+    expectSmooth(placed);
+    // Not vacuous: the rider came by bots level with them off the line.
+    const level = placed.flatMap(({ rider, bots }) =>
+      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+    );
+    expect(level.length).toBeGreaterThan(10);
+  });
   it('holds the known limit of a rider steering into the field as it gets going: two bots drawn inside each other only then, and briefly (#2558’s review, finding B)', () => {
     // The previous case's steering, on a seed where it does reach the limit:
     // the rider swerves back across the grid at about 2.2 s, as the bots
@@ -814,19 +828,28 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     expectNeverInside(placed, true);
     expectNeverAJump(placed);
     expectSmooth(placed);
-    // The ticks with two bots drawn inside each other, and how far: the lesser
-    // of how far under a bike length along and how far under a place across.
-    const overlapping: { readonly seconds: number; readonly along: number }[] = [];
+    // The ticks with two bots drawn inside each other, and how far: how far
+    // under a bike length apart along, and how far under a place apart
+    // across, each the most of any pair inside each other on the tick.
+    const overlapping: {
+      readonly seconds: number;
+      readonly along: number;
+      readonly across: number;
+    }[] = [];
     for (const [tick, { bots }] of placed.entries()) {
       let along = 0;
+      let across = 0;
       for (const [at, one] of bots.entries()) {
         for (const other of bots.slice(at + 1)) {
           if (inside(one, other)) {
             along = Math.max(along, BIKE_LENGTH_METRES - Math.abs(one.along - other.along));
+            across = Math.max(across, PACK_ABREAST_METRES - Math.abs(one.across - other.across));
           }
         }
       }
-      if (along > 0) overlapping.push({ seconds: (tick + 1) * LAP_RACE_TICK_SECONDS, along });
+      if (along > 0) {
+        overlapping.push({ seconds: (tick + 1) * LAP_RACE_TICK_SECONDS, along, across });
+      }
     }
     let run = 0;
     let longest = 0;
@@ -842,15 +865,27 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     // limit is gone, and this case and the PR's notes should say so.
     expect(overlapping.length).toBeGreaterThan(0);
     // Only in the second after the swerve back across the grid, 2.0 to 3.0 s
-    // after Go; at most 17 ticks (0.85 s) in all; and, at worst,
-    // two bots 0.32 m apart on one line, 1.43 m inside each other along.
+    // after Go; 9 ticks (0.45 s) in all, 8 of them in one run, from 2.10 to
+    // 2.55 s; at worst 1.30 m inside each other along, 0.22 m apart across.
+    // Then on one line, for 7 ticks: a bot made way for the rider onto the
+    // line of a bot a bike length ahead of it, and is drawn up to 1.20 m
+    // inside it, the two 0.55 m apart nose to tail. Before #2558's review,
+    // finding H, the bot that made way was pushed a step further across by
+    // the rounding, and the two were drawn 0.32 m apart across, 1.43 m inside
+    // each other along, for 17 ticks.
     for (const { seconds } of overlapping) {
       expect(seconds).toBeGreaterThanOrEqual(2);
       expect(seconds).toBeLessThanOrEqual(3);
     }
-    expect(overlapping.length).toBeLessThanOrEqual(17);
-    expect(longest).toBeLessThanOrEqual(17);
-    expect(Math.max(...overlapping.map(({ along }) => along))).toBeLessThanOrEqual(1.45);
+    expect(overlapping.length).toBeLessThanOrEqual(9);
+    expect(longest).toBeLessThanOrEqual(8);
+    expect(Math.max(...overlapping.map(({ along }) => along))).toBeLessThanOrEqual(1.3);
+    // And across (#2558's review, finding J): on one line no longer and no
+    // deeper than that, so a change that puts two bots on one line for more
+    // of the limit, or further inside each other there, is red.
+    const oneLine = overlapping.filter(({ across }) => across > PACK_ABREAST_METRES - 1e-9);
+    expect(oneLine.length).toBeLessThanOrEqual(7);
+    expect(Math.max(0, ...oneLine.map(({ along }) => along))).toBeLessThanOrEqual(1.21);
   });
   it.each([
     // At about 63 s a bot comes up on the rider's line with a bot beside it
@@ -954,5 +989,71 @@ describe('a bot the rider steers into makes way at once, within its reach (#2558
       9,
     );
     expect(a?.shift).toBeCloseTo(PACK_CLOSE_UP_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS, 9);
+  });
+});
+
+describe('a bot exactly a place across from the rider is clear of them (#2558’s review, finding H)', () => {
+  // The rider in the lane at −1.75 m. A bot laid out a place to their left is
+  // at −2.3 m, which in floating point is 0.5499999999999998 from them, not
+  // 0.55: a place across, and so clear, but by a hair under it.
+  const LANE = -1.75;
+  const BESIDE = LANE - PACK_ABREAST_METRES;
+
+  it('is laid out where the rounding puts it, a hair under a place from the rider', () => {
+    // The premise, so that this case cannot pass on a rounding that came out
+    // exactly at 0.55.
+    expect(Math.abs(BESIDE - LANE)).toBeLessThan(PACK_ABREAST_METRES);
+  });
+
+  it('leaves a bot level with the rider a place across where it is, never giving way', () => {
+    let layout: PackLayout = new Map([
+      ['a', { shift: 0, shiftBefore: 0, lateral: BESIDE, sway: 0 }],
+    ]);
+    for (let tick = 0; tick < 40; tick += 1) {
+      const along = 100 + 10 * tick * LAP_RACE_TICK_SECONDS;
+      layout = stepPackLayout(
+        [
+          { id: RIDER, along, lateral: LANE, speed: 10 },
+          { id: 'a', along, lateral: LANE, speed: 10 },
+        ],
+        RIDER,
+        layout,
+        LAP_RACE_TICK_SECONDS,
+      );
+      expect(layout.get('a')).toEqual({ shift: 0, shiftBefore: 0, lateral: BESIDE, sway: 0 });
+    }
+  });
+
+  it('has a faster bot a place across, drawn behind the rider, come up past them', () => {
+    // The race has the bot a metre ahead of the rider and 2 m/s faster; it is
+    // drawn 2.5 m behind them, a place to their left, where a bot held behind
+    // the rider was left: seed 333 drew one there for 13 s while the race had
+    // it up to 13.8 m ahead.
+    let layout: PackLayout = new Map([
+      ['a', { shift: -3.5, shiftBefore: -3.5, lateral: BESIDE, sway: 0 }],
+    ]);
+    let ahead = Number.NaN;
+    for (let tick = 0; tick < 40; tick += 1) {
+      const rider = 100 + 8 * tick * LAP_RACE_TICK_SECONDS;
+      const bot = 101 + 10 * tick * LAP_RACE_TICK_SECONDS;
+      layout = stepPackLayout(
+        [
+          { id: RIDER, along: rider, lateral: LANE, speed: 8 },
+          { id: 'a', along: bot, lateral: LANE, speed: 10 },
+        ],
+        RIDER,
+        layout,
+        LAP_RACE_TICK_SECONDS,
+      );
+      const a = layout.get('a');
+      ahead = bot + (a?.shift ?? Number.NaN) - rider;
+      // Never drawn inside the rider on the way.
+      const inside =
+        Math.abs(ahead) < BIKE_LENGTH_METRES - 1e-9 &&
+        Math.abs((a?.lateral ?? Number.NaN) - LANE) < PACK_ABREAST_METRES - 1e-9;
+      expect(inside).toBe(false);
+    }
+    // Within two seconds it is drawn past the rider: level or ahead of them.
+    expect(ahead).toBeGreaterThan(0);
   });
 });

@@ -116,15 +116,27 @@ export const PACK_GIVE_WAY_SHARE = 0.9;
 
 /**
  * The fastest a bot's drawn speed changes against its race speed, metres a
- * second squared: **80**, four metres a second a tick. A bot slows to give way
+ * second squared: **40**, two metres a second a tick. A bot slows to give way
  * and speeds up to close up again over ticks: drawn at its full give-way on
  * one tick and closing up on the next, a bot held behind the rider was drawn
- * at 1.4 m/s and 16 m/s on alternate ticks (#2558's review, finding A). It is
- * as low as keeps the rider out of every bot: at 60, a bot in front of a rider
- * winding up through a field with items on could not get out of their way in
- * time (`pack-layout.test.ts`, "sees a pass coming").
+ * at 1.4 m/s and 16 m/s on alternate ticks (#2558's review, finding A).
+ *
+ * It is as low as keeps the rider out of every bot. It was 80 until a bot a
+ * place across from the rider stopped being scored as inside them by a
+ * rounding ({@link PACK_ROUNDING_METRES}, finding H): before that, at 60 or
+ * 40 a bot in front of a rider winding up through a field with items on could
+ * not get out of their way in time (`pack-layout.test.ts`, "sees a pass
+ * coming"). At 30, a bot the rider steers into cannot step forward out of
+ * their way at {@link PACK_CLOSE_UP_METRES_PER_SECOND} within the tick, and
+ * the known limit off the line runs past 3 s; at 20, a bot held behind the
+ * rider at race speed is drawn giving way and closing up on alternate ticks
+ * again. A rider brakes at 3 to 5 m/s², so this is still a firm brake: a bot
+ * gives back 10 m/s over a quarter of a second rather than an eighth. On a
+ * 10-seed probe of 120 s rides in a pack, steady, steering and surging, no
+ * bot was drawn under half its race speed on one tick and over it on the
+ * next, against 33 at 80.
  */
-export const PACK_SHIFT_EASE_METRES_PER_SECOND_SQUARED = 80;
+export const PACK_SHIFT_EASE_METRES_PER_SECOND_SQUARED = 40;
 
 /**
  * The speed below which a bot keeps the place it was laid out in, metres a
@@ -505,18 +517,32 @@ interface Drawn {
 }
 
 /**
+ * How far under a bike length along, or under a place across, two drawn
+ * bicycles may be and still be clear, metres: **1e-9**, a nanometre. Places
+ * are added up in floating point, and a bot laid out a place across from the
+ * rider at −1.75 m is at −2.3 m, which is `0.5499999999999998` apart: without
+ * this, that bot scored as inside the rider by about 1e-16, and, the score
+ * read in order, gave way or held behind them as if it were in their way. A
+ * bot was drawn 2.5 m behind the rider for 13 s while the race had it moving
+ * up to 13.8 m ahead (#2558's review, finding H). A nanometre is far under
+ * anything drawn, and far over the rounding in adding up a place.
+ */
+const PACK_ROUNDING_METRES = 1e-9;
+
+/**
  * How far two drawn bicycles are inside each other: how far they are under a
  * bike length apart along, times how far under a place apart across, square
- * metres. Nought is clear; it shrinks as either moves off the other, so a step
- * aside counts before the two are clear.
+ * metres, each within {@link PACK_ROUNDING_METRES}. Nought is clear; it
+ * shrinks as either moves off the other, so a step aside counts before the
+ * two are clear.
  */
 function overlap(
   one: { along: number; lateral: number },
   other: { along: number; lateral: number },
 ): number {
   return (
-    Math.max(0, BIKE_LENGTH_METRES - Math.abs(one.along - other.along)) *
-    Math.max(0, PACK_ABREAST_METRES - Math.abs(one.lateral - other.lateral))
+    Math.max(0, BIKE_LENGTH_METRES - PACK_ROUNDING_METRES - Math.abs(one.along - other.along)) *
+    Math.max(0, PACK_ABREAST_METRES - PACK_ROUNDING_METRES - Math.abs(one.lateral - other.lateral))
   );
 }
 
@@ -779,16 +805,22 @@ function clearOf(
           ),
         )),
   ].map(reach);
+  // Many places are the same once within reach, most of all in a pile-up,
+  // where each would be scored again for nothing (#2558's review, finding L).
+  // The first of each is kept, so the place chosen is the same.
+  const alongs = [...new Set(shifts)];
   const laterals = [
-    now.lateral,
-    was.lateral,
-    ...near.flatMap((other) =>
-      [-1, 1].map((side) =>
-        toward(was.lateral, other.lateral + side * PACK_ABREAST_METRES, across),
+    ...new Set([
+      now.lateral,
+      was.lateral,
+      ...near.flatMap((other) =>
+        [-1, 1].map((side) =>
+          toward(was.lateral, other.lateral + side * PACK_ABREAST_METRES, across),
+        ),
       ),
-    ),
+    ]),
   ];
-  for (const shift of shifts) {
+  for (const shift of alongs) {
     for (const lateral of laterals) {
       const each = { shift, lateral };
       const scored = score(each);
