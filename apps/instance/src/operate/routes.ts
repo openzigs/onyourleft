@@ -97,8 +97,8 @@ const statusSchema: Schema = {
       },
     },
     /**
-     * The newest backup's record — `null` until #2606 records snapshots, and
-     * whenever none is recorded.
+     * The backup service's newest snapshot (#2606) — `null` while it has
+     * recorded none. A one-off run, such as the pre-deploy snapshot, is not it.
      */
     lastBackup: {
       type: ['object', 'null'],
@@ -165,6 +165,65 @@ const statusSchema: Schema = {
   ],
   additionalProperties: false,
 };
+
+const nullableCount: Schema = { type: ['integer', 'null'] };
+
+const backupRecordSchema: Schema = {
+  type: 'object',
+  properties: {
+    id: { type: 'integer' },
+    /** When the run started, ISO 8601, UTC. */
+    at: { type: 'string' },
+    /** Whole seconds since then. */
+    ageSeconds: count,
+    /** Whether it made a snapshot. */
+    outcome: { type: 'string', enum: ['done', 'failed'] },
+    /** A failed run's error, by name or Node's code (`ENOSPC`) — never its message. */
+    error: { type: ['string', 'null'] },
+    /** The snapshot directory's NAME (`snapshot-<time>`), never the folder it is in. */
+    snapshot: { type: ['string', 'null'] },
+    /** Every table's rows, added up, from its manifest. */
+    rows: nullableCount,
+    blobs: nullableCount,
+    databaseSha256: { type: ['string', 'null'] },
+    sizeBytes: nullableCount,
+    /** How its off-box copy went — `copied`, `failed` or `not-configured` — or `null` for a failed run. */
+    offBox: { type: ['string', 'null'] },
+    /** How many old snapshots `--keep` removed. */
+    removed: nullableCount,
+    /** Free space where the snapshots go, and where their off-box copies go, when it ran. */
+    freeBytes: {
+      type: 'object',
+      properties: { backups: nullableCount, offBox: nullableCount },
+      required: ['backups', 'offBox'],
+      additionalProperties: false,
+    },
+    /** The backup service's interval; `null` for a one-off run such as the pre-deploy snapshot. */
+    intervalSeconds: nullableCount,
+    /** It was made because the owner asked for it. */
+    requested: { type: 'boolean' },
+  },
+  required: [
+    'id',
+    'at',
+    'ageSeconds',
+    'outcome',
+    'error',
+    'snapshot',
+    'rows',
+    'blobs',
+    'databaseSha256',
+    'sizeBytes',
+    'offBox',
+    'removed',
+    'freeBytes',
+    'intervalSeconds',
+    'requested',
+  ],
+  additionalProperties: false,
+};
+
+const isoOf = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
 export const OPERATE_ROUTES: readonly Route[] = [
   {
@@ -244,6 +303,92 @@ export const OPERATE_ROUTES: readonly Route[] = [
         })),
         cursor: page.value.next,
       });
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/backups',
+    sealed: 'only',
+    operationId: 'getOperateBackups',
+    reaches: 'owner',
+    summary:
+      'The instance’s backups (#2606), read from the records the `backup` service writes — the instance never reads the backup folders: the newest 50, newest first, each with when it ran and its age, whether it made a snapshot (a failed run names its error, never its message), the snapshot directory’s name, its row and blob counts and database SHA-256 from its manifest, its size, how its off-box copy went, how many old snapshots it removed, the free space where snapshots and their off-box copies go, and the backup service’s interval (`null` for a one-off run); and the “back up now” still waiting, if any. No host path. Restore is not here: it stays on the CLI. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          backups: { type: 'array', items: backupRecordSchema },
+          /** The “back up now” still waiting: when it was asked, or `null`. */
+          pending: {
+            type: ['object', 'null'],
+            properties: { requestedAt: { type: 'string' } },
+            required: ['requestedAt'],
+            additionalProperties: false,
+          },
+        },
+        required: ['backups', 'pending'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const view = await operateOf(context).backups();
+      return json({
+        backups: view.records.map((record) => ({
+          id: record.id,
+          at: isoOf(record.at),
+          ageSeconds: Math.max(0, view.now - record.at),
+          outcome: record.outcome,
+          error: record.error,
+          snapshot: record.snapshot,
+          rows: record.rows,
+          blobs: record.blobs,
+          databaseSha256: record.databaseSha256,
+          sizeBytes: record.sizeBytes,
+          offBox: record.offBox,
+          removed: record.removed,
+          freeBytes: { backups: record.backupsFreeBytes, offBox: record.offBoxFreeBytes },
+          intervalSeconds: record.intervalSeconds,
+          requested: record.requested,
+        })),
+        pending: view.pendingSince === null ? null : { requestedAt: isoOf(view.pendingSince) },
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/backups',
+    sealed: 'only',
+    operationId: 'requestOperateBackup',
+    reaches: 'owner',
+    summary:
+      '“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'too_many'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          /** When it was asked, ISO 8601, UTC. */
+          requestedAt: { type: 'string' },
+        },
+        required: ['requestedAt'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      // The handler has answered anybody but the signed-in owner already.
+      if (context.caller === undefined) throw new Error('owner route called without a caller');
+      const asked = await operateOf(context).requestBackup(context.caller.athleteId);
+      if (!asked.ok) return errorResponse(asked.code);
+      return json({ requestedAt: isoOf(asked.value.requestedAt) });
     },
   },
 ];

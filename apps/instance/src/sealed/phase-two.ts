@@ -115,4 +115,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // sealed from the first and never served where nothing is sealed.
   only('GET', '/v1/operate/log', OPERATE),
   only('GET', '/v1/operate/status', OPERATE),
+  // #2606: the backups the `backup` service recorded, and "back up now".
+  only('GET', '/v1/operate/backups', OPERATE),
+  only('POST', '/v1/operate/backups', OPERATE),
 ];

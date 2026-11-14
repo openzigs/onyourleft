@@ -84,7 +84,9 @@ rollback() {
   local image="$1" snapshot="$2"
   [ -n "${image}" ] || die 'there is no previous deploy to roll back to.'
   say "rolling back to ${image}"
-  compose stop instance >/dev/null 2>&1 || true
+  # The backup service too (#2606): it opens the database to look for the
+  # owner's "back up now", and must not while a restore replaces it.
+  compose stop instance backup >/dev/null 2>&1 || true
   if [ -n "${snapshot}" ]; then
     say "restoring ${snapshot}"
     OYL_INSTANCE_IMAGE="${image}" compose run --rm --no-deps --entrypoint node backup \

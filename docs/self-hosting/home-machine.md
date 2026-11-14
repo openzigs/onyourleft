@@ -388,7 +388,10 @@ To go back by hand: `bash apps/instance/deploy/home/deploy.sh --rollback`.
 
 The `backup` service takes an online snapshot every six hours into `OYL_BACKUP_DIR`, copies it to
 `OYL_OFFBOX_DIR`, and keeps the newest fourteen of each (`OYL_BACKUP_INTERVAL_SECONDS`,
-`OYL_BACKUP_KEEP`). A copy that cannot be written fails, and says so in `docker compose logs backup`.
+`OYL_BACKUP_KEEP`). A copy that cannot be written is recorded as `failed` and says so in
+`docker compose logs backup`; the snapshot on the box is kept. Each run is recorded in the database,
+and the owner can ask for a snapshot from the app's Operate area, which the service takes within
+30 seconds — see [Backup](../operating-an-instance.md#backup).
 
 ⚠️ **No backup may be older than 30 days** (#1381): a backup holds what the instance has since erased,
 and the privacy policy tells riders so. The defaults (fourteen, six hours apart) keep 3.5 days. If you

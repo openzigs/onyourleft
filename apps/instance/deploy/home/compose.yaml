@@ -193,7 +193,13 @@ services:
   # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
   # second directory on the box, and a copy of it OFF the box — a USB drive
   # or a share, whatever OYL_OFFBOX_DIR names. The newest OYL_BACKUP_KEEP of
-  # each are kept.
+  # each are kept. Since #2606 it is `backup-loop`: a run every
+  # OYL_BACKUP_INTERVAL_SECONDS as before, and within 30 s of the owner's
+  # "back up now" from the app's Operate area, which reaches it through the
+  # database — this is the ONLY service that mounts the backup folders, and
+  # the instance (which holds OYL_INSTANCE_SECRET_KEY) never does. Each run
+  # is recorded in the database. `docker compose stop backup` lets a run in
+  # progress finish, within the grace period.
   backup:
     <<: *instance-image
     depends_on:
@@ -202,16 +208,17 @@ services:
     restart: unless-stopped
     healthcheck:
       disable: true
-    entrypoint: ['sh', '-c']
+    stop_grace_period: 120s
+    entrypoint: ['node', 'src/operator/cli.ts']
     command:
-      - >-
-        while true; do
-        node src/operator/cli.ts backup /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox;
-        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}";
-        done
-    environment:
-      OYL_BACKUP_KEEP: ${OYL_BACKUP_KEEP:-14}
-      OYL_BACKUP_INTERVAL_SECONDS: ${OYL_BACKUP_INTERVAL_SECONDS:-21600}
+      - backup-loop
+      - /backups
+      - --keep
+      - '${OYL_BACKUP_KEEP:-14}'
+      - --copy-to
+      - /offbox
+      - --interval
+      - '${OYL_BACKUP_INTERVAL_SECONDS:-21600}'
     volumes:
       - data:/data
       - ${OYL_BACKUP_DIR:?set OYL_BACKUP_DIR to a directory on this machine for the snapshots}:/backups

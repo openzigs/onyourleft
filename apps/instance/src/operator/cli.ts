@@ -6,7 +6,7 @@ import { resolveExtensionless } from '../node-imports.ts';
 
 /**
  * `node src/operator/cli.ts <command> …` — the operator's commands (#791):
- * `migrate`, `backup`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`, `account-erase`. `commands.ts` says
+ * `migrate`, `backup`, `backup-loop`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`, `account-erase`. `commands.ts` says
  * what each does. The resolve hook goes first, as in `main.ts`.
  *
  * The data it works on is where the instance keeps it: `OYL_INSTANCE_DATABASE`
@@ -27,8 +27,20 @@ async function readStandardInput(): Promise<string> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
+/**
+ * `backup-loop` runs until it is stopped (#2606): the `backup` service's
+ * `docker compose stop` sends SIGTERM, and a run in progress finishes first.
+ * Only that command is given the handlers — every other one keeps Node's own
+ * answer to Ctrl-C.
+ */
+const stop = new AbortController();
+if (process.argv[2] === 'backup-loop') {
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => stop.abort());
+}
+
 const { runCommand } = await import('./run.ts');
 process.exitCode = await runCommand(process.argv.slice(2), {
+  signal: stop.signal,
   database: process.env.OYL_INSTANCE_DATABASE,
   blobs: process.env.OYL_INSTANCE_BLOBS,
   secret: process.env.OYL_INSTANCE_SECRET_KEY,

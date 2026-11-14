@@ -7338,6 +7338,259 @@
         }
       }
     },
+    "/v1/operate/backups": {
+      "get": {
+        "operationId": "getOperateBackups",
+        "summary": "The instance’s backups (#2606), read from the records the `backup` service writes — the instance never reads the backup folders: the newest 50, newest first, each with when it ran and its age, whether it made a snapshot (a failed run names its error, never its message), the snapshot directory’s name, its row and blob counts and database SHA-256 from its manifest, its size, how its off-box copy went, how many old snapshots it removed, the free space where snapshots and their off-box copies go, and the backup service’s interval (`null` for a one-off run); and the “back up now” still waiting, if any. No host path. Restore is not here: it stays on the CLI. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "backups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "ageSeconds": {
+                            "type": "integer"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "failed"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "snapshot": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rows": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "blobs": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "databaseSha256": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sizeBytes": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "offBox": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "removed": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "freeBytes": {
+                            "type": "object",
+                            "properties": {
+                              "backups": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "offBox": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "backups",
+                              "offBox"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "intervalSeconds": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "requested": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "ageSeconds",
+                          "outcome",
+                          "error",
+                          "snapshot",
+                          "rows",
+                          "blobs",
+                          "databaseSha256",
+                          "sizeBytes",
+                          "offBox",
+                          "removed",
+                          "freeBytes",
+                          "intervalSeconds",
+                          "requested"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "pending": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "requestedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requestedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "backups",
+                    "pending"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "requestOperateBackup",
+        "summary": "“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requestedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "requestedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "description": "One of `rate_limited`, `too_many`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/operate/log": {
       "get": {
         "operationId": "getOperatorLog",
@@ -7389,7 +7642,8 @@
                               "instance_key_reset",
                               "load_accounts_add",
                               "load_accounts_erase",
-                              "account_erase"
+                              "account_erase",
+                              "backup_requested"
                             ]
                           },
                           "detail": {
@@ -11230,6 +11484,7 @@
                   "record_key_revoked",
                   "model_without_pictures",
                   "rate_limited",
+                  "too_many",
                   "internal",
                   "picture_model_failed",
                   "unavailable",
@@ -11746,6 +12001,16 @@
       },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "too_many": {
+        "description": "`too_many` (429), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

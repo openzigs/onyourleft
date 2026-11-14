@@ -4,7 +4,9 @@ import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
   accountErase,
   backup,
+  backupLoop,
   CommandError,
+  OFF_BOX_FAILED,
   instanceKey,
   loadAccountsAdd,
   loadAccountsErase,
@@ -21,6 +23,7 @@ import {
 const USAGE = `usage: node src/operator/cli.ts <command>
   migrate
   backup <directory> [--keep N] [--copy-to <directory>]
+  backup-loop <directory> --interval <seconds> [--keep N] [--copy-to <directory>]
   restore <snapshot directory> [--force]
   verify
   room-open <roomId> --kind ride|race --length <metres> [--grade <percent>] [--position hoods|drops|upright] [--countdown <ms>]
@@ -62,6 +65,8 @@ export async function runCommand(
     readonly origin?: string | undefined;
     /** Standard input, read whole: where `model-key set` takes the key from. */
     readonly readStandardInput?: () => Promise<string>;
+    /** What stops `backup-loop` (#2606): `cli.ts` aborts it on SIGTERM or SIGINT. */
+    readonly signal?: AbortSignal;
   },
 ): Promise<number> {
   const paths: DataPaths = {
@@ -81,9 +86,33 @@ export async function runCommand(
         const copyTo = flag(args, '--copy-to');
         const destination = args[0];
         if (destination === undefined) throw new CommandError(USAGE);
-        report = await backup(paths, destination, {
+        const taken = await backup(paths, destination, {
           ...(keep === undefined ? {} : { keep: Number(keep) }),
           ...(copyTo === undefined ? {} : { copyTo }),
+        });
+        // The snapshot is taken and recorded; a copy that did not reach the
+        // second place is still a failure for whoever runs this by hand (#2606).
+        if (taken.offBox === 'failed') {
+          process.stdout.write(`${JSON.stringify(taken)}\n`);
+          process.stderr.write(OFF_BOX_FAILED);
+          return 1;
+        }
+        report = taken;
+        break;
+      }
+      case 'backup-loop': {
+        const keep = flag(args, '--keep');
+        const copyTo = flag(args, '--copy-to');
+        const interval = flag(args, '--interval');
+        const destination = args[0];
+        if (destination === undefined || interval === undefined || args.length > 1) {
+          throw new CommandError(USAGE);
+        }
+        report = await backupLoop(paths, destination, {
+          intervalSeconds: /^[0-9]+$/.test(interval) ? Number(interval) : Number.NaN,
+          ...(keep === undefined ? {} : { keep: Number(keep) }),
+          ...(copyTo === undefined ? {} : { copyTo }),
+          ...(env.signal === undefined ? {} : { signal: env.signal }),
         });
         break;
       }
