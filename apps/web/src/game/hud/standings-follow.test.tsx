@@ -147,6 +147,16 @@ describe('useOwnLineInView — #2599', () => {
     expect(scrolls).toHaveLength(2);
   });
 
+  it('jumps to the own line when the room changes, and eases only when the place does', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    scrollTop = 0;
+    await mounted.rerender(<List own={7} room={125} />);
+    expect(scrolls.at(-1)?.behavior).toBe('instant');
+    scrollTop = 0;
+    await mounted.rerender(<List own={6} room={125} />);
+    expect(scrolls.at(-1)?.behavior).toBe('smooth');
+  });
+
   it('leaves a list the rider scrolled, and eases back to the own line after the return time', async () => {
     mounted = await mount(<List own={7} room={100} />);
     const list = listOf(mounted.container);

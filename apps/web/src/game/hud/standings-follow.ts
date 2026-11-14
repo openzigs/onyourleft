@@ -78,6 +78,10 @@ export function useOwnLineInView(
 ): void {
   const hold = useRef<number | undefined>(undefined);
   const opened = useRef(false);
+  // The room the list was last centred in: a new room is a new layout (the
+  // fonts arriving, a rotation, the text size), which it jumps to, where a
+  // new place in the same room is a move a rider sees, which it eases to.
+  const centredIn = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const centre = useRef<(smooth: boolean) => void>(() => undefined);
   centre.current = (smooth: boolean): void => {
@@ -104,12 +108,14 @@ export function useOwnLineInView(
     if (element === null) return;
     if (room === undefined) {
       opened.current = false;
+      centredIn.current = undefined;
       element.removeAttribute('data-oyl-more');
       return;
     }
     if (!following(hold.current, Date.now())) return;
-    centre.current(opened.current);
+    centre.current(opened.current && centredIn.current === room);
     opened.current = true;
+    centredIn.current = room;
   }, [list, own, room]);
 
   useEffect(() => {

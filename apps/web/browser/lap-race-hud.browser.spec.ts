@@ -81,7 +81,10 @@ const STANDINGS_SHOWN = `
     margin: 0 !important; overflow: visible !important; clip-path: none !important;
     white-space: normal !important; grid-area: notices !important;
     align-self: start !important; justify-self: end !important;
-  }`;
+  }
+  /* #2599: and at its full height, as it would be drawn there with no room
+     rule: the list's height is the room's on a stage where it is shown. */
+  .oyl-game--riding .oyl-hud .oyl-hud__standings-scroll { max-height: none !important; }`;
 
 function sized(viewport: Viewport): string {
   return `${String(viewport.width)}×${String(viewport.height)}`;
@@ -494,27 +497,35 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     expect(stageOf(measured, 'corner-back').standingsList?.more).toBe('above');
   });
 
-  test('a finger’s scroll moves the list, never the page, and never presses Use item', async ({
-    page,
-  }) => {
-    await open(page, fourByThree, '?corner=race&text=normal');
-    await page.evaluate(() => {
-      window.scrollTo(0, 0);
+  test.describe('on a touch screen', () => {
+    // A synthesized touch gesture needs a page that takes touch input: on
+    // the CI runner's Linux Chromium without it the gesture moved nothing.
+    test.use({ hasTouch: true });
+
+    test('a finger’s scroll moves the list, never the page, and never presses Use item', async ({
+      page,
+    }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const before = await ownLine(page, 'corner-back');
+      const pageBefore = await page.evaluate(() => window.scrollY);
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.synthesizeScrollGesture', {
+        x: Math.round(before.x),
+        y: Math.round(before.y),
+        yDistance: 120,
+        gestureSourceType: 'touch',
+        speed: 2_000,
+      });
+      const after = await ownLine(page, 'corner-back');
+      expect(after.scrollTop, 'the list scrolled up under the finger').toBeLessThan(
+        before.scrollTop,
+      );
+      expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(pageBefore);
+      expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
     });
-    const before = await ownLine(page, 'corner-back');
-    const pageBefore = await page.evaluate(() => window.scrollY);
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send('Input.synthesizeScrollGesture', {
-      x: Math.round(before.x),
-      y: Math.round(before.y),
-      yDistance: 120,
-      gestureSourceType: 'touch',
-      speed: 2_000,
-    });
-    const after = await ownLine(page, 'corner-back');
-    expect(after.scrollTop, 'the list scrolled up under the finger').toBeLessThan(before.scrollTop);
-    expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(pageBefore);
-    expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
   });
 
   for (const motion of ['no-preference', 'reduce'] as const) {
