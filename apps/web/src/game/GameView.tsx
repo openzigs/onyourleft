@@ -2575,14 +2575,17 @@ function GameScreen({
         ...startOf(simulated, profile.totalDistance),
         // #2425, ADR 0066 D-1: a solo ride drafts the rider behind the pacer
         // and their OWN ghost, with the device's switch on (D-6). Never in a
-        // room, whose `k` is the room's (D-1.5), never in a lap race (D-2),
-        // never behind another rider's ghost (D-3); with the switch off, or
-        // with nobody to give a draft, nothing is handed and the ride is
+        // room, whose `k` is the room's (D-1.5), never behind another rider's
+        // ghost (D-3); in a lap race the `k` is the race's own (ADR 0067 D-3,
+        // #2461: `stepLapRaceRide`) and the simulation only keeps the in-draft
+        // state for the Draft field and the mark (D-3.7). With the switch off,
+        // or with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
         ...soloDraftOf(
-          roomId === undefined && raceChoice === undefined && readSoloDraftChoice(deviceStorage()),
+          roomId === undefined && readSoloDraftChoice(deviceStorage()),
           pacer !== undefined && raceChoice === undefined,
           ghostRiderRef.current === undefined ? ghostRef.current : undefined,
+          raceChoice !== undefined,
         ),
       });
       simulationRef.current = simulation;
@@ -2856,7 +2859,8 @@ function GameScreen({
       }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
-      // the rider's mass; its seed is drawn inside and kept by nothing.
+      // the rider's mass (below, it only turns the rider's watts into W/kg for
+      // the bots to read); its seed is drawn inside and kept by nothing.
       reducedMotionRef.current =
         typeof globalThis.matchMedia === 'function' &&
         globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2871,6 +2875,11 @@ function GameScreen({
               riderDistance: simulation.state.ride.distance,
               lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
               storage: deviceStorage(),
+              // #2461, ADR 0067 D-3.4: ADR 0066 D-6's switch reaches the race.
+              // On, every racer drafts, the rider included; off, none does.
+              draft: readSoloDraftChoice(deviceStorage()),
+              // #2463: the bots read the rider's power as W/kg, the standings' figure.
+              riderMassKilograms: riderMassFor(props.riderMass).mass,
             });
       setState(simulation.state);
       setChosen(route);
@@ -3706,10 +3715,21 @@ function GameScreen({
       // writes to itself, the HUD and the frame, never to the trainer (D-2).
       const lapRace = lapRaceRef.current;
       if (lapRace !== undefined && stepsRun > 0) {
-        lapRaceRef.current = stepLapRaceRide(lapRace, {
+        const raced = stepLapRaceRide(lapRace, {
           ticks: stepsRun,
           along: simulation.state.ride.distance,
+          // #2463, ADR 0067 D-0: the bots read the rider's power. Read only by
+          // the race; the trainer's write above has already been offered.
+          ...(sensors.rider.live ? { riderWatts: sensors.rider.power } : {}),
         });
+        lapRaceRef.current = raced;
+        // #2461, ADR 0067 D-3.3: the rider's draft from the field, ridden from
+        // the next step on as a room's `k` is (`room-ride.ts` §`roomFrame`):
+        // a multiplier on the rider's drag in the simulation and nothing
+        // else, so the trainer feels it only as the rider arriving sooner.
+        // After the grade above was sampled, so this frame's write never
+        // sees it. `1` with the switch off: the ride before #2461.
+        simulation.draftWith(raced.riderDraft);
       }
       // #1911: a room's lap race, on the same steps and after the same grade:
       // the rider's inputs sent, what the room's newest frame covers dropped,
@@ -5183,16 +5203,20 @@ function chasedGaps(
 
 /**
  * The solo draft a ride is handed — #2425, ADR 0066 D-1 — or nothing: with
- * the switch off (`on` false), and with neither a pacer nor the rider's own
- * ghost to give one. The ghost enters as its own `ghostDistanceAt`, a
+ * the switch off (`on` false), and with neither a pacer, the rider's own
+ * ghost nor a lap race (`raced`, ADR 0067 D-3.7) to give one. The ghost enters as its own `ghostDistanceAt`, a
  * replay at the ride's racing clock and never a re-simulation (D-1.1).
  */
 function soloDraftOf(
   on: boolean,
   pacer: boolean,
   ownGhost: GhostTrack | undefined,
+  raced: boolean,
 ): { readonly soloDraft?: SoloDraftSources } {
-  if (!on || (!pacer && ownGhost === undefined)) return {};
+  if (!on) return {};
+  // A lap race: its `k` comes from the race (ADR 0067 D-3.7), never a ghost's.
+  if (raced) return { soloDraft: { raced: true } };
+  if (!pacer && ownGhost === undefined) return {};
   return {
     soloDraft:
       ownGhost === undefined

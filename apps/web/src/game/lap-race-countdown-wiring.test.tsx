@@ -36,6 +36,7 @@ import { endRideAnswer } from './end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import type { LapRaceChoice } from './lap-race/choice';
+import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES, PACK_MOST_ABREAST } from './lap-race/pack-layout';
 import { LAP_RACE_COUNTDOWN_MS } from './lap-race/ride-race';
 import type { GameRenderer } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -70,6 +71,10 @@ interface DrawnInput {
   readonly odometer: number;
   readonly riderDistance: number;
   readonly bots: readonly number[];
+  /** Each bot's place across the road, metres, in the same order (#2544). */
+  readonly across: readonly number[];
+  /** The rider's place across the road, metres. */
+  readonly riderAcross: number;
 }
 const inputs = vi.hoisted((): DrawnInput[] => []);
 vi.mock('./scene', async (importOriginal) => {
@@ -83,6 +88,8 @@ vi.mock('./scene', async (importOriginal) => {
         odometer: input.state.ride.distance,
         riderDistance: input.riderDistance ?? Number.NaN,
         bots: (input.raceBots ?? []).map((bot) => bot.distanceMetres),
+        across: (input.raceBots ?? []).map((bot) => bot.lateralMetres),
+        riderAcross: input.steeredLateral ?? Number.NaN,
       });
       return actual.sceneFrame(...args);
     },
@@ -311,11 +318,12 @@ function secondsAfter(frame: number): number {
 }
 
 describe('a solo lap race counts down ten seconds on its line before Go — #2546', () => {
-  it('shows 10 down to 1 and then Go, holds the rider and every bot on the line, and starts the race’s clock at nought at Go', async () => {
+  it('shows 10 down to 1 and then Go, holds the rider on the line and every bot in its place on the grid, and starts the race’s clock at nought at Go', async () => {
     const root = await rideOn({ race: RACE });
     const notices: string[] = [];
     const placeShown: string[] = [];
-    for (let frame = 1; frame <= COUNTDOWN_FRAMES + 2; frame += 1) {
+    // The countdown, and ten frames (5 s) of rolling off the line after Go.
+    for (let frame = 1; frame <= COUNTDOWN_FRAMES + 10; frame += 1) {
       await pump();
       notices.push(raceNotice(root));
       if (frame <= COUNTDOWN_FRAMES) {
@@ -339,18 +347,66 @@ describe('a solo lap race counts down ten seconds on its line before Go — #254
     expect(stepped.filter((each) => each.atMs <= goAt)).toEqual([]);
     // The first step is the frame after Go's, and the race's clock read nought at it.
     expect(stepped[0]).toEqual({ atMs: goAt + FRAME_MS, ticks: 10, raceAtMs: 0 });
-    // Drawn: every frame of the countdown has the rider and the three bots on the line.
+    // Drawn: every frame of the countdown has the rider on the line and the
+    // three bots standing in their places on the grid (the owner's ruling of
+    // 2026-11-13 on #2544), the same places on every frame.
     const held = inputs.filter((each) => each.atMs <= goAt);
     expect(held.length).toBeGreaterThan(COUNTDOWN_FRAMES / 2);
+    const grid = held[0];
     for (const each of held) {
       expect(each.odometer).toBe(0);
       expect(each.riderDistance).toBe(0);
-      expect(each.bots).toEqual([0, 0, 0]);
+      expect(each.bots).toEqual(grid?.bots);
+      expect(each.across).toEqual(grid?.across);
     }
-    // And the next frame moves everybody.
-    const after = inputs.find((each) => each.atMs === goAt + FRAME_MS);
-    expect(after?.odometer).toBeGreaterThan(0);
-    expect(Math.min(...(after?.bots ?? [0]))).toBeGreaterThan(0);
+    // The grid: the rider's the back row, on the line, and every bot a whole
+    // number of bike lengths up the road from it, no more abreast in a row than
+    // a row holds, and no two racers inside one another.
+    const racers = [
+      { along: 0, across: grid?.riderAcross ?? Number.NaN },
+      ...(grid?.bots ?? []).map((along, at) => ({ along, across: grid?.across[at] ?? Number.NaN })),
+    ];
+    expect(racers).toHaveLength(RACE.bots + 1);
+    const rows = new Map<number, number>();
+    for (const { along } of racers) {
+      const row = Math.round(along / BIKE_LENGTH_METRES);
+      expect(along).toBeCloseTo(row * BIKE_LENGTH_METRES, 9);
+      expect(row).toBeGreaterThanOrEqual(0);
+      rows.set(row, (rows.get(row) ?? 0) + 1);
+    }
+    expect(Math.max(...rows.values())).toBeLessThanOrEqual(PACK_MOST_ABREAST);
+    expect(rows.size).toBeGreaterThan(1);
+    // Every row ahead of the rider leaves them a way through: no bot on the
+    // rider's line, so the rider rolls off between them at Go.
+    for (const { along, across } of racers.slice(1)) {
+      if (along === 0) continue;
+      expect(Math.abs(across - (grid?.riderAcross ?? Number.NaN))).toBeGreaterThanOrEqual(
+        PACK_ABREAST_METRES - 1e-9,
+      );
+    }
+    for (const [at, one] of racers.entries()) {
+      for (const other of racers.slice(at + 1)) {
+        const apart =
+          Math.abs(one.along - other.along) >= BIKE_LENGTH_METRES - 1e-9 ||
+          Math.abs(one.across - other.across) >= PACK_ABREAST_METRES - 1e-9;
+        expect(apart).toBe(true);
+      }
+    }
+    // From Go on, the whole field rolls off together: on every frame after
+    // Go's, the rider and every bot are drawn further up the road than on the
+    // frame before. Nobody stands still waiting for their place.
+    const rolling = inputs.filter((each) => each.atMs >= goAt);
+    expect(rolling.length).toBeGreaterThanOrEqual(10);
+    for (const [at, each] of rolling.entries()) {
+      const before = rolling[at - 1];
+      if (before === undefined) continue;
+      expect(each.odometer, `frame ${String(at)} after Go`).toBeGreaterThan(before.odometer);
+      each.bots.forEach((along, bot) => {
+        expect(along, `bot ${String(bot)}, frame ${String(at)} after Go`).toBeGreaterThan(
+          before.bots[bot] ?? Number.POSITIVE_INFINITY,
+        );
+      });
+    }
   });
 
   it('never rides the wait: one step after Go, the rider has ridden one step from rest at the line', async () => {
@@ -394,11 +450,15 @@ describe('a solo lap race counts down ten seconds on its line before Go — #254
       if (raceNotice(root).includes(RACE_TEXT.go)) goFrame = frame;
     }
     expect(goFrame).toBe(7_000 / FRAME_MS);
-    // Nothing was stepped before Go, and every drawn frame before it had the field on the line.
+    // Nothing was stepped before Go, and every drawn frame before it had the
+    // rider on the line and the field in its places on the grid, unmoved.
     const goAt = resumedAt + 7_000;
     expect(stepped.filter((each) => each.atMs <= goAt)).toEqual([]);
+    const grid = inputs[0];
+    expect(grid?.bots).toHaveLength(RACE.bots);
     for (const each of inputs.filter((input) => input.atMs <= goAt)) {
-      expect(each.bots).toEqual([0, 0, 0]);
+      expect(each.bots).toEqual(grid?.bots);
+      expect(each.across).toEqual(grid?.across);
       expect(each.odometer).toBe(0);
     }
     await pump();
