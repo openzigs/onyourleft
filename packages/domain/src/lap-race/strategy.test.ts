@@ -27,9 +27,11 @@ import {
   BOT_LANE_DWELL_MS,
   BOT_MEMORY_AT_START,
   BOT_PERSONALITIES,
+  BOT_SKILLS,
   BOT_PUDDLE_REACH_METRES,
   BOT_RELINE_MS,
   botFieldPersonalities,
+  botFieldSkills,
   strategicBotDecision,
   type BotMemory,
   type BotPersonality,
@@ -1040,6 +1042,33 @@ describe('a solo race’s mixed field', () => {
     );
     expect(firsts).toEqual(new Set(BOT_PERSONALITIES));
     expect(botFieldPersonalities(5, 0)).toEqual([]);
+  });
+
+  it('deals the three skills in turn from a start the seed picks, keyed apart from the personalities (#2463)', () => {
+    for (let seed = 0; seed < 30; seed += 1) {
+      const dealt = botFieldSkills(seed, 7);
+      expect(dealt).toEqual(botFieldSkills(seed, 7));
+      for (let at = 0; at + 2 < dealt.length; at += 1) {
+        expect(new Set(dealt.slice(at, at + 3)).size).toBe(3);
+      }
+    }
+    const firsts = Array.from({ length: 30 }, (_, seed) => botFieldSkills(seed, 1)[0]);
+    expect(new Set(firsts)).toEqual(new Set(BOT_SKILLS));
+    // Its own salt: the skill's start is not the personality's, seed for seed.
+    const offsets = Array.from({ length: 30 }, (_, seed) => {
+      const personality = BOT_PERSONALITIES.indexOf(
+        botFieldPersonalities(seed, 1)[0] as BotPersonality,
+      );
+      return (BOT_SKILLS.indexOf(firsts[seed] as BotSkill) - personality + 3) % 3;
+    });
+    expect(new Set(offsets).size).toBeGreaterThan(1);
+    expect(botFieldSkills(5, 0)).toEqual([]);
+    expect(() => botFieldSkills(1.5, 3)).toThrow(/^seed must be a whole number$/);
+    for (const count of [-1, 2.5, Number.NaN]) {
+      expect(() => botFieldSkills(1, count)).toThrow(
+        /^count must be a whole number of at least zero$/,
+      );
+    }
   });
 
   it('refuses a seed or a count that is not a whole number', () => {

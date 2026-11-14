@@ -453,3 +453,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   countdown's seconds and then rode the same trace (`lap-race-wiring.test.tsx`). The countdown
   itself sends the trainer nothing but the line's grade and has no path to a trainer command.
   Nothing else in this ADR changes.
+- **2026-11-12** — **D-2.4 with the rider's draft** (ADR 0066 D-6's draft switch,
+  [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md) D-3's answer (b)): **whether
+  the switch is on or off, a lap race's saved ride is the trainer's measured speed and distance.** The
+  draft is a multiplier on the rider's `C_D·A` in the game's simulation only (ADR 0067 D-3.3), so it
+  carries the rider further in the game, but the saved speed channel is what the trainer measured and
+  the saved distance is that channel integrated (`recording/totals.ts` §`rideDistance`). **The draft
+  reaches the saved ride only through its lap times**, because the rider reaches the lap line sooner.
+  A draft decides only when a grade is sent to the trainer, never what grade is sent (D-2.1 as the
+  2026-11-11 entry narrows it). With the switch off no racer drafts, and D-2.4 stands as written. No
+  recording behaviour changes.
+  `apps/web/src/game/lap-race-draft-wiring.test.tsx` › `the rider takes a draft from a bot, through
+  the simulation only — #2461 (ADR 0067 D-3)` › `saves the trainer’s measured speed and distance with
+  the switch on, and the draft only moves the lap times (ADR 0060 D-2.4, 2026-11-12)` reads the saved
+  activity back from the store with the switch on and off, and
+  `apps/web/src/game/lap-race-wiring.test.tsx` › `the recorded ride is unchanged by a lap race — #1906
+  (D-2.4)` holds the switch-off case (#2461). Recorded on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6833584017),
+  which replaces the switch-on half of the
+  [earlier ruling that day](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6829334664).
+  This entry only clarifies D-2.4; nothing else in this ADR changes.
