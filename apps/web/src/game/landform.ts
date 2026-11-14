@@ -768,7 +768,7 @@ export const RETRACE_SINK_METRES = 200;
 
 /**
  * How far under its own heights the ground of a pass lying ALONGSIDE a nearer
- * one is drawn, in metres: **1** — #1996. @see retracedRoles
+ * one is drawn, in metres: **1.5** — #1996, #2469. @see retracedRoles
  *
  * Both passes read one height field, so their grounds are the same ground but
  * for the passes' distance apart, which moves the relief's clear band by as
@@ -776,8 +776,20 @@ export const RETRACE_SINK_METRES = 200;
  * level with the nearer pass's, they fought for the same depth; drawn under
  * it, the nearer pass's ground is on top wherever it is, and the other's
  * covers the inside of the nearer pass's U-turn, where it is folded away.
+ *
+ * ⚠️ **Why 1.5 and not #1996's 1** — #2469. The nearer pass has a seam at
+ * its own U-turn (#2101) and the pass alongside it, a pass of its own, has
+ * none, so for {@link SEAM_CREST_FADE_METRES} of road past the turn the
+ * nearer pass's relief is held down and the other's is not. Measured on
+ * `outAndBackRoute({ offset: 3 })`, every 2 m of the 16 : 10 view out to
+ * 100 m in 26 frames from both chase cameras: the other pass's own ground
+ * stood up to 0.755 m over the nearer one's — 0.406 m with the hold taken
+ * away, inside the clear band's 0.18 × 3 m — so at 1 m under it was 0.245 m
+ * clear, and the drawn-path camera (#2422) looked at it 32 m ahead. 0.755 m
+ * plus `out-and-back.test.ts`' half-metre floor is 1.255 m; 1.5 is the next
+ * half metre, not a measured optimum.
  */
-export const RETRACE_UNDER_METRES = 1;
+export const RETRACE_UNDER_METRES = 1.5;
 
 /**
  * The most rows the ground round a turning point is drawn with: **8** — #1996,
