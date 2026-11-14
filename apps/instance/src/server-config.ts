@@ -12,6 +12,7 @@
 
 import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
 import { DEFAULT_HEARTBEAT_MS, MAXIMUM_HEARTBEAT_MS } from './analysis/jobs.ts';
+import { configuredHostProblem } from './history/address.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
 import type { DiscordSettings } from './voice/discord.ts';
 
@@ -29,6 +30,7 @@ export interface RawServerConfig {
   /** The file `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` names, as {@link readDiscordTokenFile} read it. */
   readonly discordBotTokenFile?: DiscordTokenFile | undefined;
   readonly discordGuildId?: string | undefined;
+  readonly tunnelReadyUrl?: string | undefined;
 }
 
 /**
@@ -96,6 +98,13 @@ export interface ServerConfig {
    * `OYL_INSTANCE_DISCORD_BOT_TOKEN_FILE` (#2146) and `OYL_INSTANCE_DISCORD_GUILD_ID` are set.
    */
   readonly discord: DiscordSettings | undefined;
+  /**
+   * `cloudflared`'s own `/ready` on the deployment's private network (#2604),
+   * asked for the owner's Status — or `undefined`, and the tunnel's state is
+   * "not known" and nothing is asked. Held to the history index's address
+   * rule (`history/address.ts`): a private address or a single-label name.
+   */
+  readonly tunnelReadyUrl: URL | undefined;
 }
 
 export type ServerConfigResult =
@@ -240,6 +249,37 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     if (problems.length === before) discord = { botToken: token, guildId };
   }
 
+  // #2604: the tunnel's readiness, on the private network or not at all. A
+  // problem names the variable and the rule, never the address.
+  let tunnelReadyUrl: URL | undefined;
+  if (present(raw.tunnelReadyUrl)) {
+    let parsed: URL | undefined;
+    try {
+      parsed = new URL(raw.tunnelReadyUrl.trim());
+    } catch {
+      parsed = undefined;
+    }
+    if (
+      parsed?.protocol !== 'http:' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      parsed.search !== '' ||
+      parsed.hash !== ''
+    ) {
+      problems.push(
+        'OYL_INSTANCE_TUNNEL_READY_URL must be an http: URL with no credentials, query or fragment, such as http://172.30.88.10:20241/ready.',
+      );
+    } else {
+      const hostProblem = configuredHostProblem(parsed.hostname);
+      if (hostProblem === undefined) tunnelReadyUrl = parsed;
+      else {
+        problems.push(
+          `OYL_INSTANCE_TUNNEL_READY_URL was refused because ${hostProblem}: the tunnel's metrics are asked on this machine's private network only.`,
+        );
+      }
+    }
+  }
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -256,6 +296,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       secretKey: secret.kind === 'ok' ? secret.bytes : undefined,
       analysisHeartbeatMs,
       discord,
+      tunnelReadyUrl,
     },
   };
 }

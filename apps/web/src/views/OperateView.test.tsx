@@ -113,6 +113,51 @@ describe('the Operate area over the real instance — #2603', () => {
   );
 });
 
+describe('the Operate area’s Status over the real instance — #2604', () => {
+  /** The value a Status fact is shown with, by its name. */
+  function fact(name: string): string {
+    const term = [...(mounted?.container.querySelectorAll('dt') ?? [])].find(
+      (each) => each.textContent === name,
+    );
+    return (term?.nextElementSibling?.textContent ?? '').replace(/\s+/g, ' ');
+  }
+
+  it('shows the owner the instance’s counts as the instance holds them, above the log', async () => {
+    const { owner, approveRider } = await operatedWorld();
+    await approveRider();
+    mounted = await mount(<OperateView port={createOperatePort(owner.dependencies)} />);
+    await until(() => fact('Accounts') !== '');
+    // The owner, the deputy and the approved rider.
+    expect(fact('Accounts')).toBe('3 active, 0 awaiting approval, 0 suspended');
+    expect(fact('Tunnel')).toBe('not known');
+    expect(fact('Last backup')).toBe('not recorded');
+    expect(fact('Instance keys')).toBe('ready');
+    const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
+      (each) => each.textContent,
+    );
+    expect(headings.slice(0, 2)).toEqual(['Status', 'Operator log']);
+    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
+  });
+
+  it.each(['deputy', 'rider'] as const)(
+    'never asks the instance’s status for the %s',
+    async (who) => {
+      const operated = await operatedWorld();
+      const counted = countingSealed(operated.world, '/v1/operate/status');
+      const port = createOperatePort({ ...operated[who].dependencies, send: counted.send });
+      mounted = await mount(<OperateView port={port} />);
+      await until(readDone);
+      expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
+      expect(fact('Accounts')).toBe('');
+      expect(counted.count()).toBe(0);
+      // The control: the same counting reaches the route when the owner reads.
+      const owners = countingSealed(operated.world, '/v1/operate/status');
+      await createOperatePort({ ...operated.owner.dependencies, send: owners.send }).status();
+      expect(owners.count()).toBe(1);
+    },
+  );
+});
+
 describe('the Operate area over a scripted instance — #2603', () => {
   it('renders two entries newest first, then Show older entries appends the next page from the port', async () => {
     const scripted = scriptedOperate({ pageSize: 2 });
@@ -132,7 +177,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()[2]).toContain(
       'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
     );
-    expect(scripted.calls).toEqual(['standing', 'log', 'log 2']);
+    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'log 2']);
     expect(showOlder()).toBeUndefined();
   });
 

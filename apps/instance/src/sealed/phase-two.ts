@@ -114,4 +114,5 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // #2602, ADR 0047's amendment of 2026-11-14: the owner's Operate area,
   // sealed from the first and never served where nothing is sealed.
   only('GET', '/v1/operate/log', OPERATE),
+  only('GET', '/v1/operate/status', OPERATE),
 ];

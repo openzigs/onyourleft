@@ -64,16 +64,20 @@ describe('the Operate area — #2603', () => {
     for (const each of buttons) expect(each.classList.contains('oyl-button')).toBe(true);
     // One heading level under the page's h1.
     expect([...document.querySelectorAll('main h2')].map((each) => each.textContent)).toEqual([
+      'Status',
       'Operator log',
       'Still to come',
     ]);
+    // #2604: Status's one control, Compare with main, is a target too.
+    for (const each of controls()) expect(each.classList.contains('oyl-button')).toBe(true);
   });
 
   it('passes the audit after the last page, with no control left on the log', async () => {
     await open(scriptedOperate({ pageSize: 2 }));
     await showOlder();
     expect(audit()).toBe('');
-    expect(controls()).toEqual([]);
+    // Status's Compare with main stays; the log has nothing left to press.
+    expect(controls().map((each) => each.textContent)).toEqual(['Compare with main']);
   });
 
   it('passes the audit when the log could not be read, and when a page did not come', async () => {

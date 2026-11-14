@@ -1018,6 +1018,36 @@ export interface OperatorLogEntry {
   readonly outcome: OperatorOutcome;
 }
 
+/**
+ * How many of each thing the instance holds, for the owner's Status (#2604).
+ * Counts only: no name, id or row of anybody.
+ */
+export interface OperateCounts {
+  readonly athletes: {
+    /** Registered or approved, and not suspended. */
+    readonly active: number;
+    /** Awaiting a moderator's approval, and not suspended. */
+    readonly pending: number;
+    /** Suspended, whether they had been approved or not. */
+    readonly suspended: number;
+  };
+  /** Rooms made over HTTP that are not over. */
+  readonly roomsOpen: number;
+  readonly analysis: { readonly queued: number; readonly running: number };
+}
+
+/**
+ * The three counts the owner's Status reads beside the athletes' (#2604), in
+ * order: rooms open, analysis jobs queued, analysis jobs running. Each one is
+ * written so SQLite answers it from an index, and `operate-counts.test.ts`
+ * holds each query plan to that.
+ */
+export const OPERATE_COUNT_QUERIES = [
+  'SELECT count(*) AS n FROM private_room WHERE closed_at IS NULL',
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'queued'",
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'running'",
+] as const;
+
 /** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
 export interface OperatorChange<T> {
   readonly outcome: Exclude<OperatorOutcome, 'failed'>;
@@ -2052,6 +2082,8 @@ export interface SqlStore {
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
   /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** How many athletes are in each standing, rooms are open and jobs wait or run (#2604). Counts only. */
+  operateCounts(): Promise<OperateCounts>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
   listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
@@ -6016,6 +6048,45 @@ function storeOver(
             .execute()
         ).map(athleteFrom),
       ),
+
+    operateCounts: () =>
+      exclusive(async () => {
+        const standing = await db
+          .selectFrom('athlete')
+          .select([
+            sql<number>`sum(case when suspended_at is null and registration_state = 'active' then 1 else 0 end)`.as(
+              'active',
+            ),
+            sql<number>`sum(case when suspended_at is null and registration_state = 'pending' then 1 else 0 end)`.as(
+              'pending',
+            ),
+            sql<number>`sum(case when suspended_at is not null and registration_state in ('active', 'pending') then 1 else 0 end)`.as(
+              'suspended',
+            ),
+          ])
+          .executeTakeFirstOrThrow();
+        // Each count is one the store can answer from an index (#2604's
+        // review): migration 0041's partial `private_room_open`, and
+        // `analysis_job_by_status` by its leading column. A `sum(case …)` over
+        // the jobs would scan them all. `operate-counts.test.ts` reads the plans.
+        const counted: number[] = [];
+        for (const query of OPERATE_COUNT_QUERIES) {
+          const read = await sql<{ n: number }>`${sql.raw(query)}`.execute(db);
+          counted.push(Number(read.rows[0]?.n ?? 0));
+        }
+        const [open = 0, queued = 0, running = 0] = counted;
+        // `sum` over no rows is NULL.
+        const count = (value: unknown): number => Number(value ?? 0);
+        return {
+          athletes: {
+            active: count(standing.active),
+            pending: count(standing.pending),
+            suspended: count(standing.suspended),
+          },
+          roomsOpen: open,
+          analysis: { queued, running },
+        };
+      }),
 
     listLoadAthletes: () =>
       exclusive(async () =>

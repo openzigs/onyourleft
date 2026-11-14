@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { clientAddress } from './client-address.ts';
 import { readAnalysisModelSettings, readConfig, readHistorySettings } from './config.ts';
+import { readServerConfig } from './server-config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
 
@@ -38,15 +39,22 @@ describe('deploy/home/compose.yaml — registration (#775)', () => {
 describe('deploy/home/compose.yaml — the rider’s address behind the tunnel', () => {
   const header = setting('OYL_INSTANCE_CLIENT_ADDRESS_HEADER');
   const trusted = setting('OYL_INSTANCE_TRUSTED_PROXIES');
-  const tunnel = setting('ipv4_address');
-  const subnet = setting('- subnet');
+  /** Every fixed address the tunnel has, one per network it is on. */
+  const tunnelAddresses = [...service('tunnel').matchAll(/ipv4_address: (\S+)/g)].map(
+    (match) => match[1] ?? '',
+  );
+  const subnets = [...COMPOSE.matchAll(/- subnet: (\S+)/g)].map((match) => match[1] ?? '');
 
-  it('names the header, and trusts exactly the address it gives cloudflared', () => {
+  it('names the header, and trusts exactly the addresses it gives cloudflared, each in a subnet the file declares', () => {
     expect(header).toBe('cf-connecting-ip');
-    expect(tunnel).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
-    expect(trusted).toBe(tunnel);
-    const [network] = (subnet ?? '').split('/');
-    expect(network?.split('.').slice(0, 3)).toEqual(tunnel?.split('.').slice(0, 3));
+    // #2604: two networks, two addresses — Docker may answer `instance` with either.
+    expect(tunnelAddresses).toHaveLength(2);
+    expect(trusted?.split(',')).toEqual(tunnelAddresses);
+    for (const address of tunnelAddresses) {
+      expect(address).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+      const prefix = address.split('.').slice(0, 3).join('.');
+      expect(subnets.map((subnet) => subnet.split('.').slice(0, 3).join('.'))).toContain(prefix);
+    }
   });
 
   it('is a configuration the instance accepts, under which the tunnel’s header is believed and nobody else’s is', () => {
@@ -58,12 +66,12 @@ describe('deploy/home/compose.yaml — the rider’s address behind the tunnel',
     if (!read.ok) throw new Error(read.problems.join(' '));
     const { clientAddressHeader, trustedProxies } = read.config;
     const sent = new Headers({ 'cf-connecting-ip': '203.0.113.9' });
-    expect(clientAddress(tunnel ?? '', sent, clientAddressHeader, trustedProxies)).toBe(
-      '203.0.113.9',
-    );
-    expect(clientAddress('172.30.87.3', sent, clientAddressHeader, trustedProxies)).toBe(
-      '172.30.87.3',
-    );
+    for (const address of tunnelAddresses) {
+      expect(clientAddress(address, sent, clientAddressHeader, trustedProxies)).toBe('203.0.113.9');
+      // Another container on the same network is counted as itself.
+      const neighbour = address.replace(/\.\d+$/, '.3');
+      expect(clientAddress(neighbour, sent, clientAddressHeader, trustedProxies)).toBe(neighbour);
+    }
   });
 });
 
@@ -170,4 +178,49 @@ describe('deploy/home/compose.yaml — every setting the server reads reaches it
       expect(instance).toMatch(new RegExp(`^ {6}${name}: `, 'm'));
     },
   );
+});
+
+describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => {
+  const tunnel = service('tunnel');
+  const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
+  /** The top-level `networks:` block. */
+  const networks = /^networks:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
+  /** Every service the file declares, read from it, so a new one is held too. */
+  const services = /^services:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
+  const SERVICES = [...services.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map(
+    (match) => match[1] ?? '',
+  );
+
+  it('binds cloudflared’s metrics to its address on an internal network only it and the instance join', () => {
+    const bound = /'--metrics', '(\d+\.\d+\.\d+\.\d+):(\d+)'/.exec(tunnel);
+    expect(bound).not.toBeNull();
+    const [, address = '', port = ''] = bound ?? [];
+    // Not 0.0.0.0, which is every network the tunnel is on.
+    expect(address).not.toBe('0.0.0.0');
+    expect(tunnel).toMatch(
+      new RegExp(`tunnel_metrics:\\s*\\n\\s*ipv4_address: ${address.replaceAll('.', '\\.')}`),
+    );
+    // Internal: no route out of it, and a subnet the address is in.
+    const metrics =
+      /^ {2}tunnel_metrics:\n([\s\S]*?)(?=^ {2}\S|$(?![\s\S]))/m.exec(networks)?.[1] ?? '';
+    expect(metrics).toMatch(/^\s*internal: true$/m);
+    const subnet = /subnet: (\d+\.\d+\.\d+)\.0\/24/.exec(metrics)?.[1];
+    expect(address.split('.').slice(0, 3).join('.')).toBe(subnet);
+    // Exactly the instance and the tunnel are on it, of every service in the file.
+    expect(SERVICES).toEqual(
+      expect.arrayContaining(['migrate', 'instance', 'tunnel', 'ollama', 'backup']),
+    );
+    expect(SERVICES.filter((name) => service(name).includes('tunnel_metrics'))).toEqual([
+      'instance',
+      'tunnel',
+    ]);
+    // No port for it, and the template asks that address, which the instance accepts.
+    const lines = tunnel.split('\n').filter((line) => !/^\s*#/.test(line));
+    expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
+    const url = /^OYL_INSTANCE_TUNNEL_READY_URL=(\S+)$/m.exec(env)?.[1];
+    expect(url).toBe(`http://${address}:${port}/ready`);
+    const read = readServerConfig({ tunnelReadyUrl: url }, 1);
+    expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe(address);
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_TUNNEL_READY_URL: \$\{OYL_INSTANCE_TUNNEL_READY_URL:-\}/);
+  });
 });

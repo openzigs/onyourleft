@@ -524,6 +524,9 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
     return send(world, 'GET', '/v1/operate/log', token);
   },
+  // #2604: the owner's Status, counts and states only.
+  getOperateStatus: async (world) =>
+    send(world, 'GET', '/v1/operate/status', await moderatorToken(world)),
 
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {

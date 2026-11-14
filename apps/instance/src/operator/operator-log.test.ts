@@ -22,6 +22,7 @@ import { secretBytes } from '../keys/instance-keys-testing.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { openServingStore } from '../store/serving.ts';
 import type { OperatorLogEntry } from '../store/sql-store.ts';
+import { MIGRATIONS } from '../store/migrations/index.ts';
 import { athleteFixture, deviceKeyFixture, migrateAllBut } from '../store/testing/index.ts';
 import { unloggedSentence } from './commands.ts';
 import { runCommand } from './run.ts';
@@ -194,7 +195,11 @@ describe('the operator CLI writes the operator log (#2602)', () => {
   it('still takes a backup of a database from before the operator log, and says it is not logged', async () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-log-'));
     const data = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
-    await migrateAllBut(data.database, 1);
+    // Every migration from 0040, the operator log's, onwards left out.
+    const names = Object.keys(MIGRATIONS);
+    const first = names.indexOf('0040-operator-log');
+    if (first < 0) throw new Error('no migration named 0040-operator-log in MIGRATIONS');
+    await migrateAllBut(data.database, names.length - first);
     expect(await cli(data, ['backup', join(directory, 'backups')])).toBe(0);
     expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
   });

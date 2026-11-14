@@ -850,6 +850,48 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   sections still to come. The deputy and every other rider see no such button, and anybody who opens
   the address is told only that their account is not the owner. A device that cannot seal — no
   instance card, or a copy of the app loaded from a website — is told so and asks nothing.
+- **Status** ([#2604](https://github.com/openzigs/onyourleft/issues/2604)). The first section of
+  Operate, read from `GET /v1/operate/status`, which changes nothing and so logs nothing: each check
+  `GET /ready` makes (database, migrations, rooms), the version, the deployed commit, the registration
+  mode, how long the process has been up, free and total space on the disk holding the database (and
+  on the blob directory's, when that is another device) with a warning under 10 % free, the last
+  backup ("not recorded" until [#2606](https://github.com/openzigs/onyourleft/issues/2606) records
+  snapshots), the tunnel, how many athletes are active, awaiting approval and suspended, how many
+  rooms are open and analysis jobs waiting or running, and the instance keys' state. ⚠️ **On Docker
+  Desktop (Windows or macOS) the disk figures are Docker's own virtual disk**, not the host drive it
+  is stored on: the `data` volume lives inside Docker's virtual machine, and nothing in a container
+  can see the drive under it. A full Windows drive can leave the 10 % warning quiet, so watch that
+  drive yourself. On a Linux host the figures are the host's own file system. **Counts and
+  names only**: no name, id or row of anybody, no path on the host, and no environment variable's
+  value but the registration mode and the commit — never a secret, a token or a key. When the
+  instance runs this repository's own source (`OYL_INSTANCE_SOURCE_URL` empty, or in this
+  repository), the app shows a **Compare with main** link to GitHub's compare page for the deployed
+  commit. It is only a link you open in your browser: **neither the app nor the instance asks
+  GitHub anything**. A modified instance shows its commit alone.
+- **The tunnel's readiness.** Shown as **not known** unless you set
+  **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
+  `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:
+  an internal network (no route out) that only `instance` and `tunnel` join.
+  `instance.env.example` sets `OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`. It
+  uses the address, not the name `tunnel`, which resolves on both of the tunnel's networks. If
+  172.30.88.0/24 is already in use on the box, change the subnet, the address in the command and
+  the variable together.
+  - **Why a network of its own:** cloudflared's metrics server serves more than `/ready`. It also
+    serves `/metrics` (connector and edge details), `/config` (the tunnel's ingress: its public
+    hostname and the origin it forwards to), `/debug/pprof` (profiling, which costs CPU) and
+    `/diag`. None of these carries the tunnel token, but none is for the other containers either,
+    so `ollama`, `backup` and `migrate` are not on that network. On a Linux host, processes on the
+    host itself can still reach the address, as they can any container's.
+  - **The address rule:** the address is held to the history index's rule (ADR 0040 D-6): `http:`
+    only, its host a private address or a single-label name such as a Compose service. Anything
+    else stops the instance at start, naming the variable.
+  - **Each read:** a name is resolved on every read, every address it has must be private, and no
+    redirect is followed. One two-second deadline covers the lookup, the request and its answer
+    together, so a resolver that hangs cannot hold the page.
+  - **What it shows:** **ready**, with how many connections cloudflared holds ready; or **not
+    ready** for a `503`, no answer within the deadline, or anything else.
+  - ⚠️ **Never publish that metrics port** (`ports:` on the `tunnel` service), and never put another
+    service on `tunnel_metrics`. Leave the variable empty and nothing is asked.
 
 ## Moderation and the operator's duties
 
