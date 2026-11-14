@@ -26,6 +26,20 @@
  * one power trace as an ordinary ride and as a race with items off and on,
  * and holds every grade written and its time equal.
  *
+ * ## The rider gives and takes a draft (#2461, ADR 0067 D-3)
+ *
+ * With ADR 0066 D-6's switch on ({@link LapRaceRideStart.draft}), every racer
+ * drafts on effort distance, the rider included: `stepBotRace` makes the one
+ * `fieldDraftFactors` call for the field each tick, and the rider's `k` from
+ * it is {@link LapRaceRide.riderDraft}. `GameView` rides the rider at that `k`
+ * through the simulation's `draftWith`, a room's own call, so a draft reaches
+ * the trainer only the way riding harder does (ADR 0066 D-7, ADR 0067 D-3.3):
+ * the rider arrives at the next grade sooner. The `k` is read after the frame's
+ * steps, so it rides the next frame's, as a room's prediction does. With the
+ * switch off, no racer drafts and the race is the race before #2461 to the bit.
+ * `lap-race-wiring.test.tsx` holds a race with the switch on to an ordinary
+ * ride ridden at the same `k`, step for step (D-3.6).
+ *
  * ## The steps that ran, and only those
  *
  * As Delivery's round (`delivery/ride-round.ts` §"The steps that ran"): one
@@ -156,6 +170,14 @@ export interface LapRaceRide {
   readonly names: Readonly<Record<string, string>>;
   /** What is still to be said about the race (`hud/lap-race-announce.ts`). */
   readonly owed: LapRaceOwed;
+  /** Whether every racer drafts, the rider included: ADR 0066 D-6's switch at the press (D-3.4). */
+  readonly draft: boolean;
+  /**
+   * The rider's draft multiplier `k` on the last tick, from the field's one
+   * `fieldDraftFactors` call (#2461): `1` alone, before the first tick, and
+   * always with {@link draft} off. The simulation rides the rider at it.
+   */
+  readonly riderDraft: number;
   /**
    * How much of the countdown is left, ms of the ride's unpaused frames: the
    * rider is held on the line until it is nought (#2546). @see countLapRaceDown
@@ -175,6 +197,12 @@ export interface LapRaceRideStart {
   readonly lineOffset: number;
   /** The device's storage, for the assisted setting (`assist-preference.ts`). */
   readonly storage: PreferenceStorage | undefined;
+  /**
+   * Whether the race drafts, every racer and the rider alike: ADR 0066 D-6's
+   * switch (`solo-draft-preference.ts`), which ADR 0067 D-3.4 extends to the
+   * lap race. Absent, no racer drafts.
+   */
+  readonly draft?: boolean | undefined;
 }
 
 /**
@@ -298,6 +326,8 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
       ids.map((id, index) => [id, botName((paces[index] as BotPace).style, index + 1)]),
     ),
     owed: lapRaceOwedAtStart(race, LAP_RACE_RIDER_ID),
+    draft: input.draft === true,
+    riderDraft: 1,
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
   };
 }
@@ -381,7 +411,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   const from = ride.along;
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
-  let { race, bots, input, owed } = ride;
+  let { race, bots, input, owed, riderDraft } = ride;
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
@@ -398,6 +428,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       elapsed: seconds(LAP_RACE_TICK_SECONDS),
       conditions: ride.conditions,
       seed: ride.seed,
+      draft: ride.draft,
       rider: {
         effortDistances: rider.effortDistances,
         ...(rider.lanes === undefined ? {} : { lanes: rider.lanes }),
@@ -406,6 +437,8 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     });
     race = stepped.race;
     bots = stepped.bots;
+    // #2461: the rider's `k` from the same call that drafted the bots.
+    riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
     owed = oweRaceTick(
       owed,
       before,
@@ -414,7 +447,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
     );
   }
-  return { ...ride, race, bots, input, owed, along: to };
+  return { ...ride, race, bots, input, owed, riderDraft, along: to };
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */

@@ -41,6 +41,7 @@ import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { draftedRide, type SoloDraftState } from './solo-draft';
 import type { LapRaceChoice } from './lap-race/choice';
+import { LAP_RACE_COUNTDOWN_MS } from './lap-race/ride-race';
 import { circuitRoute } from './route-fixtures-testing';
 import type { createGradientSession } from './gradient';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
@@ -512,13 +513,57 @@ describe('no solo draft in a room — #2425, ADR 0066 D-1.5', () => {
   });
 });
 
-describe('no solo draft in a lap race — #2425, ADR 0066 D-2', () => {
+describe('the solo draft in a lap race — #2425 ADR 0066 D-2, restated by #2461 (ADR 0067 D-3.7, D-4)', () => {
+  const race: LapRaceChoice = { laps: 2, bots: 3, tier: 'brisk', itemsOn: false };
+  /** The race's seed, fixed so the bots are dealt the same field in every run (it is drawn from the platform's source). */
+  const SEED = 2;
+  /**
+   * 20 s of racing after the race's countdown (#2546), which holds the rider on
+   * the line, out of every draft, for its first {@link LAP_RACE_COUNTDOWN_MS}.
+   */
+  const RACE_FRAMES = LAP_RACE_COUNTDOWN_MS / FRAME_MS + 80;
+  beforeEach(() => {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = SEED;
+        return array;
+      },
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it('drafts nobody behind the own ghost the chooser sends with a lap race', async () => {
-    const race: LapRaceChoice = { laps: 2, bots: 3, tier: 'brisk', itemsOn: false };
-    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: 80 });
+    // ADR 0067 D-3.7: the assertions are kept as they were, with the switch off.
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: RACE_FRAMES });
     expect(draft.every((text) => text === undefined)).toBe(true);
     await endTheRide();
     expect(handed.every((ended) => ended.drafted !== true)).toBe(true);
+  });
+
+  it('shows the Draft field and marks the ride drafted once the rider sat in a bot’s draft, with the switch on', async () => {
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: RACE_FRAMES });
+    // The field, read off the HUD: the share of drag the bot's wheel removed.
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    // The mark the recording carries (ADR 0066 D-5.3, D-5.6): the in-draft
+    // state and the road behind it, summing to a drafted ride.
+    expect(stepped.some((each) => each.inDraft)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
+  it('shows the Draft field with no own ghost beside the race: the race alone hands the draft', async () => {
+    // The cases above send the own ghost with the race, as the chooser does;
+    // with none, only the race (`raced`) gives the ride its solo draft state.
+    const { draft } = await rideSolo({ lapRace: race, frames: RACE_FRAMES });
+    expect(Math.max(...draft.map((text) => percentOf(text) ?? 0))).toBeGreaterThanOrEqual(10);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
+  });
+
+  it('hides the field with the display preference off, and the ride is marked all the same (R-13)', async () => {
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    const { draft } = await rideSolo({ ownGhost: true, lapRace: race, frames: RACE_FRAMES });
+    expect(draft.every((text) => text === undefined)).toBe(true);
+    expect(draftedRide(stepped.at(-1))).toBe(true);
   });
 });
 

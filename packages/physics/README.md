@@ -332,8 +332,10 @@ Since #2460 the field can draft (ADR 0067 D-3). With `BotRaceStep.draft` on, `st
 the rider's included (`lapRaceDraftFactors`), and rides each bot's plan power through `advance` with
 its `C_D·A` times its `k` (`pacer.ts` §`advancePlannedBot`'s `dragFactor`). The power is the plan's
 either way: a sheltered bot goes faster for it. Drawn distance, which items move, never enters. With
-the switch off, the default, the race is the race before #2460 to the bit; `apps/web` passes ADR
-0066 D-6's switch in #2461, which also reads the rider's own `k` from the same call.
+the switch off, the default, the race is the race before #2460 to the bit. Since #2461 `apps/web`
+passes ADR 0066 D-6's switch, and `stepBotRace` hands back the factors it rode the bots at
+(`BotRaceTick.draft`), the rider's included: the game rides the rider at that `k` through its own
+simulation, so the rider's draft is never a second walk of the field.
 
 ---
 
