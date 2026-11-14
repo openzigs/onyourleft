@@ -491,11 +491,13 @@ const PACK_CLEARING_PASSES = 2;
  * each bot is drawn at the place, within the tick's reach, that is least
  * inside anyone. Its reach is what it may move in a tick:
  * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, and along no faster than
- * {@link PACK_CLOSE_UP_METRES_PER_SECOND} forward or its give-way back, so it
- * never jumps and never goes backwards (#2558's review, finding 1). Inside
- * the rider counts first, since the rider is never moved: now, on the frames
- * drawn back to the tick before, and {@link PACK_SEEN_AHEAD_SECONDS} on.
- * Then inside a bot; then the least move from the place it was laid out in.
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND} forward or {@link PACK_GIVE_WAY_SHARE}
+ * of its speed back, so it never jumps and never goes backwards (#2558's
+ * review, finding 1). Inside the rider counts first, since the rider is
+ * never moved; then inside a bot, each on this tick and on the frames drawn
+ * back to the tick before; then inside the rider
+ * {@link PACK_SEEN_AHEAD_SECONDS} on; then the least move from the place it
+ * was laid out in.
  * Two bicycles are inside each other under a bike length along and under a
  * place across, so two nose to tail on one line are as inside each other as
  * two side by side (#2558's review, finding 2).
@@ -639,9 +641,10 @@ function clearOf(
   if (insideRider(chosen) === 0 && insideAny(chosen) === 0 && riderSoon(chosen) === 0) {
     return chosen;
   }
-  // Within reach: along, from as far back as it may give way to as far on as
-  // it may close up; across, a step either way.
-  const least = was.shift - giveWay(racer) * elapsedSeconds;
+  // Within reach: along, from as far back as it may give way to keep clear,
+  // PACK_GIVE_WAY_SHARE of its speed so it is still drawn going forward, to
+  // as far on as it may close up; across, a step either way.
+  const least = was.shift - PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed) * elapsedSeconds;
   const most = was.shift + PACK_CLOSE_UP_METRES_PER_SECOND * elapsedSeconds;
   const reach = (shift: number): number => Math.min(most, Math.max(least, shift));
   const near = others.filter(

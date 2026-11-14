@@ -514,6 +514,7 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     itemsOn = false,
     steerAt: readonly number[] = [],
     profile: RouteProfile = LOOP,
+    riderWatts = 230,
   ): Placed[] {
     const spy = vi
       .spyOn(globalThis.crypto, 'getRandomValues')
@@ -560,7 +561,7 @@ describe('every pass goes round: the rider and the bots never drawn through one 
       }
       const before = along;
       along += speedAt(seconds) * LAP_RACE_TICK_SECONDS;
-      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 230 });
+      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts });
       const drawn = ride;
       placed.push({
         ...frame(lapRaceDrawing(drawn, along, 0, false)),
@@ -726,19 +727,9 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     // Items on, so hits shuffle the field, and the rider winding up at
     // 1.5 m/s² to 9 m/s through it.
     const placed = rideFromTheGrid((at) => Math.min(9, 1.5 * at), 600, 2_544, true);
-    // No two bots drawn inside one another by more than a twentieth of a bike
-    // length or of a place.
-    for (const [tick, { bots }] of placed.entries()) {
-      for (const [one, a] of bots.entries()) {
-        for (const b of bots.slice(one + 1)) {
-          const depth = Math.min(
-            1 - Math.abs(a.along - b.along) / BIKE_LENGTH_METRES,
-            1 - Math.abs(a.across - b.across) / PACK_ABREAST_METRES,
-          );
-          expect(depth, `tick ${String(tick)}`).toBeLessThan(0.05);
-        }
-      }
-    }
+    // No two bots drawn inside one another, nor one inside the rider, on any
+    // frame: a bot held up behind one the race has ahead goes round it.
+    expectNeverInside(placed);
     // Not vacuous: the rider went by bots level with them.
     const level = placed.flatMap(({ rider, bots }) =>
       bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
@@ -765,22 +756,31 @@ describe('every pass goes round: the rider and the bots never drawn through one 
       );
     expect(early.length).toBeGreaterThan(10);
   });
-  it('has the bots coming down a hill faster than the rider go round them and round one another, on any frame', () => {
-    // A 12 m rise and fall each 628 m lap, the rider steady at 8 m/s: down
-    // the hill the field comes past them, and catches its own.
-    const hilly = circuitRoute(
-      100,
-      (at) => 12 * Math.sin((at / (2 * Math.PI * 100)) * Math.PI * 2),
-    );
-    const placed = rideFromTheGrid(() => 8, 3_000, 1, false, [], hilly);
-    expectNeverInside(placed);
-    expectNeverAJump(placed);
-    // Not vacuous: bots came by the rider level with them.
-    const level = placed.flatMap(({ rider, bots }) =>
-      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
-    );
-    expect(level.length).toBeGreaterThan(10);
-  });
+  it.each([
+    // The field comes past the rider down the hill, and round its own.
+    { seed: 1, watts: 230 },
+    // At 200 W, as #2561's harness rides it: a bot comes down on the rider
+    // with a bot either side of them, and must give way to keep clear.
+    { seed: 2, watts: 200 },
+  ])(
+    'has the bots coming down a hill faster than the rider go round them and round one another, on any frame (seed $seed, $watts W)',
+    ({ seed, watts }) => {
+      // A 12 m rise and fall each 628 m lap, the rider steady at 8 m/s: down
+      // the hill the field comes past them, and catches its own.
+      const hilly = circuitRoute(
+        100,
+        (at) => 12 * Math.sin((at / (2 * Math.PI * 100)) * Math.PI * 2),
+      );
+      const placed = rideFromTheGrid(() => 8, 3_000, seed, false, [], hilly, watts);
+      expectNeverInside(placed);
+      expectNeverAJump(placed);
+      // Not vacuous: bots came by the rider level with them.
+      const level = placed.flatMap(({ rider, bots }) =>
+        bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+      );
+      expect(level.length).toBeGreaterThan(10);
+    },
+  );
 });
 
 describe('a bot the rider steers into makes way at once, within its reach (#2558’s review, finding 1)', () => {
