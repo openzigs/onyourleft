@@ -125,6 +125,13 @@ import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
 import {
+  drawnShift,
+  gridPackLayout,
+  stepPackLayout,
+  type PackLayout,
+  type PackRacer,
+} from './pack-layout';
+import {
   askLane,
   askToUseItem,
   riderTick,
@@ -174,6 +181,12 @@ export interface LapRaceRide {
    * always with {@link draft} off. The simulation rides the rider at it.
    */
   readonly riderDraft: number;
+  /**
+   * Where the drawing lays the field out (#2544, `pack-layout.ts`): each bot's
+   * row, a bike length a row, and its place across its lane, stepped with the
+   * race. Drawing only: the race never reads it.
+   */
+  readonly pack: PackLayout;
   /**
    * How much of the countdown is left, ms of the ride's unpaused frames: the
    * rider is held on the line until it is nought (#2546). @see countLapRaceDown
@@ -305,25 +318,27 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
       LAP_RACE_RIDER_ID,
     ),
   );
+  // A mixed field: the three personalities, the three skills and the five
+  // pacing styles (each its archetype, #2459) in turn, and an ability each,
+  // from the race's seed.
+  const bots = ids.map((id, index) =>
+    lapRaceBot(
+      id,
+      tier,
+      {
+        personality: personalities[index] as BotPersonality,
+        skill: skills[index] as BotSkill,
+      },
+      paces[index] as BotPace,
+    ),
+  );
+  const riderInput = startRiderInput(input.lineOffset);
   return {
     race,
-    // A mixed field: the three personalities, the three skills and the five
-    // pacing styles (each its archetype, #2459) in turn, and an ability each,
-    // from the race's seed.
-    bots: ids.map((id, index) =>
-      lapRaceBot(
-        id,
-        tier,
-        {
-          personality: personalities[index] as BotPersonality,
-          skill: skills[index] as BotSkill,
-        },
-        paces[index] as BotPace,
-      ),
-    ),
+    bots,
     seed,
     assist,
-    input: startRiderInput(input.lineOffset),
+    input: riderInput,
     startAlong: input.riderDistance,
     along: input.riderDistance,
     conditions: input.conditions,
@@ -334,8 +349,32 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     draft: input.draft === true,
     riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
+    // The owner's ruling of 2026-11-13 on #2544: the pack forms on the line.
+    // Every bot stands in its place on the grid through the countdown, so the
+    // field rolls off together at Go (`pack-layout.ts` §"On the grid").
+    pack: gridPackLayout(packField(race, bots, riderInput, 0), LAP_RACE_RIDER_ID),
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
   };
+}
+
+/**
+ * The field as the pack layout reads it (#2544): every racer's race place and
+ * lane, the rider where they steered, and each bot's speed.
+ */
+function packField(
+  race: ItemRaceState,
+  bots: readonly LapRaceBot[],
+  input: RiderRaceInput,
+  riderSpeed: number,
+): PackRacer[] {
+  const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
+  speeds.set(LAP_RACE_RIDER_ID, riderSpeed);
+  return race.racers.map((entry) => ({
+    id: entry.racer.id,
+    along: racePosition(entry.racer),
+    lateral: entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
+    speed: speeds.get(entry.racer.id) ?? 0,
+  }));
 }
 
 /** Whether the race is still counting down on its line, so nothing of it may move (#2546). */
@@ -430,7 +469,10 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     step.riderWatts === undefined || mass === undefined || !(mass > 0)
       ? undefined
       : step.riderWatts / mass;
-  let { race, bots, input, owed, riderDraft } = ride;
+  let { race, bots, input, owed, riderDraft, pack } = ride;
+  // The rider's speed on effort distance over the step, which the pack layout
+  // reads to see a pass coming (#2544).
+  const riderSpeed = (to - from) / (ticks * LAP_RACE_TICK_SECONDS);
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
@@ -459,6 +501,14 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     bots = stepped.bots;
     // #2461: the rider's `k` from the same call that drafted the bots.
     riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
+    // #2544: the field laid out for the drawing, a tick on, the rider where
+    // they steered.
+    pack = stepPackLayout(
+      packField(race, bots, input, riderSpeed),
+      LAP_RACE_RIDER_ID,
+      pack,
+      LAP_RACE_TICK_SECONDS,
+    );
     owed = oweRaceTick(
       owed,
       before,
@@ -467,7 +517,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
     );
   }
-  return { ...ride, race, bots, input, owed, riderDraft, along: to };
+  return { ...ride, race, bots, input, owed, riderDraft, pack, along: to };
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
@@ -524,13 +574,23 @@ export function lapRaceDrawing(
     const speed = speeds.get(entry.racer.id);
     if (speed === undefined) continue;
     const hit = hitLook(entry.effects, race.atMs, reducedMotion);
+    // #2544: its place in the pack, a bike length a row from the rider's and
+    // beside the others in its lane, and on the grid from the press.
+    const place = ride.pack.get(entry.racer.id);
     raceBots.push({
+      // Never behind the route's start, where a row behind a rider who pressed
+      // at its very beginning would otherwise be drawn.
       distanceMetres: Math.max(
         0,
-        ride.startAlong + racePosition(entry.racer) - speed * behindSeconds,
+        ride.startAlong +
+          racePosition(entry.racer) +
+          (place === undefined ? 0 : drawnShift(place, behindSeconds, LAP_RACE_TICK_SECONDS)) -
+          speed * behindSeconds,
       ),
       speedMetresPerSecond: speed,
-      lateralMetres: laneLateral(entry.lane),
+      lateralMetres: place?.lateral ?? laneLateral(entry.lane),
+      swayMetresPerSecond: place?.sway ?? 0,
+      laidOut: place !== undefined,
       ...(hit === undefined ? {} : { hit }),
     });
   }

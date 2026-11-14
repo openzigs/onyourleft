@@ -461,6 +461,19 @@ export interface RaceBotInput {
    * aside only to make room for the rider when level with them ({@link lateralOf}).
    */
   readonly lateralMetres: number;
+  /**
+   * How fast that place is moving across the road, metres a second, positive
+   * to the right (#2544, `lap-race/pack-layout.ts`): the bicycle turns and
+   * leans into it as a steered rider's does (#2456). Absent or nought, it
+   * rides straight.
+   */
+  readonly swayMetresPerSecond?: number | undefined;
+  /**
+   * Whether the race's pack layout placed it (#2544), which keeps it clear of
+   * the rider already: then it is drawn at {@link lateralMetres} as it is,
+   * never moved aside, which would put two bots beside the rider on one spot.
+   */
+  readonly laidOut?: boolean | undefined;
   /** Its hit effect, while one runs on it. @see RiderMarker.hit */
   readonly hit?: RaceHitLook | undefined;
 }
@@ -1324,7 +1337,11 @@ interface Rider {
   readonly lane?: number | undefined;
   /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
   readonly steered?: number | undefined;
-  /** How fast it is drawn moving across the road while steered — the rider's only. @see SceneInput.steeredSway */
+  /**
+   * How fast it is drawn moving across the road while steered — the rider's —
+   * or while a lap race's pack moves it — a race bot's (#2544).
+   * @see SceneInput.steeredSway @see RaceBotInput.swayMetresPerSecond
+   */
   readonly sway?: number | undefined;
   /** How fast that is changing — the rider's only. @see SceneInput.steeredSwayRate */
   readonly swayRate?: number | undefined;
@@ -1334,6 +1351,8 @@ interface Rider {
   readonly followed?: boolean | undefined;
   /** A lap-race bot's lane, across the road, in place of the line. @see RaceBotInput.lateralMetres */
   readonly laned?: number | undefined;
+  /** @see RaceBotInput.laidOut */
+  readonly laidOut?: boolean | undefined;
   /** @see RiderMarker.hit */
   readonly hit?: RaceHitLook | undefined;
   /** The cadence turning its cranks, the rider's only. @see RidingInputs.cadence */
@@ -1477,6 +1496,9 @@ function ridersOnTheRoad(
       crankAngle: pedalling(bot.distanceMetres),
       pedalling: bot.speedMetresPerSecond > 0,
       laned: bot.lateralMetres,
+      // #2544: how fast the pack's layout is moving it across, which turns and leans it.
+      sway: bot.swayMetresPerSecond,
+      laidOut: bot.laidOut,
       hit: bot.hit,
     });
   }
@@ -1695,7 +1717,11 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Ac
     return { metres: rider.steered, rate: laneChangeRate(rider.sway ?? 0, rider.speed) };
   }
   if (rider.laned !== undefined) {
-    return { metres: lanedLateral(rider, rider.laned, riders, line), rate: 0 };
+    // #2544: a laned bot moving across the pack turns into the move.
+    return {
+      metres: rider.laidOut === true ? rider.laned : lanedLateral(rider, rider.laned, riders, line),
+      rate: laneChangeRate(rider.sway ?? 0, rider.speed),
+    };
   }
   let level = 0;
   for (const other of riders) {
@@ -1730,7 +1756,10 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Ac
  * lean past the tyres' grip. The bend's alone for every rider nobody steered.
  */
 function withSteeringLean(rider: Rider, bend: number): number {
-  if (rider.steered === undefined || rider.sway === undefined) return bend;
+  // #2544: and a lap-race bot moving across the pack, as a steered rider does.
+  if ((rider.steered === undefined && rider.laned === undefined) || rider.sway === undefined) {
+    return bend;
+  }
   const lean = bend + laneChangeLean(rider.sway, rider.speed);
   return Math.max(-MAXIMUM_LEAN_RADIANS, Math.min(MAXIMUM_LEAN_RADIANS, lean));
 }
