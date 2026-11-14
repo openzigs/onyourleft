@@ -136,6 +136,16 @@ export interface RidingInputs {
   readonly speed: number;
 }
 
+/** A crash being drawn on a rider — #2493. @see RiderMarker.crash */
+export interface RiderCrashLook {
+  /** Seconds since the crash, by the frames the loop ran. */
+  readonly seconds: number;
+  /** Which way they fall: the rider's right (`1`) or left (`-1`). */
+  readonly side: 1 | -1;
+  /** How far into the crash pose they are: 0 on the bike, 1 on the ground. */
+  readonly share: number;
+}
+
 /** A marker on the road: the rider, the bot (#92), the ghost (#93), or another real rider in a room (#783). */
 export interface RiderMarker {
   /**
@@ -327,6 +337,16 @@ export interface RiderMarker {
    * call. Absent on every ordinary ride and on a racer nothing has hit.
    */
   readonly hit?: RaceHitLook | undefined;
+  /**
+   * The rider's crash in a Delivery round, while one is drawn and motion is
+   * not reduced — #2493: how long ago it was, which side they fall to, and
+   * how far into the crash pose they are (`delivery/crash-look.ts`). The
+   * realistic rider plays its file's crash clip with it, on top of the roll
+   * {@link lean} already carries; the stylised rider has no clip and keeps the
+   * roll. Absent on every other rider and frame, and under reduced motion,
+   * which keeps #2475's still pose.
+   */
+  readonly crash?: RiderCrashLook | undefined;
   /**
    * How far this rider's bars are drawn turned, in radians, positive to the
    * rider's right — #2494: the fork, the front wheel and the bar turned about
@@ -532,9 +552,13 @@ export interface WaterFrame {
  * Which of Delivery's obstacles — `delivery/obstacles.ts` §`ObstacleKind`,
  * restated so that nothing the view reaches imports Delivery's modules.
  * `delivery/in-view.ts` builds {@link DeliveryInView} from
- * the roster, so a kind added there and not here does not typecheck.
+ * the roster, so a kind added there and not here does not typecheck. A car
+ * pulling out (#2364) is drawn as a parked car's body with, since #2506, a
+ * hazard marker overhead and lit amber indicators of its own, so that it
+ * reads apart from a parked car (`three-renderer.ts` §`obstacleShape`).
  */
-export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone' | 'parked-car';
+export type DeliveryObstacleKind =
+  'bin' | 'trolley' | 'cone' | 'parked-car' | 'dog' | 'car-pulling-out' | 'oncoming-rider';
 
 /** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
 export interface DeliveryPiece {
@@ -553,6 +577,37 @@ export interface DeliveryObstaclePiece extends DeliveryPiece {
    * it, so a car keeps its colour. Absent, the first paint.
    */
   readonly index?: number;
+  /**
+   * How a car is moving this frame — #2540: what its wheels, body and
+   * indicators show in the realistic world, which draws Kenney's car with its
+   * wheels apart (`three-renderer.ts` §`deliveryCarPose`). Absent, as for
+   * every parked car, nothing on it moves. Read for a car only.
+   */
+  readonly car?: DeliveryCarMotion;
+}
+
+/**
+ * How a car among Delivery's obstacles is moving — #2540. Numbers in the
+ * car's own terms; the view turns them into a pose and nothing else reads
+ * them. The car pulling out (#2364, #2506) is what hands one.
+ */
+export interface DeliveryCarMotion {
+  /** How far it has moved since it was set going, in metres: its wheels roll through this. */
+  readonly travelledMetres: number;
+  /** Its speed, in metres a second: with its steer, how far its body leans. */
+  readonly speedMetresPerSecond: number;
+  /** Its front wheels' angle, in radians, positive to the car's own left. */
+  readonly steerRadians: number;
+  /** How hard it is braking, `0` to `1`: its nose dips. */
+  readonly braking: number;
+  /** Which indicator is on, if either. */
+  readonly indicator?: 'left' | 'right';
+  /**
+   * How long the indicator has been on, in seconds: it flashes from then.
+   * Absent, an indicator that is on is lit steadily — what a frame hands
+   * under `prefers-reduced-motion`, as the lap race's hit effect is steady.
+   */
+  readonly indicatorSeconds?: number;
 }
 
 /**
@@ -562,8 +617,32 @@ export interface DeliveryObstaclePiece extends DeliveryPiece {
  */
 export interface DeliveryInView {
   readonly parcels: readonly DeliveryPiece[];
-  readonly markers: readonly DeliveryPiece[];
+  readonly markers: readonly DeliveryMarkerPiece[];
   readonly obstacles: readonly DeliveryObstaclePiece[];
+  /** A level's rain and dusk (#2366), for the drawing only. Absent, clear daylight. */
+  readonly weather?: DeliveryWeatherFrame;
+}
+
+/**
+ * A Delivery level's weather and light, as the view draws them — #2366, ADR
+ * 0065 D-10.4: falling rain in one call, unless the rider asked for reduced
+ * motion, and a dimmer light at dusk, which costs no call.
+ */
+export interface DeliveryWeatherFrame {
+  readonly rain: boolean;
+  readonly dusk: boolean;
+}
+
+/**
+ * Which marker a house wears — #2365: a doorstep's, a mailbox's at the kerb,
+ * or a house that must not get a parcel's. Told apart by shape, never by
+ * colour alone (ADR 0065 D-10.5).
+ */
+export type DeliveryMarkerKind = 'house' | 'mailbox' | 'no-delivery';
+
+/** A house's marker, and which (#2365). Absent, a doorstep's. */
+export interface DeliveryMarkerPiece extends DeliveryPiece {
+  readonly kind?: DeliveryMarkerKind;
 }
 
 /** What {@link SceneFrame.terrain} carries. */

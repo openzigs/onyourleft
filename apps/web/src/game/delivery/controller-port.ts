@@ -25,4 +25,12 @@ export interface ControllerPort {
    * (#1827, `controller-input.ts`).
    */
   onControllerEvents(listener: (events: readonly OpenBikeControlEvent[]) => void): () => void;
+  /**
+   * #2514: whether a controller is paired right now. The app hands the game
+   * this port on every Bluetooth-capable platform, paired or not, so holding
+   * one says nothing: a port that omits this is read as nothing paired.
+   */
+  readonly paired?: boolean;
+  /** Called after every change of {@link paired}; omitted where it never changes. */
+  subscribe?(listener: () => void): () => void;
 }

@@ -161,7 +161,8 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',
         'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
       ],
-      Kenney: [],
+      // #2540: the Car Kit's own page.
+      Kenney: ['https://kenney.nl/assets/'],
       // #1585: the house models' public records and their own pages.
       'An individual model under CC-BY-4.0': [
         'https://api.sketchfab.com/v3/models/',
@@ -209,15 +210,18 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         owners.set(source.id, (owners.get(source.id) ?? new Set()).add(verdict.source.name));
       }
     }
-    // Four sources are used today — ambientCG since #1274, which ADR 0026 D-4
-    // had already admitted, and since #1585 D-4's individual CC-BY-4.0 models
-    // — and nothing ADR 0049 admits is adopted by #1275.
+    // Five sources are used today — ambientCG since #1274, which ADR 0026 D-4
+    // had already admitted, since #1585 D-4's individual CC-BY-4.0 models,
+    // and since #2540 Kenney, for the Car Kit — and nothing ADR 0049 admits
+    // is adopted by #1275.
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
       'An individual model under CC-BY-4.0',
+      'Kenney',
       'MakeHuman’s own files',
       'Poly Haven',
       'ambientCG',
     ]);
+    expect(owners.get('kenney-car-kit')).toEqual(new Set(['Kenney']));
     expect(owners.get('rva_duplex_02a')).toEqual(new Set(['An individual model under CC-BY-4.0']));
     expect(owners.get('Rock026')).toEqual(new Set(['ambientCG']));
     expect(owners.get('makehuman')).toEqual(new Set(['MakeHuman’s own files']));

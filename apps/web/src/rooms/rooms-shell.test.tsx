@@ -497,8 +497,13 @@ describe('a private race — #785', () => {
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(3);
     expect(reading('To go')).not.toBe(atTheLine);
-    // And the start is said, whatever the rider chose about announcements.
-    expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).toBe('Go.');
+    // #2546, the owner's ruling of 2026-11-12: the start follows the rider's
+    // announcements setting, off here, so the region does not say it (it said
+    // it whatever the setting until then; `lap-race-countdown-wiring.test.tsx`
+    // holds both settings).
+    expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).not.toBe(
+      RACE_TEXT.go,
+    );
   });
 
   it('asks nothing for a race the rider leaves while it runs, and shows its result on a press once the instance has it — #785’s review (N5)', async () => {

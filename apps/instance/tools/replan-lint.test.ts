@@ -8,9 +8,10 @@
  *
  * The fixture is linted as the real `pnpm run lint` would lint that file: the
  * repository's own ESLint, its own config, the text on stdin under the
- * validator's path. Nothing is written to the tree. ESLint is started twice
- * for the whole file, before the tests, because starting it takes seconds on
- * a busy runner.
+ * validator's path. Nothing is written to the tree. ESLint is started once
+ * for the whole file, before the tests, and lints the text under both paths
+ * through its own API (`lintText`), because starting it takes seconds on a
+ * busy runner: once inside the hook's 10 s default, not twice (#2569).
  *
  * It lives here because it needs a process and a file path, and
  * `packages/domain` is typed with no platform API at all.
@@ -45,34 +46,43 @@ interface Finding {
   readonly message: string;
 }
 
-/** What ESLint says about {@link FIXTURE} if it were the file at `path`. */
-function lint(path: string): readonly Finding[] {
+/**
+ * What ESLint says about {@link FIXTURE} if it were the file at each of
+ * `paths`, in order: one process, the repository's own ESLint and config.
+ */
+function lint(paths: readonly string[]): readonly (readonly Finding[])[] {
+  const script = [
+    "import { ESLint } from 'eslint';",
+    'const eslint = new ESLint({ cwd: process.cwd() });',
+    'const [fixture, ...paths] = JSON.parse(process.argv[1]);',
+    'const results = [];',
+    'for (const filePath of paths) results.push(await eslint.lintText(fixture, { filePath }));',
+    'process.stdout.write(JSON.stringify(results));',
+  ].join('\n');
   const run = spawnSync(
     process.execPath,
-    [
-      join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'),
-      '--stdin',
-      '--stdin-filename',
-      path,
-      '--format',
-      'json',
-    ],
-    { cwd: ROOT, input: FIXTURE, encoding: 'utf8' },
+    ['--input-type=module', '--eval', script, JSON.stringify([FIXTURE, ...paths])],
+    { cwd: ROOT, encoding: 'utf8' },
   );
-  // 1 is "there are findings"; anything else is not a lint of this fixture.
-  expect(run.status, run.stderr).toBe(1);
-  const files = JSON.parse(run.stdout) as readonly { readonly messages: readonly Finding[] }[];
-  expect(files).toHaveLength(1);
-  return files[0]?.messages ?? [];
+  expect(run.status, run.stderr).toBe(0);
+  const linted = JSON.parse(run.stdout) as readonly (readonly {
+    readonly messages: readonly Finding[];
+  }[])[];
+  return linted.map((files) => {
+    expect(files).toHaveLength(1);
+    return files[0]?.messages ?? [];
+  });
 }
 
 describe('the lint block for replan.ts — #1296', () => {
   let validator: readonly Finding[] = [];
   let neighbour: readonly Finding[] = [];
   beforeAll(() => {
-    validator = lint(VALIDATOR);
-    neighbour = lint(NEIGHBOUR);
-  }, 120_000);
+    const results = lint([VALIDATOR, NEIGHBOUR]);
+    // By name, not as a default: a short result would hold every case below to nothing.
+    expect(results, 'one result for each path linted').toHaveLength(2);
+    [validator, neighbour] = results as readonly [readonly Finding[], readonly Finding[]];
+  });
 
   const on = (findings: readonly Finding[], line: number): readonly Finding[] =>
     findings.filter((each) => each.line === line);
