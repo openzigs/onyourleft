@@ -227,11 +227,21 @@ const ATHLETE = {
 /**
  * Each case below took 0.7–2.0 s with ten busy loops on a two-CPU container
  * (Node 24.21, 2026-10-01) and about 0.1 s idle. On CI under coverage they took
- * 379, 349 and 309 ms (run 36891647825, an AMD EPYC 9V74), so 20 s is fifty
- * times the CI figure and ten times the loaded one — kept that wide because
- * these cases exist for the loaded runner (docs/agents/ci.md §4c).
+ * 379, 349 and 309 ms (run 36891647825, an AMD EPYC 9V74), and the whole file
+ * 838 and 865 ms on the nightly coverage job (43207158376, 43008116660, EPYC
+ * 9V74). They keep Vitest's 5 s default: #2550 took away the 20 s each had
+ * (docs/agents/ci.md §4c, "Cheaper cases under coverage — #1688").
  */
-const LOADED = { timeout: 20_000 };
+
+/**
+ * The retry ladder of the two cases whose holder lets go after the first
+ * attempt (#2550's review, F2). Only that first attempt has to fail, so the
+ * pauses need only outlast the holder's commit: 1.55 s in all, where the
+ * 200, 500, 1 000 and 2 000 ms these cases had came to 3.7 s of a 5 s case.
+ * Each pause is about the sum of those before it, so a write lands within
+ * about twice the time the holder took to let go.
+ */
+const LET_GO_LADDER = [50, 100, 200, 400, 800];
 
 /** How many times a statement whose SQL starts with `prefix` was handed to SQLite. */
 function attemptsOf(queries: readonly string[], prefix: string): number {
@@ -239,46 +249,42 @@ function attemptsOf(queries: readonly string[], prefix: string): number {
 }
 
 describe('a write while another connection holds the lock past the busy timeout (#985)', () => {
-  it(
-    'lands once the lock is let go, rather than failing with "database is locked"',
-    LOADED,
-    async () => {
-      const path = await migrated();
-      const holder = holdTheLock(path, 30_000);
-      const queries: string[] = [];
-      // The lock is let go only from a timer set as the FIRST attempt starts.
-      // That attempt blocks this thread for its whole 50 ms busy timeout with
-      // the lock still held, so it cannot land: the timer fires after it has
-      // failed, and only a retry can write. `attemptsOf` then proves it ran.
-      const store = await openSqlStore(path, {
-        busyTimeoutMilliseconds: 50,
-        busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
-        onQuery: (sql) => {
-          queries.push(sql);
-          if (attemptsOf(queries, 'insert into "athlete"') === 1) setTimeout(holder.letGo, 0);
-        },
-      });
-      try {
-        await holder.held;
-        await store.putAthlete(ATHLETE);
-        await holder.released;
-        expect(attemptsOf(queries, 'insert into "athlete"')).toBeGreaterThanOrEqual(2);
-        expect((await store.getAthlete('rider'))?.displayName).toBe('Rider');
-        expect((await store.getAthlete('holder'))?.displayName).toBe('Holder');
-      } finally {
-        await store.close();
-        await holder.stop();
-      }
-    },
-  );
+  it('lands once the lock is let go, rather than failing with "database is locked"', async () => {
+    const path = await migrated();
+    const holder = holdTheLock(path, 30_000);
+    const queries: string[] = [];
+    // The lock is let go only from a timer set as the FIRST attempt starts.
+    // That attempt blocks this thread for its whole 50 ms busy timeout with
+    // the lock still held, so it cannot land: the timer fires after it has
+    // failed, and only a retry can write. `attemptsOf` then proves it ran.
+    const store = await openSqlStore(path, {
+      busyTimeoutMilliseconds: 50,
+      busyRetryDelaysMilliseconds: LET_GO_LADDER,
+      onQuery: (sql) => {
+        queries.push(sql);
+        if (attemptsOf(queries, 'insert into "athlete"') === 1) setTimeout(holder.letGo, 0);
+      },
+    });
+    try {
+      await holder.held;
+      await store.putAthlete(ATHLETE);
+      await holder.released;
+      expect(attemptsOf(queries, 'insert into "athlete"')).toBeGreaterThanOrEqual(2);
+      expect((await store.getAthlete('rider'))?.displayName).toBe('Rider');
+      expect((await store.getAthlete('holder'))?.displayName).toBe('Holder');
+    } finally {
+      await store.close();
+      await holder.stop();
+    }
+  });
 
-  it('a transaction lands too: its BEGIN IMMEDIATE is what is run again', LOADED, async () => {
+  it('a transaction lands too: its BEGIN IMMEDIATE is what is run again', async () => {
     const path = await migrated();
     const queries: string[] = [];
     let holder: Holder | undefined;
     const store = await openSqlStore(path, {
       busyTimeoutMilliseconds: 50,
-      busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
+      busyRetryDelaysMilliseconds: LET_GO_LADDER,
       onQuery: (sql) => {
         queries.push(sql);
         // Kysely's bare `begin`, which `node-sqlite.ts` prepares as BEGIN IMMEDIATE.
@@ -308,28 +314,24 @@ describe('a write while another connection holds the lock past the busy timeout 
     }
   });
 
-  it(
-    'fails, bounded, when the lock is never let go — and nothing was written',
-    LOADED,
-    async () => {
-      const path = await migrated();
-      const store = await openSqlStore(path, {
-        busyTimeoutMilliseconds: 20,
-        busyRetryDelaysMilliseconds: [10, 10],
-      });
-      const holder = holdTheLock(path, 30_000);
-      try {
-        await holder.held;
-        await expect(store.putAthlete(ATHLETE)).rejects.toThrow(/database is locked/);
-        holder.letGo();
-        await holder.released;
-        expect(await store.getAthlete('rider')).toBeUndefined();
-      } finally {
-        await store.close();
-        await holder.stop();
-      }
-    },
-  );
+  it('fails, bounded, when the lock is never let go — and nothing was written', async () => {
+    const path = await migrated();
+    const store = await openSqlStore(path, {
+      busyTimeoutMilliseconds: 20,
+      busyRetryDelaysMilliseconds: [10, 10],
+    });
+    const holder = holdTheLock(path, 30_000);
+    try {
+      await holder.held;
+      await expect(store.putAthlete(ATHLETE)).rejects.toThrow(/database is locked/);
+      holder.letGo();
+      await holder.released;
+      expect(await store.getAthlete('rider')).toBeUndefined();
+    } finally {
+      await store.close();
+      await holder.stop();
+    }
+  });
 });
 
 /**
@@ -345,7 +347,7 @@ describe('a write while another connection holds the lock past the busy timeout 
  * the old one — and with the wiring broken the store runs it three times.
  */
 describe('inside a transaction, a busy statement is handed back at once (#985)', () => {
-  it('is attempted exactly once, with SQLITE_BUSY_SNAPSHOT', LOADED, async () => {
+  it('is attempted exactly once, with SQLITE_BUSY_SNAPSHOT', async () => {
     const path = await migrated();
     const queries: string[] = [];
     const db = openKysely(path, {

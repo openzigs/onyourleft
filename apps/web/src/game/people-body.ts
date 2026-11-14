@@ -9,8 +9,8 @@
  *
  * ## Cut at load, from the rider's own file — no new asset
  *
- * The rider's body is 8 468 triangles over 4 769 vertices (8 636 until #2495's
- * eyes took their share); sixteen of them would be 135 000, four times the
+ * The rider's body is 8 270 triangles over 4 680 vertices (8 438 until #2495's
+ * eyes took their share); sixteen of them would be 132 000, four times the
  * issue's 32 000. {@link clusterDecimate} cuts
  * it by VERTEX CLUSTERING (Rossignac and Borrel, 1993): the body is divided
  * into cubes, every vertex in a cube becomes the one nearest the cube's mean,

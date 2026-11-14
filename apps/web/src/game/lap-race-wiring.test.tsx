@@ -30,6 +30,15 @@
  * Every shared ride runs with every network primitive replaced by a refusal
  * that counts its calls (ADR 0060 D-7.3, CLAUDE.md §1).
  *
+ * ## The countdown, and the ordinary ride's twin (#2546)
+ *
+ * A race holds the rider on its line for {@link COUNTDOWN_FRAMES} frames
+ * before Go, pedalling the trace all the while. So the ordinary ride every
+ * race is held equal to is the same ride for a rider who stood still on the
+ * line for those seconds — sent 0 W until Go ({@link standingAt}) and the same
+ * trace after it — and the shadow is held on the line for them too. The
+ * comparisons themselves are as #1906 wrote them.
+ *
  * ## The draft switch (#2461, ADR 0067 D-3.4 and D-3.6)
  *
  * Every ride here runs with ADR 0066 D-6's draft switch **off** unless it asks
@@ -72,6 +81,7 @@ import { HIT_GLOW_MEAN } from './lap-race/in-view';
 import {
   askRaceItem,
   askRaceLane,
+  LAP_RACE_COUNTDOWN_MS,
   LAP_RACE_RIDER_ID,
   LAP_RACE_TICK_SECONDS,
   lapRaceBotConditions,
@@ -184,33 +194,49 @@ const ITEMS_OFF: LapRaceChoice = { ...RACE, itemsOn: false };
 /** Ten simulation steps a frame: a slow frame, so every frame runs the several-steps path. */
 const FRAME_MS = 500;
 const START_MS = 1_000_000;
-/** 70 s of ride: two laps, and long enough after the line for the finish to be said. */
-const FRAMES = 140;
+/** The frames a race's countdown holds the rider on the line for (#2546): Go is the last of them. */
+const COUNTDOWN_FRAMES = LAP_RACE_COUNTDOWN_MS / FRAME_MS;
+/** 70 s of race after the countdown: two laps, and long enough after the line for the finish to be said. */
+const FRAMES = COUNTDOWN_FRAMES + 140;
 
 /** The scripted power trace: a function of the ride's clock alone, the same in every ride. */
 function powerAt(nowMs: number): number {
   return 290 + 70 * Math.sin((nowMs - START_MS) / 6_000);
 }
 
+/**
+ * The ordinary ride's twin of a race (#2546): the trace, but 0 W through the
+ * countdown, Go's own frame included, so the rider stands still on the line
+ * as the race's rider is held there.
+ */
+function standingAt(nowMs: number): number {
+  return nowMs - START_MS <= LAP_RACE_COUNTDOWN_MS ? 0 : powerAt(nowMs);
+}
+
 /** The rider's presses after each frame's tick, by frame index: lanes, and the item key often. */
-const PRESSES: ReadonlyMap<number, SteerIntent | 'item'> = new Map<number, SteerIntent | 'item'>([
-  [6, 'lane-left'],
-  [30, 'lane-right'],
-  [31, 'lane-right'],
-  [70, 'lane-left'],
-  ...Array.from({ length: 13 }, (_, index): [number, 'item'] => [12 + index * 9, 'item']),
-]);
+const PRESSES: ReadonlyMap<number, SteerIntent | 'item'> = new Map<number, SteerIntent | 'item'>(
+  [
+    [6, 'lane-left'],
+    [30, 'lane-right'],
+    [31, 'lane-right'],
+    [70, 'lane-left'],
+    ...Array.from({ length: 13 }, (_, index): [number, 'item'] => [12 + index * 9, 'item']),
+  ].map(([frame, what]): [number, SteerIntent | 'item'] => [
+    (frame as number) + COUNTDOWN_FRAMES,
+    what as SteerIntent | 'item',
+  ]),
+);
 
 let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
 
-function port(route: RidableRoute = ROUTE): GamePort {
+function port(route: RidableRoute = ROUTE, power: (at: number) => number = powerAt): GamePort {
   return {
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
-      rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
+      rider: { power: watts(power(nowMs)), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
       heartRate: { value: 142, live: true, paired: true },
     }),
@@ -384,7 +410,11 @@ interface ShadowFrame {
   readonly power: number;
 }
 
-/** `frames` frames of the scripted ride, advanced as `GameView`'s tick advances its simulation. */
+/**
+ * `frames` frames of the scripted ride, advanced as `GameView`'s tick advances
+ * its simulation: held on the line through the countdown (#2546), whose last
+ * frame, Go's, ends exactly at Go and so runs no step.
+ */
 function shadowRide(frames: number): ShadowFrame[] {
   const simulation = new GameSimulation({
     profile: CIRCUIT,
@@ -394,7 +424,8 @@ function shadowRide(frames: number): ShadowFrame[] {
   for (let frame = 1; frame <= frames; frame += 1) {
     const at = START_MS + frame * FRAME_MS;
     const input: RiderInput = { power: watts(powerAt(at)), live: true };
-    const { steps } = simulation.advanceTo(at, input);
+    if (frame <= COUNTDOWN_FRAMES) simulation.holdAt(at);
+    const { steps } = frame <= COUNTDOWN_FRAMES ? { steps: 0 } : simulation.advanceTo(at, input);
     out.push({ steps, along: simulation.state.ride.distance, power: input.power });
   }
   return out;
@@ -482,6 +513,8 @@ async function rideTheTrace(options: {
   readonly seen?: Map<number, DrawnInput> | undefined;
   readonly room?: Pick<Parameters<typeof GameView>[0], 'room' | 'roomId'> | undefined;
   readonly delivery?: boolean | undefined;
+  /** The rider's power by the clock: {@link powerAt} unless given. */
+  readonly power?: ((at: number) => number) | undefined;
   /** Tick *Pace me* and type this intensity on the chooser before the press (#1971). */
   readonly pacerIntensity?: string | undefined;
   /** The presses to make, {@link PRESSES} unless given. */
@@ -495,7 +528,7 @@ async function rideTheTrace(options: {
   if (options.drafted !== true) localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
   mounted = await mount(
     <GameView
-      port={port(options.route)}
+      port={port(options.route, options.power)}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
       renderer={() =>
         Promise.resolve(capturingRenderer(options.drawn ?? [], options.realistic, options.blind))
@@ -559,7 +592,11 @@ interface RideOptions {
   readonly blind?: boolean | undefined;
 }
 
-/** The scripted ride, start to *End ride*, with the network refused, read and unmounted. */
+/**
+ * The scripted ride, start to *End ride*, with the network refused, read and
+ * unmounted. With no race, the race's ordinary twin: standing on the line
+ * through the countdown ({@link standingAt}).
+ */
 async function rideOnce(
   race: LapRaceChoice | undefined,
   options: RideOptions = {},
@@ -584,12 +621,13 @@ async function rideOnce(
     trainer: trainerPort(writes),
     drawn,
     seen,
+    ...(race === undefined ? { power: standingAt } : {}),
     drafted: options.drafted,
     frames: options.frames,
     blind: options.blind,
     // Mid-race, half way round the first lap: every racer still riding.
     onFrame: (index) => {
-      if (index === 30) midRace = standings();
+      if (index === COUNTDOWN_FRAMES + 30) midRace = standings();
       return Promise.resolve();
     },
   });
@@ -603,7 +641,7 @@ async function rideOnce(
   return { ...read, writes, drawn, reached: [...reached], trace };
 }
 
-/** How long the drafted rides of #2461 ride: 40 s, a lap and a half of the loop. */
+/** How long the drafted rides of #2461 ride after the countdown: 40 s, a lap and a half of the loop. */
 const DRAFTED_FRAMES = 80;
 
 /** The three shared rides, each ridden once by the first case that asks. */
@@ -655,6 +693,12 @@ describe('a solo lap race inside a game ride — #1906', () => {
     const me = script.ride.race.racers.find((entry) => entry.racer.id === LAP_RACE_RIDER_ID);
     if (me === undefined || me.racer.finishedAtMs === null)
       throw new Error('the shadow rider did not finish');
+    // #2546: the race's clock started at Go, not at the press: its finish
+    // time is the frame it was crossed on less the countdown.
+    const finishedFrame = script.finishedFrame ?? Number.NaN;
+    const raceClockThen = (finishedFrame + 1) * FRAME_MS - LAP_RACE_COUNTDOWN_MS;
+    expect(me.racer.finishedAtMs).toBeLessThanOrEqual(raceClockThen);
+    expect(me.racer.finishedAtMs).toBeGreaterThan(raceClockThen - FRAME_MS);
     // The finish the shadow predicts is the one the real ride says, once.
     const finishes = ride.said.filter((text) => text.startsWith('Finished, '));
     expect(script.ride.owed.finish).toMatch(/^Finished, \d of 8, in /u);
@@ -718,6 +762,11 @@ describe('a solo lap race inside a game ride — #1906', () => {
     const grades = ordinary.writes.map((each) => each.parameters.grade);
     expect(Math.max(...grades)).toBeGreaterThan(1);
     expect(Math.min(...grades)).toBeLessThan(-1);
+    // #2546: and written both while the countdown held the rider on the
+    // line, the line's grade, and after Go.
+    const goAt = START_MS + LAP_RACE_COUNTDOWN_MS;
+    expect(ordinary.writes.filter((each) => each.atMs <= goAt).length).toBeGreaterThan(0);
+    expect(ordinary.writes.filter((each) => each.atMs > goAt).length).toBeGreaterThan(30);
     // The items-off race ran, and drew no pick-up point: nothing is picked up there.
     expect(off.drawn.every((frame) => frame.lapRace !== undefined)).toBe(true);
     expect(off.drawn.every((frame) => frame.lapRace?.pickUps.length === 0)).toBe(true);
@@ -737,18 +786,26 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // frame-to-trainer coupling that exists only in a drafted lap race makes it
     // write other than the blind replay. Drawn, all three rides took 5.0 s under
     // coverage on CI (the nightly of 2026-11-13 on #2561's branch).
-    const frames = DRAFTED_FRAMES;
+    //
+    // #2546: the race holds the rider on the line through the countdown, and
+    // its simulation is first advanced on Go's own frame; the ordinary ride
+    // stands still on the line at 0 W (`standingAt`) and is advanced on every
+    // frame. So the replay rides alone (`k` 1) through the countdown's frames
+    // before Go's, then the race's trace from Go's frame on, call for call.
+    const frames = COUNTDOWN_FRAMES + DRAFTED_FRAMES;
     const off = await rideOnce(ITEMS_OFF, { drafted: true, frames });
     const on = await rideOnce(RACE, { drafted: true, frames, blind: true });
     // Items move race offsets and never effort distances, which is all the
     // draft reads (D-3.2): one `k` trace for both, so one ordinary ride.
     expect(on.trace).toStrictEqual(off.trace);
+    expect(off.trace).toHaveLength(frames - (COUNTDOWN_FRAMES - 1));
+    const aligned = [...Array<number>(COUNTDOWN_FRAMES - 1).fill(1), ...off.trace];
     // An ordinary ride, no race, ridden at the races' `k` trace.
-    const replay = await rideOnce(undefined, { replay: off.trace, frames, blind: true });
+    const replay = await rideOnce(undefined, { replay: aligned, frames, blind: true });
     // Non-vacuity: the rider sat in a bot's draft for a good part of the race,
     // the replay rode at it, and the road's grades climb and fall.
     expect(off.trace.filter((k) => k < 0.9).length).toBeGreaterThan(20);
-    expect(replay.trace).toStrictEqual(off.trace);
+    expect(replay.trace).toStrictEqual(aligned);
     expect(off.writes.length).toBeGreaterThan(30);
     const grades = off.writes.map((each) => each.parameters.grade);
     expect(Math.max(...grades)).toBeGreaterThan(1);
@@ -774,7 +831,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     process.on('unhandledRejection', onRejection);
     try {
       // Past the first lap's line, on the last lap.
-      await rideTheTrace({ race: RACE, frames: 70, blind: true });
+      await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 70, blind: true });
       expect(raceFields()[0]).toMatch(/Lap 2 of 2/u);
       await clickThrough(buttonStarting('End ride'));
       await clickThrough(endRideAnswer(document, 'End ride'));
@@ -832,7 +889,8 @@ describe('a solo lap race inside a game ride — #1906', () => {
       LAP_RACE_ASSIST_STORAGE_KEY,
       JSON.stringify({ itemsOff: true, autoUse: false, noKnockBack: false, gentlerBots: true }),
     );
-    await rideTheTrace({ race: RACE, frames: 6, blind: true });
+    // Past the countdown, so the bots are riding and have a figure each.
+    await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 6, blind: true });
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
     // One tier below the chosen 'hard', read off the bots' figures (#2455: a
@@ -901,14 +959,14 @@ describe('a solo lap race inside a game ride — #1906', () => {
       removeEventListener: () => undefined,
     }));
     const drawn: SceneFrame[] = [];
-    await rideTheTrace({ race: RACE, drawn, frames: 80 });
+    await rideTheTrace({ race: RACE, drawn, frames: COUNTDOWN_FRAMES + 80 });
     const hits = drawn.flatMap((frame) => frame.markers.flatMap((marker) => marker.hit ?? []));
     expect(hits.length).toBeGreaterThan(5);
     for (const hit of hits) expect(hit).toEqual({ glow: HIT_GLOW_MEAN, scale: 1, spin: 0 });
   });
 
   it('takes no lane or item press while the ride is paused, and the next ones once it rides again', async () => {
-    await rideTheTrace({ race: RACE, frames: 40, presses: new Map() });
+    await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 40, presses: new Map() });
     // The item held, without the warning under it (`LAP_RACE_TEXT.warning`),
     // which follows the other racers' puddles and changes while the rider waits.
     const item = (): string =>
@@ -1133,6 +1191,8 @@ describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () =>
     await rideTheTrace({
       race,
       trainer: gameTrainerPortOver(controller),
+      // #2546: the race's ordinary twin stands on the line through the countdown.
+      ...(race === undefined ? { power: standingAt } : {}),
       blind: true,
       // The bench keeps whole seconds, so it runs one a frame: twice the
       // game's clock, which both rides share, and fine enough that a lap line
@@ -1205,5 +1265,17 @@ describe('the recorded ride is unchanged by a lap race — #1906 (D-2.4)', () =>
     expect(without.fields).toEqual([]);
     expect(raced.fields.some((text) => text.includes('Finished'))).toBe(true);
     expect(raced.recorded).toStrictEqual(without.recorded);
+    // #2546, the owner's ruling of 2026-11-12: the countdown's seconds are
+    // in the recorded ride, as the trainer reported them. The bench keeps a
+    // second a frame, so they are its first COUNTDOWN_FRAMES seconds: power
+    // and speed in every one after the first sample, and every one of them
+    // moving time — a rider pedalling a trainer on the line is moving on it.
+    const countdown = raced.recorded.power.slice(1, COUNTDOWN_FRAMES + 1);
+    expect(countdown).toHaveLength(COUNTDOWN_FRAMES);
+    for (const power of countdown) expect(power).toBeGreaterThan(0);
+    for (const speed of raced.recorded.speed.slice(1, COUNTDOWN_FRAMES + 1)) {
+      expect(speed).toBeGreaterThan(0);
+    }
+    expect(raced.recorded.movingSeconds).toBe(raced.recorded.power.length - 1);
   });
 });

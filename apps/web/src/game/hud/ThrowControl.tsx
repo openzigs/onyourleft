@@ -56,10 +56,15 @@ export interface ThrowControlProps {
   readonly port: ThrowInputPort;
   /** The HUD's touch lock is on. */
   readonly touchLocked: boolean;
+  /**
+   * The buttons are not drawn — #2514: a pad or a paired controller throws for
+   * the rider, so the corner gives the road its room back. The keys still throw.
+   */
+  readonly buttonless?: boolean | undefined;
 }
 
 /** @see the module header */
-export function ThrowControl(props: ThrowControlProps): JSX.Element {
+export function ThrowControl(props: ThrowControlProps): JSX.Element | null {
   const { port } = props;
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -76,6 +81,7 @@ export function ThrowControl(props: ThrowControlProps): JSX.Element {
     };
   }, [port]);
 
+  if (props.buttonless === true) return null;
   return (
     <div className="oyl-hud__throws">
       <div role="group" aria-label={THROW_CONTROL_NAME} className="oyl-hud__throw-buttons">
