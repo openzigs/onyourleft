@@ -176,17 +176,38 @@ describe('deploy/home/compose.yaml — every setting the server reads reaches it
 describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => {
   const tunnel = service('tunnel');
   const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
+  /** The top-level `networks:` block. */
+  const networks = /^networks:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
+  /** Every service whose own block names a network. */
+  const SERVICES = ['migrate', 'instance', 'tunnel', 'ollama', 'backup'];
 
-  it('serves cloudflared’s metrics on the project’s network, and publishes no port for them', () => {
-    const port = /'--metrics', '0\.0\.0\.0:(\d+)'/.exec(tunnel)?.[1];
-    expect(port).toBeDefined();
+  it('binds cloudflared’s metrics to its address on an internal network only it and the instance join', () => {
+    const bound = /'--metrics', '(\d+\.\d+\.\d+\.\d+):(\d+)'/.exec(tunnel);
+    expect(bound).not.toBeNull();
+    const [, address = '', port = ''] = bound ?? [];
+    // Not 0.0.0.0, which is every network the tunnel is on.
+    expect(address).not.toBe('0.0.0.0');
+    expect(tunnel).toMatch(
+      new RegExp(`tunnel_metrics:\\s*\\n\\s*ipv4_address: ${address.replaceAll('.', '\\.')}`),
+    );
+    // Internal: no route out of it, and a subnet the address is in.
+    const metrics =
+      /^ {2}tunnel_metrics:\n([\s\S]*?)(?=^ {2}\S|$(?![\s\S]))/m.exec(networks)?.[1] ?? '';
+    expect(metrics).toMatch(/^\s*internal: true$/m);
+    const subnet = /subnet: (\d+\.\d+\.\d+)\.0\/24/.exec(metrics)?.[1];
+    expect(address.split('.').slice(0, 3).join('.')).toBe(subnet);
+    // Exactly the instance and the tunnel are on it.
+    expect(SERVICES.filter((name) => service(name).includes('tunnel_metrics'))).toEqual([
+      'instance',
+      'tunnel',
+    ]);
+    // No port for it, and the template asks that address, which the instance accepts.
     const lines = tunnel.split('\n').filter((line) => !/^\s*#/.test(line));
     expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
-    // The template asks that port by the service's name, which the instance accepts.
     const url = /^OYL_INSTANCE_TUNNEL_READY_URL=(\S+)$/m.exec(env)?.[1];
-    expect(url).toBe(`http://tunnel:${String(port)}/ready`);
+    expect(url).toBe(`http://${address}:${port}/ready`);
     const read = readServerConfig({ tunnelReadyUrl: url }, 1);
-    expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe('tunnel');
+    expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe(address);
     expect(COMPOSE).toMatch(/OYL_INSTANCE_TUNNEL_READY_URL: \$\{OYL_INSTANCE_TUNNEL_READY_URL:-\}/);
   });
 });

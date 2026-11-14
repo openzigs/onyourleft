@@ -79,7 +79,7 @@ export interface DiskProbe {
   device(path: string): Promise<number>;
 }
 
-/** How long the tunnel's `/ready` is waited for before it is `not_ready`. */
+/** How long the tunnel is waited for, its name's lookup included, before it is `not_ready`. */
 const TUNNEL_WAIT_MS = 2_000;
 
 /** The directory a file is in: everything before its last separator. */
@@ -147,31 +147,41 @@ export function tunnelReadiness(options: {
   readonly url: URL | undefined;
   readonly resolve: Resolver;
   readonly fetch: typeof globalThis.fetch;
+  /** The one deadline over the lookup, the request and its body: {@link TUNNEL_WAIT_MS} unless a test's. */
+  readonly waitMs?: number;
 }): () => Promise<TunnelState> {
   const { url, resolve, fetch } = options;
-  return async () => {
-    if (url === undefined) return { state: 'unknown' };
-    try {
-      const checked = await localAddressesOnly(url.hostname, resolve);
-      if (!checked.ok) return { state: 'not_ready' };
-      const target = new URL(url.href);
-      target.hostname = checked.address.includes(':') ? `[${checked.address}]` : checked.address;
-      const answer = await fetch(target, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TUNNEL_WAIT_MS),
-      });
-      if (answer.status !== 200) {
-        await answer.body?.cancel();
-        return { state: 'not_ready' };
-      }
-      const body = (await answer.json()) as { readyConnections?: unknown } | null;
-      const connections = body?.readyConnections;
-      return typeof connections === 'number' && Number.isSafeInteger(connections) && connections > 0
-        ? { state: 'ready', connections }
-        : { state: 'not_ready' };
-    } catch {
+  const waitMs = options.waitMs ?? TUNNEL_WAIT_MS;
+
+  async function ask(at: URL, deadline: AbortSignal): Promise<TunnelState> {
+    const checked = await localAddressesOnly(at.hostname, resolve);
+    if (!checked.ok || deadline.aborted) return { state: 'not_ready' };
+    const target = new URL(at.href);
+    target.hostname = checked.address.includes(':') ? `[${checked.address}]` : checked.address;
+    const answer = await fetch(target, { redirect: 'manual', signal: deadline });
+    if (answer.status !== 200) {
+      await answer.body?.cancel();
       return { state: 'not_ready' };
     }
+    const body = (await answer.json()) as { readyConnections?: unknown } | null;
+    const connections = body?.readyConnections;
+    return typeof connections === 'number' && Number.isSafeInteger(connections) && connections > 0
+      ? { state: 'ready', connections }
+      : { state: 'not_ready' };
+  }
+
+  return async () => {
+    if (url === undefined) return { state: 'unknown' };
+    // #2622's review: ONE deadline, started before the name is looked up, so
+    // a resolver that hangs — the tunnel's container being recreated, a
+    // search domain retried upstream — cannot hold the owner's page past it.
+    // A lookup still running when it passes is left to finish unread.
+    const deadline = AbortSignal.timeout(waitMs);
+    const expired = new Promise<TunnelState>((settle) => {
+      deadline.addEventListener('abort', () => settle({ state: 'not_ready' }), { once: true });
+    });
+    const asked = ask(url, deadline).catch((): TunnelState => ({ state: 'not_ready' }));
+    return Promise.race([asked, expired]);
   };
 }
 

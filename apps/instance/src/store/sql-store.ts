@@ -1036,6 +1036,18 @@ export interface OperateCounts {
   readonly analysis: { readonly queued: number; readonly running: number };
 }
 
+/**
+ * The three counts the owner's Status reads beside the athletes' (#2604), in
+ * order: rooms open, analysis jobs queued, analysis jobs running. Each one is
+ * written so SQLite answers it from an index, and `operate-counts.test.ts`
+ * holds each query plan to that.
+ */
+export const OPERATE_COUNT_QUERIES = [
+  'SELECT count(*) AS n FROM private_room WHERE closed_at IS NULL',
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'queued'",
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'running'",
+] as const;
+
 /** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
 export interface OperatorChange<T> {
   readonly outcome: Exclude<OperatorOutcome, 'failed'>;
@@ -6053,18 +6065,16 @@ function storeOver(
             ),
           ])
           .executeTakeFirstOrThrow();
-        const rooms = await db
-          .selectFrom('private_room')
-          .select((eb) => eb.fn.countAll<number>().as('open'))
-          .where('closed_at', 'is', null)
-          .executeTakeFirstOrThrow();
-        const jobs = await db
-          .selectFrom('analysis_job')
-          .select([
-            sql<number>`sum(case when status = 'queued' then 1 else 0 end)`.as('queued'),
-            sql<number>`sum(case when status = 'running' then 1 else 0 end)`.as('running'),
-          ])
-          .executeTakeFirstOrThrow();
+        // Each count is one the store can answer from an index (#2604's
+        // review): migration 0041's partial `private_room_open`, and
+        // `analysis_job_by_status` by its leading column. A `sum(case …)` over
+        // the jobs would scan them all. `operate-counts.test.ts` reads the plans.
+        const counted: number[] = [];
+        for (const query of OPERATE_COUNT_QUERIES) {
+          const read = await sql<{ n: number }>`${sql.raw(query)}`.execute(db);
+          counted.push(Number(read.rows[0]?.n ?? 0));
+        }
+        const [open = 0, queued = 0, running = 0] = counted;
         // `sum` over no rows is NULL.
         const count = (value: unknown): number => Number(value ?? 0);
         return {
@@ -6073,8 +6083,8 @@ function storeOver(
             pending: count(standing.pending),
             suspended: count(standing.suspended),
           },
-          roomsOpen: count(rooms.open),
-          analysis: { queued: count(jobs.queued), running: count(jobs.running) },
+          roomsOpen: open,
+          analysis: { queued, running },
         };
       }),
 

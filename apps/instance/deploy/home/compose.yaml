@@ -124,6 +124,11 @@ services:
     # Docker waits this long after SIGTERM before it kills the instance: the
     # rooms are told the server is stopping and final results written first.
     stop_grace_period: 20s
+    # The project's network, and the tunnel's metrics network (#2604), which
+    # only the instance and the tunnel are on.
+    networks:
+      - default
+      - tunnel_metrics
     # LOCAL DEBUGGING ONLY — never with the tunnel's hostname pointing here:
     # ports: ['127.0.0.1:8787:8787']
 
@@ -134,10 +139,12 @@ services:
   # (emSign) intermediates (Cloudflare's notice of 2026-10-20): stay at or above it.
   tunnel:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
-    # `--metrics` serves cloudflared's `/ready` on this project's network for
-    # the instance's Status (#2604). ⚠️ NO `ports:` for it, EVER: it is
-    # reached by this service's name and never from the host.
-    command: ['tunnel', '--no-autoupdate', '--metrics', '0.0.0.0:20241', 'run']
+    # `--metrics` serves cloudflared's `/ready` for the instance's Status
+    # (#2604), bound to its address on `tunnel_metrics` ALONE: that server also
+    # serves `/metrics`, `/config` (the tunnel's ingress), `/debug/pprof` and
+    # `/diag`, so no other container — not `ollama`, not `backup` — may reach
+    # it. ⚠️ NO `ports:` for it, EVER.
+    command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
     depends_on:
@@ -149,6 +156,8 @@ services:
     networks:
       default:
         ipv4_address: 172.30.87.10
+      tunnel_metrics:
+        ipv4_address: 172.30.88.10
 
   # The history index's embedding model (#835, ADR 0040 D-5, D-6): a local
   # Ollama, which the instance reaches by this service's name. Only with the
@@ -211,6 +220,16 @@ networks:
     ipam:
       config:
         - subnet: 172.30.87.0/24
+  # #2604: cloudflared's metrics server, for the instance's Status. Internal
+  # (no route out) and joined by `instance` and `tunnel` only, so the other
+  # services cannot read the tunnel's `/config`, `/debug/pprof` or `/diag`.
+  # Change the address here, in `tunnel`'s command and in
+  # OYL_INSTANCE_TUNNEL_READY_URL together if 172.30.88.0/24 is in use.
+  tunnel_metrics:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.88.0/24
 
 volumes:
   # The SQLite database and the blobs: the one volume that is backed up.

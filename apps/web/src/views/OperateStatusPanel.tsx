@@ -3,6 +3,7 @@
 import type { JSX, ReactNode } from 'react';
 
 import { ButtonLink } from '../design/Button';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import type { OperateDisk, OperateStatus, OperateStatusRead } from '../instance/operate-port';
 
@@ -46,6 +47,15 @@ export const STATUS_UNREADABLE_TEXT =
 
 /** The last-backup field until a snapshot is recorded (#2606). */
 export const NOT_RECORDED = 'not recorded';
+
+/**
+ * Behind Status's ⓘ (#2622's review): on Docker Desktop the data volume is
+ * inside Docker's virtual machine, so the instance sees that disk and never
+ * the host drive under it.
+ */
+export const DOCKER_DESKTOP_DISK_TEXT =
+  'On Docker Desktop (Windows or macOS) the disk figures are Docker’s own virtual disk, not ' +
+  'the drive it is stored on. Watch that drive yourself.';
 
 /** The tunnel's state when the operator has not said where to ask (the epic's decision 4). */
 export const TUNNEL_NOT_KNOWN = 'not known';
@@ -253,7 +263,21 @@ export function OperateStatusPanel({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-status">
-      <h2 id="oyl-operate-status">Status</h2>
+      <SectionHeading
+        level={2}
+        id="oyl-operate-status"
+        help={
+          <>
+            <p>
+              Read from your instance as this page opened. It changes nothing on the instance, and
+              shows counts and names only.
+            </p>
+            <p>{DOCKER_DESKTOP_DISK_TEXT}</p>
+          </>
+        }
+      >
+        Status
+      </SectionHeading>
       {status.kind === 'status' ? (
         <Shown status={status} now={now()} />
       ) : (

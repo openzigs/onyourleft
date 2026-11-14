@@ -267,7 +267,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       parsed.hash !== ''
     ) {
       problems.push(
-        'OYL_INSTANCE_TUNNEL_READY_URL must be an http: URL with no credentials, query or fragment, such as http://tunnel:20241/ready.',
+        'OYL_INSTANCE_TUNNEL_READY_URL must be an http: URL with no credentials, query or fragment, such as http://172.30.88.10:20241/ready.',
       );
     } else {
       const hostProblem = configuredHostProblem(parsed.hostname);

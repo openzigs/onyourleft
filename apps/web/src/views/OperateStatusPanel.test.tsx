@@ -15,6 +15,7 @@ import type { OperateStatus } from '../instance/operate-port';
 import { SCRIPTED_STATUS } from '../instance/testing';
 import { mount, type Mounted } from '../testing/mount';
 import {
+  DOCKER_DESKTOP_DISK_TEXT,
   NOT_RECORDED,
   OperateStatusPanel,
   STATUS_UNREADABLE_TEXT,
@@ -90,6 +91,13 @@ describe('the Status panel — #2604', () => {
     expect(fact('Disk holding the blobs')).toContain('20 GB free of 1.0 TB');
     expect(fact('Disk holding the blobs')).toContain('Less than a tenth of this disk is free.');
     expect(fact('Disk holding the database')).not.toContain('Less than a tenth');
+  });
+
+  it('says the disk figures are Docker’s virtual disk under Docker Desktop', async () => {
+    await show(SCRIPTED_STATUS);
+    const help = mounted?.container.querySelector('.oyl-section-help__panel');
+    expect(help?.textContent).toContain(DOCKER_DESKTOP_DISK_TEXT);
+    expect(DOCKER_DESKTOP_DISK_TEXT).toContain('virtual disk');
   });
 
   it('reads the last backup as not recorded until one is, and the tunnel as not known until asked', async () => {

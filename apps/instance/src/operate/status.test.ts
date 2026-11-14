@@ -112,6 +112,25 @@ describe('the tunnel (#2604)', () => {
     }
   });
 
+  it('is not ready once the deadline passes while the name’s lookup still hangs, and asks nothing', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    // A resolver that never answers: the tunnel's container gone, a search domain retried.
+    const resolve = () => new Promise<readonly string[]>(() => undefined);
+    expect(await tunnelReadiness({ url: URL_SET, resolve, fetch, waitMs: 20 })()).toEqual({
+      state: 'not_ready',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('is not ready once the deadline passes while the request still hangs', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(() => new Promise<Response>(() => undefined));
+    expect(
+      await tunnelReadiness({ url: URL_SET, resolve: privateName, fetch, waitMs: 20 })(),
+    ).toEqual({ state: 'not_ready' });
+    // The request carried the same deadline, so it is cancelled with it.
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
   it('asks nothing of a name that resolves to a public address', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
     const resolve = () => Promise.resolve(['172.30.87.10', '203.0.113.9']);

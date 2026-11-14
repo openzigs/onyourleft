@@ -8,12 +8,15 @@
  * through the store on another connection — and read back through the route.
  */
 
+import { toHex } from '@onyourleft/domain';
+import { mkdir, mkdtemp, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { secretBytes } from '../keys/instance-keys-testing.ts';
+import { TEST_ORIGIN } from '../auth/identity-testing.ts';
+import { privateSpellings, secretBytes } from '../keys/instance-keys-testing.ts';
 import {
   codeOf,
   startModerationWorld,
@@ -260,7 +263,11 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
     const metricsToken = 'MARKER-metrics-token-2604-0123456789abcdef';
     const discordToken = 'MARKER-discord-bot-token-2604-0123456789';
     const hostedKey = 'sk-MARKER-hosted-key-2604';
-    const directory = join(tmpdir(), 'oyl-status-markers');
+    // A real directory on a real disk: the disk source reads it, and its path is a marker.
+    const directory = await mkdtemp(join(tmpdir(), 'oyl-status-markers-'));
+    await mkdir(join(directory, 'blobs'));
+    // The world's own keys, through the real source: made only once it has started.
+    const held: { world?: SoleModeratorWorld } = {};
     const server = readServerConfig(
       {
         database: join(directory, 'instance.sqlite'),
@@ -271,7 +278,7 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
         secretKey: secret,
         discordBotTokenFile: { kind: 'read', text: discordToken },
         discordGuildId: '123456789012345678',
-        tunnelReadyUrl: 'http://tunnel:20241/ready',
+        tunnelReadyUrl: 'http://172.30.88.10:20241/ready',
       },
       1,
     );
@@ -283,17 +290,20 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
       operateStatus: statusSources({
         // The whole server configuration, every secret in it: what is read is the builder's choice.
         server: server.config,
-        keys: { show: () => Promise.reject(new Error('unused')) },
+        keys: {
+          show: () => {
+            if (held.world === undefined) throw new Error('no world yet');
+            return held.world.instanceKeys.show();
+          },
+        },
         now: () => 0,
         startedAt: 0,
-        resolve: () => Promise.resolve(['172.30.87.10']),
+        resolve: () => Promise.reject(new Error('an address literal is never looked up')),
         fetch,
-        disk: {
-          statfs: () => Promise.reject(new Error('no disk')),
-          device: () => Promise.resolve(1),
-        },
+        disk: { statfs: (at) => statfs(at), device: async (at) => (await stat(at)).dev },
       }),
     });
+    held.world = world;
     try {
       const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       try {
@@ -316,10 +326,23 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
       // The tunnel was asked, at the address it resolved to: the sources were live.
       expect((answer.body as StatusBody).tunnel).toEqual({ state: 'ready', connections: 4 });
       expect((fetch.mock.calls[0]?.[0] as URL | undefined)?.href).toBe(
-        'http://172.30.87.10:20241/ready',
+        'http://172.30.88.10:20241/ready',
       );
+      // The real keys and the real disk were read, so their markers were in reach.
+      expect((answer.body as StatusBody).keys).toBe('ready');
+      expect((answer.body as StatusBody).disk.length).toBeGreaterThan(0);
+      // Every spelling of every private half the instance holds.
+      const rows = await world.freshRead((store) => store.listInstanceKeys());
+      expect(rows.length).toBeGreaterThan(0);
+      const privateHalves: string[] = [];
+      for (const row of rows) {
+        privateHalves.push(...(await privateSpellings(row, secretBytes(7), TEST_ORIGIN)));
+        // And the half as it is stored, wrapped.
+        privateHalves.push(toHex(row.wrapped), btoa(String.fromCharCode(...row.wrapped)));
+      }
       const body = JSON.stringify(answer.body);
       for (const marker of [
+        ...privateHalves,
         secret,
         metricsToken,
         discordToken,
@@ -327,12 +350,13 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
         world.owner.token,
         world.owner.device.publicKey,
         directory,
-        'tunnel:20241',
+        '172.30.88.10',
       ]) {
         expect(body).not.toContain(marker);
       }
     } finally {
       await world.close();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });
