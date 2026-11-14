@@ -86,12 +86,12 @@ const PACK = {
 const DRAWN_BACK_SLACK_METRES = 0.005;
 /**
  * The most a bot's drawn speed against its race speed may change in a tick,
- * metres a second: **4**, `pack-layout.ts`'s 80 m/s² ease at the race's 20 Hz
+ * metres a second: **2**, `pack-layout.ts`'s 40 m/s² ease at the race's 20 Hz
  * tick, and 0.25 m/s for the race speed's own change over it. Written here,
  * not imported, so a layout that eased less is red rather than a bound that
  * moved with it.
  */
-const EASED_PER_TICK = 4 + 0.25;
+const EASED_PER_TICK = 2 + 0.25;
 /** How far back between two ticks each frame `GameView` draws is, as a share of a tick. */
 const BETWEEN_TICKS = [0.25, 0.5, 0.75] as const;
 /** A move back in the group within this many seconds of its end was caught. */
@@ -413,8 +413,10 @@ describe.each(['flat', 'hilly'] as const)(
               `${tick.second.toFixed(2)} s: ${String(tick.jolt)} m/s, ${String(tick.flips)} flips`,
           );
         expect(jolts).toEqual([]);
-        // Not vacuous: read from the third tick on, at race speed.
-        expect(ticks.slice(2).some((tick) => tick.jolt > 0)).toBe(true);
+        // Not vacuous: read from the third tick on, at race speed, the field
+        // did give way and close up at the ease (#2561's review): a jolt of
+        // over 1.5 m/s, three quarters of it, which rounding never reaches.
+        expect(ticks.slice(2).some((tick) => tick.jolt > 1.5)).toBe(true);
       },
     );
 
