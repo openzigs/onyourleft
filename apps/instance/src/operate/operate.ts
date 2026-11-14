@@ -15,20 +15,51 @@
  * D-7, D-13).
  *
  * What it holds today is the operator log's read: every action taken as the
- * operator, from the app or the CLI, newest first. Every action is WRITTEN
+ * operator, from the app or the CLI, newest first — and the instance's Status
+ * (#2604, `status.ts`), which changes nothing and so logs nothing. Every action is WRITTEN
  * through `SqlStore.recordOperatorAction`, which applies it and logs it in
  * one transaction; this module only reads.
  */
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
-import type { OperatorLogEntry, SqlStore } from '../store/sql-store.ts';
+import type { OperateCounts, OperatorLogEntry, SqlStore } from '../store/sql-store.ts';
+import type { DiskSpace, KeysState, StatusSources, TunnelState } from './status.ts';
 
 export type OperateResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly code: ErrorCode; readonly fields?: readonly FieldProblem[] };
 
+/** The newest backup's record, as #2606 will write it. */
+export interface LastBackup {
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  readonly offBox: 'copied' | 'failed' | 'not-configured';
+  readonly intervalSeconds: number;
+}
+
+/**
+ * What the owner's Status shows that the instance reads for itself (#2604).
+ * Health, version, commit and registration mode are the handler's own and
+ * are added by the route. Counts and states only: nothing secret, no path.
+ */
+export interface InstanceStatus {
+  /** Whole seconds since this process started. */
+  readonly uptimeSeconds: number;
+  readonly disk: readonly DiskSpace[];
+  /**
+   * The newest backup's record — `null` until #2606 records snapshots, and
+   * whenever none is recorded: shown as "not recorded".
+   */
+  readonly lastBackup: LastBackup | null;
+  readonly tunnel: TunnelState;
+  readonly counts: OperateCounts;
+  readonly keys: KeysState;
+}
+
 export interface Operate {
+  /** The instance's own state, read-only (#2604). Writes nothing, logs nothing. */
+  status(): Promise<InstanceStatus>;
   /** The operator log a page at a time, NEWEST first: `?limit=` (1–200, default 50) and `?cursor=`. */
   logPage(query: URLSearchParams): Promise<OperateResult<Page<OperatorLogEntry>>>;
 }
@@ -45,9 +76,29 @@ const NOT_OUR_CURSOR: readonly FieldProblem[] = [
 /** The cursor's key: an operator log position, and nothing else's. */
 const CURSOR_KEY = 'operator-log';
 
-export function createOperate(options: { readonly store: SqlStore }): Operate {
-  const { store } = options;
+export function createOperate(options: {
+  readonly store: SqlStore;
+  /** What Status reads beyond the store (#2604): `status.ts` builds each. */
+  readonly status: StatusSources;
+}): Operate {
+  const { store, status } = options;
   return {
+    async status() {
+      const [counts, disk, tunnel, keys] = await Promise.all([
+        store.operateCounts(),
+        status.disk(),
+        status.tunnel(),
+        status.keys(),
+      ]);
+      return {
+        uptimeSeconds: Math.max(0, Math.floor((status.now() - status.startedAt) / 1000)),
+        disk,
+        lastBackup: null,
+        tunnel,
+        counts,
+        keys,
+      };
+    },
     async logPage(query) {
       const request = parsePageRequest(query);
       if (!request.ok) return { ok: false, code: 'validation_failed', fields: request.fields };

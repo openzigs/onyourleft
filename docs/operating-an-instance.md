@@ -850,6 +850,32 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   sections still to come. The deputy and every other rider see no such button, and anybody who opens
   the address is told only that their account is not the owner. A device that cannot seal — no
   instance card, or a copy of the app loaded from a website — is told so and asks nothing.
+- **Status** ([#2604](https://github.com/openzigs/onyourleft/issues/2604)). The first section of
+  Operate, read from `GET /v1/operate/status`, which changes nothing and so logs nothing: each check
+  `GET /ready` makes (database, migrations, rooms), the version, the deployed commit, the registration
+  mode, how long the process has been up, free and total space on the disk holding the database (and
+  on the blob directory's, when that is another device) with a warning under 10 % free, the last
+  backup ("not recorded" until [#2606](https://github.com/openzigs/onyourleft/issues/2606) records
+  snapshots), the tunnel, how many athletes are active, awaiting approval and suspended, how many
+  rooms are open and analysis jobs waiting or running, and the instance keys' state. **Counts and
+  names only**: no name, id or row of anybody, no path on the host, and no environment variable's
+  value but the registration mode and the commit — never a secret, a token or a key. When the
+  instance runs this repository's own source (`OYL_INSTANCE_SOURCE_URL` empty, or in this
+  repository), the app shows a **Compare with main** link to GitHub's compare page for the deployed
+  commit. It is only a link you open in your browser: **neither the app nor the instance asks
+  GitHub anything**. A modified instance shows its commit alone.
+- **The tunnel's readiness.** Shown as **not known** unless you set
+  **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
+  `tunnel` service with `--metrics 0.0.0.0:20241`, which serves cloudflared's metrics on this
+  project's private network, and `instance.env.example` sets
+  `OYL_INSTANCE_TUNNEL_READY_URL=http://tunnel:20241/ready`. The address is held to the history
+  index's rule (ADR 0040 D-6): `http:` only, its host a private address or a single-label name such
+  as a Compose service; anything else stops the instance at start, naming the variable. The name is
+  resolved on every request, every address it has must be private, and no redirect is followed.
+  The instance then shows **ready**, with how many connections cloudflared holds ready, or **not
+  ready** for a `503`, no answer within two seconds, or anything else. ⚠️ **Never publish that
+  metrics port** (`ports:` on the `tunnel` service): it is reached by the service's name and nothing
+  outside the box should reach it. Leave the variable empty and nothing is asked.
 
 ## Moderation and the operator's duties
 

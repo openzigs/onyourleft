@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { lookup } from 'node:dns/promises';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
@@ -55,6 +55,7 @@ import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
 import { createOperate } from './operate/operate.ts';
+import { statusSources, type DiskProbe } from './operate/status.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
 import { createDiscordClient } from './voice/discord.ts';
@@ -114,6 +115,12 @@ const KEYS_BUSY_RETRY_MS = 5_000;
  * and the channel goes on being made, so the next socket's welcome has it.
  */
 export const VOICE_INVITE_WAIT_MS = 2_000;
+
+/** Node's own disk calls, for the owner's Status (#2604): `operate/status.ts` loads no builtin. */
+export const NODE_DISK_PROBE: DiskProbe = {
+  statfs: (path) => statfs(path),
+  device: async (path) => (await stat(path)).dev,
+};
 
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
@@ -251,6 +258,8 @@ async function voiceInviteWithin<T>(asked: Promise<T>, waitMs: number): Promise<
 export async function startInstance(options: InstanceOptions): Promise<StartedInstance> {
   const { server, log } = options;
   const now = options.now ?? (() => Date.now());
+  // #2604: what the owner's Status counts its uptime from.
+  const startedAt = now();
   const path = server.databasePath;
   await mkdir(dirname(path), { recursive: true });
 
@@ -832,7 +841,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ...(segments === undefined ? {} : { segments }),
             // #2602: the owner's Operate area. Every route of it is sealed
             // only, and the handler answers `unavailable` where nothing is.
-            operate: createOperate({ store }),
+            operate: createOperate({
+              store,
+              status: statusSources({
+                server,
+                keys,
+                now,
+                startedAt,
+                resolve: options.resolve ?? systemResolver,
+                fetch: globalThis.fetch,
+                disk: NODE_DISK_PROBE,
+              }),
+            }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
             ...(sidePose === undefined ? {} : { sidePose }),

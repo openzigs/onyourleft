@@ -1018,6 +1018,24 @@ export interface OperatorLogEntry {
   readonly outcome: OperatorOutcome;
 }
 
+/**
+ * How many of each thing the instance holds, for the owner's Status (#2604).
+ * Counts only: no name, id or row of anybody.
+ */
+export interface OperateCounts {
+  readonly athletes: {
+    /** Registered or approved, and not suspended. */
+    readonly active: number;
+    /** Awaiting a moderator's approval, and not suspended. */
+    readonly pending: number;
+    /** Suspended, whether they had been approved or not. */
+    readonly suspended: number;
+  };
+  /** Rooms made over HTTP that are not over. */
+  readonly roomsOpen: number;
+  readonly analysis: { readonly queued: number; readonly running: number };
+}
+
 /** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
 export interface OperatorChange<T> {
   readonly outcome: Exclude<OperatorOutcome, 'failed'>;
@@ -2052,6 +2070,8 @@ export interface SqlStore {
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
   /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** How many athletes are in each standing, rooms are open and jobs wait or run (#2604). Counts only. */
+  operateCounts(): Promise<OperateCounts>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
   listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
@@ -6016,6 +6036,47 @@ function storeOver(
             .execute()
         ).map(athleteFrom),
       ),
+
+    operateCounts: () =>
+      exclusive(async () => {
+        const standing = await db
+          .selectFrom('athlete')
+          .select([
+            sql<number>`sum(case when suspended_at is null and registration_state = 'active' then 1 else 0 end)`.as(
+              'active',
+            ),
+            sql<number>`sum(case when suspended_at is null and registration_state = 'pending' then 1 else 0 end)`.as(
+              'pending',
+            ),
+            sql<number>`sum(case when suspended_at is not null and registration_state in ('active', 'pending') then 1 else 0 end)`.as(
+              'suspended',
+            ),
+          ])
+          .executeTakeFirstOrThrow();
+        const rooms = await db
+          .selectFrom('private_room')
+          .select((eb) => eb.fn.countAll<number>().as('open'))
+          .where('closed_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        const jobs = await db
+          .selectFrom('analysis_job')
+          .select([
+            sql<number>`sum(case when status = 'queued' then 1 else 0 end)`.as('queued'),
+            sql<number>`sum(case when status = 'running' then 1 else 0 end)`.as('running'),
+          ])
+          .executeTakeFirstOrThrow();
+        // `sum` over no rows is NULL.
+        const count = (value: unknown): number => Number(value ?? 0);
+        return {
+          athletes: {
+            active: count(standing.active),
+            pending: count(standing.pending),
+            suspended: count(standing.suspended),
+          },
+          roomsOpen: count(rooms.open),
+          analysis: { queued: count(jobs.queued), running: count(jobs.running) },
+        };
+      }),
 
     listLoadAthletes: () =>
       exclusive(async () =>

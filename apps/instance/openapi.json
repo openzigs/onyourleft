@@ -7464,6 +7464,270 @@
         }
       }
     },
+    "/v1/operate/status": {
+      "get": {
+        "operationId": "getOperateStatus",
+        "summary": "The instance’s Status (#2604), read-only: the checks `GET /ready` makes, the version and deployed commit, the registration mode, uptime, disk space, the last backup, the tunnel’s readiness (`unknown` unless `OYL_INSTANCE_TUNNEL_READY_URL` is set), how many athletes are in each standing, rooms open and analysis jobs waiting or running, and the instance keys’ state. Counts and names only: no secret, no row of anybody, no path on the host. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ready": {
+                      "type": "boolean"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "boolean"
+                        },
+                        "migrations": {
+                          "type": "string",
+                          "enum": [
+                            "at-head",
+                            "migrating",
+                            "behind",
+                            "ahead",
+                            "unknown"
+                          ]
+                        },
+                        "rooms": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "migrations",
+                        "rooms"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "upstream": {
+                      "type": "boolean"
+                    },
+                    "registration": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "approval",
+                        "invite",
+                        "closed"
+                      ]
+                    },
+                    "uptimeSeconds": {
+                      "type": "integer"
+                    },
+                    "disk": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holds": {
+                            "type": "string",
+                            "enum": [
+                              "database",
+                              "blobs",
+                              "database_and_blobs"
+                            ]
+                          },
+                          "freeBytes": {
+                            "type": "integer"
+                          },
+                          "totalBytes": {
+                            "type": "integer"
+                          },
+                          "low": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "holds",
+                          "freeBytes",
+                          "totalBytes",
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lastBackup": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "offBox": {
+                          "type": "string",
+                          "enum": [
+                            "copied",
+                            "failed",
+                            "not-configured"
+                          ]
+                        },
+                        "intervalSeconds": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "offBox",
+                        "intervalSeconds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "tunnel": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "unknown",
+                            "ready",
+                            "not_ready"
+                          ]
+                        },
+                        "connections": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "connections"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "athletes": {
+                          "type": "object",
+                          "properties": {
+                            "active": {
+                              "type": "integer"
+                            },
+                            "pending": {
+                              "type": "integer"
+                            },
+                            "suspended": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "active",
+                            "pending",
+                            "suspended"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "roomsOpen": {
+                          "type": "integer"
+                        },
+                        "analysis": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "integer"
+                            },
+                            "running": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "running"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "athletes",
+                        "roomsOpen",
+                        "analysis"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "keys": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "no-secret",
+                        "no-origin",
+                        "no-keys",
+                        "unreadable",
+                        "busy"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ready",
+                    "checks",
+                    "version",
+                    "commit",
+                    "upstream",
+                    "registration",
+                    "uptimeSeconds",
+                    "disk",
+                    "lastBackup",
+                    "tunnel",
+                    "counts",
+                    "keys"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/reports": {
       "post": {
         "operationId": "reportAthlete",

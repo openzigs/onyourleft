@@ -7,15 +7,18 @@ import { StatusMessage } from '../design/StatusMessage';
 import type {
   OperatePort,
   OperateStanding,
+  OperateStatusRead,
   OperatorLogEntry,
   OperatorLogRead,
 } from '../instance/operate-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
  * **Operate** (#2603, epic #2601): the owner-only area of the app for running
- * the instance this device is signed in to. Its first content is the operator
- * log (#2602); the sections later sub-issues fill are listed, not yet drawn.
+ * the instance this device is signed in to. It shows the instance's Status
+ * (#2604, `OperateStatusPanel.tsx`) and the operator log (#2602); the
+ * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
  *
@@ -23,8 +26,8 @@ import { hrefFor, routeById } from '../shell/routes';
  * whose link to it is drawn only when {@link OperatePort.standing} says this
  * device's account is the instance's owner. Anybody who opens its address
  * anyway is told only that their own account is not the owner — which the
- * instance's own `not_found` already told them — and the log is never asked
- * for: the standing read is the one request made. The instance checks every
+ * instance's own `not_found` already told them — and neither the status nor
+ * the log is asked for: the standing read is the one request made. The instance checks every
  * Operate route itself; this page only declines to draw what it would refuse.
  *
  * ## What is shown is read back
@@ -44,7 +47,6 @@ export const OPERATE_PURPOSE =
 
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
 export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'Status',
   'Accounts',
   'Backups',
   'AI backend',
@@ -120,7 +122,11 @@ function when(iso: string): string {
 type Shown =
   | { readonly kind: 'reading' }
   | { readonly kind: 'not-shown'; readonly standing: Exclude<OperateStanding, 'owner'> }
-  | { readonly kind: 'owner'; readonly log: OperatorLogRead };
+  | {
+      readonly kind: 'owner';
+      readonly status: OperateStatusRead;
+      readonly log: OperatorLogRead;
+    };
 
 function LogEntry({
   entry,
@@ -250,11 +256,11 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       setShown({ kind: 'not-shown', standing });
       return;
     }
-    const log = await port.log();
+    const [status, log] = await Promise.all([port.status(), port.log()]);
     setMoreFailed(false);
     setShown(
       log.kind === 'page' || log.kind === 'unreachable'
-        ? { kind: 'owner', log }
+        ? { kind: 'owner', status, log }
         : { kind: 'not-shown', standing: log.kind },
     );
   }, [port]);
@@ -276,6 +282,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       if (current.log.next !== cursor) return current;
       return {
         kind: 'owner',
+        status: current.status,
         log: {
           kind: 'page',
           entries: [...current.log.entries, ...next.entries],
@@ -312,6 +319,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
   return (
     <div className="oyl-operate">
       <p>{OPERATE_PURPOSE}</p>
+      <OperateStatusPanel status={shown.status} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}

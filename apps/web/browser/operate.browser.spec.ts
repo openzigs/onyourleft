@@ -17,7 +17,10 @@
  * - the Instance screen's *Operate this instance*, drawn for the owner, is a
  *   target of that size too;
  * - the route is not in the navigation, and an account that is not the owner
- *   gets no control on it but the way back.
+ *   gets no control on it but the way back;
+ * - Status (#2604) is drawn first, its deployed commit — one unbroken 40-hex
+ *   word in `code` — inside the viewport, and *Compare with main* is a target
+ *   whose `href` is GitHub's compare page, opened outside the app.
  *
  * ## The control
  *
@@ -103,6 +106,18 @@ test.describe('the Operate area — #2603', () => {
       // A page of two, and the control for the next, both laid out.
       await expect(page.locator('main .oyl-operate__log > li')).toHaveCount(2);
       await expect(page.getByRole('button', { name: 'Show older entries' })).toHaveCount(1);
+      // #2604: Status, first, with its one link a target that leaves the app.
+      await expect(page.locator('main h2').first()).toHaveText('Status');
+      await expect(page.locator('main .oyl-operate__status dt')).toContainText(['Accounts']);
+      const compare = page.getByRole('link', { name: 'Compare with main' });
+      await expect(compare).toHaveAttribute(
+        'href',
+        /^https:\/\/github\.com\/openzigs\/onyourleft\/compare\/[0-9a-f]{40}\.\.\.main$/,
+      );
+      await expect(compare).toHaveAttribute('target', '_blank');
+      const commit = await page.locator('main .oyl-operate__status code').boundingBox();
+      expect(commit?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((commit?.x ?? 0) + (commit?.width ?? 0)).toBeLessThanOrEqual(width + 0.5);
     });
   }
 

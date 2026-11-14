@@ -85,8 +85,70 @@ export type OperatorLogRead =
 /** How many entries one page asks for: a short page, well under the transport's 256 KiB. */
 export const OPERATOR_LOG_PAGE = 25;
 
+/** One disk the instance's data is on (#2604). */
+export interface OperateDisk {
+  readonly holds: 'database' | 'blobs' | 'database_and_blobs';
+  readonly freeBytes: number;
+  readonly totalBytes: number;
+  /** Under a tenth free, as the instance judged it. */
+  readonly low: boolean;
+}
+
+/** The newest backup's record (#2606): `null` until one is recorded. */
+export interface OperateLastBackup {
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  readonly offBox: 'copied' | 'failed' | 'not-configured';
+  /** The backup service's interval, in seconds. */
+  readonly intervalSeconds: number;
+}
+
+/** The instance keys' state, by the instance's own name for it. */
+export type OperateKeysState =
+  'ready' | 'no-secret' | 'no-origin' | 'no-keys' | 'unreadable' | 'busy';
+
+/** What `GET /v1/operate/status` says (#2604): counts and names, nothing secret. */
+export interface OperateStatus {
+  readonly kind: 'status';
+  /** Whether `GET /ready` would say ready, and each of its checks. */
+  readonly ready: boolean;
+  readonly checks: {
+    readonly database: boolean;
+    readonly migrations: 'at-head' | 'migrating' | 'behind' | 'ahead' | 'unknown';
+    readonly rooms: boolean;
+  };
+  readonly version: string;
+  /** The deployed commit, 40 lower-case hex, or `null` when the operator named none. */
+  readonly commit: string | null;
+  /** The instance runs this repository's own source, so its commit may be compared with `main`. */
+  readonly upstream: boolean;
+  readonly registration: 'open' | 'approval' | 'invite' | 'closed';
+  readonly uptimeSeconds: number;
+  readonly disk: readonly OperateDisk[];
+  readonly lastBackup: OperateLastBackup | null;
+  readonly tunnel:
+    | { readonly state: 'unknown' | 'not_ready' }
+    | { readonly state: 'ready'; readonly connections: number };
+  readonly counts: {
+    readonly athletes: {
+      readonly active: number;
+      readonly pending: number;
+      readonly suspended: number;
+    };
+    readonly roomsOpen: number;
+    readonly analysis: { readonly queued: number; readonly running: number };
+  };
+  readonly keys: OperateKeysState;
+}
+
+/** The instance's status, or why there is none: a standing other than `owner`. */
+export type OperateStatusRead =
+  OperateStatus | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
+  /** The instance's status, read-only (#2604): one sealed request. */
+  status(): Promise<OperateStatusRead>;
   /** Whether this device's account is the instance's owner — one sealed request, or none. */
   standing(): Promise<OperateStanding>;
   /** One page of the operator log, newest first: the first, or the one after `cursor`. */
@@ -163,6 +225,129 @@ function pageFrom(answer: InstanceAnswer): OperatorLogPage | undefined {
   return { kind: 'page', entries: entries as OperatorLogEntry[], next };
 }
 
+/** A whole number no smaller than zero. */
+function whole(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value);
+}
+
+const COMMIT = /^[0-9a-f]{40}$/;
+/** A version as `package.json` writes one. */
+const VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
+
+function diskFrom(value: unknown): OperateDisk | undefined {
+  const row = record(value);
+  if (
+    row === undefined ||
+    !oneOf(row.holds, ['database', 'blobs', 'database_and_blobs'] as const) ||
+    !whole(row.freeBytes) ||
+    !whole(row.totalBytes) ||
+    typeof row.low !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return { holds: row.holds, freeBytes: row.freeBytes, totalBytes: row.totalBytes, low: row.low };
+}
+
+/** `null`, a backup record, or `undefined` when it is neither. */
+function lastBackupFrom(value: unknown): OperateLastBackup | null | undefined {
+  if (value === null) return null;
+  const row = record(value);
+  const at = isoMoment(row?.at);
+  if (
+    row === undefined ||
+    at === undefined ||
+    !oneOf(row.offBox, ['copied', 'failed', 'not-configured'] as const) ||
+    !whole(row.intervalSeconds)
+  ) {
+    return undefined;
+  }
+  return { at, offBox: row.offBox, intervalSeconds: row.intervalSeconds };
+}
+
+/**
+ * The status as the instance writes it, or `undefined` when any part is not —
+ * so nothing but closed names, numbers and the commit's hex reaches the screen.
+ */
+function statusFrom(answer: InstanceAnswer): OperateStatus | undefined {
+  const body = record(answer.body);
+  const checks = record(body?.checks);
+  const tunnel = record(body?.tunnel);
+  const counts = record(body?.counts);
+  const athletes = record(counts?.athletes);
+  const analysis = record(counts?.analysis);
+  if (
+    body === undefined ||
+    checks === undefined ||
+    tunnel === undefined ||
+    counts === undefined ||
+    athletes === undefined ||
+    analysis === undefined ||
+    !Array.isArray(body.disk)
+  ) {
+    return undefined;
+  }
+  const disk = body.disk.map(diskFrom);
+  const lastBackup = lastBackupFrom(body.lastBackup);
+  if (
+    typeof body.ready !== 'boolean' ||
+    typeof checks.database !== 'boolean' ||
+    !oneOf(checks.migrations, ['at-head', 'migrating', 'behind', 'ahead', 'unknown'] as const) ||
+    typeof checks.rooms !== 'boolean' ||
+    typeof body.version !== 'string' ||
+    !VERSION.test(body.version) ||
+    !(body.commit === null || (typeof body.commit === 'string' && COMMIT.test(body.commit))) ||
+    typeof body.upstream !== 'boolean' ||
+    !oneOf(body.registration, ['open', 'approval', 'invite', 'closed'] as const) ||
+    !whole(body.uptimeSeconds) ||
+    disk.some((each) => each === undefined) ||
+    lastBackup === undefined ||
+    !oneOf(tunnel.state, ['unknown', 'ready', 'not_ready'] as const) ||
+    !whole(athletes.active) ||
+    !whole(athletes.pending) ||
+    !whole(athletes.suspended) ||
+    !whole(counts.roomsOpen) ||
+    !whole(analysis.queued) ||
+    !whole(analysis.running) ||
+    !oneOf(body.keys, ['ready', 'no-secret', 'no-origin', 'no-keys', 'unreadable', 'busy'] as const)
+  ) {
+    return undefined;
+  }
+  let shownTunnel: OperateStatus['tunnel'];
+  if (tunnel.state === 'ready') {
+    if (!whole(tunnel.connections)) return undefined;
+    shownTunnel = { state: 'ready', connections: tunnel.connections };
+  } else {
+    shownTunnel = { state: tunnel.state };
+  }
+  return {
+    kind: 'status',
+    ready: body.ready,
+    checks: { database: checks.database, migrations: checks.migrations, rooms: checks.rooms },
+    version: body.version,
+    commit: body.commit,
+    upstream: body.upstream,
+    registration: body.registration,
+    uptimeSeconds: body.uptimeSeconds,
+    disk: disk as OperateDisk[],
+    lastBackup,
+    tunnel: shownTunnel,
+    counts: {
+      athletes: {
+        active: athletes.active,
+        pending: athletes.pending,
+        suspended: athletes.suspended,
+      },
+      roomsOpen: counts.roomsOpen,
+      analysis: { queued: analysis.queued, running: analysis.running },
+    },
+    keys: body.keys,
+  };
+}
+
 /**
  * Whether an answer is the INSTANCE saying this account is not its owner — the
  * status AND its own code. An Operate route answers anybody but the owner as a
@@ -202,6 +387,24 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         return isNotTheOwner(answer) ? 'not-owner' : 'unreachable';
       } catch {
         return 'unreachable';
+      }
+    },
+
+    status: async () => {
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return { kind: closedStanding(session) };
+        const answer = await session.sealed.call('GET', '/v1/operate/status', {
+          token: session.token,
+        });
+        if (answer.status === 401) return { kind: 'signed-out' };
+        if (answer.status === 200) return statusFrom(answer) ?? { kind: 'unreachable' };
+        if (isNotTheOwner(answer)) return { kind: 'not-owner' };
+        // #2602: an instance with no OYL_INSTANCE_SECRET_KEY offers no Operate area.
+        if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
+        return { kind: 'unreachable' };
+      } catch {
+        return { kind: 'unreachable' };
       }
     },
 

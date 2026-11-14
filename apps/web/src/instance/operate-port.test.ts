@@ -12,7 +12,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { INSTANCE_SESSION_STORAGE_KEY } from './instance-port';
 import type { InstanceSend } from './instance-transport';
-import { createOperatePort, OPERATOR_LOG_PAGE, type OperatorLogRead } from './operate-port';
+import {
+  createOperatePort,
+  OPERATOR_LOG_PAGE,
+  type OperateStatusRead,
+  type OperatorLogRead,
+} from './operate-port';
 import {
   closeOperateWorlds,
   countingSealed,
@@ -222,5 +227,90 @@ describe('the operator log — #2602, #2603', () => {
     expect(await answered([good, { ...good, id: 2, ...change }]).log()).toEqual({
       kind: 'unreachable',
     });
+  });
+});
+
+describe('the instance’s status — #2604', () => {
+  function asStatus(read: OperateStatusRead) {
+    if (read.kind !== 'status') throw new Error(`not a status: ${read.kind}`);
+    return read;
+  }
+
+  it('reads the owner the instance’s counts, as the instance holds them, and nobody else anything', async () => {
+    const { owner, deputy, rider, approveRider } = await operatedWorld();
+    const before = asStatus(await createOperatePort(owner.dependencies).status());
+    // The owner and the deputy are active; the rider awaits approval.
+    expect(before.counts.athletes).toEqual({ active: 2, pending: 1, suspended: 0 });
+    expect(before.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(before.upstream).toBe(true);
+    expect(before.tunnel).toEqual({ state: 'unknown' });
+    expect(before.lastBackup).toBeNull();
+    expect(before.keys).toBe('ready');
+    await approveRider();
+    const after = asStatus(await createOperatePort(owner.dependencies).status());
+    expect(after.counts.athletes).toEqual({ active: 3, pending: 0, suspended: 0 });
+    // The deputy is a moderator and NOT the operator; an approved rider is a rider.
+    expect(await createOperatePort(deputy.dependencies).status()).toEqual({ kind: 'not-owner' });
+    expect(await createOperatePort(rider.dependencies).status()).toEqual({ kind: 'not-owner' });
+  });
+
+  it('is no-keys on an instance with no OYL_INSTANCE_SECRET_KEY', async () => {
+    const device = await keylessOwner();
+    expect(await createOperatePort(device.dependencies).status()).toEqual({ kind: 'no-keys' });
+  });
+
+  /** A status as the instance writes it, every field well-formed. */
+  const GOOD = {
+    ready: true,
+    checks: { database: true, migrations: 'at-head', rooms: true },
+    version: '1.2.3',
+    commit: '0123456789abcdef0123456789abcdef01234567',
+    upstream: true,
+    registration: 'approval',
+    uptimeSeconds: 60,
+    disk: [{ holds: 'database', freeBytes: 1, totalBytes: 2, low: false }],
+    lastBackup: null,
+    tunnel: { state: 'ready', connections: 4 },
+    counts: {
+      athletes: { active: 1, pending: 0, suspended: 0 },
+      roomsOpen: 0,
+      analysis: { queued: 0, running: 0 },
+    },
+    keys: 'ready',
+  };
+
+  async function answeredWith(body: unknown): Promise<OperateStatusRead> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) =>
+        world.answeringAs('/v1/operate/status', () => Response.json(body))(new Request(url, init)),
+    }).status();
+  }
+
+  it('carries nothing the instance sent beyond its own fields', async () => {
+    const read = asStatus(await answeredWith({ ...GOOD, secretKey: 'MARKER-2604' }));
+    expect(read.tunnel).toEqual({ state: 'ready', connections: 4 });
+    expect(JSON.stringify(read)).not.toContain('MARKER-2604');
+  });
+
+  it.each([
+    ['a commit that is not 40 hex', { commit: 'main' }],
+    ['a commit that carries a path', { commit: `${'a'.repeat(40)}/../x` }],
+    ['a version that is free text', { version: 'see https://example.com' }],
+    ['an unknown registration mode', { registration: 'anyone' }],
+    ['a count that is not whole', { uptimeSeconds: 1.5 }],
+    ['a negative count', { counts: { ...GOOD.counts, roomsOpen: -1 } }],
+    ['an unknown keys state', { keys: 'MARKER-key-value' }],
+    ['a ready tunnel with no count', { tunnel: { state: 'ready', connections: null } }],
+    ['a disk that names a path', { disk: [{ ...GOOD.disk[0], holds: '/data' }] }],
+    [
+      'a backup whose time is not ISO 8601',
+      { lastBackup: { at: 'today', offBox: 'copied', intervalSeconds: 1 } },
+    ],
+  ] as const)('shows no status that holds %s', async (_name, change) => {
+    // The control: the same answer, well-formed, is a status.
+    expect((await answeredWith(GOOD)).kind).toBe('status');
+    expect(await answeredWith({ ...GOOD, ...change })).toEqual({ kind: 'unreachable' });
   });
 });

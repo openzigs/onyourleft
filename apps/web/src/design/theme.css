@@ -13973,3 +13973,25 @@ select.oyl-input {
 .oyl-hud__tile-grade--wall :is(.oyl-hud__digits, .oyl-hud__slope) {
   color: var(--oyl-color-hud-grade-wall);
 }
+
+/*
+ * #2604: the owner's Status in the Operate area — a description list laid out
+ * as cards, as `.oyl-ride-summary` lays out a ride's, at the body size: some
+ * values are sentences, and the deployed commit is one unbroken word, which
+ * `.oyl-main code` breaks.
+ */
+.oyl-operate__status {
+  display: grid;
+  gap: var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  margin: var(--oyl-space-lg) 0;
+}
+
+.oyl-operate__status dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-operate__status dd {
+  margin: 0;
+}

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { clientAddress } from './client-address.ts';
 import { readAnalysisModelSettings, readConfig, readHistorySettings } from './config.ts';
+import { readServerConfig } from './server-config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
 
@@ -170,4 +171,22 @@ describe('deploy/home/compose.yaml — every setting the server reads reaches it
       expect(instance).toMatch(new RegExp(`^ {6}${name}: `, 'm'));
     },
   );
+});
+
+describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => {
+  const tunnel = service('tunnel');
+  const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
+
+  it('serves cloudflared’s metrics on the project’s network, and publishes no port for them', () => {
+    const port = /'--metrics', '0\.0\.0\.0:(\d+)'/.exec(tunnel)?.[1];
+    expect(port).toBeDefined();
+    const lines = tunnel.split('\n').filter((line) => !/^\s*#/.test(line));
+    expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
+    // The template asks that port by the service's name, which the instance accepts.
+    const url = /^OYL_INSTANCE_TUNNEL_READY_URL=(\S+)$/m.exec(env)?.[1];
+    expect(url).toBe(`http://tunnel:${String(port)}/ready`);
+    const read = readServerConfig({ tunnelReadyUrl: url }, 1);
+    expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe('tunnel');
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_TUNNEL_READY_URL: \$\{OYL_INSTANCE_TUNNEL_READY_URL:-\}/);
+  });
 });

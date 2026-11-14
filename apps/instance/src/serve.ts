@@ -82,6 +82,7 @@ const server = readServerConfig(
       (path) => readFileSync(path, 'utf8'),
     ),
     discordGuildId: process.env.OYL_INSTANCE_DISCORD_GUILD_ID,
+    tunnelReadyUrl: process.env.OYL_INSTANCE_TUNNEL_READY_URL,
   },
   availableParallelism(),
 );

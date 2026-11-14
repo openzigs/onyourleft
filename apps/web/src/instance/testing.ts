@@ -56,7 +56,7 @@ import {
   type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
-import type { OperatePort, OperateStanding, OperatorLogEntry } from './operate-port';
+import type { OperatePort, OperateStanding, OperateStatus, OperatorLogEntry } from './operate-port';
 
 export interface ScriptedInstance {
   readonly port: InstancePort;
@@ -851,7 +851,7 @@ export function scriptedModeration(
  */
 export interface ScriptedOperate {
   readonly port: OperatePort;
-  /** Every method called, in order: `standing`, `log`, `log <cursor>`. */
+  /** Every method called, in order: `standing`, `status`, `log`, `log <cursor>`. */
   readonly calls: string[];
   held: {
     standing: OperateStanding;
@@ -861,8 +861,44 @@ export interface ScriptedOperate {
     pageSize: number;
     /** `false` to answer every read of the log as one that could not be read. */
     logReadable: boolean;
+    /** What the instance's status says (#2604), or `null` to answer it as one that could not be read. */
+    status: OperateStatus | null;
   };
 }
+
+/**
+ * An instance's status (#2604) with something in every field to draw: a
+ * ready instance on this repository's source, the blobs on a disk of their
+ * own that is nearly full, a tunnel with four connections, and no backup
+ * recorded yet.
+ */
+export const SCRIPTED_STATUS: OperateStatus = {
+  kind: 'status',
+  ready: true,
+  checks: { database: true, migrations: 'at-head', rooms: true },
+  version: '0.0.0',
+  commit: '0123456789abcdef0123456789abcdef01234567',
+  upstream: true,
+  registration: 'approval',
+  uptimeSeconds: (3 * 24 + 4) * 3600 + 17 * 60,
+  disk: [
+    {
+      holds: 'database',
+      freeBytes: 412_000_000_000,
+      totalBytes: 500_000_000_000,
+      low: false,
+    },
+    { holds: 'blobs', freeBytes: 20_000_000_000, totalBytes: 1_000_000_000_000, low: true },
+  ],
+  lastBackup: null,
+  tunnel: { state: 'ready', connections: 4 },
+  counts: {
+    athletes: { active: 3, pending: 1, suspended: 1 },
+    roomsOpen: 2,
+    analysis: { queued: 2, running: 1 },
+  },
+  keys: 'ready',
+};
 
 /**
  * Three operator log entries, oldest first: a migration from the CLI, a room
@@ -902,6 +938,7 @@ export function scriptedOperate(
     readonly standing?: OperateStanding;
     readonly entries?: readonly OperatorLogEntry[];
     readonly pageSize?: number;
+    readonly status?: OperateStatus | null;
   } = {},
 ): ScriptedOperate {
   const calls: string[] = [];
@@ -910,8 +947,14 @@ export function scriptedOperate(
     entries: [...(options.entries ?? SCRIPTED_OPERATOR_LOG)],
     pageSize: options.pageSize ?? 25,
     logReadable: true,
+    status: options.status === undefined ? SCRIPTED_STATUS : options.status,
   };
   const port: OperatePort = {
+    status: () => {
+      calls.push('status');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      return Promise.resolve(held.status ?? { kind: 'unreachable' });
+    },
     standing: () => {
       calls.push('standing');
       return Promise.resolve(held.standing);

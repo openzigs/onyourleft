@@ -52,6 +52,9 @@ services:
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # cloudflared's `/ready` (#2604), asked for the owner's Status. Empty:
+      # the tunnel shows as "not known" and nothing is asked.
+      OYL_INSTANCE_TUNNEL_READY_URL: ${OYL_INSTANCE_TUNNEL_READY_URL:-}
       # The room's WebSocket ping (25 s when empty). `0` turns it off, for
       # measuring the tunnel's idle timeout only (home-machine.md, "Measuring
       # the tunnel"); remove it again afterwards.
@@ -131,7 +134,10 @@ services:
   # (emSign) intermediates (Cloudflare's notice of 2026-10-20): stay at or above it.
   tunnel:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
-    command: ['tunnel', '--no-autoupdate', 'run']
+    # `--metrics` serves cloudflared's `/ready` on this project's network for
+    # the instance's Status (#2604). ⚠️ NO `ports:` for it, EVER: it is
+    # reached by this service's name and never from the host.
+    command: ['tunnel', '--no-autoupdate', '--metrics', '0.0.0.0:20241', 'run']
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
     depends_on:
