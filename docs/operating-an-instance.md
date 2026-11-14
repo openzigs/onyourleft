@@ -825,15 +825,25 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   init|rotate|rotate-identity|reset`, `load-accounts add|erase` and `account-erase --confirm` — are
   logged; reads are not. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
-  snapshot from before migration 0040 is `logged: false` until `migrate`. An entry carries when, where
-  from (`app` or `cli`), the action, a short closed-vocabulary detail (`applied=2`, `cleared`) — never
-  free text, a key or a position — and the outcome: `done`, `refused` or `failed`. The owner reads it
+  snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
+  its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
+  `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
+  deploy whose migrations applied. An entry carries when, where from (`app` or `cli`), the action, a
+  short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
+  closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
+  `model-key clear`): anything else, including a word another action uses, is refused with the
+  action, so a detail is never free text, a key or a position. The schema also holds it to lower-case
+  letters, digits, `_`, `=` and `,`, at most 200 characters. The owner reads it
   at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
 - **What erasure and `migrate … down` do to it.** As with the moderation log
   ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite
   triggers refuse any `UPDATE` or `DELETE`, **erasing an account keeps every entry** (it has no
   foreign key to the account), and `migrate … down` refuses to undo migration 0040 while the log holds
   a single entry.
+- **What `restore` does to it.** The log lives in the database, so a restore puts back the log as
+  it was when the snapshot was taken: **the entries the replaced database recorded after that
+  snapshot are gone**, and the restore's own entry follows the snapshot's last one. A gap after a
+  restore is expected, not a sign of tampering; the snapshot directory you restored from dates it.
 - **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
   as the owner, the Instance screen shows **Operate this instance**, which opens
   `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
