@@ -786,14 +786,28 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ **Since #2495 it has EYES**, and
+                        8 998 triangles. ⚠️ The helmet's material is
+                        single-sided: a lens wound towards the face is culled
+                        from the front (#2504). `rider-gear.test.ts` reads the
+                        lenses, the closed vents, the straps on the skin and
+                        the shoes back out of the file. ⚠️ **Since #2495 it has EYES**, and
                         a reviewer who remembers flat skin under the glasses
                         is reading the old file: a ball in each socket at
                         MakeHuman's own eye, drawn in `rider_kit.py`'s
                         pupil, iris and white, in the HELMET's mesh (so on the
                         head bone, no draw call), its 168 triangles taken out
                         of the body's share (`rider-eyes.test.ts`). The pack's
-                        rider (#2485) keeps flat ones. ⚠️ The jersey's main colour is in NO
+                        rider (#2485) keeps flat ones. ⚠️ **Since #2493 the
+                        file carries a CRASH CLIP** (`crash`, made by
+                        step 10 from `rider_crash.py` on `delivery/
+                        crash-look.ts`' times): `RealisticRiderBelt` blends
+                        the body toward it by the crash's share whenever a
+                        marker carries `crash`, never under reduced motion,
+                        and the stylised world keeps #2475's roll alone.
+                        #2505: write a lying moment with `on_road`, not in the
+                        bicycle's `x`/`y`, and name its `elbows`/`knees`; the
+                        test reads the drawn body 3 cm clear of every part of
+                        the bicycle. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
@@ -923,7 +937,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         bots are split as a room's riders are (#783), and
                         it rides without the pacer a rider chose. Started at
                         the press (assist read from the device, ONE seed
-                        nothing keeps), stepped one
+                        nothing keeps), then held on its line for a 10 s
+                        countdown of unpaused frames (#2546:
+                        §`countLapRaceDown`, read as a room's race through
+                        `room-ride.ts` §`countdownRace`, so the hold, the
+                        *Race* notice and the region are the room's; nothing
+                        steps before Go), stepped one
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`: a field of
                         mixed personalities from the seed, at the `canny`
@@ -937,7 +956,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the grade is still sampled at the simulation's
                         odometer, BEFORE the race steps;
                         `game/lap-race-wiring.test.tsx` rides one power trace
-                        as an ordinary ride and as a race with items off and
+                        as an ordinary ride (standing still on the line
+                        through the countdown, #2546) and as a race with items off and
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
                         The bots ride still air on a windy ride: stated
@@ -1117,7 +1137,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `delivery-belt.test.ts`; the 20-piece village frame
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
-                        measured 201 356) by the same nightly spec
+                        measured 201 356) by the same nightly spec.
+                        ⚠️ **Since #2540 the realistic world's parked car is
+                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
+                        `tools/realistic/blender/process_vehicle.py`), its
+                        wheels and indicators apart and posed per instance in
+                        the same call (`withDeliveryCarPose`, from
+                        `port.ts` §`DeliveryCarMotion`), its roster
+                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
+                        frame 203 998; the stylised world keeps its own car
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and

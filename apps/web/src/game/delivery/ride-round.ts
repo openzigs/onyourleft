@@ -101,17 +101,28 @@
  * ## A round on a built-in level (#2362, ADR 0065)
  *
  * {@link DeliveryRideStart.level} is the level's round: its `houses` are the
- * round's, in place of the week's, and its static hazards set the obstacles
- * (`obstacles.ts` §`levelObstacleMix`): parked cars and bins, every one
- * standing. The assist still places fewer or none. A level round is kept
+ * round's, in place of the week's, and its hazards set the obstacles
+ * (`obstacles.ts` §`levelObstacleMix`): its static ones parked cars and bins,
+ * every one standing, and since #2364 its moving ones a dog, a car pulling
+ * out or another rider coming the other way, each stepped only on a step that
+ * ran, as every obstacle is. The assist still places fewer or none. A level round is kept
  * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
  * is never written to `delivery-progress.ts`. Reached, its end keeps the
  * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens
  * the next level in the picker. The level's throw window is not
  * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
  * may (`level-file.ts`), and the later levels that tighten it read it
- * (#2367, which draws them). Its mailbox and no-delivery shares, weather and light are
- * #2365's and #2366's.
+ * (#2367, which draws them). Its mailbox and no-delivery shares are read
+ * (#2365): the pick makes that share of its houses mailboxes at the kerb, and
+ * that share houses that must not get a parcel, apart from the round
+ * ({@link DeliveryRide.noDeliveryTargets}); a parcel one catches takes
+ * `throw.ts` §`NO_DELIVERY_SCORE_DELTA` off the round's score, or nothing with
+ * the assist's no fail on, and never reaches the week.
+ * Its weather and light (#2366) are read here for the drawing only
+ * ({@link DeliveryRide.weather}, {@link DeliveryRide.revealMetres}): they
+ * change where a marker is drawn from, never the round, the throw, the
+ * obstacles, the announcements, the ride record or the trainer (ADR 0065
+ * D-11: rain and dusk are a drawing and never a grade).
  *
  * ## Nothing here leaves the ride (DL11)
  *
@@ -129,6 +140,7 @@ import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { LOW_LIGHT_REVEAL_METRES } from './in-view';
 import { readLevelProgress, withLevelFinished, writeLevelProgress } from './level-progress';
 import type { LevelRound } from './levels/level-file';
 import {
@@ -163,6 +175,7 @@ import {
   ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
   DELIVERY_TICK_SECONDS,
+  NO_DELIVERY_SCORE_DELTA,
   NO_PARCELS,
   stepThrows,
   THROW_WINDOW_AFTER_METRES,
@@ -198,8 +211,38 @@ export interface DeliveryRide {
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
   readonly onLevel: boolean;
+  /**
+   * The houses on a level that must not get a parcel (#2365), for the drawing
+   * and the warning; never on the round. Each `position` is its place here.
+   */
+  readonly noDeliveryTargets: readonly DeliveryTarget[];
+  /** The same houses as the throw reads them. */
+  readonly throwNoDelivery: readonly ThrowTarget[];
+  /**
+   * A parcel at one of them costs {@link NO_DELIVERY_SCORE_DELTA} (#2365);
+   * `false` with the assist's no fail on, when it costs nothing (DL10).
+   */
+  readonly noDeliveryCosts: boolean;
   /** The level's id, on a level (#2363): what its end keeps as finished (ADR 0065 D-9.2). */
   readonly levelId: string | undefined;
+  /**
+   * The level's weather and light (#2366, ADR 0065 D-10.4), for the drawing
+   * only: rain and dusk. Clear daylight on a rider's own route.
+   */
+  readonly weather: DeliveryWeather;
+  /**
+   * How near a house the rider must be for its marker to be drawn, metres
+   * (#2366): `in-view.ts` §`LOW_LIGHT_REVEAL_METRES` in rain or at dusk,
+   * `undefined` — no nearer than the corridor draws — in clear daylight or
+   * with the assist's wider windows on (DL10: no hidden targets).
+   */
+  readonly revealMetres: number | undefined;
+}
+
+/** A round's weather and light, as the drawing reads them (#2366). */
+export interface DeliveryWeather {
+  readonly rain: boolean;
+  readonly dusk: boolean;
 }
 
 /** What a round needs at the press. */
@@ -230,11 +273,12 @@ export interface DeliveryRideStart {
    * rider's route.
    */
   readonly level?:
-    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> & {
-        readonly lengthMetres: number;
-        /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
-        readonly id: string;
-      })
+    | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> &
+        Partial<Pick<LevelRound, 'mailboxShare' | 'noDeliveryShare' | 'weather' | 'light'>> & {
+          readonly lengthMetres: number;
+          /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
+          readonly id: string;
+        })
     | undefined;
 }
 
@@ -256,6 +300,14 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
       origin: input.origin,
       riderDistance: input.riderDistance,
       houses: input.level?.houses ?? week.houses,
+      // #2365: a level's mailboxes and houses that get no parcel, from this seed.
+      shares:
+        input.level === undefined
+          ? undefined
+          : {
+              mailbox: input.level.mailboxShare ?? 0,
+              noDelivery: input.level.noDeliveryShare ?? 0,
+            },
     },
     seed,
   );
@@ -263,8 +315,13 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
   if (last === undefined || (!pick.complete && pick.targets.length < FEWEST_DELIVERY_HOUSES)) {
     return undefined;
   }
+  const furthest = Math.max(last.distance, pick.noDelivery.at(-1)?.distance ?? 0);
+  const weather: DeliveryWeather = {
+    rain: input.level?.weather === 'rain',
+    dusk: input.level?.light === 'dusk',
+  };
   const obstacles = placeObstacles(
-    { from: input.riderDistance, to: last.distance + TARGET_WINDOW_HALF_METRES },
+    { from: input.riderDistance, to: furthest + TARGET_WINDOW_HALF_METRES },
     seed,
     assist.obstacles,
     // A round runs solo only, so its rider can always steer (DL9).
@@ -274,12 +331,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
   return {
     week,
     targets: pick.targets,
-    throwTargets: pick.targets.map((target): ThrowTarget => ({
-      position: target.position,
-      along: target.distance,
-      side: target.side === 1 ? 'right' : 'left',
-      clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
-    })),
+    throwTargets: pick.targets.map(throwTargetOf),
     round: startRound(pick.targets.length, {
       assisted: assist.noFail,
       dayHouses: input.level?.houses ?? week.houses,
@@ -294,7 +346,25 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     along: input.riderDistance,
     outcome: undefined,
     onLevel: input.level !== undefined,
+    noDeliveryTargets: pick.noDelivery,
+    throwNoDelivery: pick.noDelivery.map(throwTargetOf),
+    noDeliveryCosts: !assist.noFail,
     levelId: input.level?.id,
+    weather,
+    // #2366: a marker shows only once the rider is closer, unless the assist widens the windows.
+    revealMetres:
+      (weather.rain || weather.dusk) && !assist.widerWindows ? LOW_LIGHT_REVEAL_METRES : undefined,
+  };
+}
+
+/** A picked house as the throw reads it: its doorstep, or its mailbox (#2365). */
+function throwTargetOf(target: DeliveryTarget): ThrowTarget {
+  return {
+    position: target.position,
+    along: target.distance,
+    side: target.side === 1 ? 'right' : 'left',
+    clear: Math.max(0, target.fromRoad - CARRIAGEWAY_HALF_WIDTH_METRES),
+    ...(target.mailbox === true ? { mailbox: true } : {}),
   };
 }
 
@@ -317,6 +387,8 @@ export interface DeliveryRideStepped {
   readonly crashes: number;
   /** The throw asked for was taken: `false` when none was, or the cool-down refused it. */
   readonly thrown: boolean;
+  /** Parcels a house that must not get one caught on these steps (#2365); nought once the round is over. */
+  readonly noDeliveries: number;
 }
 
 /** The throw left the rider inside the target's window: `throw.ts`' own test, restated. */
@@ -358,7 +430,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   if (!Number.isInteger(ticks) || ticks < 0) {
     throw new RangeError('a Delivery ride step runs a whole number of ticks, 0 or more');
   }
-  if (ticks === 0) return { ride, crashes: 0, thrown: false };
+  if (ticks === 0) return { ride, crashes: 0, thrown: false, noDeliveries: 0 };
   const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
   const from = ride.along;
   // Never backwards: a room's correction does not run on a Delivery ride
@@ -367,6 +439,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   let { round, throws, obstacleState, outcome, steer } = ride;
   const changes = [...ride.changes];
   let crashes = 0;
+  let noDeliveries = 0;
   let thrown = false;
   let before = from;
   for (let tick = 1; tick <= ticks; tick += 1) {
@@ -377,6 +450,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       round,
       ...(tick === 1 && step.throwTo !== undefined ? { throwTo: step.throwTo } : {}),
       widerWindows: ride.widerWindows,
+      noDelivery: ride.throwNoDelivery,
     });
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
@@ -410,6 +484,11 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     if (outcome !== undefined) continue;
     for (const landing of thrownNow.landings) {
       if (landing.kind === 'delivery') changes.push('delivery');
+      // #2365: a parcel at a house that must not get one costs, and never pays.
+      if (landing.kind === 'no-delivery') {
+        noDeliveries += 1;
+        if (ride.noDeliveryCosts) changes.push({ scoreDelta: NO_DELIVERY_SCORE_DELTA });
+      }
     }
     changes.push(...obstaclesNow.crashes);
     crashes += obstaclesNow.crashes.length;
@@ -430,6 +509,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     },
     crashes,
     thrown,
+    noDeliveries,
   };
 }
 
@@ -454,20 +534,37 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
  * the road, and how far ahead along it, so the HUD can say where to throw
  * without the rider having to spot the house's marker. A side and a distance
  * from the rider, never a place (DL11).
+ *
+ * ⚠️ **Since #2513 the distance is to the THROW POINT, not to the house.** The
+ * owner's frame of 2026-11-12 read "Next house 0 ft on the right" level with
+ * the house, which is beside and behind the chase camera and out of frame:
+ * the countdown pointed the rider at the one place the house cannot be seen,
+ * and a parcel thrown there is thrown late. It now counts down to where the
+ * house's throw window opens (`throw.ts` §`THROW_WINDOW_BEFORE_METRES`, 20 m
+ * before it), and reaches nought there; from there until the window closes
+ * the HUD says to throw (the owner's ruling of 2026-11-12 on #2513).
  */
 export interface NextHouse {
   readonly side: ThrowSide;
-  /** Metres along the road from the rider to the house; nought once the rider is level with it or past. */
+  /**
+   * Metres along the road from the rider to where the house's throw window
+   * opens; nought once the rider is inside the window, until it closes
+   * behind them. A reviewer who remembers this as the distance to the house
+   * is reading the file before #2513.
+   */
   readonly metres: number;
 }
 
 /**
  * The next house still expecting a parcel, in route order, from where the
- * rider is after the last step that ran — #2453. A house the rider has just
- * passed stays the next one, at nought metres, until its window closes behind
- * them and the round counts it missed (`throw.ts`
+ * rider is after the last step that ran — #2453. A house the rider is level
+ * with or has just passed stays the next one, at nought metres, until its
+ * window closes behind them and the round counts it missed (`throw.ts`
  * §`THROW_WINDOW_AFTER_METRES`): it can still be delivered to. `undefined`
- * when no house on the round is still expecting one.
+ * when no house on the round is still expecting one. Its distance is to the
+ * window's opening edge, {@link THROW_WINDOW_BEFORE_METRES} before the house
+ * (#2513), which the assist's wider windows do not move (`throw.ts` §"Wider
+ * windows").
  */
 export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   let next: DeliveryTarget | undefined;
@@ -478,7 +575,7 @@ export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   if (next === undefined) return undefined;
   return {
     side: next.side === 1 ? 'right' : 'left',
-    metres: Math.max(0, next.distance - ride.along),
+    metres: Math.max(0, next.distance - THROW_WINDOW_BEFORE_METRES - ride.along),
   };
 }
 
