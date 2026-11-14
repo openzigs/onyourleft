@@ -1200,7 +1200,7 @@ describe('opened at a section, from Operate’s Accounts — #2605', () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  it('leaves focus on the control pressed when an action reads the queues again', async () => {
+  it('does not pull focus back to the heading when an action reads the queues again', async () => {
     const scripted = scriptedModeration();
     mounted = await mount(<ModerationView port={scripted.port} section="suspended" />);
     await settle();

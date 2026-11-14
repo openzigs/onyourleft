@@ -46,7 +46,7 @@ export const REGISTRATION_MODE_TEXT: Readonly<
   approval: {
     short: 'approval: a moderator approves each account',
     meaning:
-      'A new rider’s account waits until a moderator approves it, and until then nobody else sees it.',
+      'A new rider’s account waits until a moderator approves it; until then other riders cannot see it.',
   },
   invite: {
     short: 'invite: only with an invite code',

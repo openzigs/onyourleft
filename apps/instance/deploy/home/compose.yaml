@@ -153,9 +153,10 @@ services:
     depends_on:
       - instance
     restart: unless-stopped
-    # A FIXED address, so the instance can name it as the one proxy whose
-    # client-address header it believes (OYL_INSTANCE_TRUSTED_PROXIES above).
-    # Change both together if 172.30.87.0/24 is already used on this machine.
+    # FIXED addresses, so the instance can name this proxy, whose
+    # client-address header it believes, by both of them
+    # (OYL_INSTANCE_TRUSTED_PROXIES above). Change a network's subnet, this
+    # address on it and that list together if the subnet is already in use.
     networks:
       default:
         ipv4_address: 172.30.87.10
@@ -226,8 +227,9 @@ networks:
   # #2604: cloudflared's metrics server, for the instance's Status. Internal
   # (no route out) and joined by `instance` and `tunnel` only, so the other
   # services cannot read the tunnel's `/config`, `/debug/pprof` or `/diag`.
-  # Change the address here, in `tunnel`'s command and in
-  # OYL_INSTANCE_TUNNEL_READY_URL together if 172.30.88.0/24 is in use.
+  # Change the address here, in `tunnel`'s command, in
+  # OYL_INSTANCE_TUNNEL_READY_URL and in OYL_INSTANCE_TRUSTED_PROXIES
+  # together if 172.30.88.0/24 is in use.
   tunnel_metrics:
     internal: true
     ipam:

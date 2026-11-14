@@ -3221,7 +3221,7 @@
     "Registration mode: approval",
     "Help with Registration mode: approval",
     "In every mode, the keys named as owner and deputy sign in with an active account.",
-    "A new rider’s account waits until a moderator approves it, and until then nobody else sees it.",
+    "A new rider’s account waits until a moderator approves it; until then other riders cannot see it.",
     "Changing the mode",
     "This app shows the mode and cannot change it.",
     "On the instance’s host:",

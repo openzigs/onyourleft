@@ -185,11 +185,22 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
   const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
   /** The top-level `networks:` block. */
   const networks = /^networks:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
-  /** Every service the file declares, read from it, so a new one is held too. */
-  const services = /^services:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
-  const SERVICES = [...services.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map(
-    (match) => match[1] ?? '',
-  );
+  /**
+   * Every service a compose file declares, read from it, so a new one is held
+   * too. The block ends at the next top-level key, not at any column-0 line,
+   * so a `# comment` at column 0 inside it does not cut it short.
+   */
+  const serviceNames = (text: string): string[] => {
+    const services = /^services:\n([\s\S]*?)(?=^[a-z])/m.exec(text)?.[1] ?? '';
+    return [...services.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map((match) => match[1] ?? '');
+  };
+  const SERVICES = serviceNames(COMPOSE);
+
+  it('reads every service even past a column-0 comment inside `services:`', () => {
+    const commented = COMPOSE.replace(/^ {2}tunnel:$/m, '# a column-0 comment\n  tunnel:');
+    expect(commented).not.toBe(COMPOSE);
+    expect(serviceNames(commented)).toEqual(SERVICES);
+  });
 
   it('binds cloudflared’s metrics to its address on an internal network only it and the instance join', () => {
     const bound = /'--metrics', '(\d+\.\d+\.\d+\.\d+):(\d+)'/.exec(tunnel);
