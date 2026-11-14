@@ -39,7 +39,20 @@
  * on the way to {@link advancePlannedBot}, and neither is its strategy: two races
  * where the same bot leads and trails read back identical power traces, and so
  * do two bots of one tier and different skill. That holds because a solo
- * race's bots have no draft (ADR 0061 D-4).
+ * race's bots have no draft (ADR 0061 D-4) unless the step asks for one.
+ *
+ * ## The draft (#2460, ADR 0067 D-3)
+ *
+ * With {@link BotRaceStep.draft} on, the field drafts: ADR 0038's model,
+ * `draft.ts` §`fieldDraftFactors`, unchanged, over **every racer's effort
+ * distance** as the race stood at the start of the tick, the rider's included,
+ * in one call for the whole field (ADR 0060 D-5.3, as a room reads it). Never
+ * the drawn distance: an item that knocks a racer back costs it its place on
+ * the screen and never its shelter (D-3.2). Each bot's `k` multiplies its
+ * `C_D·A` in its one tick through {@link advance} (ADR 0028 D-1), and nothing
+ * else: its plan's power is the same, and it rides faster for it. The rider's
+ * own `k`, from the same call, is #2461's. With the draft off, the default, no
+ * racer drafts and the race is the race before #2460 to the bit (D-3.4).
  *
  * ## No instance, no network (D-7.3)
  *
@@ -69,6 +82,7 @@ import {
   type BotTier,
 } from '@onyourleft/domain';
 
+import { fieldDraftFactors } from './draft';
 import { advancePlannedBot, BOT_AT_START_LINE, botDemand, type BotCourse } from './pacer';
 import type { RideState } from './simulate';
 
@@ -112,6 +126,26 @@ export interface BotRaceStep {
   readonly seed: number;
   /** The rider's inputs this tick, as their client sends them. */
   readonly rider?: Omit<RaceTickInput, 'atMs'>;
+  /**
+   * Whether the field drafts this tick (#2460, ADR 0067 D-3.4: ADR 0066 D-6's
+   * switch, which `apps/web` reads). Absent or `false`, no bot drafts.
+   */
+  readonly draft?: boolean;
+}
+
+/**
+ * Every racer's draft multiplier `k`, by id, from the field's **effort
+ * distances** as the race stands: one `draft.ts` §`fieldDraftFactors` call for
+ * the whole field, the rider included (ADR 0067 D-3.1, D-3.2). Never the
+ * drawn distance, which items move.
+ */
+export function lapRaceDraftFactors(race: ItemRaceState): Readonly<Record<string, number>> {
+  const factors = fieldDraftFactors(race.racers.map((entry) => entry.racer.effortDistance));
+  const byId: Record<string, number> = {};
+  race.racers.forEach((entry, index) => {
+    byId[entry.racer.id] = factors[index] as number;
+  });
+  return byId;
 }
 
 /**
@@ -155,6 +189,8 @@ export function stepBotRace(
   const effortDistances: Record<string, number> = { ...step.rider?.effortDistances };
   const lanes: Record<string, number> = { ...step.rider?.lanes };
   const uses: string[] = [...(step.rider?.uses ?? [])];
+  // #2460: the field's shelter, once for every racer, as the race stood.
+  const factors = step.draft === true ? lapRaceDraftFactors(race) : undefined;
   const moved = bots.map((bot): LapRaceBot => {
     // How far the bot will ride this tick, near enough: what its puddle
     // look-ahead and its last call grow with.
@@ -180,7 +216,13 @@ export function stepBotRace(
         elapsed: step.elapsed,
       },
     );
-    const tick = advancePlannedBot(bot.ride, step.elapsed, course, planned.power);
+    const tick = advancePlannedBot(
+      bot.ride,
+      step.elapsed,
+      course,
+      planned.power,
+      factors?.[bot.id] ?? 1,
+    );
     effortDistances[bot.id] = tick.state.distance;
     return {
       ...bot,

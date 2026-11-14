@@ -38,6 +38,7 @@ import randomSource from './random.ts?raw';
 import raceSource from './race.ts?raw';
 import strategyTestingSource from './strategy-testing.ts?raw';
 import strategySource from './strategy.ts?raw';
+import tacticsSource from './tactics.ts?raw';
 import wbalSource from './wbal.ts?raw';
 import { raceCourse } from './race';
 
@@ -224,6 +225,7 @@ describe('never from a recorded ride (ADR 0007 D4, ADR 0060 D-7.1)', () => {
       'race.ts': raceSource,
       'strategy.ts': strategySource,
       'strategy-testing.ts': strategyTestingSource,
+      'tactics.ts': tacticsSource,
       'wbal.ts': wbalSource,
     };
     let read = 0;

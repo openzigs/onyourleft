@@ -44,7 +44,9 @@ export type LapRaceErrorCode =
   /** A power for a bot's W′ balance that is not a finite number of watts (#2458). */
   | 'power-not-finite'
   /** A bot's pace with a style the model does not name, or an ability outside its band (#2455). */
-  | 'pace-out-of-range';
+  | 'pace-out-of-range'
+  /** A bot's race view whose time, distances, grade, laps or rank are not a race's (#2462). */
+  | 'view-out-of-range';
 
 /** Raised by the lap-race model. @see LapRaceErrorCode */
 export class LapRaceError extends Error {
