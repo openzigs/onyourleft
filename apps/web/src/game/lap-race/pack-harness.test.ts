@@ -76,12 +76,22 @@ const PACK = {
 } as const;
 /**
  * How far inside each other two racers may be drawn on a frame between two
- * ticks, metres: **0.005**. Each bot there is drawn back along its own speed,
- * and getting going from rest it covered a little less than that in the tick
- * (`ride-race.ts` §`lapRaceDrawing`, #2546): two bots a bike length apart on
- * the line are drawn up to 3 mm closer on the first frames after Go.
+ * ticks, metres: **0.005**. Each bot there is drawn back along its speed at
+ * the end of the tick (`ride-race.ts` §`lapRaceDrawing`, #2546), so a bot
+ * whose speed changed in the tick, most of all from rest, is drawn a little
+ * off where it was: two bots a bike length apart are drawn up to 3 mm closer,
+ * nearly all of it within 0.3 s of Go, and by under a millimetre after any
+ * change of speed later in the ride.
  */
 const DRAWN_BACK_SLACK_METRES = 0.005;
+/**
+ * The most a bot's drawn speed against its race speed may change in a tick,
+ * metres a second: **4**, `pack-layout.ts`'s 80 m/s² ease at the race's 20 Hz
+ * tick, and 0.25 m/s for the race speed's own change over it. Written here,
+ * not imported, so a layout that eased less is red rather than a bound that
+ * moved with it.
+ */
+const EASED_PER_TICK = 4 + 0.25;
 /** How far back between two ticks each frame `GameView` draws is, as a share of a tick. */
 const BETWEEN_TICKS = [0.25, 0.5, 0.75] as const;
 /** A move back in the group within this many seconds of its end was caught. */
@@ -110,6 +120,18 @@ interface Tick {
   readonly inside: number;
   /** The same, on the frames drawn between this tick and the one before. */
   readonly insideBetween: number;
+  /**
+   * How much the bot whose drawn speed changed most against its race speed
+   * changed, from the tick before to this one, metres a second (#2558's
+   * review, finding A): nought on the first two ticks.
+   */
+  readonly jolt: number;
+  /**
+   * How many bots at race speed, over 4 m/s, were drawn under half it on the
+   * tick before and over it on this one, or the other way about: the 10 Hz
+   * judder of a bot giving way in full and closing up again.
+   */
+  readonly flips: number;
   /** Every racer as it is drawn, along and across, to the millimetre. */
   readonly drawn: string;
 }
@@ -170,11 +192,44 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
   if (race === undefined) throw new Error('a circuit starts a race');
   let along = race.startAlong;
   const ticks: Tick[] = [];
+  // Each bot's drawn place and speed on the tick before, and how much faster
+  // than its race speed it was drawn going over it.
+  let botsBefore: readonly { readonly along: number; readonly speed: number }[] | undefined;
+  let fasterBefore: readonly number[] | undefined;
   const count = Math.round(RIDDEN_SECONDS / LAP_RACE_TICK_SECONDS);
   for (let tick = 1; tick <= count; tick += 1) {
     along += RIDER_SPEED * LAP_RACE_TICK_SECONDS;
     race = stepLapRaceRide(race, { ticks: 1, along, riderWatts: RIDER_WATTS });
-    const drawn = placed(lapRaceDrawing(race, along, 0, false));
+    const drawing = lapRaceDrawing(race, along, 0, false);
+    const drawn = placed(drawing);
+    const bots = drawing.raceBots.map((bot) => ({
+      along: bot.distanceMetres,
+      speed: bot.speedMetresPerSecond,
+    }));
+    const drawnSpeeds = bots.map(
+      (bot, at) => (bot.along - (botsBefore?.[at]?.along ?? Number.NaN)) / LAP_RACE_TICK_SECONDS,
+    );
+    const faster = drawnSpeeds.map((speed, at) => speed - (bots[at]?.speed ?? Number.NaN));
+    let jolt = 0;
+    let flips = 0;
+    if (fasterBefore !== undefined) {
+      for (const [at, bot] of bots.entries()) {
+        const before = (fasterBefore[at] ?? Number.NaN) + (botsBefore?.[at]?.speed ?? Number.NaN);
+        const now = drawnSpeeds[at] ?? Number.NaN;
+        const change = Math.abs((faster[at] ?? Number.NaN) - (fasterBefore[at] ?? Number.NaN));
+        // A NaN is a jolt that fails the bound, never one that passes it.
+        jolt = Number.isNaN(change) ? Number.POSITIVE_INFINITY : Math.max(jolt, change);
+        if (
+          bot.speed > 4 &&
+          ((before < 0.5 * bot.speed && now > bot.speed) ||
+            (before > bot.speed && now < 0.5 * bot.speed))
+        ) {
+          flips += 1;
+        }
+      }
+    }
+    fasterBefore = botsBefore === undefined ? undefined : faster;
+    botsBefore = bots;
     const stepped = race;
     // The frames between this tick and the one before, the rider blended as
     // `simulation.ts` §`drawnAt` blends them (#2561's review).
@@ -211,6 +266,8 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
       k: new Map(Object.entries(k)),
       inside: deepest(drawn),
       insideBetween,
+      jolt,
+      flips,
       drawn: drawn.map((each) => `${each.along.toFixed(3)},${each.lateral.toFixed(3)}`).join(' '),
     });
   }
@@ -342,6 +399,22 @@ describe.each(['flat', 'hilly'] as const)(
         expect(Math.max(...ticks.map((tick) => tick.insideBetween))).toBeLessThanOrEqual(
           DRAWN_BACK_SLACK_METRES,
         );
+      },
+    );
+
+    it.each(SEEDS)(
+      'draws every bot’s speed smoothly: never giving way and closing up on alternate ticks (seed %i, #2558’s review, finding A)',
+      (seed) => {
+        const ticks = field(name, seed);
+        const jolts = ticks
+          .filter((tick) => !(tick.jolt <= EASED_PER_TICK) || tick.flips > 0)
+          .map(
+            (tick) =>
+              `${tick.second.toFixed(2)} s: ${String(tick.jolt)} m/s, ${String(tick.flips)} flips`,
+          );
+        expect(jolts).toEqual([]);
+        // Not vacuous: read from the third tick on, at race speed.
+        expect(ticks.slice(2).some((tick) => tick.jolt > 0)).toBe(true);
       },
     );
 
