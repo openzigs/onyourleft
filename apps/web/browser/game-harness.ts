@@ -12632,7 +12632,11 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
-  // #621, on the same view and the level road.
+  // #621, on the same view and the level road. #2596: these three draw a bot
+  // and the ghost in the rider's own place under a camera brought close, which
+  // is the space a rider other than the rider's own fades out of; they read
+  // each rider's colours, so they read them with the fade off.
+  riderFadeOf(view, 'off');
   const tint = tintProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: seeded tints');
 
@@ -12658,6 +12662,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   // #623, on the same view and the same road.
   const kit = kitProbe(view, gl, canvas, riding(level, 400));
+  riderFadeOf(view, 'fade');
   phaseEnds('realistic: the kit — #623');
 
   // #620, on the same view and the same road; then what a whole wooded frame
