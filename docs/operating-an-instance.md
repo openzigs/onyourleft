@@ -844,6 +844,12 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   it was when the snapshot was taken: **the entries the replaced database recorded after that
   snapshot are gone**, and the restore's own entry follows the snapshot's last one. A gap after a
   restore is expected, not a sign of tampering; the snapshot directory you restored from dates it.
+- **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
+  as the owner, the Instance screen shows **Operate this instance**, which opens
+  `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
+  sections still to come. The deputy and every other rider see no such button, and anybody who opens
+  the address is told only that their account is not the owner. A device that cannot seal — no
+  instance card, or a copy of the app loaded from a website — is told so and asks nothing.
 
 ## Moderation and the operator's duties
 

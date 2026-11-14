@@ -57,6 +57,7 @@ export type RouteId =
   | 'credits'
   | 'instance'
   | 'moderation'
+  | 'operate'
   | 'more'
   | 'not-found';
 
@@ -651,6 +652,34 @@ export const MODERATION_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Operating the instance this device's account OWNS (#2603, epic #2601): the
+ * operator log today, and the instance's status, accounts, backups, AI
+ * backend, rooms and keys as later sub-issues fill it.
+ *
+ * **Not in {@link ROUTES}**, for {@link MODERATION_ROUTE}'s reason: only the
+ * instance's owner has any use for it. The Instance screen links to it when
+ * `instance/operate-port.ts` §`OperatePort.standing` says this device's account
+ * is the owner — never the deputy (ADR 0046 D-9 Q9) — and anybody else who
+ * opens its address is told only that their own account is not the owner,
+ * which the instance's own `not_found` already told them. In
+ * {@link ALL_ROUTES}, so the accessibility gate and the reflow walk audit it
+ * unasked.
+ */
+export const OPERATE_ROUTE: RouteDefinition = {
+  id: 'operate',
+  group: 'more',
+  layout: 'prose',
+  path: '/settings/instance/operate',
+  navLabel: 'Operate',
+  title: 'Operate',
+  summary: 'Run the instance you own, from this app.',
+  help: [
+    'Run the instance you own from this app: what was done to it, and by what. Only its owner ' +
+      'sees this page.',
+  ],
+};
+
+/**
  * The tripod phone's side-camera screen (#528, ADR 0033).
  *
  * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is a mode
@@ -756,6 +785,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
   MODERATION_ROUTE,
+  OPERATE_ROUTE,
   MORE_ROUTE,
   DELIVERY_COURSES_ROUTE,
   LAP_RACE_COURSES_ROUTE,

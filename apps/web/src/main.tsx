@@ -177,6 +177,7 @@ import {
 import type { LoadedFrom } from './instance/instance-pin';
 import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
+import { createOperatePort, type OperatePort } from './instance/operate-port';
 import { createStatementsPort, type StatementsPort } from './instance/statements-port';
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
@@ -1239,6 +1240,26 @@ function buildModerationPort(): ModerationPort | undefined {
 }
 
 /**
+ * The Operate area's port (#2603): the ONE production place an operate port
+ * is built, so `check:wiring` reports `createOperatePort` if this goes. Over
+ * the session the Connect screen keeps, sealed, through the one instance
+ * module (ADR 0036 D-3 (a)); a device signed in to nothing sends nothing.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildOperatePort(): OperatePort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  // Every Operate route is sealed and signed by this device's key (#2602).
+  return createOperatePort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
  * The statements of reasons about this rider's account (#910): the ONE
  * production place a statements port is built, so `check:wiring` reports
  * `createStatementsPort` if this goes. Over the instance this device
@@ -1753,6 +1774,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #955: built once, for the Connect screen's reason above.
   const moderation = buildModerationPort();
+  // #2603: built once, for the Connect screen's reason above.
+  const operate = buildOperatePort();
   // #910: what a moderator decided about this rider's account, and why.
   const statements = buildStatementsPort();
   // #1529: the riders this rider blocked, to undo a block by.
@@ -1847,6 +1870,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
+          {...(operate === undefined ? {} : { operate })}
           {...(statements === undefined ? {} : { statements })}
           {...(blocks === undefined ? {} : { blocks })}
           {...(sync === undefined ? {} : { sync })}

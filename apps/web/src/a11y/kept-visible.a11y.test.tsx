@@ -319,6 +319,8 @@ const KEPT: Record<RouteId, Kept> = {
     populated: MODERATION_KEPT_VISIBLE,
     reason: 'the empty walk is an account that moderates nothing, so the page has no action on it',
   },
+  // #2603: the owner's log and a list of sections to come; nothing on it acts.
+  operate: { sentences: [], reason: `${NOTHING_TUCKED}: a read-only log and a list` },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
   'route-editor': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {

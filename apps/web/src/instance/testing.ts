@@ -56,6 +56,7 @@ import {
   type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
+import type { OperatePort, OperateStanding, OperatorLogEntry } from './operate-port';
 
 export interface ScriptedInstance {
   readonly port: InstancePort;
@@ -835,6 +836,99 @@ export function scriptedModeration(
         inviteCode,
         expiresAt: 1_790_604_800,
       } as const);
+    },
+  };
+  return { port, calls, held };
+}
+
+/**
+ * A stand-in {@link OperatePort} (#2603) for the Operate area, the Instance
+ * screen's link to it, the accessibility walk and the browser harnesses. It
+ * keeps what the instance's operator log would — entries, oldest first as the
+ * instance writes them — and pages them NEWEST first, as `GET /v1/operate/log`
+ * does. Anybody it does not hold as the owner reads no log, as the instance
+ * answers them `not_found`.
+ */
+export interface ScriptedOperate {
+  readonly port: OperatePort;
+  /** Every method called, in order: `standing`, `log`, `log <cursor>`. */
+  readonly calls: string[];
+  held: {
+    standing: OperateStanding;
+    /** Oldest first, as the instance writes them. */
+    entries: OperatorLogEntry[];
+    /** How many entries one page holds. */
+    pageSize: number;
+    /** `false` to answer every read of the log as one that could not be read. */
+    logReadable: boolean;
+  };
+}
+
+/**
+ * Three operator log entries, oldest first: a migration from the CLI, a room
+ * opened from the app, and a failed restore whose detail is the longest its
+ * action's vocabulary admits (`apps/instance` §`OPERATOR_DETAILS`) — one
+ * unbroken word a 320 px page must break.
+ */
+export const SCRIPTED_OPERATOR_LOG: readonly OperatorLogEntry[] = [
+  {
+    id: 1,
+    at: '2026-11-14T09:00:00.000Z',
+    source: 'cli',
+    action: 'migrate',
+    detail: 'applied=40',
+    outcome: 'done',
+  },
+  {
+    id: 2,
+    at: '2026-11-14T09:30:00.000Z',
+    source: 'app',
+    action: 'room_open',
+    detail: 'ride',
+    outcome: 'done',
+  },
+  {
+    id: 3,
+    at: '2026-11-14T10:00:00.000Z',
+    source: 'cli',
+    action: 'restore',
+    detail: 'keys_not_rotated,blobs=999999999',
+    outcome: 'failed',
+  },
+];
+
+export function scriptedOperate(
+  options: {
+    readonly standing?: OperateStanding;
+    readonly entries?: readonly OperatorLogEntry[];
+    readonly pageSize?: number;
+  } = {},
+): ScriptedOperate {
+  const calls: string[] = [];
+  const held: ScriptedOperate['held'] = {
+    standing: options.standing ?? 'owner',
+    entries: [...(options.entries ?? SCRIPTED_OPERATOR_LOG)],
+    pageSize: options.pageSize ?? 25,
+    logReadable: true,
+  };
+  const port: OperatePort = {
+    standing: () => {
+      calls.push('standing');
+      return Promise.resolve(held.standing);
+    },
+    log: (cursor) => {
+      calls.push(cursor === undefined ? 'log' : `log ${cursor}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (!held.logReadable) return Promise.resolve({ kind: 'unreachable' });
+      // The cursor is an offset as text — opaque to the screen.
+      const newestFirst = [...held.entries].reverse();
+      const start = cursor === undefined ? 0 : Number(cursor);
+      const end = start + held.pageSize;
+      return Promise.resolve({
+        kind: 'page',
+        entries: newestFirst.slice(start, end),
+        next: end < newestFirst.length ? String(end) : null,
+      });
     },
   };
   return { port, calls, held };
