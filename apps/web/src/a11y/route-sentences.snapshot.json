@@ -3172,7 +3172,7 @@
     "Only the instance’s owner sees it: the instance refuses everyone else, the deputy moderator included.",
     "Operator log",
     "Every operator action, from this app or the host’s command line, newest first.",
-    "Load-test accounts added, 2026-11-14 10:00 UTC, from the command line on the host: refused (accounts_requested_by_the_operat=999999999,accounts_already_held_by_instanc=999999999,accounts_added_in_this_transacti=999999999).",
+    "Restored from a backup, 2026-11-14 10:00 UTC, from the command line on the host: failed (keys_not_rotated,blobs=999999999).",
     "Room opened, 2026-11-14 09:30 UTC, from the app: done (ride).",
     "Show older entries",
     "Still to come",

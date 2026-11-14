@@ -866,8 +866,9 @@ export interface ScriptedOperate {
 
 /**
  * Three operator log entries, oldest first: a migration from the CLI, a room
- * opened from the app, and a refused CLI action whose detail is the longest
- * unbroken one the instance's grammar admits — what a 320 px page must break.
+ * opened from the app, and a failed restore whose detail is the longest its
+ * action's vocabulary admits (`apps/instance` §`OPERATOR_DETAILS`) — one
+ * unbroken word a 320 px page must break.
  */
 export const SCRIPTED_OPERATOR_LOG: readonly OperatorLogEntry[] = [
   {
@@ -890,13 +891,9 @@ export const SCRIPTED_OPERATOR_LOG: readonly OperatorLogEntry[] = [
     id: 3,
     at: '2026-11-14T10:00:00.000Z',
     source: 'cli',
-    action: 'load_accounts_add',
-    detail: [
-      'accounts_requested_by_the_operat=999999999',
-      'accounts_already_held_by_instanc=999999999',
-      'accounts_added_in_this_transacti=999999999',
-    ].join(','),
-    outcome: 'refused',
+    action: 'restore',
+    detail: 'keys_not_rotated,blobs=999999999',
+    outcome: 'failed',
   },
 ];
 

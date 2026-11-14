@@ -117,8 +117,8 @@ describe('the Operate area over a scripted instance — #2603', () => {
     mounted = await mount(<OperateView port={scripted.port} />);
     await settle();
     expect(logLines()).toHaveLength(2);
-    expect(logLines()[0]).toContain('Load-test accounts added');
-    expect(logLines()[0]).toContain('refused');
+    expect(logLines()[0]).toContain('Restored from a backup');
+    expect(logLines()[0]).toContain('failed (keys_not_rotated,blobs=999999999)');
     expect(logLines()[1]).toContain(
       'Room opened, 2026-11-14 09:30 UTC, from the app: done (ride).',
     );
