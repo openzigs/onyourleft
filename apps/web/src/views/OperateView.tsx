@@ -169,9 +169,11 @@ function OperatorLog({
     const from = askedAt.current;
     if (from === null || log.kind !== 'page') return;
     askedAt.current = null;
+    // While there is more the button stays, so focus stays wherever it is —
+    // even on the document: Safari does not focus a button it clicks.
+    if (log.next !== null) return;
     // Only when focus was left with nowhere to be — the button went with the
-    // last page. While there is more it stays, and keeps focus; a rider who
-    // moved on keeps theirs.
+    // last page. A rider who moved on keeps theirs.
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
     const at = Math.min(from, log.entries.length - 1);

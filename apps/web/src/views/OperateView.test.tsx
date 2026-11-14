@@ -9,6 +9,7 @@
  * out at a tablet's and a phone's size by `browser/operate.browser.spec.ts`.
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createOperatePort, OPERATOR_LOG_PAGE } from '../instance/operate-port';
@@ -262,6 +263,25 @@ describe('the Operate area over a scripted instance — #2603', () => {
     await settle();
     expect(logLines()).toHaveLength(3);
     expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('leaves focus on the document after a pointer press brings a middle page, as Safari leaves it', async () => {
+    const scripted = scriptedOperate({ pageSize: 1 });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    // Safari on macOS and iOS does not focus a button on click or tap.
+    expect(document.activeElement).toBe(document.body);
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(logLines()).toHaveLength(2);
+    expect(showOlder()).toBeDefined();
+    expect(document.activeElement).toBe(document.body);
+    expect(mounted.container.querySelector('.oyl-operate__log > li[tabindex]')).toBeNull();
   });
 
   it('leaves focus where it is while there is still an older page to show', async () => {
