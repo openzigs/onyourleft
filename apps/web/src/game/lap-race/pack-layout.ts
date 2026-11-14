@@ -34,10 +34,14 @@
  *
  * ## Never inside one another
  *
- * Once every bot has its place, a bot less than {@link PACK_ABREAST_METRES}
- * across from a racer ahead of it is drawn at least a bike length behind it,
- * so a bot steering a lane over, or a row still closing up, is never drawn
- * through anyone. The rider is never moved.
+ * Two bicycles are inside each other under {@link BIKE_LENGTH_METRES} apart
+ * along and under {@link PACK_ABREAST_METRES} across: nose to tail on one line
+ * as much as side by side. Once every bot has its place, one that would be
+ * inside anyone is drawn instead at the place within its reach that is least
+ * inside anyone, the rider first: held back, stepped aside, or both. A bot the
+ * race has ahead of one it is held behind goes round it, up the side, as it
+ * goes round the rider (the owner's ruling of 2026-11-13). The rider is never
+ * moved.
  *
  * ## On the grid
  *
@@ -48,9 +52,10 @@
  * level the rider is laid out last: theirs is the back row, so the grid stands
  * from the rider's line forward and no bot is drawn behind the race's start.
  * Off the line a bot keeps its grid place until it is rolling
- * ({@link PACK_ROLLING_METRES_PER_SECOND}), and from there it gives way no
- * faster than {@link PACK_GIVE_WAY_SHARE} of its own speed, so its drawn place
- * goes forward from Go on and no bot stands still waiting for its place.
+ * ({@link PACK_ROLLING_METRES_PER_SECOND}), unless it is in the rider's line
+ * and its row is making way, when it eases aside; and from there it gives way
+ * no faster than {@link PACK_GIVE_WAY_SHARE} of its own speed, so its drawn
+ * place goes forward from Go on and no bot stands still waiting for its place.
  *
  * ## Never a jump
  *
@@ -59,8 +64,11 @@
  * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, the rider's own steering
  * speed, and {@link PACK_CLOSE_UP_METRES_PER_SECOND} along. Its sideways speed
  * goes to the drawing with it, which turns and leans the bicycle into the move
- * (#2456's `lane-change-lean.ts`). The layout is stepped with the race, a tick
- * at a time: a pure function of the field and the layout before.
+ * (#2456's `lane-change-lean.ts`). Keeping clear of another racer is held to
+ * the same reach, back no faster than it gives way, so no bot is drawn
+ * jumping or going backwards to get out of anyone's way (#2558's review). The
+ * layout is stepped with the race, a tick at a time: a pure function of the
+ * field and the layout before.
  */
 
 import { SIDEWAYS_METRES_PER_SECOND } from '../lanes';
@@ -366,17 +374,28 @@ export function stepPackLayout(
     throw new RangeError('a pack layout steps a finite number of seconds, 0 or more');
   }
   const wanted = targets(racers, riderId, previous, false);
+  const rider = racers.find((racer) => racer.id === riderId);
   const next = new Map<string, PackPlace>();
   for (const racer of racers) {
     if (racer.id === riderId) continue;
     const was = previous.get(racer.id);
     // Off the line, a bot keeps its place on the grid until it is rolling:
     // the field's order changes by centimetres while it gets going, and a
-    // place re-dealt for each would only shuffle it.
+    // place re-dealt for each would only shuffle it. But a bot in the rider's
+    // line, its row making way for them, still eases aside, away from the
+    // rider: a rider who steers into a bot still getting going finds it
+    // making way (#2558's review, finding 3).
+    const wants = wanted.get(racer.id) as Target;
+    const easesAside =
+      rider !== undefined &&
+      wants.makingWay &&
+      was !== undefined &&
+      Math.abs(was.lateral - rider.lateral) < PACK_ABREAST_METRES &&
+      Math.abs(wants.lateral - rider.lateral) > Math.abs(was.lateral - rider.lateral);
     const target =
       was !== undefined && racer.speed < PACK_ROLLING_METRES_PER_SECOND
-        ? { shift: was.shift, lateral: was.lateral }
-        : (wanted.get(racer.id) as Target);
+        ? { shift: was.shift, lateral: easesAside ? wants.lateral : was.lateral }
+        : wants;
     if (was === undefined) {
       next.set(racer.id, {
         shift: target.shift,
@@ -391,11 +410,7 @@ export function stepPackLayout(
       target.lateral,
       PACK_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds,
     );
-    // Back along the road no faster than it may give way: never backwards.
-    const back = Math.min(
-      PACK_CLOSE_UP_METRES_PER_SECOND,
-      PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed),
-    );
+    const back = giveWay(racer);
     next.set(racer.id, {
       shift:
         target.shift < was.shift
@@ -410,13 +425,87 @@ export function stepPackLayout(
 }
 
 /**
- * The layout with no two racers inside each other: front to back, a bot less
- * than {@link PACK_ABREAST_METRES} across from a racer ahead of it, and less
- * than {@link BIKE_LENGTH_METRES} behind, is in the way. A move that would put
- * it there waits, across or along, until the place is free; one already in
- * the way is drawn back toward a bike length behind, never faster than
- * {@link PACK_GIVE_WAY_SHARE} of its own speed, so it never goes backwards or
- * jumps. The rider is never moved.
+ * How fast a bot's drawn place may go back along the road, metres a second:
+ * {@link PACK_GIVE_WAY_SHARE} of its speed, and never more than
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND}, so it is never drawn going backwards.
+ */
+function giveWay(racer: PackRacer): number {
+  return Math.min(PACK_CLOSE_UP_METRES_PER_SECOND, PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed));
+}
+
+/** A racer as drawn while the field is cleared: its drawn place, and its place in the race. */
+interface Drawn {
+  readonly along: number;
+  readonly lateral: number;
+  /** Its race place, metres: who the race has ahead. */
+  readonly race: number;
+  /**
+   * Where it is drawn along on the frames back toward the tick before, at the
+   * far end, metres: its race place a tick back along its speed and its shift
+   * before. The frames between two ticks draw it there and at its new place
+   * across, so a move across is clear on them too only if it is clear here.
+   */
+  readonly before: number;
+}
+
+/**
+ * How far two drawn bicycles are inside each other: how far they are under a
+ * bike length apart along, times how far under a place apart across, square
+ * metres. Nought is clear; it shrinks as either moves off the other, so a step
+ * aside counts before the two are clear.
+ */
+function overlap(
+  one: { along: number; lateral: number },
+  other: { along: number; lateral: number },
+): number {
+  return (
+    Math.max(0, BIKE_LENGTH_METRES - Math.abs(one.along - other.along)) *
+    Math.max(0, PACK_ABREAST_METRES - Math.abs(one.lateral - other.lateral))
+  );
+}
+
+/** One place a bot may be drawn on this tick. */
+interface Candidate {
+  readonly shift: number;
+  readonly lateral: number;
+}
+
+/**
+ * How far ahead a bot sees the rider coming, seconds: **0.1**, two ticks, and
+ * {@link PACK_MAKE_WAY_SECONDS}, the time it takes to move two places across.
+ * A bot the rider would be inside by then moves already, so the rider, who
+ * may close faster than a bot may move, does not reach it, and a bot does not
+ * cross the rider's line just ahead of them.
+ */
+const PACK_SEEN_AHEAD_SECONDS = [0.1, PACK_MAKE_WAY_SECONDS] as const;
+
+/**
+ * How many times the field is gone through front to back each tick: **2**.
+ * The second time, a bot ahead sees where the bots behind it went, and can
+ * make room for one that had to move toward it.
+ */
+const PACK_CLEARING_PASSES = 2;
+
+/**
+ * The layout with no two racers inside each other (#2544): front to back,
+ * each bot is drawn at the place, within the tick's reach, that is least
+ * inside anyone. Its reach is what it may move in a tick:
+ * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, and along no faster than
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND} forward or {@link PACK_GIVE_WAY_SHARE}
+ * of its speed back, so it never jumps and never goes backwards (#2558's
+ * review, finding 1). Inside the rider counts first, since the rider is
+ * never moved; then inside a bot, each on this tick and on the frames drawn
+ * back to the tick before; then inside the rider
+ * {@link PACK_SEEN_AHEAD_SECONDS} on; then the least move from the place it
+ * was laid out in.
+ * Two bicycles are inside each other under a bike length along and under a
+ * place across, so two nose to tail on one line are as inside each other as
+ * two side by side (#2558's review, finding 2).
+ *
+ * A bot the race has ahead of a racer it is drawn held up behind goes round
+ * it: it steps aside toward a place beside it, where that is free, and then
+ * comes past up the side, as a bot passes the rider (the owner's ruling of
+ * 2026-11-13 on #2544).
  */
 function clear(
   racers: readonly PackRacer[],
@@ -429,24 +518,27 @@ function clear(
   // Where every racer is while each bot is placed: the rider where they are,
   // a bot placed already where it was placed, and one still to place where it
   // was last tick, so a bot ahead never moves across into one level behind it.
-  const where = new Map<string, { along: number; lateral: number }>();
-  if (rider !== undefined) where.set(rider.id, { along: rider.along, lateral: rider.lateral });
+  const where = new Map<string, Drawn>();
   for (const racer of racers) {
-    if (racer.id === riderId) continue;
+    if (racer.id === riderId) {
+      where.set(racer.id, {
+        along: racer.along,
+        lateral: racer.lateral,
+        race: racer.along,
+        before: racer.along - racer.speed * elapsedSeconds,
+      });
+      continue;
+    }
     const was = previous.get(racer.id) ?? layout.get(racer.id);
     if (was !== undefined) {
-      where.set(racer.id, { along: racer.along + was.shift, lateral: was.lateral });
+      where.set(racer.id, {
+        along: racer.along + was.shift,
+        lateral: was.lateral,
+        race: racer.along,
+        before: racer.along - racer.speed * elapsedSeconds + was.shift,
+      });
     }
   }
-  let placing = '';
-  const blocking = (along: number, lateral: number) =>
-    [...where].find(
-      ([id, other]) =>
-        id !== placing &&
-        Math.abs(other.lateral - lateral) < PACK_ABREAST_METRES &&
-        Math.abs(other.along - along) < BIKE_LENGTH_METRES,
-    )?.[1];
-  const fixed = [...where.values()];
   const bots = racers
     .filter((racer) => racer.id !== riderId)
     .map((racer) => ({ racer, place: layout.get(racer.id) as PackPlace }))
@@ -455,87 +547,164 @@ function clear(
         b.racer.along + b.place.shift - (a.racer.along + a.place.shift) ||
         (a.racer.id < b.racer.id ? -1 : 1),
     );
-  for (const { racer, place } of bots) {
-    placing = racer.id;
-    const was = previous.get(racer.id);
-    const { shiftBefore } = place;
-    let { lateral, sway, shift } = place;
-    if (was !== undefined && blocking(racer.along + shift, lateral) !== undefined) {
-      // A move into a place that is taken waits: across first, then along,
-      // then both, whichever leaves it clear; where none does, it is already
-      // in someone's way, and gives way back toward a bike length behind.
-      const tries = [
-        { shift, lateral: was.lateral },
-        { shift: Math.min(shift, was.shift), lateral },
-        { shift: Math.min(shift, was.shift), lateral: was.lateral },
-      ];
-      const free = tries.find(
-        (each) => blocking(racer.along + each.shift, each.lateral) === undefined,
+  const across = PACK_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds;
+  for (let pass = 0; pass < PACK_CLEARING_PASSES; pass += 1) {
+    for (const { racer, place } of bots) {
+      const was = previous.get(racer.id);
+      if (was === undefined) continue;
+      const placed = clearOf(
+        racer,
+        place,
+        layout.get(racer.id) as PackPlace,
+        was,
+        where,
+        rider,
+        across,
+        elapsedSeconds,
       );
-      if (free !== undefined) {
-        ({ shift, lateral } = free);
-      } else {
-        // Nowhere free: the place furthest from anyone, then give way from it.
-        // Out of the rider's way first, since the rider is never moved.
-        const clearance = (each: { shift: number; lateral: number }): number =>
-          Math.min(
-            ...[...where]
-              .filter(([id]) => id !== placing)
-              .map(([, other]) =>
-                Math.hypot(other.along - (racer.along + each.shift), other.lateral - each.lateral),
-              ),
-          );
-        const inRidersWay = (each: { shift: number; lateral: number }): boolean =>
-          rider !== undefined &&
-          Math.abs(rider.lateral - each.lateral) < PACK_ABREAST_METRES &&
-          Math.abs(rider.along - (racer.along + each.shift)) < BIKE_LENGTH_METRES;
-        ({ shift, lateral } = [{ shift, lateral }, ...tries].reduce((best, each) =>
-          Number(inRidersWay(best)) - Number(inRidersWay(each)) ||
-          clearance(each) - clearance(best) > 0
-            ? each
-            : best,
-        ));
-        // What it may still give back this tick, less what it gave already.
-        let room =
-          PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed) * elapsedSeconds -
-          Math.max(0, was.shift - shift);
-        for (let pass = 0; pass <= fixed.length && room > 0; pass += 1) {
-          const ahead = blocking(racer.along + shift, lateral);
-          // Back only from a racer ahead of it: never back through one behind.
-          if (ahead === undefined || ahead.along < racer.along + shift) break;
-          const back = Math.min(room, racer.along + shift - (ahead.along - BIKE_LENGTH_METRES));
-          if (!(back > 0)) break;
-          shift -= back;
-          room -= back;
-        }
-      }
-      sway = elapsedSeconds > 0 ? (lateral - was.lateral) / elapsedSeconds : 0;
+      where.set(racer.id, {
+        along: racer.along + placed.shift,
+        lateral: placed.lateral,
+        race: racer.along,
+        before: racer.along - racer.speed * elapsedSeconds + was.shift,
+      });
+      layout.set(racer.id, {
+        shift: placed.shift,
+        shiftBefore: place.shiftBefore,
+        lateral: placed.lateral,
+        sway: elapsedSeconds > 0 ? (placed.lateral - was.lateral) / elapsedSeconds : 0,
+      });
     }
-    // Never through the rider, who is never moved: a bot still in their way,
-    // because it could not get aside in time, is held clear of them, a bike
-    // length ahead or behind on the side it is on, and steps aside at the
-    // sideways speed where that is free, until it is clear and let go.
-    if (
-      was !== undefined &&
-      rider !== undefined &&
-      Math.abs(rider.lateral - lateral) < PACK_ABREAST_METRES &&
-      Math.abs(rider.along - (racer.along + shift)) < BIKE_LENGTH_METRES
-    ) {
-      const ahead = racer.along + shift >= rider.along ? 1 : -1;
-      shift = rider.along + ahead * BIKE_LENGTH_METRES - racer.along;
-      const side = Math.sign(was.lateral - rider.lateral) || 1;
-      const aside = toward(
-        was.lateral,
-        rider.lateral + side * PACK_ABREAST_METRES,
-        PACK_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds,
-      );
-      if (blocking(racer.along + shift, aside) === undefined || aside === lateral) {
-        lateral = aside;
-      }
-      sway = elapsedSeconds > 0 ? (lateral - was.lateral) / elapsedSeconds : 0;
-    }
-    where.set(racer.id, { along: racer.along + shift, lateral });
-    layout.set(racer.id, { shift, shiftBefore, lateral, sway });
   }
   return layout;
+}
+
+/**
+ * One bot's place this tick, clear of everyone in `where` as far as its reach
+ * allows: where it is placed so far (`current`) when that is clear, and
+ * otherwise the best place within reach of where it was (`was`), the least
+ * move from where it was laid out (`place`).
+ */
+function clearOf(
+  racer: PackRacer,
+  place: PackPlace,
+  current: Candidate,
+  was: PackPlace,
+  where: ReadonlyMap<string, Drawn>,
+  rider: PackRacer | undefined,
+  across: number,
+  elapsedSeconds: number,
+): Candidate {
+  const others = [...where].filter(([id]) => id !== racer.id).map(([, other]) => other);
+  const drawnAt = (each: Candidate) => ({ along: racer.along + each.shift, lateral: each.lateral });
+  // On the frames drawn back toward the tick before, a bot is drawn at its
+  // shift before but already at its new place across: a move across is clear
+  // there only if it is clear of where the other is drawn there.
+  const before = racer.along - racer.speed * elapsedSeconds + was.shift;
+  const insideBefore = (
+    each: Candidate,
+    other: Drawn,
+    moving = each.lateral !== was.lateral,
+  ): number =>
+    moving
+      ? overlap(
+          { along: before, lateral: each.lateral },
+          { along: other.before, lateral: other.lateral },
+        )
+      : 0;
+  // Inside the rider: on this tick, and on the frames back to the tick
+  // before. And soon to be: a moment on, each racer at its own speed.
+  const riderDrawn = rider === undefined ? undefined : where.get(rider.id);
+  const insideRider = (each: Candidate): number =>
+    rider === undefined || riderDrawn === undefined
+      ? 0
+      : overlap(drawnAt(each), rider) + insideBefore(each, riderDrawn, true);
+  const riderSoon = (each: Candidate): number =>
+    rider === undefined
+      ? 0
+      : PACK_SEEN_AHEAD_SECONDS.reduce(
+          (sum, seconds) =>
+            sum +
+            overlap(
+              { along: racer.along + each.shift + racer.speed * seconds, lateral: each.lateral },
+              { along: rider.along + rider.speed * seconds, lateral: rider.lateral },
+            ),
+          0,
+        );
+  const insideAny = (each: Candidate): number =>
+    others.reduce(
+      (sum, other) => sum + overlap(drawnAt(each), other) + insideBefore(each, other),
+      0,
+    );
+  const now = { shift: place.shift, lateral: place.lateral };
+  let chosen: Candidate = { shift: current.shift, lateral: current.lateral };
+  if (insideRider(chosen) === 0 && insideAny(chosen) === 0 && riderSoon(chosen) === 0) {
+    return chosen;
+  }
+  // Within reach: along, from as far back as it may give way to keep clear,
+  // PACK_GIVE_WAY_SHARE of its speed so it is still drawn going forward, to
+  // as far on as it may close up; across, a step either way.
+  const least = was.shift - PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed) * elapsedSeconds;
+  const most = was.shift + PACK_CLOSE_UP_METRES_PER_SECOND * elapsedSeconds;
+  const reach = (shift: number): number => Math.min(most, Math.max(least, shift));
+  const near = others.filter(
+    (other) => overlap(drawnAt(now), other) > 0 || overlap(drawnAt(was), other) > 0,
+  );
+  // Along: where it was laid out, where it was, as far back as it may go, and
+  // a bike length either side of each racer near it. Across: where it was
+  // laid out, where it was, and a step toward a place either side of each.
+  const shifts = [
+    now.shift,
+    Math.min(now.shift, was.shift),
+    least,
+    ...near.flatMap((other) =>
+      [-1, 1].map((side) => other.along + side * BIKE_LENGTH_METRES - racer.along),
+    ),
+  ].map(reach);
+  const laterals = [
+    now.lateral,
+    was.lateral,
+    ...near.flatMap((other) =>
+      [-1, 1].map((side) =>
+        toward(was.lateral, other.lateral + side * PACK_ABREAST_METRES, across),
+      ),
+    ),
+  ];
+  const moved = (each: Candidate): number =>
+    Math.abs(each.shift - now.shift) + Math.abs(each.lateral - now.lateral);
+  // Out of the rider's way first, since the rider is never moved; then out of
+  // every bot's; then the least move. Grouped so that a worse place never wins
+  // on a difference that is merely not nought (#2558's review, finding 4).
+  const better = (each: Candidate, best: Candidate): boolean =>
+    (insideRider(each) - insideRider(best) ||
+      insideAny(each) - insideAny(best) ||
+      riderSoon(each) - riderSoon(best) ||
+      moved(each) - moved(best)) < 0;
+  for (const shift of shifts) {
+    for (const lateral of laterals) {
+      const each = { shift, lateral };
+      if (better(each, chosen)) chosen = each;
+    }
+  }
+  // Held up behind a racer the race has it ahead of: it goes round, a step
+  // toward the place beside it, when that is no more inside anyone than
+  // being held.
+  const holding = near.find(
+    (other) =>
+      other.race < racer.along &&
+      other.along > racer.along + chosen.shift &&
+      overlap(drawnAt(now), other) > 0,
+  );
+  if (holding !== undefined && chosen.shift < now.shift) {
+    const first = Math.sign(was.lateral - holding.lateral) || 1;
+    const held = chosen;
+    const round = [first, -first]
+      .map((side) => ({
+        shift: held.shift,
+        lateral: toward(was.lateral, holding.lateral + side * PACK_ABREAST_METRES, across),
+      }))
+      .find((each) => insideRider(each) <= insideRider(held) && insideAny(each) <= insideAny(held));
+    if (round !== undefined) chosen = round;
+  }
+  return chosen;
 }
