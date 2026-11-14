@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RiderMarker } from './port';
+import { emptyRiderFadeLine, riderFadeLine } from './rider-fade';
 import { isConstructedMaterial, RiderSilhouetteBelt } from './three-renderer';
 import type { SunStyle } from './world';
 import { REALISTIC_RIDER_SILHOUETTE_BYTES } from './realistic-budget';
@@ -208,6 +209,31 @@ describe('the silhouette belt — one instanced transparent draw — #626', () =
     }
     expect(belt.mesh.instanceMatrix.version).toBeGreaterThan(0);
     expect((throws as unknown as { version: number }).version).toBeGreaterThan(0);
+  });
+
+  it('#2596 — casts none for a rider faded out, and a lighter one as it is part faded', () => {
+    const belt = new RiderSilhouetteBelt(silhouette);
+    belt.setShown(true);
+    const rider = at('rider', 0);
+    const line = riderFadeLine(
+      { ...rider, y: 3, targetAheadMetres: 25, eyeRoadY: 3, targetRoadY: 3 },
+      [rider],
+      emptyRiderFadeLine(),
+    );
+    const part = { ...at('bot', -2.05), x: 1.1 };
+    belt.place([rider, at('bot', -2.05), part], sun, line);
+    expect(belt.mesh.count).toBe(2);
+    const throws = belt.mesh.geometry.getAttribute('oylThrow');
+    expect(throws.getZ(0)).toBe(0);
+    expect(throws.getZ(1)).toBeCloseTo(0.625, 6);
+    expect(belt.mesh.instanceMatrix.array[16 + 12]).toBeCloseTo(1.1, 5);
+    // The shader takes that share off the darkness.
+    const material = belt.mesh.material as unknown as { fragmentShader: string };
+    expect(material.fragmentShader).toContain('oylDarkness * cover * (1.0 - vOylFaded)');
+    // With no line, the control, both bots cast whole.
+    belt.place([rider, at('bot', -2.05), part], sun);
+    expect(belt.mesh.count).toBe(3);
+    expect(throws.getZ(1)).toBe(0);
   });
 
   it('draws nothing until it is shown, and nothing once it is hidden', () => {

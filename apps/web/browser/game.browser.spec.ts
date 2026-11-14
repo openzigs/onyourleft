@@ -5256,6 +5256,36 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(measured.shoulderRockControl).toBeLessThan(1e-6);
   });
 
+  test('fades a bot held between the camera and the rider out, body, bicycle, helmet and shadow, and draws the rider behind it as with no bot — #2596', async ({
+    harnessRun,
+  }) => {
+    const { riderFade: seen, riderFadeCalls: calls } = await realistic(harnessRun);
+    console.log(
+      `#2596 realistic squares read: ${JSON.stringify(seen)}; draw calls ${JSON.stringify(calls)}`,
+    );
+    // What it costs: no draw call. A body faded out entirely is not drawn at
+    // all, so the frame is the rider alone's; whole, the bot's body is one more.
+    expect(calls.alone).toBeGreaterThan(0);
+    expect(calls.faded).toBe(calls.alone);
+    expect(calls.whole).toBe(calls.alone + 1);
+    // The squares are what they say (the controls): the rider's is the
+    // rider, and with the fade off the bot fills its own and hides the rider.
+    expect(seen.riderDrawn).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.bot.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.rider.whole).toBeGreaterThan(0);
+    expect(seen.frame.whole).toBeGreaterThan(seen.bot.whole);
+    // The product: the bot is not drawn, its shadow is not drawn, and the
+    // rider is drawn exactly as with no bot.
+    expect(seen.bot.faded).toBe(0);
+    expect(seen.rider.faded).toBe(0);
+    expect(seen.frame.faded).toBe(0);
+    // Two places across, part of it: the rule keeps 3/8 of its pixels
+    // (`rider-fade.ts`), every part of it alike, so the square on its
+    // back keeps about that share, not none and not all.
+    expect(seen.aside.faded).toBeGreaterThan(seen.aside.whole * 0.25);
+    expect(seen.aside.faded).toBeLessThan(seen.aside.whole * 0.5);
+  });
+
   test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({
     harnessRun,
   }) => {

@@ -27,7 +27,14 @@ import {
   type ContactShadow,
 } from './contact-shadow';
 import type { RiderMarker } from './port';
-import { ContactShadowBelt, RiderBelt, ScatterBelt, WorldLamps } from './three-renderer';
+import { emptyRiderFadeLine, riderFadeLine } from './rider-fade';
+import {
+  ContactShadowBelt,
+  fadesRiders,
+  RiderBelt,
+  ScatterBelt,
+  WorldLamps,
+} from './three-renderer';
 import type { SunStyle } from './world';
 
 const blank = (): ContactShadow => ({ x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 });
@@ -361,5 +368,74 @@ describe('a leaning rider’s shadow — #499', () => {
 
   it('is still cast by nobody for the ghost, however far it leans', () => {
     expect(placeContactShadow(marker('ghost', 0, 0, 0.5), SUN, blank())).toBe(false);
+  });
+});
+
+describe('a faded rider’s shadow fades with it — #2596', () => {
+  const sun: SunStyle = { ...SUN, ambient: 0.4, direct: 0.6 / SUN.y };
+  /** The camera's line on a north-going road, the rider at the origin. */
+  const line = riderFadeLine(
+    {
+      x: 0,
+      y: 12,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      targetAheadMetres: 25,
+      eyeRoadY: 12,
+      targetRoadY: 12,
+    },
+    [marker('rider')],
+    emptyRiderFadeLine(),
+  );
+
+  it('draws no blob for a bot faded out, a lighter one for a bot part faded, and the rider’s whole', () => {
+    const blobs = new ContactShadowBelt();
+    // In line behind the rider (gone), two places across behind them (part),
+    // and ahead (whole).
+    const markers = [
+      marker('rider'),
+      marker('bot', 0, -2.05),
+      marker('bot', 1.1, -2.05),
+      marker('bot', 0, 6),
+    ];
+    blobs.place(markers, sun, line);
+    expect(blobs.mesh.count).toBe(3);
+    const faded = blobs.mesh.geometry.getAttribute('oylFaded');
+    expect(faded.getX(0)).toBe(0);
+    expect(faded.getX(1)).toBeCloseTo(0.625, 6);
+    expect(faded.getX(2)).toBe(0);
+    // The faded bot's slot went to the next caster: the part-faded one is placed second.
+    const into = blank();
+    placeContactShadow(markers[2] as RiderMarker, sun, into);
+    expect(translationOf(blobs, 1)[0]).toBeCloseTo(into.x, 5);
+    // With no line, the control, every caster's blob is drawn whole.
+    blobs.place(markers, sun);
+    expect(blobs.mesh.count).toBe(4);
+    for (let slot = 0; slot < 4; slot += 1) expect(faded.getX(slot)).toBe(0);
+  });
+
+  it('takes that share off the blob’s darkness in its shader', () => {
+    const blobs = new ContactShadowBelt();
+    const shader = {
+      vertexShader: '#include <common>\nvoid main() {\n#include <color_vertex>\n}',
+      fragmentShader: '',
+      uniforms: {},
+    };
+    (
+      blobs.mesh.material as unknown as { onBeforeCompile: (s: typeof shader) => void }
+    ).onBeforeCompile(shader);
+    expect(shader.vertexShader).toContain('attribute float oylFaded;');
+    expect(shader.vertexShader).toContain('vColor.a *= 1.0 - oylFaded;');
+  });
+
+  it('casts into the shadow map with a depth material that fades the rider as the picture does', () => {
+    const riders = new RiderBelt();
+    for (const mesh of Object.values(riders.meshes)) {
+      const depth = mesh.customDepthMaterial;
+      expect(depth?.type).toBe('MeshDepthMaterial');
+      expect(fadesRiders(depth as never)).toBe(true);
+    }
+    riders.dispose();
   });
 });
