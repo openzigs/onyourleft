@@ -31,6 +31,7 @@ import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
 import { integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
+import type { OperatorAction, SqlStore } from '../store/sql-store.ts';
 import { createSync } from '../sync/sync.ts';
 
 /**
@@ -63,6 +64,28 @@ import { createSync } from '../sync/sync.ts';
  *
  * Every command prints ONE JSON object, so a scheduled run's log is a record,
  * and names no row's contents — counts and times only.
+ *
+ * ## The operator log (#2602)
+ *
+ * Every command that changes the instance's state writes an entry to the
+ * operator log (migration 0040) — the owner's ruling of 2026-11-14 on #2601:
+ * the log is the whole record, the CLI's and the app's. Its actor is
+ * `{ source: 'cli' }` and NO athlete: the CLI runs on the host as whoever can
+ * reach the data, which is not an athlete, so it names none rather than
+ * borrowing the owner's. `verify`, `model-key status`, `instance-key show`
+ * and `account-erase` without `--confirm` change nothing and log nothing.
+ *
+ * - **A change to rows** (`room-open`, `model-key set|clear`, the
+ *   `instance-key` changes, `load-accounts`, `account-erase --confirm`) runs
+ *   inside `SqlStore.recordOperatorAction`, so the change and its entry
+ *   commit together or not at all; a refusal found there is logged
+ *   `refused`, and a failure `failed`, with the change rolled back.
+ * - **A change to files** (`migrate`, `backup`, `restore`) cannot share a
+ *   transaction with a row: its entry is written once the work has ended,
+ *   through the same function, and its report says `logged`. A restore's
+ *   entry goes into the database it restored — what the replaced one
+ *   recorded since the snapshot goes with it — and a snapshot from before
+ *   the operator log has none until `migrate` (`logged: false`).
  */
 
 export interface DataPaths {
@@ -109,11 +132,106 @@ function stamp(at: Date): string {
   return at.toISOString().replace(/[:.]/g, '-');
 }
 
+/** The CLI's actor in the operator log (#2602): the host, and no athlete. */
+const FROM_THE_CLI = { source: 'cli' } as const;
+
+/** Unix seconds, from the command's clock. */
+function secondsOf(now: (() => Date) | undefined): number {
+  return Math.floor((now ?? (() => new Date()))().getTime() / 1000);
+}
+
+/** A refusal found inside an operator action: logged `refused`, then thrown as the command's error. */
+class Refused {
+  readonly message: string;
+  constructor(message: string) {
+    this.message = message;
+  }
+}
+
+/**
+ * Run `change` on `store` as a CLI operator action (#2602): the change and
+ * its entry in ONE transaction. A {@link Refused} value is logged `refused`
+ * and thrown as a {@link CommandError}; anything thrown is logged `failed`
+ * and thrown on, the change rolled back.
+ */
+async function asOperatorAction<T>(
+  store: SqlStore,
+  action: OperatorAction,
+  change: (inside: SqlStore) => Promise<T | Refused>,
+  detail: (value: T) => string | null = () => null,
+  now?: () => Date,
+): Promise<T> {
+  const { value } = await store.recordOperatorAction<T | Refused>(
+    { actor: FROM_THE_CLI, action, at: secondsOf(now) },
+    async (inside) => {
+      const changed = await change(inside);
+      return changed instanceof Refused
+        ? { outcome: 'refused', value: changed }
+        : { outcome: 'done', detail: detail(changed), value: changed };
+    },
+  );
+  if (value instanceof Refused) throw new CommandError(value.message);
+  return value;
+}
+
+/**
+ * Log a command whose change is FILES once it has ended (#2602): `done` with
+ * `detail`, or — when `work` threw — `failed`, and the error thrown on. Answers
+ * whether the entry was written: a database with no operator log yet (one not
+ * migrated, or restored from before it) leaves the work done and unlogged.
+ */
+async function loggedAfter<T>(
+  database: string,
+  action: OperatorAction,
+  work: () => Promise<T>,
+  detail: (value: T) => string | null,
+): Promise<{ readonly value: T; readonly logged: boolean }> {
+  let failure: { readonly error: unknown } | undefined;
+  let value: T | undefined;
+  try {
+    value = await work();
+  } catch (error) {
+    failure = { error };
+  }
+  let logged = false;
+  if (existsSync(database)) {
+    const store = openServingStore(database);
+    try {
+      await store.recordOperatorAction(
+        { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
+        () => {
+          if (failure !== undefined) throw failure.error;
+          return { outcome: 'done', detail: detail(value as T), value: undefined };
+        },
+      );
+      logged = true;
+    } catch (error) {
+      // The work's own error is the one an operator needs; a log that could
+      // not be written leaves `logged` false.
+      if (
+        failure === undefined &&
+        !(error instanceof Error && /no such table/.test(error.message))
+      ) {
+        throw error;
+      }
+    } finally {
+      await store.close();
+    }
+  }
+  if (failure !== undefined) throw failure.error;
+  return { value: value as T, logged };
+}
+
 export async function migrate(paths: DataPaths) {
   await mkdir(dirname(paths.database), { recursive: true });
   const started = performance.now();
-  const report = await migrateForDeploy(paths.database);
-  return { command: 'migrate', ...report, ms: Math.round(performance.now() - started) };
+  const { value: report, logged } = await loggedAfter(
+    paths.database,
+    'migrate',
+    () => migrateForDeploy(paths.database),
+    (done) => `applied=${String(done.changed)}`,
+  );
+  return { command: 'migrate', ...report, ms: Math.round(performance.now() - started), logged };
 }
 
 export async function backup(
@@ -125,6 +243,20 @@ export async function backup(
   if (options.keep !== undefined && (!Number.isInteger(options.keep) || options.keep < 1)) {
     throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
   }
+  const { value, logged } = await loggedAfter(
+    paths.database,
+    'backup',
+    () => takeBackup(paths, destination, options),
+    (done) => `blobs=${String(done.blobs)},removed=${String(done.removed)}`,
+  );
+  return { ...value, logged };
+}
+
+async function takeBackup(
+  paths: DataPaths,
+  destination: string,
+  options: { readonly keep?: number; readonly copyTo?: string; readonly now?: () => Date },
+) {
   const started = performance.now();
   const at = (options.now ?? (() => new Date()))();
   const snapshot = join(destination, `snapshot-${stamp(at)}`);
@@ -191,6 +323,22 @@ export async function restore(
     /** `OYL_INSTANCE_SECRET_KEY` and `OYL_INSTANCE_ORIGIN`, for the rotation it ends with (#1189). */
     readonly keys?: KeyEnvironment;
   } = {},
+) {
+  // Logged into the database it RESTORED, once the data is in place and checked.
+  const { value, logged } = await loggedAfter(
+    paths.database,
+    'restore',
+    () => placeRestore(paths, snapshot, options),
+    (done) =>
+      `blobs=${String(done.blobs)},${done.keys.rotated ? 'keys_rotated' : 'keys_not_rotated'}`,
+  );
+  return { ...value, logged };
+}
+
+async function placeRestore(
+  paths: DataPaths,
+  snapshot: string,
+  options: { readonly force?: boolean; readonly keys?: KeyEnvironment },
 ) {
   const started = performance.now();
   const manifestPath = join(snapshot, MANIFEST);
@@ -281,22 +429,33 @@ function keyEnvironment(environment: KeyEnvironment): {
   return { secret: read.kind === 'ok' ? read.bytes : undefined, origin: config.config.origin };
 }
 
+/**
+ * `operation` over the instance's keys — as an operator action when `action`
+ * is named (#2602): the keys over the action's store, so what it writes and
+ * its log entry commit together. `show` and the rotation inside `restore`
+ * (logged as the restore) name none.
+ */
 async function withInstanceKeys<T>(
   paths: DataPaths,
   environment: KeyEnvironment,
   operation: (keys: InstanceKeys) => Promise<T>,
+  action?: OperatorAction,
 ): Promise<T> {
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const { secret, origin } = keyEnvironment(environment);
   const store = openServingStore(paths.database);
+  const now = environment.now ?? (() => Math.floor(Date.now() / 1000));
+  const keysOver = (over: SqlStore): InstanceKeys =>
+    createInstanceKeys({ store: over, secret, origin, now });
   try {
-    const keys = createInstanceKeys({
+    if (action === undefined) return await operation(keysOver(store));
+    return await asOperatorAction(
       store,
-      secret,
-      origin,
-      now: environment.now ?? (() => Math.floor(Date.now() / 1000)),
-    });
-    return await operation(keys);
+      action,
+      (inside) => operation(keysOver(inside)),
+      undefined,
+      () => new Date(now() * 1000),
+    );
   } catch (error) {
     // A fixed sentence naming the variable; never a key.
     if (error instanceof InstanceKeysUnavailable) throw new CommandError(error.message);
@@ -352,38 +511,50 @@ export async function instanceKey(
   ) {
     throw new CommandError('--serial-above is a whole number: the serial a device names.');
   }
-  return withInstanceKeys(paths, environment, async (keys) => {
-    const command = `instance-key ${action.action}`;
-    switch (action.action) {
-      case 'init': {
-        const done = await keys.maintain();
-        return { command, made: done.made, ...(await keys.show()) };
+  const logged: Readonly<Record<InstanceKeyAction['action'], OperatorAction | undefined>> = {
+    init: 'instance_key_init',
+    show: undefined,
+    rotate: 'instance_key_rotate',
+    'rotate-identity': 'instance_key_rotate_identity',
+    reset: 'instance_key_reset',
+  };
+  return withInstanceKeys(
+    paths,
+    environment,
+    async (keys) => {
+      const command = `instance-key ${action.action}`;
+      switch (action.action) {
+        case 'init': {
+          const done = await keys.maintain();
+          return { command, made: done.made, ...(await keys.show()) };
+        }
+        case 'show':
+          return { command, ...(await keys.show()) };
+        case 'rotate':
+          return {
+            command,
+            ...(await keys.rotate({
+              dropOld: action.dropOld,
+              ...(action.serialAbove === undefined ? {} : { serialAbove: action.serialAbove }),
+            })),
+          };
+        case 'rotate-identity':
+          return {
+            command,
+            endorsed: !action.compromised,
+            repin: 'every device pins again from the new card',
+            ...(await keys.rotateIdentity({ compromised: action.compromised })),
+          };
+        case 'reset':
+          return {
+            command,
+            repin: 'every device pins again from the new card',
+            ...(await keys.reset()),
+          };
       }
-      case 'show':
-        return { command, ...(await keys.show()) };
-      case 'rotate':
-        return {
-          command,
-          ...(await keys.rotate({
-            dropOld: action.dropOld,
-            ...(action.serialAbove === undefined ? {} : { serialAbove: action.serialAbove }),
-          })),
-        };
-      case 'rotate-identity':
-        return {
-          command,
-          endorsed: !action.compromised,
-          repin: 'every device pins again from the new card',
-          ...(await keys.rotateIdentity({ compromised: action.compromised })),
-        };
-      case 'reset':
-        return {
-          command,
-          repin: 'every device pins again from the new card',
-          ...(await keys.reset()),
-        };
-    }
-  });
+    },
+    logged[action.action],
+  );
 }
 
 /** The operator's secret, imported, or a refusal naming the variable and never its value. */
@@ -449,29 +620,38 @@ export async function modelKeySet(
   }
   const store = openServingStore(paths.database);
   try {
-    const device = await store.findDeviceKey(ownerKey);
-    if (device === undefined || device.revokedAt !== null) {
-      throw new CommandError(
-        'OYL_INSTANCE_OWNER_KEY is not a device key of any athlete on this instance: the operator signs in first. Nothing was written.',
-      );
-    }
-    const sealed = await sealHostedKey(secret, {
-      athleteId: device.athleteId,
-      url: url.url.href,
-      model,
-      key,
-    });
-    const put = await store.putHostedModelKey(device.athleteId, {
-      url: url.url.href,
-      model,
-      ...sealed,
-      setAt: Math.floor((options.now ?? (() => new Date()))().getTime() / 1000),
-    });
-    if (put.outcome === 'no-athlete') {
-      throw new CommandError(
-        'The operator’s athlete is not on this instance. Nothing was written.',
-      );
-    }
+    await asOperatorAction(
+      store,
+      'model_key_set',
+      async (inside) => {
+        const device = await inside.findDeviceKey(ownerKey);
+        if (device === undefined || device.revokedAt !== null) {
+          return new Refused(
+            'OYL_INSTANCE_OWNER_KEY is not a device key of any athlete on this instance: the operator signs in first. Nothing was written.',
+          );
+        }
+        const sealed = await sealHostedKey(secret, {
+          athleteId: device.athleteId,
+          url: url.url.href,
+          model,
+          key,
+        });
+        const put = await inside.putHostedModelKey(device.athleteId, {
+          url: url.url.href,
+          model,
+          ...sealed,
+          setAt: secondsOf(options.now),
+        });
+        if (put.outcome === 'no-athlete') {
+          return new Refused(
+            'The operator’s athlete is not on this instance. Nothing was written.',
+          );
+        }
+        return put.outcome;
+      },
+      () => null,
+      options.now,
+    );
   } finally {
     await store.close();
   }
@@ -505,7 +685,13 @@ export async function modelKeyStatus(paths: DataPaths, secretText: string | unde
 export async function modelKeyClear(paths: DataPaths) {
   const store = openServingStore(paths.database);
   try {
-    return { command: 'model-key clear', cleared: await store.clearHostedModelKey() };
+    const cleared = await asOperatorAction(
+      store,
+      'model_key_clear',
+      (inside) => inside.clearHostedModelKey(),
+      (held) => (held ? 'cleared' : 'none_held'),
+    );
+    return { command: 'model-key clear', cleared };
   } finally {
     await store.close();
   }
@@ -548,23 +734,32 @@ export async function roomOpen(
     throw new CommandError('--route is a lower-case SHA-256.');
   const store = openServingStore(paths.database);
   try {
-    await store.putRoom({
-      id: roomId,
-      kind: options.kind === 'ride' ? 'group' : 'race',
-      visibility: 'private',
-      routeSha256,
-      physicsVersion: PHYSICS_VERSION,
-    });
-    await store.putRoomCourse({
-      roomId,
-      lengthMetres: options.lengthMetres,
-      grades: [[0, options.gradePercent ?? 0]],
-      ridingPosition: position,
-      capacity: null,
-      countdownMs: options.countdownMs ?? null,
-      rejoinWindowMs: null,
-      raceStartedAt: null,
-    });
+    // The room and its course, and the entry, together (#2602).
+    await asOperatorAction(
+      store,
+      'room_open',
+      async (inside) => {
+        await inside.putRoom({
+          id: roomId,
+          kind: options.kind === 'ride' ? 'group' : 'race',
+          visibility: 'private',
+          routeSha256,
+          physicsVersion: PHYSICS_VERSION,
+        });
+        await inside.putRoomCourse({
+          roomId,
+          lengthMetres: options.lengthMetres,
+          grades: [[0, options.gradePercent ?? 0]],
+          ridingPosition: position,
+          capacity: null,
+          countdownMs: options.countdownMs ?? null,
+          rejoinWindowMs: null,
+          raceStartedAt: null,
+        });
+        return options.kind;
+      },
+      (kind) => kind,
+    );
   } finally {
     await store.close();
   }
@@ -614,28 +809,38 @@ export async function loadAccountsAdd(
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const store = openServingStore(paths.database);
   try {
-    let held = 0;
-    for (const key of keys) if ((await store.findDeviceKey(key)) !== undefined) held += 1;
-    if (held > 0) {
-      throw new CommandError(
-        `${String(held)} of these keys already belong to an account on this instance, and this command adds only accounts it makes. Nothing was written.`,
-      );
-    }
-    const at = Math.floor((options.now ?? (() => new Date()))().getTime() / 1000);
-    for (const [index, publicKey] of keys.entries()) {
-      const athleteId = randomHex(16);
-      await store.registerAthlete({
-        athlete: {
-          id: athleteId,
-          displayName: `Load ${String(index + 1)}`,
-          createdAt: at,
-          registrationState: 'active',
-        },
-        key: { publicKey, athleteId, addedAt: at, revokedAt: null },
-        recoveryCodeSha256s: [],
-        loadRunAt: at,
-      });
-    }
+    // Every account and the entry together (#2602): a run that fails part way adds none.
+    await asOperatorAction(
+      store,
+      'load_accounts_add',
+      async (inside) => {
+        let held = 0;
+        for (const key of keys) if ((await inside.findDeviceKey(key)) !== undefined) held += 1;
+        if (held > 0) {
+          return new Refused(
+            `${String(held)} of these keys already belong to an account on this instance, and this command adds only accounts it makes. Nothing was written.`,
+          );
+        }
+        const at = secondsOf(options.now);
+        for (const [index, publicKey] of keys.entries()) {
+          const athleteId = randomHex(16);
+          await inside.registerAthlete({
+            athlete: {
+              id: athleteId,
+              displayName: `Load ${String(index + 1)}`,
+              createdAt: at,
+              registrationState: 'active',
+            },
+            key: { publicKey, athleteId, addedAt: at, revokedAt: null },
+            recoveryCodeSha256s: [],
+            loadRunAt: at,
+          });
+        }
+        return keys.length;
+      },
+      (added) => `added=${String(added)}`,
+      options.now,
+    );
     return {
       command: 'load-accounts add',
       added: keys.length,
@@ -644,6 +849,32 @@ export async function loadAccountsAdd(
   } finally {
     await store.close();
   }
+}
+
+/**
+ * Erase each account `which` names the way a rider's own erasure does it
+ * (`sync/routes.ts` §`eraseAccount`): any room it made closed first, then its
+ * files and every row it owns — all through `store`, an operator action's.
+ * Answers how many.
+ */
+async function eraseAccounts(
+  paths: DataPaths,
+  store: SqlStore,
+  which: () => Promise<readonly string[]>,
+): Promise<number> {
+  const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
+  const rooms = createRooms({
+    store,
+    routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
+    nameFor: () => Promise.resolve(undefined),
+    now: () => Date.now(),
+  });
+  const athletes = await which();
+  for (const athleteId of athletes) {
+    await rooms.closeRoomsMadeBy(athleteId);
+    await sync.eraseAccount(athleteId);
+  }
+  return athletes.length;
 }
 
 /**
@@ -657,21 +888,17 @@ export async function loadAccountsErase(paths: DataPaths) {
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const store = openServingStore(paths.database);
   try {
-    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
-    const rooms = createRooms({
+    // The erasures and the entry together (#2602). A file removed before a
+    // rollback is gone; its rows are not, and a retry finds them again.
+    const erased = await asOperatorAction(
       store,
-      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
-      nameFor: () => Promise.resolve(undefined),
-      now: () => Date.now(),
-    });
-    const athletes = await store.listLoadAthletes();
-    for (const athleteId of athletes) {
-      await rooms.closeRoomsMadeBy(athleteId);
-      await sync.eraseAccount(athleteId);
-    }
+      'load_accounts_erase',
+      (inside) => eraseAccounts(paths, inside, () => inside.listLoadAthletes()),
+      (count) => `erased=${String(count)}`,
+    );
     return {
       command: 'load-accounts erase',
-      erased: athletes.length,
+      erased,
       remaining: (await store.listLoadAthletes()).length,
     };
   } finally {
@@ -735,15 +962,13 @@ export async function accountErase(
         next: 'Nothing was erased. Run it again with --confirm, the same code on standard input, to erase this account.',
       };
     }
-    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
-    const rooms = createRooms({
+    // The erasure and the entry together (#2602); the entry names no athlete.
+    await asOperatorAction(
       store,
-      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
-      nameFor: () => Promise.resolve(undefined),
-      now: () => Date.now(),
-    });
-    await rooms.closeRoomsMadeBy(athleteId);
-    await sync.eraseAccount(athleteId);
+      'account_erase',
+      (inside) => eraseAccounts(paths, inside, () => Promise.resolve([athleteId])),
+      () => null,
+    );
     if ((await store.getAthlete(athleteId)) !== undefined) {
       throw new CommandError('The account is still here after its erasure: run it again.');
     }

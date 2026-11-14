@@ -801,6 +801,40 @@ on disk only for riders who had already finished. A **group ride** has no result
 again, empty, for whoever rejoins it — from the start of the route. Every ride goes on recording on the rider's own
 device, whatever happens to the instance (ADR 0036 D-3).
 
+## The Operate area
+
+The app has an **owner-only area for running the instance** — Operate ([#2601](https://github.com/openzigs/onyourleft/issues/2601)).
+It is reached through the same device-key sign-in and the same sealed, end-to-end encrypted channel
+as everything else ([ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)),
+so the instance gains no new login. The server half is [#2602](https://github.com/openzigs/onyourleft/issues/2602):
+
+- **The owner's alone.** Every `/v1/operate/*` route is answered only for the athlete whose device
+  holds `OYL_INSTANCE_OWNER_KEY`. Anybody else — **the deputy included**, and a rider awaiting
+  approval or suspended — is answered `not_found`, exactly as an address with no route. The deputy is
+  a second moderator, not the operator (ADR 0046 D-9 Q9), and keeps the Moderation screen. The check
+  is made by the instance on every request, never only by hiding a button.
+- **Sealed, or not served.** Every Operate route is sealed-only. On an instance with no
+  `OYL_INSTANCE_SECRET_KEY`, which seals nothing, every Operate route answers `unavailable` and names
+  that variable: the owner's area is never served in plaintext through the tunnel.
+- **The operator log.** Every action taken as the operator is written to an append-only log
+  (migration 0040) **in the same transaction as the change**, so an action is applied and logged or
+  neither: from the app, naming the owner's athlete, and from the CLI on the host
+  (`node src/operator/cli.ts …`, the owner's ruling of 2026-11-14), naming **no athlete**, because
+  the CLI is run by whoever can reach the data, not by an account. The commands that change state —
+  `migrate`, `backup`, `restore`, `room-open`, `model-key set|clear`, `instance-key
+  init|rotate|rotate-identity|reset`, `load-accounts add|erase` and `account-erase --confirm` — are
+  logged; reads are not. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  work has ended and says `logged` in its report; a restore logs into the database it restored, so a
+  snapshot from before migration 0040 is `logged: false` until `migrate`. An entry carries when, where
+  from (`app` or `cli`), the action, a short closed-vocabulary detail (`applied=2`, `cleared`) — never
+  free text, a key or a position — and the outcome: `done`, `refused` or `failed`. The owner reads it
+  at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
+- **What erasure and `migrate … down` do to it.** As with the moderation log
+  ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite
+  triggers refuse any `UPDATE` or `DELETE`, **erasing an account keeps every entry** (it has no
+  foreign key to the account), and `migrate … down` refuses to undo migration 0040 while the log holds
+  a single entry.
+
 ## Moderation and the operator's duties
 
 Running an instance for other people is a set of duties as well as a box:

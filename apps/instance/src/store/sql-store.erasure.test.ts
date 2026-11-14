@@ -125,6 +125,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'statement.target_athlete_id': {
     kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
   },
+  'operator_log.actor_athlete_id': {
+    kept: 'the operator log is append-only, as the moderation log is: erasing the owner’s account does not erase what the operator did (#2602)',
+  },
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
@@ -311,6 +314,11 @@ describe('erasing an athlete (#769, #35)', () => {
         },
         at: 1_790_001_070,
       });
+      // #2602: B, as the operator, took an action from the app.
+      await store.recordOperatorAction(
+        { actor: { source: 'app', athleteId: ATHLETE_B }, action: 'room_open', at: 1_790_001_080 },
+        () => ({ outcome: 'done', value: undefined }),
+      );
       // #911: B appeals the statement about their hidden name.
       const [statement] = await store.listStatements(ATHLETE_B);
       await store.putAppeal({

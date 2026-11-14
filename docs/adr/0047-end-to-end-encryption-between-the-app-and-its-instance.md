@@ -1583,3 +1583,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   integrity log, is a moderator read and so in D-7's "every moderator read" row already. All three
   are marked `only` from the first and listed in `apps/instance/src/sealed/phase-two.ts` and
   `phase-one.ts`. The body above is not edited. (#69)
+- **2026-11-14** — **D-7's phase-2 list gains a row of its own: the owner's Operate area** (#2602,
+  the owner's rulings of 2026-11-14 on #2601). `GET /v1/operate/log`, the operator log, is marked
+  `only` from the first, and every later `/v1/operate/*` route joins this row the same way: it is
+  the owner's admin surface, reached through the tunnel. As with the side camera's row (ADR 0050
+  D-2), **an instance with no `OYL_INSTANCE_SECRET_KEY` does not serve these routes in plaintext**:
+  it answers each `unavailable`, naming the variable, rather than offering an admin surface
+  unsealed (D-7, D-13).
+  Each route is reached only by the athlete holding `OYL_INSTANCE_OWNER_KEY` — not the deputy — and
+  is listed in `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#2602)
