@@ -207,28 +207,30 @@ export function stepWbal(
  * - never over CP while it is exhausted;
  * - never more above CP than its balance pays for in the tick, so the balance
  *   reaches 0 and goes no further;
- * - and never under its floor.
+ * - and never under its floor: the capacity's, or `floorWatts` where the
+ *   caller names one (#2542: none on a wheel in a draft, ADR 0067 D-1.3).
  *
  * Over a tick of no time the balance limits nothing, because nothing is spent.
  *
  * @throws {LapRaceError} as {@link stepWbal}, and `power-not-finite` for a
- *   wanted power that is not a finite number of watts.
+ *   wanted power or a floor that is not a finite number of watts.
  */
 export function spendableWatts(
   capacity: BotCapacity,
   energy: BotEnergy,
   wantedWatts: number,
   dtSeconds: number,
+  floorWatts: number = capacity.floorWatts,
 ): number {
   checkCapacity(capacity);
   checkEnergy(capacity, energy);
   checkElapsed(dtSeconds);
-  if (!Number.isFinite(wantedWatts)) {
+  if (!Number.isFinite(wantedWatts) || !Number.isFinite(floorWatts)) {
     throw new LapRaceError('power-not-finite', 'power must be a finite number of watts');
   }
   const { cpWatts } = capacity;
   let most = Math.min(capacity.peakWatts, BOT_CEILING_WATTS);
   if (energy.exhausted) most = Math.min(most, cpWatts);
   else if (dtSeconds > 0) most = Math.min(most, cpWatts + energy.wbalJoules / dtSeconds);
-  return Math.max(capacity.floorWatts, Math.min(wantedWatts, most));
+  return Math.max(floorWatts, Math.min(wantedWatts, most));
 }

@@ -43,6 +43,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradeAt,
+  gradePercent,
   kilograms,
   metres,
   metresPerSecond,
@@ -54,7 +55,7 @@ import {
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
-import { withDefaultCoefficients } from './coefficients';
+import { withDefaultCoefficients, withDragArea } from './coefficients';
 import * as botPacerModule from './pacer';
 import * as physicsPackage from './index';
 import {
@@ -62,9 +63,11 @@ import {
   advancePlannedBot,
   BOT_AT_START_LINE,
   botDemand,
+  botHoldWatts,
   createBotPacer,
   type BotCourse,
 } from './pacer';
+import { powerRequired } from './power';
 import { PhysicsError } from './physics-error';
 import { advance, START_OF_RIDE, type RideState } from './simulate';
 
@@ -204,6 +207,32 @@ describe('the bot goes through the same physics as the rider', () => {
         advancePlannedBot(MID_ROUTE, seconds(1), courseOn(CLIMB), watts(321), bad),
       ).toThrow(PhysicsError);
     }
+  });
+
+  it('works out what holds a speed on the road under the bot, at its k, through powerRequired (#2542)', () => {
+    const at = (course: BotCourse, speed: number, k?: number): number =>
+      botHoldWatts(MID_ROUTE, course, speed, k);
+    const base = withDefaultCoefficients(undefined);
+    const expected = (grade: number, speed: number, k: number, headwind?: number): number =>
+      powerRequired({
+        groundSpeed: metresPerSecond(speed),
+        totalMass: kilograms(75),
+        grade: gradePercent(grade),
+        airDensityKilogramsPerCubicMetre: AIR,
+        ...(headwind === undefined ? {} : { headwindMetresPerSecond: headwind }),
+        coefficients: withDragArea(k * base.dragCoefficient * base.frontalAreaSquareMetres),
+      }).totalWatts;
+    expect(at(courseOn(FLAT), 10)).toBeCloseTo(expected(0, 10, 1), 9);
+    expect(at(courseOn(CLIMB), 5, 0.65)).toBeCloseTo(expected(gradeAt(CLIMB, 1000), 5, 0.65), 9);
+    // The course's wind is in it, and a draft is cheaper than the open.
+    expect(at({ ...courseOn(FLAT), headwindMetresPerSecond: 3 }, 10)).toBeCloseTo(
+      expected(0, 10, 1, 3),
+      9,
+    );
+    expect(at(courseOn(FLAT), 10, 0.65)).toBeLessThan(at(courseOn(FLAT), 10));
+    // Signed: a descent steep enough asks for less than nothing.
+    expect(at(courseOn(DESCENT), 5)).toBeLessThan(0);
+    expect(() => at(courseOn(FLAT), 10, 0)).toThrow(PhysicsError);
   });
 
   it('rides on whatever that tick returns, so it cannot be on separate maths', () => {

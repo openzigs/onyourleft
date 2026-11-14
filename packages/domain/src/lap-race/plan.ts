@@ -114,6 +114,7 @@ import {
 import { BOT_EVEN_PACE, BOT_STYLE_EASING, checkBotPace, type BotPace } from './pace';
 import { nextUnit, raceRandom } from './random';
 import type { RaceCourse } from './race';
+import { BOT_TACTIC_WHEEL_FLOOR_WATTS } from './tactics';
 import { spendableWatts, stepWbal, type BotCapacity, type BotEnergy } from './wbal';
 
 /**
@@ -308,6 +309,19 @@ export interface BotPlanTactic {
   readonly targetWatts: number;
   /** Whether the tactic is `kick`: the bot sprints, and its plan's own sprint distance gives way. */
   readonly kick: boolean;
+  /**
+   * Which wheel the target holds (#2542), shaped to the road and the draft
+   * already, so the plan rides it as it is, its style and the grade adding
+   * nothing: `'sit-in'`, never past what the plan itself rides here, so a
+   * wheel that attacks is let go; `'follow'`, as far as W′ pays. Absent, it
+   * holds none.
+   */
+  readonly wheel?: 'sit-in' | 'follow';
+  /**
+   * Whether the bot rides in a draft this tick, `k` < 1 (#2542). On a wheel in
+   * a draft the floor does not apply (ADR 0067 D-1.3, R-10). Absent, it does not.
+   */
+  readonly drafted?: boolean;
 }
 
 /** What one step of the plan reads from the bot's own ride. */
@@ -392,6 +406,24 @@ export function botPlanStep(
   // #2455: the bot's own power here, never over its tier's; its CP in its
   // hard part, and eased under it outside, where it recovers.
   const { tactic } = input;
+  // #2542: a wheel's target is already the road's and the draft's: ridden as
+  // it is, with no floor in a draft (ADR 0067 D-1.3, R-10). Sitting in, never
+  // past the plan's own ride here.
+  if (tactic?.wheel !== undefined) {
+    const floor = tactic.drafted === true ? BOT_TACTIC_WHEEL_FLOOR_WATTS : plan.capacity.floorWatts;
+    const ceiling =
+      tactic.wheel === 'sit-in'
+        ? coursePower(plan, ownPowerAt(plan, effortDistance), input.grade)
+        : tactic.targetWatts;
+    const held = spendableWatts(
+      plan.capacity,
+      energy,
+      Math.min(tactic.targetWatts, ceiling),
+      elapsed,
+      floor,
+    );
+    return { power: watts(held), energy: stepWbal(plan.capacity, energy, held, elapsed) };
+  }
   const own =
     tactic === undefined
       ? ownPowerAt(plan, effortDistance)

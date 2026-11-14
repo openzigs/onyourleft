@@ -89,6 +89,7 @@ import {
   gradeAt,
   kilograms,
   metres,
+  metresPerSecond,
   pacedPowerWatts,
   seconds,
 } from '@onyourleft/domain';
@@ -96,6 +97,7 @@ import {
 import type { PhysicsCoefficients } from './coefficients';
 import { withDefaultCoefficients, withDragArea } from './coefficients';
 import { PhysicsError } from './physics-error';
+import { powerRequired } from './power';
 import type { RideConditions, RideState } from './simulate';
 import { advance, START_OF_RIDE } from './simulate';
 
@@ -244,6 +246,39 @@ export function advancePlannedBot(
   dragFactor = 1,
 ): BotTick {
   return rideTick(state, elapsed, course, power, dragFactor);
+}
+
+/**
+ * The power, watts, that holds a bot at `speedMetresPerSecond` on the road
+ * under it, at draft multiplier `dragFactor` (#2542): Martin's steady-state
+ * balance through {@link powerRequired}, at the same mass, air, wind and
+ * coefficients its tick rides through {@link advance}. **Signed**: a descent
+ * steep enough to carry it faster asks for less than nothing. What a lap-race
+ * bot holding a wheel feeds forward.
+ *
+ * ⚠️ **Internal to this package**, as {@link advancePlannedBot} is.
+ *
+ * @throws {PhysicsError} for a draft multiplier outside (0, 1], and through
+ * {@link powerRequired}.
+ */
+export function botHoldWatts(
+  state: RideState,
+  course: BotCourse,
+  speedMetresPerSecond: number,
+  dragFactor = 1,
+): number {
+  const ride = conditionsFor(course, dragFactor);
+  const required = powerRequired({
+    groundSpeed: metresPerSecond(Math.max(0, speedMetresPerSecond)),
+    totalMass: ride.totalMass,
+    grade: botDemand(state, course).grade,
+    airDensityKilogramsPerCubicMetre: ride.airDensityKilogramsPerCubicMetre,
+    ...(ride.headwindMetresPerSecond === undefined
+      ? {}
+      : { headwindMetresPerSecond: ride.headwindMetresPerSecond }),
+    ...(ride.coefficients === undefined ? {} : { coefficients: ride.coefficients }),
+  });
+  return required.totalWatts;
 }
 
 /** The one bot tick: the pacing rule's power, or the plan's where one is handed in. */

@@ -16,8 +16,8 @@
  *
  * | State | When | Power target |
  * |---|---|---|
- * | `sit-in` | the default, most of all in the early laps: most mid-race surges come back | {@link BOT_TACTIC_SIT_IN_SHARE} of CP within draft reach of the racer ahead, CP otherwise |
- * | `follow` | the racer ahead, or the rider ahead, is in a move within {@link BOT_TACTIC_FOLLOW_METRES} | {@link BOT_TACTIC_FOLLOW_SURGE} over CP while the gap is open, CP once on the wheel |
+ * | `sit-in` | the default, most of all in the early laps: most mid-race surges come back | it holds the wheel ahead (below) within {@link BOT_TACTIC_WHEEL_METRES}, no harder than its plan rides the road, CP otherwise |
+ * | `follow` | the racer ahead, or the rider ahead, is in a move within {@link BOT_TACTIC_FOLLOW_METRES} | it holds the wheel ahead within {@link BOT_TACTIC_WHEEL_METRES}, W′ paying for it, {@link BOT_TACTIC_FOLLOW_SURGE} over CP further back |
  * | `attack` | in a lull, more on a climb (a climber) or early (an attacker), for {@link BOT_TACTIC_ATTACK_MS} at most | {@link BOT_TACTIC_ATTACK_SURGE} over CP |
  * | `chase` | the racer ahead is out of draft reach and within {@link BOT_TACTIC_BRIDGE_METRES} | {@link BOT_TACTIC_CHASE_SURGE} over CP |
  * | `recover` | the bot reads its W′ under {@link BOT_TACTIC_RECOVER_SHARE} | {@link BOT_TACTIC_RECOVER_CP_SHARE} of CP |
@@ -26,6 +26,40 @@
  *
  * ⚠️ Every threshold is an amateur-coaching number to tune against #2464's
  * harness, not physiology, and a proposal for the owner.
+ *
+ * ## Holding a wheel (#2542)
+ *
+ * In `sit-in` and `follow`, a bot within {@link BOT_TACTIC_WHEEL_METRES} of
+ * the racer ahead, the rider or a bot, holds its wheel: its target closes or
+ * opens the gap toward {@link BOT_TACTIC_WHEEL_GAP_METRES}, in the band
+ * {@link BOT_TACTIC_WHEEL_NEAREST_METRES} to {@link BOT_TACTIC_WHEEL_FURTHEST_METRES}
+ * a rider sits on a wheel at. It is a feed-forward and a damped correction,
+ * each a function of the view as it stands, so the tick rate changes nothing:
+ *
+ * - **Feed-forward**: {@link RaceView.holdWatts}, the power that holds the
+ *   speed of the racer ahead in the bot's own draft on the road under it,
+ *   which `@onyourleft/physics` §`stepBotRace` works out through the one
+ *   physics. At the gap and at that speed, it is all the bot needs.
+ * - **Correction**: {@link BOT_TACTIC_WHEEL_GAP_GAIN} of CP for every metre
+ *   it is off the gap, less {@link BOT_TACTIC_WHEEL_CLOSING_GAIN} of CP for
+ *   every m/s it closes, so it slows its approach before it reaches the wheel.
+ *   Held between {@link BOT_TACTIC_WHEEL_EASE} of CP under the feed-forward
+ *   and {@link BOT_TACTIC_WHEEL_SURGE} over it, so a bot 30 m back closes at
+ *   a sitting-in effort, never a sprint.
+ *
+ * **Sitting in, a bot rides a wheel no harder than its own plan rides that
+ * road** (`plan.ts` §`botPlanStep`, {@link TacticDecision.wheel}): it climbs
+ * with the wheel as its plan climbs, and a wheel that attacks is let go
+ * unless the bot chooses to `follow` it. **Following, W′ pays for the wheel**:
+ * the capacity has the last word, as for every state, and a following bot
+ * that reads its W′ low recovers or, at 0, is held to CP: it lets the wheel go. A wheel ridden at less than
+ * {@link BOT_TACTIC_WHEEL_PACE_SHARE} of the bot's CP
+ * ({@link RaceView.aheadEffortWatts}) is too slow to hold, and the bot rides
+ * its own pace past it. That reads the effort of the racer ahead, not its
+ * speed: a rider slowing onto a climb, or picking up speed over the top, is
+ * riding no easier, and a bot that read the speed would pass them there. On
+ * the wheel, in a draft, the capacity's floor does not apply (ADR 0067 D-1.3,
+ * R-10).
  *
  * ## Choice: utility, a commitment bonus and a dwell (Game AI Pro 3 ch. 13)
  *
@@ -112,6 +146,25 @@ export interface RaceView {
   readonly metresToLine: number;
   /** The grade ahead, percent: what the road does in the next stretch. */
   readonly gradeAheadPercent: number;
+  /**
+   * Its own speed less the racer ahead's, m/s: above 0 it is closing (#2542).
+   * 0 when it leads.
+   */
+  readonly closingMetresPerSecond: number;
+  /**
+   * The power, watts, that holds the speed of the racer ahead in the bot's own
+   * draft ({@link draftFactor}) on the road under it, or `null` when it leads
+   * (#2542). Worked out by the caller through the one physics.
+   */
+  readonly holdWatts: number | null;
+  /**
+   * How hard the racer ahead rides, watts at the bot's mass, as if in the
+   * open: its power over its own draft multiplier (#2542). `null` when it
+   * leads, or when its power cannot be read (the rider with no live power).
+   */
+  readonly aheadEffortWatts: number | null;
+  /** Its draft multiplier `k` this tick: 1 in the open and with the draft off (#2542). */
+  readonly draftFactor: number;
   /** Its W′ balance now. */
   readonly energy: BotEnergy;
   /** Its capacity, fixed for the race: read, never changed. */
@@ -138,6 +191,12 @@ export const TACTIC_MEMORY_AT_START: TacticMemory = Object.freeze({
 export interface TacticDecision {
   readonly tactic: BotTactic;
   readonly targetWatts: number;
+  /**
+   * Whether the target holds a wheel (#2542): already shaped to the road and
+   * the draft, so the plan rides it as it is, with no floor in a draft, and,
+   * sitting in, no harder than the plan itself rides there.
+   */
+  readonly wheel: boolean;
   readonly memory: TacticMemory;
 }
 
@@ -180,6 +239,37 @@ export const BOT_TACTIC_FOLLOW_METRES = 50;
 /** Within this, metres, a bot is on the wheel ahead: the draft's reach, **30 m** (`physics` §`DRAFT_REACH_METRES`). */
 export const BOT_TACTIC_WHEEL_METRES = 30;
 
+/** The nearest a bot holding a wheel sits behind it, metres: **0.3** (#2542). */
+export const BOT_TACTIC_WHEEL_NEAREST_METRES = 0.3;
+
+/** The furthest a bot holding a wheel sits behind it, metres: **1** (#2542). */
+export const BOT_TACTIC_WHEEL_FURTHEST_METRES = 1;
+
+/** The gap a bot holding a wheel steers for, metres: the middle of the band, **0.65** (#2542). */
+export const BOT_TACTIC_WHEEL_GAP_METRES =
+  (BOT_TACTIC_WHEEL_NEAREST_METRES + BOT_TACTIC_WHEEL_FURTHEST_METRES) / 2;
+
+/** What a bot holding a wheel adds, as a share of CP, for every metre it is behind the gap: **0.4** (#2542). */
+export const BOT_TACTIC_WHEEL_GAP_GAIN = 0.4;
+
+/** What a bot holding a wheel takes off, as a share of CP, for every m/s it closes on it: **2** (#2542). */
+export const BOT_TACTIC_WHEEL_CLOSING_GAIN = 2;
+
+/** The most a bot holding a wheel rides over the feed-forward, as a share of CP: **0.15** (#2542). */
+export const BOT_TACTIC_WHEEL_SURGE = 0.15;
+
+/** The most a bot holding a wheel eases under the feed-forward, as a share of CP: **0.5** (#2542). */
+export const BOT_TACTIC_WHEEL_EASE = 0.5;
+
+/** The least a bot holding a wheel in a draft rides, watts: **0**, it may freewheel (ADR 0067 D-1.3, R-10). */
+export const BOT_TACTIC_WHEEL_FLOOR_WATTS = 0;
+
+/**
+ * A wheel ridden at less than this share of the bot's CP, as if in the open,
+ * is too slow to hold, and the bot rides past it: **0.85** (#2542).
+ */
+export const BOT_TACTIC_WHEEL_PACE_SHARE = 0.85;
+
 /** The furthest a bot will bridge to the racer ahead alone, metres: **200**. */
 export const BOT_TACTIC_BRIDGE_METRES = 200;
 
@@ -191,9 +281,6 @@ export const BOT_TACTIC_ATTACK_MS = 20_000;
 
 /** How far over its own CP the rider must ride to read as a move, as a share: **0.15**. */
 export const BOT_TACTIC_MOVE_SHARE = 0.15;
-
-/** A sitting-in bot's target on the wheel, as a share of CP: **0.9**, the draft paying for the rest. */
-export const BOT_TACTIC_SIT_IN_SHARE = 0.9;
 
 /** A following bot's surge over CP while the gap is open: **0.15**. */
 export const BOT_TACTIC_FOLLOW_SURGE = 0.15;
@@ -258,7 +345,13 @@ interface Read {
 }
 
 function checkView(view: RaceView): void {
-  const finite = [view.atMs, view.metresToLine, view.gradeAheadPercent, view.riderGapMetres];
+  const finite = [
+    view.atMs,
+    view.metresToLine,
+    view.gradeAheadPercent,
+    view.riderGapMetres,
+    view.closingMetresPerSecond,
+  ];
   if (
     finite.some((value) => !Number.isFinite(value)) ||
     view.atMs < 0 ||
@@ -271,11 +364,15 @@ function checkView(view: RaceView): void {
     (view.gapAheadMetres !== null && !Number.isFinite(view.gapAheadMetres)) ||
     // #2463: `null` for the last bot, as `gapAheadMetres` is for the leader.
     (view.gapBehindMetres !== null && !Number.isFinite(view.gapBehindMetres)) ||
-    (view.riderWattsPerKilogram !== null && !Number.isFinite(view.riderWattsPerKilogram))
+    (view.riderWattsPerKilogram !== null && !Number.isFinite(view.riderWattsPerKilogram)) ||
+    // #2542: a power a physics worked out, and a draft multiplier in (0, 1].
+    (view.holdWatts !== null && !Number.isFinite(view.holdWatts)) ||
+    (view.aheadEffortWatts !== null && !Number.isFinite(view.aheadEffortWatts)) ||
+    !(view.draftFactor > 0 && view.draftFactor <= 1)
   ) {
     throw new LapRaceError(
       'view-out-of-range',
-      'a race view has a finite time of at least zero, finite distances and grade, and whole laps and rank',
+      'a race view has a finite time of at least zero, finite distances, speeds, powers and grade, whole laps and rank, and a draft multiplier in (0, 1]',
     );
   }
 }
@@ -367,15 +464,37 @@ function score(
   }
 }
 
-/** What a state asks for, watts, before the capacity caps it. */
-function wanted(tactic: BotTactic, view: RaceView): number {
+/**
+ * What holding the wheel ahead asks for, watts (#2542), or `null` with no
+ * wheel to hold: nobody within {@link BOT_TACTIC_WHEEL_METRES}, or a wheel too
+ * slow to be worth it. The feed-forward and the damped correction of the
+ * header, read on the gap as it is, never as the skill misreads it: a bot
+ * misjudges when to go, not where a wheel is a metre in front of it.
+ */
+function wheelWatts(view: RaceView): number | null {
+  const gap = view.gapAheadMetres;
   const cp = view.capacity.cpWatts;
-  const onWheel = view.gapAheadMetres !== null && view.gapAheadMetres <= BOT_TACTIC_WHEEL_METRES;
+  if (gap === null || gap > BOT_TACTIC_WHEEL_METRES) return null;
+  if (view.holdWatts === null) return null;
+  const effort = view.aheadEffortWatts;
+  if (effort !== null && effort < cp * BOT_TACTIC_WHEEL_PACE_SHARE) return null;
+  const correction =
+    BOT_TACTIC_WHEEL_GAP_GAIN * (gap - BOT_TACTIC_WHEEL_GAP_METRES) -
+    BOT_TACTIC_WHEEL_CLOSING_GAIN * view.closingMetresPerSecond;
+  return (
+    view.holdWatts +
+    cp * Math.min(BOT_TACTIC_WHEEL_SURGE, Math.max(-BOT_TACTIC_WHEEL_EASE, correction))
+  );
+}
+
+/** What a state asks for, watts, before the capacity caps it: the wheel's where it holds one. */
+function wanted(tactic: BotTactic, view: RaceView, wheel: number | null): number {
+  const cp = view.capacity.cpWatts;
   switch (tactic) {
     case 'sit-in':
-      return onWheel ? cp * BOT_TACTIC_SIT_IN_SHARE : cp;
+      return wheel ?? cp;
     case 'follow':
-      return onWheel ? cp : cp * (1 + BOT_TACTIC_FOLLOW_SURGE);
+      return wheel ?? cp * (1 + BOT_TACTIC_FOLLOW_SURGE);
     case 'attack':
       return cp * (1 + BOT_TACTIC_ATTACK_SURGE);
     case 'chase':
@@ -390,8 +509,8 @@ function wanted(tactic: BotTactic, view: RaceView): number {
 }
 
 /**
- * The bot's tactic for this instant, its power target and the memory to hand
- * back. The state is chosen once per `archetype.ts` §`BOT_TACTICS_WINDOW_MS`;
+ * The bot's tactic for this instant, its power target, whether it holds a
+ * wheel, and the memory to hand back. The state is chosen once per `archetype.ts` §`BOT_TACTICS_WINDOW_MS`;
  * the target follows it on every call, through `wbal.ts` §`spendableWatts` over
  * no time, so it is never over the bot's peak, never over CP while it is
  * exhausted and never under its floor. The caller limits it again to what the
@@ -453,6 +572,18 @@ export function decideTactic(
       window,
     };
   }
-  const targetWatts = spendableWatts(view.capacity, view.energy, wanted(tactic, view), 0);
-  return { tactic, targetWatts, memory: next };
+  const wheel = tactic === 'sit-in' || tactic === 'follow' ? wheelWatts(view) : null;
+  // On a wheel in a draft the capacity's floor does not apply (ADR 0067 D-1.3, R-10).
+  const floor =
+    wheel !== null && view.draftFactor < 1
+      ? BOT_TACTIC_WHEEL_FLOOR_WATTS
+      : view.capacity.floorWatts;
+  const targetWatts = spendableWatts(
+    view.capacity,
+    view.energy,
+    wanted(tactic, view, wheel),
+    0,
+    floor,
+  );
+  return { tactic, targetWatts, wheel: wheel !== null, memory: next };
 }

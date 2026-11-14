@@ -112,6 +112,12 @@ describe('spending: an attack costs what it rides over CP (ADR 0067 D-2)', () =>
     expect(BOT_CEILING_WATTS).toBe(MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS);
     const strong = { ...CAPACITY, peakWatts: 1_000 };
     expect(spendableWatts(strong, full, 10 * CP, 1)).toBe(BOT_CEILING_WATTS);
+    // #2542: a floor the caller names, in place of the capacity's.
+    expect(spendableWatts(CAPACITY, full, 0, 1, 0)).toBe(0);
+    expect(spendableWatts(CAPACITY, full, -5, 1, 0)).toBe(0);
+    expect(spendableWatts(CAPACITY, full, 0, 1, CAPACITY.floorWatts + 1)).toBe(
+      CAPACITY.floorWatts + 1,
+    );
     // Over a tick of no time nothing is spent, so the balance limits nothing.
     expect(spendableWatts(CAPACITY, { wbalJoules: 0, exhausted: false }, 1.5 * CP, 0)).toBe(
       1.5 * CP,
@@ -228,6 +234,9 @@ describe('it refuses what is not a balance', () => {
       );
     }
     expect(codeOf(() => spendableWatts(CAPACITY, full, Number.NaN, 1))).toBe('power-not-finite');
+    expect(codeOf(() => spendableWatts(CAPACITY, full, CP, 1, Number.NaN))).toBe(
+      'power-not-finite',
+    );
     expect(codeOf(() => spendableWatts({ ...CAPACITY, peakWatts: Number.NaN }, full, CP, 1))).toBe(
       'capacity-out-of-range',
     );
