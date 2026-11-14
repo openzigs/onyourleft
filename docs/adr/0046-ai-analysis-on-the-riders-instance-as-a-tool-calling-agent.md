@@ -1179,62 +1179,92 @@ Until 2026-10-07 this section was §"Owner questions left open".
 
   The body above is not edited. (#1104)
 - **2026-11-14** — **The operator's analysis settings may be changed from the app, held in one
-  database row that overrides `.env`, and D-9's switch for other riders is built after all.** The
-  owner asked on [#2601](https://github.com/openzigs/onyourleft/issues/2601) that a rider *"should
-  be able to configure if it is local llm or using a remote one […] in the app"*, and ruled on
-  [#2608](https://github.com/openzigs/onyourleft/issues/2608) on 2026-11-14, verbatim: *"take the
-  recommended answer. A single database row overrides `.env`, and with no row `.env` applies.
-  "Local or remote" means which sources the instance offers riders. Share mode stays withdrawn. The
-  local-address rule is checked on save and on every request. The repository names and recommends
-  no model. Record this as a dated amendment to ADR 0046. Also add the operator switch for other
-  riders' analysis (D-9), off by default: see #2601."* The ruling on #2601 the same day adds that
-  changes made from the app *"take effect without a restart"*, that when the switch is on *"other
-  approved riders on the instance may have their rides analysed by the instance's local model. A
-  hosted job still runs only on the rider's own key, under their consent naming the endpoint"*, and
-  that *"CLI operator commands write to the same append-only operator log as actions taken in the
-  app."* D-9 said how the model is reached and who may ask, not where the operator writes it down,
-  so this records how D-9 is configured; no decision is reversed. As ruled:
+  database row that overrides `.env`; D-9's switch for other riders is built, off by default, and
+  now covers the local model only.** The owner asked on
+  [#2601](https://github.com/openzigs/onyourleft/issues/2601) that the user, here the operator,
+  *"should be able to configure if it is local llm or using a remote one […] in the app"*, and
+  ruled on [#2608](https://github.com/openzigs/onyourleft/issues/2608) on 2026-11-14, verbatim:
+  *"take the recommended answer. A single database row overrides `.env`, and with no row `.env`
+  applies. "Local or remote" means which sources the instance offers riders. Share mode stays
+  withdrawn. The local-address rule is checked on save and on every request. The repository names
+  and recommends no model. Record this as a dated amendment to ADR 0046. Also add the operator
+  switch for other riders' analysis (D-9), off by default: see #2601."* The ruling on #2601 the
+  same day adds that changes made from the app *"take effect without a restart"*, that when the
+  switch is on *"other approved riders on the instance may have their rides analysed by the
+  instance's local model. A hosted job still runs only on the rider's own key, under their consent
+  naming the endpoint"*, and that *"CLI operator commands write to the same append-only operator
+  log as actions taken in the app."* On [PR #2624](https://github.com/openzigs/onyourleft/pull/2624)
+  the same day the owner ruled the two questions that text left open, verbatim: *"Scope of the
+  other-riders switch: local model only. While it is off, other riders cannot use the instance's
+  local model. A rider who holds their own hosted key, and has given consent naming the endpoint,
+  can still have analysis run. This narrows the 2026-10-07 Q13 answer ("gates both key modes") to
+  the local model."* and *"Default: off, including for existing instances. The owner turns it on
+  themselves."* As ruled:
   1. **Where the settings live.** One row in the instance's database holds the operator's analysis
      settings: the local model's address, its name, its reasoning tokens (the 2026-10-11 entry's
-     field), which sources the instance offers, and the switch for other riders. **With no row,
-     `.env` applies exactly as before** (`OYL_INSTANCE_ANALYSIS_MODEL_URL`,
-     `OYL_INSTANCE_ANALYSIS_MODEL`, `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS`), so a fresh
-     install and every existing deployment behave unchanged, and clearing the row returns to `.env`.
-  2. **No restart.** A change applies to the next job; a job already running keeps the connection it
-     started with.
-  3. **"Local or remote" is which sources the instance offers riders**: D-9's source 1, the
-     OpenAI-compatible server on the box, and source 2, a hosted endpoint on a rider's **own** key
-     under **their own** consent naming the endpoint (Q10). With hosted turned off, every hosted job
-     is refused `hosted_unavailable` before a key is read; no key is deleted and no consent is
-     withdrawn. **Share mode stays withdrawn** (the 2026-10-09 entry): the operator's key serves the
-     operator's own jobs only, and nothing in this entry is a shared key.
+     field), which sources the instance offers, and the switch for other riders. **With no row, the
+     model settings come from `.env` exactly as before** (`OYL_INSTANCE_ANALYSIS_MODEL_URL`,
+     `OYL_INSTANCE_ANALYSIS_MODEL`, `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS`), so the model a
+     fresh install or an existing deployment uses is unchanged. **The switch for other riders is
+     not unchanged**: see point 6.
+  2. **A field the row leaves unset falls back on its own, field by field**, never the row as a
+     whole: each model setting to its `.env` value, the sources offered to **both**, as today, and
+     the switch to **off**. Clearing a field returns that field to its fallback; clearing the whole
+     row returns every field, so it also turns the switch off. *The author's choice*, as the
+     simplest rule that never widens access: no unset field turns anything on.
+  3. **Who may write it.** Only the operator, the athlete of `OYL_INSTANCE_OWNER_KEY` (Q9), from the
+     app, or the operator command on the host. Never the deputy, whose request is answered as though
+     there were no such route. The app's routes are `sealed: 'only'`
+     ([ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7), answer
+     `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`, and every write, from the app or
+     the CLI, is an entry in the operator log
+     ([#2602](https://github.com/openzigs/onyourleft/issues/2602)) that never carries a key. ⚠️
+     Before this, changing where every rider's local-model job goes needed the host's `.env` and a
+     restart. Now the holder of the owner's device key can point it at any address ADR 0040 D-6
+     accepts, which is any local address and not only the box; point 4 bounds it, and the log
+     records it after the fact.
   4. **The address rules do not move.** A local address passes ADR 0040 D-6's rule
      (`apps/instance/src/history/address.ts`) **when it is saved**, which refuses it with nothing
      stored, **and on every request**, the resolution check included, exactly as an `.env` address
      does. A hosted endpoint is `https` only.
-  5. **The repository names and recommends no model**, and no vendor
+  5. **"Local or remote" is which sources the instance offers riders**: D-9's source 1, the
+     OpenAI-compatible server on the box, and source 2, a hosted endpoint on a rider's **own** key
+     under **their own** consent naming the endpoint (Q10). With hosted turned off, every hosted job
+     is refused `hosted_unavailable` before a key is read; no key is deleted and no consent is
+     withdrawn. **Share mode stays withdrawn** (the 2026-10-09 entry): the operator's key serves the
+     operator's own jobs only.
+  6. **The switch for other riders** is built, as D-9 §"Who may ask" has it in the author's reading
+     (*"one instance setting, held in the database, changed by the operator command or by the
+     operator in the app"*), and is **off by default, on existing instances as on new ones**; the
+     operator turns it on. **It covers the instance's local model only**: while it is off, another
+     rider's job on the local model is refused before a model is called, and a rider whose own
+     hosted key is held with their consent naming its endpoint can still have a hosted job run.
+     **This narrows Q13** (*"the operator's switch gates both key modes"*) **to the local model**, by
+     the owner's ruling above. It is recorded here and not by a superseding ADR because the owner
+     ruled that this decision be recorded as an amendment to this ADR, as its entries of 2026-10-09
+     (Share mode withdrawn) and 2026-10-26 (D-12 and Q2 superseded) were. The 2026-10-12 entry's
+     *"there is no shared key and no operator's switch"* was true of that build and no longer is for
+     the switch; the shared key is still withdrawn.
+  7. **Every job type, the re-plan during a ride included.** The switch and the hosted-off setting
+     apply to a re-plan ([ADR 0048](0048-workouts-that-change-during-the-ride.md)) as to a post-ride
+     analysis, and a refused re-plan leaves the plan as it is (ADR 0048 D-9). A change applies from
+     the next job; a job already running, a re-plan included, keeps the connection it started with,
+     so a change made mid-ride reaches only that ride's later re-plans.
+  8. **The repository names and recommends no model**, and no vendor
      ([ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-4): the app lists what the
-     operator's own server reports. ADR 0040 D-5's embedding default is untouched by this, because
-     the embedding model is not one of these settings.
-  6. **The operator's switch for other riders** is built: D-9 §"Who may ask" as written, *"one
-     instance setting, held in the database, changed by the operator command or by the operator in
-     the app"*, **off by default**, so with no row it is off. The 2026-10-12 entry's *"there is no
-     shared key and no operator's switch"* was true of that build and no longer is for the switch;
-     the shared key is still withdrawn. The ruling describes the switch by the local model; Q13
-     (*"the operator's switch gates both key modes"*) is not revisited by it and still stands, so
-     while the switch is off another rider's hosted job is refused too. Narrowing the switch to the
-     local model would change Q13 and is the owner's to rule.
-  7. **The operator log.** Every operator command that changes the instance's state writes to the
-     same append-only operator log as an action taken in the app, so the log is the whole record.
-     [#2602](https://github.com/openzigs/onyourleft/issues/2602) built this
-     (`apps/instance/src/operator/commands.ts` §"The operator log").
+     operator's own server reports. ADR 0040 D-5's embedding default is untouched, because the
+     embedding model is not one of these settings.
+  9. **The operator log is the whole record.** Every operator command that changes the instance's
+     state writes to the same append-only operator log as an action taken in the app; #2602 built
+     this (`apps/instance/src/operator/commands.ts` §"The operator log").
 
   **Unchanged**: the operator secret stays in the environment (Q6); the history index's embedding
   model (ADR 0040, whose D-7 re-embeds every row on a change, which is not a toggle) and the
   picture model (ADR 0050) stay `.env`-only; and no model runs on a phone or tablet (D-13): the app
   only sends the setting to the instance. **What a rider sees change**: nothing, for the operator.
-  Every other rider on an instance where the operator has not turned the switch on is refused
-  analysis, from either source, once [#2609](https://github.com/openzigs/onyourleft/issues/2609)
-  builds the switch; before it, nothing gated them. A rider also loses the hosted source when the
-  operator turns hosted off. ADR 0031, 0036 and 0040 gain no entry: each rule of theirs this cites is
-  applied as written. The body above is not edited. (#2601, #2608)
+  Every other rider is refused the instance's local model, post-ride and re-plan alike, until the
+  operator turns the switch on, once [#2609](https://github.com/openzigs/onyourleft/issues/2609)
+  builds it; before it, nothing gated them. Their hosted jobs on their own key are unaffected by
+  the switch, and are refused only while the operator has hosted turned off. ADR 0031, 0036, 0040
+  and 0048 gain no entry: each rule of theirs this cites is applied as written. The body above is
+  not edited. (#2601, #2608)
