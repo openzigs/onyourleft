@@ -20,7 +20,9 @@
  *   gets no control on it but the way back;
  * - Status (#2604) is drawn first, its deployed commit — one unbroken 40-hex
  *   word in `code` — inside the viewport, and *Compare with main* is a target
- *   whose `href` is GitHub's compare page, opened outside the app.
+ *   whose `href` is GitHub's compare page, opened outside the app;
+ * - Accounts (#2605) is drawn second, and its links — targets of that size,
+ *   by the button walk above — open the Moderation screen at a section.
  *
  * ## The control
  *
@@ -33,7 +35,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { hrefFor, routeById } from '../src/shell/routes';
+import { hrefFor, hrefForModerationSection, routeById } from '../src/shell/routes';
 
 import type { ReflowMeasurement } from './reflow-harness';
 
@@ -115,6 +117,16 @@ test.describe('the Operate area — #2603', () => {
         /^https:\/\/github\.com\/openzigs\/onyourleft\/compare\/[0-9a-f]{40}\.\.\.main$/,
       );
       await expect(compare).toHaveAttribute('target', '_blank');
+      // #2605: Accounts, second, whose links open the Moderation screen at a section.
+      await expect(page.locator('main h2').nth(1)).toHaveText('Accounts');
+      await expect(page.getByRole('link', { name: 'Go to approvals' })).toHaveAttribute(
+        'href',
+        hrefForModerationSection('approvals'),
+      );
+      await expect(page.getByRole('link', { name: 'Go to suspended accounts' })).toHaveAttribute(
+        'href',
+        hrefForModerationSection('suspended'),
+      );
       const commit = await page.locator('main .oyl-operate__status code').boundingBox();
       expect(commit?.x ?? -1).toBeGreaterThanOrEqual(0);
       expect((commit?.x ?? 0) + (commit?.width ?? 0)).toBeLessThanOrEqual(width + 0.5);

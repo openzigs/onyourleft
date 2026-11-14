@@ -6,6 +6,7 @@ import { ButtonLink } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import type { OperateDisk, OperateStatus, OperateStatusRead } from '../instance/operate-port';
+import { REGISTRATION_MODE_TEXT } from './OperateAccountsPanel';
 
 /**
  * **Status** (#2604, epic #2601): the first section of the owner's Operate
@@ -114,13 +115,6 @@ const MIGRATIONS_TEXT: Readonly<Record<OperateStatus['checks']['migrations'], st
   behind: 'behind this build: run migrate',
   ahead: 'ahead of this build',
   unknown: 'not known',
-};
-
-const REGISTRATION_TEXT: Readonly<Record<OperateStatus['registration'], string>> = {
-  open: 'open: anybody may join',
-  approval: 'approval: a moderator approves each account',
-  invite: 'invite: only with an invite code',
-  closed: 'closed: nobody new may join',
 };
 
 const KEYS_TEXT: Readonly<Record<OperateStatus['keys'], string>> = {
@@ -237,7 +231,7 @@ function Shown({
         )}
         <LastBackup backup={status.lastBackup} now={now} />
         <Fact name="Tunnel">{tunnelText(status.tunnel)}</Fact>
-        <Fact name="Registration">{REGISTRATION_TEXT[status.registration]}</Fact>
+        <Fact name="Registration">{REGISTRATION_MODE_TEXT[status.registration].short}</Fact>
         <Fact name="Accounts">
           {`${String(athletes.active)} active, ${String(athletes.pending)} awaiting approval, ${String(athletes.suspended)} suspended`}
         </Fact>

@@ -12,6 +12,7 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createModerationPort } from '../instance/moderation-port';
 import { createOperatePort, OPERATOR_LOG_PAGE } from '../instance/operate-port';
 import {
   closeOperateWorlds,
@@ -21,6 +22,7 @@ import {
 } from '../testing/operate-instance-testing';
 import { scriptedOperate } from '../instance/testing';
 import { AppShell } from '../shell/AppShell';
+import { hrefFor, hrefForModerationSection, routeById } from '../shell/routes';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import {
   OPERATE_NO_PORT,
@@ -32,6 +34,7 @@ import {
   OperateView,
   operatorActionLabel,
 } from './OperateView';
+import { MODERATION_SECTION_HEADING } from './ModerationView';
 
 let mounted: Mounted | undefined;
 
@@ -135,7 +138,7 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 2)).toEqual(['Status', 'Operator log']);
+    expect(headings.slice(0, 3)).toEqual(['Status', 'Accounts', 'Operator log']);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
   });
 
@@ -156,6 +159,73 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
       expect(owners.count()).toBe(1);
     },
   );
+});
+
+describe('the Operate area’s Accounts over the real instance — #2605', () => {
+  const SHELL = { capabilities: { bluetooth: undefined, secureContext: true } } as const;
+
+  /** The section headed `heading`, or `undefined`. */
+  function section(heading: string): HTMLElement | undefined {
+    return [...(mounted?.container.querySelectorAll('section') ?? [])].find(
+      (each) => each.querySelector('h2')?.textContent === heading,
+    );
+  }
+
+  function link(name: string): HTMLAnchorElement | undefined {
+    return [...(mounted?.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === name,
+    );
+  }
+
+  /** The names in the Moderation screen's approval queue. */
+  function waiting(): string[] {
+    return [...(section('Waiting for approval')?.querySelectorAll('h3') ?? [])].map(
+      (each) => each.textContent,
+    );
+  }
+
+  it('shows the owner two accounts awaiting approval, and Go to approvals lands on that heading, focused', async () => {
+    const operated = await operatedWorld();
+    await operated.anotherRider('Second rider');
+    globalThis.location.hash = hrefFor(routeById('operate'));
+    mounted = await mount(
+      <AppShell
+        {...SHELL}
+        operate={createOperatePort(operated.owner.dependencies)}
+        moderation={createModerationPort(operated.owner.dependencies)}
+      />,
+    );
+    await until(() => link('Go to approvals') !== undefined);
+    const accounts = (section('Accounts')?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(accounts).toContain('2 awaiting approval');
+    expect(accounts).toContain('0 suspended');
+    expect(accounts).toContain('Registration mode: approval');
+    const approvals = link('Go to approvals');
+    expect(approvals?.getAttribute('href')).toBe(hrefForModerationSection('approvals'));
+    if (approvals !== undefined) await activateWithKeyboard(approvals);
+    await until(() => document.activeElement?.id === MODERATION_SECTION_HEADING.approvals);
+    expect(mounted.container.querySelector('h1')?.textContent).toBe('Moderation');
+    expect(document.activeElement?.textContent).toBe('Waiting for approval');
+    // The queue the count was of, read by the screen that decides it.
+    expect(waiting().sort()).toEqual(['Rider', 'Second rider']);
+  });
+
+  it('gives the deputy no link-out in Operate, and the Moderation screen still opens for them at a section', async () => {
+    const operated = await operatedWorld();
+    mounted = await mount(<OperateView port={createOperatePort(operated.deputy.dependencies)} />);
+    await until(readDone);
+    expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
+    expect(section('Accounts')).toBeUndefined();
+    expect(link('Go to approvals')).toBeUndefined();
+    mounted.unmount();
+    globalThis.location.hash = hrefForModerationSection('approvals');
+    mounted = await mount(
+      <AppShell {...SHELL} moderation={createModerationPort(operated.deputy.dependencies)} />,
+    );
+    await until(() => document.activeElement?.id === MODERATION_SECTION_HEADING.approvals);
+    expect(document.activeElement?.textContent).toBe('Waiting for approval');
+    expect(waiting()).toEqual(['Rider']);
+  });
 });
 
 describe('the Operate area over a scripted instance — #2603', () => {

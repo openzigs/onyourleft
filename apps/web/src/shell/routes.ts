@@ -836,10 +836,12 @@ export interface RouteMatch {
    */
   readonly play?: GameMode;
   /**
-   * The hash's query on the Workouts and Ride routes, and on no other. On
-   * Workouts (#2304) the built-in list's filter (`workouts/built-in.ts`
-   * §`builtInFilterFromQuery`); on Ride (#2306) a tailored built-in to ride
-   * (`workouts/built-in-ride.ts` §`builtInRideFromQuery`). Kept in the
+   * The hash's query on the Workouts, Ride and Moderation routes, and on no
+   * other. On Workouts (#2304) the built-in list's filter
+   * (`workouts/built-in.ts` §`builtInFilterFromQuery`); on Ride (#2306) a
+   * tailored built-in to ride (`workouts/built-in-ride.ts`
+   * §`builtInRideFromQuery`); on Moderation (#2605) the section Operate's
+   * Accounts opened it at ({@link moderationSectionFromQuery}). Kept in the
    * address so a reload, a shared link and Back all show the same. Absent
    * where there is no query.
    */
@@ -875,7 +877,11 @@ export interface RouteMatch {
  */
 export function matchHash(hash: string): RouteMatch {
   const match = matchHashAmong(MATCHABLE_ROUTES, hash);
-  if (match.route.id === 'workouts' || match.route.id === 'ride') {
+  if (
+    match.route.id === 'workouts' ||
+    match.route.id === 'ride' ||
+    match.route.id === 'moderation'
+  ) {
     const query = hashQuery(hash);
     return query === undefined || query === '' ? match : { ...match, query };
   }
@@ -1041,6 +1047,34 @@ export function hrefForSelection(route: RouteDefinition, id: string): string {
 /** The link to one ride's detail view. */
 export function hrefForActivity(id: string): string {
   return hrefFor(ACTIVITY_DETAIL_ROUTE, id);
+}
+
+/**
+ * The sections of the Moderation screen that Operate's Accounts (#2605) opens
+ * it at: the approval queue, the suspended accounts and the invitation.
+ */
+export const MODERATION_SECTIONS = ['approvals', 'suspended', 'invite'] as const;
+export type ModerationSection = (typeof MODERATION_SECTIONS)[number];
+
+/**
+ * The Moderation screen opened at one of its sections — #2605. A QUERY, for
+ * {@link hrefForGameRoute}'s reason: it is still the Moderation route, which
+ * shows a moderator every section as before; the screen only moves focus to
+ * the named section's heading once it has drawn it. A nested `#id` would not
+ * do: the hash is the route, so a second fragment is not an anchor the browser
+ * scrolls to.
+ */
+export function hrefForModerationSection(section: ModerationSection): string {
+  return `${hrefFor(MODERATION_ROUTE)}?section=${section}`;
+}
+
+/** The section {@link hrefForModerationSection} named, or `undefined` for none this screen has. */
+export function moderationSectionFromQuery(
+  query: string | undefined,
+): ModerationSection | undefined {
+  if (query === undefined) return undefined;
+  const asked = new URLSearchParams(query).get('section');
+  return MODERATION_SECTIONS.find((section) => section === asked);
 }
 
 /**

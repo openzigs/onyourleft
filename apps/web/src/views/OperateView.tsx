@@ -12,12 +12,15 @@ import type {
   OperatorLogRead,
 } from '../instance/operate-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { OperateAccountsPanel } from './OperateAccountsPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
  * **Operate** (#2603, epic #2601): the owner-only area of the app for running
  * the instance this device is signed in to. It shows the instance's Status
- * (#2604, `OperateStatusPanel.tsx`) and the operator log (#2602); the
+ * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
+ * `OperateAccountsPanel.tsx`, read from the same status) and the operator log
+ * (#2602); the
  * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
@@ -47,7 +50,6 @@ export const OPERATE_PURPOSE =
 
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
 export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'Accounts',
   'Backups',
   'AI backend',
   'Rooms',
@@ -320,6 +322,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
     <div className="oyl-operate">
       <p>{OPERATE_PURPOSE}</p>
       <OperateStatusPanel status={shown.status} />
+      <OperateAccountsPanel status={shown.status} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}

@@ -112,6 +112,7 @@ import {
   groupDestination,
   hrefFor,
   LEVEL_GAME_SUMMARY,
+  moderationSectionFromQuery,
   NAV_GROUPS,
   navGroupOf,
   routesInGroup,
@@ -923,7 +924,13 @@ function viewFor(
         />
       );
     case 'moderation':
-      return <ModerationView port={props.moderation} />;
+      return (
+        <ModerationView
+          port={props.moderation}
+          // #2605: the section Operate's Accounts opened it at, from the address.
+          section={moderationSectionFromQuery(match.query)}
+        />
+      );
     case 'operate':
       return <OperateView port={props.operate} />;
     case 'more':

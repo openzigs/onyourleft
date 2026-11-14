@@ -65,6 +65,7 @@ describe('the Operate area — #2603', () => {
     // One heading level under the page's h1.
     expect([...document.querySelectorAll('main h2')].map((each) => each.textContent)).toEqual([
       'Status',
+      'Accounts',
       'Operator log',
       'Still to come',
     ]);
@@ -76,8 +77,13 @@ describe('the Operate area — #2603', () => {
     await open(scriptedOperate({ pageSize: 2 }));
     await showOlder();
     expect(audit()).toBe('');
-    // Status's Compare with main stays; the log has nothing left to press.
-    expect(controls().map((each) => each.textContent)).toEqual(['Compare with main']);
+    // Status's Compare with main and Accounts' links (#2605) stay; the log has
+    // nothing left to press.
+    expect(controls().map((each) => each.textContent)).toEqual([
+      'Compare with main',
+      'Go to approvals',
+      'Go to suspended accounts',
+    ]);
   });
 
   it('passes the audit when the log could not be read, and when a page did not come', async () => {

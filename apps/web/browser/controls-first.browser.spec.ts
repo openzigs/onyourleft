@@ -99,6 +99,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { THEMES } from '../src/design/tokens';
+import { SCRIPTED_STATUS } from '../src/instance/testing';
 import {
   ALL_ROUTES,
   hrefFor,
@@ -327,8 +328,11 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
   // #2604: Status tucks what Docker Desktop's disk figures are (#2622's review),
-  // and is drawn only for the owner, whom only the populated ports are.
-  operate: ['Status'],
+  // and is drawn only for the owner, whom only the populated ports are. #2605:
+  // what Accounts is for, and what every registration mode shares, are behind
+  // each heading's ⓘ. The mode heading names the populated instance's mode,
+  // read from its fixture so the two cannot drift.
+  operate: ['Status', 'Accounts', `Registration mode: ${SCRIPTED_STATUS.registration}`],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.
