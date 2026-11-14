@@ -124,7 +124,13 @@ import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
 import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './assist-preference';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
-import { drawnShift, NO_PACK_LAYOUT, stepPackLayout, type PackLayout } from './pack-layout';
+import {
+  drawnShift,
+  gridPackLayout,
+  stepPackLayout,
+  type PackLayout,
+  type PackRacer,
+} from './pack-layout';
 import {
   askLane,
   askToUseItem,
@@ -312,25 +318,27 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
       LAP_RACE_RIDER_ID,
     ),
   );
+  // A mixed field: the three personalities, the three skills and the five
+  // pacing styles (each its archetype, #2459) in turn, and an ability each,
+  // from the race's seed.
+  const bots = ids.map((id, index) =>
+    lapRaceBot(
+      id,
+      tier,
+      {
+        personality: personalities[index] as BotPersonality,
+        skill: skills[index] as BotSkill,
+      },
+      paces[index] as BotPace,
+    ),
+  );
+  const riderInput = startRiderInput(input.lineOffset);
   return {
     race,
-    // A mixed field: the three personalities, the three skills and the five
-    // pacing styles (each its archetype, #2459) in turn, and an ability each,
-    // from the race's seed.
-    bots: ids.map((id, index) =>
-      lapRaceBot(
-        id,
-        tier,
-        {
-          personality: personalities[index] as BotPersonality,
-          skill: skills[index] as BotSkill,
-        },
-        paces[index] as BotPace,
-      ),
-    ),
+    bots,
     seed,
     assist,
-    input: startRiderInput(input.lineOffset),
+    input: riderInput,
     startAlong: input.riderDistance,
     along: input.riderDistance,
     conditions: input.conditions,
@@ -341,9 +349,32 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     draft: input.draft === true,
     riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
-    pack: NO_PACK_LAYOUT,
+    // The owner's ruling of 2026-11-13 on #2544: the pack forms on the line.
+    // Every bot stands in its place on the grid through the countdown, so the
+    // field rolls off together at Go (`pack-layout.ts` §"On the grid").
+    pack: gridPackLayout(packField(race, bots, riderInput, 0), LAP_RACE_RIDER_ID),
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
   };
+}
+
+/**
+ * The field as the pack layout reads it (#2544): every racer's race place and
+ * lane, the rider where they steered, and each bot's speed.
+ */
+function packField(
+  race: ItemRaceState,
+  bots: readonly LapRaceBot[],
+  input: RiderRaceInput,
+  riderSpeed: number,
+): PackRacer[] {
+  const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
+  speeds.set(LAP_RACE_RIDER_ID, riderSpeed);
+  return race.racers.map((entry) => ({
+    id: entry.racer.id,
+    along: racePosition(entry.racer),
+    lateral: entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
+    speed: speeds.get(entry.racer.id) ?? 0,
+  }));
 }
 
 /** Whether the race is still counting down on its line, so nothing of it may move (#2546). */
@@ -439,6 +470,9 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       ? undefined
       : step.riderWatts / mass;
   let { race, bots, input, owed, riderDraft, pack } = ride;
+  // The rider's speed on effort distance over the step, which the pack layout
+  // reads to see a pass coming (#2544).
+  const riderSpeed = (to - from) / (ticks * LAP_RACE_TICK_SECONDS);
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
@@ -469,15 +503,8 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
     // #2544: the field laid out for the drawing, a tick on, the rider where
     // they steered.
-    const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
     pack = stepPackLayout(
-      race.racers.map((entry) => ({
-        id: entry.racer.id,
-        along: racePosition(entry.racer),
-        lateral:
-          entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
-        speed: speeds.get(entry.racer.id) ?? 0,
-      })),
+      packField(race, bots, input, riderSpeed),
       LAP_RACE_RIDER_ID,
       pack,
       LAP_RACE_TICK_SECONDS,
@@ -548,7 +575,7 @@ export function lapRaceDrawing(
     if (speed === undefined) continue;
     const hit = hitLook(entry.effects, race.atMs, reducedMotion);
     // #2544: its place in the pack, a bike length a row from the rider's and
-    // beside the others in its lane; its lane alone before the first tick.
+    // beside the others in its lane, and on the grid from the press.
     const place = ride.pack.get(entry.racer.id);
     raceBots.push({
       // Never behind the route's start, where a row behind a rider who pressed
