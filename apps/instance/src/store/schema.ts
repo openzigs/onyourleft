@@ -413,6 +413,23 @@ export interface ModerationLogTable {
 }
 
 /**
+ * One action taken as the instance's operator (#2602, migration 0040), from
+ * the app's Operate area or the operator's CLI. Append-only: the schema
+ * refuses an UPDATE or a DELETE. No foreign key: erasure keeps it.
+ */
+export interface OperatorLogTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly source: 'app' | 'cli';
+  /** The owner's athlete for `app`; `NULL` for `cli`, which has none. */
+  readonly actor_athlete_id: string | null;
+  readonly action: string;
+  readonly detail: string | null;
+  readonly outcome: 'done' | 'refused' | 'failed';
+}
+
+/**
  * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
  * the schema refuses a DELETE, and every UPDATE but the erasure of its notifier
  * details (#1381, migration 0036). No column is a client address.
@@ -765,6 +782,7 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly operator_log: OperatorLogTable;
   readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;

@@ -63,6 +63,7 @@ const isExempt = (reach: Reach): reach is { readonly exempt: string } =>
 
 const ATHLETE_ROUTES = ROUTES.filter((route) => isAthleteReach(route.reaches));
 const MODERATOR_ROUTES = ROUTES.filter((route) => route.reaches === 'moderation');
+const OWNER_ROUTES = ROUTES.filter((route) => route.reaches === 'owner');
 const EXEMPT_ROUTES = ROUTES.filter((route) => isExempt(route.reaches));
 
 /** A body each athlete-reaching route accepts, by operation id. */
@@ -296,11 +297,16 @@ describe('the route table declares whom every route reaches (#83)', () => {
     for (const route of ROUTES) {
       const reach = route.reaches;
       const known =
-        reach === 'own' || reach === 'moderation' || isAthleteReach(reach) || isExempt(reach);
+        reach === 'own' ||
+        reach === 'moderation' ||
+        reach === 'owner' ||
+        isAthleteReach(reach) ||
+        isExempt(reach);
       expect(known, route.operationId).toBe(true);
     }
     expect(ATHLETE_ROUTES.length).toBeGreaterThan(0);
     expect(MODERATOR_ROUTES.length).toBeGreaterThan(0);
+    expect(OWNER_ROUTES.length).toBeGreaterThan(0);
   });
 
   it('lets no route that says it reaches only its own name an athlete in its path or body', () => {
@@ -354,7 +360,7 @@ describe('the route table declares whom every route reaches (#83)', () => {
   });
 
   it('puts every route that reaches another athlete behind a signed-in session', () => {
-    for (const route of [...ATHLETE_ROUTES, ...MODERATOR_ROUTES]) {
+    for (const route of [...ATHLETE_ROUTES, ...MODERATOR_ROUTES, ...OWNER_ROUTES]) {
       expect(route.auth, route.operationId).toBe('session');
       if (isAthleteReach(route.reaches)) {
         expect(route.path, route.operationId).toContain(`{${route.reaches.athlete}}`);
@@ -465,6 +471,23 @@ describe('every path a blocked athlete could use is refused, as though nobody we
       expect(answer.status).toBe(404);
       expect(codeOf(answer.body)).toBe('not_found');
       expect(answer).toEqual(nowhere);
+    },
+  );
+
+  it.each(OWNER_ROUTES.map((route) => [route.operationId, route] as const))(
+    '%s answers an ordinary rider AND the deputy as though there were no such route (#2602)',
+    async (_operation, route) => {
+      const path = route.path.replace(/\{[A-Za-z]+\}/g, unrelated.athleteId);
+      const body = route.method === 'GET' ? undefined : {};
+      const nowhere = await world.as(viewer, 'GET', '/v1/no-such-route');
+      for (const caller of [viewer, world.deputy]) {
+        const answer = await world.as(caller, route.method, path, body);
+        expect(answer.status).toBe(404);
+        expect(codeOf(answer.body)).toBe('not_found');
+        expect(answer).toEqual(nowhere);
+      }
+      // The control: the owner reaches it.
+      expect((await world.as(world.owner, route.method, path, body)).status).toBeLessThan(300);
     },
   );
 
@@ -622,8 +645,10 @@ describe('a suspended rider’s way-out session reaches the export, the deletion
           signer: leaving.device.signingKey,
           ...(route.method === 'GET' ? {} : { body: {} }),
         });
-        expect(sealed.reply?.status).toBe(403);
-        expect(sealedCodeOf(sealed)).toBe('account_suspended');
+        // #2602: an owner's route is not there for a suspended rider at all.
+        const expected = route.reaches === 'owner' ? 'not_found' : 'account_suspended';
+        expect(sealed.reply?.status).toBe(route.reaches === 'owner' ? 404 : 403);
+        expect(sealedCodeOf(sealed)).toBe(expected);
         return;
       }
       const answer = await world.call(route.method, route.path.replace(/\{[A-Za-z]+\}/g, 'x'), {
@@ -638,4 +663,93 @@ describe('a suspended rider’s way-out session reaches the export, the deletion
   it('reaches the export — the control that shows the session works', async () => {
     expect((await world.call('GET', '/v1/account/export', { token })).status).toBe(200);
   });
+});
+
+/**
+ * The owner's routes (#2602): what the table must say of each, and the check
+ * that holds them — in the handler, so a route that forgets to ask is still
+ * refused.
+ */
+describe('the owner’s routes are the owner’s alone, checked in ONE place (#2602)', () => {
+  it('declares every /v1/operate/ route `owner`, sealed-only and signed-in, and no other route `owner`', () => {
+    const operate = ROUTES.filter((route) => route.path.startsWith('/v1/operate/'));
+    expect(operate.length).toBeGreaterThan(0);
+    expect(operate.map((route) => route.operationId).sort()).toEqual(
+      OWNER_ROUTES.map((route) => route.operationId).sort(),
+    );
+    for (const route of OWNER_ROUTES) {
+      expect(route.sealed, route.operationId).toBe('only');
+      expect(route.auth, route.operationId).toBe('session');
+      expect(route.admitsPending, route.operationId).toBeUndefined();
+      expect(route.admitsSuspended, route.operationId).toBeUndefined();
+    }
+  });
+
+  /** A route that says it is the owner's and checks nothing itself. */
+  const FORGETFUL: Route = {
+    method: 'GET',
+    path: '/v1/operate/forgetful',
+    sealed: 'only',
+    operationId: 'forgetfulOwnerRoute',
+    reaches: 'owner',
+    summary: 'A test route whose handler forgets to check who is calling.',
+    identity: true,
+    auth: 'session',
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { reached: { type: 'boolean' } },
+        required: ['reached'],
+        additionalProperties: false,
+      },
+    },
+    handle: () =>
+      new Response(JSON.stringify({ reached: true }), {
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      }),
+  };
+
+  let world: ModerationWorld;
+  beforeAll(async () => {
+    world = await startModerationWorld({ routes: [...ROUTES, FORGETFUL] });
+  });
+  afterAll(() => world.close());
+
+  it('refuses a route declared `reaches: owner` whose handler forgets to check, because the check is in the handler', async () => {
+    const rider = await world.rider('Not the owner');
+    const nowhere = await world.as(rider, 'GET', '/v1/no-such-route');
+    expect(await world.as(rider, 'GET', FORGETFUL.path)).toEqual(nowhere);
+    expect(await world.as(world.deputy, 'GET', FORGETFUL.path)).toEqual(nowhere);
+    expect(await world.as(world.owner, 'GET', FORGETFUL.path)).toEqual({
+      status: 200,
+      body: { reached: true },
+    });
+  });
+});
+
+describe('the owner’s routes on an instance with no OYL_INSTANCE_SECRET_KEY (#2602, ADR 0047 D-7)', () => {
+  let world: ModerationWorld;
+  beforeAll(async () => {
+    world = await startModerationWorld({ keyless: true });
+  });
+  afterAll(() => world.close());
+
+  it.each(OWNER_ROUTES.map((route) => [route.operationId, route] as const))(
+    '%s answers `unavailable`, naming the variable, to the owner, a rider and no session alike',
+    async (_operation, route) => {
+      const path = route.path.replace(/\{[A-Za-z]+\}/g, 'x');
+      const rider = await world.rider();
+      const answers = [
+        await world.as(world.owner, route.method, path),
+        await world.as(rider, route.method, path),
+        await world.call(route.method, path),
+      ];
+      for (const answer of answers) {
+        expect(answer.status).toBe(503);
+        expect(codeOf(answer.body)).toBe('unavailable');
+        expect(JSON.stringify(answer.body)).toContain('OYL_INSTANCE_SECRET_KEY');
+      }
+    },
+  );
 });

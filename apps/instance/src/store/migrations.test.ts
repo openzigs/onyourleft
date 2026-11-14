@@ -130,6 +130,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   segment_effort: `INSERT INTO segment_effort (id, athlete_id, segment_id, content_sha256, started_at, elapsed_seconds, visibility, received_at) VALUES ('effort-a', 'a', '${'a'.repeat(32)}', '${'1'.repeat(64)}', 34, 60.5, 'public', 35)`,
   segment_flag: `INSERT INTO segment_flag VALUES (1, 'a', '${'a'.repeat(32)}', 'effort-a', 'a', 'sha-a', 'vehicle', 36)`,
   segment_integrity_log: `INSERT INTO segment_integrity_log VALUES (1, 37, 'flagged_effort', 'a', 'a', '${'a'.repeat(32)}', 'effort-a', 'vehicle')`,
+  // #2602: a CLI entry, so it names no athlete.
+  operator_log: `INSERT INTO operator_log VALUES (1, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
 };
 
 /**
@@ -147,6 +149,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0030-hidden-items': 'hidden_item',
   '0036-notice-erasure': 'notice_erasure',
   '0039-leaderboard-integrity': 'segment_integrity_log',
+  '0040-operator-log': 'operator_log',
 };
 
 interface Snapshot {
@@ -406,6 +409,26 @@ describe('the migrations (#769)', () => {
     expect(snapshot(path)).toEqual(before);
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0007-moderation');
+    });
+  });
+
+  it('refuses to undo 0040 while the operator log holds an entry, and changes nothing (#2602)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0040-operator-log') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const before = snapshot(path);
+    expect(before.rows.operator_log).toBe(1);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /operator log holds entries/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0040-operator-log');
     });
   });
 

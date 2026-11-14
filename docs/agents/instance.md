@@ -202,7 +202,18 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `segment_flag`, and `segment_integrity_log`,
                         append-only by trigger, `down` refused while it holds
                         an entry); docs/leaderboard-integrity.md states the
-                        rule and its measured detection.
+                        rule and its measured detection. Since #2602
+                        `src/operate/` is the owner-only Operate area's
+                        server half: `reaches: 'owner'` (the owner's key,
+                        NOT the deputy's; checked in the handler,
+                        `unavailable` with no secret key), migration 0040's
+                        append-only `operator_log`, and THE store function
+                        `recordOperatorAction` — change and entry in one
+                        transaction, the change on a store bound to it, its
+                        calls' own transactions savepoints. The CLI's state
+                        changes log through it too (`source: 'cli'`, no
+                        athlete). docs/operating-an-instance.md §"The
+                        Operate area".
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

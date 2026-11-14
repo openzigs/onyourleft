@@ -8,6 +8,7 @@ import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { NOTICE_PAGE_PATH } from './moderation/notices.ts';
+import { OPERATE_ROUTES } from './operate/routes.ts';
 import { pageResponse } from './html.ts';
 import { LEGAL_PAGE_PATH, legalPage } from './legal.ts';
 import { TERMS_PAGE_PATH, termsPage } from './terms.ts';
@@ -240,6 +241,7 @@ export const ROUTES: readonly Route[] = [
   ...SEALED_ROUTES,
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
+  ...OPERATE_ROUTES,
   ...SYNC_ROUTES,
   ...SEGMENT_ROUTES,
   ...HISTORY_ROUTES,

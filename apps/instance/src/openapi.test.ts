@@ -502,6 +502,28 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
+  // #2602: the owner's, with an entry of each source to shape-check.
+  getOperatorLog: async (world) => {
+    const token = await moderatorToken(world);
+    const owner = (await world.call('GET', '/v1/auth/session', { token })).body as {
+      athleteId: string;
+    };
+    await world.freshRead(async (store) => {
+      await store.recordOperatorAction(
+        { actor: { source: 'cli' }, action: 'migrate', at: 1_790_000_000 },
+        () => ({ outcome: 'done', detail: 'applied=1', value: undefined }),
+      );
+      await store.recordOperatorAction(
+        {
+          actor: { source: 'app', athleteId: owner.athleteId },
+          action: 'room_open',
+          at: 1_790_000_001,
+        },
+        () => ({ outcome: 'refused', value: undefined }),
+      );
+    });
+    return send(world, 'GET', '/v1/operate/log', token);
+  },
 
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {

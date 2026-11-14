@@ -360,6 +360,13 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
   },
+  recordOperatorAction: {
+    notAScopedRead:
+      'the operator’s write, with its log entry (#2602); its change is the caller’s own; sql-store.operator-log.test.ts',
+  },
+  listOperatorLogPage: {
+    notAScopedRead: 'the operator’s own record, a page at a time, newest first (#2602)',
+  },
   listSuspendedAthletes: {
     notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
   },

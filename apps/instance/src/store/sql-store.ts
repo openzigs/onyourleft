@@ -50,6 +50,7 @@ import type {
   LinkCodeTable,
   ModerationLogTable,
   NoticeErasureTable,
+  OperatorLogTable,
   NoticeTable,
   StatementTable,
   AppealTable,
@@ -925,6 +926,84 @@ export type ModerationOutcome =
   | { readonly outcome: 'applied'; readonly logId: number }
   | { readonly outcome: 'not_found' }
   | { readonly outcome: 'not_applicable' };
+
+/**
+ * The operator's actions (#2602): the CLOSED list `operator_log.action` is
+ * written from. #2602 adds the operator CLI's commands that change state (the
+ * owner's ruling of 2026-11-14 on #2601); each Operate sub-issue adds its own.
+ * A name not on it is refused before anything is written.
+ */
+export const OPERATOR_ACTIONS = [
+  'migrate',
+  'backup',
+  'restore',
+  'room_open',
+  'model_key_set',
+  'model_key_clear',
+  'instance_key_init',
+  'instance_key_rotate',
+  'instance_key_rotate_identity',
+  'instance_key_reset',
+  'load_accounts_add',
+  'load_accounts_erase',
+  'account_erase',
+] as const;
+
+export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
+
+/** How an operator action ended. */
+export type OperatorOutcome = 'done' | 'refused' | 'failed';
+
+/**
+ * Who took an operator action: the owner's athlete, from the app's Operate
+ * area, or the operator's CLI on the host — which has no athlete, so names
+ * none rather than borrowing the owner's (migration 0040).
+ */
+export type OperatorActor =
+  { readonly source: 'app'; readonly athleteId: string } | { readonly source: 'cli' };
+
+/**
+ * An entry's `detail`: words from a closed vocabulary, each optionally
+ * `=` a whole number, joined by commas — `applied=2`, `drop_old`,
+ * `added=3,held=3`. Never free text, a secret or a coordinate: no space, no
+ * decimal point, no sign, and short.
+ */
+export const OPERATOR_DETAIL =
+  /^[a-z][a-z0-9_]{0,31}(=[0-9]{1,9})?(,[a-z][a-z0-9_]{0,31}(=[0-9]{1,9})?){0,5}$/;
+
+/** One entry of the operator log, as it is read. */
+export interface OperatorLogEntry {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly source: 'app' | 'cli';
+  /** The owner's athlete for `app`; `null` for `cli`. */
+  readonly actorAthleteId: string | null;
+  readonly action: OperatorAction;
+  readonly detail: string | null;
+  readonly outcome: OperatorOutcome;
+}
+
+/** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
+export interface OperatorChange<T> {
+  readonly outcome: Exclude<OperatorOutcome, 'failed'>;
+  /** Held to {@link OPERATOR_DETAIL}, or `null`. */
+  readonly detail?: string | null;
+  readonly value: T;
+}
+
+/** An operator action's entry, before it is written. */
+export interface OperatorEntry {
+  readonly actor: OperatorActor;
+  readonly action: OperatorAction;
+  /** Unix seconds. */
+  readonly at: number;
+}
+
+/** What a detail or an action not on the closed lists is refused with. Names the field, never the value. */
+export class OperatorEntryError extends Error {
+  override readonly name = 'OperatorEntryError';
+}
 
 /** What revoking a device key did (#867). */
 export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
@@ -1896,6 +1975,36 @@ export interface SqlStore {
     limit: number,
   ): Promise<readonly ModerationLogEntry[]>;
   /**
+   * THE operator store function (#2602): run `change` and append its entry to
+   * the operator log in ONE transaction, so an action is applied and logged
+   * or neither. `change` is handed this store bound to that transaction —
+   * every write it makes through it commits or rolls back with the entry, a
+   * store call's own transaction becoming a savepoint inside it. When
+   * `change` or the entry's write throws, nothing it wrote is kept, a
+   * `failed` entry is appended on its own if it can be, and the error is
+   * thrown on. Answers `change`'s value and the entry's id.
+   *
+   * ⚠️ `change` uses the store it is HANDED, never this one: a call on this
+   * store waits for the action, which waits for `change` — they would wait
+   * for each other for ever.
+   *
+   * ⚠️ Only the database is in the transaction: a file `change` writes or
+   * removes (a blob, a snapshot) is not rolled back, so such a change does
+   * that work in an order a retry repairs, as `sync.eraseAccount` does.
+   */
+  recordOperatorAction<T>(
+    entry: OperatorEntry,
+    change: (store: SqlStore) => OperatorChange<T> | Promise<OperatorChange<T>>,
+  ): Promise<{ readonly value: T; readonly logId: number }>;
+  /**
+   * One page of the operator log, NEWEST first: at most `limit` entries whose
+   * id is below `beforeId`, or the newest when it is `undefined`.
+   */
+  listOperatorLogPage(
+    beforeId: number | undefined,
+    limit: number,
+  ): Promise<readonly OperatorLogEntry[]>;
+  /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
    * that order, or the first when it is `undefined`.
@@ -2338,6 +2447,77 @@ const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEn
   at: row.at,
   roomId: row.room_id,
 });
+
+const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry => ({
+  id: row.id,
+  at: row.at,
+  source: row.source,
+  actorAthleteId: row.actor_athlete_id,
+  action: row.action as OperatorAction,
+  detail: row.detail,
+  outcome: row.outcome,
+});
+
+/** Append one operator log entry through `executor`, answering its id (#2602). */
+async function appendOperatorLog(
+  executor: Kysely<InstanceDatabase>,
+  entry: OperatorEntry,
+  outcome: OperatorOutcome,
+  detail: string | null,
+): Promise<number> {
+  const row = await executor
+    .insertInto('operator_log')
+    .values({
+      at: entry.at,
+      source: entry.actor.source,
+      actor_athlete_id: entry.actor.source === 'app' ? entry.actor.athleteId : null,
+      action: entry.action,
+      detail,
+      outcome,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+/**
+ * `trx`, as a `Kysely` whose `transaction()` opens a SAVEPOINT inside it
+ * rather than a transaction of its own (#2602): what an operator action's
+ * change runs every store call on, so a call's own transaction keeps its
+ * meaning — what it rolls back is rolled back — while everything it commits
+ * waits on the operator action's one commit. Every other member is the
+ * transaction's own, bound to it (Kysely's private fields need it as `this`).
+ */
+function savepointsIn(trx: Transaction<InstanceDatabase>): Kysely<InstanceDatabase> {
+  let made = 0;
+  const flattened: Kysely<InstanceDatabase> = new Proxy(trx, {
+    get(target, key) {
+      if (key === 'transaction') {
+        return () => ({
+          execute: async <T>(work: (inner: Kysely<InstanceDatabase>) => Promise<T>) => {
+            made += 1;
+            const name = sql.raw(`operator_change_${String(made)}`);
+            await sql`savepoint ${name}`.execute(target);
+            try {
+              const result = await work(flattened);
+              await sql`release ${name}`.execute(target);
+              return result;
+            } catch (error) {
+              await sql`rollback to ${name}`.execute(target);
+              await sql`release ${name}`.execute(target);
+              throw error;
+            }
+          },
+        });
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+  return flattened;
+}
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
   publicKey: row.public_key,
@@ -3008,6 +3188,19 @@ function instanceKeyStatementValues(statement: InstanceKeyStatementRow) {
 }
 
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
+  return storeOver(db, undefined);
+}
+
+/**
+ * A store over `db`, or — `inside` given — over an operator action's
+ * transaction (#2602, {@link SqlStore.recordOperatorAction}): there a scrub's
+ * write-ahead-log checkpoint waits for the commit, which `inside.scrubbed`
+ * asks for, and the store cannot be closed.
+ */
+function storeOver(
+  db: Kysely<InstanceDatabase>,
+  inside: { readonly scrubbed: () => void } | undefined,
+): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const next = queue.then(operation, operation);
@@ -3035,7 +3228,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       return await operation();
     } finally {
       await sql`pragma secure_delete = off`.execute(db);
-      await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+      // Inside an operator action the old pages are still the transaction's:
+      // the checkpoint is taken after its commit (#2602).
+      if (inside === undefined) await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+      else inside.scrubbed();
     }
   }
 
@@ -5694,6 +5890,46 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return (await query.orderBy('id', 'desc').limit(limit).execute()).map(moderationLogFrom);
       }),
 
+    recordOperatorAction: (entry, change) =>
+      exclusive(async () => {
+        if (!(OPERATOR_ACTIONS as readonly string[]).includes(entry.action)) {
+          throw new OperatorEntryError('action must be one of the operator log’s actions.');
+        }
+        let scrubbed = false;
+        try {
+          return await db.transaction().execute(async (trx) => {
+            const changed = await change(
+              storeOver(savepointsIn(trx), {
+                scrubbed: () => {
+                  scrubbed = true;
+                },
+              }),
+            );
+            const detail = changed.detail ?? null;
+            if (detail !== null && !OPERATOR_DETAIL.test(detail)) {
+              throw new OperatorEntryError(
+                'detail must be words from a closed vocabulary, each optionally = a whole number.',
+              );
+            }
+            const logId = await appendOperatorLog(trx, entry, changed.outcome, detail);
+            return { value: changed.value, logId };
+          });
+        } catch (error) {
+          // Nothing the change wrote was kept; the attempt is, where it can be.
+          await appendOperatorLog(db, entry, 'failed', null).catch(() => undefined);
+          throw error;
+        } finally {
+          if (scrubbed) await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+        }
+      }),
+
+    listOperatorLogPage: (beforeId, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('operator_log').selectAll();
+        if (beforeId !== undefined) query = query.where('id', '<', beforeId);
+        return (await query.orderBy('id', 'desc').limit(limit).execute()).map(operatorLogFrom);
+      }),
+
     listSuspendedAthletes: (after, limit) =>
       exclusive(async () => {
         let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
@@ -6561,6 +6797,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
-    close: () => exclusive(() => db.destroy()),
+    close: () =>
+      inside === undefined
+        ? exclusive(() => db.destroy())
+        : Promise.reject(new Error('An operator action’s store is closed by its transaction.')),
   };
 }

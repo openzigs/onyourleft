@@ -557,7 +557,7 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     const f = await fixture();
     const edge = await testDevice();
     const before = everyRow(f.w.path);
-    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(35);
+    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(36);
     for (const route of PHASE_TWO_SEALED_ROUTES) {
       const { path, body } = requestFor(route, f);
       const tried = await asTheEdge(f, edge, f.bea.token, route.method, path, body);
