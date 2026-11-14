@@ -97,9 +97,12 @@ instance from `cloudflared`, so the per-address rate limits read the rider's own
 `cf-connecting-ip` header Cloudflare writes (`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`). The instance
 believes that header only from a proxy it trusts — loopback, or an address in
 `OYL_INSTANCE_TRUSTED_PROXIES` — so `compose.yaml` gives `cloudflared` the fixed address
-`172.30.87.10` on the project's own network and names exactly that address. You do not set either in
-`.env`. If `172.30.87.0/24` is already in use on this machine, change the subnet, the tunnel's
-address and `OYL_INSTANCE_TRUSTED_PROXIES` in `compose.yaml` together. Anything else on that network,
+`172.30.87.10` on the project's own network, and `172.30.88.10` on `tunnel_metrics`, the internal
+network only it and the instance share for the tunnel's readiness (#2604), and names exactly those
+two addresses. You do not set either in `.env`. If `172.30.87.0/24` or `172.30.88.0/24` is already
+in use on this machine, change that subnet, the tunnel's address on it and
+`OYL_INSTANCE_TRUSTED_PROXIES` in `compose.yaml` together; for `172.30.88.0/24`, also the
+`--metrics` address in the tunnel's command and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network,
 or a port published for local debugging, is counted as itself, whatever header it sends.
 
 ## 5. Deploy — one command

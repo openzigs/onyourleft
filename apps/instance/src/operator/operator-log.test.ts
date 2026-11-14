@@ -197,7 +197,9 @@ describe('the operator CLI writes the operator log (#2602)', () => {
     const data = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
     // Every migration from 0040, the operator log's, onwards left out.
     const names = Object.keys(MIGRATIONS);
-    await migrateAllBut(data.database, names.length - names.indexOf('0040-operator-log'));
+    const first = names.indexOf('0040-operator-log');
+    if (first < 0) throw new Error('no migration named 0040-operator-log in MIGRATIONS');
+    await migrateAllBut(data.database, names.length - first);
     expect(await cli(data, ['backup', join(directory, 'backups')])).toBe(0);
     expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
   });

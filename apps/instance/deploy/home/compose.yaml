@@ -86,8 +86,11 @@ services:
       # and believe it ONLY from cloudflared's own address below (#891, #903
       # item 4): another container on this network, or a port published for
       # local debugging, arrives from somewhere else and is counted as itself.
+      # #2604: and its address on `tunnel_metrics` too. The tunnel is on both
+      # networks, and Docker's DNS may answer `instance` with this network's
+      # address, so cloudflared's requests could arrive from either.
       OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
-      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10
+      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10,172.30.88.10
       # The history index (#835, ADR 0040): http://ollama:11434 with the
       # `ollama` service below running; empty, and the index is off.
       OYL_INSTANCE_EMBEDDING_URL: ${OYL_INSTANCE_EMBEDDING_URL:-}
