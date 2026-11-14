@@ -16,14 +16,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { openServingStore } from '../store/serving.ts';
 import { ATHLETE_A, activityRecordFixture, seedWorld } from '../store/testing/index.ts';
+import { runCommand } from './run.ts';
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+/**
+ * The longest one command's child process may take (#2568, #1688). Vitest
+ * cannot interrupt a synchronous child, so this is what stops a hung one,
+ * and it is below the case's 5 s default. One command takes about 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
 
 let directory: string | undefined;
 afterEach(async () => {
@@ -36,7 +43,7 @@ function run(data: { database: string; blobs: string }, ...args: string[]) {
     cwd: INSTANCE,
     encoding: 'utf8',
     env: { ...process.env, OYL_INSTANCE_DATABASE: data.database, OYL_INSTANCE_BLOBS: data.blobs },
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   const report =
     result.status === 0
@@ -45,13 +52,29 @@ function run(data: { database: string; blobs: string }, ...args: string[]) {
   return { status: result.status, stderr: result.stderr, report };
 }
 
+/**
+ * `migrate` in this process, as set-up: `runCommand`, which `cli.ts` only
+ * calls. A Node start is the slowest part of a run (#2568: about 0.2 s
+ * locally, 0.5–0.8 s under coverage on CI); 'room-open' below still spawns
+ * `migrate` as the operator runs it.
+ */
+async function migrated(data: { database: string; blobs: string }): Promise<void> {
+  // It reports as JSON on stdout; keep that out of the run's output.
+  const report = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    expect(await runCommand(['migrate'], data)).toBe(0);
+  } finally {
+    report.mockRestore();
+  }
+}
+
 async function populated() {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-'));
   const live = {
     database: join(directory, 'live', 'instance.sqlite'),
     blobs: join(directory, 'live', 'blobs'),
   };
-  expect(run(live, 'migrate').status).toBe(0);
+  await migrated(live);
   const store = openServingStore(live.database);
   await seedWorld(store);
   const blobs = createDiskBlobStore(live.blobs);
@@ -115,9 +138,11 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
       rows: backup.report.rows,
       blobs: 2,
     });
-  }, 30_000);
+  });
 
-  it('refuses a restore over a database in place without --force, and a snapshot whose database was changed', async () => {
+  // Two cases, not one (#2568): six child processes in one case took 3.8 s
+  // under coverage on CI (nightly 43466611146, EPYC 7763).
+  it('refuses a restore over a database in place without --force, and restores with it', async () => {
     const { directory: root, live, store } = await populated();
     await store.close();
     expect(run(live, 'backup', join(root, 'backups')).status).toBe(0);
@@ -127,6 +152,14 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     expect(over.status).toBe(1);
     expect(over.stderr).toContain('--force');
     expect(run(live, 'restore', path, '--force').status).toBe(0);
+  });
+
+  it('refuses a snapshot that lost a blob, and one whose database was changed', async () => {
+    const { directory: root, live, store } = await populated();
+    await store.close();
+    expect(run(live, 'backup', join(root, 'backups')).status).toBe(0);
+    const [snapshot] = await readdir(join(root, 'backups'));
+    const path = join(root, 'backups', snapshot ?? '');
 
     // A snapshot that lost a blob on the way (a copy cut short) restores
     // nothing it can vouch for: its counts no longer match its manifest.
@@ -146,7 +179,7 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     const tampered = run(empty, 'restore', path);
     expect(tampered.status).toBe(1);
     expect(existsSync(empty.database)).toBe(false);
-  }, 30_000);
+  });
 
   it('keeps the newest N snapshots, and copies each to a second place — the off-box copy', async () => {
     const { directory: root, live, store } = await populated();
@@ -166,7 +199,7 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     }
     expect(await readdir(join(root, 'on-box'))).toHaveLength(2);
     expect(await readdir(join(root, 'usb'))).toEqual(await readdir(join(root, 'on-box')));
-  }, 30_000);
+  });
 });
 
 describe('a restore is checked before it replaces anything — #895 review N1, N2', () => {
@@ -187,7 +220,7 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
     expect(failed.stderr).toContain('Nothing in place was changed');
     expect(run(live, 'verify').report).toEqual(before);
     expect(existsSync(`${live.database}.restoring`)).toBe(false);
-  }, 30_000);
+  });
 
   it('replaces the blob directory rather than merging into it', async () => {
     const { directory: root, live, store } = await populated();
@@ -200,21 +233,24 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
     const restored = run(live, 'restore', join(root, 'backups', snapshot ?? ''), '--force');
     expect(restored.status, restored.stderr).toBe(0);
     expect(run(live, 'verify').report.blobs).toBe(2);
-  }, 30_000);
+  });
 
-  it('refuses --keep that is not a whole number of at least one', async () => {
-    const { directory: root, live, store } = await populated();
-    await store.close();
-    for (const keep of ['0', '-1', '1.5', 'many']) {
+  // One case per value (#2568): four child processes in one case took 3.3 s
+  // under coverage on CI (nightly 43466611146, EPYC 7763).
+  it.each(['0', '-1', '1.5', 'many'])(
+    'refuses --keep %s: not a whole number of at least one',
+    async (keep) => {
+      const { directory: root, live, store } = await populated();
+      await store.close();
       const taken = run(live, 'backup', join(root, 'backups'), '--keep', keep);
       expect(taken.status, keep).toBe(1);
       expect(taken.stderr).toContain('--keep');
-    }
-  }, 30_000);
+    },
+  );
 });
 
 describe('room-open — a room until #784 and #785 let a rider make one', () => {
-  it('opens a room the instance can serve, and refuses nonsense', async () => {
+  it('opens a room the instance can serve', async () => {
     directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-'));
     const data = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
     expect(run(data, 'migrate').status).toBe(0);
@@ -228,8 +264,16 @@ describe('room-open — a room until #784 and #785 let a rider make one', () => 
     } finally {
       await store.close();
     }
+  });
+
+  // Its own case (#2568): five child processes in one took 3.1 s under
+  // coverage on CI (nightly 43466611146, EPYC 7763).
+  it('refuses nonsense: a kind it does not know, a length below zero, a command it does not have', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-'));
+    const data = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
+    await migrated(data);
     expect(run(data, 'room-open', 'x', '--kind', 'party', '--length', '1').status).toBe(1);
     expect(run(data, 'room-open', 'x', '--kind', 'race', '--length', '-5').status).toBe(1);
     expect(run(data, 'sideways').status).toBe(2);
-  }, 30_000);
+  });
 });

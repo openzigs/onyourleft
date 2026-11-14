@@ -388,7 +388,7 @@ describe('deleting an account (#35)', () => {
     expect(world.blobs.size).toBe(0);
     console.log(`#35 erase: 500 rides and their files in ${took.toFixed(0)} ms, in one request`);
     expect(took).toBeLessThan(ERASE_BUDGET_MS);
-  }, 60_000);
+  });
 });
 
 /**
@@ -577,10 +577,9 @@ describe('a suspended rider may take their data out and delete their account, an
     expect(await instance.freshRead((store) => store.findDeviceKey(stranger.publicKey))).toBe(
       undefined,
     );
-    // 476 ms on green `main` (38337365635, EPYC 7763) and 2 574 ms under
-    // coverage (nightly 38279988356, EPYC 9V74), 51 % of Vitest's 5 s default.
-    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
-  }, 8_000);
+    // Under 300 ms under coverage on nightly 43413444621, and 2 574 ms on
+    // nightly 38279988356 (EPYC 9V74): under Vitest's 5 s default (#2569).
+  });
 
   it('refuses a way-out session to a revoked key, and opens no session for it (#926’s review, N1)', async () => {
     let lost: TestDevice | undefined;

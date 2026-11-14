@@ -244,16 +244,17 @@ describe('the drawn picture, which a real model can open — #1106', () => {
     await runClock(clock, measuring);
     const report = await measuring;
     const sent = bodies.map((body) => (body as { picture: string }).picture);
+    // Each drawn once here: drawing is a hot loop coverage instruments (#2569).
+    const [first, second] = [drawnPicture(0), drawnPicture(1)];
     expect(sent).toHaveLength(2);
-    expect(sent[0] === Buffer.from(drawnPicture(0)).toString('base64')).toBe(true);
-    expect(sent[1] === Buffer.from(drawnPicture(1)).toString('base64')).toBe(true);
+    expect(sent[0] === Buffer.from(first).toString('base64')).toBe(true);
+    expect(sent[1] === Buffer.from(second).toString('base64')).toBe(true);
     expect(report.picture).toBe('drawn');
-    expect(report.pictureBytes).toBe(drawnPicture(0).length);
-    // Under 300 ms on every green `main` run read, and 3 723 ms under coverage
-    // (nightly 38537249148, EPYC 7763), 74 % of Vitest's 5 s default: drawing
-    // the picture is a hot loop coverage instruments. About three times the
-    // slowest CI figure (docs/agents/ci.md §4c, #1262); nothing it does is changed.
-  }, 12_000);
+    expect(report.pictureBytes).toBe(first.length);
+    // 1 270 ms under coverage on nightly 43413444621 with the first drawn
+    // twice more, and 3 723 ms on nightly 38537249148: under Vitest's 5 s
+    // default with no timeout of its own (#2569).
+  });
 
   it('sends filler unless asked, and reports the size asked for', async () => {
     const clock = { ms: 0 };
@@ -312,10 +313,8 @@ describe('a real model on this machine in place of the scripted one — #1106', 
     );
     // The scripted server was started and never asked.
     expect(instance.model.requests).toHaveLength(0);
-    // 959 ms on green `main` (38490502814, EPYC 7763) and 2 591 ms under
-    // coverage (nightly 38282093800, EPYC 7763), 52 % of Vitest's 5 s default.
-    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
-  }, 8_000);
+    // 1 190 ms under coverage on nightly 43413444621, inside Vitest's 5 s default (#2569).
+  });
 
   it.each([
     'https://localhost:11434/v1',
@@ -390,8 +389,14 @@ describe('a picture through the instance as it really starts — #1106', () => {
 
 describe('the command — #1106', () => {
   const tool = join(dirname(fileURLToPath(import.meta.url)), 'side-picture-round-trip.ts');
+  /**
+   * How long the command may run before it is killed: under the case's 5 s, as
+   * a wait inside a case must be (#2569). `spawnSync` blocks the case, so this,
+   * not Vitest's timeout, is what stops a command that hangs.
+   */
+  const COMMAND_WAIT_MS = 4_000;
   const run = (...args: string[]) =>
-    spawnSync(process.execPath, [tool, ...args], { encoding: 'utf8', timeout: 60_000 });
+    spawnSync(process.execPath, [tool, ...args], { encoding: 'utf8', timeout: COMMAND_WAIT_MS });
 
   it('runs on loopback against an instance it starts and stops, and prints one JSON report', () => {
     const ran = run('--loopback', '--model-ms', '20', '--pictures', '4', '--interval-ms', '10');
@@ -414,11 +419,9 @@ describe('the command — #1106', () => {
       pictureBytes: drawnPicture(0).length,
       answers: { '{"rider":false}': 1 },
     });
-    // A child process: 2 302 ms on green `main` (38337365635, EPYC 7763) and
-    // 2 662 ms under coverage (nightly 38492183044, EPYC 7763), 53 % of
-    // Vitest's 5 s default. About three times the slowest CI figure
-    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
-  }, 8_000);
+    // A child process: 1 570 ms under coverage on nightly 43413444621, inside
+    // Vitest's 5 s default (#2569).
+  });
 
   it.each([
     [['--url', 'http://127.0.0.1:1', '--loopback'], 'give --loopback or --url, and not both'],

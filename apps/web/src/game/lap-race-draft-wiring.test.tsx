@@ -41,7 +41,12 @@ import { mount, settle, queryAll, type Mounted } from '../testing/mount';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import type { LapRaceChoice } from './lap-race/choice';
-import { lapRaceBotConditions, startLapRaceRide, stepLapRaceRide } from './lap-race/ride-race';
+import {
+  LAP_RACE_COUNTDOWN_MS,
+  lapRaceBotConditions,
+  startLapRaceRide,
+  stepLapRaceRide,
+} from './lap-race/ride-race';
 import type { GameRenderer } from './port';
 import { lineOffsetAt, racingLine } from './racing-line';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -82,6 +87,11 @@ const RADIUS = 40;
 /** Ten simulation steps a frame. */
 const FRAME_MS = 500;
 const START_MS = 1_000_000;
+/**
+ * The frames a race's countdown holds the rider on the line for (#2546), Go's
+ * own the last of them: no step is run in them, so no `k` is taken either.
+ */
+const COUNTDOWN_FRAMES = LAP_RACE_COUNTDOWN_MS / FRAME_MS;
 /** The race's seed, the same for the race and its shadow. */
 const SEED = 7;
 
@@ -211,6 +221,14 @@ async function rideFlat(
   return { odometer, trace };
 }
 
+/**
+ * The ordinary ride's twin of a race's trace (#2546): 0 W through the
+ * countdown, Go's own frame included, so the rider stands still on the line.
+ */
+function standing(power: (at: number) => number): (at: number) => number {
+  return (at) => (at - START_MS <= LAP_RACE_COUNTDOWN_MS ? 0 : power(at));
+}
+
 /** A flat loop, so the gap to a bot is the rider's power and the draft alone. */
 const FLAT = circuitRoute(RADIUS, () => 0);
 const FLAT_ROUTE: RidableRoute = { id: 'flat-race', name: 'Flat loop', profile: FLAT, attempts: 0 };
@@ -233,6 +251,8 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
    * The rider's power each frame is a rider's own: the power to ride at the
    * bot's speed, plus a little to close or open the gap, at the `k` the rider
    * is getting. What comes out is a power trace, a function of the clock.
+   * The rider is first held on the line for {@link COUNTDOWN_FRAMES}, as a
+   * race holds them (#2546), so the wheel is held from Go.
    */
   function wheelShadow(): {
     readonly power: readonly number[];
@@ -258,7 +278,11 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
     // Frame 0 is the press; frame 1 the first the simulation runs from.
     const power: number[] = [150, 150];
     const gaps: number[] = [];
-    for (let frame = 1; frame <= WHEEL_FRAMES; frame += 1) {
+    for (let frame = 1; frame <= COUNTDOWN_FRAMES; frame += 1) {
+      simulation.holdAt(START_MS + frame * FRAME_MS);
+      power.push(150);
+    }
+    for (let frame = COUNTDOWN_FRAMES + 1; frame <= COUNTDOWN_FRAMES + WHEEL_FRAMES; frame += 1) {
       const { steps } = simulation.advanceTo(START_MS + frame * FRAME_MS, {
         power: watts(power[frame] ?? 0),
         live: true,
@@ -305,9 +329,10 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
     expect(longest).toBeGreaterThanOrEqual(HELD_FRAMES);
     const trace = (at: number): number =>
       shadow.power[Math.round((at - START_MS) / FRAME_MS)] ?? 150;
-    // The device's default, the switch on, and the same trace on an ordinary ride.
-    const drafted = await rideFlat(ONE_BOT, trace, WHEEL_FRAMES);
-    const alone = await rideFlat(undefined, trace, WHEEL_FRAMES);
+    // The device's default, the switch on, and the same trace on an ordinary
+    // ride, whose rider stands still on the line (0 W) through the countdown.
+    const drafted = await rideFlat(ONE_BOT, trace, COUNTDOWN_FRAMES + WHEEL_FRAMES);
+    const alone = await rideFlat(undefined, standing(trace), COUNTDOWN_FRAMES + WHEEL_FRAMES);
     // `GameState.ride.distance` on the last frame: the game simulation's
     // odometer, which the race's effort distance reads. Not the recorder's
     // distance, which the saved ride and the HUD's Distance field show.
@@ -406,8 +431,8 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
     };
   }
 
-  /** 40 s of ride: past the first lap line drafted and undrafted. */
-  const RECORDED_FRAMES = 80;
+  /** The countdown, then 40 s of ride: past the first lap line drafted and undrafted. */
+  const RECORDED_FRAMES = COUNTDOWN_FRAMES + 80;
 
   it('saves the trainer’s measured speed and distance with the switch on, and the draft only moves the lap times (ADR 0060 D-2.4, 2026-11-12)', async () => {
     const shadow = wheelShadow();

@@ -497,7 +497,7 @@ describe('#1808 — fewer houses than the round wants', () => {
       { buildings: mappedBuildingsOf([]), profile, origin, riderDistance: 0, houses: 8 },
       1,
     );
-    expect(pick).toEqual({ targets: [], wanted: 8, complete: false });
+    expect(pick).toEqual({ targets: [], wanted: 8, complete: false, noDelivery: [] });
   });
 
   it('takes none behind the rider, nor any whose window would open in the rider’s chunk', () => {
@@ -814,7 +814,7 @@ describe('#1856 — only houses a parcel can reach', () => {
     const place = { buildings: mappedBuildingsOf(plans), profile: far.profile, origin: far.origin };
     expect(
       pickRoundTargets({ ...place, riderDistance: RIDER, houses: FIRST_DAY_HOUSES }, 1),
-    ).toEqual({ targets: [], wanted: FIRST_DAY_HOUSES, complete: false });
+    ).toEqual({ targets: [], wanted: FIRST_DAY_HOUSES, complete: false, noDelivery: [] });
     expect(roundOn(1, place)).toBeUndefined();
   });
 });

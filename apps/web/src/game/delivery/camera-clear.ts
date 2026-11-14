@@ -35,7 +35,8 @@
  * Nothing here formats a position into a string (CLAUDE.md §6, ADR 0004 D).
  */
 
-import { OBSTACLE_KINDS, type Obstacle } from './obstacles';
+import { OBSTACLE_KINDS, obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
+import { DELIVERY_TICK_SECONDS } from './throw';
 
 /** How far behind the rider the chase camera's eye stands, metres: `camera.ts` §`CAMERA_BEHIND_METRES`, pinned by the test. */
 export const CAMERA_BEHIND_RIDER_METRES = 4.5;
@@ -71,16 +72,30 @@ function smoothStep(from: number, to: number, at: number): number {
  * The eye's lateral offset, in metres right of the centre line, for a rider
  * `riderAlong` metres along the route drawn `riderLateral` metres right of it:
  * the rider's own, moved off any parked car the eye is alongside. @see the header
+ *
+ * A car pulling out (#2364) is drawn as a parked car, so it is a car here too,
+ * at the lateral it has come out to by `state`'s tick; given no `state` it is
+ * not met, as it is drawn nowhere until it is set going.
  */
 export function eyeLateralBesideParkedCars(
   obstacles: readonly Obstacle[],
   riderAlong: number,
   riderLateral: number,
+  state?: ObstacleState,
 ): number {
   const eyeAlong = riderAlong - CAMERA_BEHIND_RIDER_METRES;
   let lateral = riderLateral;
-  for (const obstacle of obstacles) {
-    if (obstacle.kind !== 'parked-car' || obstacle.stands === undefined) continue;
+  for (const [index, obstacle] of obstacles.entries()) {
+    let stands: number;
+    if (obstacle.kind === 'parked-car' && obstacle.stands !== undefined) {
+      stands = obstacle.stands;
+    } else if (obstacle.kind === 'car-pulling-out' && state !== undefined) {
+      const started = state.startedAt[index];
+      if (started === undefined) continue;
+      stands = obstacleAcross(obstacle, (state.tick - started) * DELIVERY_TICK_SECONDS);
+    } else {
+      continue;
+    }
     const { halfLength, halfWidth } = OBSTACLE_KINDS[obstacle.kind];
     const back = obstacle.along - halfLength - CAMERA_NEAR_PLANE_METRES;
     const front = obstacle.along + halfLength;
@@ -89,10 +104,10 @@ export function eyeLateralBesideParkedCars(
       (1 - smoothStep(front, front + CAMERA_CAR_EASE_METRES, eyeAlong));
     if (beside === 0) continue;
     // The car's road side, and the eye's limit that far inside it.
-    const onTheRight = obstacle.stands > 0;
+    const onTheRight = stands > 0;
     const limit = onTheRight
-      ? obstacle.stands - halfWidth - CAMERA_CAR_CLEARANCE_METRES
-      : obstacle.stands + halfWidth + CAMERA_CAR_CLEARANCE_METRES;
+      ? stands - halfWidth - CAMERA_CAR_CLEARANCE_METRES
+      : stands + halfWidth + CAMERA_CAR_CLEARANCE_METRES;
     const over = onTheRight ? Math.max(0, lateral - limit) : Math.min(0, lateral - limit);
     lateral -= beside * over;
   }

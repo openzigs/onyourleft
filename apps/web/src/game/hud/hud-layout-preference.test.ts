@@ -51,6 +51,7 @@ describe('the HUD layout preference (#2079)', () => {
       totalsStrip: false,
       route: 'full',
       power: 'average',
+      delivery: 'game',
     });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
@@ -105,6 +106,7 @@ describe('the focus arrangement (#2383)', () => {
       totalsStrip: false,
       route: 'full',
       power: 'average',
+      delivery: 'game',
     });
     expect(focusArrangement(read)).toBe(true);
   });
@@ -172,6 +174,7 @@ describe('the compact route panel (#2385)', () => {
       totalsStrip: false,
       route: 'compact',
       power: 'average',
+      delivery: 'game',
     });
     expect(compactRoute(read)).toBe(true);
     // Compact says how the route panel is drawn, never whether.
@@ -213,6 +216,7 @@ describe('power as a 3 s average or instant (#2420)', () => {
         textSize: 'large',
         arrangement: 'focus',
         power: 'instant',
+        delivery: 'game',
       }),
     ).toBe(true);
     const read = readHudLayout(localStorage);
@@ -223,6 +227,7 @@ describe('power as a 3 s average or instant (#2420)', () => {
       totalsStrip: false,
       route: 'full',
       power: 'instant',
+      delivery: 'game',
     });
     expect(powerView(read)).toBe('instant');
   });
