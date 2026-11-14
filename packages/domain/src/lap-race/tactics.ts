@@ -20,7 +20,7 @@
  * | `follow` | the racer ahead, or the rider ahead, is in a move within {@link BOT_TACTIC_FOLLOW_METRES} | it holds the wheel ahead within {@link BOT_TACTIC_WHEEL_METRES}, W′ paying for it, {@link BOT_TACTIC_FOLLOW_SURGE} over CP further back |
  * | `attack` | in a lull, more on a climb (a climber) or early (an attacker), for {@link BOT_TACTIC_ATTACK_MS} at most | {@link BOT_TACTIC_ATTACK_SURGE} over CP |
  * | `chase` | the racer ahead is out of draft reach and within {@link BOT_TACTIC_BRIDGE_METRES} | {@link BOT_TACTIC_CHASE_SURGE} over CP |
- * | `recover` | the bot reads its W′ under {@link BOT_TACTIC_RECOVER_SHARE} | {@link BOT_TACTIC_RECOVER_CP_SHARE} of CP |
+ * | `recover` | the bot reads its W′ under {@link BOT_TACTIC_RECOVER_SHARE} | {@link BOT_TACTIC_RECOVER_CP_SHARE} of CP; on a wheel (#2543), the wheel's target, never over that |
  * | `flyer` | the last {@link BOT_TACTIC_FLYER_LAPS} laps, before the launch, with {@link BOT_TACTIC_FLYER_WBAL_SHARE} of W′ or more | {@link BOT_TACTIC_FLYER_SURGE} over CP, until the bot reads its W′ under {@link BOT_TACTIC_FLYER_WBAL_SHARE} (then it sits in) |
  * | `kick` | from its launch distance, {@link BOT_TACTIC_LAUNCH_METRES} times its archetype's sprint factor | its peak |
  *
@@ -52,14 +52,26 @@
  * with the wheel as its plan climbs, and a wheel that attacks is let go
  * unless the bot chooses to `follow` it. **Following, W′ pays for the wheel**:
  * the capacity has the last word, as for every state, and a following bot
- * that reads its W′ low recovers or, at 0, is held to CP: it lets the wheel go. A wheel ridden at less than
- * {@link BOT_TACTIC_WHEEL_PACE_SHARE} of the bot's CP
- * ({@link RaceView.aheadEffortWatts}) is too slow to hold, and the bot rides
- * its own pace past it. That reads the effort of the racer ahead, not its
- * speed: a rider slowing onto a climb, or picking up speed over the top, is
- * riding no easier, and a bot that read the speed would pass them there. On
- * the wheel, in a draft, the capacity's floor does not apply (ADR 0067 D-1.3,
- * R-10).
+ * that reads its W′ low recovers or, at 0, is held to CP: it lets the wheel
+ * go. A wheel whose pace ({@link RaceView.wheelPaceWatts}) is under
+ * {@link BOT_TACTIC_WHEEL_PACE_SHARE} of the bot's CP is too slow to hold, and
+ * the bot rides its own pace past it. A bot's pace is its CP, fixed for the
+ * race (#2543): a wheel easing for a second to open its own gap, or going down
+ * a descent, is no slower a rider, and a bot that read its power there passed
+ * it, and the line churned. The rider's pace is their power: not their speed,
+ * which slows onto a climb at a steady effort. On the wheel, in a draft, the
+ * capacity's floor does not apply (ADR 0067 D-1.3, R-10).
+ *
+ * ## Faders and the riders behind them (#2543)
+ *
+ * A recovering bot holds a wheel too, never harder than its recovering
+ * target, so a bot that has spent its W′ stays in a group's draft while the
+ * group's pace allows it and slips back when it does not. The riders behind a
+ * fader do not go back with it: a racer more than
+ * {@link BOT_TACTIC_WHEEL_LOST_METRES} behind its own wheel, and no faster
+ * than it, has lost it, and the bot behind {@link RaceView.wheelGapMetres
+ * holds the wheel in front of it instead}, coming round. So a fader slips
+ * through the group to its back, then off it.
  *
  * ## Choice: utility, a commitment bonus and a dwell (Game AI Pro 3 ch. 13)
  *
@@ -147,22 +159,30 @@ export interface RaceView {
   /** The grade ahead, percent: what the road does in the next stretch. */
   readonly gradeAheadPercent: number;
   /**
-   * Its own speed less the racer ahead's, m/s: above 0 it is closing (#2542).
-   * 0 when it leads.
+   * Metres to the wheel it holds, or `null` with none (#2543): the racer
+   * ahead's, or, where that one has lost its own wheel and the one before it
+   * is in reach, that one's, so the bot comes round a rider going backwards.
+   * Every wheel field below reads the same racer.
+   */
+  readonly wheelGapMetres: number | null;
+  /**
+   * Its own speed less the wheel's, m/s: above 0 it is closing (#2542). 0 when
+   * it leads.
    */
   readonly closingMetresPerSecond: number;
   /**
-   * The power, watts, that holds the speed of the racer ahead in the bot's own
+   * The power, watts, that holds the speed of the wheel in the bot's own
    * draft ({@link draftFactor}) on the road under it, or `null` when it leads
    * (#2542). Worked out by the caller through the one physics.
    */
   readonly holdWatts: number | null;
   /**
-   * How hard the racer ahead rides, watts at the bot's mass, as if in the
-   * open: its power over its own draft multiplier (#2542). `null` when it
-   * leads, or when its power cannot be read (the rider with no live power).
+   * The wheel's pace, watts at the bot's mass (#2542, #2543): a bot's CP, read
+   * and never changed, or the rider's power over their own draft multiplier.
+   * `null` when it leads, or when it cannot be read (the rider with no live
+   * power, a bot before its first tick).
    */
-  readonly aheadEffortWatts: number | null;
+  readonly wheelPaceWatts: number | null;
   /** Its draft multiplier `k` this tick: 1 in the open and with the draft off (#2542). */
   readonly draftFactor: number;
   /** Its W′ balance now. */
@@ -261,12 +281,20 @@ export const BOT_TACTIC_WHEEL_SURGE = 0.15;
 /** The most a bot holding a wheel eases under the feed-forward, as a share of CP: **0.5** (#2542). */
 export const BOT_TACTIC_WHEEL_EASE = 0.5;
 
+/**
+ * A racer this many metres or more behind its own wheel, and no faster than
+ * it, has lost it: a bot behind comes round it to the wheel in front, if that
+ * is within {@link BOT_TACTIC_WHEEL_METRES} (#2543). **2 m**, twice the far
+ * end of the band.
+ */
+export const BOT_TACTIC_WHEEL_LOST_METRES = 2 * BOT_TACTIC_WHEEL_FURTHEST_METRES;
+
 /** The least a bot holding a wheel in a draft rides, watts: **0**, it may freewheel (ADR 0067 D-1.3, R-10). */
 export const BOT_TACTIC_WHEEL_FLOOR_WATTS = 0;
 
 /**
- * A wheel ridden at less than this share of the bot's CP, as if in the open,
- * is too slow to hold, and the bot rides past it: **0.85** (#2542).
+ * A wheel whose pace is under this share of the bot's CP is too slow to hold,
+ * and the bot rides past it: **0.85** (#2542).
  */
 export const BOT_TACTIC_WHEEL_PACE_SHARE = 0.85;
 
@@ -364,10 +392,11 @@ function checkView(view: RaceView): void {
     (view.gapAheadMetres !== null && !Number.isFinite(view.gapAheadMetres)) ||
     // #2463: `null` for the last bot, as `gapAheadMetres` is for the leader.
     (view.gapBehindMetres !== null && !Number.isFinite(view.gapBehindMetres)) ||
+    (view.wheelGapMetres !== null && !Number.isFinite(view.wheelGapMetres)) ||
     (view.riderWattsPerKilogram !== null && !Number.isFinite(view.riderWattsPerKilogram)) ||
     // #2542: a power a physics worked out, and a draft multiplier in (0, 1].
     (view.holdWatts !== null && !Number.isFinite(view.holdWatts)) ||
-    (view.aheadEffortWatts !== null && !Number.isFinite(view.aheadEffortWatts)) ||
+    (view.wheelPaceWatts !== null && !Number.isFinite(view.wheelPaceWatts)) ||
     !(view.draftFactor > 0 && view.draftFactor <= 1)
   ) {
     throw new LapRaceError(
@@ -472,11 +501,11 @@ function score(
  * misjudges when to go, not where a wheel is a metre in front of it.
  */
 function wheelWatts(view: RaceView): number | null {
-  const gap = view.gapAheadMetres;
+  const gap = view.wheelGapMetres;
   const cp = view.capacity.cpWatts;
   if (gap === null || gap > BOT_TACTIC_WHEEL_METRES) return null;
   if (view.holdWatts === null) return null;
-  const effort = view.aheadEffortWatts;
+  const effort = view.wheelPaceWatts;
   if (effort !== null && effort < cp * BOT_TACTIC_WHEEL_PACE_SHARE) return null;
   const correction =
     BOT_TACTIC_WHEEL_GAP_GAIN * (gap - BOT_TACTIC_WHEEL_GAP_METRES) -
@@ -500,7 +529,10 @@ function wanted(tactic: BotTactic, view: RaceView, wheel: number | null): number
     case 'chase':
       return cp * (1 + BOT_TACTIC_CHASE_SURGE);
     case 'recover':
-      return cp * BOT_TACTIC_RECOVER_CP_SHARE;
+      // #2543: on a wheel, no harder than recovering: a spent bot slips back.
+      return wheel === null
+        ? cp * BOT_TACTIC_RECOVER_CP_SHARE
+        : Math.min(wheel, cp * BOT_TACTIC_RECOVER_CP_SHARE);
     case 'flyer':
       return cp * (1 + BOT_TACTIC_FLYER_SURGE);
     case 'kick':
@@ -572,7 +604,8 @@ export function decideTactic(
       window,
     };
   }
-  const wheel = tactic === 'sit-in' || tactic === 'follow' ? wheelWatts(view) : null;
+  const wheel =
+    tactic === 'sit-in' || tactic === 'follow' || tactic === 'recover' ? wheelWatts(view) : null;
   // On a wheel in a draft the capacity's floor does not apply (ADR 0067 D-1.3, R-10).
   const floor =
     wheel !== null && view.draftFactor < 1
