@@ -218,7 +218,6 @@ function OperatorLog({
                 const cursor = log.next;
                 if (busy || cursor === null || log.kind !== 'page') return;
                 askedAt.current = log.entries.length;
-                
                 setBusy(true);
                 void onMore(cursor).finally(() => {
                   setBusy(false);
