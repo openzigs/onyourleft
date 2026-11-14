@@ -51,8 +51,10 @@
  * the screen and never its shelter (D-3.2). Each bot's `k` multiplies its
  * `C_D·A` in its one tick through {@link advance} (ADR 0028 D-1), and nothing
  * else: its plan's power is the same, and it rides faster for it. The rider's
- * own `k`, from the same call, is #2461's. With the draft off, the default, no
- * racer drafts and the race is the race before #2460 to the bit (D-3.4).
+ * own `k` comes out of the same call, in {@link BotRaceTick.draft} (#2461):
+ * `apps/web` rides the rider at it through the game's simulation, never a
+ * second walk of the field. With the draft off, the default, no racer drafts
+ * and the race is the race before #2460 to the bit (D-3.4).
  *
  * ## No instance, no network (D-7.3)
  *
@@ -148,6 +150,18 @@ export function lapRaceDraftFactors(race: ItemRaceState): Readonly<Record<string
   return byId;
 }
 
+/** A solo race one tick on: the race, its bots, and the field's draft that tick. */
+export interface BotRaceTick {
+  readonly race: ItemRaceState;
+  readonly bots: readonly LapRaceBot[];
+  /**
+   * Every racer's draft multiplier `k` this tick, by id, the rider's included:
+   * the one {@link lapRaceDraftFactors} call the bots were ridden at (#2461,
+   * ADR 0067 D-3.1). Absent with {@link BotRaceStep.draft} off.
+   */
+  readonly draft?: Readonly<Record<string, number>>;
+}
+
 /**
  * A bot on the start line, with its strength, its way of racing and its pace
  * chosen apart. With no pace, it rides the even plan, a rouleur's (#2459), at its
@@ -174,7 +188,8 @@ export function lapRaceBot(
 /**
  * The race and its bots one tick on. Each bot decides from the race as it
  * stood, rides its race plan's power through {@link advancePlannedBot}, and the race
- * takes the bots' effort distances and decisions with the rider's inputs.
+ * takes the bots' effort distances and decisions with the rider's inputs. With
+ * the draft on, the field's factors come back with it, the rider's included.
  *
  * @throws through `strategicBotDecision` (`travel-out-of-range`) or
  * `botPlanStep` (`elapsed-out-of-range`) for an elapsed time that is not
@@ -185,7 +200,7 @@ export function stepBotRace(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
   step: BotRaceStep,
-): { readonly race: ItemRaceState; readonly bots: readonly LapRaceBot[] } {
+): BotRaceTick {
   const effortDistances: Record<string, number> = { ...step.rider?.effortDistances };
   const lanes: Record<string, number> = { ...step.rider?.lanes };
   const uses: string[] = [...(step.rider?.uses ?? [])];
@@ -240,5 +255,6 @@ export function stepBotRace(
       uses,
     }),
     bots: moved,
+    ...(factors === undefined ? {} : { draft: factors }),
   };
 }
