@@ -512,17 +512,27 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
       const before = await ownLine(page, 'corner-back');
       const pageBefore = await page.evaluate(() => window.scrollY);
       const cdp = await page.context().newCDPSession(page);
-      await cdp.send('Input.synthesizeScrollGesture', {
-        x: Math.round(before.x),
-        y: Math.round(before.y),
-        yDistance: 120,
-        gestureSourceType: 'touch',
-        speed: 2_000,
-      });
-      const after = await ownLine(page, 'corner-back');
-      expect(after.scrollTop, 'the list scrolled up under the finger').toBeLessThan(
-        before.scrollTop,
-      );
+      // A finger put down on the list, drawn 120 px down in steps, and lifted:
+      // raw touch input, which the compositor scrolls as a finger's pan.
+      const x = Math.round(before.x);
+      const y = Math.round(before.y) - 40;
+      const touch = async (
+        type: 'touchStart' | 'touchMove' | 'touchEnd',
+        at: number | undefined,
+      ): Promise<void> => {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type,
+          touchPoints: at === undefined ? [] : [{ x, y: at }],
+        });
+      };
+      await touch('touchStart', y);
+      for (let step = 1; step <= 12; step += 1) await touch('touchMove', y + step * 10);
+      await touch('touchEnd', undefined);
+      await expect
+        .poll(async () => (await ownLine(page, 'corner-back')).scrollTop, {
+          message: 'the list scrolled up under the finger',
+        })
+        .toBeLessThan(before.scrollTop);
       expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(pageBefore);
       expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
     });
