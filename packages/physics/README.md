@@ -305,15 +305,19 @@ bot's personality and skill, with the memory it handed back last tick), rides it
 power through `advanceBot`'s tick at that power, `pacer.ts` §`advancePlannedBot`, which `index.ts` does not export so that `advanceBot` keeps no parameter for a rider's power (#1960, ADR 0061: `@onyourleft/domain` §`botPlanStep`, from its tier, the
 grade under it, the effort distance it has left and its own reserve), and hands the bots' effort distances and decisions to §`stepRace` with
 the rider's inputs. A bot's inputs are a tier, the plan, the course and a seed. Its public
-signatures take no activity, stream or ghost type, which a type-level test holds. Its power never reads
-the race's standings, its race offset or its drawn distance: there is no rubber-banding (ADR 0060
-D-9, ADR 0061 D-3). `lap-race-bot.test.ts` replaces
+signatures take no activity, stream or ghost type, which a type-level test holds. Since #2463 its
+power reads the race (ADR 0067 D-0): each tick `stepBotRace` builds each racing bot's
+`RaceView` on effort distance and asks `@onyourleft/domain` §`decideTactic`, whose target sets the
+level `botPlanStep` shapes to the road, and whose kick opens the sprint. Its **capacity** never
+reads the race (D-1.2): the plan is built once, at the bot's first tick, and kept on the bot, and
+`lap-race-bot.test.ts` replays each bot's W′ balance from its own power on that one capacity,
+leading and trailing. No item's offset or drawn lap reaches the view. `lap-race-bot.test.ts` replaces
 `advance` with a sentinel, as `pacer.test.ts` does, and requires the bot's race position to move.
 The seed is the race's own, and the decision refuses one that is not a safe whole number. Each
 bot's speed times the tick's length is passed as how far it will ride, so its puddle look-ahead and
 its last call grow with its speed (`packages/domain/src/lap-race/strategy.ts`). A bot's strategy is
-chosen apart from its tier and is never read on the way to its power: a crafty and a naive bot of
-one tier ride one power trace, and the crafty one finishes ahead more often than not.
+chosen apart from its tier and never reaches its capacity: a crafty and a naive bot of one tier
+carry one CP, W′ and peak, and the crafty one finishes ahead more often than not (ADR 0067 D-7).
 
 Since #2455 a bot also carries a `BotPace` (`@onyourleft/domain` §`pace.ts`): its ability at or
 under its tier and its pacing style off the course, dealt from the race's seed at the start. Its
@@ -326,6 +330,16 @@ profile within the tier, its CP share, W′, peak, recovery, climbing and kick, 
 capacity is set from. `lap-race-bot.test.ts` holds a sprinter to beating a rouleur of its tier in a
 flat final 200 m from level, and a climber to beating a sprinter on the hilly loop, each in more than
 half of 100 seeds.
+
+Since #2460 the field can draft (ADR 0067 D-3). With `BotRaceStep.draft` on, `stepBotRace` calls
+`draft.ts` §`fieldDraftFactors` once a tick over every racer's **effort distance** as the race stood,
+the rider's included (`lapRaceDraftFactors`), and rides each bot's plan power through `advance` with
+its `C_D·A` times its `k` (`pacer.ts` §`advancePlannedBot`'s `dragFactor`). The power is the plan's
+either way: a sheltered bot goes faster for it. Drawn distance, which items move, never enters. With
+the switch off, the default, the race is the race before #2460 to the bit. Since #2461 `apps/web`
+passes ADR 0066 D-6's switch, and `stepBotRace` hands back the factors it rode the bots at
+(`BotRaceTick.draft`), the rider's included: the game rides the rider at that `k` through its own
+simulation, so the rider's draft is never a second walk of the field.
 
 ---
 

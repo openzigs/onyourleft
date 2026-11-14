@@ -101,6 +101,7 @@ export {
   BOT_SKILL_MISJUDGEMENT,
   BOT_SKILLS,
   botFieldPersonalities,
+  botFieldSkills,
   strategicBotDecision,
 } from './strategy';
 
@@ -142,7 +143,39 @@ export {
   botTacticsMisjudgement,
 } from './archetype';
 
-export type { BotPlanInput, BotPlanStep, BotRacePlan } from './plan';
+// Each bot's race-aware tactics (#2462, ADR 0067 D-0, D-1, D-7): utility over
+// seven states, chosen once per decision window, telling the power model how
+// hard to ride inside a capacity it never changes. Wired into the race by #2463.
+export type { BotTactic, RaceView, TacticDecision, TacticMemory } from './tactics';
+export {
+  BOT_TACTIC_ATTACK_MS,
+  BOT_TACTIC_ATTACK_SURGE,
+  BOT_TACTIC_BRIDGE_METRES,
+  BOT_TACTIC_CHASE_SURGE,
+  BOT_TACTIC_CLIMB_GRADE_PERCENT,
+  BOT_TACTIC_COMMITMENT,
+  BOT_TACTIC_DWELL_MS,
+  BOT_TACTIC_EARLY_LAPS,
+  BOT_TACTIC_FLYER_LAPS,
+  BOT_TACTIC_FLYER_SURGE,
+  BOT_TACTIC_FLYER_WBAL_SHARE,
+  BOT_TACTIC_FOLLOW_METRES,
+  BOT_TACTIC_FOLLOW_SURGE,
+  BOT_TACTIC_LAUNCH_METRES,
+  BOT_TACTIC_MOVE_SHARE,
+  BOT_TACTIC_RECOVER_CP_SHARE,
+  BOT_TACTIC_RECOVER_SHARE,
+  BOT_TACTIC_SIT_IN_SHARE,
+  BOT_TACTIC_UTILITY,
+  BOT_TACTIC_WBAL_FLOOR,
+  BOT_TACTIC_WHEEL_METRES,
+  BOT_TACTICS,
+  botLaunchMetres,
+  decideTactic,
+  TACTIC_MEMORY_AT_START,
+} from './tactics';
+
+export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
   BOT_PLAN_SURGE_CEILING,
   BOT_SPRINT_LONGEST_METRES,

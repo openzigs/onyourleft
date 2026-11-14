@@ -13,8 +13,9 @@
  * A bot's power is a function of its tier, the road, the distance it has left
  * and its own W′ balance, **and never of any other racer**. What
  * {@link botPlanStep} reads is the whole of D-2. ⚠️ ADR 0067 D-0 has since
- * lifted that rule: a bot's strategy may read the race. This plan does not
- * yet; #2462 and #2463 add what does, and nothing here changes a capacity:
+ * lifted that rule: a bot's strategy may read the race. This plan does not;
+ * since #2463 its {@link BotPlanInput.tactic} carries what the tactics read
+ * (#2462), and nothing here changes a capacity:
  *
  * | Input | Where it comes from |
  * |---|---|
@@ -297,6 +298,18 @@ function ownPowerAt(plan: BotRacePlan, effortDistance: number): number {
     : plan.easedWatts;
 }
 
+/**
+ * What a bot's tactics ask of its plan on one tick (#2463, ADR 0067 D-1):
+ * `tactics.ts` §`decideTactic`'s target, already inside the bot's capacity,
+ * and whether the tactic is the kick.
+ */
+export interface BotPlanTactic {
+  /** The tactic's power target, watts: the level the bot rides at on the flat, in its hard part. */
+  readonly targetWatts: number;
+  /** Whether the tactic is `kick`: the bot sprints, and its plan's own sprint distance gives way. */
+  readonly kick: boolean;
+}
+
 /** What one step of the plan reads from the bot's own ride. */
 export interface BotPlanInput {
   /** The bot's own effort distance, metres (D-2.3): never its drawn distance, never its place. */
@@ -305,6 +318,11 @@ export interface BotPlanInput {
   readonly grade: GradePercent | number;
   /** How long this tick lasts, seconds: the power is held for all of it. */
   readonly elapsed: number;
+  /**
+   * What its tactics ask this tick (#2463). Absent, the plan alone decides:
+   * the plan as it was before tactics were wired.
+   */
+  readonly tactic?: BotPlanTactic | undefined;
 }
 
 /** What the plan rides this tick, and the W′ balance after it. */
@@ -346,6 +364,12 @@ function coursePower(plan: BotRacePlan, own: number, grade: number): number {
  * more above its CP than its balance pays for, its CP alone while it is
  * exhausted, and inside the tier's floor, the surge ceiling and 7 W/kg.
  *
+ * With a {@link BotPlanInput.tactic} (#2463), the tactic sets the level: the
+ * bot's own power is scaled by the tactic's target over its CP, so its style's
+ * easing and the road's climbs and descents still shape it, and the tactic's
+ * kick, not the plan's sprint distance, opens the sprint. Its capacity is the
+ * plan's either way (ADR 0067 D-1).
+ *
  * @param energy - the bot's W′ balance: full at the start (`wbal.ts`
  *   §`fullBotEnergy` of the plan's capacity), then what the last step returned.
  * @throws {LapRaceError} `effort-distance-not-finite`; `elapsed-out-of-range`
@@ -367,8 +391,13 @@ export function botPlanStep(
   }
   // #2455: the bot's own power here, never over its tier's; its CP in its
   // hard part, and eased under it outside, where it recovers.
-  const own = ownPowerAt(plan, effortDistance);
-  const sprinting = plan.raceMetres - effortDistance <= plan.sprintMetres;
+  const { tactic } = input;
+  const own =
+    tactic === undefined
+      ? ownPowerAt(plan, effortDistance)
+      : (ownPowerAt(plan, effortDistance) * tactic.targetWatts) / plan.ownWatts;
+  const sprinting =
+    tactic === undefined ? plan.raceMetres - effortDistance <= plan.sprintMetres : tactic.kick;
   const wanted = sprinting ? plan.surgeWatts : coursePower(plan, own, input.grade);
   const power = spendableWatts(plan.capacity, energy, wanted, elapsed);
   return { power: watts(power), energy: stepWbal(plan.capacity, energy, power, elapsed) };

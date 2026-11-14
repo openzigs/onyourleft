@@ -51,6 +51,7 @@ import { ROOM_LOST_TEXT } from './room-ride';
 import { LAP_RACE_CHOICE_TEXT } from './StageChooser';
 import { circuitRoute } from './route-fixtures-testing';
 import { GameSimulation, type RiderInput } from './simulation';
+import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { endRideAnswer } from './end-ride-testing';
 
@@ -358,6 +359,10 @@ let soloRide: Promise<readonly Write[]> | undefined;
 const soloWrites = (): Promise<readonly Write[]> =>
   (soloRide ??= (async () => {
     const solo: Write[] = [];
+    // With the draft switch off (#2461, ADR 0067 D-3.4): a solo race with it
+    // on drafts the rider behind its bots, and a room's draft is the room's,
+    // not the switch's.
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     await mountRide({ lapRace: SOLO_ITEMS_OFF, writes: solo, blind: true });
     // Its countdown (#2546), then the race.
     for (let index = 0; index < COUNTDOWN_FRAMES + FRAMES; index += 1) await pump();
