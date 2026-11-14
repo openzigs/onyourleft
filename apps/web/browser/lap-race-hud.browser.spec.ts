@@ -305,8 +305,10 @@ test.describe('#1904 — the lap race measurement can fail', () => {
  *   topmost thing at each of its corners, hit-tested;
  * - *Pause* and *End ride* are on the stage at 48 px or more (#669);
  * - on a tablet the standings are drawn with the rider's own line, and at
- *   1280×800 and upright, where there is room, with every line — the whole
- *   field of #2328 gives way only where the room is short.
+ *   1280×800 and upright, where there is room, with every line at every text
+ *   size — the whole field of #2328 gives way only where the room is short;
+ * - and the FIRST frame drawn already has them off the actions panel (PR
+ *   #2621's review): the room is measured before paint, not a frame later.
  *
  * The control puts every line back where the room is short, and the
  * standings are then over the actions panel at 1024×768.
@@ -335,7 +337,7 @@ const CORNER_CASES = [
 ];
 
 /** What is wrong with the corner of one stage, as sentences. */
-function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: string): string[] {
+function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport): string[] {
   const faults: string[] = [];
   const say = (box: Box): string =>
     `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
@@ -377,7 +379,7 @@ function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: 
     if (!stage.standingsLines.some((line) => line.you && line.drawn)) {
       faults.push('the rider’s own line gave way');
     }
-    if (ROOMY.has(sized(viewport)) && text === 'normal' && drawn.length !== 8) {
+    if (ROOMY.has(sized(viewport)) && drawn.length !== 8) {
       faults.push(`${String(drawn.length)} of 8 lines drawn where there is room for all`);
     }
   }
@@ -390,13 +392,28 @@ for (const { viewport, text } of CORNER_CASES) {
   }) => {
     const measured = await open(page, viewport, `?corner=race&text=${text}`);
     expect(measured.map((each) => each.stage)).toEqual([...CORNER_STAGES]);
+    const first = await page.evaluate(() => window.__oylLapRaceHudFirstFrame);
+    expect(
+      first?.map((each) => each.stage),
+      'the first frame was read',
+    ).toEqual([...CORNER_STAGES]);
+    for (const frame of first ?? []) {
+      const { standings, actions } = frame;
+      if (standings === undefined || actions === undefined) continue;
+      expect(
+        overlap(standings, actions),
+        `${viewport.name}, ${frame.stage}: the first frame drew the standings ` +
+          `[${standings.top.toFixed(0)} → ${standings.bottom.toFixed(0)}] over the actions panel ` +
+          `from ${actions.top.toFixed(0)}`,
+      ).toBe(false);
+    }
     for (const stage of measured) {
       expect(stage.standingsLines.length, stage.stage).toBe(8);
       const drawn = stage.standingsLines.filter((line) => line.drawn).length;
       console.log(
         `#2599 ${viewport.name}, ${text} text, ${stage.stage}: ${String(drawn)} of 8 lines drawn`,
       );
-      expect(cornerFaults(stage, viewport, text), `${viewport.name}, ${stage.stage}`).toEqual([]);
+      expect(cornerFaults(stage, viewport), `${viewport.name}, ${stage.stage}`).toEqual([]);
     }
   });
 }
@@ -409,7 +426,7 @@ test('#2599 the corner measurement can fail: every line drawn puts the standings
   await open(page, fourByThree, '?corner=race&text=normal');
   await page.addStyleTag({ content: LINES_GIVE_WAY_UNDONE });
   const undone = await remeasure(page);
-  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
+  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree));
   console.log(`#2599 control, 1024×768 with every line drawn: ${faults.join('; ')}`);
   expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
 });

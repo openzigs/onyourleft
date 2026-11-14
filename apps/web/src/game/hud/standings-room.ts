@@ -28,7 +28,7 @@
  * `browser/lap-race-hud.browser.spec.ts` §"#2599" measures it.
  */
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 /**
  * The least space between the standings and the actions panel under them:
@@ -36,6 +36,14 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
  * `ride-laps.browser.spec.ts` §`MARGIN_PIXELS` holds for a room's race.
  */
 export const STANDINGS_CLEARANCE_PIXELS = 16;
+
+/**
+ * How much more room than a line's height a line that gave way needs before
+ * it is drawn again (PR #2621's review). Without it, a trainer line near its
+ * wrap point — `-1.5 %` to `-12.5 %` — grows and shrinks the actions panel
+ * by a line, and the furthest line blinks in and out each time.
+ */
+export const STANDINGS_HYSTERESIS_PIXELS = 4;
 
 /**
  * Each line's place in the order the lines give way: `0` is kept the
@@ -82,15 +90,22 @@ export interface StandingsRoom {
 /**
  * How many lines the room holds: the space from the list's top to the
  * actions panel's, less the clearance and what the panel draws below its
- * list, in whole lines, never fewer than none.
+ * list, in whole lines, never fewer than none. With `drawn`, the lines drawn
+ * now, the room must hold a line and {@link STANDINGS_HYSTERESIS_PIXELS}
+ * more before a line that gave way comes back; a line goes as soon as the
+ * room no longer holds it, so the hysteresis never draws one too many.
  */
-export function linesThatFit(room: StandingsRoom): number {
+export function linesThatFit(room: StandingsRoom, drawn?: number): number {
   if (!(room.lineHeight > 0)) return 0;
   const below = room.panelBottom - room.listBottom;
   const space = room.actionsTop - STANDINGS_CLEARANCE_PIXELS - below - room.listTop;
-  // A thousandth of a pixel, so a room that is exactly n lines tall in
-  // sub-pixel layout is not read as one short of them.
-  return Math.max(0, Math.floor(space / room.lineHeight + 0.001));
+  const whole = (pixels: number): number =>
+    // A thousandth of a pixel, so a room that is exactly n lines tall in
+    // sub-pixel layout is not read as one short of them.
+    Math.max(0, Math.floor(pixels / room.lineHeight + 0.001));
+  const fit = whole(space);
+  if (drawn === undefined || fit <= drawn) return fit;
+  return Math.max(drawn, whole(space - STANDINGS_HYSTERESIS_PIXELS));
 }
 
 /** Whether the line at `rank` gives way when the room holds `fit` lines. */
@@ -103,9 +118,13 @@ export function givesWay(rank: number, fit: number | undefined): boolean {
  * for all of them — or are not drawn at all (a phone, where the panel is
  * clipped to nothing), or are not over the actions panel in the layout.
  *
- * Measured when the HUD or any of its panels changes size (a rotation, the
- * text size, *Use item* or the touch lock's note in the actions panel, a
- * reading in the secondary panel above), and when the number of lines does.
+ * Measured before the first paint, so no frame draws the lines over the
+ * actions panel (PR #2621's review); then again when the HUD or any of its
+ * panels changes size (a rotation, the text size, *Use item* or the touch
+ * lock's note in the actions panel, a reading in the secondary panel
+ * above), when a panel is added to the HUD or its class or style changes —
+ * which can move a panel without resizing one — and when the number of
+ * lines changes.
  */
 export function useStandingsRoom(
   panel: RefObject<HTMLElement | null>,
@@ -116,20 +135,44 @@ export function useStandingsRoom(
   // The last line height measured: when every line has given way there is
   // no line left to read it from.
   const lineHeight = useRef(0);
-  useEffect(() => {
+  // The lines drawn now, for the hysteresis; `undefined` is all of them.
+  const drawn = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
     const section = panel.current;
     const ol = list.current;
     const hud = section?.closest('.oyl-hud');
     if (section === null || ol === null || hud === null || hud === undefined) return undefined;
-    if (typeof ResizeObserver === 'undefined') return undefined;
     const measure = (): void => {
-      setFit(roomFor(section, ol, hud, lineHeight, lines));
+      const next = roomFor(section, ol, hud, lineHeight, lines, drawn.current ?? lines);
+      drawn.current = next;
+      setFit(next);
     };
-    const observer = new ResizeObserver(measure);
-    observer.observe(hud);
-    for (const child of hud.children) observer.observe(child);
+    // Before paint: a state update from a layout effect renders again
+    // synchronously, so the first frame drawn already has the lines that fit.
+    measure();
+    if (typeof ResizeObserver === 'undefined' || typeof MutationObserver === 'undefined') {
+      return undefined;
+    }
+    const sizes = new ResizeObserver(measure);
+    sizes.observe(hud);
+    for (const child of hud.children) sizes.observe(child);
+    const attributes = { attributes: true, attributeFilter: ['class', 'style'] };
+    const changes = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const added of record.addedNodes) {
+          if (added instanceof Element && added.parentElement === hud) {
+            sizes.observe(added);
+            changes.observe(added, attributes);
+          }
+        }
+      }
+      measure();
+    });
+    changes.observe(hud, { ...attributes, childList: true });
+    for (const child of hud.children) changes.observe(child, attributes);
     return () => {
-      observer.disconnect();
+      sizes.disconnect();
+      changes.disconnect();
     };
   }, [panel, list, lines]);
   return fit;
@@ -141,6 +184,7 @@ function roomFor(
   hud: Element,
   lineHeight: { current: number },
   lines: number,
+  drawn: number,
 ): number | undefined {
   const panelBox = section.getBoundingClientRect();
   if (panelBox.width <= 1 || panelBox.height <= 1) return undefined;
@@ -157,12 +201,15 @@ function roomFor(
     }
   }
   const listBox = ol.getBoundingClientRect();
-  const fit = linesThatFit({
-    listTop: listBox.top,
-    listBottom: listBox.bottom,
-    panelBottom: panelBox.bottom,
-    actionsTop: actionsBox.top,
-    lineHeight: lineHeight.current,
-  });
+  const fit = linesThatFit(
+    {
+      listTop: listBox.top,
+      listBottom: listBox.bottom,
+      panelBottom: panelBox.bottom,
+      actionsTop: actionsBox.top,
+      lineHeight: lineHeight.current,
+    },
+    drawn,
+  );
   return fit >= lines ? undefined : fit;
 }

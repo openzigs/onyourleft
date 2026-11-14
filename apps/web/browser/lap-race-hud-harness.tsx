@@ -141,12 +141,26 @@ export interface LapRaceStageMeasurement {
   }[];
 }
 
+/** One stage's standings and actions panel in the first frame drawn. */
+export interface FirstFrame {
+  readonly stage: string;
+  readonly standings: Box | undefined;
+  readonly actions: Box | undefined;
+}
+
 declare global {
   interface Window {
     /** Set once the stages are rendered AND the fonts are loaded. */
     __oylLapRaceHud?: { readonly ready: boolean; readonly errors: readonly string[] };
     /** The measurement, taken when it is called. */
     __oylLapRaceHudMeasure?: () => readonly LapRaceStageMeasurement[];
+    /**
+     * PR #2621's review: each stage's standings and actions panel as the
+     * FIRST frame drew them — read in the first animation frame after the
+     * render, which runs before that frame is painted and before any
+     * `ResizeObserver` delivers. `undefined` until then.
+     */
+    __oylLapRaceHudFirstFrame?: readonly FirstFrame[];
   }
 }
 
@@ -500,6 +514,47 @@ function measure(): readonly LapRaceStageMeasurement[] {
   });
 }
 
+function firstFrame(): readonly FirstFrame[] {
+  return [...document.querySelectorAll('[data-oyl-lap-race-stage]')].map((stage) => {
+    const origin = stage.getBoundingClientRect();
+    const standings = stage.querySelector('.oyl-hud__standings');
+    const actions = stage.querySelector('.oyl-hud__actions');
+    return {
+      stage: stage.getAttribute('data-oyl-lap-race-stage') ?? '',
+      standings: standings === null ? undefined : boxIn(standings, origin),
+      actions: actions === null ? undefined : boxIn(actions, origin),
+    };
+  });
+}
+
+/** Each stage's count of standings lines that gave way, in document order. */
+function givenWay(): string {
+  return [...document.querySelectorAll('[data-oyl-lap-race-stage]')]
+    .map((stage) => stage.querySelectorAll('.oyl-hud__standings-line--gives-way').length)
+    .join(',');
+}
+
+/** The most frames {@link settled} waits; the spec's own bound is the real one. */
+const MOST_SETTLING_FRAMES = 120;
+
+/**
+ * #2599, PR #2621's review: the standings measure again when a panel changes
+ * size — the fonts arriving among them — and draw the lines that fit a frame
+ * later. Ready once two frames running give way the same lines on every
+ * stage, rather than after a fixed count of frames.
+ */
+async function settled(): Promise<void> {
+  const frame = (): Promise<unknown> => new Promise((resolve) => requestAnimationFrame(resolve));
+  await frame();
+  let before = givenWay();
+  for (let count = 0; count < MOST_SETTLING_FRAMES; count += 1) {
+    await frame();
+    const now = givenWay();
+    if (now === before) return;
+    before = now;
+  }
+}
+
 /** Whether `element` is what a press lands on at each of its corners, two pixels in. */
 function topmost(element: Element): boolean {
   element.scrollIntoView({ block: 'nearest' });
@@ -528,12 +583,11 @@ async function run(): Promise<void> {
       </StrictMode>,
     );
   });
+  requestAnimationFrame(() => {
+    window.__oylLapRaceHudFirstFrame = firstFrame();
+  });
   await document.fonts.ready;
-  // #2599: the standings measure their room when a panel is laid out and
-  // draw again with the lines that fit, a frame or two later.
-  for (let frame = 0; frame < 4; frame += 1) {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
+  await settled();
   window.__oylLapRaceHudMeasure = measure;
   window.__oylLapRaceHud = { ready: true, errors };
 }

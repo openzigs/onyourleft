@@ -8,7 +8,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { STANDINGS_CLEARANCE_PIXELS, giveWayRanks, givesWay, linesThatFit } from './standings-room';
+import {
+  STANDINGS_CLEARANCE_PIXELS,
+  STANDINGS_HYSTERESIS_PIXELS,
+  giveWayRanks,
+  givesWay,
+  linesThatFit,
+} from './standings-room';
 
 /** Eight lines with the rider's own at `own`. */
 function field(own: number, length = 8): { you: boolean }[] {
@@ -95,5 +101,27 @@ describe('linesThatFit — #2599', () => {
 
   it('holds no line when no line height is known', () => {
     expect(linesThatFit({ ...room, lineHeight: 0, actionsTop: 900 })).toBe(0);
+  });
+
+  describe('with the lines drawn now — the hysteresis (PR #2621)', () => {
+    /** The actions panel's top for a room `extra` px over `lines` whole lines. */
+    const actionsTop = (lines: number, extra: number): number =>
+      300 + 9 + STANDINGS_CLEARANCE_PIXELS + 25 * lines + extra;
+
+    it('does not draw a line back until the room holds it and a few pixels more', () => {
+      expect(linesThatFit({ ...room, actionsTop: actionsTop(6, 2) }, 5)).toBe(5);
+      expect(
+        linesThatFit({ ...room, actionsTop: actionsTop(6, STANDINGS_HYSTERESIS_PIXELS) }, 5),
+      ).toBe(6);
+    });
+
+    it('gives a line way as soon as the room no longer holds it', () => {
+      expect(linesThatFit({ ...room, actionsTop: actionsTop(5, 24) }, 6)).toBe(5);
+    });
+
+    it('keeps the lines drawn when the room is unchanged near the wrap point', () => {
+      expect(linesThatFit({ ...room, actionsTop: actionsTop(6, 1) }, 6)).toBe(6);
+      expect(linesThatFit({ ...room, actionsTop: actionsTop(6, 1) }, 5)).toBe(5);
+    });
   });
 });
