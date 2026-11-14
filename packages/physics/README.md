@@ -318,9 +318,14 @@ one tier ride one power trace, and the crafty one finishes ahead more often than
 Since #2455 a bot also carries a `BotPace` (`@onyourleft/domain` §`pace.ts`): its ability at or
 under its tier and its pacing style off the course, dealt from the race's seed at the start. Its
 race plan reads it (`botRacePlan`'s fourth argument), so a field of one tier spreads into a race;
-its decisions never do. A bot given no pace rides the even pace at its tier's full power, #1960's
-plan as it was. `lap-race-bot.test.ts` holds every style to the tier's mean, ceiling and floor, the
+its decisions never do. A bot given no pace rides the even pace at its tier's full power, as a rouleur (#2459, below). `lap-race-bot.test.ts` holds every style to the tier's mean, ceiling and floor, the
 tiers to their order on dealt paces, and the lead-or-trail power trace for every style.
+
+Since #2459 a pace's style carries a rider archetype (`@onyourleft/domain` §`archetype.ts`): a power
+profile within the tier, its CP share, W′, peak, recovery, climbing and kick, which the race plan's
+capacity is set from. `lap-race-bot.test.ts` holds a sprinter to beating a rouleur of its tier in a
+flat final 200 m from level, and a climber to beating a sprinter on the hilly loop, each in more than
+half of 100 seeds.
 
 Since #2460 the field can draft (ADR 0067 D-3). With `BotRaceStep.draft` on, `stepBotRace` calls
 `draft.ts` §`fieldDraftFactors` once a tick over every racer's **effort distance** as the race stood,

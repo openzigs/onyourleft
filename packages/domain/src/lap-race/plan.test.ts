@@ -19,13 +19,18 @@ import {
 import { BOT_TIER_WATTS_PER_KILOGRAM, BOT_TIERS } from './bots';
 import { LapRaceError } from './errors';
 import {
+  BOT_ARCHETYPE_CLIMB_GRADE_PERCENT,
+  BOT_ARCHETYPE_CP_SHARE,
+  BOT_ARCHETYPE_PEAK_SHARE,
+  BOT_ARCHETYPE_RECOVERY_FACTOR,
+  BOT_ARCHETYPE_SPRINT_FACTOR,
+  BOT_ARCHETYPE_WPRIME_FACTOR,
+  BOT_ARCHETYPES,
+} from './archetype';
+import {
   BOT_ABILITY_SPREAD,
-  BOT_CLIMBER_GRADE_PERCENT,
   BOT_EVEN_PACE,
   BOT_PACING_STYLES,
-  BOT_SPRINTER_GRADE_PERCENT,
-  BOT_SPRINTER_SPRINT_FACTOR,
-  BOT_STYLE_BUDGET_FACTOR,
   BOT_STYLE_EASING,
   type BotPace,
 } from './pace';
@@ -47,6 +52,8 @@ const COURSE = raceCourse(2_000, 3);
 const HARD = botRacePlan('hard', COURSE, 1);
 /** 3.6 W/kg at 75 kg. */
 const TIER = 270;
+/** The even pace's archetype, the rouleur's, recovery rate (#2459). */
+const ROULEUR_RECOVERY = BOT_ARCHETYPE_RECOVERY_FACTOR.rouleur;
 /** Somewhere mid-race, far from the sprint. */
 const MID = 1_000;
 
@@ -79,21 +86,25 @@ function codeOf(run: () => unknown): string | undefined {
 describe('a plan is fixed from the tier, the course and the race’s seed (ADR 0061 D-2)', () => {
   it('holds the tier’s power at 75 kg, the bounds of D-8.2 and the race’s length', () => {
     expect(HARD.tierWatts).toBeCloseTo(TIER, 9);
-    expect(HARD.surgeWatts).toBeCloseTo(TIER * BOT_PLAN_SURGE_CEILING, 9);
+    // The even pace is a rouleur's (#2459): its peak is its archetype's share, under the ceiling.
+    expect(HARD.archetype).toBe('rouleur');
+    expect(HARD.surgeWatts).toBeCloseTo(TIER * BOT_ARCHETYPE_PEAK_SHARE.rouleur, 9);
+    expect(HARD.surgeWatts).toBeLessThanOrEqual(TIER * BOT_PLAN_SURGE_CEILING);
     expect(HARD.floorWatts).toBeCloseTo(TIER * PACING_FACTOR_FLOOR, 9);
-    expect(HARD.wPrimeJoules).toBe(BOT_WPRIME_JOULES.hard);
+    expect(HARD.wPrimeJoules).toBe(BOT_WPRIME_JOULES.hard * BOT_ARCHETYPE_WPRIME_FACTOR.rouleur);
     expect(HARD.raceMetres).toBe(6_000);
   });
 
   it('fixes its capacity from the tier and the pace: CP its own power, W′, the peak and the floor (ADR 0067 D-1.1)', () => {
     expect(HARD.capacity).toEqual({
       cpWatts: HARD.ownWatts,
-      wPrimeJoules: BOT_WPRIME_JOULES.hard,
+      wPrimeJoules: HARD.wPrimeJoules,
       peakWatts: HARD.surgeWatts,
       floorWatts: HARD.floorWatts,
+      recoveryFactor: ROULEUR_RECOVERY,
     });
     const weak = botRacePlan('hard', COURSE, 1, { style: 'climber', ability: 0.95 });
-    expect(weak.capacity.cpWatts).toBeCloseTo(TIER * 0.95, 9);
+    expect(weak.capacity.cpWatts).toBeCloseTo(TIER * 0.95 * BOT_ARCHETYPE_CP_SHARE.climber, 9);
     expect(weak.capacity.wPrimeJoules).toBe(
       botWPrimeJoules('hard', { style: 'climber', ability: 0.95 }),
     );
@@ -152,6 +163,7 @@ describe('a plan is fixed from the tier, the course and the race’s seed (ADR 0
 
   it('is scalars only, with nowhere for a recorded ride or another racer', () => {
     expect(Object.keys(HARD).sort()).toEqual([
+      'archetype',
       'capacity',
       'climbGradePercent',
       'easedWatts',
@@ -165,12 +177,15 @@ describe('a plan is fixed from the tier, the course and the race’s seed (ADR 0
       'tierWatts',
       'wPrimeJoules',
     ]);
-    const { capacity, ...rest } = HARD;
+    const { capacity, archetype, ...rest } = HARD;
     for (const value of Object.values(rest)) expect(typeof value).toBe('number');
+    // Its archetype is a key from the table (#2459), not a ride.
+    expect(BOT_ARCHETYPES).toContain(archetype);
     expect(Object.keys(capacity).sort()).toEqual([
       'cpWatts',
       'floorWatts',
       'peakWatts',
+      'recoveryFactor',
       'wPrimeJoules',
     ]);
     for (const value of Object.values(capacity)) expect(typeof value).toBe('number');
@@ -215,13 +230,13 @@ describe('the course asks, and the W′ balance decides (ADR 0067 D-2)', () => {
     const steep = step(HARD, EMPTY, -6);
     expect(steep.power).toBeCloseTo(HARD.floorWatts, 9);
     expect(step(HARD, 0, -20).power).toBeCloseTo(HARD.floorWatts, 9);
-    // From empty: the whole of CP less the floor, for the second.
-    expect(steep.energy.wbalJoules).toBeCloseTo(TIER - HARD.floorWatts, 9);
+    // From empty: the whole of CP less the floor, for the second, at its archetype's rate.
+    expect(steep.energy.wbalJoules).toBeCloseTo((TIER - HARD.floorWatts) * ROULEUR_RECOVERY, 9);
     // 5 J short of full: a fraction of that, and never past W′.
     const nearlyFull = step(HARD, HARD.wPrimeJoules - 5, -6);
     expect(nearlyFull.energy.wbalJoules).toBeLessThanOrEqual(HARD.wPrimeJoules);
     expect(nearlyFull.energy.wbalJoules - (HARD.wPrimeJoules - 5)).toBeCloseTo(
-      ((TIER - HARD.floorWatts) * 5) / HARD.wPrimeJoules,
+      ((TIER - HARD.floorWatts) * 5 * ROULEUR_RECOVERY) / HARD.wPrimeJoules,
       9,
     );
   });
@@ -277,8 +292,9 @@ describe('the closing sprint, on effort distance (ADR 0061 D-2, D-8.6)', () => {
   });
 
   it('fades in a sprint it cannot pay for, and kicks again once it has recovered past the re-entry share', () => {
-    // A bot that runs out in its sprint rides its CP for the rest of it…
-    let held = energy(200);
+    // A bot that runs out in its sprint rides its CP for the rest of it: a
+    // full tick's surge, then the 50 J left, then nothing…
+    let held = energy(HARD.surgeWatts - TIER + 50);
     const ridden: number[] = [];
     for (let tick = 0; tick < 5; tick += 1) {
       const next = step(HARD, held, 0, opens + tick);
@@ -329,7 +345,9 @@ describe('the balance books every joule over a long run of mixed grades (ADR 006
         } else {
           // At or under it, it recovers, and by no more than the shortfall.
           expect(change, style).toBeGreaterThanOrEqual(0);
-          expect(change, style).toBeLessThanOrEqual((cp - next.power) * elapsed + 1e-9);
+          // …times its archetype's recovery rate (#2459).
+          const rate = plan.capacity.recoveryFactor ?? 1;
+          expect(change, style).toBeLessThanOrEqual((cp - next.power) * elapsed * rate + 1e-9);
           recovered += change;
         }
         held = next.energy;
@@ -399,10 +417,12 @@ describe('each bot’s own pace (#2455)', () => {
     const full = (plan: BotRacePlan, at: number): number =>
       step(plan, plan.wPrimeJoules, 0, at).power;
     // A full balance, on the flat: what it rides as its own at each point.
-    expect(full(bolter, 500)).toBeCloseTo(TIER, 9);
-    expect(full(bolter, 2_500)).toBeCloseTo(TIER * (1 - BOT_STYLE_EASING), 9);
-    expect(full(closer, 2_500)).toBeCloseTo(TIER * (1 - BOT_STYLE_EASING), 9);
-    expect(full(closer, 4_500)).toBeCloseTo(TIER, 9);
+    // Both are attackers (#2459), whose CP is that archetype's share of the tier.
+    const own = TIER * BOT_ARCHETYPE_CP_SHARE.attacker;
+    expect(full(bolter, 500)).toBeCloseTo(own, 9);
+    expect(full(bolter, 2_500)).toBeCloseTo(own * (1 - BOT_STYLE_EASING), 9);
+    expect(full(closer, 2_500)).toBeCloseTo(own * (1 - BOT_STYLE_EASING), 9);
+    expect(full(closer, 4_500)).toBeCloseTo(own, 9);
     // Eased under its CP, a part-spent bot recovers.
     const easing = step(bolter, 1_000, 0, 2_500);
     expect(easing.energy.wbalJoules).toBeGreaterThan(1_000);
@@ -415,28 +435,40 @@ describe('each bot’s own pace (#2455)', () => {
     expect(botRacePlan('hard', once, 1, pace('negative-split')).hardFromMetres).toBe(2_000);
   });
 
-  it('climbs harder as a climber and saves on climbs as a sprinter, with a larger W′ each', () => {
+  it('climbs harder as a climber and saves on climbs as a sprinter, each its archetype’s row (#2459)', () => {
     const climb = (style: BotPace['style']): number => step(planOf(style), 2_000, 4).power;
-    // At 4 %: a climber's full surge, the even pace's half, a sprinter's quarter.
-    expect(climb('climber')).toBeCloseTo(HARD.surgeWatts, 9);
+    const climber = planOf('climber');
+    const sprinter = planOf('sprinter');
+    // At 4 %: a climber's full peak, the even pace's half, a sprinter's quarter.
+    expect(climb('climber')).toBeCloseTo(climber.surgeWatts, 9);
     expect(climb('even')).toBeCloseTo(TIER + (HARD.surgeWatts - TIER) / 2, 9);
-    expect(climb('sprinter')).toBeCloseTo(TIER + (HARD.surgeWatts - TIER) / 4, 9);
-    expect(planOf('climber').climbGradePercent).toBe(BOT_CLIMBER_GRADE_PERCENT);
-    expect(planOf('sprinter').climbGradePercent).toBe(BOT_SPRINTER_GRADE_PERCENT);
-    for (const style of ['climber', 'sprinter'] as const) {
-      expect(planOf(style).wPrimeJoules).toBeCloseTo(
-        BOT_WPRIME_JOULES.hard * BOT_STYLE_BUDGET_FACTOR,
-        9,
-      );
-    }
-    expect(planOf('fast-start').wPrimeJoules).toBe(BOT_WPRIME_JOULES.hard);
+    expect(climb('sprinter')).toBeCloseTo(
+      sprinter.ownWatts + (sprinter.surgeWatts - sprinter.ownWatts) / 4,
+      9,
+    );
+    expect(climb('climber')).toBeGreaterThan(climb('sprinter'));
+    expect(climber.climbGradePercent).toBe(BOT_ARCHETYPE_CLIMB_GRADE_PERCENT.climber);
+    expect(sprinter.climbGradePercent).toBe(BOT_ARCHETYPE_CLIMB_GRADE_PERCENT.sprinter);
+    // The sprinter holds the large W′ and the high peak; the climber neither.
+    expect(sprinter.wPrimeJoules).toBeCloseTo(
+      BOT_WPRIME_JOULES.hard * BOT_ARCHETYPE_WPRIME_FACTOR.sprinter,
+      9,
+    );
+    expect(sprinter.wPrimeJoules).toBeGreaterThan(climber.wPrimeJoules);
+    expect(sprinter.surgeWatts).toBeGreaterThan(climber.surgeWatts);
+    expect(planOf('fast-start').wPrimeJoules).toBe(
+      BOT_WPRIME_JOULES.hard * BOT_ARCHETYPE_WPRIME_FACTOR.attacker,
+    );
   });
 
   it('opens a sprinter’s kick further out, from the same draw as the field’s', () => {
     for (let seed = 0; seed < 20; seed += 1) {
       const even = botRacePlan('brisk', COURSE, seed);
       const sprinter = botRacePlan('brisk', COURSE, seed, pace('sprinter'));
-      expect(sprinter.sprintMetres).toBeCloseTo(even.sprintMetres * BOT_SPRINTER_SPRINT_FACTOR, 9);
+      expect(sprinter.sprintMetres).toBeCloseTo(
+        even.sprintMetres * BOT_ARCHETYPE_SPRINT_FACTOR.sprinter,
+        9,
+      );
     }
     // Never longer than the race.
     expect(botRacePlan('brisk', raceCourse(250, 1), 3, pace('sprinter')).sprintMetres).toBe(250);
