@@ -37,8 +37,12 @@ export type LapRaceErrorCode =
   | 'travel-out-of-range'
   /** A bot plan's tick that is not a finite number of seconds of at least zero (#1960). */
   | 'elapsed-out-of-range'
-  /** A bot's reserve that is not between nought and its plan's budget (#1960). */
-  | 'reserve-out-of-range'
+  /** A bot's W′ balance that is not between nought and its W′ (#2458, ADR 0067 D-2). */
+  | 'wbal-out-of-range'
+  /** A bot's capacity whose critical power or W′ is not a finite number above zero (#2458). */
+  | 'capacity-out-of-range'
+  /** A power for a bot's W′ balance that is not a finite number of watts (#2458). */
+  | 'power-not-finite'
   /** A bot's pace with a style the model does not name, or an ability outside its band (#2455). */
   | 'pace-out-of-range';
 

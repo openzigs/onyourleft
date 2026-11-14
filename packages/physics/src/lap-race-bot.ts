@@ -19,8 +19,8 @@
  * personality and a skill, which decide its lanes and items and nothing else),
  * a `BotPace` (#2455: its ability at or under its tier and its pacing style
  * off the course, which its race plan reads and its decisions never do),
- * what its decisions remember from the last tick, its own energy reserve
- * (#1960), and its own ride state. The whole of a tick's inputs is the elapsed
+ * what its decisions remember from the last tick, its own W′ balance
+ * (#2458, ADR 0067 D-2), and its own ride state. The whole of a tick's inputs is the elapsed
  * time, the course's conditions (the same {@link BotCourse} the #92 bot takes,
  * minus the plan the tier supplies), the race's seed and the rider's inputs. **No activity, stream, ghost or
  * recorded sample is a parameter anywhere here** (ADR 0007 D4, ADR 0060 D-7.1),
@@ -29,7 +29,9 @@
  * ## No rubber-banding (ADR 0060 D-9, ADR 0061 D-1)
  *
  * A bot's power is a function of its tier, the road under it, the effort
- * distance it has left and its own reserve, and never of any other racer. The
+ * distance it has left and its own W′ balance, and never of any other racer.
+ * ADR 0067 D-0 has since lifted that rule for strategy; until #2463 wires a
+ * strategy that reads the race, what follows still holds. The
  * plan is built from the bot's tier, the race's course and the race's seed
  * (`botRacePlan`), and stepped on the bot's own odometer, which is its effort
  * distance: **never its `raceOffset`, its drawn distance or its place**, which
@@ -46,6 +48,7 @@
  */
 
 import type {
+  BotEnergy,
   BotMemory,
   BotPace,
   BotStrategy,
@@ -60,6 +63,7 @@ import {
   botPlanStep,
   botRacePlan,
   botTierPlan,
+  botWPrimeJoules,
   stepRace,
   strategicBotDecision,
   type BotTier,
@@ -84,10 +88,10 @@ export interface LapRaceBot {
   /** What its decisions remember from the last tick of this race: nothing stored, nothing recorded. */
   readonly memory: BotMemory;
   /**
-   * Joules in its race plan's reserve (#1960, ADR 0061): spent above its tier,
-   * refilled below it. Empty at the start.
+   * Its W′ balance (#2458, ADR 0067 D-2): spent above its CP, recovered below
+   * it, and full at the start. Its capacity is fixed for the race.
    */
-  readonly reserve: number;
+  readonly energy: BotEnergy;
   readonly ride: RideState;
   /** What its race plan rode on the last tick, in watts. 0 before the first. */
   readonly power: Watts | 0;
@@ -127,7 +131,7 @@ export function lapRaceBot(
     strategy,
     pace,
     memory: BOT_MEMORY_AT_START,
-    reserve: 0,
+    energy: { wbalJoules: botWPrimeJoules(tier, pace), exhausted: false },
     ride: BOT_AT_START_LINE,
     power: 0,
   };
@@ -169,7 +173,7 @@ export function stepBotRace(
     // grade under it there: never the race's view of where the bot is.
     const planned = botPlanStep(
       botRacePlan(bot.tier, race.course, step.seed, bot.pace),
-      bot.reserve,
+      bot.energy,
       {
         effortDistance: bot.ride.distance,
         grade: botDemand(bot.ride, course).grade,
@@ -181,7 +185,7 @@ export function stepBotRace(
     return {
       ...bot,
       memory: decision.memory,
-      reserve: planned.reserve,
+      energy: planned.energy,
       ride: tick.state,
       power: tick.power,
     };

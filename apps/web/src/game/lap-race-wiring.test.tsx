@@ -43,7 +43,13 @@
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BOT_TIER_WATTS_PER_KILOGRAM, botFieldPaces, seconds, watts } from '@onyourleft/domain';
+import {
+  BOT_PLAN_SURGE_CEILING,
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  botFieldPaces,
+  seconds,
+  watts,
+} from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
@@ -58,7 +64,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
-import { botName } from './hud/lap-race-hud';
+import { botName, LAP_RACE_TEXT } from './hud/lap-race-hud';
 import type { SteerIntent } from './lanes';
 import { LAP_RACE_ASSIST_STORAGE_KEY } from './lap-race/assist-preference';
 import { HIT_GLOW_MEAN } from './lap-race/in-view';
@@ -772,11 +778,12 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // Items off: the place field and no item field.
     expect(raceFields()).toHaveLength(1);
     // One tier below the chosen 'hard', read off the bots' figures (#2455: a
-    // bot is named by its pace, not its tier). A bot rides at most its own
-    // power plus what it has banked, and never under its tier's −20 % floor:
-    // Brisk's figures lie between 2.2 and 2.8 W/kg, where a Hard bot rides at
-    // least the Hard tier's floor, 2.9, and a bot assisted two tiers down, to
-    // Steady, at most 2.0.
+    // bot is named by its pace, not its tier). Since #2458 a bot starts with
+    // its whole W′ and goes harder up the opening climb, never over its
+    // tier's surge ceiling and never under its −20 % floor: Brisk's figures
+    // lie between 2.2 and 4.2 W/kg. On the climb they are on here, Hard bots
+    // ride over 4.2, and a bot assisted two tiers down, to Steady, rides at
+    // most 3.0; the field rides over 3.0, which rules Steady out.
     const figures = queryAll<HTMLElement>(
       mounted?.container ?? document,
       '.oyl-hud__standings-line:not(.oyl-hud__standings-line--you)',
@@ -785,7 +792,12 @@ describe('a solo lap race inside a game ride — #1906', () => {
       .filter((figure): figure is string => figure !== undefined)
       .map(Number);
     expect(figures.length).toBeGreaterThanOrEqual(RACE.bots);
-    expect(Math.max(...figures)).toBeLessThanOrEqual(BOT_TIER_WATTS_PER_KILOGRAM.brisk);
+    expect(Math.max(...figures)).toBeLessThanOrEqual(
+      BOT_TIER_WATTS_PER_KILOGRAM.brisk * BOT_PLAN_SURGE_CEILING + 1e-9,
+    );
+    expect(Math.max(...figures)).toBeGreaterThan(
+      BOT_TIER_WATTS_PER_KILOGRAM.steady * BOT_PLAN_SURGE_CEILING,
+    );
     // Brisk's own floor, the figure rounded to a tenth, rules out Steady.
     expect(Math.min(...figures)).toBeGreaterThanOrEqual(
       Math.floor(BOT_TIER_WATTS_PER_KILOGRAM.brisk * 0.8 * 10) / 10,
@@ -839,7 +851,12 @@ describe('a solo lap race inside a game ride — #1906', () => {
 
   it('takes no lane or item press while the ride is paused, and the next ones once it rides again', async () => {
     await rideTheTrace({ race: RACE, frames: COUNTDOWN_FRAMES + 40, presses: new Map() });
-    const item = (): string => raceFields()[1] ?? '';
+    // The item held, without the warning under it (`LAP_RACE_TEXT.warning`),
+    // which follows the other racers' puddles and changes while the rider waits.
+    const item = (): string =>
+      Object.values(LAP_RACE_TEXT.warning)
+        .reduce((text, warning) => text.replace(warning, ''), raceFields()[1] ?? '')
+        .trim();
     const lateral = (): number | undefined => inputs.at(-1)?.steeredLateral;
     const holding = item();
     // Past the first pick-up point, so the rider holds something to use.

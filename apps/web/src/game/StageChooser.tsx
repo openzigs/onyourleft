@@ -1690,20 +1690,24 @@ export const LAP_RACE_CHOICE_TEXT = {
   tierHint: (): string =>
     `${BOT_TIERS.map(
       (tier) => `${BOT_TIER_TEXT[tier]} ${BOT_TIER_WATTS_PER_KILOGRAM[tier].toFixed(1)}`,
-    ).join(', ')} watts per kilogram, on average over a race, each bot at or a little under it.`,
+    ).join(
+      ', ',
+    )} watts per kilogram: what each bot can hold for a whole race, at or a little under it.`,
   /**
-   * Why a bot's figure in the race is not its tier's (#2329): the race plan
-   * (#1960, ADR 0061) saves on the flat and downhill and spends on climbs and
-   * in the sprint, and the standings show the tick's figure. Since #2455 each
-   * bot also has its own pace (`@onyourleft/domain` §`pace.ts`), which its
-   * name in the standings says. ⚠️ The #2455 clause is draft wording for the
-   * owner's approval. `lap-race/bot-figure.test.ts` holds each clause to what
-   * the HUD shows.
+   * Why a bot's figure in the race is not its tier's (#2329): since #2458 a
+   * tier is what a bot can hold, its CP, and the race plan spends a W′ above
+   * it on climbs and in the sprint, eases under it downhill, and holds a bot
+   * that has spent its W′ at it until it recovers (ADR 0067 D-1, D-2). The
+   * standings show the tick's figure. Since #2455 each bot also has its own
+   * pace (`@onyourleft/domain` §`pace.ts`), which its name in the standings
+   * says. ⚠️ Draft wording for the owner's approval (#2455, #2458).
+   * `lap-race/bot-figure.test.ts` holds each clause to what the HUD shows.
    */
   tierLive:
-    'The figure beside a bot in the race moves around that: a bot saves a little on the flat ' +
-    'and more downhill, then spends it on climbs and in the final sprint. Each bot paces ' +
-    'the race its own way, and its name says how.',
+    'The figure beside a bot in the race moves around that: a bot holds it on the flat, eases ' +
+    'downhill and goes harder on climbs and in the final sprint, and one that goes too hard ' +
+    'for too long fades back to it until it recovers. Each bot paces the race its own way, ' +
+    'and its name says how.',
   items: 'Race with items',
   assistedOn: 'Your assisted race setting is on.',
   assistedOff: 'An assisted race setting can make a race easier.',

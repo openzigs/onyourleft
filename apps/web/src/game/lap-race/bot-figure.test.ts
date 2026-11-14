@@ -7,17 +7,17 @@
  *
  * The figure is the bot's power on the tick just ridden over its fixed
  * `BOT_MASS_KILOGRAMS`: not a time average, and not drafting (a bot has no
- * draft, ADR 0061 D-4). Its tier is the race plan's average (#1960,
- * `@onyourleft/domain` §`plan.ts`), and the plan saves a little on the flat
- * and more downhill and spends it on climbs and in the sprint. Rounding alone
- * cannot make 2.6: the flat's saving is 2.66, written 2.7. So 2.6 is a bot
- * riding downhill. That held at full ability only.
+ * draft, ADR 0061 D-4). Since #2458 its tier is what it can hold, its CP
+ * (`@onyourleft/domain` §`plan.ts`, ADR 0067 D-1): it holds that on the flat,
+ * eases under it downhill, spends a W′ above it on climbs and in the sprint,
+ * and once the W′ is spent it holds its CP until it has recovered some
+ * (§`wbal.ts`). Before #2458 the plan banked a reserve 5 % under the tier on
+ * the flat, and that saving is gone.
  *
  * Since #2455 each bot also rides its own ability, at or a little under its
  * tier, so those figures are now its own: the race here pins a seed that
  * deals its one bot the even pace and reads the figures against its own W/kg.
- * In a live race a Brisk bot at ability 0.94 reads 2.6 on the flat once its
- * reserve is full, so 2.6 no longer means downhill there.
+ * In a live race a Brisk bot at ability 0.94 reads 2.6 on the flat.
  *
  * Each case holds one clause of what the chooser now says
  * (`StageChooser.tsx` §`LAP_RACE_CHOICE_TEXT.tierLive`), so a change to the
@@ -26,8 +26,6 @@
 
 import {
   BOT_ABILITY_SPREAD,
-  BOT_PLAN_BANKING,
-  BOT_PLAN_MEAN_TOLERANCE,
   BOT_TIER_WATTS_PER_KILOGRAM,
   botFieldPaces,
   gradeAt,
@@ -154,26 +152,23 @@ describe('a Brisk bot’s W/kg on the HUD, against its tier — #2329', () => {
     expect(OWN).toBeGreaterThan(TIER * (1 - BOT_ABILITY_SPREAD));
   });
 
-  it('saves a little on the flat: 5 % under its own figure while its reserve fills', () => {
-    const early = flat.slice(1, 200).map((reading) => reading.figure);
-    expect(new Set(early)).toEqual(new Set([written(OWN * (1 - BOT_PLAN_BANKING))]));
+  it('holds its own figure on the flat, from the gun: never over its tier', () => {
+    // Clear of the sprint: the whole flat race before it.
+    const flatRace = flat.filter((reading) => reading.left > 400);
+    expect(flatRace.length).toBeGreaterThan(200);
+    expect(new Set(flatRace.map((reading) => reading.figure))).toEqual(new Set([written(OWN)]));
+    expect(OWN).toBeLessThanOrEqual(TIER);
   });
 
-  it('rides its own figure on the flat once the reserve is full: never over its tier', () => {
-    const steady = flat.filter((reading) => reading.left > 400).at(-1);
-    expect(steady?.figure).toBe(written(OWN));
-    expect(steady?.value).toBeLessThanOrEqual(TIER);
-  });
-
-  it('saves more downhill: under its flat saving on a descent, which rounding alone cannot make', () => {
-    const banked = Number.parseFloat(written(OWN * (1 - BOT_PLAN_BANKING)));
+  it('eases downhill: under its own figure on a descent', () => {
+    const own = Number.parseFloat(written(OWN));
     const descending = hilly.filter((reading) => reading.grade < -2 && reading.left > 400);
     expect(descending.length).toBeGreaterThan(0);
-    const below = descending.filter((reading) => reading.value < banked);
+    const below = descending.filter((reading) => reading.value < own);
     expect(below.length).toBeGreaterThan(descending.length / 2);
   });
 
-  it('spends it on climbs and in the final sprint: above its tier', () => {
+  it('goes harder on climbs and in the final sprint: above its tier', () => {
     const climbing = hilly.filter((reading) => reading.grade > 2 && reading.left > 400);
     expect(climbing.some((reading) => reading.value > TIER)).toBe(true);
     const sprint = flat.filter((reading) => reading.left < 150);
@@ -181,13 +176,12 @@ describe('a Brisk bot’s W/kg on the HUD, against its tier — #2329', () => {
     expect(sprint.some((reading) => reading.value > TIER)).toBe(true);
   });
 
-  it('averages about its tier over the race: never above it, and within the plan’s tolerance', () => {
-    for (const readings of [flat, hilly]) {
-      const values = readings.map((reading) => reading.value).filter(Number.isFinite);
-      const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-      // Each figure is rounded to 0.1, so the mean may sit 0.05 either side.
-      expect(mean).toBeLessThanOrEqual(TIER + 0.05);
-      expect(mean).toBeGreaterThanOrEqual(TIER * (1 - BOT_PLAN_MEAN_TOLERANCE) - 0.05);
-    }
+  it('fades back to its own figure on a climb once it has gone too hard for too long (#2458)', () => {
+    const climbing = hilly.filter((reading) => reading.grade > 2 && reading.left > 400);
+    const first = climbing.findIndex((reading) => reading.value > TIER);
+    expect(first).toBeGreaterThanOrEqual(0);
+    // Later in the race, on climbs as steep, it can no longer pay for more than it holds.
+    const faded = climbing.slice(first).filter((reading) => reading.figure === written(OWN));
+    expect(faded.length).toBeGreaterThan(0);
   });
 });
