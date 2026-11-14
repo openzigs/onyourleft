@@ -253,56 +253,52 @@ describe('the migrations (#769)', () => {
    * migration's `down` and `up`, which is more than the fresh file asked of
    * them, not less. Seeding twice adds nothing (`FIXTURE_ROWS`).
    *
-   * ⚠️ **Its timeout is judged against CI under coverage** (docs/agents/ci.md §4c).
-   * Before the walk, on `Tests and coverage report`: 505–993 ms on 34 of 38
-   * green runs read on 2026-10-01 (36843950489 to 36882904839), then 1 140,
-   * 1 829, 2 775 and 3 293 ms (36849145949, 36881644356, 36877000180,
-   * 36845803725); and over Vitest's 5 s, so red, 6 737 ms on 36860095171
-   * attempt 1 (#975) and 11 237 ms on 36884103033 attempt 1 (#984). Every
-   * figure over 2.5 s was an Intel Xeon 6973P-C. 35 s is about three times
-   * the slowest; the walk took 180–230 ms locally where the fresh files took
-   * 280–450 ms. The walk's first CI figure is 327 ms (36891647825, an AMD
-   * EPYC 9V74), one run on a fast runner: the timeout still rests on the old
-   * shape's slowest figures until a walk lands on a loaded Xeon.
+   * ⚠️ **It keeps Vitest's 5 s default, judged against CI under coverage**
+   * (docs/agents/ci.md §4c). Before the walk, on `Tests and coverage report`:
+   * 505–993 ms on 34 of 38 green runs read on 2026-10-01 (36843950489 to
+   * 36882904839), then 1 140, 1 829, 2 775 and 3 293 ms (36849145949,
+   * 36881644356, 36877000180, 36845803725); and over Vitest's 5 s, so red,
+   * 6 737 ms on 36860095171 attempt 1 (#975) and 11 237 ms on 36884103033
+   * attempt 1 (#984). Every figure over 2.5 s was an Intel Xeon 6973P-C. The
+   * walk took 327 ms on its first CI run (36891647825, an AMD EPYC 9V74), and
+   * 618 and 602 ms on the nightly coverage job (43207158376, 43008116660,
+   * EPYC 9V74 both). #2550 took away the 35 s it had carried for the old
+   * shape (#1688's ruling: make a slow case cheaper, never raise a timeout).
    */
-  it(
-    'each one, undone, leaves the schema and the rows exactly as they were before it',
-    { timeout: 35_000 },
-    async () => {
-      const onDisk = await migrationsOnDisk();
-      const path = await freshPath();
-      for (let n = 1; n <= onDisk.length; n += 1) {
-        const name = onDisk[n - 1]![0];
-        const through = Object.fromEntries(onDisk.slice(0, n)) as Record<string, InstanceMigration>;
+  it('each one, undone, leaves the schema and the rows exactly as they were before it', async () => {
+    const onDisk = await migrationsOnDisk();
+    const path = await freshPath();
+    for (let n = 1; n <= onDisk.length; n += 1) {
+      const name = onDisk[n - 1]![0];
+      const through = Object.fromEntries(onDisk.slice(0, n)) as Record<string, InstanceMigration>;
 
-        // Migrated through n - 1 already: by the previous turn's up(n - 1).
-        seedEveryTable(path);
-        const before = snapshot(path);
+      // Migrated through n - 1 already: by the previous turn's up(n - 1).
+      seedEveryTable(path);
+      const before = snapshot(path);
 
-        await withKysely(path, (db) => migrateToLatest(db, through));
-        seedEveryTable(path, EMPTY_FOR_ITS_OWN_DOWN[name]);
-        const after = snapshot(path);
-        expect(after.schema, `${name} changes the schema`).not.toEqual(before.schema);
+      await withKysely(path, (db) => migrateToLatest(db, through));
+      seedEveryTable(path, EMPTY_FOR_ITS_OWN_DOWN[name]);
+      const after = snapshot(path);
+      expect(after.schema, `${name} changes the schema`).not.toEqual(before.schema);
 
-        await withKysely(path, (db) => migrateDownOne(db, through));
-        const undone = snapshot(path);
-        expect(undone.schema, `down(${name}) restores the schema`).toEqual(before.schema);
-        expect(undone.rows, `down(${name}) keeps the earlier rows`).toEqual(before.rows);
+      await withKysely(path, (db) => migrateDownOne(db, through));
+      const undone = snapshot(path);
+      expect(undone.schema, `down(${name}) restores the schema`).toEqual(before.schema);
+      expect(undone.rows, `down(${name}) keeps the earlier rows`).toEqual(before.rows);
 
-        await withKysely(path, (db) => migrateUpOne(db, through));
-        const redone = snapshot(path);
-        expect(redone.schema, `up(${name}) again`).toEqual(after.schema);
-        expect(redone.rows, `up(${name}) again keeps the earlier rows`).toEqual({
-          ...before.rows,
-          ...Object.fromEntries(
-            Object.keys(after.rows)
-              .filter((table) => !(table in before.rows))
-              .map((table) => [table, 0]),
-          ),
-        });
-      }
-    },
-  );
+      await withKysely(path, (db) => migrateUpOne(db, through));
+      const redone = snapshot(path);
+      expect(redone.schema, `up(${name}) again`).toEqual(after.schema);
+      expect(redone.rows, `up(${name}) again keeps the earlier rows`).toEqual({
+        ...before.rows,
+        ...Object.fromEntries(
+          Object.keys(after.rows)
+            .filter((table) => !(table in before.rows))
+            .map((table) => [table, 0]),
+        ),
+      });
+    }
+  });
 
   it('takes a lap race’s columns away with 0037, and every room made before reads the same through the room plan, down and up again (#1910)', async () => {
     const path = await freshPath();
@@ -699,12 +695,20 @@ describe('the migrations (#769)', () => {
 
   it('takes both analysis tables away with 0020, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
     const path = await freshPath();
-    await withKysely(path, (db) => migrateToLatest(db));
-    await withKysely(path, async (db) => {
-      while ((await appliedMigrations(db)).at(-1) !== '0020-analysis-jobs') {
-        await migrateDownOne(db);
-      }
-    });
+    // Stop at 0020 (#2555): the per-migration walk already proves that the
+    // downs of 0021 onward restore the schema, so going to the newest and back
+    // down would reach this same schema at several times the cost.
+    await withKysely(path, (db) =>
+      migrateToLatest(
+        db,
+        Object.fromEntries(
+          Object.entries(MIGRATIONS).filter(([name]) => name <= '0020-analysis-jobs'),
+        ),
+      ),
+    );
+    expect((await withKysely(path, (db) => appliedMigrations(db))).at(-1)).toBe(
+      '0020-analysis-jobs',
+    );
     seedEveryTable(path);
     const named = (): string[] => {
       const database = openDatabase(path);

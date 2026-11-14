@@ -24,9 +24,20 @@
  *    materials, three's `renderer.info.render.calls` shown and hidden: the
  *    realistic world's programs compile and draw without loading the
  *    realistic world, which the required gate does not pay for (#866).
+ * 3a. **`programs(world, car)`** — PR #2548: every program the belt makes in
+ *    each world's materials, with a car of Kenney's parts among the
+ *    obstacles where `car` is set, read off WebGL itself: linked or not, and
+ *    the vertex attribute slots each uses, beside `MAX_VERTEX_ATTRIBS`
+ *    (`three-renderer.ts` §`deliveryProgramsProbe`). The car is
+ *    {@link STAND_IN_CAR}, one triangle a part, because the program is made
+ *    from which attributes the parts carry and not from their triangles, and
+ *    the required gate loads none of the realistic set (#866).
  * 4. **`kinds(world)`** — one obstacle of each kind, square-on: whether a
  *    point only the bin covers, one the bin and the cone cover, and one the
  *    bin and the trolley cover read as painted.
+ *    **`pullingOut(world)`** — #2506: a car pulling out read at the same
+ *    points, and a parked car and a car pulling out read at the middle of
+ *    where a hazard marker floats, with the eye raised to it.
  * 5. **`showcase()`** — a real view's frame with a parcel in flight, a house's
  *    marker and one obstacle of each kind, on a canvas the spec photographs
  *    for the owner (the lane's ruling of 2026-10-28).
@@ -39,6 +50,13 @@
  * 8. **`pastParkedCar(eyeAheads, width, height)`** — #2396: the rider back in
  *    the right-hand lane just past a parked car, the camera still beside it,
  *    and how much of the road under the rider the car covers at each place.
+ * 9. **`markerOnScreen(aspect, leads)`** — #2513: four houses abreast, a
+ *    doorstep near the road and one as deep as a target may be on each side,
+ *    and the rider held each of `leads` before them in each of the three
+ *    lanes; where each marker's diamond lands on the frame, projected from
+ *    the instance the view's belt drew (`three-renderer.ts`
+ *    §`deliveryDrawnOf`, its foot and its scale) through the camera's own
+ *    projection (`camera.ts` §`projectToFrame`).
  */
 
 import { metres } from '@onyourleft/domain';
@@ -55,7 +73,7 @@ import {
   type ObstacleKind,
 } from '../src/game/delivery/obstacles';
 import { startRound } from '../src/game/delivery/round';
-import type { DeliveryTarget } from '../src/game/delivery/targets';
+import { MAILBOX_FROM_KERB_METRES, type DeliveryTarget } from '../src/game/delivery/targets';
 import {
   CARRIAGEWAY_HALF_WIDTH_METRES,
   NO_PARCELS,
@@ -74,10 +92,20 @@ import { corridorOrigin } from '../src/game/terrain';
 import {
   deliveryCallsProbe,
   deliveryDrawnOf,
+  deliveryWeatherOf,
   deliveryKindProbe,
+  deliveryProgramsProbe,
+  MARKER_DIAMOND_HEIGHTS,
   threeGameRenderer,
   type DeliveryCalls,
+  type DeliveryCarGeometry,
+  type DeliveryCarRole,
+  type DeliveryProgramReading,
+  type DeliveryWeatherReadback,
 } from '../src/game/three-renderer';
+import { cameraRig, projectToFrame } from '../src/game/camera';
+import { LANE_OFFSETS_METRES } from '../src/game/lanes';
+import { TARGET_MOST_FROM_ROAD_METRES } from '../src/game/delivery/targets';
 
 import { drawCounter } from './realistic/draws';
 
@@ -107,9 +135,20 @@ declare global {
       viewCalls(count: number): DeliveryViewCalls;
       markerLeaves(): DeliveryMarkerReading;
       probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCalls;
-      kinds(world: 'stylised' | 'realistic'): Readonly<Record<ObstacleKind, readonly boolean[]>>;
+      programs(
+        world: 'stylised' | 'realistic',
+        car: boolean,
+      ): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] };
+      rainCalls(): DeliveryRainCalls;
+      weatherLook(): Readonly<Record<WeatherName, WeatherLook>>;
+      weatherShowcase(weather: WeatherName): void;
+      weatherReadback(): Readonly<Record<WeatherName, DeliveryWeatherReadback | undefined>>;
+      kinds(world: 'stylised' | 'realistic'): Readonly<Record<ProbedKind, readonly boolean[]>>;
+      pullingOut(world: 'stylised' | 'realistic'): PullingOutReading;
       showcase(): void;
       carsShowcase(): void;
+      mailboxShowcase(): void;
+      pullingOutShowcase(): void;
       inLane(
         kind: ObstacleKind,
         lane: number,
@@ -125,13 +164,23 @@ declare global {
         width: number,
         height: number,
       ): readonly PastCarSample[];
+      markerOnScreen(aspect: number, leads: readonly number[]): readonly MarkerOnScreenSample[];
     };
   }
 }
 
 const counter = drawCounter(WebGL2RenderingContext.prototype);
 
-const ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone', 'parked-car'];
+/**
+ * The kinds this harness reads pixels of. #2364's dog and other rider are
+ * held to their footprints and their one instanced mesh by
+ * `delivery-belt.test.ts`. A car pulling out draws a parked car's body, so
+ * it reads as one here, and #2506's `pullingOut` reads its own marker.
+ */
+const ROSTER = ['bin', 'trolley', 'cone', 'parked-car'] as const satisfies readonly ObstacleKind[];
+
+/** One of {@link ROSTER}. */
+type ProbedKind = (typeof ROSTER)[number];
 
 /** The kinds that cross the road: a parked car (#2362) only ever stands. */
 const CROSSING_ROSTER: readonly ObstacleKind[] = ['bin', 'trolley', 'cone'];
@@ -193,7 +242,7 @@ function piecesOn(frame: SceneFrame, count: number): DeliveryInView {
     markers: Array.from({ length: count }, (_, index) => at(index, 6, 0)),
     obstacles: Array.from({ length: count }, (_, index) => ({
       ...at(index, -2, 0),
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as ProbedKind,
     })),
   };
 }
@@ -221,6 +270,178 @@ function viewCalls(count: number): DeliveryViewCalls {
   const empty = callsOf(view, { ...frame, delivery: { parcels: [], markers: [], obstacles: [] } });
   view.destroy();
   return { without, with: withDelivery, empty, drawn };
+}
+
+/** #2366: what a level's rain costs a frame, and whether it was drawn at all. */
+export interface DeliveryRainCalls {
+  /** Calls for a frame with a round in clear weather. */
+  readonly clear: number;
+  /** Calls for the same frame with the round in rain. */
+  readonly rain: number;
+  /** Whether the view drew the rain on that frame. */
+  readonly rainShown: boolean;
+}
+
+/** #2366: the same Delivery frame in clear weather and in rain, counted. */
+function rainCalls(): DeliveryRainCalls {
+  const view = threeGameRenderer.create(canvas(), qualitySettings(0));
+  view.resize(320, 180);
+  const frame = frameAt(RIDER);
+  const delivery = piecesOn(frame, 2);
+  const clear = callsOf(view, { ...frame, delivery: { ...delivery, weather: CLEAR } });
+  const rain = callsOf(view, {
+    ...frame,
+    delivery: { ...delivery, weather: { rain: true, dusk: false } },
+  });
+  const rainShown = deliveryWeatherOf(view).rain;
+  view.destroy();
+  return { clear, rain, rainShown };
+}
+
+/** Clear daylight. */
+const CLEAR = { rain: false, dusk: false } as const;
+
+/** #2508: the weathers a level is drawn in. */
+type WeatherName = 'clear' | 'dusk' | 'rain' | 'rain-dusk';
+
+const WEATHERS: Readonly<Record<WeatherName, { readonly rain: boolean; readonly dusk: boolean }>> =
+  {
+    clear: CLEAR,
+    dusk: { rain: false, dusk: true },
+    rain: { rain: true, dusk: false },
+    'rain-dusk': { rain: true, dusk: true },
+  };
+
+/**
+ * #2508: a whole frame's look, read off the drawing buffer — its mean sRGB
+ * channels, 0 to 255, their Rec. 709 luma, and the hue of the mean colour in
+ * degrees (0 red, 30 orange, 210 sky blue, 240 blue).
+ */
+export interface WeatherLook {
+  readonly red: number;
+  readonly green: number;
+  readonly blue: number;
+  readonly luma: number;
+  readonly hue: number;
+}
+
+/** The hue of an sRGB colour, degrees in [0, 360). */
+function hueOf(red: number, green: number, blue: number): number {
+  const high = Math.max(red, green, blue);
+  const low = Math.min(red, green, blue);
+  if (high === low) return 0;
+  const span = high - low;
+  const sector =
+    high === red
+      ? ((green - blue) / span + 6) % 6
+      : high === green
+        ? (blue - red) / span + 2
+        : (red - green) / span + 4;
+  return sector * 60;
+}
+
+/** #2508's frame: the rider on the level's road, two houses ahead, a parked car, in `weather`. */
+function weatherFrame(weather: WeatherName): SceneFrame {
+  const frame = frameAt(RIDER);
+  const obstacles: Obstacle[] = [
+    { kind: 'parked-car', along: RIDER + 14, stands: parkedCarStands('right') },
+  ];
+  return {
+    ...frame,
+    delivery: {
+      ...deliveryInView({
+        corridor: frame.corridor,
+        targets: housesOn(frame, [RIDER + 18, RIDER + 32]),
+        round: startRound(2),
+        throws: NO_PARCELS,
+        obstacles,
+        obstacleState: startObstacles(obstacles),
+      }),
+      weather: WEATHERS[weather],
+    },
+  };
+}
+
+/**
+ * #2508: the same frame of the stylised world in each weather, through a
+ * real view, read back whole: how dark and how warm each is.
+ */
+function weatherLook(): Record<WeatherName, WeatherLook> {
+  const width = 640;
+  const height = 400;
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const gl = shown.getContext('webgl2');
+  if (gl === null) throw new Error('#2508: the view drew into no WebGL2 context');
+  const pixels = new Uint8Array(width * height * 4);
+  const look = (weather: WeatherName): WeatherLook => {
+    const frame = weatherFrame(weather);
+    view.render(frame);
+    view.render(frame);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    for (let at = 0; at < pixels.length; at += 4) {
+      red += pixels[at] ?? 0;
+      green += pixels[at + 1] ?? 0;
+      blue += pixels[at + 2] ?? 0;
+    }
+    const count = width * height;
+    [red, green, blue] = [red / count, green / count, blue / count];
+    return {
+      red,
+      green,
+      blue,
+      luma: 0.2126 * red + 0.7152 * green + 0.0722 * blue,
+      hue: hueOf(red, green, blue),
+    };
+  };
+  const read = {
+    clear: look('clear'),
+    dusk: look('dusk'),
+    rain: look('rain'),
+    'rain-dusk': look('rain-dusk'),
+  };
+  view.destroy();
+  return read;
+}
+
+/**
+ * PR #2522: the same frame of the stylised world in each weather, through a
+ * real view, and what each frame was drawn with read back off the view's own
+ * materials: the ground's colour, the scenery's shade, the rain's colour and
+ * how near the camera its nearest streak stood (`three-renderer.ts`
+ * §`deliveryWeatherOf`).
+ */
+function weatherReadback(): Record<WeatherName, DeliveryWeatherReadback | undefined> {
+  const shown = canvas(640, 400);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(640, 400);
+  const read = (weather: WeatherName): DeliveryWeatherReadback | undefined => {
+    const frame = weatherFrame(weather);
+    view.render(frame);
+    view.render(frame);
+    return deliveryWeatherOf(view).readback;
+  };
+  const back = {
+    clear: read('clear'),
+    dusk: read('dusk'),
+    rain: read('rain'),
+    'rain-dusk': read('rain-dusk'),
+  };
+  view.destroy();
+  return back;
+}
+
+/** #2508's photographs for the owner: {@link weatherFrame} on the tablet's 1280×800, in `weather`. */
+function weatherShowcase(weather: WeatherName): void {
+  const shown = canvas(1280, 800);
+  shown.id = `delivery-weather-${weather}`;
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  view.render(weatherFrame(weather));
 }
 
 /** Two houses on the rider's right, a doorstep 1.5 m off the carriageway, at `distances`. */
@@ -306,14 +527,36 @@ function markerLeaves(): DeliveryMarkerReading {
   return { delivered, before, after };
 }
 
-function kinds(world: 'stylised' | 'realistic'): Record<ObstacleKind, readonly boolean[]> {
-  const read = (kind: ObstacleKind): readonly boolean[] =>
+function kinds(world: 'stylised' | 'realistic'): Record<ProbedKind, readonly boolean[]> {
+  const read = (kind: ProbedKind): readonly boolean[] =>
     deliveryKindProbe(canvas(256, 256), world, kind, KIND_POINTS);
   return {
     bin: read('bin'),
     trolley: read('trolley'),
     cone: read('cone'),
     'parked-car': read('parked-car'),
+  };
+}
+
+/** #2506's reading: a car pulling out's body at {@link KIND_POINTS}, and whether each car paints a hazard marker's middle. */
+interface PullingOutReading {
+  readonly body: readonly boolean[];
+  readonly marker: { readonly 'parked-car': boolean; readonly 'car-pulling-out': boolean };
+}
+
+/**
+ * The middle of an obstacle's hazard marker, the obstacle's own metres:
+ * `three-renderer.ts` §`HAZARD_MARKER_MIDDLE_METRES`, 2.7 m up, on its axis.
+ * Restated: the marker's height is not exported.
+ */
+const MARKER_POINT = [0, 2.7] as const;
+
+function pullingOut(world: 'stylised' | 'realistic'): PullingOutReading {
+  const marker = (kind: 'parked-car' | 'car-pulling-out'): boolean =>
+    deliveryKindProbe(canvas(256, 256), world, kind, [MARKER_POINT], MARKER_POINT[1])[0] === true;
+  return {
+    body: deliveryKindProbe(canvas(256, 256), world, 'car-pulling-out', KIND_POINTS),
+    marker: { 'parked-car': marker('parked-car'), 'car-pulling-out': marker('car-pulling-out') },
   };
 }
 
@@ -326,7 +569,7 @@ function probeCalls(world: 'stylised' | 'realistic', count: number): DeliveryCal
       y: 0,
       z: -3,
       yaw: 0,
-      kind: ROSTER[index % ROSTER.length] as ObstacleKind,
+      kind: ROSTER[index % ROSTER.length] as ProbedKind,
     })),
   };
   return deliveryCallsProbe(canvas(64, 32), world, view);
@@ -371,6 +614,41 @@ function showcase(): void {
 }
 
 /**
+ * #2507: the owner's photograph of a mailbox from where its throw window
+ * opens, on the tablet's 1280×800: a mailbox at the right-hand kerb
+ * `throw.ts` §`THROW_WINDOW_BEFORE_METRES` (20 m) ahead, and a doorstep's
+ * marker 25 m beyond it to compare, through a real view and the real
+ * `deliveryInView`.
+ */
+function mailboxShowcase(): void {
+  const shown = canvas(1280, 800);
+  shown.id = 'delivery-mailbox';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  const frame = frameAt(RIDER);
+  const [mailbox, house] = housesOn(frame, [RIDER + 20, RIDER + 45]) as [
+    DeliveryTarget,
+    DeliveryTarget,
+  ];
+  const fromRoad = CARRIAGEWAY_HALF_WIDTH_METRES + MAILBOX_FROM_KERB_METRES;
+  const targets: DeliveryTarget[] = [
+    { ...mailbox, mailbox: true, fromRoad, x: mailbox.x + mailbox.fromRoad - fromRoad },
+    house,
+  ];
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets,
+      round: startRound(2),
+      throws: NO_PARCELS,
+      obstacles: [],
+      obstacleState: startObstacles([]),
+    }),
+  });
+}
+
+/**
  * #2362, round 5: the owner's photograph of the parked cars, three in a row
  * at the right-hand kerb ahead of the rider, one of each paint, on a real
  * frame of the stylised world.
@@ -386,6 +664,41 @@ function carsShowcase(): void {
     along: RIDER + ahead,
     stands: parkedCarStands('right'),
   }));
+  view.render({
+    ...frame,
+    delivery: deliveryInView({
+      corridor: frame.corridor,
+      targets: [],
+      round: startRound(1),
+      throws: NO_PARCELS,
+      obstacles,
+      obstacleState: startObstacles(obstacles),
+    }),
+  });
+}
+
+/**
+ * #2506's photograph for the owner: a parked car at the right kerb 10 m
+ * ahead, and a car about to pull out of the same kerb 20 m ahead, waiting
+ * and not yet set going, through a real view and the real `deliveryInView`.
+ */
+function pullingOutShowcase(): void {
+  const shown = canvas(960, 540);
+  shown.id = 'delivery-pulling-out';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(960, 540);
+  const frame = frameAt(RIDER);
+  const obstacles: Obstacle[] = [
+    { kind: 'parked-car', along: RIDER + 10, stands: parkedCarStands('right') },
+    {
+      kind: 'car-pulling-out',
+      along: RIDER + 20,
+      from: 'right',
+      startAfter: 0,
+      to: parkedCarStands('right'),
+      rides: 0,
+    },
+  ];
   view.render({
     ...frame,
     delivery: deliveryInView({
@@ -648,14 +961,165 @@ function pastCarShowcase(eyeAhead: number, behind: boolean): void {
   });
 }
 
+/** A car of one triangle a part, every role of Kenney's among them — PR #2548. @see programs */
+const STAND_IN_CAR: DeliveryCarGeometry = {
+  parts: (
+    [
+      'body',
+      'paint',
+      'front-wheel',
+      'front-wheel',
+      'back-wheel',
+      'back-wheel',
+      'indicator-left',
+      'indicator-right',
+    ] as const satisfies readonly DeliveryCarRole[]
+  ).map((role, index) => ({
+    role,
+    position: new Float32Array([0, 0.3 * index, 0, 0.5, 0.3 * index, 0, 0, 0.3 * index + 0.3, 0]),
+    normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    colour: new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+    pivot: [0, 0.3, index < 4 ? 1.3 : -1.3] as const,
+  })),
+  wheelRadius: 0.3,
+  wheelbase: 2.6,
+  triangles: 8,
+};
+
+function programs(
+  world: 'stylised' | 'realistic',
+  car: boolean,
+): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] } {
+  return deliveryProgramsProbe(canvas(), world, car ? STAND_IN_CAR : undefined);
+}
+
+/** Where one marker's diamond landed on one frame {@link markerOnScreen} drew. */
+export interface MarkerOnScreenSample {
+  /** How far before the houses the rider was held, metres along the road. */
+  readonly lead: number;
+  /** The lane the rider was steered into, metres right of the centre line (`lanes.ts`). */
+  readonly lane: number;
+  /** Which house: its side, and its doorstep near the road or as deep as a target may be. */
+  readonly house: string;
+  /** How large the belt drew it (`three-renderer.ts` §`markerScaleAt`). */
+  readonly scale: number;
+  /**
+   * The diamond's middle and top, and the marker's foot, as fractions of the
+   * frame's width and height from its top left (`camera.ts` §`FramePoint`);
+   * `undefined` for a point behind the eye.
+   */
+  readonly middle: { readonly left: number; readonly top: number } | undefined;
+  readonly top: { readonly left: number; readonly top: number } | undefined;
+  readonly foot: { readonly left: number; readonly top: number } | undefined;
+}
+
+/** Where #2513's four houses stand: this far along {@link ROUTE}, abreast. */
+const ABREAST_ALONG = RIDER + 200;
+
+/**
+ * #2513: where a house marker lands on the screen as a rider rides up to it.
+ * Four houses abreast, {@link ABREAST_ALONG} metres along: on each side, a
+ * doorstep 1.5 m off the carriageway and one {@link TARGET_MOST_FROM_ROAD_METRES}
+ * from the road's centre, the deepest a round's target may be (`targets.ts`).
+ * The rider is held each of `leads` before them in each lane, the camera
+ * following as `scene.ts` has it; the real `in-view.ts` §`deliveryInView`
+ * places the markers and a real view (`threeGameRenderer.create`) draws each
+ * frame, so the belt scales each marker by its distance from the eye. Each
+ * marker's foot and scale are read back off the belt's instances, its diamond
+ * raised by `scale` times {@link MARKER_DIAMOND_HEIGHTS} (it is scaled about
+ * its foot), and projected through `camera.ts` §`projectToFrame`, the
+ * projection the view sets up. The frame is drawn small: where a point lands,
+ * as a share of the frame, is the aspect's and not the size's.
+ */
+function markerOnScreen(aspect: number, leads: readonly number[]): readonly MarkerOnScreenSample[] {
+  const height = 120;
+  const width = Math.round(height * aspect);
+  const shown = canvas(width, height);
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(width, height);
+  const start = atStartLine(ROUTE);
+  const houses = [
+    { house: 'right, near the road', side: 1, fromRoad: CARRIAGEWAY_HALF_WIDTH_METRES + 1.5 },
+    { house: 'right, deepest', side: 1, fromRoad: TARGET_MOST_FROM_ROAD_METRES },
+    { house: 'left, near the road', side: -1, fromRoad: CARRIAGEWAY_HALF_WIDTH_METRES + 1.5 },
+    { house: 'left, deepest', side: -1, fromRoad: TARGET_MOST_FROM_ROAD_METRES },
+  ] as const;
+  const samples: MarkerOnScreenSample[] = [];
+  for (const lane of LANE_OFFSETS_METRES) {
+    for (const lead of leads) {
+      const frame = sceneFrame({
+        profile: ROUTE,
+        origin: ORIGIN,
+        state: { ...start, ride: { ...start.ride, distance: metres(ABREAST_ALONG - lead) } },
+        steeredLateral: lane,
+      });
+      const point = pointNear(frame, ABREAST_ALONG);
+      // Riding north the rider's right is east, `−x`.
+      const targets: DeliveryTarget[] = houses.map((each, position) => ({
+        position,
+        distance: point.along,
+        side: each.side,
+        fromRoad: each.fromRoad,
+        kind: 'doorstep',
+        x: point.x - each.side * each.fromRoad,
+        y: point.y,
+        z: point.z,
+        yaw: (-each.side * Math.PI) / 2,
+      }));
+      view.render({
+        ...frame,
+        delivery: deliveryInView({
+          corridor: frame.corridor,
+          targets,
+          round: startRound(houses.length),
+          throws: NO_PARCELS,
+          obstacles: [],
+          obstacleState: startObstacles([]),
+        }),
+      });
+      const rig = cameraRig(frame.camera);
+      const at = (x: number, y: number, z: number) => {
+        const projected = projectToFrame(rig, aspect, { x, y, z });
+        return projected === undefined ? undefined : { left: projected.left, top: projected.top };
+      };
+      for (const drawn of deliveryDrawnOf(view, 'markers')) {
+        const target = targets.find(
+          (each) => Math.abs(each.x - drawn.x) < 1e-3 && Math.abs(each.z - drawn.z) < 1e-3,
+        );
+        if (target === undefined) throw new Error('the belt drew a marker on no house');
+        samples.push({
+          lead,
+          lane,
+          house: houses[target.position]?.house ?? '',
+          scale: drawn.scale,
+          middle: at(drawn.x, drawn.y + MARKER_DIAMOND_HEIGHTS.middle * drawn.scale, drawn.z),
+          top: at(drawn.x, drawn.y + MARKER_DIAMOND_HEIGHTS.top * drawn.scale, drawn.z),
+          foot: at(drawn.x, drawn.y, drawn.z),
+        });
+      }
+    }
+  }
+  view.destroy();
+  return samples;
+}
+
 window.__oylDelivery = {
   ready: true,
+  programs,
+  markerOnScreen,
   pastCarShowcase,
   carsShowcase,
+  mailboxShowcase,
+  pullingOutShowcase,
   viewCalls,
   markerLeaves,
   probeCalls,
+  rainCalls,
+  weatherLook,
+  weatherShowcase,
+  weatherReadback,
   kinds,
+  pullingOut,
   showcase,
   inLane,
   inLaneShowcase,

@@ -53,6 +53,18 @@ SOCK_CUFF = 0.025
 SHOE_COLLAR = 0.012
 # The sole's upper edge, above the lowest point of the foot.
 SOLE_HEIGHT = 0.014
+# The shoe's last (#2504): MakeHuman's foot is bare, with five toes, so each
+# foot below the ankle is drawn out onto its own convex hull -- one smooth toe
+# box and a flat sole -- and stood this far off it, the upper's thickness. The
+# change fades to nothing over this height below the ankle joint, so the leg
+# above is not moved.
+SHOE_THICKNESS = 0.003
+SHOE_BLEND = 0.03
+# The toe box: the foot's vertices further than this share of the way from
+# the heel to the toes are relaxed over the hull this many times, so the gaps
+# between the toes spread into an even skin rather than folding.
+SHOE_TOE_BOX = 0.55
+SHOE_RELAX = 60
 
 # --- the jersey's panels ---------------------------------------------------------
 # Round the torso, in degrees from the front centre line (0) to the back (180).

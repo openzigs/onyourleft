@@ -48,6 +48,18 @@
  * skips. A frame that ran several steps shares the frame's distance between
  * them. The race's clock starts at nought at the line and moves 50 ms a tick.
  *
+ * ## Ten seconds on the line first (#2546)
+ *
+ * A race does not start at the press. {@link LAP_RACE_COUNTDOWN_MS} of the
+ * ride's own frames count down first ({@link countLapRaceDown}), the paused
+ * ones not among them, and until they have `GameView` holds the rider on the
+ * line (`simulation.ts` §`holdAt`) as a room holds its riders (#785), so no
+ * step runs and nothing here is stepped: no bot moves, spends or decides, and
+ * the race's clock is still nought at Go. The HUD and the region say it in a
+ * room's words (`room-ride.ts` §`RACE_TEXT`, §`countdownRace`). The trainer is
+ * sent the line's grade throughout, which is what an ordinary ride standing
+ * still on the line is sent.
+ *
  * ## The race ends at the line, and the ride goes on
  *
  * The rider's finish is the model's (`race.ts` §`settle`), said once
@@ -125,6 +137,13 @@ import {
 /** The race's length of one tick: the simulation's step, `simulation.ts` §`SIMULATION_STEP_SECONDS`. */
 export const LAP_RACE_TICK_SECONDS = 0.05;
 
+/**
+ * How long a solo race counts down on its line before Go — #2546, the owner's
+ * request of 2026-11-12: ten seconds, a room's own default
+ * (`apps/instance` §`DEFAULT_COUNTDOWN_MS`), so the two start alike.
+ */
+export const LAP_RACE_COUNTDOWN_MS = 10_000;
+
 /** The rider's id in the race. Never shown: the HUD names the rider's own line itself. */
 export const LAP_RACE_RIDER_ID = 'rider';
 
@@ -162,6 +181,11 @@ export interface LapRaceRide {
    * race. Drawing only: the race never reads it.
    */
   readonly pack: PackLayout;
+  /**
+   * How much of the countdown is left, ms of the ride's unpaused frames: the
+   * rider is held on the line until it is nought (#2546). @see countLapRaceDown
+   */
+  readonly countdownLeftMs: number;
 }
 
 /** What a race needs at the press. */
@@ -318,7 +342,49 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
     pack: NO_PACK_LAYOUT,
+    countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
   };
+}
+
+/** Whether the race is still counting down on its line, so nothing of it may move (#2546). */
+export function lapRaceCounting(ride: LapRaceRide): boolean {
+  return ride.countdownLeftMs > 0;
+}
+
+/** One frame of a race's countdown. @see countLapRaceDown */
+export interface LapRaceCountdownStep {
+  readonly ride: LapRaceRide;
+  /**
+   * The instant the rider is held on the line until, on this frame: the
+   * frame's own end while the race is still counting, the instant of Go on
+   * the frame Go falls in, and `undefined` on every frame after it. `GameView`
+   * hands it to `simulation.ts` §`holdAt`, so the wait is never ridden and the
+   * first step after Go starts from the line at rest.
+   */
+  readonly heldToMs: number | undefined;
+}
+
+/**
+ * Count the race down by one frame, `fromMs` to `toMs` on the ride's clock —
+ * #2546. A frame is only ever run while the ride is riding (`GameView`'s loop
+ * stops for a pause, and starts its frames afresh on resume), so a paused
+ * countdown stays where it stopped and resumes from that second.
+ *
+ * Go is the frame the countdown reaches nought on, and the instant it does
+ * is `fromMs` plus what was left: a frame that runs past it holds the rider
+ * only to that instant, so the race's first step is a whole step after Go.
+ */
+export function countLapRaceDown(
+  ride: LapRaceRide,
+  fromMs: number,
+  toMs: number,
+): LapRaceCountdownStep {
+  if (!lapRaceCounting(ride)) return { ride, heldToMs: undefined };
+  const frameMs = Math.max(0, toMs - fromMs);
+  if (frameMs < ride.countdownLeftMs) {
+    return { ride: { ...ride, countdownLeftMs: ride.countdownLeftMs - frameMs }, heldToMs: toMs };
+  }
+  return { ride: { ...ride, countdownLeftMs: 0 }, heldToMs: fromMs + ride.countdownLeftMs };
 }
 
 /** The race after the rider asked for a lane change: taken by the next tick. */
@@ -459,6 +525,13 @@ export interface LapRaceDrawing {
  * drawn odometer (`simulation.ts` §`drawnAt`, a step behind the newest), and
  * `behindSeconds` how far behind the newest step that is, so each bot is
  * drawn as far back along its own speed and the field moves together.
+ *
+ * ⚠️ **Never behind the ride's start** — #2546. A bot one tick off the line
+ * from rest has covered less than a tick at its new speed, so drawn a whole
+ * step back along that speed it is behind where it started, and at the start
+ * of a ride that is a negative distance, which the scene refuses and the
+ * frame dies on. Every race now starts from rest at Go after its countdown,
+ * and a 60 Hz screen's first frame after Go usually runs one step.
  */
 export function lapRaceDrawing(
   ride: LapRaceRide,

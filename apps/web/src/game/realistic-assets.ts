@@ -48,6 +48,8 @@
  * - {@link REALISTIC_CHAIN_LINK} is the chain-link fence beside industrial,
  *   school and sports grounds (#1274): Poly Haven's, its frame coloured a
  *   vertex at a time and its wire a cut-out picture.
+ * - {@link REALISTIC_DELIVERY_CAR} is Delivery's parked car since #2540:
+ *   Kenney's CC0 sedan, a colour a corner, its wheels and indicators apart.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -601,6 +603,14 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The animation in {@link REALISTIC_RIDER} that is the body's own fall and
+ * get-up in a Delivery crash — #2493, made by `tools/realistic/blender/
+ * process_rider.py` from `rider_crash.py`'s moments on #2475's timeline, and
+ * blended in by `three-renderer.ts` §`RealisticRiderBelt` (`RiderMarker.crash`).
+ */
+export const REALISTIC_RIDER_CRASH_CLIP = 'crash';
+
+/**
  * The rider's three maps — #623, drawn and baked by
  * `tools/realistic/blender/process_rider.py` onto the body's own texture
  * coordinates, dedicated `CC0-1.0` with the MakeHuman skin and eyebrow they
@@ -812,6 +822,18 @@ export const REALISTIC_CHAIN_LINK = {
 } as const;
 
 /**
+ * The car a Delivery round's parked cars are drawn as in the realistic world —
+ * #2540: Kenney's CC0 Car Kit sedan, made by `tools/realistic/blender/
+ * process_vehicle.py` into eight named parts — `body`, `paint` (the body's
+ * paint, which each car wears its own of), four wheels (`wheel-front-left`
+ * and so on, each node at its hub) and `indicator-left` and
+ * `indicator-right` — each a colour a corner, with no picture and no
+ * material, so it is drawn inside the Delivery obstacles' one instanced call
+ * (`three-renderer.ts` §`DeliveryBelt`). The stylised world keeps its own car.
+ */
+export const REALISTIC_DELIVERY_CAR = 'car_sedan.glb';
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -858,6 +880,7 @@ export function realisticFiles(): readonly string[] {
     ...REALISTIC_ROADSIDE_MODEL_NAMES.map((model) => REALISTIC_ROADSIDE_MODELS[model]),
     REALISTIC_CHAIN_LINK.model,
     REALISTIC_CHAIN_LINK.wire,
+    REALISTIC_DELIVERY_CAR,
   ];
 }
 
