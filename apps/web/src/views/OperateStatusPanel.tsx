@@ -201,15 +201,26 @@ function Shown({
           The instance is up but not ready for riders. The checks below say which failed.
         </StatusMessage>
       )}
+      {/* What is deployed, and its one control, first: a phone's fold is 783 px
+          and the facts below run past it (#666, `controls-first.browser.spec.ts`). */}
+      <dl className="oyl-operate__status">
+        <Fact name="Version">{status.version}</Fact>
+        <Fact name="Deployed commit">
+          {status.commit === null ? 'not named' : <code>{status.commit}</code>}
+        </Fact>
+      </dl>
+      {compare === undefined ? null : (
+        <p>
+          <ButtonLink variant="secondary" external href={compare}>
+            Compare with main
+          </ButtonLink>
+        </p>
+      )}
       <dl className="oyl-operate__status">
         <Fact name="Database">{okText(status.checks.database)}</Fact>
         <Fact name="Migrations">{MIGRATIONS_TEXT[status.checks.migrations]}</Fact>
         <Fact name="Rooms">{okText(status.checks.rooms)}</Fact>
         <Fact name="Up for">{durationText(status.uptimeSeconds)}</Fact>
-        <Fact name="Version">{status.version}</Fact>
-        <Fact name="Deployed commit">
-          {status.commit === null ? 'not named' : <code>{status.commit}</code>}
-        </Fact>
         {status.disk.length === 0 ? (
           <Fact name="Disk">not known</Fact>
         ) : (
@@ -227,13 +238,6 @@ function Shown({
         </Fact>
         <Fact name="Instance keys">{KEYS_TEXT[status.keys]}</Fact>
       </dl>
-      {compare === undefined ? null : (
-        <p>
-          <ButtonLink variant="secondary" external href={compare}>
-            Compare with main
-          </ButtonLink>
-        </p>
-      )}
     </>
   );
 }
