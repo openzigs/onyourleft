@@ -868,6 +868,18 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   repository), the app shows a **Compare with main** link to GitHub's compare page for the deployed
   commit. It is only a link you open in your browser: **neither the app nor the instance asks
   GitHub anything**. A modified instance shows its commit alone.
+- **Accounts** ([#2605](https://github.com/openzigs/onyourleft/issues/2605)). The second section of
+  Operate, read from the same `GET /v1/operate/status`: how many accounts are **awaiting approval**
+  and how many are **suspended**, each with a link that opens the Moderation screen
+  (`#/settings/instance/moderation?section=approvals` or `?section=suspended`) with that section's
+  heading focused, and, on an `invite` instance, a link to its invitation. Approving, refusing,
+  lifting a suspension and inviting are done on the Moderation screen; Accounts has no control of
+  its own and sends nothing. It also shows the **registration mode** with one sentence on what it
+  means, and how to change it: the app **does not change it** (the epic's decision 2). Set
+  `OYL_INSTANCE_REGISTRATION` in the `.env` beside `compose.yaml` and run
+  `docker compose up -d instance`, which recreates the container with the new value;
+  `docker compose restart` does not read `.env` again. The deputy keeps the Moderation screen,
+  reached from the Instance screen, and sees no Operate.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

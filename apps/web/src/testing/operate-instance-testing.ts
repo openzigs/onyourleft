@@ -152,6 +152,8 @@ export interface OperateWorld {
   readonly rider: OperateDevice;
   /** Approve {@link rider}, as the owner does from the Moderation screen. */
   readonly approveRider: () => Promise<void>;
+  /** One more device connected as a new rider, whose account waits for approval (#2605). */
+  readonly anotherRider: (name: string) => Promise<OperateDevice>;
 }
 
 /** An approval-required instance whose owner, deputy and one rider are each a device here. */
@@ -198,6 +200,14 @@ export async function operatedWorld(
         'ok',
       );
       if (decided.kind !== 'done') throw new Error(`approve: ${JSON.stringify(decided)}`);
+    },
+    anotherRider: async (name) => {
+      const device = await anOperateDevice(send, name, card);
+      // An hour on: new accounts are limited per client address, and every
+      // device here is the same address.
+      world.clock.ms += 3_600_000;
+      await device.connect();
+      return device;
     },
   };
 }
