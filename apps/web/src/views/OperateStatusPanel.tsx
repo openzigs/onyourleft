@@ -211,14 +211,9 @@ function Shown({
           The instance is up but not ready for riders. The checks below say which failed.
         </StatusMessage>
       )}
-      {/* What is deployed, and its one control, first: a phone's fold is 783 px
-          and the facts below run past it (#666, `controls-first.browser.spec.ts`). */}
-      <dl className="oyl-operate__status">
-        <Fact name="Version">{status.version}</Fact>
-        <Fact name="Deployed commit">
-          {status.commit === null ? 'not named' : <code>{status.commit}</code>}
-        </Fact>
-      </dl>
+      {/* Its one control first, then what is deployed: a phone's fold is 783 px
+          and the facts run past it, and a section may lay out at most 130 px of
+          prose before its first control (#666, `controls-first.browser.spec.ts`). */}
       {compare === undefined ? null : (
         <p>
           <ButtonLink variant="secondary" external href={compare}>
@@ -227,6 +222,10 @@ function Shown({
         </p>
       )}
       <dl className="oyl-operate__status">
+        <Fact name="Version">{status.version}</Fact>
+        <Fact name="Deployed commit">
+          {status.commit === null ? 'not named' : <code>{status.commit}</code>}
+        </Fact>
         <Fact name="Database">{okText(status.checks.database)}</Fact>
         <Fact name="Migrations">{MIGRATIONS_TEXT[status.checks.migrations]}</Fact>
         <Fact name="Rooms">{okText(status.checks.rooms)}</Fact>

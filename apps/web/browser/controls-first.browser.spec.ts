@@ -326,6 +326,9 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // only over the populated ports. Notices and Appeals tuck nothing: each item
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
+  // #2604: Status tucks what Docker Desktop's disk figures are (#2622's review),
+  // and is drawn only for the owner, whom only the populated ports are.
+  operate: ['Status'],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.
