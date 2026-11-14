@@ -1039,6 +1039,16 @@
     "Only the account its operator names as moderator can use this page.",
     "Go to the instance screen"
   ],
+  "operate empty": [
+    "Operate",
+    "Run the instance you own, from this app.",
+    "Help with Operate",
+    "Run the instance you own from this app: what was done to it, and by what.",
+    "Only its owner sees this page.",
+    "iNot available: Your account is not this instance’s owner.",
+    "Only the account its operator names as owner can use this page.",
+    "Go to the instance screen"
+  ],
   "more empty": [
     "More",
     "Devices, files, the camera, settings, an instance and this app.",
@@ -2952,6 +2962,7 @@
     "To have it deleted, delete your account on the instance from this screen while you are signed in, or ask whoever runs the instance.",
     "For the project’s own instance, that is its maintainer, as the privacy policy’s Contact section says.",
     "Moderate this instance",
+    "Operate this instance",
     "Get the source code of this instance (opens in a new tab).",
     "Change your name there",
     "The new name other riders will see",
@@ -3150,6 +3161,29 @@
     "This page cannot change it.",
     "Approved an account, 2026-09-21 11:26 UTC, by you; account rider-carys.",
     "Reason: Known to the club."
+  ],
+  "operate populated": [
+    "Operate",
+    "Run the instance you own, from this app.",
+    "Help with Operate",
+    "Run the instance you own from this app: what was done to it, and by what.",
+    "Only its owner sees this page.",
+    "This is where you run your instance from the app.",
+    "Only the instance’s owner sees it: the instance refuses everyone else, the deputy moderator included.",
+    "Operator log",
+    "Every operator action, from this app or the host’s command line, newest first.",
+    "Load-test accounts added, 2026-11-14 10:00 UTC, from the command line on the host: refused (accounts_requested_by_the_operat=999999999,accounts_already_held_by_instanc=999999999,accounts_added_in_this_transacti=999999999).",
+    "Room opened, 2026-11-14 09:30 UTC, from the app: done (ride).",
+    "Show older entries",
+    "Still to come",
+    "These sections will be added here:",
+    "Status",
+    "Accounts",
+    "Backups",
+    "AI backend",
+    "Rooms",
+    "Instance keys",
+    "Recent errors"
   ],
   "more populated": [
     "More",

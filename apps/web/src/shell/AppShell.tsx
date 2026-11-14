@@ -59,6 +59,7 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { OperatePort } from '../instance/operate-port';
 import type { SyncPort } from '../instance/sync-port';
 import type { StatementsPort } from '../instance/statements-port';
 import type { BlocksPort } from '../instance/blocks-port';
@@ -183,6 +184,7 @@ const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
 const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 const InstanceView = lazyView(MORE_GROUP, (group) => group.InstanceView);
 const ModerationView = lazyView(MORE_GROUP, (group) => group.ModerationView);
+const OperateView = lazyView(MORE_GROUP, (group) => group.OperateView);
 const MoreView = lazyView(MORE_GROUP, (group) => group.MoreView);
 
 /** The id `main` carries, and the only place it is written. */
@@ -612,6 +614,12 @@ export interface AppShellProps {
    */
   readonly moderation?: ModerationPort | undefined;
   /**
+   * The Operate area's port (#2603) — `instance/operate-port.ts`
+   * §`createOperatePort`, built in `main.tsx` and nowhere else. The Instance
+   * screen asks it whether to link to Operate at all.
+   */
+  readonly operate?: OperatePort | undefined;
+  /**
    * Sync with the instance (#1195) — `instance/sync-port.ts`
    * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
    * screen draws its panel only once connected, and offers it only with a card.
@@ -907,6 +915,7 @@ function viewFor(
         <InstanceView
           port={props.instance}
           moderation={props.moderation}
+          operate={props.operate}
           sync={props.sync}
           hostedSettings={props.hostedSettings}
           statements={props.statements}
@@ -915,6 +924,8 @@ function viewFor(
       );
     case 'moderation':
       return <ModerationView port={props.moderation} />;
+    case 'operate':
+      return <OperateView port={props.operate} />;
     case 'more':
       return <MoreView />;
     case 'credits':

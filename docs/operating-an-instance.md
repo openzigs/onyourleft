@@ -834,6 +834,12 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   triggers refuse any `UPDATE` or `DELETE`, **erasing an account keeps every entry** (it has no
   foreign key to the account), and `migrate … down` refuses to undo migration 0040 while the log holds
   a single entry.
+- **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
+  as the owner, the Instance screen shows **Operate this instance**, which opens
+  `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
+  sections still to come. The deputy and every other rider see no such button, and anybody who opens
+  the address is told only that their account is not the owner. A device that cannot seal — no
+  instance card, or a copy of the app loaded from a website — is told so and asks nothing.
 
 ## Moderation and the operator's duties
 

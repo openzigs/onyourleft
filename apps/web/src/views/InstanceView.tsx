@@ -17,6 +17,7 @@ import type {
   InstanceState,
 } from '../instance/instance-port';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
+import type { OperatePort, OperateStanding } from '../instance/operate-port';
 import type { SyncPort } from '../instance/sync-port';
 import { HostedServicePanel } from '../ride-analysis/HostedServicePanel';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
@@ -154,6 +155,9 @@ function Receives(): JSX.Element {
 /** The Instance screen's link to Moderation, drawn for the instance's moderator only (#955). */
 export const MODERATE_LINK_TEXT = 'Moderate this instance';
 
+/** The Instance screen's link to Operate, drawn for the instance's owner only — never the deputy (#2603). */
+export const OPERATE_LINK_TEXT = 'Operate this instance';
+
 /** What the Instance screen says of terms the rider has not read (#909). ⚠️ Draft wording awaiting the owner's approval. */
 export const TERMS_CHANGED_TEXT = {
   lead: (version: string) =>
@@ -189,6 +193,7 @@ function TermsChanged({
 export function InstanceView({
   port,
   moderation,
+  operate,
   sync,
   hostedSettings,
   statements,
@@ -206,6 +211,8 @@ export function InstanceView({
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
+  /** Asked, once connected, whether this account OWNS the instance (#2603). */
+  readonly operate?: OperatePort | undefined;
   /** Sync with the instance (#1195): drawn only once connected, and only offered with a card. */
   readonly sync?: SyncPort | undefined;
   /** A hosted model service on the rider's own key (#1251): drawn only once connected. */
@@ -213,6 +220,7 @@ export function InstanceView({
 }): JSX.Element {
   const [state, setState] = useState<InstanceState | undefined>(undefined);
   const [standing, setStanding] = useState<ModerationStanding | undefined>(undefined);
+  const [ownership, setOwnership] = useState<OperateStanding | undefined>(undefined);
   const [devices, setDevices] = useState<DevicesOutcome | undefined>(undefined);
   const [changes, setChanges] = useState<AccountChangesOutcome | undefined>(undefined);
   /** The key this screen revoked (#1208): the list is shown marked after it. */
@@ -237,14 +245,17 @@ export function InstanceView({
     const now = await port.current();
     setState(now);
     setStanding(undefined);
+    setOwnership(undefined);
     if (now.kind === 'connected') {
       setDevices(undefined);
       setDevices(await port.devices());
       // #1208: every notice, at each sealed read of this screen.
       setChanges(await port.accountChanges());
       if (moderation !== undefined) setStanding(await moderation.standing());
+      // #2603: only the instance's owner is offered Operate.
+      if (operate !== undefined) setOwnership(await operate.standing());
     }
-  }, [port, moderation]);
+  }, [port, moderation, operate]);
 
   useEffect(() => {
     void read();
@@ -470,6 +481,14 @@ export function InstanceView({
           {standing === 'moderator' ? (
             <p>
               <a href={hrefFor(routeById('moderation'))}>{MODERATE_LINK_TEXT}</a>
+            </p>
+          ) : null}
+          {/* #2603: only the instance's owner is offered the link — never the deputy. */}
+          {ownership === 'owner' ? (
+            <p>
+              <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('operate'))}>
+                {OPERATE_LINK_TEXT}
+              </a>
             </p>
           ) : null}
           {state.sourceUrl === null ? null : (

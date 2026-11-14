@@ -1,0 +1,230 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// @vitest-environment jsdom
+
+/**
+ * The Operate area (#2603): over the REAL instance (`testing/operate-instance-testing.ts`)
+ * as its owner, its deputy and a rider, and over the scripted port in
+ * `instance/testing.ts` for what the screen does with each answer. The route
+ * is audited over both walk fixtures by `a11y/routes.a11y.test.tsx`, and laid
+ * out at a tablet's and a phone's size by `browser/operate.browser.spec.ts`.
+ */
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createOperatePort, OPERATOR_LOG_PAGE } from '../instance/operate-port';
+import {
+  closeOperateWorlds,
+  countingSealed,
+  operatedWorld,
+  writeOperatorEntries,
+} from '../testing/operate-instance-testing';
+import { scriptedOperate } from '../instance/testing';
+import { AppShell } from '../shell/AppShell';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
+import {
+  OPERATE_NO_PORT,
+  OPERATE_PURPOSE,
+  OPERATE_SECTIONS_TO_COME,
+  OPERATE_STANDING_TEXT,
+  OPERATOR_LOG_MORE_UNREADABLE_TEXT,
+  OPERATOR_LOG_UNREADABLE_TEXT,
+  OperateView,
+} from './OperateView';
+
+let mounted: Mounted | undefined;
+
+afterEach(async () => {
+  mounted?.unmount();
+  mounted = undefined;
+  globalThis.location.hash = '';
+  await closeOperateWorlds();
+});
+
+function text(): string {
+  return (mounted?.container.textContent ?? '').replace(/\s+/g, ' ');
+}
+
+/** The log's lines, top to bottom. */
+function logLines(): string[] {
+  return [...(mounted?.container.querySelectorAll('.oyl-operate__log > li') ?? [])].map((each) =>
+    (each.textContent ?? '').replace(/\s+/g, ' '),
+  );
+}
+
+function showOlder(): HTMLButtonElement | undefined {
+  return [...(mounted?.container.querySelectorAll('button') ?? [])].find(
+    (each) => each.textContent === 'Show older entries',
+  );
+}
+
+/** Settle until `done` holds: a sealed read takes more than a couple of turns. */
+async function until(done: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 200 && !done(); turn += 1) await settle();
+  await settle();
+}
+
+const readDone = () => !text().includes('Reading the instance');
+
+describe('the Operate area over the real instance — #2603', () => {
+  it(`shows the owner the log newest first, and Show older entries appends the next page`, async () => {
+    const { owner, world } = await operatedWorld();
+    await writeOperatorEntries(world, OPERATOR_LOG_PAGE + 2);
+    mounted = await mount(<OperateView port={createOperatePort(owner.dependencies)} />);
+    await until(() => logLines().length > 0);
+    expect(text()).toContain(OPERATE_PURPOSE);
+    expect(logLines()).toHaveLength(OPERATOR_LOG_PAGE);
+    // Newest first: the last written (`blobs=26`) is the first line.
+    expect(logLines()[0]).toContain(`blobs=${String(OPERATOR_LOG_PAGE + 1)}`);
+    expect(logLines()[0]).toContain('Backup taken');
+    expect(logLines()[0]).toContain('from the command line on the host: done');
+    const button = showOlder();
+    expect(button).toBeDefined();
+    if (button !== undefined) await activateWithKeyboard(button);
+    await until(() => logLines().length > OPERATOR_LOG_PAGE);
+    expect(logLines()).toHaveLength(OPERATOR_LOG_PAGE + 2);
+    expect(logLines().at(-2)).toContain('blobs=1)');
+    expect(logLines().at(-1)).toContain('blobs=0)');
+    // The end of the log: nothing more to ask for.
+    expect(showOlder()).toBeUndefined();
+  });
+
+  it.each(['deputy', 'rider'] as const)(
+    'tells the %s only that their account is not the owner, and never asks for the log',
+    async (who) => {
+      const operated = await operatedWorld();
+      await writeOperatorEntries(operated.world, 2);
+      if (who === 'rider') await operated.approveRider();
+      const counted = countingSealed(operated.world, '/v1/operate/log');
+      const port = createOperatePort({ ...operated[who].dependencies, send: counted.send });
+      mounted = await mount(<OperateView port={port} />);
+      await until(readDone);
+      expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
+      expect(logLines()).toEqual([]);
+      expect(text()).not.toContain('blobs=');
+      // No request reached `/v1/operate/log`: the standing read was the only one.
+      expect(counted.count()).toBe(0);
+      // The control: the same counting reaches the route when the owner reads.
+      const owners = countingSealed(operated.world, '/v1/operate/log');
+      await createOperatePort({ ...operated.owner.dependencies, send: owners.send }).log();
+      expect(owners.count()).toBe(1);
+    },
+  );
+});
+
+describe('the Operate area over a scripted instance — #2603', () => {
+  it('renders two entries newest first, then Show older entries appends the next page from the port', async () => {
+    const scripted = scriptedOperate({ pageSize: 2 });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect(logLines()).toHaveLength(2);
+    expect(logLines()[0]).toContain('Load-test accounts added');
+    expect(logLines()[0]).toContain('refused');
+    expect(logLines()[1]).toContain(
+      'Room opened, 2026-11-14 09:30 UTC, from the app: done (ride).',
+    );
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    await settle();
+    expect(logLines()).toHaveLength(3);
+    expect(logLines()[2]).toContain(
+      'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
+    );
+    expect(scripted.calls).toEqual(['standing', 'log', 'log 2']);
+    expect(showOlder()).toBeUndefined();
+  });
+
+  it('says what each part of the area is for, and lists the sections still to come', async () => {
+    mounted = await mount(<OperateView port={scriptedOperate().port} />);
+    await settle();
+    expect(text()).toContain(OPERATE_PURPOSE);
+    for (const section of OPERATE_SECTIONS_TO_COME) expect(text()).toContain(section);
+  });
+
+  it('shows an action a newer instance added by its own name', async () => {
+    const scripted = scriptedOperate({
+      entries: [
+        {
+          id: 1,
+          at: '2026-11-14T09:00:00.000Z',
+          source: 'cli',
+          action: 'tunnel_check',
+          detail: null,
+          outcome: 'done',
+        },
+      ],
+    });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect(logLines()).toEqual([
+      'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
+    ]);
+  });
+
+  it.each(['not-owner', 'signed-out', 'unreachable', 'no-keys'] as const)(
+    'tells %s only that, and asks for nothing but the standing',
+    async (standing) => {
+      const scripted = scriptedOperate({ standing });
+      mounted = await mount(<OperateView port={scripted.port} />);
+      await settle();
+      expect(text()).toContain(OPERATE_STANDING_TEXT[standing]);
+      expect(text()).not.toContain(OPERATE_PURPOSE);
+      expect(scripted.calls).toEqual(['standing']);
+      expect(mounted.container.querySelector('a')?.getAttribute('href')).toBe(
+        '#/settings/instance',
+      );
+    },
+  );
+
+  it('says the log could not be read, and draws no entry', async () => {
+    const scripted = scriptedOperate();
+    scripted.held.logReadable = false;
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(OPERATOR_LOG_UNREADABLE_TEXT);
+    expect(logLines()).toEqual([]);
+  });
+
+  it('says a page did not come, keeps what is shown, and offers it again', async () => {
+    const scripted = scriptedOperate({ pageSize: 2 });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    scripted.held.logReadable = false;
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    await settle();
+    expect(text()).toContain(OPERATOR_LOG_MORE_UNREADABLE_TEXT);
+    expect(logLines()).toHaveLength(2);
+    scripted.held.logReadable = true;
+    const again = showOlder();
+    if (again === undefined) throw new Error('no Show older entries offered again');
+    await activateWithKeyboard(again);
+    await settle();
+    expect(text()).not.toContain(OPERATOR_LOG_MORE_UNREADABLE_TEXT);
+    expect(logLines()).toHaveLength(3);
+  });
+
+  it('says so where there is no local store to keep a sign-in in', async () => {
+    mounted = await mount(<OperateView />);
+    await settle();
+    expect(text()).toContain(OPERATE_NO_PORT);
+  });
+
+  it('is what the shell opens at /settings/instance/operate, for a non-owner asking only the standing', async () => {
+    const scripted = scriptedOperate({ standing: 'not-owner' });
+    globalThis.location.hash = '#/settings/instance/operate';
+    mounted = await mount(
+      <AppShell
+        capabilities={{ bluetooth: undefined, secureContext: true }}
+        operate={scripted.port}
+      />,
+    );
+    await until(() => text().includes(OPERATE_STANDING_TEXT['not-owner']));
+    expect(mounted.container.querySelector('h1')?.textContent).toBe('Operate');
+    expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
+    expect(scripted.calls).toEqual(['standing']);
+    // Not in the navigation, as Moderation is not.
+    expect(mounted.container.querySelector('nav a[href="#/settings/instance/operate"]')).toBeNull();
+  });
+});
