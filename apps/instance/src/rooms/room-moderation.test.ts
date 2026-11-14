@@ -14,13 +14,24 @@
  *   any room, hides a name and suspends: each is in the log, a removed
  *   rider's socket is closed and their ticket refused;
  * - nobody else may do any of it.
+ *
+ * The room worker's clock runs {@link ROOM_CLOCK_RATE} times the wall's
+ * (#2567). A flag needs five room seconds over the 5 s ceiling, and the case
+ * waited for eight: at the wall's rate that alone was 8 s of a case that now
+ * has Vitest's 5 s. The worker is the production module, forked by the
+ * production router; only its global `Date.now` and `setTimeout` are faster
+ * (not `setInterval`, so not the host's pinger), which reaches further than
+ * the faster timer `RoomHost`'s `setTimer` lets a test inject: `ws`'s own
+ * timers and the host's stop grace run at that rate too. The riders stamp their
+ * reports on a clock of the same rate, so the room admits them as it would
+ * an honest client's (`room/core/clock.ts`).
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { RoomMessage } from '@onyourleft/protocol';
+import { FLAG_COASTING, type Frame, type RoomMessage } from '@onyourleft/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
@@ -28,6 +39,7 @@ import { testConfig } from '../instance-testing.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { flagReason, ROOM_REPORT_REASONS } from '../moderation/moderation.ts';
 import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
+import { reportText } from '../room/core/room-testing.ts';
 import { joinRoom, type RoomClient } from '../room/node/router-testing.ts';
 import { until } from '../room/node/node-room-testing.ts';
 import { readServerConfig } from '../server-config.ts';
@@ -36,6 +48,40 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { roomBody } from './rooms-testing.ts';
 import { wholeModerationLog } from '../store/testing/index.ts';
+
+/**
+ * How many times the wall's rate the room worker's clock runs. It shrinks the
+ * room's 5 s report slack (`DEFAULT_REPORT_SLACK.lateMs`) to 1 s of wall time
+ * as well: a report that late is refused and its rider coasts. The latest one
+ * measured on a nightly runner (EPYC 7763, six runs of this case, run
+ * 43497542957) was 135 room ms, 27 ms of the wall's (#2567).
+ */
+const ROOM_CLOCK_RATE = 5;
+
+/**
+ * Loaded into the room worker before its own module: the router forks it with
+ * this process's `execArgv`, which `world` lends this flag while the instance
+ * starts. Its room ticks every `1000 / ROOM_CLOCK_RATE` wall milliseconds.
+ */
+const FAST_ROOM_CLOCK = `--import=data:text/javascript,${encodeURIComponent(
+  `const rate = ${String(ROOM_CLOCK_RATE)};` +
+    'const wall = Date.now; const from = wall();' +
+    'Date.now = () => from + (wall() - from) * rate;' +
+    'const later = globalThis.setTimeout;' +
+    'globalThis.setTimeout = (run, ms, ...rest) => later(run, (ms ?? 0) / rate, ...rest);',
+)}`;
+
+/**
+ * The bound of a wait inside the case, which has Vitest's 5 s (#2567): nine
+ * room seconds are 1.8 s of the wall's. A wait reached late in the case fails
+ * as Vitest's timeout rather than by name.
+ */
+const WAIT_MS = 3_000;
+
+/** A report stamped on a clock that runs at the room worker's rate. */
+const reportAtRoomRate = (client: RoomClient, sequence: number, watts: number): void => {
+  client.socket.send(reportText(sequence, Date.now() * ROOM_CLOCK_RATE, watts));
+};
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -59,24 +105,33 @@ async function world(moderator: TestDevice) {
   await migrateForDeploy(path);
   const server = readServerConfig({ database: path, origin: TEST_ORIGIN, roomWorkers: '1' }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));
-  running = await startInstance({
-    config: testConfig({
-      bodyLimitBytes: 16_384,
-      registration: 'open',
-      moderators: { owner: moderator.publicKey },
-      // Five riders from one loopback address is past the registration limit
-      // (3 an hour): each signs in from an address of their own, through a
-      // header believed from loopback alone.
-      clientAddressHeader: 'x-test-address',
-      trustedProxies: ['127.0.0.1', '::1', '::ffff:127.0.0.1'],
-    }),
-    server: { ...server.config, blobsPath: join(directory, 'blobs') },
-    version: '9.8.7',
-    notices: 'notices',
-    log: () => undefined,
-    defaultCountdownMs: 0,
-  });
-  await running.opened;
+  const unlent = [...process.execArgv];
+  process.execArgv.push(FAST_ROOM_CLOCK);
+  try {
+    running = await startInstance({
+      config: testConfig({
+        bodyLimitBytes: 16_384,
+        registration: 'open',
+        moderators: { owner: moderator.publicKey },
+        // Five riders from one loopback address is past the registration limit
+        // (3 an hour): each signs in from an address of their own, through a
+        // header believed from loopback alone.
+        clientAddressHeader: 'x-test-address',
+        trustedProxies: ['127.0.0.1', '::1', '::ffff:127.0.0.1'],
+      }),
+      server: { ...server.config, blobsPath: join(directory, 'blobs') },
+      version: '9.8.7',
+      notices: 'notices',
+      log: () => undefined,
+      defaultCountdownMs: 0,
+    });
+    await running.opened;
+  } finally {
+    // Only the flag lent above: `indexOf`'s -1 would take Vitest's last flag.
+    const lent = process.execArgv.indexOf(FAST_ROOM_CLOCK);
+    if (lent !== -1) process.execArgv.splice(lent, 1);
+  }
+  expect(process.execArgv, 'Vitest’s own flags, as they were').toEqual(unlent);
   const url = running.url;
   const call = async (method: string, route: string, token: string, body?: unknown) => {
     const response = await fetch(`${url}${route}`, {
@@ -182,19 +237,29 @@ describe('moderation in a room on the running instance — #789', () => {
     let sequence = 0;
     const pedal = setInterval(() => {
       sequence += 1;
-      annSocket.report(sequence, 200);
-      bobSocket.report(sequence, 200);
-      deeSocket.report(sequence, 200);
+      reportAtRoomRate(annSocket, sequence, 200);
+      reportAtRoomRate(bobSocket, sequence, 200);
+      reportAtRoomRate(deeSocket, sequence, 200);
       // Cat rides at 2 000 W: past the 5 s ceiling of 18 W/kg at 72 kg.
-      catSocket.report(sequence, 2_000);
-    }, 250);
+      reportAtRoomRate(catSocket, sequence, 2_000);
+    }, 250 / ROOM_CLOCK_RATE);
     try {
       // The flag is a report the room files: one, for the ceiling breached.
       await until(
-        () => catSocket.messages.some((m) => m.type === 'frame' && m.tick >= 8),
-        'eight seconds of racing',
-        20_000,
+        () => catSocket.messages.some((m) => m.type === 'frame' && m.tick >= 9),
+        'nine seconds of racing',
+        WAIT_MS,
       );
+      // Stamped at the room's rate, Cat's reports are admitted to the end: she
+      // rides, not coasts, in the eighth or ninth second. Stamped on the wall's,
+      // they fall behind the room's clock by four seconds a second, past its
+      // 5 s slack by the eighth, and every rider coasts from there.
+      const late = catSocket.messages.filter((m): m is Frame => m.type === 'frame' && m.tick >= 8);
+      const catRides = (frame: Frame): boolean =>
+        ((frame.riders.find((r) => r.riderId === riderIdOf(catSocket))?.flags ?? FLAG_COASTING) &
+          FLAG_COASTING) ===
+        0;
+      expect(late.some(catRides)).toBe(true);
       await until(() => false, 'a beat for the write', 300).catch(() => undefined);
       const flagged = (await w.read((store) => store.listOpenReports())).filter(
         (report) => report.flag !== null,
@@ -333,5 +398,5 @@ describe('moderation in a room on the running instance — #789', () => {
     expect(
       (await w.read((store) => store.listOpenReports())).filter((r) => r.flag !== null),
     ).toEqual([]);
-  }, 60_000);
+  });
 });

@@ -20,6 +20,7 @@ import { corridorOrigin, roadCorridor } from '../terrain';
 import { LAP_RACE_MOST_BOTS } from './choice';
 import {
   BIKE_LENGTH_METRES,
+  gridPackLayout,
   NO_PACK_LAYOUT,
   PACK_ABREAST_METRES,
   PACK_CLOSE_UP_METRES_PER_SECOND,
@@ -139,6 +140,44 @@ describe('rows a bike length apart, the rider’s the anchor (#2544)', () => {
     );
     expect(() => stepPackLayout([], RIDER, before, Number.NaN)).toThrow(RangeError);
     expect(() => stepPackLayout([], RIDER, before, -1)).toThrow(RangeError);
+  });
+});
+
+describe('the pack forms on the line (the owner’s ruling of 2026-11-13 on #2544)', () => {
+  it('stands the field on a grid: rows a bike length apart, the rider’s the back row, every row ahead either side of the rider’s line', () => {
+    // Seven bots and the rider, level on the line and in one lane, as a race
+    // starts them.
+    const ids = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'];
+    const grid = gridPackLayout(
+      [at(RIDER, 0), ...ids.map((id) => at(id, 0))].map((racer) => ({ ...racer, speed: 0 })),
+      RIDER,
+    );
+    expect([...grid.keys()].sort()).toEqual(ids);
+    const rows = new Map<number, number[]>();
+    for (const place of grid.values()) {
+      const row = Math.round(place.shift / BIKE_LENGTH_METRES);
+      expect(place.shift).toBeCloseTo(row * BIKE_LENGTH_METRES, 9);
+      expect(place.shiftBefore).toBe(place.shift);
+      expect(place.sway).toBe(0);
+      rows.set(row, [...(rows.get(row) ?? []), place.lateral]);
+    }
+    // Three rows: two full rows ahead, and the rider's, with the last bot beside them.
+    expect([...rows.keys()].sort()).toEqual([0, 1, 2]);
+    expect(rows.get(0)).toHaveLength(1);
+    for (const row of [1, 2]) {
+      const across = rows.get(row) ?? [];
+      expect(across).toHaveLength(PACK_MOST_ABREAST);
+      // Either side of the rider's line, which is left free, a place apart,
+      // and two across the rider's line: the way through.
+      expect(across.some((lateral) => lateral < 0)).toBe(true);
+      expect(across.some((lateral) => lateral > 0)).toBe(true);
+      for (const lateral of across) {
+        expect(Math.abs(lateral)).toBeGreaterThanOrEqual(PACK_ABREAST_METRES - 1e-9);
+      }
+      const sorted = [...across].sort((a, b) => a - b);
+      const gaps = sorted.slice(1).map((lateral, next) => lateral - (sorted[next] as number));
+      expect(gaps.map((gap) => Math.round(gap / PACK_ABREAST_METRES)).sort()).toEqual([1, 2]);
+    }
   });
 });
 
@@ -383,5 +422,204 @@ describe('drawn turning and leaning into a move across the pack, as a steered ri
       Math.hypot((a?.x as number) - (b?.x as number), (a?.z as number) - (b?.z as number));
     expect(apart(bots[0], bots[1])).toBeGreaterThan(PACK_ABREAST_METRES - 0.01);
     expect(apart(rider, bots[0])).toBeGreaterThan(PACK_ABREAST_METRES - 0.01);
+  });
+});
+
+describe('every pass goes round: the rider and the bots never drawn through one another (the owner’s ruling of 2026-11-13 on #2544)', () => {
+  /**
+   * The race's seed, fixed: it is drawn from the platform's source. Under it,
+   * two bots cross each other's lanes level off the line, and so cannot make
+   * way at once: what holds a bot clear of the rider is tested too.
+   */
+  const SEED = 99;
+  const LOOP = circuitRoute(120);
+
+  /** One tick's drawing: where the rider is, and each bot, along the road and across it. */
+  interface Placed {
+    readonly rider: { readonly along: number; readonly across: number };
+    readonly bots: readonly {
+      readonly along: number;
+      readonly across: number;
+      readonly speed: number;
+    }[];
+  }
+
+  /**
+   * A seven-bot race from the grid, the rider riding off the line at
+   * `speedAt(seconds)` m/s, drawn on every tick through `lapRaceDrawing` as
+   * `GameView` draws it.
+   */
+  function rideFromTheGrid(
+    speedAt: (seconds: number) => number,
+    ticks: number,
+    seed = SEED,
+    itemsOn = false,
+  ): Placed[] {
+    const spy = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = seed;
+        return array;
+      });
+    let ride: LapRaceRide | undefined;
+    try {
+      ride = startLapRaceRide({
+        choice: { laps: 3, bots: LAP_RACE_MOST_BOTS, tier: 'brisk', itemsOn },
+        profile: LOOP,
+        conditions: lapRaceBotConditions(
+          LOOP,
+          rideConditionsFor(kilograms(75), DEFAULT_RIDING_POSITION),
+        ),
+        riderDistance: 50,
+        lineOffset: 0,
+        storage: undefined,
+        draft: true,
+        riderMassKilograms: 75,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    if (ride === undefined) throw new Error('a loop starts a race');
+    const placed: Placed[] = [];
+    let along = ride.startAlong;
+    for (let tick = 0; tick < ticks; tick += 1) {
+      along += speedAt((tick + 1) * LAP_RACE_TICK_SECONDS) * LAP_RACE_TICK_SECONDS;
+      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 230 });
+      const drawing = lapRaceDrawing(ride, along, 0, false);
+      placed.push({
+        rider: { along: drawing.riderDistance, across: drawing.steeredLateral },
+        bots: drawing.raceBots.map((bot) => ({
+          along: bot.distanceMetres,
+          across: bot.lateralMetres,
+          speed: bot.speedMetresPerSecond,
+        })),
+      });
+    }
+    return placed;
+  }
+
+  /**
+   * Every bot's drawn place, tick to tick: forward, and never faster than its
+   * own speed and {@link PACK_CLOSE_UP_METRES_PER_SECOND}, give or take its
+   * own speed's change over the tick. A bot is never pushed along ahead of the
+   * rider, nor jumped back through them: it makes way across.
+   */
+  function expectNeverAJump(placed: readonly Placed[]): void {
+    for (const [tick, { bots }] of placed.entries()) {
+      const before = placed[tick - 1]?.bots;
+      if (before === undefined) continue;
+      for (const [bot, each] of bots.entries()) {
+        const moved = (each.along - (before[bot]?.along ?? Number.NaN)) / LAP_RACE_TICK_SECONDS;
+        const where = `bot ${String(bot)}, tick ${String(tick)}`;
+        expect(moved, where).toBeGreaterThanOrEqual(0);
+        expect(moved, where).toBeLessThanOrEqual(
+          each.speed + PACK_CLOSE_UP_METRES_PER_SECOND + 0.25,
+        );
+      }
+    }
+  }
+
+  /** Whether a bot is inside the rider: under a bike length along and under a place across. */
+  const inside = (rider: Placed['rider'], bot: Placed['bots'][number]): boolean =>
+    Math.abs(bot.along - rider.along) < BIKE_LENGTH_METRES - 1e-9 &&
+    Math.abs(bot.across - rider.across) < PACK_ABREAST_METRES - 1e-9;
+
+  it('rides the rider through slower bots in their lane round them, never inside one, on any frame', () => {
+    // 30 s off the line at up to 11 m/s, faster than any brisk bot: the rider
+    // comes up through the whole field, which stands on the grid in the
+    // rider's lane and rides off it there.
+    const placed = rideFromTheGrid((at) => Math.min(11, 2 * at), 600);
+    for (const [tick, { rider, bots }] of placed.entries()) {
+      for (const [bot, each] of bots.entries()) {
+        expect(inside(rider, each), `bot ${String(bot)}, tick ${String(tick)}`).toBe(false);
+      }
+    }
+    expectNeverAJump(placed);
+    // Not vacuous: the rider passed every bot, and went by some of them level
+    // with them, a bike length or less along, on the way.
+    const last = placed.at(-1);
+    for (const each of last?.bots ?? []) expect(each.along).toBeLessThan(last?.rider.along ?? 0);
+    const level = placed.flatMap(({ rider, bots }) =>
+      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+    );
+    expect(level.length).toBeGreaterThan(10);
+  });
+
+  it('has a bot that comes past the rider go up the side, never through them', () => {
+    // A rider who goes clear of the field off the line, winding up at 2 m/s²
+    // to 11 m/s, and from 10 s eases at 2 m/s² to 2 m/s, slower than any bot:
+    // the field comes past.
+    const placed = rideFromTheGrid(
+      (at) => Math.max(2, Math.min(11, 2 * at, 11 - 2 * (at - 10))),
+      900,
+    );
+    for (const [tick, { rider, bots }] of placed.entries()) {
+      for (const [bot, each] of bots.entries()) {
+        if (Math.abs(each.along - rider.along) >= BIKE_LENGTH_METRES - 1e-9) continue;
+        // Level with the rider: beside them, a place or more across.
+        expect(
+          Math.abs(each.across - rider.across),
+          `bot ${String(bot)}, tick ${String(tick)}`,
+        ).toBeGreaterThanOrEqual(PACK_ABREAST_METRES - 1e-9);
+      }
+    }
+    expectNeverAJump(placed);
+    // Not vacuous: bots were level with the rider, and came past, from a
+    // bike length behind the rider to a bike length ahead.
+    const level = placed.flatMap(({ rider, bots }) =>
+      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+    );
+    expect(level.length).toBeGreaterThan(10);
+    const gaps = (bot: number): number[] =>
+      placed.map(({ rider, bots }) => (bots[bot]?.along ?? Number.NaN) - rider.along);
+    const passed = (placed[0]?.bots ?? []).filter((_, bot) => {
+      const gap = gaps(bot);
+      const behind = gap.findIndex((each) => each < -BIKE_LENGTH_METRES);
+      return behind >= 0 && gap.slice(behind).some((each) => each > BIKE_LENGTH_METRES);
+    });
+    expect(passed.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('has a bot the rider closes on in their lane ease aside before the rider reaches it, never held up against them', () => {
+    // A field with no two bots crossing level off the line: every bot the
+    // rider comes up on can make way in time.
+    const placed = rideFromTheGrid((at) => Math.min(11, 2 * at), 600, 2_544);
+    const held = placed.flatMap(({ rider, bots }) =>
+      bots.filter(
+        (each) =>
+          Math.abs(each.across - rider.across) < PACK_ABREAST_METRES - 1e-9 &&
+          Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES + 0.05,
+      ),
+    );
+    expect(held).toEqual([]);
+    // Not vacuous: the rider went by bots level with them.
+    const level = placed.flatMap(({ rider, bots }) =>
+      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+    );
+    expect(level.length).toBeGreaterThan(10);
+  });
+
+  it('sees a pass coming and makes way in time, so no bot is pushed into another to clear the rider', () => {
+    // Items on, so hits shuffle the field, and the rider winding up at
+    // 1.5 m/s² to 9 m/s through it.
+    const placed = rideFromTheGrid((at) => Math.min(9, 1.5 * at), 600, 2_544, true);
+    // No two bots drawn inside one another by more than a twentieth of a bike
+    // length or of a place.
+    for (const [tick, { bots }] of placed.entries()) {
+      for (const [one, a] of bots.entries()) {
+        for (const b of bots.slice(one + 1)) {
+          const depth = Math.min(
+            1 - Math.abs(a.along - b.along) / BIKE_LENGTH_METRES,
+            1 - Math.abs(a.across - b.across) / PACK_ABREAST_METRES,
+          );
+          expect(depth, `tick ${String(tick)}`).toBeLessThan(0.05);
+        }
+      }
+    }
+    // Not vacuous: the rider went by bots level with them.
+    const level = placed.flatMap(({ rider, bots }) =>
+      bots.filter((each) => Math.abs(each.along - rider.along) < BIKE_LENGTH_METRES),
+    );
+    expect(level.length).toBeGreaterThan(10);
   });
 });
