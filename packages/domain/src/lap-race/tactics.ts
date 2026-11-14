@@ -52,8 +52,9 @@
  * A function of the view, the archetype, the skill, its memory and the seed.
  * Scalars only, `+ − × ÷`, `Math.min`, `Math.max` (ADR 0067 D-5.2) and `Math.floor`
  * (an addition to D-5.2's list: exact in IEEE 754); it imports nothing from `apps/`, nothing platform-bound and nothing
- * of the trainer (`tactics.test.ts` reads its imports). Wiring it into the race
- * is #2463.
+ * of the trainer (`tactics.test.ts` reads its imports). `@onyourleft/physics`
+ * §`stepBotRace` wires it into the race (#2463): one view and one call per
+ * racing bot per tick, its target through `plan.ts` §`botPlanStep`.
  */
 
 import {
@@ -152,8 +153,17 @@ export const BOT_TACTIC_WBAL_FLOOR = 0.3;
 /** The share of its W′ under which a bot wants to `recover`: **0.5**. */
 export const BOT_TACTIC_RECOVER_SHARE = 0.5;
 
-/** Where a bot launches its kick, metres to the line, times its archetype's sprint factor: **200 m**. */
-export const BOT_TACTIC_LAUNCH_METRES = 200;
+/**
+ * Where a bot launches its kick, metres to the line, times its archetype's
+ * sprint factor: **300 m**, the far end of the plan's own sprint
+ * (`plan.ts` §`BOT_SPRINT_LONGEST_METRES`). #2463 moved it from 200 m once the
+ * tactics were wired: at 200 m a bot's W′ paid for a longer kick than it
+ * launched, so a naive bot that misread the line early beat a crafty one that
+ * read it exactly (67 of 150 seeds against 83 in `lap-race-bot.test.ts`'s
+ * skill race), which is ADR 0067 D-7 backwards. At 300 m the crafty bot is
+ * ahead in 84 of 150. ⚠️ Still a feel number for #2464's harness.
+ */
+export const BOT_TACTIC_LAUNCH_METRES = 300;
 
 /** How many laps from the end a `flyer` may go: the last **2**. */
 export const BOT_TACTIC_FLYER_LAPS = 2;
@@ -248,13 +258,7 @@ interface Read {
 }
 
 function checkView(view: RaceView): void {
-  const finite = [
-    view.atMs,
-    view.metresToLine,
-    view.gradeAheadPercent,
-    view.riderGapMetres,
-    view.gapBehindMetres,
-  ];
+  const finite = [view.atMs, view.metresToLine, view.gradeAheadPercent, view.riderGapMetres];
   if (
     finite.some((value) => !Number.isFinite(value)) ||
     view.atMs < 0 ||
@@ -265,6 +269,8 @@ function checkView(view: RaceView): void {
     !Number.isSafeInteger(view.fieldSize) ||
     view.rank > view.fieldSize ||
     (view.gapAheadMetres !== null && !Number.isFinite(view.gapAheadMetres)) ||
+    // #2463: `null` for the last bot, as `gapAheadMetres` is for the leader.
+    (view.gapBehindMetres !== null && !Number.isFinite(view.gapBehindMetres)) ||
     (view.riderWattsPerKilogram !== null && !Number.isFinite(view.riderWattsPerKilogram))
   ) {
     throw new LapRaceError(

@@ -406,6 +406,8 @@ function raceFields(): string[] {
 interface ShadowFrame {
   readonly steps: number;
   readonly along: number;
+  /** The rider's power on the frame, watts: what the bots read of the rider (#2463). */
+  readonly power: number;
 }
 
 /**
@@ -424,7 +426,7 @@ function shadowRide(frames: number): ShadowFrame[] {
     const input: RiderInput = { power: watts(powerAt(at)), live: true };
     if (frame <= COUNTDOWN_FRAMES) simulation.holdAt(at);
     const { steps } = frame <= COUNTDOWN_FRAMES ? { steps: 0 } : simulation.advanceTo(at, input);
-    out.push({ steps, along: simulation.state.ride.distance });
+    out.push({ steps, along: simulation.state.ride.distance, power: input.power });
   }
   return out;
 }
@@ -453,6 +455,7 @@ function scriptFor(seed: number, choice: LapRaceChoice, shadow: readonly ShadowF
     riderDistance: 0,
     lineOffset: lineOffsetAt(racingLine(CIRCUIT), 0),
     storage: undefined,
+    riderMassKilograms: riderMassFor(undefined).mass,
   });
   vi.restoreAllMocks();
   if (ride === undefined) throw new Error('the circuit is a loop, so a race starts on it');
@@ -462,7 +465,13 @@ function scriptFor(seed: number, choice: LapRaceChoice, shadow: readonly ShadowF
   let finishedFrame: number | undefined;
   shadow.forEach((frame, index) => {
     if (ride === undefined) return;
-    if (frame.steps > 0) ride = stepLapRaceRide(ride, { ticks: frame.steps, along: frame.along });
+    if (frame.steps > 0) {
+      ride = stepLapRaceRide(ride, {
+        ticks: frame.steps,
+        along: frame.along,
+        riderWatts: frame.power,
+      });
+    }
     const me = ride.race.racers.find((entry) => entry.racer.id === LAP_RACE_RIDER_ID);
     for (const effect of me?.effects ?? []) {
       if (effect.rateMetresPerSecond < 0) hits.add(`${String(effect.fromMs)}`);

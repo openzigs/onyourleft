@@ -10,6 +10,8 @@
 
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { decideTactic } from '@onyourleft/domain';
+
 import type {
   BotPace,
   BotPacingStyle,
@@ -25,11 +27,13 @@ import type {
 import {
   altitudeMetres,
   BOT_ABILITY_SPREAD,
+  BOT_TACTIC_MOVE_SHARE,
   BOT_MASS_KILOGRAMS,
   BOT_PACING_STYLES,
   botFieldPaces,
   BOT_PERSONALITIES,
   BOT_TIER_WATTS_PER_KILOGRAM,
+  botLaunchMetres,
   botPlanStep,
   botRacePlan,
   botTierPlan,
@@ -55,6 +59,7 @@ import {
   routeProfile,
   seconds,
   standings,
+  watts,
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
@@ -75,6 +80,17 @@ import { advance, type RideState } from './simulate';
 vi.mock('./simulate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./simulate')>();
   return { ...actual, advance: vi.fn(actual.advance) };
+});
+
+// #2463: counted, so a test can hold the plan to one build a race and the
+// tactics to one decision a bot a tick. The real functions, only watched.
+vi.mock('@onyourleft/domain', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@onyourleft/domain')>();
+  return {
+    ...actual,
+    botRacePlan: vi.fn(actual.botRacePlan),
+    decideTactic: vi.fn(actual.decideTactic),
+  };
 });
 
 // #2460: counted, so a test can hold the field's draft to one call a tick.
@@ -103,6 +119,8 @@ function loop(climb: number): RouteProfile {
 
 const FLAT = loop(0);
 const HILLY = loop(20);
+/** Twice the hilly loop's climb: about 16 %, where a steady bot's climb outruns its W′ (#2463). */
+const STEEP = loop(40);
 
 /** The solo race's skill, and a personality: what a bot decides by when a test does not care. */
 const STRATEGY: BotStrategy = { personality: 'opportunist', skill: 'canny' };
@@ -278,11 +296,23 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     >();
     // #2460: `draft` is ADR 0066 D-6's switch, a boolean: nowhere for a recorded ride.
     expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<
-      'elapsed' | 'conditions' | 'seed' | 'rider' | 'draft'
+      'elapsed' | 'conditions' | 'seed' | 'rider' | 'draft' | 'riderWattsPerKilogram'
     >();
     expectTypeOf<BotRaceStep['draft']>().toEqualTypeOf<boolean | undefined>();
+    // #2463: the rider's power is a number, read live: nowhere for a recorded ride.
+    expectTypeOf<BotRaceStep['riderWattsPerKilogram']>().toEqualTypeOf<number | undefined>();
+    // #2463: its tactics' memory and its plan, both built from the race, never a ride.
     expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<
-      'id' | 'tier' | 'strategy' | 'pace' | 'memory' | 'energy' | 'ride' | 'power'
+      | 'id'
+      | 'tier'
+      | 'strategy'
+      | 'pace'
+      | 'memory'
+      | 'tactics'
+      | 'plan'
+      | 'energy'
+      | 'ride'
+      | 'power'
     >();
     // #2455: a pace is a style key and a number, with nowhere for a recorded ride.
     expectTypeOf<keyof BotPace>().toEqualTypeOf<'style' | 'ability'>();
@@ -336,20 +366,30 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     expect(fromDomain).toEqual(
       [
         'BOT_EVEN_PACE',
+        'BOT_MASS_KILOGRAMS',
         'BOT_MEMORY_AT_START',
+        'BOT_TACTIC_MOVE_SHARE',
         'BotEnergy',
         'BotMemory',
         'BotPace',
+        'BotPlanTactic',
+        'BotRacePlan',
         'BotStrategy',
         'BotTier',
         'ItemRaceState',
         'RaceTickInput',
+        'RaceView',
         'Seconds',
+        'TACTIC_MEMORY_AT_START',
+        'TacticMemory',
         'Watts',
         'botPlanStep',
         'botRacePlan',
         'botTierPlan',
         'botWPrimeJoules',
+        'decideTactic',
+        'distanceOnRoute',
+        'gradeAt',
         'stepRace',
         'strategicBotDecision',
       ].sort(),
@@ -390,68 +430,146 @@ describe('tiers decide a race with no items', () => {
   });
 });
 
-describe('no rubber-banding (ADR 0060 D-9)', () => {
-  it('reads back the same power trace whether the bot leads the race or trails it', () => {
-    const trace = (rivals: BotTier): { readonly power: number[]; readonly place: number } => {
-      const run = race(
-        HILLY,
-        [
-          { id: 'bot', tier: 'hard' },
-          { id: 'r1', tier: rivals },
-          { id: 'r2', tier: rivals },
-        ],
-        7,
-        true,
-        300,
-      );
-      const last = run.races[run.races.length - 1] as ItemRaceState;
-      return {
-        power: run.bots.map((bots) => bots.find((bot) => bot.id === 'bot')?.power ?? -1),
-        place: standings(last.racers.map((entry) => entry.racer)).indexOf('bot'),
-      };
+describe('no bot’s capacity changes with rank (ADR 0067 D-1.2, D-4)', () => {
+  /**
+   * The bot's ride against two rivals of `rivals`, and its W′ balance replayed
+   * from its own power on the one capacity it carries, tick for tick: what a
+   * capacity scaled by rank anywhere on the way would break.
+   */
+  function raced(
+    rivals: BotTier,
+    pace?: BotPace,
+  ): {
+    readonly capacity: unknown;
+    readonly place: number;
+    readonly ticks: number;
+    readonly replayed: boolean;
+  } {
+    const run = race(
+      HILLY,
+      [
+        { id: 'bot', tier: 'hard', ...(pace === undefined ? {} : { pace }) },
+        // The rivals ride other paces too, so nothing about them is the bot's.
+        { id: 'r1', tier: rivals, pace: { style: 'sprinter', ability: 1 } },
+        { id: 'r2', tier: rivals, pace: { style: 'fast-start', ability: 0.95 } },
+      ],
+      7,
+      true,
+      300,
+    );
+    const mine = run.bots.map((bots) => bots.find((bot) => bot.id === 'bot') as LapRaceBot);
+    const plan = mine.at(-1)?.plan;
+    if (plan === undefined) throw new Error('the bot rode no tick');
+    let replayed = true;
+    for (let tick = 1; tick < mine.length; tick += 1) {
+      const before = mine[tick - 1] as LapRaceBot;
+      const after = mine[tick] as LapRaceBot;
+      // The same plan on every tick, and the balance its own power leaves on it.
+      if (after.plan !== plan) replayed = false;
+      const expected = stepWbal(plan.capacity, before.energy, after.power, 1);
+      if (JSON.stringify(expected) !== JSON.stringify(after.energy)) replayed = false;
+    }
+    const last = run.races[run.races.length - 1] as ItemRaceState;
+    return {
+      capacity: plan.capacity,
+      place: standings(last.racers.map((entry) => entry.racer)).indexOf('bot'),
+      ticks: mine.length,
+      replayed,
     };
-    const leading = trace('steady');
-    const trailing = trace('fierce');
+  }
+
+  it('reads back the same CP, W′ and peak whether the bot leads the race or trails it, its W′ balance replayed from its own power on that one capacity', () => {
+    const leading = raced('steady');
+    const trailing = raced('fierce');
     expect(leading.place).toBe(0);
     expect(trailing.place).toBe(2);
-    // Until the shorter race ended: the bot's own ride is the same length in both.
-    const ticks = Math.min(leading.power.length, trailing.power.length);
-    expect(ticks).toBeGreaterThan(100);
-    // The road is hilly, so the trace is not one number repeated.
-    expect(new Set(leading.power.slice(0, ticks)).size).toBeGreaterThan(10);
-    expect(trailing.power.slice(0, ticks)).toEqual(leading.power.slice(0, ticks));
+    expect(Math.min(leading.ticks, trailing.ticks)).toBeGreaterThan(100);
+    // The capacity its tier, pace and the seed give it, leading or trailing.
+    const course = raceCourse(HILLY.totalDistance, 3);
+    expect(leading.capacity).toEqual(botRacePlan('hard', course, 7).capacity);
+    expect(trailing.capacity).toEqual(leading.capacity);
+    expect(leading.replayed).toBe(true);
+    expect(trailing.replayed).toBe(true);
   });
 
-  it('holds for every pace: a paced bot reads back one power trace leading or trailing (#2455)', () => {
+  it('holds for every pace and archetype: one capacity leading or trailing, the balance replayed', () => {
+    const course = raceCourse(HILLY.totalDistance, 3);
     for (const style of BOT_PACING_STYLES) {
       const pace: BotPace = { style, ability: 1 - BOT_ABILITY_SPREAD / 2 };
-      const trace = (rivals: BotTier): { readonly power: number[]; readonly place: number } => {
-        const run = race(
-          HILLY,
-          [
-            { id: 'bot', tier: 'hard', pace },
-            // The rivals ride other paces too, so nothing about them is the bot's.
-            { id: 'r1', tier: rivals, pace: { style: 'sprinter', ability: 1 } },
-            { id: 'r2', tier: rivals, pace: { style: 'fast-start', ability: 0.95 } },
-          ],
-          7,
-          true,
-          300,
-        );
-        const last = run.races[run.races.length - 1] as ItemRaceState;
-        return {
-          power: run.bots.map((bots) => bots.find((bot) => bot.id === 'bot')?.power ?? -1),
-          place: standings(last.racers.map((entry) => entry.racer)).indexOf('bot'),
-        };
-      };
-      const leading = trace('steady');
-      const trailing = trace('fierce');
+      const leading = raced('steady', pace);
+      const trailing = raced('fierce', pace);
       expect(leading.place, style).toBe(0);
       expect(trailing.place, style).toBe(2);
-      const ticks = Math.min(leading.power.length, trailing.power.length);
-      expect(ticks, style).toBeGreaterThan(100);
-      expect(trailing.power.slice(0, ticks), style).toEqual(leading.power.slice(0, ticks));
+      expect(leading.capacity, style).toEqual(botRacePlan('hard', course, 7, pace).capacity);
+      expect(trailing.capacity, style).toEqual(leading.capacity);
+      expect(leading.replayed, style).toBe(true);
+      expect(trailing.replayed, style).toBe(true);
     }
+  });
+
+  it('reads the race: the same bot, seed and course rides another power leading than 3rd with a rival 50 m ahead on the last lap (#2463)', () => {
+    const course = raceCourse(FLAT.totalDistance, 3);
+    const raceMetres = course.lapLengthMetres * course.laps;
+    // On the last lap, well short of any kick.
+    const from = raceMetres - 400;
+    const run = (
+      places: readonly (readonly [id: string, effort: number])[],
+    ): { power: number[]; capacity: unknown; tactics: string[] } => {
+      const start = createItemRace({
+        course,
+        seed: 3,
+        itemsOn: false,
+        racerIds: places.map(([id]) => id),
+        startMs: 0,
+      });
+      let state: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => ({
+          ...entry,
+          racer: {
+            ...entry.racer,
+            effortDistance: places.find(([id]) => id === entry.racer.id)?.[1] ?? 0,
+          },
+        })),
+      };
+      let bots: readonly LapRaceBot[] = places.map(([id, effort]) => ({
+        ...lapRaceBot(id, 'brisk', STRATEGY),
+        ride: { speed: metresPerSecond(9), distance: metres(effort) },
+      }));
+      const power: number[] = [];
+      const tactics: string[] = [];
+      for (let second = 0; second < 15; second += 1) {
+        const next = stepBotRace(state, bots, {
+          elapsed: seconds(1),
+          conditions: conditions(FLAT),
+          seed: 3,
+        });
+        state = next.race;
+        bots = next.bots;
+        vi.mocked(advance).mockClear();
+        const bot = bots.find((each) => each.id === 'bot') as LapRaceBot;
+        power.push(bot.power);
+        tactics.push(bot.tactics.tactic);
+      }
+      const bot = bots.find((each) => each.id === 'bot') as LapRaceBot;
+      return { power, capacity: bot.plan?.capacity, tactics };
+    };
+    // Leading, the two rivals far behind; then 3rd, one rival 50 m up the road and one beyond.
+    const leading = run([
+      ['bot', from],
+      ['r1', from - 100],
+      ['r2', from - 120],
+    ]);
+    const third = run([
+      ['bot', from],
+      ['r1', from + 50],
+      ['r2', from + 80],
+    ]);
+    expect(third.power).not.toEqual(leading.power);
+    expect(third.tactics).not.toEqual(leading.tactics);
+    // And never by its capacity: the one its tier, pace and the seed give it.
+    expect(leading.capacity).toEqual(botRacePlan('brisk', course, 3).capacity);
+    expect(third.capacity).toEqual(leading.capacity);
   });
 });
 
@@ -466,6 +584,14 @@ describe('the same race gives the same decisions', () => {
     const one = race(HILLY, field, 11, true);
     const two = race(HILLY, field, 11, true);
     expect(JSON.stringify(two)).toBe(JSON.stringify(one));
+    // #2463: the tactics too, state by state, and another seed decides others.
+    const tactics = (run: Run): string =>
+      JSON.stringify(run.bots.map((bots) => bots.map((bot) => bot.tactics.tactic)));
+    expect(tactics(two)).toBe(tactics(one));
+    expect(tactics(race(HILLY, field, 12, true))).not.toBe(tactics(one));
+    expect(
+      new Set(one.bots.flatMap((bots) => bots.map((bot) => bot.tactics.tactic))).size,
+    ).toBeGreaterThan(1);
     const lanes = (run: Run): string =>
       JSON.stringify(run.races.map((state) => state.racers.map((entry) => entry.lane)));
     expect(lanes(race(HILLY, field, 12, true))).not.toBe(lanes(one));
@@ -540,12 +666,10 @@ describe('the same race gives the same decisions', () => {
   });
 });
 
-describe('skill is its own axis, and never power (#1959, ADR 0060 D-9)', () => {
-  it('a crafty bot beats a naive one of the same tier more often than not, on the same power trace', () => {
-    // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
-    // average of 15 to 26: at the 10 ms default 19.9 s, and 10.2 s under
-    // --coverage (one run each, with a 60 s timeout); at the quarter-second
-    // sub-step 0.57 to 1.15 s, and 1.26 to 1.86 s under --coverage (three runs each).
+describe('skill is its own axis, and never capacity (#1959, ADR 0067 D-4, D-7)', () => {
+  it('a crafty bot beats a naive one of the same tier and capacity more often than not, with the same CP, W′ and peak', () => {
+    // #2523: at the quarter-second sub-step, not `advance`'s 10 ms (#1688's
+    // ruling: a slow case is made cheaper, never given a longer timeout).
     let ahead = 0;
     let behind = 0;
     for (let seed = 1; seed <= 150; seed += 1) {
@@ -576,10 +700,12 @@ describe('skill is its own axis, and never power (#1959, ADR 0060 D-9)', () => {
       const order = standings(last.racers.map((entry) => entry.racer));
       if (order.indexOf(crafty) < order.indexOf(naive)) ahead += 1;
       else behind += 1;
-      // Strength is the tier alone: the two skills ride one power trace, tick for tick.
-      const trace = (id: string): number[] =>
-        run.bots.map((bots) => bots.find((bot) => bot.id === id)?.power ?? -1);
-      expect(trace(crafty), `seed ${String(seed)}`).toEqual(trace(naive));
+      // Strength is the tier alone: the two skills carry one capacity. Their
+      // power traces may differ now, because spending is strategy (#2463).
+      const capacity = (id: string): unknown =>
+        run.bots.at(-1)?.find((bot) => bot.id === id)?.plan?.capacity;
+      expect(capacity(crafty), `seed ${String(seed)}`).toEqual(capacity(naive));
+      expect(capacity(crafty)).toBeDefined();
     }
     expect(ahead).toBeGreaterThan(behind);
   });
@@ -677,6 +803,10 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
         pace,
       }));
       fields.push({ profile: HILLY, seed, field });
+      // #2463: since the tactics were wired a bot recovers before its W′ is
+      // gone on the hilly loop, and spends the last of it in its kick, so the
+      // exhausted cap with some W′ back is reached on a steeper loop's climbs.
+      fields.push({ profile: STEEP, seed, field });
     }
     let exhausted = 0;
     // Ticks on which an exhausted bot had some W′ back and asked over CP.
@@ -690,7 +820,7 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
         undefined,
         BALANCE_INTEGRATION_STEP_SECONDS,
       );
-      const label = `seed ${String(seed)} ${profile === FLAT ? 'flat' : 'hilly'}`;
+      const label = `seed ${String(seed)} ${profile === FLAT ? 'flat' : profile === HILLY ? 'hilly' : 'steep'}`;
       for (const { id, tier, pace } of field) {
         const wPrime = botWPrimeJoules(tier, pace);
         const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
@@ -791,69 +921,27 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
     expect(Math.max(...descents)).toBeLessThanOrEqual(plan.tierWatts);
   });
 
-  it('opens its sprint on its own effort distance, on the flat', () => {
-    const run = race(FLAT, [{ id: 'bot', tier: 'brisk' }], 9, false);
+  it('opens its sprint where its tactics read the launch, on its own effort distance, on the flat (#2463)', () => {
+    // ADR 0067 D-4: since #2463 the kick opens the sprint, at the launch its
+    // archetype's tactics read on effort distance. A crafty bot misreads
+    // nothing, so it kicks on the first tick that starts inside its launch.
+    const run = race(
+      FLAT,
+      [{ id: 'bot', tier: 'brisk', strategy: { personality: 'opportunist', skill: 'crafty' } }],
+      9,
+      false,
+    );
     const ticks = ticksOf(run, 'bot', FLAT);
     const plan = botRacePlan('brisk', raceCourse(FLAT.totalDistance, 3), 9);
-    const opens = ticks.from.findIndex((at) => plan.raceMetres - at <= plan.sprintMetres);
+    const launch = botLaunchMetres(plan.archetype);
+    const opens = ticks.from.findIndex((at) => plan.raceMetres - at <= launch);
     expect(opens).toBeGreaterThan(0);
-    // Banking at most until the tick before; above its tier from the tick it opens.
-    expect(ticks.power[opens - 1]).toBeLessThanOrEqual(plan.tierWatts);
+    // Under its peak until the tick before; at its peak from the tick it opens.
+    expect(ticks.power[opens - 1]).toBeLessThan(plan.surgeWatts);
     expect(ticks.power[opens]).toBeCloseTo(plan.surgeWatts, 9);
-  });
-
-  it('rides the same power at one effort distance whatever items did to its race offset (D-3.3)', () => {
-    // How ADR 0061 D-8.5's race-level property is held here. D-8.5 asks that
-    // the same bot, course and seed read back an identical power as a function
-    // of its own effort distance whatever the other racers' items do, and that
-    // a plan reading its drawn distance turn that red. What other racers' items
-    // change about a bot is its `raceOffset` and nothing else (ADR 0060 D-5.1,
-    // D-4: a solo race's bots have no draft), so this fixture builds that
-    // change directly: one race state, the bot at one effort distance, and the
-    // offset an item would leave it with set to 0, +10 m and −10 m. Equal power
-    // across the three is the property at one effort distance; the two
-    // distances either side of the sprint's opening are where a drawn-distance
-    // read must differ, and it does (M6 in the PR body). #1900's whole-race
-    // lead-or-trail run holds the rank half; it stays green under a
-    // drawn-distance read, because a whole race rarely sits an offset across
-    // the sprint's opening, which is why this fixture puts one there.
-    const seed = 2;
-    const start = createItemRace({
-      course: raceCourse(FLAT.totalDistance, 3),
-      seed,
-      itemsOn: false,
-      racerIds: ['bot', 'rival'],
-      startMs: 0,
-    });
-    const plan = botRacePlan('hard', start.course, seed);
-    const opens = plan.raceMetres - plan.sprintMetres;
-    const powerAt = (effortDistance: number, raceOffset: number): number => {
-      const race: ItemRaceState = {
-        ...start,
-        racers: start.racers.map((entry) =>
-          entry.racer.id === 'bot'
-            ? { ...entry, racer: { ...entry.racer, effortDistance, raceOffset } }
-            : entry,
-        ),
-      };
-      const bot: LapRaceBot = {
-        ...lapRaceBot('bot', 'hard', STRATEGY),
-        energy: { wbalJoules: 1_000, exhausted: false },
-        ride: { speed: metresPerSecond(10), distance: metres(effortDistance) },
-      };
-      return stepBotRace(race, [bot], { elapsed: seconds(1), conditions: conditions(FLAT), seed })
-        .bots[0]?.power as number;
-    };
-    // 5 m short of the sprint: a bot drawn 10 m on would be inside it on the drawn distance.
-    const before = powerAt(opens - 5, 0);
-    expect(before).toBe(plan.tierWatts);
-    expect(powerAt(opens - 5, 10)).toBe(before);
-    expect(powerAt(opens - 5, -10)).toBe(before);
-    // 5 m into it: a bot drawn 10 m back would be outside it on the drawn distance.
-    const inside = powerAt(opens + 5, 0);
-    expect(inside).toBeCloseTo(plan.surgeWatts, 9);
-    expect(powerAt(opens + 5, -10)).toBe(inside);
-    expect(powerAt(opens + 5, 10)).toBe(inside);
+    const states = run.bots.map((bots) => bots[0]?.tactics.tactic);
+    expect(states[opens + 1]).toBe('kick');
+    expect(states[opens]).not.toBe('kick');
   });
 });
 
@@ -1209,6 +1297,194 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
     counted.mockClear();
     stepBotRace(race, bots, { elapsed: seconds(0.05), conditions: conditions(FLAT), seed: 3 });
     expect(counted).not.toHaveBeenCalled();
+  });
+
+  it('builds each bot’s plan once a race and decides its tactic once a tick: O(bots), one draft call (#2463)', () => {
+    let bots: readonly LapRaceBot[] = dealtField('brisk', 3).map(({ id, tier, pace }) =>
+      lapRaceBot(id, tier, STRATEGY, pace),
+    );
+    let race = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 3,
+      itemsOn: true,
+      racerIds: [...bots.map((bot) => bot.id), 'rider'],
+      startMs: 0,
+    });
+    const plans = vi.mocked(botRacePlan);
+    const decisions = vi.mocked(decideTactic);
+    const draws = vi.mocked(fieldDraftFactors);
+    plans.mockClear();
+    decisions.mockClear();
+    draws.mockClear();
+    for (let tick = 0; tick < 20; tick += 1) {
+      const next = stepBotRace(race, bots, {
+        elapsed: seconds(0.05),
+        conditions: conditions(FLAT),
+        seed: 3,
+        draft: true,
+        riderWattsPerKilogram: 3,
+        rider: { effortDistances: { rider: tick * 0.5 } },
+      });
+      race = next.race;
+      bots = next.bots;
+      vi.mocked(advance).mockClear();
+    }
+    // Seven plans for the race, on the first tick; none rebuilt on the 19 after it.
+    expect(plans).toHaveBeenCalledTimes(7);
+    // One decision a bot a tick, and the field's draft once a tick.
+    expect(decisions).toHaveBeenCalledTimes(7 * 20);
+    expect(draws).toHaveBeenCalledTimes(20);
+    // Each bot's tactic reads its own seat and the rider's power.
+    const seats = new Set(decisions.mock.calls.map(([view]) => view.botIndex));
+    expect([...seats].sort()).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(decisions.mock.calls.every(([view]) => view.riderWattsPerKilogram === 3)).toBe(true);
+  });
+
+  it('reads every distance in a bot’s view on effort distance: laps left, the line and the gaps, whatever items did to the offsets (#2463)', () => {
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 4,
+      itemsOn: true,
+      racerIds: ['bot', 'ahead', 'rider'],
+      startMs: 0,
+    });
+    const lap = start.course.lapLengthMetres;
+    const view = (offset: number, lapsDone: number) => {
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => {
+          const effortDistance =
+            entry.racer.id === 'bot' ? lap - 5 : entry.racer.id === 'ahead' ? lap + 10 : lap - 40;
+          return {
+            ...entry,
+            // An item's offset, and a lap the race counted on the drawn line.
+            // The bot knocked one way, every other racer the other.
+            racer: {
+              ...entry.racer,
+              effortDistance,
+              raceOffset: entry.racer.id === 'bot' ? offset : -offset,
+              lapsDone,
+            },
+          };
+        }),
+      };
+      const field = ['bot', 'ahead'].map((id) => ({
+        ...lapRaceBot(id, 'brisk', STRATEGY),
+        ride: {
+          speed: metresPerSecond(9),
+          distance: metres(id === 'bot' ? lap - 5 : lap + 10),
+        },
+      }));
+      const decisions = vi.mocked(decideTactic);
+      decisions.mockClear();
+      stepBotRace(race, field, {
+        elapsed: seconds(1),
+        conditions: conditions(FLAT),
+        seed: 4,
+        riderWattsPerKilogram: 3,
+        rider: { effortDistances: { rider: lap - 40 } },
+      });
+      vi.mocked(advance).mockClear();
+      const [read] = decisions.mock.calls.find(([each]) => each.botIndex === 0) ?? [];
+      if (read === undefined) throw new Error('the bot decided nothing');
+      return read;
+    };
+    const level = view(0, 0);
+    // Still on its first lap on effort distance, 15 m off the next racer, 35 m ahead of the rider.
+    expect(level.lapsLeft).toBe(3);
+    expect(level.metresToLine).toBe(3 * lap - (lap - 5));
+    expect(level.gapAheadMetres).toBe(15);
+    expect(level.gapBehindMetres).toBe(35);
+    expect(level.riderGapMetres).toBe(-35);
+    expect(level.rank).toBe(2);
+    // An offset of the whole bound either way, and a lap counted on the drawn line, change none of it.
+    for (const offset of [RACE_OFFSET_BOUND_METRES, -RACE_OFFSET_BOUND_METRES]) {
+      const knocked = view(offset, 1);
+      expect({ ...knocked, energy: level.energy, capacity: level.capacity }).toEqual(level);
+    }
+  });
+
+  it('hands a bot a view of the racers still racing, a move ahead of it, and the grade 50 m on (#2463)', () => {
+    const course = raceCourse(HILLY.totalDistance, 3);
+    const planned = (id: string, distance: number, power: number): LapRaceBot => {
+      const bot = lapRaceBot(id, 'brisk', STRATEGY);
+      const plan = botRacePlan('brisk', course, 4, bot.pace);
+      return {
+        ...bot,
+        plan,
+        power: power === 0 ? 0 : watts(plan.capacity.cpWatts + power),
+        ride: { speed: metresPerSecond(9), distance: metres(distance) },
+      };
+    };
+    const view = (opts: {
+      readonly aheadPower: number;
+      readonly riderPerKilogram?: number;
+      readonly riderAhead?: boolean;
+      readonly finished?: string;
+      readonly at?: number;
+    }) => {
+      const at = opts.at ?? 100;
+      const start = createItemRace({
+        course,
+        seed: 4,
+        itemsOn: false,
+        racerIds: ['bot', 'ahead', 'rider'],
+        startMs: 0,
+      });
+      const distances: Record<string, number> = {
+        bot: at,
+        ahead: opts.riderAhead === true ? at - 30 : at + 20,
+        rider: opts.riderAhead === true ? at + 20 : at - 30,
+      };
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => ({
+          ...entry,
+          racer: {
+            ...entry.racer,
+            effortDistance: distances[entry.racer.id] as number,
+            finishedAtMs: entry.racer.id === opts.finished ? 500 : null,
+          },
+        })),
+      };
+      const field = [planned('bot', at, 0), planned('ahead', at + 20, opts.aheadPower)];
+      const decisions = vi.mocked(decideTactic);
+      decisions.mockClear();
+      stepBotRace(race, field, {
+        elapsed: seconds(1),
+        conditions: conditions(HILLY),
+        seed: 4,
+        riderWattsPerKilogram: opts.riderPerKilogram,
+        rider: { effortDistances: { rider: distances.rider as number } },
+      });
+      vi.mocked(advance).mockClear();
+      const [read] = decisions.mock.calls.find(([each]) => each.botIndex === 0) ?? [];
+      if (read === undefined) throw new Error('the bot decided nothing');
+      return read;
+    };
+    // A bot ahead is in a move over its own CP, and not at or under it.
+    expect(view({ aheadPower: 1 }).aheadInMove).toBe(true);
+    expect(view({ aheadPower: -1 }).aheadInMove).toBe(false);
+    // The rider ahead is in a move over CP with the share on top, and not just under it.
+    const cp = planned('bot', 0, 0).plan?.capacity.cpWatts as number;
+    const needed = (cp * (1 + BOT_TACTIC_MOVE_SHARE)) / BOT_MASS_KILOGRAMS;
+    expect(
+      view({ aheadPower: 0, riderAhead: true, riderPerKilogram: needed * 1.05 }).aheadInMove,
+    ).toBe(true);
+    expect(
+      view({ aheadPower: 0, riderAhead: true, riderPerKilogram: needed * 0.95 }).aheadInMove,
+    ).toBe(false);
+    // The grade 50 m on, over the turn from a climb to a descent.
+    const turn = view({ aheadPower: 0, at: 225 });
+    const here = gradeAt(HILLY, distanceOnRoute(HILLY, 225));
+    expect(turn.gradeAheadPercent).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, 275)));
+    expect(turn.gradeAheadPercent).not.toBe(here);
+    // A finished racer is not in the rank, the gaps or the field.
+    const all = view({ aheadPower: 0 });
+    expect([all.rank, all.fieldSize, all.gapAheadMetres]).toEqual([2, 3, 20]);
+    const done = view({ aheadPower: 0, finished: 'ahead' });
+    expect([done.rank, done.fieldSize, done.gapAheadMetres]).toEqual([1, 2, null]);
+    expect(done.gapBehindMetres).toBe(30);
   });
 
   it('hands back the rider’s k from that one call, beside the bots’ (#2461), and none with the draft off', () => {

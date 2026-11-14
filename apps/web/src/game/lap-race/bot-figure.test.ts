@@ -26,10 +26,12 @@
 
 import {
   BOT_ABILITY_SPREAD,
+  BOT_TACTIC_WHEEL_METRES,
   BOT_TIER_WATTS_PER_KILOGRAM,
   botFieldPaces,
   gradeAt,
   kilograms,
+  type BotTactic,
   type RouteProfile,
 } from '@onyourleft/domain';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -76,6 +78,10 @@ interface Reading {
   readonly grade: number;
   /** The effort distance the bot has left to the line, metres. */
   readonly left: number;
+  /** The tactic the bot rode the tick under (#2463). */
+  readonly tactic: BotTactic | undefined;
+  /** Whether the rider was within draft reach ahead of the bot: a wheel it may sit on (#2463). */
+  readonly onWheel: boolean;
 }
 
 /** Ride `choice` on `profile` to the bot's finish, the rider a steady 9 m/s, and read every tick. */
@@ -102,6 +108,14 @@ function ride(profile: RouteProfile, choice: LapRaceChoice = BRISK): Reading[] {
   const lap = race.race.course.lapLengthMetres;
   const readings: Reading[] = [];
   for (let tick = 1; tick < 20_000; tick += 1) {
+    // Where the rider was against the bot as the tick began: what its tactic read.
+    const gapToRider = (): number => {
+      const of = (id: string): number =>
+        race?.race.racers.find((entry) => entry.racer.id === id)?.racer.effortDistance ??
+        Number.NaN;
+      return of('rider') - of('bot-1');
+    };
+    const ahead = gapToRider();
     race = stepLapRaceRide(race, { ticks: 1, along: tick * LAP_RACE_TICK_SECONDS * 9 });
     const bot = race.race.racers.find((entry) => entry.racer.id === 'bot-1');
     if (bot === undefined) throw new Error('the bot is not in the race');
@@ -115,6 +129,8 @@ function ride(profile: RouteProfile, choice: LapRaceChoice = BRISK): Reading[] {
       value: Number.parseFloat(line?.figure ?? ''),
       grade: gradeAt(profile, effort % lap),
       left: length - effort,
+      tactic: race.bots[0]?.tactics.tactic,
+      onWheel: ahead > 0 && ahead <= BOT_TACTIC_WHEEL_METRES,
     });
   }
   throw new Error('the bot did not finish');
@@ -152,11 +168,16 @@ describe('a Brisk bot’s W/kg on the HUD, against its tier — #2329', () => {
     expect(OWN).toBeGreaterThan(TIER * (1 - BOT_ABILITY_SPREAD));
   });
 
-  it('holds its own figure on the flat, from the gun: never over its tier', () => {
+  it('holds its own figure on the flat while it sits in off any wheel, never over its tier (#2463)', () => {
+    // Since #2463 a bot's tactics read the race (ADR 0067 D-0): on a wheel it
+    // sits in under its figure, and in a move it rides over it. Riding its
+    // race alone, sitting in, it holds its own figure, as the chooser says.
     // Clear of the sprint: the whole flat race before it.
     const flatRace = flat.filter((reading) => reading.left > 400);
     expect(flatRace.length).toBeGreaterThan(200);
-    expect(new Set(flatRace.map((reading) => reading.figure))).toEqual(new Set([written(OWN)]));
+    const alone = flatRace.filter((reading) => reading.tactic === 'sit-in' && !reading.onWheel);
+    expect(alone.length).toBeGreaterThan(100);
+    expect(new Set(alone.map((reading) => reading.figure))).toEqual(new Set([written(OWN)]));
     expect(OWN).toBeLessThanOrEqual(TIER);
   });
 

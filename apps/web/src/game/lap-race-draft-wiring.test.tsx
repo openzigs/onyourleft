@@ -269,6 +269,7 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
       lineOffset: lineOffsetAt(racingLine(FLAT), 0),
       storage: undefined,
       draft: true,
+      riderMassKilograms: riderMassFor(undefined).mass,
     });
     vi.restoreAllMocks();
     if (ride === undefined) throw new Error('the flat loop is a loop, so a race starts on it');
@@ -286,8 +287,13 @@ describe('the rider takes a draft from a bot, through the simulation only — #2
         power: watts(power[frame] ?? 0),
         live: true,
       });
-      if (steps > 0)
-        ride = stepLapRaceRide(ride, { ticks: steps, along: simulation.state.ride.distance });
+      if (steps > 0) {
+        ride = stepLapRaceRide(ride, {
+          ticks: steps,
+          along: simulation.state.ride.distance,
+          riderWatts: power[frame] ?? 0,
+        });
+      }
       simulation.draftWith(ride.riderDraft);
       const bot = ride.bots[0];
       if (bot === undefined) throw new Error('a one-bot race has its bot');

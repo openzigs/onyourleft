@@ -2859,7 +2859,8 @@ function GameScreen({
       }
       // #1906: a solo lap race, on the line at the press — never in a room
       // (ADR 0060 D-7.3, D-8). Its bots ride the rider's road and air, never
-      // the rider's mass; its seed is drawn inside and kept by nothing.
+      // the rider's mass (below, it only turns the rider's watts into W/kg for
+      // the bots to read); its seed is drawn inside and kept by nothing.
       reducedMotionRef.current =
         typeof globalThis.matchMedia === 'function' &&
         globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2877,6 +2878,8 @@ function GameScreen({
               // #2461, ADR 0067 D-3.4: ADR 0066 D-6's switch reaches the race.
               // On, every racer drafts, the rider included; off, none does.
               draft: readSoloDraftChoice(deviceStorage()),
+              // #2463: the bots read the rider's power as W/kg, the standings' figure.
+              riderMassKilograms: riderMassFor(props.riderMass).mass,
             });
       setState(simulation.state);
       setChosen(route);
@@ -3715,6 +3718,9 @@ function GameScreen({
         const raced = stepLapRaceRide(lapRace, {
           ticks: stepsRun,
           along: simulation.state.ride.distance,
+          // #2463, ADR 0067 D-0: the bots read the rider's power. Read only by
+          // the race; the trainer's write above has already been offered.
+          ...(sensors.rider.live ? { riderWatts: sensors.rider.power } : {}),
         });
         lapRaceRef.current = raced;
         // #2461, ADR 0067 D-3.3: the rider's draft from the field, ridden from

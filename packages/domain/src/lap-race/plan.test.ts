@@ -45,7 +45,7 @@ import {
   type BotRacePlan,
 } from './plan';
 import { raceCourse } from './race';
-import { BOT_WBAL_REENTRY_FRACTION, type BotEnergy } from './wbal';
+import { BOT_WBAL_REENTRY_FRACTION, stepWbal, type BotEnergy } from './wbal';
 
 /** Three laps of 2 km: long enough that the sprint is a part of the race. */
 const COURSE = raceCourse(2_000, 3);
@@ -316,6 +316,53 @@ describe('the closing sprint, on effort distance (ADR 0061 D-2, D-8.6)', () => {
     expect(seconds).toBeGreaterThan(10);
     expect(rest.wbalJoules).toBeGreaterThan(HARD.wPrimeJoules * BOT_WBAL_REENTRY_FRACTION);
     expect(step(HARD, rest, 0, opens).power).toBeCloseTo(HARD.surgeWatts, 9);
+  });
+});
+
+describe('its tactics set the level, and the kick opens the sprint (#2463, ADR 0067 D-1)', () => {
+  const opens = HARD.raceMetres - HARD.sprintMetres;
+  const tactic = (share: number, kick = false) => ({ targetWatts: TIER * share, kick });
+  const ride = (at: number, grade: number, given: ReturnType<typeof tactic> | undefined) =>
+    botPlanStep(HARD, energy(HARD.wPrimeJoules), {
+      effortDistance: at,
+      grade,
+      elapsed: 1,
+      tactic: given,
+    }).power;
+
+  it('rides the tactic’s target on the flat, where the plan alone rides its CP', () => {
+    expect(ride(MID, 0, undefined)).toBe(TIER);
+    expect(ride(MID, 0, tactic(0.9))).toBeCloseTo(TIER * 0.9, 9);
+    expect(ride(MID, 0, tactic(1.3))).toBeCloseTo(TIER * 1.3, 9);
+  });
+
+  it('keeps the road’s shape on the tactic’s level: harder up a climb, easier down a descent', () => {
+    const level = tactic(0.9);
+    expect(ride(MID, 4, level)).toBeGreaterThan(ride(MID, 0, level));
+    expect(ride(MID, -4, level)).toBeLessThan(ride(MID, 0, level));
+    // Never past what the capacity allows: the peak up a wall, the floor down a cliff.
+    expect(ride(MID, 30, tactic(1.3))).toBeCloseTo(HARD.surgeWatts, 9);
+    expect(ride(MID, -30, tactic(0.85))).toBeGreaterThanOrEqual(HARD.floorWatts);
+  });
+
+  it('opens the sprint on the kick, and not on the plan’s own sprint distance', () => {
+    // Inside the plan's sprint without a kick: the tactic's level, not the surge.
+    expect(ride(opens + 5, 0, tactic(1))).toBeCloseTo(TIER, 9);
+    // The kick, anywhere: the surge.
+    expect(ride(MID, 0, tactic(1, true))).toBeCloseTo(HARD.surgeWatts, 9);
+    // With no tactic, the plan's sprint as before.
+    expect(ride(opens + 5, 0, undefined)).toBeCloseTo(HARD.surgeWatts, 9);
+  });
+
+  it('leaves the capacity where it was: the balance books the same joules on the plan’s one capacity', () => {
+    const held = energy(HARD.wPrimeJoules / 2);
+    const stepped = botPlanStep(HARD, held, {
+      effortDistance: MID,
+      grade: 0,
+      elapsed: 1,
+      tactic: tactic(1.3),
+    });
+    expect(stepped.energy).toEqual(stepWbal(HARD.capacity, held, stepped.power, 1));
   });
 });
 
