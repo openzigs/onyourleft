@@ -13,7 +13,9 @@
  *   gets clear of the wheel behind it, and then is caught or holds its gap;
  * - **faders drop off**: on the hills a bot that has spent its W′ ends up
  *   out of the draft of the racer ahead of it;
- * - **the drawn layout never overlaps**, on any tick;
+ * - **the drawn layout never overlaps**: no two racers inside each other's
+ *   bike box, a bike length along and a place across, on any tick or on the
+ *   frames drawn between ticks;
  * - **a run replays identically**.
  *
  * Each field is ridden once and read by every case that asks about it. No case
@@ -35,6 +37,7 @@ import { lapRaceDraftFactors } from '@onyourleft/physics';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute } from '../route-fixtures-testing';
 import { LAP_RACE_MOST_BOTS } from './choice';
+import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from './pack-layout';
 import {
   LAP_RACE_RIDER_ID,
   LAP_RACE_TICK_SECONDS,
@@ -71,8 +74,16 @@ const PACK = {
   flat: { k: 0.6, share: 4 / 7 },
   hilly: { k: 0.8, share: 5 / 7 },
 } as const;
-/** The least centre-to-centre distance between two drawn racers, metres. */
-const LEAST_APART_METRES = 0.5;
+/**
+ * How far inside each other two racers may be drawn on a frame between two
+ * ticks, metres: **0.005**. Each bot there is drawn back along its own speed,
+ * and getting going from rest it covered a little less than that in the tick
+ * (`ride-race.ts` §`lapRaceDrawing`, #2546): two bots a bike length apart on
+ * the line are drawn up to 3 mm closer on the first frames after Go.
+ */
+const DRAWN_BACK_SLACK_METRES = 0.005;
+/** How far back between two ticks each frame `GameView` draws is, as a share of a tick. */
+const BETWEEN_TICKS = [0.25, 0.5, 0.75] as const;
 /** A move back in the group within this many seconds of its end was caught. */
 const CAUGHT_WITHIN_SECONDS = 60;
 /** A move that never falls under this share of the gap it ended with held it: **0.5**. */
@@ -90,10 +101,48 @@ interface Tick {
   readonly tactic: ReadonlyMap<string, BotTactic>;
   readonly wbal: ReadonlyMap<string, number>;
   readonly k: ReadonlyMap<string, number>;
-  /** The least distance between two racers as they are drawn, metres. */
-  readonly leastApart: number;
+  /**
+   * How far the two racers drawn furthest inside each other are inside, on
+   * this tick, metres: the lesser of how far under a bike length apart along
+   * and how far under a place across. Nought or less is clear; two nose to
+   * tail on one line are as inside each other as two side by side.
+   */
+  readonly inside: number;
+  /** The same, on the frames drawn between this tick and the one before. */
+  readonly insideBetween: number;
   /** Every racer as it is drawn, along and across, to the millimetre. */
   readonly drawn: string;
+}
+
+/** Every racer on one drawing, along the road and across it, the rider first. */
+function placed(
+  drawing: ReturnType<typeof lapRaceDrawing>,
+): { readonly along: number; readonly lateral: number }[] {
+  return [
+    { along: drawing.riderDistance, lateral: drawing.steeredLateral },
+    ...drawing.raceBots.map((bot) => ({ along: bot.distanceMetres, lateral: bot.lateralMetres })),
+  ];
+}
+
+/**
+ * How far the two racers furthest inside each other on one drawing are
+ * inside, metres: the lesser of how far under a bike length apart along and
+ * how far under a place across (#2561's review).
+ */
+function deepest(drawn: readonly { readonly along: number; readonly lateral: number }[]): number {
+  let most = Number.NEGATIVE_INFINITY;
+  for (const [at, one] of drawn.entries()) {
+    for (const other of drawn.slice(at + 1)) {
+      most = Math.max(
+        most,
+        Math.min(
+          BIKE_LENGTH_METRES - Math.abs(one.along - other.along),
+          PACK_ABREAST_METRES - Math.abs(one.lateral - other.lateral),
+        ),
+      );
+    }
+  }
+  return most;
 }
 
 /** Ride the field `seed` deals on `profile` for {@link RIDDEN_SECONDS}. */
@@ -125,19 +174,24 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
   for (let tick = 1; tick <= count; tick += 1) {
     along += RIDER_SPEED * LAP_RACE_TICK_SECONDS;
     race = stepLapRaceRide(race, { ticks: 1, along, riderWatts: RIDER_WATTS });
-    const drawing = lapRaceDrawing(race, along, 0, false);
-    const drawn = [
-      { along: drawing.riderDistance, lateral: drawing.steeredLateral },
-      ...drawing.raceBots.map((bot) => ({ along: bot.distanceMetres, lateral: bot.lateralMetres })),
-    ];
-    let leastApart = Number.POSITIVE_INFINITY;
-    for (let one = 0; one < drawn.length; one += 1) {
-      for (let other = one + 1; other < drawn.length; other += 1) {
-        const a = drawn[one] as (typeof drawn)[number];
-        const b = drawn[other] as (typeof drawn)[number];
-        leastApart = Math.min(leastApart, Math.hypot(a.along - b.along, a.lateral - b.lateral));
-      }
-    }
+    const drawn = placed(lapRaceDrawing(race, along, 0, false));
+    const stepped = race;
+    // The frames between this tick and the one before, the rider blended as
+    // `simulation.ts` §`drawnAt` blends them (#2561's review).
+    const insideBetween = Math.max(
+      ...BETWEEN_TICKS.map((back) =>
+        deepest(
+          placed(
+            lapRaceDrawing(
+              stepped,
+              along - RIDER_SPEED * LAP_RACE_TICK_SECONDS * back,
+              back * LAP_RACE_TICK_SECONDS,
+              false,
+            ),
+          ),
+        ),
+      ),
+    );
     const k = lapRaceDraftFactors(race.race);
     ticks.push({
       second: tick * LAP_RACE_TICK_SECONDS,
@@ -155,7 +209,8 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
         ]),
       ),
       k: new Map(Object.entries(k)),
-      leastApart,
+      inside: deepest(drawn),
+      insideBetween,
       drawn: drawn.map((each) => `${each.along.toFixed(3)},${each.lateral.toFixed(3)}`).join(' '),
     });
   }
@@ -277,11 +332,18 @@ describe.each(['flat', 'hilly'] as const)(
       expect(away).toBeGreaterThan(0);
     });
 
-    it.each(SEEDS)('never draws two racers inside each other, on any tick (seed %i)', (seed) => {
-      expect(Math.min(...field(name, seed).map((tick) => tick.leastApart))).toBeGreaterThan(
-        LEAST_APART_METRES,
-      );
-    });
+    it.each(SEEDS)(
+      'never draws two racers inside each other, nose to tail or side by side, on any tick or between ticks (seed %i)',
+      (seed) => {
+        const ticks = field(name, seed);
+        // Every tick read, and the frames between it and the one before.
+        expect(ticks.every((tick) => Number.isFinite(tick.insideBetween))).toBe(true);
+        expect(Math.max(...ticks.map((tick) => tick.inside))).toBeLessThanOrEqual(1e-9);
+        expect(Math.max(...ticks.map((tick) => tick.insideBetween))).toBeLessThanOrEqual(
+          DRAWN_BACK_SLACK_METRES,
+        );
+      },
+    );
 
     it('replays a field identically', () => {
       const again = ride(name === 'flat' ? FLAT : HILLY, SEEDS[0]);
