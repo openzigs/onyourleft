@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ import {
 } from '../moderation/moderation-testing.ts';
 import { openServingStore } from '../store/serving.ts';
 import { BACKUP_RECORD_DAYS } from '../store/sql-store.ts';
-import { BACKUP_POLL_SECONDS, backupLoop, type DataPaths } from './commands.ts';
+import { backup, BACKUP_POLL_SECONDS, backupLoop, type DataPaths } from './commands.ts';
 import { runCommand } from './run.ts';
 
 const BACKUPS = '/v1/operate/backups';
@@ -289,6 +289,31 @@ describe('backup-loop: what it keeps (#2606, #1381)', () => {
     } finally {
       await store.close();
     }
+  });
+
+  it('prunes nothing off the box when the copy there failed, so a failing drive keeps what it had', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-backup-loop-'));
+    const paths = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await runCommand(['migrate'], paths)).toBe(0);
+    } finally {
+      quiet.mockRestore();
+    }
+    const offBox = join(directory, 'off-box');
+    const older = ['snapshot-2026-01-01', 'snapshot-2026-01-02', 'snapshot-2026-01-03'];
+    for (const name of older) await mkdir(join(offBox, name), { recursive: true });
+    // The copy's own place is taken by a file: this run's copy cannot be made.
+    const at = new Date('2026-09-01T00:00:00Z');
+    await writeFile(join(offBox, 'snapshot-2026-09-01T00-00-00-000Z'), 'in the way');
+    const taken = await backup(paths, join(directory, 'on-box'), {
+      keep: 1,
+      copyTo: offBox,
+      now: () => at,
+    });
+    expect(taken.offBox).toBe('failed');
+    expect((await readdir(offBox)).filter((name) => older.includes(name))).toEqual(older);
+    expect(await readdir(join(directory, 'on-box'))).toEqual(['snapshot-2026-09-01T00-00-00-000Z']);
   });
 
   it('refuses an interval that is not a whole number of seconds, and a --keep below one', async () => {
