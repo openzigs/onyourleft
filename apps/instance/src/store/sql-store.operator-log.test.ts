@@ -9,11 +9,17 @@
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openDatabase } from './node-sqlite.ts';
 import { openSqlStore } from './open-sql-store.ts';
-import { OperatorEntryError, type OperatorEntry, type SqlStore } from './sql-store.ts';
+import {
+  OPERATOR_ACTIONS,
+  OperatorEntryError,
+  SCRUB_CHECKPOINT_FAILED,
+  type OperatorEntry,
+  type SqlStore,
+} from './sql-store.ts';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -55,13 +61,24 @@ const ROOM = {
 
 const wholeLog = (store: SqlStore) => store.listOperatorLogPage(undefined, 200);
 
+/** The real SQLite store, made to refuse every insert into the log. */
+function refuseEveryLogInsert(h: StoreHarness): void {
+  const database = openDatabase(h.path);
+  try {
+    database.exec(`create trigger operator_log_refuses_test before insert on operator_log
+      begin select raise(abort, 'the log refused this entry'); end`);
+  } finally {
+    database.close();
+  }
+}
+
 describe('the operator store function (#2602)', () => {
   it('applies the change and appends its entry together, both read back on a fresh connection', async () => {
     const h = await withAthletes();
     const done = await h.write((store) =>
       store.recordOperatorAction(FROM_THE_APP, async (inside) => {
         await inside.putRoom(ROOM);
-        return { outcome: 'done', detail: 'kind_ride,length=450', value: 'opened' };
+        return { outcome: 'done', detail: 'ride', value: 'opened' };
       }),
     );
     expect(done.value).toBe('opened');
@@ -73,7 +90,7 @@ describe('the operator store function (#2602)', () => {
         source: 'app',
         actorAthleteId: ATHLETE_A,
         action: 'room_open',
-        detail: 'kind_ride,length=450',
+        detail: 'ride',
         outcome: 'done',
       },
     ]);
@@ -110,14 +127,7 @@ describe('the operator store function (#2602)', () => {
 
   it('keeps nothing of the change when the log entry cannot be written', async () => {
     const h = await withAthletes();
-    // The real SQLite store, made to refuse every insert into the log.
-    const database = openDatabase(h.path);
-    try {
-      database.exec(`create trigger operator_log_refuses_test before insert on operator_log
-        begin select raise(abort, 'the log refused this entry'); end`);
-    } finally {
-      database.close();
-    }
+    refuseEveryLogInsert(h);
     await expect(
       h.write((store) =>
         store.recordOperatorAction(FROM_THE_APP, async (inside) => {
@@ -127,6 +137,22 @@ describe('the operator store function (#2602)', () => {
       ),
     ).rejects.toThrow(/the log refused this entry/);
     // A fresh read: the paired change is not there, and neither is an entry.
+    expect(await h.read((store) => store.getRoom(ROOM.id))).toBeUndefined();
+    expect(await h.read(wholeLog)).toEqual([]);
+  });
+
+  it('throws the change’s own error, never the failed entry’s, when the log refuses both', async () => {
+    const h = await withAthletes();
+    refuseEveryLogInsert(h);
+    const boom = new Error('the change’s own error');
+    await expect(
+      h.write((store) =>
+        store.recordOperatorAction(FROM_THE_APP, async (inside) => {
+          await inside.putRoom(ROOM);
+          throw boom;
+        }),
+      ),
+    ).rejects.toBe(boom);
     expect(await h.read((store) => store.getRoom(ROOM.id))).toBeUndefined();
     expect(await h.read(wholeLog)).toEqual([]);
   });
@@ -150,6 +176,75 @@ describe('the operator store function (#2602)', () => {
     expect(log.map((entry) => [entry.outcome, entry.detail])).toEqual(
       Array.from({ length: 4 }, () => ['failed', null]),
     );
+  });
+
+  it('refuses, for every action, the reviewer’s probes: a split hex key, a coordinate, a password', async () => {
+    const h = await withAthletes();
+    const probes = [
+      'e3b0c44298fc1c149afbf4c8996fb924,e27ae41e4649b934ca495991b7852b85',
+      'lat=51507400,lon=127800',
+      'password_hunter2',
+    ];
+    for (const action of OPERATOR_ACTIONS) {
+      for (const detail of probes) {
+        await expect(
+          h.write((store) =>
+            store.recordOperatorAction({ actor: { source: 'cli' }, action, at: 1 }, () => ({
+              outcome: 'done',
+              detail,
+              value: undefined,
+            })),
+          ),
+          `${action}: ${detail}`,
+        ).rejects.toThrow(OperatorEntryError);
+      }
+    }
+    const log = await h.read(wholeLog);
+    expect(log).toHaveLength(OPERATOR_ACTIONS.length * probes.length);
+    expect(log.every((entry) => entry.outcome === 'failed' && entry.detail === null)).toBe(true);
+  });
+
+  it('takes a detail only from its own action’s words and counts, each part once', async () => {
+    const h = await withAthletes();
+    const attempt = (action: OperatorEntry['action'], detail: string) =>
+      h.write((store) =>
+        store.recordOperatorAction({ actor: { source: 'cli' }, action, at: 1 }, () => ({
+          outcome: 'done',
+          detail,
+          value: undefined,
+        })),
+      );
+    // Each action's own vocabulary is taken.
+    await attempt('migrate', 'applied=2');
+    await attempt('backup', 'blobs=3,removed=1');
+    await attempt('restore', 'blobs=0,keys_rotated');
+    await attempt('model_key_clear', 'none_held');
+    // Another action's word or count is not; nor a word given a number, a
+    // count given none, a part repeated, or a count past nine digits.
+    for (const [action, detail] of [
+      ['migrate', 'cleared'],
+      ['backup', 'applied=2'],
+      ['model_key_clear', 'cleared=1'],
+      ['migrate', 'applied'],
+      ['backup', 'blobs=1,blobs=2'],
+      ['migrate', 'applied=1234567890'],
+      ['migrate', 'applied=1=2'],
+      ['migrate', ''],
+    ] as const) {
+      await expect(attempt(action, detail), `${action}: ${detail}`).rejects.toThrow(
+        OperatorEntryError,
+      );
+    }
+    expect(
+      (await h.read(wholeLog))
+        .filter((entry) => entry.outcome === 'done')
+        .map((entry) => [entry.action, entry.detail]),
+    ).toEqual([
+      ['model_key_clear', 'none_held'],
+      ['restore', 'blobs=0,keys_rotated'],
+      ['backup', 'blobs=3,removed=1'],
+      ['migrate', 'applied=2'],
+    ]);
   });
 
   it('refuses an action that is not on the closed list, before anything runs', async () => {
@@ -285,6 +380,26 @@ describe('the operator log is append-only in the schema (#2602)', () => {
     }
   });
 
+  it('refuses, in the schema, a detail with a space, a capital, a sign or a point, or past 200 characters', async () => {
+    const h = await withAthletes();
+    const database = openDatabase(h.path);
+    const insert = (detail: string) =>
+      database
+        .prepare(
+          "INSERT INTO operator_log (at, source, actor_athlete_id, action, detail, outcome) VALUES (1, 'cli', NULL, 'migrate', ?, 'done')",
+        )
+        .run(detail);
+    try {
+      for (const detail of ['Rotated by hand', 'lat=-51.5', 'a b', '', 'a'.repeat(201)]) {
+        expect(() => insert(detail), JSON.stringify(detail)).toThrow(/CHECK/);
+      }
+      insert('applied=2,' + 'a'.repeat(190));
+    } finally {
+      database.close();
+    }
+    expect((await h.read(wholeLog)).map((entry) => entry.detail?.length)).toEqual([200]);
+  });
+
   it('keeps every entry when the actor’s account is erased, as the moderation log does', async () => {
     const h = await withAthletes();
     await h.write((store) =>
@@ -332,5 +447,63 @@ describe('a scrub inside an operator action (#2602, #1097)', () => {
       await store.close();
     }
     expect(await harness.read((read) => read.getHostedModelKey())).toBeUndefined();
+  });
+
+  it('keeps the action’s outcome when the checkpoint after its scrub throws, and says so naming nothing', async () => {
+    harness = await createStoreHarness();
+    await harness.write((store) => store.registerAthlete(registrationFixture(ATHLETE_A)));
+    // Broken only around the actions: a put outside one checkpoints itself.
+    let breakCheckpoint = false;
+    const store = await openSqlStore(harness.path, {
+      onQuery: (statement) => {
+        if (breakCheckpoint && /wal_checkpoint/i.test(statement)) {
+          throw new Error('the checkpoint broke');
+        }
+      },
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const key = {
+      url: 'https://models.example/v1',
+      model: 'a-model',
+      iv: new Uint8Array(12).fill(9),
+      ciphertext: new TextEncoder().encode('a hosted key'),
+      setAt: 1_790_000_000,
+    };
+    const boom = new Error('the change’s own error');
+    try {
+      // A committed action stays committed and `done`.
+      await store.putHostedModelKey(ATHLETE_A, key);
+      breakCheckpoint = true;
+      const cleared = await store.recordOperatorAction(
+        { actor: { source: 'cli' }, action: 'model_key_clear', at: 1_790_003_003 },
+        async (inside) => ({ outcome: 'done', value: await inside.clearHostedModelKey() }),
+      );
+      expect(cleared.value).toBe(true);
+      // A failed one keeps its own error.
+      breakCheckpoint = false;
+      await store.putHostedModelKey(ATHLETE_A, key);
+      breakCheckpoint = true;
+      await expect(
+        store.recordOperatorAction(
+          { actor: { source: 'cli' }, action: 'model_key_clear', at: 1_790_003_004 },
+          async (inside) => {
+            await inside.clearHostedModelKey();
+            throw boom;
+          },
+        ),
+      ).rejects.toBe(boom);
+      expect(errors.mock.calls).toEqual([[SCRUB_CHECKPOINT_FAILED], [SCRUB_CHECKPOINT_FAILED]]);
+    } finally {
+      errors.mockRestore();
+      breakCheckpoint = false;
+      await store.close();
+    }
+    expect(SCRUB_CHECKPOINT_FAILED).not.toMatch(/[0-9]/);
+    expect((await harness.read(wholeLog)).map((entry) => [entry.at, entry.outcome])).toEqual([
+      [1_790_003_004, 'failed'],
+      [1_790_003_003, 'done'],
+    ]);
+    // The failed clear was rolled back: the key put back before it is still held.
+    expect(await harness.read((read) => read.getHostedModelKey())).toBeDefined();
   });
 });

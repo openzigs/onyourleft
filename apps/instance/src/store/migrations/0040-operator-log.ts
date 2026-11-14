@@ -13,7 +13,11 @@
  *   owner's), what (`action`, from the closed list in `sql-store.ts`
  *   §`OPERATOR_ACTIONS`), a short closed-vocabulary `detail` or `NULL`, and
  *   the `outcome`: `done`, `refused` or `failed`. The `CHECK`s hold the closed
- *   columns and the actor rule in the schema, not only in the code.
+ *   columns and the actor rule in the schema, not only in the code, and hold
+ *   `detail` to its alphabet — lower-case letters, digits, `_`, `=` and `,`,
+ *   at most 200 characters. Its per-action vocabulary is the code's
+ *   (`sql-store.ts` §`OPERATOR_DETAILS`): `action` and that list grow with
+ *   each sub-issue, which a CHECK would turn into a migration each time.
  *
  * ⚠️ **Append-only in the schema**, as the moderation log is: two triggers
  * abort any `UPDATE` or `DELETE`, so no code path — this repository's or an
@@ -34,7 +38,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('source', 'text', (column) => column.notNull().check(sql`source in ('app', 'cli')`))
     .addColumn('actor_athlete_id', 'text')
     .addColumn('action', 'text', (column) => column.notNull())
-    .addColumn('detail', 'text')
+    // A second line behind the code's per-action vocabulary: a `sqlite3`
+    // session still cannot write a space, a capital, a sign or a point here.
+    .addColumn('detail', 'text', (column) =>
+      column.check(
+        sql`detail is null or (length(detail) between 1 and 200 and detail not glob '*[^a-z0-9_=,]*')`,
+      ),
+    )
     .addColumn('outcome', 'text', (column) =>
       column.notNull().check(sql`outcome in ('done', 'refused', 'failed')`),
     )

@@ -11,7 +11,7 @@
  * most of a spawned run (#2568), and `commands.test.ts` spawns the real CLI.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,9 +19,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { secretBytes } from '../keys/instance-keys-testing.ts';
+import { openDatabase } from '../store/node-sqlite.ts';
 import { openServingStore } from '../store/serving.ts';
 import type { OperatorLogEntry } from '../store/sql-store.ts';
 import { athleteFixture, deviceKeyFixture, migrateAllBut } from '../store/testing/index.ts';
+import { unloggedSentence } from './commands.ts';
 import { runCommand } from './run.ts';
 
 let directory: string | undefined;
@@ -38,21 +40,33 @@ interface Data {
 const SECRET = btoa(String.fromCharCode(...secretBytes(5)));
 const ORIGIN = 'https://ride.example';
 
-/** The last report a command printed, in this process. */
+/** The last report a command printed, in this process, and what it wrote to standard error. */
 let printed = '';
+let complained = '';
 
-async function cli(data: Data, args: readonly string[], input = ''): Promise<number> {
+async function cli(
+  data: Data,
+  args: readonly string[],
+  input = '',
+  keys: { readonly secret?: string; readonly origin?: string } = {
+    secret: SECRET,
+    origin: ORIGIN,
+  },
+): Promise<number> {
   printed = '';
+  complained = '';
   const out = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
     printed += String(chunk);
     return true;
   });
-  const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  const err = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    complained += String(chunk);
+    return true;
+  });
   try {
     return await runCommand(args, {
       ...data,
-      secret: SECRET,
-      origin: ORIGIN,
+      ...keys,
       readStandardInput: () => Promise.resolve(input),
     });
   } finally {
@@ -75,6 +89,17 @@ async function logOf(data: Data): Promise<readonly OperatorLogEntry[]> {
     return await store.listOperatorLogPage(undefined, 200);
   } finally {
     await store.close();
+  }
+}
+
+/** The real database, made to refuse every insert into the operator log. */
+function refuseEveryLogInsert(data: Data): void {
+  const database = openDatabase(data.database);
+  try {
+    database.exec(`create trigger operator_log_refuses_test before insert on operator_log
+      begin select raise(abort, 'the log refused this entry'); end`);
+  } finally {
+    database.close();
   }
 }
 
@@ -172,5 +197,34 @@ describe('the operator CLI writes the operator log (#2602)', () => {
     await migrateAllBut(data.database, 1);
     expect(await cli(data, ['backup', join(directory, 'backups')])).toBe(0);
     expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
+  });
+
+  it('logs an instance-key change refused for a missing secret or origin as refused, changing nothing', async () => {
+    const data = await migrated();
+    expect(await cli(data, ['instance-key', 'init'], '', { origin: ORIGIN })).toBe(1);
+    expect(complained).toContain('OYL_INSTANCE_SECRET_KEY');
+    expect(await cli(data, ['instance-key', 'rotate'], '', { secret: SECRET })).toBe(1);
+    expect(complained).toContain('OYL_INSTANCE_ORIGIN');
+    expect(brief(await logOf(data)).slice(0, 2)).toEqual([
+      ['instance_key_rotate', null, 'refused'],
+      ['instance_key_init', null, 'refused'],
+    ]);
+    // Nothing was made: `show` still finds no keys.
+    expect(await cli(data, ['instance-key', 'show'])).toBe(1);
+  });
+
+  it('succeeds at migrate and backup whose entry cannot be written: logged false, a line on stderr, exit 0', async () => {
+    const data = await migrated();
+    const before = await logOf(data);
+    refuseEveryLogInsert(data);
+    expect(await cli(data, ['migrate'])).toBe(0);
+    expect(JSON.parse(printed.trim())).toMatchObject({ command: 'migrate', logged: false });
+    expect(complained).toBe(unloggedSentence('migrate'));
+    expect(await cli(data, ['backup', join(directory ?? '', 'backups')])).toBe(0);
+    expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
+    expect(complained).toBe(unloggedSentence('backup'));
+    // The snapshot was taken all the same, and the log is as it was.
+    expect(await readdir(join(directory ?? '', 'backups'))).toHaveLength(1);
+    expect(await logOf(data)).toEqual(before);
   });
 });

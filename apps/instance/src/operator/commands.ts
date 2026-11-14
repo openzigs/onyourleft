@@ -82,7 +82,10 @@ import { createSync } from '../sync/sync.ts';
  *   `refused`, and a failure `failed`, with the change rolled back.
  * - **A change to files** (`migrate`, `backup`, `restore`) cannot share a
  *   transaction with a row: its entry is written once the work has ended,
- *   through the same function, and its report says `logged`. A restore's
+ *   through the same function, and its report says `logged`. The command
+ *   succeeds when its work did: an entry that cannot be written is
+ *   `logged: false` and a line on standard error, never a failed command, so
+ *   a log write cannot stop a deploy whose migrations applied. A restore's
  *   entry goes into the database it restored — what the replaced one
  *   recorded since the snapshot goes with it — and a snapshot from before
  *   the operator log has none until `migrate` (`logged: false`).
@@ -175,10 +178,23 @@ async function asOperatorAction<T>(
 }
 
 /**
+ * What a file command writes to standard error when its work is done and its
+ * entry could not be written (#2602): a fixed sentence and the action's name,
+ * no value.
+ */
+export function unloggedSentence(action: OperatorAction): string {
+  return `operator: ${action} is done, but its entry could not be written to the operator log.\n`;
+}
+
+/**
  * Log a command whose change is FILES once it has ended (#2602): `done` with
  * `detail`, or — when `work` threw — `failed`, and the error thrown on. Answers
- * whether the entry was written: a database with no operator log yet (one not
- * migrated, or restored from before it) leaves the work done and unlogged.
+ * whether the entry was written. The command's outcome is its WORK's: a log
+ * that cannot be written — a database with no operator log yet (one not
+ * migrated, or restored from before it), a full disk, a lock still held after
+ * the retries — leaves the work done and `logged: false`, and anything but a
+ * missing table says so on standard error. A deploy whose migrations applied
+ * is never stopped by its log entry.
  */
 async function loggedAfter<T>(
   database: string,
@@ -200,19 +216,22 @@ async function loggedAfter<T>(
       await store.recordOperatorAction(
         { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
         () => {
+          // Keep this guard: it is what logs a failed run `failed` and never
+          // `done`, whatever a future `detail` does with an undefined value.
           if (failure !== undefined) throw failure.error;
           return { outcome: 'done', detail: detail(value as T), value: undefined };
         },
       );
       logged = true;
     } catch (error) {
-      // The work's own error is the one an operator needs; a log that could
-      // not be written leaves `logged` false.
+      // The work's own error is the one an operator needs, and work that
+      // succeeded stays a success: a log that could not be written leaves
+      // `logged` false.
       if (
         failure === undefined &&
         !(error instanceof Error && /no such table/.test(error.message))
       ) {
-        throw error;
+        process.stderr.write(unloggedSentence(action));
       }
     } finally {
       await store.close();
@@ -452,7 +471,20 @@ async function withInstanceKeys<T>(
     return await asOperatorAction(
       store,
       action,
-      (inside) => operation(keysOver(inside)),
+      async (inside) => {
+        try {
+          return await operation(keysOver(inside));
+        } catch (error) {
+          // A missing secret or origin is a refusal, logged `refused`, not a failure.
+          if (
+            error instanceof InstanceKeysUnavailable &&
+            (error.code === 'no-secret' || error.code === 'no-origin')
+          ) {
+            return new Refused(error.message);
+          }
+          throw error;
+        }
+      },
       undefined,
       () => new Date(now() * 1000),
     );

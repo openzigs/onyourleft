@@ -963,13 +963,47 @@ export type OperatorActor =
   { readonly source: 'app'; readonly athleteId: string } | { readonly source: 'cli' };
 
 /**
- * An entry's `detail`: words from a closed vocabulary, each optionally
- * `=` a whole number, joined by commas — `applied=2`, `drop_old`,
- * `added=3,held=3`. Never free text, a secret or a coordinate: no space, no
- * decimal point, no sign, and short.
+ * An entry's `detail`: the CLOSED vocabulary each action may write (#2602).
+ * A detail is parts joined by commas, each one of the action's `words`, or
+ * one of its `counts` `=` a whole number of up to nine digits — `applied=2`,
+ * `ride`, `blobs=3,keys_rotated`. A word not listed for THAT action is
+ * refused, and so is a number under a key the action does not name, so a
+ * detail is never free text, a secret or a coordinate: `lat=51507400`, a
+ * hex key split into words and `password_hunter2` fit no action's list. Each
+ * Operate sub-issue lists what its own actions write.
  */
-export const OPERATOR_DETAIL =
-  /^[a-z][a-z0-9_]{0,31}(=[0-9]{1,9})?(,[a-z][a-z0-9_]{0,31}(=[0-9]{1,9})?){0,5}$/;
+export const OPERATOR_DETAILS: {
+  readonly [action in OperatorAction]: {
+    readonly words: readonly string[];
+    readonly counts: readonly string[];
+  };
+} = {
+  migrate: { words: [], counts: ['applied'] },
+  backup: { words: [], counts: ['blobs', 'removed'] },
+  restore: { words: ['keys_rotated', 'keys_not_rotated'], counts: ['blobs'] },
+  room_open: { words: ['ride', 'race'], counts: [] },
+  model_key_set: { words: [], counts: [] },
+  model_key_clear: { words: ['cleared', 'none_held'], counts: [] },
+  instance_key_init: { words: [], counts: [] },
+  instance_key_rotate: { words: [], counts: [] },
+  instance_key_rotate_identity: { words: [], counts: [] },
+  instance_key_reset: { words: [], counts: [] },
+  load_accounts_add: { words: [], counts: ['added'] },
+  load_accounts_erase: { words: [], counts: ['erased'] },
+  account_erase: { words: [], counts: [] },
+};
+
+/** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
+export function operatorDetailFits(action: OperatorAction, detail: string): boolean {
+  const { words, counts } = OPERATOR_DETAILS[action];
+  const parts = detail.split(',');
+  if (new Set(parts.map((part) => part.split('=')[0])).size !== parts.length) return false;
+  return parts.every((part) => {
+    const [key = '', count, ...rest] = part.split('=');
+    if (count === undefined) return words.includes(key);
+    return rest.length === 0 && counts.includes(key) && /^[0-9]{1,9}$/.test(count);
+  });
+}
 
 /** One entry of the operator log, as it is read. */
 export interface OperatorLogEntry {
@@ -987,7 +1021,7 @@ export interface OperatorLogEntry {
 /** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
 export interface OperatorChange<T> {
   readonly outcome: Exclude<OperatorOutcome, 'failed'>;
-  /** Held to {@link OPERATOR_DETAIL}, or `null`. */
+  /** Held to the action's vocabulary ({@link OPERATOR_DETAILS}), or `null`. */
   readonly detail?: string | null;
   readonly value: T;
 }
@@ -2459,6 +2493,14 @@ const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry =>
 });
 
 /** Append one operator log entry through `executor`, answering its id (#2602). */
+/**
+ * What the store reports on the console's error stream when an operator
+ * action's scrub could not be checkpointed (#2602): a fixed sentence, naming
+ * no value. `console`, not `process`: this file names nothing of Node.
+ */
+export const SCRUB_CHECKPOINT_FAILED =
+  'instance: the write-ahead log could not be checkpointed after an operator action’s scrub; the action’s outcome stands, and old page images may remain in the log until the next truncating checkpoint.';
+
 async function appendOperatorLog(
   executor: Kysely<InstanceDatabase>,
   entry: OperatorEntry,
@@ -5906,9 +5948,9 @@ function storeOver(
               }),
             );
             const detail = changed.detail ?? null;
-            if (detail !== null && !OPERATOR_DETAIL.test(detail)) {
+            if (detail !== null && !operatorDetailFits(entry.action, detail)) {
               throw new OperatorEntryError(
-                'detail must be words from a closed vocabulary, each optionally = a whole number.',
+                'detail must be words and counts from its action’s closed vocabulary, each count a whole number.',
               );
             }
             const logId = await appendOperatorLog(trx, entry, changed.outcome, detail);
@@ -5919,7 +5961,14 @@ function storeOver(
           await appendOperatorLog(db, entry, 'failed', null).catch(() => undefined);
           throw error;
         } finally {
-          if (scrubbed) await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+          // The checkpoint never changes the action's outcome: a committed
+          // action stays `done`, and a failed one keeps its own error. The
+          // operator is told, naming nothing, that old pages may remain.
+          if (scrubbed) {
+            await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db).catch(() => {
+              console.error(SCRUB_CHECKPOINT_FAILED);
+            });
+          }
         }
       }),
 
