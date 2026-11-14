@@ -38,18 +38,33 @@ rule drops nothing and the guard is what it adds.
 """
 
 import json
+import struct
 
 import bpy
 import numpy as np
 from io_scene_gltf2.io.imp.gltf2_io_binary import BinaryData
 
 
+def gltf_document(path):
+    """The glTF's JSON: the file itself, or -- #2540, a GLB such as Kenney's
+    car kit ships -- its first chunk, which the binary format requires to be
+    the JSON one."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    if data[:4] != b"glTF":
+        return json.loads(data.decode("utf-8"))
+    length, kind = struct.unpack_from("<II", data, 12)
+    if kind != 0x4E4F534A:
+        raise SystemExit(f"{path}: its first chunk is not JSON")
+    return json.loads(data[20 : 20 + length].decode("utf-8"))
+
+
 def import_scan(path):
-    """Import the glTF at `path` into the current scene with every repeated
-    triangle's second copy dropped, and return how many were dropped. Raises
-    SystemExit when the importer kept any other count of triangles."""
-    with open(path) as handle:
-        document = json.load(handle)
+    """Import the glTF or GLB at `path` into the current scene with every
+    repeated triangle's second copy dropped, and return how many were
+    dropped. Raises SystemExit when the importer kept any other count of
+    triangles."""
+    document = gltf_document(path)
     triangle_indices = {
         primitive["indices"]
         for mesh in document.get("meshes", [])

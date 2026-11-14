@@ -412,3 +412,19 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   model whose download needs an account is fetched by no script: the owner downloads it with their
   own account and the archive is pinned by its digest (`sources.ts` §`HOUSE_MODEL_SOURCES`).
   ([#1585](https://github.com/openzigs/onyourleft/issues/1585))
+- **2026-11-12** — **Kenney's Car Kit is drawn in the realistic world, from an archive the owner
+  placed.** D-10's **In** table admits Kenney (`CC0-1.0`, ADR 0026 D-4) *"for the stylised world,
+  which stays Kenney's alone in its scenery"*. Asked on
+  [#2540](https://github.com/openzigs/onyourleft/issues/2540) for realistic cars for Delivery, the
+  owner ruled on 2026-11-12 to take **Kenney's Car Kit** (3.1), whose own page,
+  `https://kenney.nl/assets/car-kit`, read on 2026-11-12, states *"Creative Commons CC0"*, and whose
+  `License.txt` states *"License: (Creative Commons Zero, CC0)"*. Its `sedan` is the realistic
+  world's parked car. This admits no new source: Kenney is on D-10's **In** list, and the stylised
+  world stays Kenney's alone, unchanged; the row's *For* column is widened by this entry alone.
+  Kenney's page is added to that row's addresses under D-11's third bullet. The kit's zip is served
+  only from a signed link a browser is handed (an automated request answers `403`), so no script
+  fetches it: as for #1585's house models, the owner had it downloaded and placed under
+  `build/raw/kenney-car-kit/`, and `inputs.lock.json` pins its digest
+  (`fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4`). `sources.ts`
+  §`DELIVERY_CAR_SOURCE` records it, and `blender/process_vehicle.py` makes the shipped car.
+  ([#2540](https://github.com/openzigs/onyourleft/issues/2540))

@@ -185,6 +185,48 @@ describe('a crash drawn on the road — scene.ts §SceneInput.riderCrash', () =>
     expect(part.pedalling).toBeLessThanOrEqual(0.5);
   });
 
+  it('#2493: carries the crash on the rider’s marker for the clip, only when told how long ago, and on nobody else', () => {
+    const played = markers({ riderCrash: { share: 1, side: -1, seconds: 0.8 } });
+    expect(of(played, 'rider').crash).toEqual({ seconds: 0.8, side: -1, share: 1 });
+    expect(of(played, 'bot').crash).toBeUndefined();
+    // With no time — reduced motion — the marker is #2475's still pose, exactly.
+    const still = markers({ riderCrash: { share: 1, side: -1 } });
+    expect(of(still, 'rider').crash).toBeUndefined();
+    expect({ ...of(played, 'rider'), crash: undefined }).toEqual({
+      ...of(still, 'rider'),
+      crash: undefined,
+    });
+  });
+
+  it('#2493: straightens the bars of a steered rider as they fall, and lays the crash over the steered pose', () => {
+    // Mid lane change: the sway building, so the bars are turned into the move.
+    const steering = { steeredSway: 0.5, steeredSwayRate: 2 } as const;
+    const riding = of(markers(steering), 'rider');
+    const turned = riding.steer ?? 0;
+    expect(Math.abs(turned)).toBeGreaterThan(Math.PI / 180);
+    // Halfway down, the bars are halfway back to straight, and the clip is carried beside them.
+    const half = of(
+      markers({ ...steering, riderCrash: { share: 0.5, side: 1, seconds: 0.4 } }),
+      'rider',
+    );
+    expect(half.steer).toBeCloseTo(turned / 2, 12);
+    expect(half.crash).toEqual({ seconds: 0.4, side: 1, share: 0.5 });
+    // The clip's marker is the steered still pose with the crash laid on it, nothing dropped.
+    const still = of(markers({ ...steering, riderCrash: { share: 0.5, side: 1 } }), 'rider');
+    expect({ ...half, crash: undefined }).toEqual({ ...still, crash: undefined });
+    // On the ground the bars point straight; getting up, they come back.
+    const down = of(
+      markers({ ...steering, riderCrash: { share: 1, side: 1, seconds: 0.8 } }),
+      'rider',
+    );
+    expect(down.steer).toBeUndefined();
+    const rising = of(
+      markers({ ...steering, riderCrash: { share: 0.25, side: 1, seconds: 2 } }),
+      'rider',
+    );
+    expect(rising.steer).toBeCloseTo(turned * 0.75, 12);
+  });
+
   it('draws the ride as it was with no crash, or a crash at nought', () => {
     expect(markers({ riderCrash: { share: 0, side: 1 } })).toEqual(markers({}));
     expect(markers({ riderCrash: undefined })).toEqual(markers({}));
