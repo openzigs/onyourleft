@@ -377,8 +377,9 @@ describe('a seeded seven-bot race, read back through sceneFrame (#2544)', () => 
     expect(insideBetween).toHaveLength(FRAMES);
     expect(whole).toBe(FRAMES / WHOLE_FRAME_EVERY);
     expect(Math.max(...inside)).toBeLessThanOrEqual(1e-9);
-    // Between ticks each bot is drawn back along its own speed, which off the
-    // line from rest is a few millimetres more than it went (#2546).
+    // Between ticks each bot is drawn back along its speed at the end of the
+    // tick, which for a bot whose speed changed in the tick, most of all from
+    // rest off the line, is a few millimetres off what it went (#2546).
     expect(Math.max(...insideBetween)).toBeLessThanOrEqual(0.005);
     // And the field did ride as a pack around the rider: four racers or more
     // within one bike length and a row on some frame, which is what the
@@ -613,6 +614,49 @@ describe('every pass goes round: the rider and the bots never drawn through one 
   }
 
   /**
+   * The most a bot's drawn speed against its race speed changes in a tick,
+   * metres a second: **4**, `pack-layout.ts`'s 80 m/s² ease at the race's
+   * 20 Hz tick. Written here, not imported, so a layout that eased less is
+   * red rather than a bound that moved with it.
+   */
+  const EASED_PER_TICK = 4;
+
+  /**
+   * Every bot's drawn speed, tick to tick, smooth (#2558's review, finding A):
+   * how much faster or slower than its race speed it is drawn changes by no
+   * more than {@link EASED_PER_TICK} from one tick to the next, give or take
+   * its race speed's own change; and, at race speed, it is never
+   * drawn under half its race speed on one tick and over it on the next, or
+   * the other way about: the 10 Hz judder of a bot held behind the rider,
+   * drawn at 1.4 m/s and 16 m/s on alternate ticks.
+   */
+  function expectSmooth(placed: readonly Placed[]): void {
+    const jolts: string[] = [];
+    const drawnSpeed = (tick: number, bot: number): number =>
+      ((placed[tick]?.bots[bot]?.along ?? Number.NaN) -
+        (placed[tick - 1]?.bots[bot]?.along ?? Number.NaN)) /
+      LAP_RACE_TICK_SECONDS;
+    for (let tick = 2; tick < placed.length; tick += 1) {
+      for (const [bot, each] of (placed[tick]?.bots ?? []).entries()) {
+        const was = placed[tick - 1]?.bots[bot];
+        const now = drawnSpeed(tick, bot);
+        const before = drawnSpeed(tick - 1, bot);
+        const change = Math.abs(now - each.speed - (before - (was?.speed ?? Number.NaN)));
+        const flips =
+          each.speed > 4 &&
+          ((before < 0.5 * each.speed && now > each.speed) ||
+            (before > each.speed && now < 0.5 * each.speed));
+        if (!(change <= EASED_PER_TICK + 0.25) || flips) {
+          jolts.push(
+            `bot ${String(bot)}, tick ${String(tick)}: ${before.toFixed(2)} then ${now.toFixed(2)} m/s, race ${each.speed.toFixed(2)} m/s`,
+          );
+        }
+      }
+    }
+    expect(jolts).toEqual([]);
+  }
+
+  /**
    * Whether two drawn racers are inside each other by more than `slack`
    * metres: under a bike length along and under a place across.
    */
@@ -626,11 +670,12 @@ describe('every pass goes round: the rider and the bots never drawn through one 
 
   /**
    * How far inside each other two racers may be drawn on a frame between two
-   * ticks, metres: **0.005**. Each bot there is drawn back along its own
-   * speed, and getting going from rest it covered a little less than that in
-   * the tick (`ride-race.ts` §`lapRaceDrawing`, #2546), so two bots a bike
-   * length apart on the line are drawn up to 3 mm closer on the first
-   * frames after Go.
+   * ticks, metres: **0.005**. Each bot there is drawn back along its speed at
+   * the end of the tick (`ride-race.ts` §`lapRaceDrawing`, #2546), so a bot
+   * whose speed changed in the tick, most of all from rest, is drawn a little
+   * off where it was: two bots a bike length apart are drawn up to 3 mm
+   * closer, nearly all of it within 0.3 s of Go, and by under a millimetre
+   * after any change of speed later in the ride.
    */
   const DRAWN_BACK_SLACK_METRES = 0.005;
 
@@ -756,6 +801,111 @@ describe('every pass goes round: the rider and the bots never drawn through one 
       );
     expect(early.length).toBeGreaterThan(10);
   });
+  it('holds the known limit of a rider steering into the field as it gets going: two bots drawn inside each other only then, and briefly (#2558’s review, finding B)', () => {
+    // The previous case's steering, on a seed where it does reach the limit:
+    // the rider swerves back across the grid at about 2.2 s, as the bots
+    // cross 3 m/s and leave their places, and a bot that must make way for
+    // the rider has only a bot beside it to make way into. The rider comes
+    // first and is never moved, and no bot may jump, so for a moment two
+    // bots are drawn inside each other. This pins how long and where.
+    const steerAt = [1, 1.85, 2.7, 3.55, 4.4, 5.25, 6.1, 7.6, 9.1, 10.6, 12.1, 13.6, 15.1, 16.6];
+    const placed = rideFromTheGrid((at) => Math.min(9, 2 * at), 400, 2, false, steerAt);
+    // Never inside the rider, on any frame, and never a jump.
+    expectNeverInside(placed, true);
+    expectNeverAJump(placed);
+    expectSmooth(placed);
+    // The ticks with two bots drawn inside each other, and how far: the lesser
+    // of how far under a bike length along and how far under a place across.
+    const overlapping: { readonly seconds: number; readonly along: number }[] = [];
+    for (const [tick, { bots }] of placed.entries()) {
+      let along = 0;
+      for (const [at, one] of bots.entries()) {
+        for (const other of bots.slice(at + 1)) {
+          if (inside(one, other)) {
+            along = Math.max(along, BIKE_LENGTH_METRES - Math.abs(one.along - other.along));
+          }
+        }
+      }
+      if (along > 0) overlapping.push({ seconds: (tick + 1) * LAP_RACE_TICK_SECONDS, along });
+    }
+    let run = 0;
+    let longest = 0;
+    for (const [at, { seconds }] of overlapping.entries()) {
+      const before = overlapping[at - 1]?.seconds;
+      run =
+        before !== undefined && Math.abs(seconds - before - LAP_RACE_TICK_SECONDS) < 1e-9
+          ? run + 1
+          : 1;
+      longest = Math.max(longest, run);
+    }
+    // This seed does reach it: if this goes red because there is none, the
+    // limit is gone, and this case and the PR's notes should say so.
+    expect(overlapping.length).toBeGreaterThan(0);
+    // Only in the second after the swerve back across the grid, 2.0 to 3.0 s
+    // after Go; at most 17 ticks (0.85 s) in all; and, at worst,
+    // two bots 0.32 m apart on one line, 1.43 m inside each other along.
+    for (const { seconds } of overlapping) {
+      expect(seconds).toBeGreaterThanOrEqual(2);
+      expect(seconds).toBeLessThanOrEqual(3);
+    }
+    expect(overlapping.length).toBeLessThanOrEqual(17);
+    expect(longest).toBeLessThanOrEqual(17);
+    expect(Math.max(...overlapping.map(({ along }) => along))).toBeLessThanOrEqual(1.45);
+  });
+  it.each([
+    // At about 63 s a bot comes up on the rider's line with a bot beside it
+    // and has to hold behind them: it was drawn at 1.4 m/s and 16 m/s on
+    // alternate ticks for half a second.
+    { seed: 8 },
+    // At about 66 s two bots come up on the rider's line a bike length
+    // apart, and the front one, easing back, has the other right behind it:
+    // seen 0.45 s on, the two ease back together, and neither is drawn
+    // inside the rider.
+    { seed: 7 },
+    // At about 63 s a bot at 14 m/s comes up on the rider's line. Offered
+    // no place to hold a bike length clear of where the rider will be, it
+    // eased back past it, and was drawn at 2 m/s for a tick.
+    { seed: 21 },
+  ])(
+    'draws a bot held behind the rider at race speed smoothly, never giving way and closing up on alternate ticks (seed $seed, #2558’s review, finding A)',
+    ({ seed }) => {
+      // 120 s at a steady 8 m/s on the flat: the field reaches race speed, over
+      // 14 m/s, and comes up on the rider from a lap down.
+      const placed = rideFromTheGrid(() => 8, 2_400, seed);
+      expectSmooth(placed);
+      // And never braking hard at race speed (#2558's review, finding D):
+      // drawn under a quarter of its race speed, at over 6 m/s.
+      const braking = placed.flatMap(({ bots }, tick) =>
+        bots.flatMap((each, bot) => {
+          const drawn =
+            (each.along - (placed[tick - 1]?.bots[bot]?.along ?? Number.NaN)) /
+            LAP_RACE_TICK_SECONDS;
+          return each.speed > 6 && drawn < 0.25 * each.speed
+            ? [
+                `bot ${String(bot)}, tick ${String(tick)}: ${drawn.toFixed(2)} m/s, race ${each.speed.toFixed(2)} m/s`,
+              ]
+            : [];
+        }),
+      );
+      expect(braking).toEqual([]);
+      expectNeverAJump(placed);
+      expectNeverInside(placed);
+      // Not vacuous: the bots reached race speed, and came up behind the
+      // rider on their line at over 12 m/s, within three bike lengths.
+      const held = placed.filter(({ rider, bots }) =>
+        bots.some((each) => {
+          const behind = rider.along - each.along;
+          return (
+            each.speed > 12 &&
+            Math.abs(each.across - rider.across) < PACK_ABREAST_METRES &&
+            behind >= BIKE_LENGTH_METRES - 1e-9 &&
+            behind < 3 * BIKE_LENGTH_METRES
+          );
+        }),
+      );
+      expect(held.length).toBeGreaterThan(5);
+    },
+  );
   it.each([
     // The field comes past the rider down the hill, and round its own.
     { seed: 1, watts: 230 },
