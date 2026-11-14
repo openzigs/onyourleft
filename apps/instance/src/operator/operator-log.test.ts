@@ -21,7 +21,7 @@ import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import { openServingStore } from '../store/serving.ts';
 import type { OperatorLogEntry } from '../store/sql-store.ts';
-import { athleteFixture, deviceKeyFixture } from '../store/testing/index.ts';
+import { athleteFixture, deviceKeyFixture, migrateAllBut } from '../store/testing/index.ts';
 import { runCommand } from './run.ts';
 
 let directory: string | undefined;
@@ -38,8 +38,15 @@ interface Data {
 const SECRET = btoa(String.fromCharCode(...secretBytes(5)));
 const ORIGIN = 'https://ride.example';
 
+/** The last report a command printed, in this process. */
+let printed = '';
+
 async function cli(data: Data, args: readonly string[], input = ''): Promise<number> {
-  const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  printed = '';
+  const out = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    printed += String(chunk);
+    return true;
+  });
   const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   try {
     return await runCommand(args, {
@@ -157,5 +164,13 @@ describe('the operator CLI writes the operator log (#2602)', () => {
     const data = await migrated();
     expect(await cli(data, ['backup', join(directory ?? '', 'backups')])).toBe(0);
     expect(brief(await logOf(data))[0]).toEqual(['backup', 'blobs=0,removed=0', 'done']);
+  });
+
+  it('still takes a backup of a database from before the operator log, and says it is not logged', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-log-'));
+    const data = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
+    await migrateAllBut(data.database, 1);
+    expect(await cli(data, ['backup', join(directory, 'backups')])).toBe(0);
+    expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
   });
 });

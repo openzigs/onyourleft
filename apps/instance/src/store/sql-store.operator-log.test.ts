@@ -202,6 +202,20 @@ describe('the operator store function (#2602)', () => {
     expect(await h.read((store) => store.getAthlete('athlete-d'))).toBeUndefined();
   });
 
+  it('hands the change a store it cannot close: the transaction ends it', async () => {
+    const h = await withAthletes();
+    await expect(
+      h.write((store) =>
+        store.recordOperatorAction(FROM_THE_APP, async (inside) => {
+          await inside.close();
+          return { outcome: 'done', value: undefined };
+        }),
+      ),
+    ).rejects.toThrow(/closed by its transaction/);
+    // And the store it was handed by is still open: the failed entry is there.
+    expect(await h.read(wholeLog)).toMatchObject([{ outcome: 'failed' }]);
+  });
+
   it('pages newest first, below the id it is given', async () => {
     const h = await withAthletes();
     await h.write(async (store) => {
