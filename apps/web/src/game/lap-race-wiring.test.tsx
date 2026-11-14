@@ -784,8 +784,8 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // as #2524 rides the cases that read no frame. The drawn ride is this draft
     // source's drawing-view check (`blind-view-wiring.test.tsx`'s header): a
     // frame-to-trainer coupling that exists only in a drafted lap race makes it
-    // write other than the blind replay. Drawn, all three rides took 5.0 s under
-    // coverage on CI (the nightly of 2026-11-13 on #2561's branch).
+    // write other than the blind replay. Drawn, all three rides took 1.0 to
+    // 2.4 s under coverage on CI, as #2534's review measured them.
     //
     // #2546: the race holds the rider on the line through the countdown, and
     // its simulation is first advanced on Go's own frame; the ordinary ride
@@ -799,6 +799,9 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // draft reads (D-3.2): one `k` trace for both, so one ordinary ride.
     expect(on.trace).toStrictEqual(off.trace);
     expect(off.trace).toHaveLength(frames - (COUNTDOWN_FRAMES - 1));
+    // The items-off race is the drawn ride the frame-leak check rests on, and
+    // it drew past Go: a ride that stopped drawing would leave nothing to leak.
+    expect(off.drawn.length).toBeGreaterThan(COUNTDOWN_FRAMES);
     const aligned = [...Array<number>(COUNTDOWN_FRAMES - 1).fill(1), ...off.trace];
     // An ordinary ride, no race, ridden at the races' `k` trace.
     const replay = await rideOnce(undefined, { replay: aligned, frames, blind: true });
