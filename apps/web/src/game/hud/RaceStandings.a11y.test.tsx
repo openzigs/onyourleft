@@ -8,7 +8,7 @@
  * Where it is drawn is the browser gate's (`ride-room.browser.spec.ts` §"#1347").
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   altitudeMetres,
@@ -24,12 +24,15 @@ import { mount, type Mounted } from '../../testing/mount';
 import type { RaceStandingsView } from '../room-ride';
 import { atStartLine } from '../simulation';
 import { HudPanel } from './HudPanel';
+import { STANDINGS_SCROLL_LABEL } from './RaceStandings';
 
 let mounted: Mounted | undefined;
 
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function route(): ReturnType<typeof routeProfile> {
@@ -161,5 +164,74 @@ describe('a race’s standings on the HUD — #1347', () => {
   it('is not there at all without standings — a group ride, or before the room sends any', async () => {
     await hud(undefined);
     expect(document.querySelector('.oyl-hud__standings')).toBeNull();
+  });
+});
+
+/**
+ * #2599: where the room above the actions panel is short of every line, the
+ * list scrolls (the owner's ruling on PR #2621). jsdom lays nothing out, so
+ * the boxes are stubbed to that case: eight 25 px lines, room for four.
+ */
+function shortOfRoom(): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  );
+  Element.prototype.scrollTo = () => undefined;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const at = (top: number, bottom: number): DOMRect => ({
+      top,
+      bottom,
+      left: 700,
+      right: 1000,
+      x: 700,
+      y: top,
+      width: 300,
+      height: bottom - top,
+      toJSON: () => ({}),
+    });
+    if (this.classList.contains('oyl-hud__actions')) return at(425, 700);
+    if (this.classList.contains('oyl-hud__standings')) return at(280, 509);
+    if (this.classList.contains('oyl-hud__standings-scroll')) return at(300, 500);
+    if (this.tagName === 'LI') return at(300, 325);
+    return at(0, 0);
+  });
+}
+
+describe('a race’s standings that scroll — #2599', () => {
+  const EIGHT: RaceStandingsView = {
+    place: 8,
+    of: 8,
+    lines: Array.from({ length: 8 }, (_, index) => ({
+      riderId: index,
+      place: index + 1,
+      who: index === 7 ? 'You' : `Rider ${String(index + 1)}`,
+      gap: index === 7 ? '' : `−${String(8 - index)} s`,
+      figure: '3.5 W/kg',
+      flagged: false,
+      you: index === 7,
+    })),
+  };
+
+  it('is a named region a keyboard reaches, holding every line, and audits clean', async () => {
+    shortOfRoom();
+    await hud(EIGHT);
+    const region = document.querySelector<HTMLElement>('.oyl-hud__standings-scroll');
+    expect(region?.getAttribute('role')).toBe('region');
+    expect(region?.getAttribute('aria-label')).toBe(STANDINGS_SCROLL_LABEL);
+    expect(region?.tabIndex).toBe(0);
+    expect(region?.style.maxHeight).toBe('100px');
+    expect(region?.querySelectorAll('li')).toHaveLength(8);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('is no stop on the way to Pause where it does not scroll', async () => {
+    await hud(EIGHT);
+    const region = document.querySelector<HTMLElement>('.oyl-hud__standings-scroll');
+    expect(region?.hasAttribute('role')).toBe(false);
+    expect(region?.hasAttribute('tabindex')).toBe(false);
   });
 });

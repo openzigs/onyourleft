@@ -51,6 +51,8 @@ import {
   type Viewport,
 } from './ride-stage';
 
+import { STANDINGS_RETURN_MS } from '../src/game/hud/standings-follow';
+
 import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
 const TABLETS = new Set(['1280×800', '1024×768', '800×1280']);
@@ -303,16 +305,24 @@ test.describe('#1904 — the lap race measurement can fail', () => {
  *   tablet are the owner's 16 px apart (#2034);
  * - the trainer's line is inside the actions panel, on the stage, and the
  *   topmost thing at each of its corners, hit-tested;
- * - *Pause* and *End ride* are on the stage at 48 px or more (#669);
- * - on a tablet the standings are drawn with the rider's own line, and at
- *   1280×800 and upright, where there is room, with every line (§`ROOMY`
- *   says at which text sizes) — the whole field of #2328 gives way only
- *   where the room is short;
+ * - *Pause* and *End ride* are on the stage at 48 px or more (#669), and
+ *   *Show laps* 44 px or more;
+ * - on a tablet every line is in the document, the rider's own line is in
+ *   view, and where the list is shorter than its lines it is a named,
+ *   focusable region that scrolls inside itself (the owner's ruling on PR
+ *   #2621: scroll with a finger rather than hide lines);
+ * - at 1280×800 and upright, where there is room, every line is in view
+ *   without scrolling (§`ROOMY` says at which text sizes);
  * - and the FIRST frame drawn already has them off the actions panel (PR
  *   #2621's review): the room is measured before paint, not a frame later.
  *
- * The control puts every line back where the room is short, and the
- * standings are then over the actions panel at 1024×768.
+ * Then, at 1024×768, a rider scrolls it: by a finger's gesture, which never
+ * presses *Use item*, and by a wheel, after which the list eases back to the
+ * rider's own line {@link STANDINGS_RETURN_MS} after the last scroll —
+ * Playwright's clock, not a real wait.
+ *
+ * The control lets the list run its full height, and the standings are then
+ * over the actions panel at 1024×768.
  */
 
 const CORNER_STAGES = ['corner-back', 'corner-middle'] as const;
@@ -321,13 +331,11 @@ const CORNER_STAGES = ['corner-back', 'corner-middle'] as const;
 const CLEARANCE_PIXELS = 16;
 
 /**
- * Where every line is drawn, by text size: the owner's landscape tablet and
- * the upright one at the normal text, and the upright one at every size.
- * ⚠️ **Not 1280×800 at the large sizes**, measured: on the CI runner's fonts
- * the rider-4th stage draws 7 of 8 there at large and extra large text (the
- * room is a line short of the eighth), where a Mac draws 8 — PR #2621's
- * review asked for 8 of 8 at every size, and CI's first run of that check
- * said it is not so.
+ * Where every line is in view without scrolling, by text size: the owner's
+ * landscape tablet and the upright one at the normal text, and the upright
+ * one at every size. ⚠️ **Not 1280×800 at the large sizes**, measured: on the
+ * CI runner's fonts the room there is a line short of the eighth for the
+ * rider-4th stage at large and extra large text, where a Mac holds all 8.
  */
 const ROOMY: Readonly<Record<string, ReadonlySet<string>>> = {
   normal: new Set(['1280×800', '800×1280']),
@@ -335,12 +343,8 @@ const ROOMY: Readonly<Record<string, ReadonlySet<string>>> = {
   'extra-large': new Set(['800×1280']),
 };
 
-const LINES_GIVE_WAY_UNDONE = `
-  .oyl-hud .oyl-hud__standings-line--gives-way {
-    position: static !important; width: auto !important; height: auto !important;
-    margin: 0 !important; overflow: visible !important; clip-path: none !important;
-    white-space: normal !important;
-  }`;
+const LIST_HEIGHT_UNDONE = `
+  .oyl-hud .oyl-hud__standings-scroll { max-height: none !important; }`;
 
 const CORNER_CASES = [
   ...OVERLAY_VIEWPORTS.map((viewport) => ({ viewport, text: 'normal' })),
@@ -388,15 +392,54 @@ function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: 
     }
   }
   if (isTablet(viewport)) {
-    const drawn = stage.standingsLines.filter((line) => line.drawn);
-    if (!stage.standingsLines.some((line) => line.you && line.drawn)) {
-      faults.push('the rider’s own line gave way');
+    const inView = stage.standingsLines.filter((line) => line.inView);
+    if (!stage.standingsLines.some((line) => line.you && line.inView)) {
+      faults.push('the rider’s own line out of view');
     }
-    if (ROOMY[text]?.has(sized(viewport)) === true && drawn.length !== 8) {
-      faults.push(`${String(drawn.length)} of 8 lines drawn where there is room for all`);
+    if (ROOMY[text]?.has(sized(viewport)) === true && inView.length !== 8) {
+      faults.push(`${String(inView.length)} of 8 lines in view where there is room for all`);
+    }
+    const swap = stage.swap;
+    if (swap !== undefined && laidOut(swap) && swap.height < 44) {
+      faults.push(`Show laps ${swap.height.toFixed(0)} px tall`);
+    }
+    const list = stage.standingsList;
+    if (list === undefined) {
+      faults.push('no standings list');
+    } else if (list.scrollHeight > list.clientHeight + 1) {
+      // Shorter than its lines: it must scroll, inside itself, and be reachable.
+      if (!list.scrolls || list.overflowY !== 'auto') faults.push('the list does not scroll');
+      if (list.overscroll !== 'contain') faults.push(`the list's overscroll is ${list.overscroll}`);
+      if (list.role !== 'region' || list.label === null || list.tabIndex !== 0) {
+        faults.push('the list is not a named, focusable region');
+      }
     }
   }
   return faults;
+}
+
+/** The list's box and whether the rider's own line is in it, in the viewport, for a stage. */
+async function ownLine(
+  page: Page,
+  stage: string,
+): Promise<{ inView: boolean; scrollTop: number; x: number; y: number }> {
+  return page.evaluate((name) => {
+    const list = document.querySelector<HTMLElement>(
+      `[data-oyl-lap-race-stage="${name}"] .oyl-hud__standings-scroll`,
+    );
+    const own = list?.querySelector('.oyl-hud__standings-line--you');
+    if (list === null || list === undefined || own === null || own === undefined) {
+      throw new Error(`no list or own line on ${name}`);
+    }
+    const view = list.getBoundingClientRect();
+    const box = own.getBoundingClientRect();
+    return {
+      inView: box.top >= view.top - 1 && box.bottom <= view.bottom + 1,
+      scrollTop: list.scrollTop,
+      x: view.left + view.width / 2,
+      y: view.top + view.height / 2,
+    };
+  }, stage);
 }
 
 for (const { viewport, text } of CORNER_CASES) {
@@ -422,24 +465,96 @@ for (const { viewport, text } of CORNER_CASES) {
     }
     for (const stage of measured) {
       expect(stage.standingsLines.length, stage.stage).toBe(8);
-      const drawn = stage.standingsLines.filter((line) => line.drawn).length;
+      const inView = stage.standingsLines.filter((line) => line.inView).length;
       console.log(
-        `#2599 ${viewport.name}, ${text} text, ${stage.stage}: ${String(drawn)} of 8 lines drawn`,
+        `#2599 ${viewport.name}, ${text} text, ${stage.stage}: ${String(inView)} of 8 lines in view`,
       );
       expect(cornerFaults(stage, viewport, text), `${viewport.name}, ${stage.stage}`).toEqual([]);
     }
   });
 }
 
-test('#2599 the corner measurement can fail: every line drawn puts the standings on the actions panel at 1024×768', async ({
+test.describe('#2599 the standings scroll at 1024×768', () => {
+  const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
+  if (fourByThree === undefined) throw new Error('no 4:3 tablet');
+
+  test('scroll, hold every racer, and open on the rider’s own line', async ({ page }) => {
+    const measured = await open(page, fourByThree, '?corner=race&text=normal');
+    for (const stage of measured) {
+      const list = stage.standingsList;
+      expect(list?.scrolls, stage.stage).toBe(true);
+      expect(list?.scrollHeight ?? 0, stage.stage).toBeGreaterThan((list?.clientHeight ?? 0) + 1);
+      expect(stage.standingsLines.length, stage.stage).toBe(8);
+      expect(
+        stage.standingsLines.some((line) => line.you && line.inView),
+        `${stage.stage}: the own line in view on open`,
+      ).toBe(true);
+    }
+    // The rider last of eight: the list opens scrolled to its foot, more above.
+    expect(stageOf(measured, 'corner-back').standingsList?.more).toBe('above');
+  });
+
+  test('a finger’s scroll moves the list, never the page, and never presses Use item', async ({
+    page,
+  }) => {
+    await open(page, fourByThree, '?corner=race&text=normal');
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+    });
+    const before = await ownLine(page, 'corner-back');
+    const pageBefore = await page.evaluate(() => window.scrollY);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.synthesizeScrollGesture', {
+      x: Math.round(before.x),
+      y: Math.round(before.y),
+      yDistance: 120,
+      gestureSourceType: 'touch',
+      speed: 2_000,
+    });
+    const after = await ownLine(page, 'corner-back');
+    expect(after.scrollTop, 'the list scrolled up under the finger').toBeLessThan(before.scrollTop);
+    expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(pageBefore);
+    expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
+  });
+
+  for (const motion of ['no-preference', 'reduce'] as const) {
+    test(`eases back to the own line ${String(STANDINGS_RETURN_MS)} ms after the last scroll — motion ${motion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion: motion });
+      await page.clock.install();
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const opened = await ownLine(page, 'corner-back');
+      expect(opened.inView).toBe(true);
+      await page.mouse.move(opened.x, opened.y);
+      await page.mouse.wheel(0, -1_000);
+      await expect.poll(async () => (await ownLine(page, 'corner-back')).scrollTop).toBe(0);
+      expect((await ownLine(page, 'corner-back')).inView, 'scrolled away from the own line').toBe(
+        false,
+      );
+      await page.clock.runFor(STANDINGS_RETURN_MS - 500);
+      expect(
+        (await ownLine(page, 'corner-back')).inView,
+        'still the rider’s, before the time',
+      ).toBe(false);
+      await page.clock.runFor(1_000);
+      await expect.poll(async () => (await ownLine(page, 'corner-back')).inView).toBe(true);
+    });
+  }
+});
+
+test('#2599 the corner measurement can fail: the list at its full height is on the actions panel at 1024×768', async ({
   page,
 }) => {
   const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
   if (fourByThree === undefined) throw new Error('no 4:3 tablet to control at');
   await open(page, fourByThree, '?corner=race&text=normal');
-  await page.addStyleTag({ content: LINES_GIVE_WAY_UNDONE });
+  await page.addStyleTag({ content: LIST_HEIGHT_UNDONE });
   const undone = await remeasure(page);
   const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
-  console.log(`#2599 control, 1024×768 with every line drawn: ${faults.join('; ')}`);
+  console.log(`#2599 control, 1024×768 with the list at its full height: ${faults.join('; ')}`);
   expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
 });

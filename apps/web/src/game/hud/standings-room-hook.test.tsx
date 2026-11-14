@@ -115,7 +115,8 @@ describe('useStandingsRoom — measured again when the HUD changes (PR #2621)', 
     const added = document.createElement('div');
     hud.append(added);
     await delivered();
-    expect(fitOf(mounted.container)).toBe('4');
+    // Four lines of 25 px.
+    expect(fitOf(mounted.container)).toBe('100');
     expect(watched).toContain(added);
   });
 
@@ -126,6 +127,6 @@ describe('useStandingsRoom — measured again when the HUD changes (PR #2621)', 
     boxes.set('actions', { top: 450, bottom: 750, left: 680, right: 1000 });
     actions.style.marginTop = '-250px';
     await delivered();
-    expect(fitOf(mounted.container)).toBe('5');
+    expect(fitOf(mounted.container)).toBe('125');
   });
 });

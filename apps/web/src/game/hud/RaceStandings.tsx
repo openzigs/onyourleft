@@ -23,7 +23,11 @@
 import { useRef, type JSX, type ReactNode } from 'react';
 
 import { STANDINGS_TEXT, type RaceStandingsView } from '../room-ride';
-import { giveWayRanks, givesWay, useStandingsRoom } from './standings-room';
+import { useOwnLineInView } from './standings-follow';
+import { useStandingsRoom } from './standings-room';
+
+/** The scrolling list's name, for a screen reader and a keyboard (#2599). */
+export const STANDINGS_SCROLL_LABEL = 'All racers';
 
 export function RaceStandings(props: {
   readonly standings: RaceStandingsView;
@@ -31,12 +35,18 @@ export function RaceStandings(props: {
   readonly swap?: ReactNode;
 }): JSX.Element {
   const { lines, place, of } = props.standings;
-  // #2599: as many lines as the room above the actions panel holds, the
-  // furthest from the rider giving way first (`standings-room.ts`).
+  // #2599: the list as tall as the room above the actions panel holds, and
+  // scrolling under a finger where that is short of every line, opening on
+  // the rider's own line (`standings-room.ts`, `standings-follow.ts`).
   const panel = useRef<HTMLElement>(null);
-  const list = useRef<HTMLOListElement>(null);
-  const fit = useStandingsRoom(panel, list, lines.length);
-  const ranks = giveWayRanks(lines);
+  const list = useRef<HTMLDivElement>(null);
+  const room = useStandingsRoom(panel, list, lines.length);
+  useOwnLineInView(
+    list,
+    lines.findIndex((line) => line.you),
+    room,
+  );
+  const scrolls = room !== undefined;
   return (
     <section ref={panel} className="oyl-hud__panel oyl-hud__standings" aria-label="Race standings">
       {props.swap === undefined ? (
@@ -57,37 +67,54 @@ export function RaceStandings(props: {
         since #1967: a lap race keeps the leader above a window further back,
         so the places can jump after the first line.
       */}
-      <ol ref={list} className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
-        {lines.map((line, index) => (
-          <li
-            key={line.riderId}
-            className={[
-              'oyl-hud__standings-line',
-              line.you ? 'oyl-hud__standings-line--you' : '',
-              givesWay(ranks[index] ?? 0, fit) ? 'oyl-hud__standings-line--gives-way' : '',
-            ]
-              .filter((name) => name !== '')
-              .join(' ')}
-            aria-current={line.you ? 'true' : undefined}
-            value={line.place}
-          >
-            {/*
+      {/*
+        #2599: a named region a keyboard can reach and scroll with the arrow
+        keys, where the list scrolls — and a plain box where it does not, so
+        it is no extra stop on the way to Pause.
+      */}
+      <div
+        ref={list}
+        className="oyl-hud__standings-scroll"
+        {...(scrolls
+          ? {
+              role: 'region',
+              'aria-label': STANDINGS_SCROLL_LABEL,
+              tabIndex: 0,
+              style: { maxHeight: room },
+              'data-oyl-scrolls': '',
+            }
+          : {})}
+      >
+        <ol className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
+          {lines.map((line) => (
+            <li
+              key={line.riderId}
+              className={
+                line.you
+                  ? 'oyl-hud__standings-line oyl-hud__standings-line--you'
+                  : 'oyl-hud__standings-line'
+              }
+              aria-current={line.you ? 'true' : undefined}
+              value={line.place}
+            >
+              {/*
               The spaces between the parts are the words' own: a screen
               reader reads a line as one run of text, and "1Ann−8 s" is not
               a line anybody could follow. The grid drops them visually.
             */}
-            <span className="oyl-hud__standings-place">{line.place}</span>{' '}
-            <span className="oyl-hud__standings-who">{line.who}</span>{' '}
-            <span className="oyl-hud__standings-gap">{line.gap}</span>{' '}
-            <span className="oyl-hud__standings-figure">
-              {line.figure}
-              {line.flagged ? (
-                <span className="oyl-hud__standings-flag"> {STANDINGS_TEXT.flagged}</span>
-              ) : null}
-            </span>
-          </li>
-        ))}
-      </ol>
+              <span className="oyl-hud__standings-place">{line.place}</span>{' '}
+              <span className="oyl-hud__standings-who">{line.who}</span>{' '}
+              <span className="oyl-hud__standings-gap">{line.gap}</span>{' '}
+              <span className="oyl-hud__standings-figure">
+                {line.figure}
+                {line.flagged ? (
+                  <span className="oyl-hud__standings-flag"> {STANDINGS_TEXT.flagged}</span>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
     </section>
   );
 }

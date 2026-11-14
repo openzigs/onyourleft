@@ -133,12 +133,33 @@ export interface LapRaceStageMeasurement {
    * boxes are read.
    */
   readonly trainer: { readonly box: Box; readonly topmost: boolean } | undefined;
-  /** Each line of the standings, by its text, and whether it is drawn at a size. */
+  /**
+   * Each line of the standings, by its text, and whether it is in view: laid
+   * out at a size and wholly inside the list's own box, where it scrolls.
+   */
   readonly standingsLines: readonly {
     readonly text: string;
     readonly you: boolean;
-    readonly drawn: boolean;
+    readonly inView: boolean;
   }[];
+  /** The standings' list (#2599): where it scrolls, and what a screen reader and a keyboard meet. */
+  readonly standingsList:
+    | {
+        readonly box: Box;
+        readonly scrolls: boolean;
+        readonly clientHeight: number;
+        readonly scrollHeight: number;
+        readonly scrollTop: number;
+        readonly role: string | null;
+        readonly label: string | null;
+        readonly tabIndex: number;
+        readonly overflowY: string;
+        readonly overscroll: string;
+        readonly more: string | null;
+      }
+    | undefined;
+  /** *Show laps*, where the standings carry it (#2080). */
+  readonly swap: Box | undefined;
 }
 
 /** One stage's standings and actions panel in the first frame drawn. */
@@ -161,6 +182,8 @@ declare global {
      * `ResizeObserver` delivers. `undefined` until then.
      */
     __oylLapRaceHudFirstFrame?: readonly FirstFrame[];
+    /** #2599: the times the corner's *Use item* was asked for. */
+    __oylLapRaceHudItemsUsed?: number;
   }
 }
 
@@ -379,6 +402,13 @@ const CORNER_STAGES: readonly { readonly stage: string; readonly race: ItemRaceS
   { stage: 'corner-middle', race: holding(raceOfEight(3), RIDER, 'tailwind') },
 ];
 
+/** #2599: how many times *Use item* was asked for, so a scroll is shown never to be a tap on it. */
+const ITEMS = {
+  useItem: (): void => {
+    window.__oylLapRaceHudItemsUsed = (window.__oylLapRaceHudItemsUsed ?? 0) + 1;
+  },
+};
+
 function Corner(): JSX.Element {
   return (
     <div>
@@ -405,7 +435,7 @@ function Corner(): JSX.Element {
             layout={CORNER_LAYOUT}
             laps={CORNER_LAPS}
             lapSeconds={59 * 60 + 59}
-            items={{ useItem: () => undefined }}
+            items={ITEMS}
             lapRace={hudOf(race)}
             standings={lapRaceStandings(hudOf(race))}
           />
@@ -475,6 +505,8 @@ function measure(): readonly LapRaceStageMeasurement[] {
     const standings = stage.querySelector('.oyl-hud__standings');
     const actions = stage.querySelector('.oyl-hud__actions');
     const trainer = stage.querySelector('.oyl-hud__trainer');
+    const list = stage.querySelector<HTMLElement>('.oyl-hud__standings-scroll');
+    const swap = stage.querySelector('.oyl-hud__standings .oyl-hud__swap');
     return {
       stage: stage.getAttribute('data-oyl-lap-race-stage') ?? '',
       panels: [...stage.querySelectorAll('.oyl-hud__panel')]
@@ -504,12 +536,35 @@ function measure(): readonly LapRaceStageMeasurement[] {
         trainer === null ? undefined : { box: boxIn(trainer, origin), topmost: topmost(trainer) },
       standingsLines: [...stage.querySelectorAll('.oyl-hud__standings-line')].map((line) => {
         const box = line.getBoundingClientRect();
+        const view = list?.getBoundingClientRect();
         return {
           text: textOf(line),
           you: line.classList.contains('oyl-hud__standings-line--you'),
-          drawn: box.width > 1 && box.height > 1,
+          inView:
+            box.width > 1 &&
+            box.height > 1 &&
+            view !== undefined &&
+            box.top >= view.top - 1 &&
+            box.bottom <= view.bottom + 1,
         };
       }),
+      standingsList:
+        list === null
+          ? undefined
+          : {
+              box: boxIn(list, origin),
+              scrolls: list.hasAttribute('data-oyl-scrolls'),
+              clientHeight: list.clientHeight,
+              scrollHeight: list.scrollHeight,
+              scrollTop: list.scrollTop,
+              role: list.getAttribute('role'),
+              label: list.getAttribute('aria-label'),
+              tabIndex: list.tabIndex,
+              overflowY: window.getComputedStyle(list).overflowY,
+              overscroll: window.getComputedStyle(list).overscrollBehaviorY,
+              more: list.getAttribute('data-oyl-more'),
+            },
+      swap: swap === null ? undefined : boxIn(swap, origin),
     };
   });
 }
@@ -527,10 +582,10 @@ function firstFrame(): readonly FirstFrame[] {
   });
 }
 
-/** Each stage's count of standings lines that gave way, in document order. */
-function givenWay(): string {
-  return [...document.querySelectorAll('[data-oyl-lap-race-stage]')]
-    .map((stage) => stage.querySelectorAll('.oyl-hud__standings-line--gives-way').length)
+/** Each stage's standings list, as tall as it is drawn and as far as it is scrolled. */
+function listState(): string {
+  return [...document.querySelectorAll('.oyl-hud__standings-scroll')]
+    .map((list) => `${String(list.clientHeight)}@${String(list.scrollTop)}`)
     .join(',');
 }
 
@@ -539,17 +594,18 @@ const MOST_SETTLING_FRAMES = 120;
 
 /**
  * #2599, PR #2621's review: the standings measure again when a panel changes
- * size — the fonts arriving among them — and draw the lines that fit a frame
- * later. Ready once two frames running give way the same lines on every
- * stage, rather than after a fixed count of frames.
+ * size — the fonts arriving among them — and set the list's height a frame
+ * later, and scroll it to the rider's own line. Ready once two frames running
+ * draw every stage's list at the same height and scroll, rather than after a
+ * fixed count of frames.
  */
 async function settled(): Promise<void> {
   const frame = (): Promise<unknown> => new Promise((resolve) => requestAnimationFrame(resolve));
   await frame();
-  let before = givenWay();
+  let before = listState();
   for (let count = 0; count < MOST_SETTLING_FRAMES; count += 1) {
     await frame();
-    const now = givenWay();
+    const now = listState();
     if (now === before) return;
     before = now;
   }

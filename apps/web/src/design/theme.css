@@ -9572,7 +9572,8 @@ select.oyl-input {
  * On a tablet it is a panel of its own in the notices row, at the END edge,
  * top-aligned under the secondary readings — a notice keeps the start edge,
  * so the two never meet (22 rem + 18 rem is under the narrowest tablet's 50).
- * Above the actions panel it draws only the lines that fit (#2599, below).
+ * Above the actions panel its list is as tall as the room holds, and scrolls
+ * where that is short of every line (#2599, below).
  * `ride-room.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
  * of the leaning rider at all three, both with anchor positioning and without.
  */
@@ -9673,23 +9674,40 @@ select.oyl-input {
   font-size: var(--oyl-font-size-sm);
 }
 
-/* #2599: a line the room above the actions panel does not hold. The grid row
-   the standings sit in is `minmax(0, 1fr)`, so nothing here stopped eight
-   lines running down over the trainer's line and *Pause* on the 4:3 tablet;
-   `standings-room.ts` measures the room and says which lines give way — the
-   furthest from the rider first, the rider's own last. Hidden by clip, so a
-   screen reader still reads the whole list (ADR 0051 D-7).
-   `lap-race-hud.browser.spec.ts` §"#2599" measures it. */
-.oyl-hud .oyl-hud__standings-line--gives-way {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
+/* #2599: a race's standings that scroll. The grid row the standings sit in
+   is `minmax(0, 1fr)`, so nothing here stopped eight lines running down over
+   the trainer's line and *Pause* on the 4:3 tablet; `standings-room.ts`
+   measures the room above the actions panel and sets the list's height to
+   the whole lines it holds, and where that is short of every line the list
+   scrolls under a finger (the owner's ruling on PR #2621) — inside itself,
+   never the HUD or the page — opening on the rider's own line
+   (`standings-follow.ts`). The edge with more beyond it fades, so a rider
+   sees there is more. Every line stays in the document for a screen reader.
+   `lap-race-hud.browser.spec.ts` §"#2599" measures and scrolls it. */
+.oyl-hud .oyl-hud__standings-scroll[data-oyl-scrolls] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  position: relative;
+}
+
+.oyl-hud .oyl-hud__standings-scroll[data-oyl-more='above'] {
+  mask-image: linear-gradient(to bottom, transparent, currentcolor 1rem);
+}
+
+.oyl-hud .oyl-hud__standings-scroll[data-oyl-more='below'] {
+  mask-image: linear-gradient(to top, transparent, currentcolor 1rem);
+}
+
+.oyl-hud .oyl-hud__standings-scroll[data-oyl-more='above below'] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    currentcolor 1rem,
+    currentcolor calc(100% - 1rem),
+    transparent
+  );
 }
 
 /*
