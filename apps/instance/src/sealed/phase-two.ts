@@ -16,6 +16,8 @@
  * rider from a race's result, by their row, in the room moderation row. Its
  * amendment of 2026-11-05 (#68) adds a row of its own: published segments,
  * the efforts shared on them and their leaderboards, sealed from the first.
+ * Its amendment of 2026-11-14 (#2602) adds the owner's Operate area, whose
+ * routes are not served at all on an instance that seals nothing.
  *
  * The COMMITTED list, as `phase-one.ts` is, and held to the route table the
  * same way: `sealed/phase-one.test.ts` compares the table with BOTH lists in
@@ -50,6 +52,8 @@ const ROOM_MODERATION =
   'A report from inside a room, a block from a race’s result, and a host removing a rider from their room';
 /** The row ADR 0047's amendment of 2026-11-05 adds (#68). */
 const SEGMENTS = 'Published segments, the efforts riders share on them, and their leaderboards';
+/** The row ADR 0047's amendment of 2026-11-14 adds (#2602). */
+const OPERATE = 'The owner’s Operate area: running the instance from the app';
 
 export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // Every sign-in, a key the instance holds included; registering a new key
@@ -107,4 +111,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // #69, in the same row: a rider's flags on an effort and on a segment.
   only('POST', '/v1/segments/{segmentId}/efforts/{effortId}/flag', SEGMENTS),
   only('POST', '/v1/segments/{segmentId}/hazard', SEGMENTS),
+  // #2602, ADR 0047's amendment of 2026-11-14: the owner's Operate area,
+  // sealed from the first and never served where nothing is sealed.
+  only('GET', '/v1/operate/log', OPERATE),
 ];

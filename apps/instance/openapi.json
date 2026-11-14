@@ -7338,6 +7338,132 @@
         }
       }
     },
+    "/v1/operate/log": {
+      "get": {
+        "operationId": "getOperatorLog",
+        "summary": "The operator log (#2602): every action taken as the instance’s operator, from the app or the CLI on the host, NEWEST first, a page at a time — `?limit=` (1–200, default 50) and `?cursor=` from the page before. Append-only. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "app",
+                              "cli"
+                            ]
+                          },
+                          "action": {
+                            "type": "string",
+                            "enum": [
+                              "migrate",
+                              "backup",
+                              "restore",
+                              "room_open",
+                              "model_key_set",
+                              "model_key_clear",
+                              "instance_key_init",
+                              "instance_key_rotate",
+                              "instance_key_rotate_identity",
+                              "instance_key_reset",
+                              "load_accounts_add",
+                              "load_accounts_erase",
+                              "account_erase"
+                            ]
+                          },
+                          "detail": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "refused",
+                              "failed"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "source",
+                          "action",
+                          "detail",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/reports": {
       "post": {
         "operationId": "reportAthlete",

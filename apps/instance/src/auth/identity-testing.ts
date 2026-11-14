@@ -62,6 +62,7 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
+import { createOperate } from '../operate/operate.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
 import { sealFor } from '../sealed/sealed-testing.ts';
 import { matchPath } from '../handler.ts';
@@ -309,6 +310,8 @@ export async function startIdentityInstance(
     observe?: (route: string | null, status: number, code: string | undefined) => void;
     /** The rooms' Discord voice (#874), as `instance.ts` hands it to them: none unless a test's. */
     voice?: RoomVoice;
+    /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
+    withoutOperate?: boolean;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -338,6 +341,7 @@ export async function startIdentityInstance(
     hostedFetch,
     observe,
     voice,
+    withoutOperate,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -503,6 +507,7 @@ export async function startIdentityInstance(
       identity,
       sync,
       segments,
+      ...(withoutOperate === true ? {} : { operate: createOperate({ store }) }),
       history,
       rooms,
       instanceKeys,

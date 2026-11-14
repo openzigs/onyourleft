@@ -132,12 +132,29 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     }
     const blobs = createDiskBlobStore(second.blobs);
     for (const key of keys) expect(await blobs.has(key)).toBe(true);
+    // Every row the snapshot held, and the restore's own entry in the
+    // operator log of the database it restored (#2602).
+    const snapshotRows = backup.report.rows as Record<string, number>;
     expect(run(second, 'verify').report).toEqual({
       command: 'verify',
       integrity: true,
-      rows: backup.report.rows,
+      rows: { ...snapshotRows, operator_log: (snapshotRows.operator_log ?? 0) + 1 },
       blobs: 2,
     });
+    expect(backup.report.logged).toBe(true);
+    expect(restored.report.logged).toBe(true);
+    const log = openServingStore(second.database);
+    try {
+      expect((await log.listOperatorLogPage(undefined, 1))[0]).toMatchObject({
+        source: 'cli',
+        actorAthleteId: null,
+        action: 'restore',
+        detail: 'blobs=2,keys_not_rotated',
+        outcome: 'done',
+      });
+    } finally {
+      await log.close();
+    }
   });
 
   // Two cases, not one (#2568): six child processes in one case took 3.8 s
@@ -218,7 +235,22 @@ describe('a restore is checked before it replaces anything — #895 review N1, N
     const failed = run(live, 'restore', short, '--force');
     expect(failed.status).toBe(1);
     expect(failed.stderr).toContain('Nothing in place was changed');
-    expect(run(live, 'verify').report).toEqual(before);
+    // Nothing but the attempt, logged as failed in the operator log (#2602).
+    const beforeRows = before.rows as Record<string, number>;
+    expect(run(live, 'verify').report).toEqual({
+      ...before,
+      rows: { ...beforeRows, operator_log: (beforeRows.operator_log ?? 0) + 1 },
+    });
+    const log = openServingStore(live.database);
+    try {
+      expect((await log.listOperatorLogPage(undefined, 1))[0]).toMatchObject({
+        action: 'restore',
+        outcome: 'failed',
+        detail: null,
+      });
+    } finally {
+      await log.close();
+    }
     expect(existsSync(`${live.database}.restoring`)).toBe(false);
   });
 

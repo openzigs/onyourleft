@@ -361,6 +361,11 @@ Reports other riders made **about** them stay in your queue, so you can still de
 ⚠️ **Migrating the database back past migration 0007 would delete the log**, so `migrate … down`
 refuses to undo 0007 while the log holds a single entry, and changes nothing.
 
+The **operator log** (#2602, migration 0040) — what the owner did as the instance's operator, from
+the app's Operate area or the CLI — is kept the same way: append-only in the schema, **kept when an
+account is erased**, and refused to `migrate … down` while it holds an entry
+([`operating-an-instance.md`](operating-an-instance.md) §"The Operate area").
+
 ## What a suspension does not do
 
 - **It does not delete anything.** The rider's rides, keys and history stay on the instance and on

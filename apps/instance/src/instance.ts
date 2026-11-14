@@ -54,6 +54,7 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
+import { createOperate } from './operate/operate.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
 import { createDiscordClient } from './voice/discord.ts';
@@ -829,6 +830,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             sealed: createSealed({ store, now }),
             ...(sync === undefined ? {} : { sync }),
             ...(segments === undefined ? {} : { segments }),
+            // #2602: the owner's Operate area. Every route of it is sealed
+            // only, and the handler answers `unavailable` where nothing is.
+            operate: createOperate({ store }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
             ...(sidePose === undefined ? {} : { sidePose }),
