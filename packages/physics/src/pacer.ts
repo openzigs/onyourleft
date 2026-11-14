@@ -89,12 +89,15 @@ import {
   gradeAt,
   kilograms,
   metres,
+  metresPerSecond,
   pacedPowerWatts,
   seconds,
 } from '@onyourleft/domain';
 
 import type { PhysicsCoefficients } from './coefficients';
+import { withDefaultCoefficients, withDragArea } from './coefficients';
 import { PhysicsError } from './physics-error';
+import { powerRequired } from './power';
 import type { RideConditions, RideState } from './simulate';
 import { advance, START_OF_RIDE } from './simulate';
 
@@ -152,15 +155,32 @@ export interface BotTick {
  */
 export const BOT_AT_START_LINE: RideState = START_OF_RIDE;
 
-/** The conditions the bot's tick runs under, with the plan's mass in them. */
-function conditionsFor(course: BotCourse): RideConditions {
+/**
+ * The conditions the bot's tick runs under, with the plan's mass in them, and
+ * ADR 0038's draft multiplier `k` on its `C_D·A` (#2460, ADR 0067 D-3.1): `1`,
+ * riding alone, is the course's own coefficients to the bit.
+ */
+function conditionsFor(course: BotCourse, dragFactor = 1): RideConditions {
+  if (!(dragFactor > 0 && dragFactor <= 1)) {
+    throw new PhysicsError('a draft multiplier is in (0, 1]');
+  }
+  const coefficients = withDefaultCoefficients(course.coefficients);
+  const drafted =
+    dragFactor === 1
+      ? course.coefficients
+      : {
+          ...course.coefficients,
+          ...withDragArea(
+            dragFactor * coefficients.dragCoefficient * coefficients.frontalAreaSquareMetres,
+          ),
+        };
   return {
     totalMass: kilograms(course.plan.massKilograms),
     airDensityKilogramsPerCubicMetre: course.airDensityKilogramsPerCubicMetre,
     ...(course.headwindMetresPerSecond === undefined
       ? {}
       : { headwindMetresPerSecond: course.headwindMetresPerSecond }),
-    ...(course.coefficients === undefined ? {} : { coefficients: course.coefficients }),
+    ...(drafted === undefined ? {} : { coefficients: drafted }),
     ...(course.integrationStepSeconds === undefined
       ? {}
       : { integrationStepSeconds: course.integrationStepSeconds }),
@@ -202,11 +222,13 @@ export function botDemand(
  * stop reporting a position for the rest of the ride.
  */
 export function advanceBot(state: RideState, elapsed: Seconds, course: BotCourse): BotTick {
-  return rideTick(state, elapsed, course, undefined);
+  return rideTick(state, elapsed, course, undefined, 1);
 }
 
 /**
- * {@link advanceBot}, at a power a lap-race bot's plan chose (#1960, ADR 0061).
+ * {@link advanceBot}, at a power a lap-race bot's plan chose (#1960, ADR 0061),
+ * and since #2460 in the draft its place in the field gives it (ADR 0067 D-3):
+ * `dragFactor` is ADR 0038's `k` on its `C_D·A`, and nothing else changes.
  *
  * ⚠️ **Internal to this package**: `index.ts` does not export it, and
  * `lap-race-bot.ts` is its one caller (`pacer.test.ts` holds both). The power is
@@ -221,8 +243,42 @@ export function advancePlannedBot(
   elapsed: Seconds,
   course: BotCourse,
   power: Watts,
+  dragFactor = 1,
 ): BotTick {
-  return rideTick(state, elapsed, course, power);
+  return rideTick(state, elapsed, course, power, dragFactor);
+}
+
+/**
+ * The power, watts, that holds a bot at `speedMetresPerSecond` on the road
+ * under it, at draft multiplier `dragFactor` (#2542): Martin's steady-state
+ * balance through {@link powerRequired}, at the same mass, air, wind and
+ * coefficients its tick rides through {@link advance}. **Signed**: a descent
+ * steep enough to carry it faster asks for less than nothing. What a lap-race
+ * bot holding a wheel feeds forward.
+ *
+ * ⚠️ **Internal to this package**, as {@link advancePlannedBot} is.
+ *
+ * @throws {PhysicsError} for a draft multiplier outside (0, 1], and through
+ * {@link powerRequired}.
+ */
+export function botHoldWatts(
+  state: RideState,
+  course: BotCourse,
+  speedMetresPerSecond: number,
+  dragFactor = 1,
+): number {
+  const ride = conditionsFor(course, dragFactor);
+  const required = powerRequired({
+    groundSpeed: metresPerSecond(Math.max(0, speedMetresPerSecond)),
+    totalMass: ride.totalMass,
+    grade: botDemand(state, course).grade,
+    airDensityKilogramsPerCubicMetre: ride.airDensityKilogramsPerCubicMetre,
+    ...(ride.headwindMetresPerSecond === undefined
+      ? {}
+      : { headwindMetresPerSecond: ride.headwindMetresPerSecond }),
+    ...(ride.coefficients === undefined ? {} : { coefficients: ride.coefficients }),
+  });
+  return required.totalWatts;
 }
 
 /** The one bot tick: the pacing rule's power, or the plan's where one is handed in. */
@@ -231,6 +287,7 @@ function rideTick(
   elapsed: Seconds,
   course: BotCourse,
   power: Watts | undefined,
+  dragFactor: number,
 ): BotTick {
   if (!Number.isFinite(elapsed)) {
     throw new PhysicsError(
@@ -242,7 +299,7 @@ function rideTick(
   const next = advance(
     state,
     { power: ridden, grade: demand.grade, duration: elapsed },
-    conditionsFor(course),
+    conditionsFor(course, dragFactor),
   );
   return { state: next, ...demand, power: ridden };
 }

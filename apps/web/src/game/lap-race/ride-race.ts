@@ -26,6 +26,20 @@
  * one power trace as an ordinary ride and as a race with items off and on,
  * and holds every grade written and its time equal.
  *
+ * ## The rider gives and takes a draft (#2461, ADR 0067 D-3)
+ *
+ * With ADR 0066 D-6's switch on ({@link LapRaceRideStart.draft}), every racer
+ * drafts on effort distance, the rider included: `stepBotRace` makes the one
+ * `fieldDraftFactors` call for the field each tick, and the rider's `k` from
+ * it is {@link LapRaceRide.riderDraft}. `GameView` rides the rider at that `k`
+ * through the simulation's `draftWith`, a room's own call, so a draft reaches
+ * the trainer only the way riding harder does (ADR 0066 D-7, ADR 0067 D-3.3):
+ * the rider arrives at the next grade sooner. The `k` is read after the frame's
+ * steps, so it rides the next frame's, as a room's prediction does. With the
+ * switch off, no racer drafts and the race is the race before #2461 to the bit.
+ * `lap-race-wiring.test.tsx` holds a race with the switch on to an ordinary
+ * ride ridden at the same `k`, step for step (D-3.6).
+ *
  * ## The steps that ran, and only those
  *
  * As Delivery's round (`delivery/ride-round.ts` §"The steps that ran"): one
@@ -74,6 +88,7 @@ import {
   BOT_MASS_KILOGRAMS,
   botFieldPaces,
   botFieldPersonalities,
+  botFieldSkills,
   createItemRace,
   racePosition,
   raceCourse,
@@ -110,6 +125,13 @@ import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
 import {
+  drawnShift,
+  gridPackLayout,
+  stepPackLayout,
+  type PackLayout,
+  type PackRacer,
+} from './pack-layout';
+import {
   askLane,
   askToUseItem,
   riderTick,
@@ -120,13 +142,6 @@ import {
 
 /** The race's length of one tick: the simulation's step, `simulation.ts` §`SIMULATION_STEP_SECONDS`. */
 export const LAP_RACE_TICK_SECONDS = 0.05;
-
-/**
- * How well a solo race's bots choose (#1959): the middle of
- * `@onyourleft/domain` §`BOT_SKILLS`, until the chooser offers it beside the
- * tier, in words the owner approves.
- */
-const LAP_RACE_BOT_SKILL: BotSkill = 'canny';
 
 /**
  * How long a solo race counts down on its line before Go — #2546, the owner's
@@ -156,6 +171,22 @@ export interface LapRaceRide {
   readonly names: Readonly<Record<string, string>>;
   /** What is still to be said about the race (`hud/lap-race-announce.ts`). */
   readonly owed: LapRaceOwed;
+  /** Whether every racer drafts, the rider included: ADR 0066 D-6's switch at the press (D-3.4). */
+  readonly draft: boolean;
+  /** The rider's mass, kilograms, for the W/kg the bots read of them (#2463); absent, they read none. */
+  readonly riderMassKilograms: number | undefined;
+  /**
+   * The rider's draft multiplier `k` on the last tick, from the field's one
+   * `fieldDraftFactors` call (#2461): `1` alone, before the first tick, and
+   * always with {@link draft} off. The simulation rides the rider at it.
+   */
+  readonly riderDraft: number;
+  /**
+   * Where the drawing lays the field out (#2544, `pack-layout.ts`): each bot's
+   * row, a bike length a row, and its place across its lane, stepped with the
+   * race. Drawing only: the race never reads it.
+   */
+  readonly pack: PackLayout;
   /**
    * How much of the countdown is left, ms of the ride's unpaused frames: the
    * rider is held on the line until it is nought (#2546). @see countLapRaceDown
@@ -175,6 +206,17 @@ export interface LapRaceRideStart {
   readonly lineOffset: number;
   /** The device's storage, for the assisted setting (`assist-preference.ts`). */
   readonly storage: PreferenceStorage | undefined;
+  /**
+   * Whether the race drafts, every racer and the rider alike: ADR 0066 D-6's
+   * switch (`solo-draft-preference.ts`), which ADR 0067 D-3.4 extends to the
+   * lap race. Absent, no racer drafts.
+   */
+  readonly draft?: boolean | undefined;
+  /**
+   * The rider's mass, kilograms: the bots read the rider's power as W/kg
+   * (#2463, ADR 0067 D-0), as the standings show it. Absent, they read none.
+   */
+  readonly riderMassKilograms?: number | undefined;
 }
 
 /**
@@ -257,6 +299,9 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
   const personalities = botFieldPersonalities(seed, ids.length);
+  // #2463, ADR 0067 D-7: each bot its tactics skill from the race's seed, so a
+  // field misjudges the race by different amounts, and is never all of one.
+  const skills = botFieldSkills(seed, ids.length);
   // #2455: each bot its own ability and pacing style, from the race's seed,
   // so the field spreads into a race rather than riding as one.
   const paces = botFieldPaces(seed, ids.length);
@@ -273,24 +318,27 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
       LAP_RACE_RIDER_ID,
     ),
   );
+  // A mixed field: the three personalities, the three skills and the five
+  // pacing styles (each its archetype, #2459) in turn, and an ability each,
+  // from the race's seed.
+  const bots = ids.map((id, index) =>
+    lapRaceBot(
+      id,
+      tier,
+      {
+        personality: personalities[index] as BotPersonality,
+        skill: skills[index] as BotSkill,
+      },
+      paces[index] as BotPace,
+    ),
+  );
+  const riderInput = startRiderInput(input.lineOffset);
   return {
     race,
-    // A mixed field: the three personalities and the five pacing styles in
-    // turn, and an ability each, from the race's seed.
-    bots: ids.map((id, index) =>
-      lapRaceBot(
-        id,
-        tier,
-        {
-          personality: personalities[index] as BotPersonality,
-          skill: LAP_RACE_BOT_SKILL,
-        },
-        paces[index] as BotPace,
-      ),
-    ),
+    bots,
     seed,
     assist,
-    input: startRiderInput(input.lineOffset),
+    input: riderInput,
     startAlong: input.riderDistance,
     along: input.riderDistance,
     conditions: input.conditions,
@@ -298,8 +346,35 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
       ids.map((id, index) => [id, botName((paces[index] as BotPace).style, index + 1)]),
     ),
     owed: lapRaceOwedAtStart(race, LAP_RACE_RIDER_ID),
+    draft: input.draft === true,
+    riderMassKilograms: input.riderMassKilograms,
+    riderDraft: 1,
+    // The owner's ruling of 2026-11-13 on #2544: the pack forms on the line.
+    // Every bot stands in its place on the grid through the countdown, so the
+    // field rolls off together at Go (`pack-layout.ts` §"On the grid").
+    pack: gridPackLayout(packField(race, bots, riderInput, 0), LAP_RACE_RIDER_ID),
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
   };
+}
+
+/**
+ * The field as the pack layout reads it (#2544): every racer's race place and
+ * lane, the rider where they steered, and each bot's speed.
+ */
+function packField(
+  race: ItemRaceState,
+  bots: readonly LapRaceBot[],
+  input: RiderRaceInput,
+  riderSpeed: number,
+): PackRacer[] {
+  const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
+  speeds.set(LAP_RACE_RIDER_ID, riderSpeed);
+  return race.racers.map((entry) => ({
+    id: entry.racer.id,
+    along: racePosition(entry.racer),
+    lateral: entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
+    speed: speeds.get(entry.racer.id) ?? 0,
+  }));
 }
 
 /** Whether the race is still counting down on its line, so nothing of it may move (#2546). */
@@ -361,6 +436,11 @@ export interface LapRaceRideStep {
   readonly ticks: number;
   /** The rider's odometer after them, metres: the simulation's own. */
   readonly along: number;
+  /**
+   * The rider's power on this frame, watts, or absent with no live reading:
+   * what the bots read of the rider as W/kg (#2463). Read only by the bots.
+   */
+  readonly riderWatts?: number | undefined;
 }
 
 /**
@@ -381,7 +461,18 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   const from = ride.along;
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
-  let { race, bots, input, owed } = ride;
+  const mass = ride.riderMassKilograms;
+  // A mass that is not above 0 would turn the watts into Infinity or NaN for
+  // the bots to read, so the bots read no W/kg then: this is the boundary
+  // of an optional field, not a case the rider's own mass reaches.
+  const riderWattsPerKilogram =
+    step.riderWatts === undefined || mass === undefined || !(mass > 0)
+      ? undefined
+      : step.riderWatts / mass;
+  let { race, bots, input, owed, riderDraft, pack } = ride;
+  // The rider's speed on effort distance over the step, which the pack layout
+  // reads to see a pass coming (#2544).
+  const riderSpeed = (to - from) / (ticks * LAP_RACE_TICK_SECONDS);
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
@@ -398,6 +489,8 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       elapsed: seconds(LAP_RACE_TICK_SECONDS),
       conditions: ride.conditions,
       seed: ride.seed,
+      draft: ride.draft,
+      ...(riderWattsPerKilogram === undefined ? {} : { riderWattsPerKilogram }),
       rider: {
         effortDistances: rider.effortDistances,
         ...(rider.lanes === undefined ? {} : { lanes: rider.lanes }),
@@ -406,6 +499,16 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     });
     race = stepped.race;
     bots = stepped.bots;
+    // #2461: the rider's `k` from the same call that drafted the bots.
+    riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
+    // #2544: the field laid out for the drawing, a tick on, the rider where
+    // they steered.
+    pack = stepPackLayout(
+      packField(race, bots, input, riderSpeed),
+      LAP_RACE_RIDER_ID,
+      pack,
+      LAP_RACE_TICK_SECONDS,
+    );
     owed = oweRaceTick(
       owed,
       before,
@@ -414,7 +517,7 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
     );
   }
-  return { ...ride, race, bots, input, owed, along: to };
+  return { ...ride, race, bots, input, owed, riderDraft, pack, along: to };
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
@@ -471,13 +574,23 @@ export function lapRaceDrawing(
     const speed = speeds.get(entry.racer.id);
     if (speed === undefined) continue;
     const hit = hitLook(entry.effects, race.atMs, reducedMotion);
+    // #2544: its place in the pack, a bike length a row from the rider's and
+    // beside the others in its lane, and on the grid from the press.
+    const place = ride.pack.get(entry.racer.id);
     raceBots.push({
+      // Never behind the route's start, where a row behind a rider who pressed
+      // at its very beginning would otherwise be drawn.
       distanceMetres: Math.max(
         0,
-        ride.startAlong + racePosition(entry.racer) - speed * behindSeconds,
+        ride.startAlong +
+          racePosition(entry.racer) +
+          (place === undefined ? 0 : drawnShift(place, behindSeconds, LAP_RACE_TICK_SECONDS)) -
+          speed * behindSeconds,
       ),
       speedMetresPerSecond: speed,
-      lateralMetres: laneLateral(entry.lane),
+      lateralMetres: place?.lateral ?? laneLateral(entry.lane),
+      swayMetresPerSecond: place?.sway ?? 0,
+      laidOut: place !== undefined,
       ...(hit === undefined ? {} : { hit }),
     });
   }

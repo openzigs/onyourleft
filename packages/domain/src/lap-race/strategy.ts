@@ -323,6 +323,31 @@ export function botFieldPersonalities(seed: number, count: number): readonly Bot
   );
 }
 
+/** Keys the field's skill deal apart from its personality deal (#2463). */
+const SKILL_SALT = 0x2463_5c11;
+
+/**
+ * The skills of a solo race's `count` bots (#2463, ADR 0067 D-7): the three in
+ * turn, from a start the race's seed picks under its own salt, so any three
+ * bots in a row are one of each and a field is never all naive or all crafty.
+ *
+ * @throws {LapRaceError} for a seed that is not a safe whole number, or a
+ *   count that is not a whole number of at least zero.
+ */
+export function botFieldSkills(seed: number, count: number): readonly BotSkill[] {
+  raceRandom(seed);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new LapRaceError('field-invalid', 'count must be a whole number of at least zero');
+  }
+  const first = Math.floor(
+    nextUnit(raceRandom((seed >>> 0) ^ SKILL_SALT)).value * BOT_SKILLS.length,
+  );
+  return Array.from(
+    { length: count },
+    (_, at) => BOT_SKILLS[(first + at) % BOT_SKILLS.length] as BotSkill,
+  );
+}
+
 /** One number in `[−1, 1)` for this bot, keyed by `what` and `which`: never the race's own draw. */
 function misjudgement(view: View, what: number, which: number): number {
   const key =

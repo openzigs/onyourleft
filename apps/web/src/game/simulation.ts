@@ -312,9 +312,8 @@ export interface SimulationSetup {
    *
    * ⚠️ **Absent is today, to the bit** (D-6): no `k` is computed and
    * {@link GameState.soloDraft} is absent. `GameView` hands it only on a solo
-   * ride — never in a room, whose `k` is the room's (D-1.5), and never in a
-   * lap race (D-2) — with the device's switch on and a pacer or an own ghost
-   * to give a draft.
+   * ride — never in a room, whose `k` is the room's (D-1.5) — with the
+   * device's switch on and a pacer, an own ghost or a lap race to give a draft.
    */
   readonly soloDraft?: SoloDraftSources | undefined;
 }
@@ -733,7 +732,7 @@ export class GameSimulation {
     for (let step = 0; step < toRun; step += 1) {
       previousRide = ride;
       previousBot = bot;
-      if (solo !== undefined) {
+      if (solo !== undefined && solo.raced !== true) {
         // #2425, ADR 0066 D-1.2: this step's `k`, from where everybody is as
         // it begins — the rider's and the bot's odometers, and the ghost at
         // the seconds ridden so far, the clock `ghostClock` reads.

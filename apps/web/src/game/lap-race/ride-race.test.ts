@@ -15,8 +15,10 @@ import {
   botFieldArchetypes,
   botFieldPaces,
   botFieldPersonalities,
+  botFieldSkills,
   kilograms,
 } from '@onyourleft/domain';
+import { lapRaceDraftFactors } from '@onyourleft/physics';
 
 import { botName, lapRaceStandings } from '../hud/lap-race-hud';
 
@@ -130,7 +132,7 @@ describe('a lap race in a ride — #1906', () => {
     }
   });
 
-  it('deals its bots a mixed field from the race’s seed (#1959), at one skill, on the chosen tier', () => {
+  it('deals its bots a mixed field from the race’s seed (#1959), a skill each (#2463), on the chosen tier', () => {
     vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
       <T extends ArrayBufferView>(array: T): T => {
         (array as unknown as Uint32Array)[0] = 7;
@@ -141,9 +143,10 @@ describe('a lap race in a ride — #1906', () => {
     const personalities = ride.bots.map((bot) => bot.strategy.personality);
     expect(personalities).toEqual(botFieldPersonalities(7, LAP_RACE_MOST_BOTS));
     expect(new Set(personalities).size).toBe(3);
-    expect(ride.bots.map((bot) => bot.strategy.skill)).toEqual(
-      Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'canny'),
-    );
+    // #2463, ADR 0067 D-7: a tactics skill each, dealt from the same seed, all three in the field.
+    const skills = ride.bots.map((bot) => bot.strategy.skill);
+    expect(skills).toEqual(botFieldSkills(7, LAP_RACE_MOST_BOTS));
+    expect(new Set(skills).size).toBe(3);
     expect(ride.bots.map((bot) => bot.tier)).toEqual(
       Array.from({ length: LAP_RACE_MOST_BOTS }, () => 'brisk'),
     );
@@ -307,8 +310,27 @@ const SPREAD_RACE: LapRaceChoice = {
 /** The rider's steady pace, metres per second: about the bots', so the field stays near them. */
 const RIDER_SPEED = 8.5;
 
+/** A race's samples: the leader's lap, and every bot's gap as the standings write it. */
+type GapSamples = readonly { readonly lap: number; readonly gaps: readonly string[] }[];
+
+/**
+ * {@link rideGaps} for `seed`, ridden once by the first case that asks and
+ * read by every other: a whole three-lap race of seven bots is the cost of
+ * these cases, and the second reads seed 1 again (#1688's ruling: a slow case
+ * is made cheaper, never given a longer timeout).
+ */
+const gapsBySeed = new Map<number, GapSamples>();
+function sampledGaps(seed: number): GapSamples {
+  let samples = gapsBySeed.get(seed);
+  if (samples === undefined) {
+    samples = rideGaps(seed);
+    gapsBySeed.set(seed, samples);
+  }
+  return samples;
+}
+
 /** The race under `seed`, and every bot's gap as the standings write it, every two seconds. */
-function sampledGaps(seed: number): { readonly lap: number; readonly gaps: readonly string[] }[] {
+function rideGaps(seed: number): GapSamples {
   vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
     <T extends ArrayBufferView>(array: T): T => {
       (array as unknown as Uint32Array)[0] = seed;
@@ -339,22 +361,122 @@ function sampledGaps(seed: number): { readonly lap: number; readonly gaps: reado
   return samples;
 }
 
+describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067 D-3)', () => {
+  /** One bot and the rider, items off, the seed fixed, the switch as given. */
+  function oneBot(draft: boolean | undefined): LapRaceRide {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+    const ride = startLapRaceRide({
+      choice: { laps: 3, bots: 1, tier: 'brisk', itemsOn: false },
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      ...(draft === undefined ? {} : { draft }),
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  }
+
+  /** 30 s of ticks with the rider held 2 m behind the bot on effort distance, once it is that far up. */
+  function onTheWheel(start: LapRaceRide): { ride: LapRaceRide; ks: number[]; field: number[] } {
+    let ride = start;
+    const ks: number[] = [];
+    const field: number[] = [];
+    for (let tick = 0; tick < 30 / LAP_RACE_TICK_SECONDS; tick += 1) {
+      const bot = ride.bots[0];
+      if (bot === undefined) throw new Error('a one-bot race has its bot');
+      // The field's `k` as the race stands before the tick: what the tick drafts on.
+      field.push(lapRaceDraftFactors(ride.race).rider ?? Number.NaN);
+      ride = stepLapRaceRide(ride, { ticks: 1, along: bot.ride.distance - 2 });
+      ks.push(ride.riderDraft);
+    }
+    return { ride, ks, field };
+  }
+
+  it('hands the rider the k the field’s one draft call gave it, every tick: in the draft 2 m behind a bot', () => {
+    const start = oneBot(true);
+    expect(start.draft).toBe(true);
+    expect(start.riderDraft).toBe(1);
+    const { ks, field } = onTheWheel(start);
+    // With the switch on, the rider's `k` is the field's, tick for tick: the
+    // one call `stepBotRace` made, never a walk of its own.
+    expect(ks).toEqual(field);
+    // Two metres behind the bot is ADR 0038's table between 1 m and 5 m.
+    const settled = ks.slice(ks.length / 2);
+    for (const k of settled) expect(k).toBeGreaterThan(0.66);
+    for (const k of settled) expect(k).toBeLessThan(0.71);
+  });
+
+  it('hands the rider the last tick’s k of a frame that ran several steps, as the single ticks would: a low frame rate is the same race', () => {
+    // A tablet at low fps runs several steps in one frame (the documented
+    // contract): the rider arrives at the bot's wheel in the frame's last tick.
+    const start = oneBot(true);
+    const bot = start.bots[0];
+    if (bot === undefined) throw new Error('a one-bot race has its bot');
+    // Held back first so the frame's first ticks are out of the draft: 20 m
+    // behind, closing to 2 m behind in the frame.
+    const behind = stepLapRaceRide(start, { ticks: 1, along: bot.ride.distance - 20 });
+    const target = (behind.bots[0]?.ride.distance ?? 0) - 2;
+    const frame = stepLapRaceRide(behind, { ticks: 3, along: target });
+    let single = behind;
+    const ks: number[] = [];
+    for (let tick = 1; tick <= 3; tick += 1) {
+      single = stepLapRaceRide(single, {
+        ticks: 1,
+        along: behind.along + ((target - behind.along) * tick) / 3,
+      });
+      ks.push(single.riderDraft);
+    }
+    // Not vacuous: the first tick was alone and the last was sheltered.
+    expect(ks[0]).toBe(1);
+    expect(ks[2]).toBeLessThan(1);
+    expect(frame.riderDraft).toBe(ks[2]);
+  });
+
+  it('drafts nobody with the switch off or absent: the rider at 1 and the bots as the race before #2461', () => {
+    const off = onTheWheel(oneBot(false));
+    const absent = onTheWheel(oneBot(undefined));
+    const on = onTheWheel(oneBot(true));
+    expect(oneBot(undefined).draft).toBe(false);
+    expect(off.ks.every((k) => k === 1)).toBe(true);
+    expect(off.ride.bots).toEqual(absent.ride.bots);
+    expect(off.ride.race).toEqual(absent.ride.race);
+    // Not vacuous: the same ticks with the switch on drafted the rider. The
+    // bot in front gets ADR 0038's small lead effect, so it rides further.
+    expect(on.ks.some((k) => k < 1)).toBe(true);
+    expect(on.ride.bots[0]?.ride.distance).toBeGreaterThan(off.ride.bots[0]?.ride.distance ?? 0);
+  });
+});
+
 describe('the field spreads into a race: the bots ride apart (#2455)', () => {
-  it('reads at least four different gaps among the seven bots over a lap, on a seeded race', () => {
-    for (const seed of [1, 2, 3]) {
+  // One seed a case, so no case rides more than one race: the three in one
+  // case took 5.0 s under coverage on CI once the pack stack stepped each tick
+  // (the nightly of 2026-11-13 on #2561's branch).
+  it.each([1, 2, 3])(
+    'reads at least four different gaps among the seven bots over a lap, on a seeded race (seed %i)',
+    (seed) => {
       const samples = sampledGaps(seed);
       const lastLap = samples.filter((sample) => sample.lap === 2);
-      expect(lastLap.length, `seed ${String(seed)}`).toBeGreaterThan(30);
+      expect(lastLap.length).toBeGreaterThan(30);
       // Every gap the standings showed over the last lap, bot by bot.
       const most = Math.max(...lastLap.map((sample) => new Set(sample.gaps).size));
-      expect(most, `seed ${String(seed)}`).toBeGreaterThanOrEqual(4);
+      expect(most).toBeGreaterThanOrEqual(4);
       // And never one stacked group once the first lap is ridden.
       const stacked = samples.filter(
         (sample) => sample.lap >= 1 && new Set(sample.gaps).size === 1,
       );
-      expect(stacked, `seed ${String(seed)}`).toEqual([]);
-    }
-  });
+      expect(stacked).toEqual([]);
+    },
+  );
 
   it('changes the gaps as it goes: the spread between the first and the last bot grows and shrinks', () => {
     const seconds = (gap: string): number => {
