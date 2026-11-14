@@ -44,6 +44,7 @@ import {
   type DeliveryOwed,
 } from './delivery-announce';
 import type { DeliveryHud } from './fields';
+import { DEFAULT_HUD_LAYOUT, type HudLayoutPreference } from './hud-layout-preference';
 import { HudPanel } from './HudPanel';
 
 let mounted: Mounted | undefined;
@@ -73,9 +74,13 @@ const PROFILE = route();
 /** #2453: the next house the panel is handed unless a case says otherwise. */
 const NEXT: DeliveryHud['next'] = { side: 'right', metres: 85 };
 
+/** #2514: the HUD as a round drew it before the game strip, once the rider chose it. */
+const EVERYTHING: HudLayoutPreference = { ...DEFAULT_HUD_LAYOUT, delivery: 'everything' };
+
 function panel(
   delivery: (Omit<DeliveryHud, 'score' | 'next'> & Partial<Pick<DeliveryHud, 'next'>>) | undefined,
   announcement = '',
+  layout?: HudLayoutPreference,
 ): JSX.Element {
   return (
     <main>
@@ -89,6 +94,7 @@ function panel(
         onEnd={() => undefined}
         paused={false}
         announcement={announcement}
+        layout={layout}
         delivery={
           delivery === undefined
             ? undefined
@@ -168,6 +174,25 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('says “Throw now, on the right” inside the house’s window, as a screen reader reads it, and audits clean — #2513', async () => {
+    const round = startRound(6);
+    mounted = await mount(panel({ round, week: WEEK, next: { side: 'right', metres: 3 } }));
+    expect(field('Next house')).toBe('Next house 3 m on the right');
+    await mounted.rerender(panel({ round, week: WEEK, next: { side: 'right', metres: 0 } }));
+    expect(field('Next house')).toBe('Next house Throw now, on the right');
+    // Set as a word (#259), so it fits its track as the outcome words do.
+    const value = [...document.querySelectorAll('.oyl-hud__field')]
+      .find((each) => text(each.querySelector('dt')) === 'Next house')
+      ?.querySelector('.oyl-hud__value');
+    expect(value?.classList.contains('oyl-hud__value--word')).toBe(true);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    await mounted.rerender(panel({ round, week: WEEK, next: { side: 'left', metres: 0 } }));
+    expect(field('Next house')).toBe('Next house Throw now, on the left');
+    // The one live region says nothing of it: the field is read where it stands.
+    expect(text(region())).toBe('');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('changes the rendered counts when a parcel lands — the text, not only the state', async () => {
     const round = startRound(6);
     mounted = await mount(panel({ round, week: WEEK }));
@@ -187,13 +212,36 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(field('Score')).toBeUndefined();
     expect(document.querySelector('.oyl-hud__field--delivery')).toBeNull();
     mounted.unmount();
-    // The same HUD with a round: the round's two fields, last, and nothing else changed.
-    mounted = await mount(panel({ round: startRound(6), week: WEEK }));
+    // The same HUD with a round, drawn as everything (#2514): the round's
+    // fields, last, and nothing else changed.
+    mounted = await mount(panel({ round: startRound(6), week: WEEK }, '', EVERYTHING));
     expect(labels()).toEqual([...ordinary.labels, 'Houses', 'Next house', 'Score']);
     for (const each of document.querySelectorAll('.oyl-hud__field--delivery')) {
       each.remove();
     }
     expect(text(document.querySelector('.oyl-hud'))).toBe(ordinary.text);
+  });
+
+  it('draws the game strip by default: power, speed and the round’s own, and no route panel — #2514', async () => {
+    const labels = (): string[] =>
+      [...document.querySelectorAll('.oyl-hud__field dt')].map((each) => text(each));
+    mounted = await mount(panel({ round: startRound(6), week: WEEK }));
+    expect(labels()).toEqual(['Power', 'Speed', 'Houses', 'Next house', 'Score']);
+    expect(document.querySelector('.oyl-hud')?.classList.contains('oyl-hud--delivery-game')).toBe(
+      true,
+    );
+    expect(document.querySelector('.oyl-hud__route')).toBeNull();
+    // The controls are the ride's, whatever the strip leaves out.
+    expect(document.querySelector('.oyl-hud__actions')).not.toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    mounted.unmount();
+    // Everything, once the rider chose it: the route panel and every reading come back.
+    mounted = await mount(panel({ round: startRound(6), week: WEEK }, '', EVERYTHING));
+    expect(labels()).toEqual(expect.arrayContaining(['Cadence', 'Heart rate', 'Distance']));
+    expect(document.querySelector('.oyl-hud__route')).not.toBeNull();
+    expect(document.querySelector('.oyl-hud')?.classList.contains('oyl-hud--delivery-game')).toBe(
+      false,
+    );
   });
 
   it('speaks a delivery, a crash and the round’s end through the one region, with announcements on, and audits clean', async () => {

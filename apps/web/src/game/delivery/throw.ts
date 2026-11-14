@@ -77,6 +77,20 @@
  * clear before each house, so a wider one would reach into the window of the
  * house before. The setting itself is `assist-preference.ts`'.
  *
+ * ## A mailbox, and a house that must not get a parcel (#2365, ADR 0065 D-10.3)
+ *
+ * A mailbox ({@link ThrowTarget.mailbox}) catches a parcel only within
+ * {@link MAILBOX_CATCH_RADIUS_METRES} of it, smaller than a doorstep's
+ * {@link TARGET_CATCH_RADIUS_METRES}, and a delivery to it is a delivery like
+ * any other. With the assist's wider windows it catches as a doorstep does.
+ *
+ * A house that must not get a parcel ({@link ThrowInput.noDelivery}) is no
+ * round position. A parcel it catches, by a doorstep's rule, is a
+ * `'no-delivery'` landing: it records nothing on the round, so it raises no
+ * score, and `ride-round.ts` takes {@link NO_DELIVERY_SCORE_DELTA} off the
+ * round's score for it (ADR 0059 D-1.4: never a reward). It catches every
+ * parcel that reaches it, however many.
+ *
  * ## Nothing here leaves the ride
  *
  * Parcels, landings and targets are held in memory for the ride only (DL11),
@@ -127,6 +141,22 @@ export const PARCEL_REACH_METRES =
 export const TARGET_CATCH_RADIUS_METRES = 1.5;
 
 /**
+ * How near a mailbox a parcel must be when it reaches the mailbox's depth, in
+ * metres along the route, to be caught there — #2365: **0.6**, under half a
+ * doorstep's {@link TARGET_CATCH_RADIUS_METRES}. This project's own number,
+ * for the owner's approval in #2365's pull request.
+ */
+export const MAILBOX_CATCH_RADIUS_METRES = 0.6;
+
+/**
+ * What a parcel at a house that must not get one does to the round's score —
+ * #2365: **one point off**, as a crash is (`obstacles.ts` §`CRASH_SCORE_DELTA`).
+ * Never a reward (ADR 0059 D-1.4). This project's own number, for the owner's
+ * approval in #2365's pull request.
+ */
+export const NO_DELIVERY_SCORE_DELTA = -1;
+
+/**
  * How far before a house the rider may be when it throws, in metres, for the
  * parcel to be a delivery there. This project's own number, for the owner's
  * approval in #1809's pull request.
@@ -172,6 +202,8 @@ export interface ThrowTarget {
   readonly side: ThrowSide;
   /** How far it stands off the carriageway's edge, in metres. */
   readonly clear: number;
+  /** A mailbox at the kerb (#2365): {@link MAILBOX_CATCH_RADIUS_METRES}. Absent, a doorstep. */
+  readonly mailbox?: boolean;
 }
 
 /** A parcel between the throw and its landing. */
@@ -214,7 +246,12 @@ interface LandingAt {
 /** A parcel that came down: on a house that could take it, or anywhere else. */
 export type Landing =
   | (LandingAt & { readonly kind: 'delivery'; readonly position: number })
-  | (LandingAt & { readonly kind: 'wasted' });
+  | (LandingAt & { readonly kind: 'wasted' })
+  | (LandingAt & {
+      readonly kind: 'no-delivery';
+      /** Which house that must not get a parcel caught it: its place in {@link ThrowInput.noDelivery}. */
+      readonly house: number;
+    });
 
 export interface ThrowInput {
   /** The rider's simulated distance along the route, in metres, and speed, in metres a second. */
@@ -229,6 +266,11 @@ export interface ThrowInput {
   readonly ticks?: number;
   /** The assist setting's wider windows (#1813): {@link ASSISTED_THROW_SCALE}. Off unless asked for. */
   readonly widerWindows?: boolean;
+  /**
+   * The houses on a level that must not get a parcel (#2365), each `position`
+   * its place in this list, not a round position. None unless given.
+   */
+  readonly noDelivery?: readonly ThrowTarget[];
 }
 
 export interface ThrowStep {
@@ -270,29 +312,39 @@ function landingOn(
   targets: readonly ThrowTarget[],
   round: Round,
   scale: number,
+  noDelivery: readonly ThrowTarget[],
 ): Landing | undefined {
   const flown = tick - parcel.launchTick;
   const from = acrossAfter(flown - 1);
   const to = acrossAfter(flown);
   let caught: Landing | undefined;
-  for (const target of targets) {
-    if (target.side !== parcel.side) continue;
-    if (round.houses[target.position] !== 'expecting') continue;
-    if (!windowOpen(parcel, target, scale)) continue;
+  /** Where `parcel` meets `target` on this tick, or `undefined` if it does not. */
+  const meets = (
+    target: ThrowTarget,
+  ): { readonly along: number; readonly across: number } | undefined => {
+    if (target.side !== parcel.side || !windowOpen(parcel, target, scale)) return undefined;
     const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
-    if (across <= from || across > to) continue;
-    if (caught !== undefined && across >= caught.across) continue;
+    if (across <= from || across > to) return undefined;
+    if (caught !== undefined && across >= caught.across) return undefined;
     const along =
       parcel.launchAlong + parcel.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
-    if (Math.abs(along - target.along) > TARGET_CATCH_RADIUS_METRES * scale) continue;
-    caught = {
-      kind: 'delivery',
-      position: target.position,
-      side: parcel.side,
-      along,
-      across,
-      tick,
-    };
+    // #2365: a mailbox's catch is smaller, unless the assist widens it to a doorstep's.
+    const radius =
+      target.mailbox === true && scale === 1
+        ? MAILBOX_CATCH_RADIUS_METRES
+        : TARGET_CATCH_RADIUS_METRES * scale;
+    return Math.abs(along - target.along) > radius ? undefined : { along, across };
+  };
+  for (const target of targets) {
+    if (round.houses[target.position] !== 'expecting') continue;
+    const met = meets(target);
+    if (met === undefined) continue;
+    caught = { kind: 'delivery', position: target.position, side: parcel.side, ...met, tick };
+  }
+  for (const house of noDelivery) {
+    const met = meets(house);
+    if (met === undefined) continue;
+    caught = { kind: 'no-delivery', house: house.position, side: parcel.side, ...met, tick };
   }
   if (caught !== undefined || flown < PARCEL_FLIGHT_TICKS) return caught;
   return {
@@ -336,7 +388,7 @@ export function stepThrows(state: ThrowState, input: ThrowInput): ThrowStep {
     tick += 1;
     const flying: ParcelInFlight[] = [];
     for (const parcel of inFlight) {
-      const landing = landingOn(parcel, tick, input.targets, round, scale);
+      const landing = landingOn(parcel, tick, input.targets, round, scale, input.noDelivery ?? []);
       if (landing === undefined) {
         flying.push(parcel);
         continue;
