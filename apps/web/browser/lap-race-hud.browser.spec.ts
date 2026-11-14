@@ -42,7 +42,14 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { OVERLAY_VIEWPORTS, inside, overlap, riderBox, type Viewport } from './ride-stage';
+import {
+  OVERLAY_VIEWPORTS,
+  TABLET_VIEWPORTS,
+  inside,
+  overlap,
+  riderBox,
+  type Viewport,
+} from './ride-stage';
 
 import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
@@ -86,9 +93,13 @@ function laidOut(box: Box): boolean {
   return box.width > 1 && box.height > 1;
 }
 
-async function open(page: Page, viewport: Viewport): Promise<readonly LapRaceStageMeasurement[]> {
+async function open(
+  page: Page,
+  viewport: Viewport,
+  query = '',
+): Promise<readonly LapRaceStageMeasurement[]> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
-  const response = await page.goto('/lap-race-hud.html');
+  const response = await page.goto(`/lap-race-hud.html${query}`);
   expect(
     response?.status(),
     'lap-race-hud.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
@@ -275,4 +286,130 @@ test.describe('#1904 — the lap race measurement can fail', () => {
     console.log(`#1904 control, 736×360 with the standings shown: ${faults.join('; ')}`);
     expect(faults).not.toEqual([]);
   });
+});
+
+/*
+ * #2599 — the standings never over the actions panel.
+ *
+ * On the owner's tablet check of 2026-11-14 a solo lap race's standings, eight
+ * lines with *Show laps* on their first row, ran down over the actions panel
+ * at the bottom right, hiding all of the trainer's line but "Tra". The stages
+ * above have neither *Use item* nor the swap, and fitted. `?corner=race`
+ * draws the corner as the tablet did (`lap-race-hud-harness.tsx` §`CORNER`),
+ * at every overlay viewport at the normal text and at the tablets at the
+ * large and extra large, and holds:
+ *
+ * - the standings' box and the actions panel's never overlap, and on a
+ *   tablet are the owner's 16 px apart (#2034);
+ * - the trainer's line is inside the actions panel, on the stage, and the
+ *   topmost thing at each of its corners, hit-tested;
+ * - *Pause* and *End ride* are on the stage at 48 px or more (#669);
+ * - on a tablet the standings are drawn with the rider's own line, and at
+ *   1280×800 and upright, where there is room, with every line — the whole
+ *   field of #2328 gives way only where the room is short.
+ *
+ * The control puts every line back where the room is short, and the
+ * standings are then over the actions panel at 1024×768.
+ */
+
+const CORNER_STAGES = ['corner-back', 'corner-middle'] as const;
+
+/** The owner's least clearance between the standings and the actions panel (2026-11-06, #2034). */
+const CLEARANCE_PIXELS = 16;
+
+/** Every line drawn where the room holds them: the owner's landscape tablet and the upright one. */
+const ROOMY = new Set(['1280×800', '800×1280']);
+
+const LINES_GIVE_WAY_UNDONE = `
+  .oyl-hud .oyl-hud__standings-line--gives-way {
+    position: static !important; width: auto !important; height: auto !important;
+    margin: 0 !important; overflow: visible !important; clip-path: none !important;
+    white-space: normal !important;
+  }`;
+
+const CORNER_CASES = [
+  ...OVERLAY_VIEWPORTS.map((viewport) => ({ viewport, text: 'normal' })),
+  ...(['large', 'extra-large'] as const).flatMap((text) =>
+    TABLET_VIEWPORTS.map((viewport) => ({ viewport, text })),
+  ),
+];
+
+/** What is wrong with the corner of one stage, as sentences. */
+function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: string): string[] {
+  const faults: string[] = [];
+  const say = (box: Box): string =>
+    `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
+  const { standings, actions, trainer } = stage;
+  if (actions === undefined) return ['no actions panel'];
+  if (standings !== undefined && laidOut(standings)) {
+    if (overlap(standings, actions)) {
+      faults.push(`the standings ${say(standings)} over the actions panel ${say(actions)}`);
+    }
+    const sideBySide = standings.right <= actions.left || actions.right <= standings.left;
+    if (!sideBySide && actions.top - standings.bottom < CLEARANCE_PIXELS) {
+      faults.push(
+        `the standings ${(actions.top - standings.bottom).toFixed(0)} px above the actions panel`,
+      );
+    }
+  }
+  if (trainer === undefined) {
+    faults.push('no trainer line');
+  } else {
+    if (!within(trainer.box, actions))
+      faults.push(`the trainer line ${say(trainer.box)} out of its panel`);
+    if (!inside(trainer.box, viewport))
+      faults.push(`the trainer line ${say(trainer.box)} off the stage`);
+    if (!trainer.topmost) faults.push(`the trainer line ${say(trainer.box)} covered`);
+  }
+  for (const label of ['Pause', 'End ride']) {
+    const control = stage.controls.find((each) => each.label === label);
+    if (control === undefined) {
+      faults.push(`no ${label}`);
+      continue;
+    }
+    if (!inside(control.box, viewport)) faults.push(`${label} ${say(control.box)} off the stage`);
+    if (control.box.width < 48 || control.box.height < 48) {
+      faults.push(`${label} ${control.box.width.toFixed(0)}×${control.box.height.toFixed(0)}`);
+    }
+  }
+  if (isTablet(viewport)) {
+    const drawn = stage.standingsLines.filter((line) => line.drawn);
+    if (!stage.standingsLines.some((line) => line.you && line.drawn)) {
+      faults.push('the rider’s own line gave way');
+    }
+    if (ROOMY.has(sized(viewport)) && text === 'normal' && drawn.length !== 8) {
+      faults.push(`${String(drawn.length)} of 8 lines drawn where there is room for all`);
+    }
+  }
+  return faults;
+}
+
+for (const { viewport, text } of CORNER_CASES) {
+  test(`#2599 a lap race's standings stay off the actions panel at ${text} text — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const measured = await open(page, viewport, `?corner=race&text=${text}`);
+    expect(measured.map((each) => each.stage)).toEqual([...CORNER_STAGES]);
+    for (const stage of measured) {
+      expect(stage.standingsLines.length, stage.stage).toBe(8);
+      const drawn = stage.standingsLines.filter((line) => line.drawn).length;
+      console.log(
+        `#2599 ${viewport.name}, ${text} text, ${stage.stage}: ${String(drawn)} of 8 lines drawn`,
+      );
+      expect(cornerFaults(stage, viewport, text), `${viewport.name}, ${stage.stage}`).toEqual([]);
+    }
+  });
+}
+
+test('#2599 the corner measurement can fail: every line drawn puts the standings on the actions panel at 1024×768', async ({
+  page,
+}) => {
+  const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
+  if (fourByThree === undefined) throw new Error('no 4:3 tablet to control at');
+  await open(page, fourByThree, '?corner=race&text=normal');
+  await page.addStyleTag({ content: LINES_GIVE_WAY_UNDONE });
+  const undone = await remeasure(page);
+  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
+  console.log(`#2599 control, 1024×768 with every line drawn: ${faults.join('; ')}`);
+  expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
 });

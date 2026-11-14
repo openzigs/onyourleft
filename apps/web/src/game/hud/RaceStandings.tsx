@@ -20,9 +20,10 @@
  * document for a screen reader, and the rider has *Follow* and its one gap.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { useRef, type JSX, type ReactNode } from 'react';
 
 import { STANDINGS_TEXT, type RaceStandingsView } from '../room-ride';
+import { giveWayRanks, givesWay, useStandingsRoom } from './standings-room';
 
 export function RaceStandings(props: {
   readonly standings: RaceStandingsView;
@@ -30,8 +31,14 @@ export function RaceStandings(props: {
   readonly swap?: ReactNode;
 }): JSX.Element {
   const { lines, place, of } = props.standings;
+  // #2599: as many lines as the room above the actions panel holds, the
+  // furthest from the rider giving way first (`standings-room.ts`).
+  const panel = useRef<HTMLElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  const fit = useStandingsRoom(panel, list, lines.length);
+  const ranks = giveWayRanks(lines);
   return (
-    <section className="oyl-hud__panel oyl-hud__standings" aria-label="Race standings">
+    <section ref={panel} className="oyl-hud__panel oyl-hud__standings" aria-label="Race standings">
       {props.swap === undefined ? (
         <p className="oyl-hud__standings-summary">{STANDINGS_TEXT.summary(place, of)}</p>
       ) : (
@@ -50,15 +57,17 @@ export function RaceStandings(props: {
         since #1967: a lap race keeps the leader above a window further back,
         so the places can jump after the first line.
       */}
-      <ol className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
-        {lines.map((line) => (
+      <ol ref={list} className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
+        {lines.map((line, index) => (
           <li
             key={line.riderId}
-            className={
-              line.you
-                ? 'oyl-hud__standings-line oyl-hud__standings-line--you'
-                : 'oyl-hud__standings-line'
-            }
+            className={[
+              'oyl-hud__standings-line',
+              line.you ? 'oyl-hud__standings-line--you' : '',
+              givesWay(ranks[index] ?? 0, fit) ? 'oyl-hud__standings-line--gives-way' : '',
+            ]
+              .filter((name) => name !== '')
+              .join(' ')}
             aria-current={line.you ? 'true' : undefined}
             value={line.place}
           >

@@ -56,6 +56,7 @@ import {
   BOT_PACING_STYLES,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   altitudeMetres,
+  beatsPerMinute,
   createItemRace,
   degreesLatitude,
   degreesLongitude,
@@ -68,6 +69,7 @@ import {
   routeProfile,
   seconds,
   stepRace,
+  unixSeconds,
   watts,
   type ItemKind,
   type ItemRaceState,
@@ -77,9 +79,15 @@ import {
 
 import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
+import {
+  DEFAULT_HUD_LAYOUT,
+  HUD_TEXT_SIZES,
+  type HudLayoutPreference,
+} from '../src/game/hud/hud-layout-preference';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from '../src/game/lap-race/choice';
 import type { GameState } from '../src/game/simulation';
+import type { LapFigures } from '../src/recording/laps';
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
@@ -117,6 +125,20 @@ export interface LapRaceStageMeasurement {
   readonly standings: Box | undefined;
   /** The ride's controls, Pause and End ride. */
   readonly controls: readonly { readonly label: string; readonly box: Box }[];
+  /** The actions panel. */
+  readonly actions: Box | undefined;
+  /**
+   * The trainer's line (#373), and whether it is the topmost thing at each of
+   * its corners, hit-tested — so a panel drawn over it is caught however the
+   * boxes are read.
+   */
+  readonly trainer: { readonly box: Box; readonly topmost: boolean } | undefined;
+  /** Each line of the standings, by its text, and whether it is drawn at a size. */
+  readonly standingsLines: readonly {
+    readonly text: string;
+    readonly you: boolean;
+    readonly drawn: boolean;
+  }[];
 }
 
 declare global {
@@ -272,7 +294,115 @@ const STAGES: readonly {
   })),
 ];
 
+/**
+ * `lap-race-hud.html?corner=race` — #2599: the bottom-right corner of a solo
+ * lap race as the owner's tablet drew it, where the stages above leave out
+ * what made it overlap. A race of eight, the most a solo race starts
+ * ({@link LAP_RACE_MOST_BOTS} bots and the rider), so the standings are
+ * eight lines; on a loop with a lap done, so the swap to the lap splits is
+ * on the standings' first row (#2080); with *Use item* in the actions panel
+ * (#1901) under the trainer's line, *Pause* and *End ride*. `&text=large` or
+ * `&text=extra-large` draws it at the HUD's larger text (#2079).
+ *
+ * - `corner-back`: the rider last, 8th of 8, holding nothing;
+ * - `corner-middle`: the rider 4th of 8, holding a tailwind, so the lines
+ *   that give way are on both sides of the rider's own.
+ */
+const SEARCH = new URLSearchParams(window.location.search);
+const CORNER = SEARCH.get('corner') === 'race';
+const TEXT_SIZE = HUD_TEXT_SIZES.find((size) => size === SEARCH.get('text')) ?? 'normal';
+const CORNER_LAYOUT: HudLayoutPreference = { ...DEFAULT_HUD_LAYOUT, textSize: TEXT_SIZE };
+
+/** A 2 km loop, out 1 km and back, so a lap race has a lap to race and the splits a lap to show. */
+function loop(): RouteProfile {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 20; index += 1) {
+    const out = index <= 10 ? index : 20 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 100) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(40 + 2 * out),
+    });
+  }
+  return routeProfile(points, { loop: true });
+}
+
+const LOOP = loop();
+
+/** Two laps done, the splits panel's rows. */
+const CORNER_LAPS: readonly LapFigures[] = [3_475, 3_599].map((moving) => ({
+  startedAt: unixSeconds(1_800_000_000),
+  elapsedTime: seconds(moving),
+  movingTime: seconds(moving),
+  distance: metres(2_000),
+  averagePower: watts(342),
+  averageHeartRate: beatsPerMinute(168),
+}));
+
+/** A race of eight, its bots `botsAhead` of them 40 m apart ahead of the rider and the rest behind. */
+function raceOfEight(botsAhead: number): ItemRaceState {
+  const bots = BOTS.slice(0, LAP_RACE_MOST_BOTS);
+  const start = createItemRace({
+    course: raceCourse(2_000, LAP_RACE_MOST_LAPS),
+    seed: 2_599,
+    itemsOn: true,
+    racerIds: [RIDER, ...bots],
+    startMs: 0,
+  });
+  const rider = 4_300;
+  const efforts: Record<string, number> = { [RIDER]: rider };
+  bots.forEach((id, index) => {
+    efforts[id] =
+      index < botsAhead ? rider + 40 * (index + 1) : rider - 40 * (index - botsAhead + 1);
+  });
+  return stepRace(start, { atMs: 600_000, effortDistances: efforts });
+}
+
+const CORNER_STAGES: readonly { readonly stage: string; readonly race: ItemRaceState }[] = [
+  { stage: 'corner-back', race: raceOfEight(LAP_RACE_MOST_BOTS) },
+  { stage: 'corner-middle', race: holding(raceOfEight(3), RIDER, 'tailwind') },
+];
+
+function Corner(): JSX.Element {
+  return (
+    <div>
+      {CORNER_STAGES.map(({ stage, race }) => (
+        <section
+          key={stage}
+          className="oyl-game oyl-game--riding"
+          style={STAGE_IN_FLOW}
+          data-oyl-lap-race-stage={stage}
+        >
+          <HudPanel
+            profile={LOOP}
+            shownPower={SHOWN_POWER}
+            state={STATE}
+            cadence={{ value: 92, live: true }}
+            heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
+            elapsedSeconds={MOVING_SECONDS}
+            paused={false}
+            onPause={() => undefined}
+            onEnd={() => undefined}
+            announcement=""
+            trainer={{ gradePercent: -12.5, writes: 1_234 }}
+            layout={CORNER_LAYOUT}
+            laps={CORNER_LAPS}
+            lapSeconds={59 * 60 + 59}
+            items={{ useItem: () => undefined }}
+            lapRace={hudOf(race)}
+            standings={lapRaceStandings(hudOf(race))}
+          />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function Harness(): JSX.Element {
+  if (CORNER) return <Corner />;
   return (
     <div>
       {STAGES.map(({ stage, race, speed }) => (
@@ -329,6 +459,8 @@ function measure(): readonly LapRaceStageMeasurement[] {
     const origin = stage.getBoundingClientRect();
     const secondary = stage.querySelector('.oyl-hud__fields--secondary');
     const standings = stage.querySelector('.oyl-hud__standings');
+    const actions = stage.querySelector('.oyl-hud__actions');
+    const trainer = stage.querySelector('.oyl-hud__trainer');
     return {
       stage: stage.getAttribute('data-oyl-lap-race-stage') ?? '',
       panels: [...stage.querySelectorAll('.oyl-hud__panel')]
@@ -353,7 +485,34 @@ function measure(): readonly LapRaceStageMeasurement[] {
         label: textOf(control),
         box: boxIn(control, origin),
       })),
+      actions: actions === null ? undefined : boxIn(actions, origin),
+      trainer:
+        trainer === null ? undefined : { box: boxIn(trainer, origin), topmost: topmost(trainer) },
+      standingsLines: [...stage.querySelectorAll('.oyl-hud__standings-line')].map((line) => {
+        const box = line.getBoundingClientRect();
+        return {
+          text: textOf(line),
+          you: line.classList.contains('oyl-hud__standings-line--you'),
+          drawn: box.width > 1 && box.height > 1,
+        };
+      }),
     };
+  });
+}
+
+/** Whether `element` is what a press lands on at each of its corners, two pixels in. */
+function topmost(element: Element): boolean {
+  element.scrollIntoView({ block: 'nearest' });
+  const box = element.getBoundingClientRect();
+  if (box.width <= 4 || box.height <= 4) return false;
+  return [
+    [box.left + 2, box.top + 2],
+    [box.right - 2, box.top + 2],
+    [box.left + 2, box.bottom - 2],
+    [box.right - 2, box.bottom - 2],
+  ].every(([x, y]) => {
+    const hit = document.elementFromPoint(x ?? 0, y ?? 0);
+    return hit !== null && element.contains(hit);
   });
 }
 
@@ -370,6 +529,11 @@ async function run(): Promise<void> {
     );
   });
   await document.fonts.ready;
+  // #2599: the standings measure their room when a panel is laid out and
+  // draw again with the lines that fit, a frame or two later.
+  for (let frame = 0; frame < 4; frame += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
   window.__oylLapRaceHudMeasure = measure;
   window.__oylLapRaceHud = { ready: true, errors };
 }
