@@ -68,6 +68,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: false,
       route: 'full',
       power: 'average',
+      delivery: 'game',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -87,9 +88,9 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       (each.textContent ?? '').trim(),
     );
     // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
-    // panels, (#2387) the strip and (#2420) two ways to show power — none of
-    // which hides it.
-    expect(offered).toHaveLength(14);
+    // panels, (#2387) the strip, (#2420) two ways to show power and (#2514)
+    // two Delivery layouts — none of which hides it.
+    expect(offered).toHaveLength(16);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -112,6 +113,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: false,
       route: 'full',
       power: 'average',
+      delivery: 'game',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -139,6 +141,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: true,
       route: 'full',
       power: 'average',
+      delivery: 'game',
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -168,6 +171,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: false,
       route: 'compact',
       power: 'average',
+      delivery: 'game',
     });
 
     // Turning the route off keeps the choice of how it is drawn, and hides it.
@@ -179,6 +183,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: false,
       route: 'compact',
       power: 'average',
+      delivery: 'game',
     });
 
     // And Settings, opened again, says the same.
@@ -212,6 +217,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       totalsStrip: false,
       route: 'full',
       power: 'instant',
+      delivery: 'game',
     });
     // And Settings, opened again (a reload), says the same.
     await settings();
@@ -234,5 +240,14 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     expect(document.querySelector('.oyl-hud-layout')?.textContent).toContain(
       ANNOUNCEMENTS_NOT_KEPT,
     );
+  });
+  it('draws a Delivery round as the game strip by default, and everything once chosen — #2514', async () => {
+    await settings();
+    expect(readHudLayout(localStorage).delivery).toBe('game');
+    expect(choice('The game strip only').checked).toBe(true);
+    await press(choice('Everything, as on any ride'));
+    expect(readHudLayout(localStorage).delivery).toBe('everything');
+    await press(choice('The game strip only'));
+    expect(readHudLayout(localStorage).delivery).toBe('game');
   });
 });

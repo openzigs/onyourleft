@@ -1087,7 +1087,11 @@ describe('a lap race’s bots on the road — #1902', () => {
     const built = sceneFrame(input({})).corridor;
     const first = built.centre[0]?.along ?? Number.NaN;
     let drawnBehindEye = 0;
-    for (let distanceMetres = RIDER + 120; distanceMetres >= first - 10; distanceMetres -= 0.25) {
+    // #2571: a metre a step, where it was a quarter: this case took 1.8 s under
+    // coverage on a fast machine and the nightly's slowest runner is about 2.9
+    // times slower (#1688), against Vitest's 5 s. A bot that left the frame did so
+    // over a stretch of road, not a quarter metre of it.
+    for (let distanceMetres = RIDER + 120; distanceMetres >= first - 10; distanceMetres -= 1) {
       const frame = sceneFrame(
         input({ raceBots: [{ distanceMetres, speedMetresPerSecond: 9, lateralMetres: 1.75 }] }),
       );

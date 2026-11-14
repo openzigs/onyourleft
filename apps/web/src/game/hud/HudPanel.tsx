@@ -70,7 +70,12 @@ import { HudCore } from './HudCore';
 import { SIMULATED_MOVING_SENTENCE } from '../simulated-rider';
 import { PlanTrace } from './PlanTrace';
 import type { TraceSample } from './recent-trace';
-import { DEFAULT_HUD_LAYOUT, panelShown, type HudLayoutPreference } from './hud-layout-preference';
+import {
+  DEFAULT_HUD_LAYOUT,
+  deliveryGame,
+  panelShown,
+  type HudLayoutPreference,
+} from './hud-layout-preference';
 import { StreetMap } from './StreetMap';
 import { RaceStandings } from './RaceStandings';
 import { LapSplits } from './LapSplits';
@@ -413,8 +418,11 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
   }, [racePanel]);
   const standingsShown =
     standings !== undefined && panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'standings');
+  // #2514: a Delivery round's game strip draws no lap table. @see deliveryGame
   const splitsShown =
-    laps !== undefined && planLap(props.profile, props.state.ride.distance) !== undefined;
+    laps !== undefined &&
+    planLap(props.profile, props.state.ride.distance) !== undefined &&
+    !deliveryGame(props.layout ?? DEFAULT_HUD_LAYOUT, props.delivery);
   const swap = (to: 'standings' | 'laps'): ReactNode =>
     standingsShown && splitsShown ? (
       <button
