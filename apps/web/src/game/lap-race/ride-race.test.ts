@@ -24,7 +24,10 @@ import { LAP_RACE_ASSIST_STORAGE_KEY } from './assist-preference';
 import {
   askRaceItem,
   askRaceLane,
+  countLapRaceDown,
+  LAP_RACE_COUNTDOWN_MS,
   LAP_RACE_TICK_SECONDS,
+  lapRaceCounting,
   lapRaceBotConditions,
   lapRaceDrawing,
   lapRaceHeard,
@@ -242,6 +245,54 @@ describe('a lap race in a ride — #1906', () => {
     expect(asked).not.toBe(ride);
     expect(askRaceItem(asked)).toBe(asked);
     expect(lapRaceHeard(ride, undefined, 0)).toBe(ride);
+  });
+});
+
+describe('a race counts down on its line before Go — #2546', () => {
+  it('starts counting ten seconds, and counts the frames it is given down to Go', () => {
+    const ride = started();
+    expect(LAP_RACE_COUNTDOWN_MS).toBe(10_000);
+    expect(ride.countdownLeftMs).toBe(LAP_RACE_COUNTDOWN_MS);
+    expect(lapRaceCounting(ride)).toBe(true);
+    // A frame inside the countdown: held to the frame's end, and that much less left.
+    const first = countLapRaceDown(ride, 1_000, 1_016);
+    expect(first.heldToMs).toBe(1_016);
+    expect(first.ride.countdownLeftMs).toBe(LAP_RACE_COUNTDOWN_MS - 16);
+    expect(lapRaceCounting(first.ride)).toBe(true);
+    // Nothing else of the race moves while it counts.
+    expect(first.ride.race).toBe(ride.race);
+    expect(first.ride.bots).toBe(ride.bots);
+  });
+
+  it('holds the frame Go falls in only to the instant of Go, and nothing after it', () => {
+    const near = { ...started(), countdownLeftMs: 30 };
+    // A 50 ms frame from 2 000: Go at 2 030, and the rider is held to it, not to 2 050.
+    const go = countLapRaceDown(near, 2_000, 2_050);
+    expect(go.heldToMs).toBe(2_030);
+    expect(go.ride.countdownLeftMs).toBe(0);
+    expect(lapRaceCounting(go.ride)).toBe(false);
+    // Exactly at the frame's end is Go too, held to that end.
+    expect(countLapRaceDown(near, 2_000, 2_030).heldToMs).toBe(2_030);
+    // Counted out: the same race, and no hold.
+    const after = countLapRaceDown(go.ride, 2_050, 2_100);
+    expect(after.ride).toBe(go.ride);
+    expect(after.heldToMs).toBeUndefined();
+  });
+
+  it('counts nothing for a frame that ran backwards', () => {
+    const ride = started();
+    const backwards = countLapRaceDown(ride, 5_000, 4_000);
+    expect(backwards.ride.countdownLeftMs).toBe(LAP_RACE_COUNTDOWN_MS);
+    expect(backwards.heldToMs).toBe(4_000);
+  });
+
+  it('never draws a bot behind the ride’s start, one tick off the line from rest and a whole step back', () => {
+    const ride = stepLapRaceRide(started(), { ticks: 1, along: 0.01 });
+    // Non-vacuity: the bots are moving, and drawn a step back along that speed is behind nought.
+    for (const bot of ride.bots) expect(bot.ride.speed as number).toBeGreaterThan(0);
+    const drawn = lapRaceDrawing(ride, 0, LAP_RACE_TICK_SECONDS, false);
+    expect(drawn.raceBots).toHaveLength(ride.bots.length);
+    for (const bot of drawn.raceBots) expect(bot.distanceMetres).toBeGreaterThanOrEqual(0);
   });
 });
 

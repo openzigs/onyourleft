@@ -19,8 +19,12 @@ import { deliveryTown } from './delivery-town-testing';
 import { LEVEL_PROGRESS_STORAGE_KEY, NO_LEVEL_FINISHED, readLevelProgress } from './level-progress';
 import {
   CRASH_SCORE_DELTA,
+  MOVING_HAZARD_KINDS,
+  MOVING_HAZARD_SIGHT_METRES,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  obstacleAcross,
+  obstacleAlong,
   PARKED_CAR_CLEARANCE_METRES,
   parkedCarStands,
   RIDER_AHEAD_METRES,
@@ -57,6 +61,7 @@ import {
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
   TARGET_CATCH_RADIUS_METRES,
   THROW_WINDOW_AFTER_METRES,
+  THROW_WINDOW_BEFORE_METRES,
   type ThrowTarget,
 } from './throw';
 
@@ -142,6 +147,17 @@ function throwPoint(target: ThrowTarget): number {
 /** The ride with no obstacle on it, so a test of the throw is not also one of a crash. */
 function withoutObstacles(ride: DeliveryRide): DeliveryRide {
   return { ...ride, obstacles: [], obstacleState: { tick: 0, startedAt: [], crashed: [] } };
+}
+
+/** The round with only its obstacle at `index`, none set going. */
+function withoutOthers(ride: DeliveryRide, index: number): DeliveryRide {
+  const kept = ride.obstacles.slice(index, index + 1);
+  return { ...ride, obstacles: kept, obstacleState: startObstacles(kept) };
+}
+
+/** The round with the rider already in lane `lane`, steering to it. */
+function steered(ride: DeliveryRide, lane: number): DeliveryRide {
+  return { ...ride, steer: { lane, offset: LANE_OFFSETS_METRES[lane] as number } };
 }
 
 describe('a round at the press — #1816', () => {
@@ -482,13 +498,15 @@ describe('a round ridden, step by step — #1816', () => {
 });
 
 describe('the next house, for the HUD — #2453', () => {
-  it('is the first house on the round, on its own side, the road between it and the rider away', () => {
+  it('is the first house on the round, on its own side, the road between the rider and its throw point away — #2513', () => {
     const ride = withoutObstacles(started());
     const [first] = ride.targets;
     if (first === undefined) throw new Error('the town gave no house');
+    // #2513: to where the window opens, 20 m before the house, never to the house.
+    expect(THROW_WINDOW_BEFORE_METRES).toBe(20);
     expect(nextHouse(ride)).toEqual({
       side: first.side === 1 ? 'right' : 'left',
-      metres: first.distance - ride.along,
+      metres: first.distance - THROW_WINDOW_BEFORE_METRES - ride.along,
     });
     // Both sides are said as the side the throw goes to.
     const sides = new Set(ride.targets.map((target) => target.side));
@@ -499,9 +517,28 @@ describe('the next house, for the HUD — #2453', () => {
         ride.throwTargets.find((each) => each.position === target.position)?.side,
       );
     }
-    // Ridden part of the way, it is that much nearer.
+    // Ridden to 30 m before the house, its throw point is 10 m on.
     const nearer = rideTo(ride, first.distance - 30).ride;
-    expect(nextHouse(nearer)?.metres).toBeCloseTo(30, 6);
+    expect(nextHouse(nearer)?.metres).toBeCloseTo(30 - THROW_WINDOW_BEFORE_METRES, 6);
+  });
+
+  it('reaches nought where the house’s window opens, and stays there through the window — #2513', () => {
+    const ride = withoutObstacles(started());
+    const first = ride.targets[0] as DeliveryTarget;
+    const opens = first.distance - THROW_WINDOW_BEFORE_METRES;
+    // Just short of the window: still a distance, however small.
+    const short = rideTo(ride, opens - 0.5).ride;
+    expect(nextHouse(short)?.metres).toBeCloseTo(0.5, 6);
+    // At its opening edge, half way through and level with the house: nought,
+    // on the house's side, for the HUD to say to throw.
+    for (const along of [opens, opens + THROW_WINDOW_BEFORE_METRES / 2, first.distance]) {
+      const inside = rideTo(ride, along).ride;
+      expect(inside.round.houses[first.position]).toBe('expecting');
+      expect(nextHouse(inside)).toEqual({
+        side: first.side === 1 ? 'right' : 'left',
+        metres: 0,
+      });
+    }
   });
 
   it('moves on to the next house once one is delivered, read off the round the throw changed', () => {
@@ -513,7 +550,7 @@ describe('the next house, for the HUD — #2453', () => {
     const second = ride.targets[1] as DeliveryTarget;
     expect(nextHouse(thrown.ride)).toEqual({
       side: second.side === 1 ? 'right' : 'left',
-      metres: second.distance - thrown.ride.along,
+      metres: Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - thrown.ride.along),
     });
   });
 
@@ -525,7 +562,10 @@ describe('the next house, for the HUD — #2453', () => {
     const past = rideTo(atClose, first.distance + THROW_WINDOW_AFTER_METRES + 0.2).ride;
     expect(past.round.houses[first.position]).toBe('missed');
     const second = ride.targets[1] as DeliveryTarget;
-    expect(nextHouse(past)?.metres).toBeCloseTo(second.distance - past.along, 6);
+    expect(nextHouse(past)?.metres).toBeCloseTo(
+      Math.max(0, second.distance - THROW_WINDOW_BEFORE_METRES - past.along),
+      6,
+    );
   });
 
   it('is none once no house on the round expects a parcel', () => {
@@ -902,6 +942,53 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
     // A rider's own route is the week's round, as before.
     expect(started().onLevel).toBe(false);
     expect(started().targets).toHaveLength(FIRST_DAY_HOUSES);
+  });
+
+  it('moves no moving hazard, and scores no crash, on a step the simulation did not run — #2364', () => {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      level: { ...LEVEL, hazardsPerKilometre: { static: 0, moving: 4 } },
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    const index = ride.obstacles.findIndex(
+      (obstacle) => obstacle.kind === 'oncoming-rider' && obstacle.to !== undefined,
+    );
+    expect(ride.obstacles.every((obstacle) => MOVING_HAZARD_KINDS.includes(obstacle.kind))).toBe(
+      true,
+    );
+    expect(index).toBeGreaterThanOrEqual(0);
+    const hazard = ride.obstacles[index] as Obstacle;
+    // Ridden in its lane until it is set going and coming on, well short of it.
+    const lane = LANE_OFFSETS_METRES.indexOf(hazard.to as number);
+    let riding = withoutOthers(steered(ride, lane), index);
+    riding = rideTo(riding, hazard.along - MOVING_HAZARD_SIGHT_METRES + 20).ride;
+    const started = riding.obstacleState.startedAt[0];
+    expect(started).toBeDefined();
+    const seconds = (riding.obstacleState.tick - (started ?? 0)) * DELIVERY_TICK_SECONDS;
+    const where = obstacleAlong(hazard, seconds);
+    expect(where).toBeLessThan(hazard.along);
+    // Paused: many frames, the odometer handed on, and no step run.
+    let paused = riding;
+    for (let frame = 0; frame < 400; frame += 1) {
+      const stepped = stepDeliveryRide(paused, {
+        ticks: 0,
+        along: hazard.along + frame,
+        speed: 8,
+      });
+      expect(stepped.crashes).toBe(0);
+      paused = stepped.ride;
+    }
+    expect(paused).toBe(riding);
+    expect(paused.obstacleState.crashed).toStrictEqual([false]);
+    expect(obstacleAlong(hazard, seconds)).toBe(where);
+    expect(obstacleAcross(hazard, seconds)).toBe(hazard.to);
+    // Ridden on, it comes on and is met: a crash, which the pause had not scored.
+    expect(rideTo(paused, hazard.along).crashes).toBe(1);
   });
 
   it('places no obstacle with the assist at none', () => {

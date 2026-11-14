@@ -125,10 +125,12 @@ import {
 import { VoiceButton, VoiceNotice } from './hud/VoiceNotice';
 import {
   acrossTheRoomsLine,
+  countdownRace,
   heldOnTheLine,
   nextToFollow,
   placeAcrossOf,
   RACE_NOTICE_LABEL,
+  RACE_TEXT,
   raceEvent,
   raceFactOf,
   raceNotice,
@@ -269,6 +271,8 @@ import type { ItemInputPort } from './lap-race/item-input-port';
 import {
   askRaceItem,
   askRaceLane,
+  countLapRaceDown,
+  lapRaceCounting,
   lapRaceDrawing,
   lapRaceFrame,
   lapRaceHeard,
@@ -302,6 +306,7 @@ import {
   oweCrash,
   oweObstacleAhead,
   oweNoRound,
+  oweSkipHouse,
   oweRoundChange,
   oweRoundOver,
   TOO_FEW_HOUSES_TEXT,
@@ -1972,6 +1977,16 @@ function GameScreen({
   const madeTheRoomRef = useRef(false);
   /** The race's last state said through the HUD's region (#785). */
   const raceSaidRef = useRef<RoomRace['kind'] | undefined>(undefined);
+  /** When this device saw the race start, for "Go." on the HUD (#2546). */
+  const raceWentAtRef = useRef<number | undefined>(undefined);
+  /**
+   * How long the rider has been held on a race's line this ride, ms — #2546.
+   * The simulation's clock stands still while they are (`simulation.ts`
+   * §`holdAt`), so the announcer's clock is the two together: the countdown's
+   * first sentence and its "Go." are ten seconds apart on it, as they are on
+   * the wall, and "Go." is said at Go rather than a window later.
+   */
+  const heldOnLineMsRef = useRef(0);
   /** The other riders the room's frames held at the last look (#784). */
   const ridersSeenRef = useRef<ReadonlySet<number> | undefined>(undefined);
   /**
@@ -2658,6 +2673,8 @@ function GameScreen({
       roomLostSaidRef.current = false;
       roomRecordAskedRef.current = false;
       raceSaidRef.current = undefined;
+      raceWentAtRef.current = undefined;
+      heldOnLineMsRef.current = 0;
       ridersSeenRef.current = undefined;
       inDraftRef.current = false;
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
@@ -3138,14 +3155,33 @@ function GameScreen({
       // the race — its first frame — and the wait is never ridden afterwards
       // (`simulation.ts` §`holdAt`). The trainer is still given the rider's own
       // road's grade at the line: nothing about a room reaches it.
-      const race = roomRef.current?.race();
+      //
+      // #2546: and a solo lap race's rider until its countdown has run out on
+      // the ride's own frames — this one included, and a paused ride's none —
+      // read as a room's race is, so the hold, the notice and the region are
+      // the room's. Never from a room's countdown: a room's rider is held
+      // until the room's first frame, whatever this device's clock says.
+      const roomRaceNow = roomRef.current?.race();
+      const solo = lapRaceRef.current;
+      const counted = solo === undefined ? undefined : countLapRaceDown(solo, lastFrameAt, at);
+      if (counted !== undefined) lapRaceRef.current = counted.ride;
+      const race =
+        roomRaceNow ??
+        (counted === undefined ? undefined : countdownRace(counted.ride.countdownLeftMs, at));
       let stepsRun = 0;
       if (heldOnTheLine(race)) {
-        simulation.holdAt(at);
+        // The reading kept for the HUD's Power, and no step run with it.
+        simulation.holdAt(at, sensors.rider);
+        heldOnLineMsRef.current += Math.max(0, at - lastFrameAt);
       } else {
+        // Go's own frame: held to the instant of Go, and ridden from it.
+        if (counted?.heldToMs !== undefined) {
+          simulation.holdAt(counted.heldToMs);
+          heldOnLineMsRef.current += Math.max(0, counted.heldToMs - lastFrameAt);
+        }
         stepsRun = simulation.advanceTo(at, sensors.rider).steps;
       }
-      if (race?.kind === 'running') {
+      if (roomRaceNow?.kind === 'running') {
         const dt = Math.max(0, (at - lastFrameAt) / 1000);
         const power = sensors.rider.live ? (sensors.rider.power as number) : 0;
         raceWattsRef.current = {
@@ -3187,7 +3223,7 @@ function GameScreen({
       if (
         roomLap !== undefined &&
         roomLapRaceRef.current === undefined &&
-        race?.kind === 'running'
+        roomRaceNow?.kind === 'running'
       ) {
         roomLapRaceRef.current = startRoomLapRace({
           race: roomLap,
@@ -3360,14 +3396,25 @@ function GameScreen({
       }
       // #785: the race's countdown, its start and its end, each said once —
       // and on the HUD, re-rendered as it moves (@see setRaceShown).
-      const raceWords = raceNotice(race, at, madeTheRoomRef.current) ?? '';
+      // #2546: the same for a solo lap race's countdown and its "Go.", which
+      // stands on the HUD for a moment from the frame this device saw it.
+      const raced = raceEvent(raceSaidRef.current, race, at);
+      // "Go." stands on the HUD, and is said, only for a rider who saw the
+      // race held: a rider who joins a room whose race is already running
+      // neither sees nor hears one.
+      const sawItHeld = raceSaidRef.current === 'waiting' || raceSaidRef.current === 'counting';
+      if (raced.said === 'running' && sawItHeld) {
+        raceWentAtRef.current = at;
+      }
+      raceSaidRef.current = raced.said;
+      if (raced.event !== undefined && (raced.said !== 'running' || sawItHeld)) {
+        events.push(raced.event);
+      }
+      const raceWords = raceNotice(race, at, madeTheRoomRef.current, raceWentAtRef.current) ?? '';
       if (raceWords !== raceShownRef.current) {
         raceShownRef.current = raceWords;
         setRaceShown(raceWords);
       }
-      const raced = raceEvent(raceSaidRef.current, race, at);
-      raceSaidRef.current = raced.said;
-      if (raced.event !== undefined) events.push(raced.event);
       // #784: a rider joining or leaving the room, with announcements on.
       // The room as it was found is the baseline: nobody "joined" it. So not
       // until the room has sent this rider a frame.
@@ -3510,16 +3557,25 @@ function GameScreen({
       // and #1818's one sentence on a ride that asked for a round and has none.
       events.push(...deliveryEvents(deliveryOwedRef.current));
       // #1906: the lap race's laps, hits, items, place and finish, owed until said.
+      // #2546: the announcer's clock is the ride's and the time held on a
+      // race's line together. @see heldOnLineMsRef
+      const sayAt = simulation.state.elapsed + heldOnLineMsRef.current / 1000;
       const raceAnnounced = lapRaceRef.current;
       if (raceAnnounced !== undefined) {
-        events.push(...lapRaceSaid(raceAnnounced, simulation.state.elapsed));
+        events.push(...lapRaceSaid(raceAnnounced, sayAt));
       }
+      // #2546: no power on its cadence while the rider is held on a race's
+      // line, in a room's lobby or a countdown, as on `main` where this clock
+      // stood still there: a reading would also close the window "Go." needs.
+      const preference = heldOnTheLine(race)
+        ? { ...announcementsRef.current, powerEverySeconds: 'never' as const }
+        : announcementsRef.current;
       const heard = announce(announcerRef.current, {
-        now: simulation.state.elapsed,
+        now: sayAt,
         readings,
         ...(remaining === undefined ? {} : { remaining }),
         events,
-        preference: announcementsRef.current,
+        preference,
       });
       announcerRef.current = heard.state;
       if (heard.sentence !== undefined) {
@@ -3536,7 +3592,7 @@ function GameScreen({
       }
       deliveryOwedRef.current = deliverySpoken(deliveryOwedRef.current, heard.kind);
       if (raceAnnounced !== undefined) {
-        lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, simulation.state.elapsed);
+        lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, sayAt);
       }
       if (heard.sentence === REPLANS_OFF_SAID) {
         replansOffOwedRef.current = false;
@@ -3620,6 +3676,8 @@ function GameScreen({
         // #2362, ADR 0065 D-10.9: on a level, a standing obstacle ahead in words.
         if (stepped.ride.onLevel) {
           owed = oweObstacleAhead(owed, stepped.ride.obstacles, stepped.ride.along);
+          // #2365, ADR 0065 D-10.5: a house ahead that must not get a parcel, in words.
+          owed = oweSkipHouse(owed, stepped.ride.noDeliveryTargets, stepped.ride.along);
         }
         const ended = stepped.ride.outcome;
         if (ended !== undefined && delivery.outcome === undefined) {
@@ -3635,10 +3693,11 @@ function GameScreen({
       // #2454: how far into a crash the rider is, while one is — on every frame,
       // drawn or not, as the HUD's "Crashed" reads it.
       const crashed = crashRef.current;
+      const crashSeconds = crashed === undefined ? 0 : (crashClock - crashed.atMs) / 1000;
       const crashAt =
         crashed === undefined || deliveryRef.current === undefined
           ? undefined
-          : crashShare((crashClock - crashed.atMs) / 1000, reducedMotionRef.current);
+          : crashShare(crashSeconds, reducedMotionRef.current);
       if (crashAt === undefined) crashRef.current = undefined;
       crashShownRef.current = crashAt;
       // #1906: the lap race, stepped on exactly the simulation steps that ran,
@@ -3680,7 +3739,20 @@ function GameScreen({
       const view = viewRef.current;
       const prepared = view !== undefined && view === preparedViewRef.current;
       const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
-      if (drawn !== undefined && view !== undefined && !waiting) {
+      // #2524: a prepared view with no drawing context is handed no more
+      // frames. It would draw none of them — `three-renderer.ts` §`render`
+      // returns at once without a renderer, and `hasContext` is fixed when the
+      // view is built (`port.ts` §`hasContext`) — so the frame below, most of a
+      // frame's work and none of it the trainer's, was built for nobody.
+      // Everything above it still runs: the simulation, the grade, the round
+      // and the race. The block's other writes are its two dampers, which only
+      // this view's frames read, and the name tags, which it lays empty for a
+      // view with no context: one view draws a whole ride (`teardown` destroys
+      // it, and the next ride's stage mounts a new layer), so the layer under a
+      // view with no context has never held a tag. The view is still prepared
+      // with one frame, below, so `preparedViewRef` moves exactly as before.
+      const blind = prepared && !view.hasContext;
+      if (drawn !== undefined && view !== undefined && !waiting && !blind) {
         // #1906: a lap race draws the rider at their race position, effort
         // distance plus race offset (ADR 0060 D-3.3), and its bots beside
         // them. The drawing only: the grade above was read at the odometer.
@@ -3804,6 +3876,7 @@ function GameScreen({
                   deliveryRef.current.obstacles,
                   drawn.riderDistance,
                   deliverySteered,
+                  deliveryRef.current.obstacleState,
                 ),
           ...(raceDrawn === undefined
             ? {}
@@ -3814,9 +3887,17 @@ function GameScreen({
           // #2454: the round's crash, drawn as a fall and a getting back up.
           // Optional the unsafe way round (`scene.ts`), so
           // `delivery-wiring.test.tsx` reads the fallen rider back off the frames.
+          // #2493: and how long ago, for the realistic rider's crash clip —
+          // never under reduced motion, which keeps #2475's still pose.
           ...(crashAt === undefined || crashed === undefined
             ? {}
-            : { riderCrash: { share: crashAt, side: crashed.side } }),
+            : {
+                riderCrash: {
+                  share: crashAt,
+                  side: crashed.side,
+                  ...(reducedMotionRef.current ? {} : { seconds: crashSeconds }),
+                },
+              }),
         });
         // #1994: the camera's heading, damped from the last drawn frame's, by
         // the wall clock between them, so a corridor that jumps turns the view
@@ -3854,6 +3935,12 @@ function GameScreen({
                   throws: round.throws,
                   obstacles: round.obstacles,
                   obstacleState: round.obstacleState,
+                  noDelivery: round.noDeliveryTargets,
+                  // #2366: in rain or at dusk a marker shows once the rider is closer,
+                  // and the frame carries the weather for the rain and the light.
+                  riderAlong: round.along,
+                  revealMetres: round.revealMetres,
+                  weather: round.weather,
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                 }),
               };
@@ -3938,7 +4025,15 @@ function GameScreen({
         // #2289: frame time alone. The thermal forecast is not read — the
         // owner's ruling; Android throttles a hot device itself.
         const sample = { frameMs };
-        const next = nextWorldQuality(previous, sample);
+        // #2513: a Delivery round's houses are mapped buildings, which only the
+        // realistic world draws, so while one runs the ladder holds realism's
+        // floor rather than leaving it (`quality.ts` §`nextWorldQuality`).
+        const running = deliveryRef.current;
+        const next = nextWorldQuality(
+          previous,
+          sample,
+          running !== undefined && running.outcome === undefined,
+        );
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
           previous,
@@ -4323,6 +4418,23 @@ function GameScreen({
     ) : undefined;
   // The countdown's seconds are read on the loop's own clock.
   const renderedAt = (props.now ?? (() => performance.now()))();
+  // #2546: a solo lap race's countdown, in the room's words, from what the
+  // last frame left of it — and, paused on the line, that it waits for the
+  // rider, which a room's does not.
+  const soloRace = lapRaceRef.current;
+  const raceWords =
+    race !== undefined
+      ? raceNotice(race, renderedAt, madeTheRoomRef.current, raceWentAtRef.current)
+      : soloRace === undefined
+        ? undefined
+        : phase === 'paused' && lapRaceCounting(soloRace)
+          ? RACE_TEXT.pausedCounting(Math.ceil(soloRace.countdownLeftMs / 1000))
+          : raceNotice(
+              countdownRace(soloRace.countdownLeftMs, renderedAt),
+              renderedAt,
+              false,
+              raceWentAtRef.current,
+            );
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
@@ -4813,11 +4925,10 @@ function GameScreen({
           // room and to nobody else (the owner's ruling of 2026-09-30; the
           // instance refuses anybody else's start too), whose notice says who
           // will; and it says what came of the press.
-          race === undefined ||
-          raceNotice(race, renderedAt, madeTheRoomRef.current) === undefined ? undefined : (
+          raceWords === undefined ? undefined : (
             <div key="race" className="oyl-hud__race">
               <StatusMessage tone="info" label={RACE_NOTICE_LABEL}>
-                {raceNotice(race, renderedAt, madeTheRoomRef.current)}
+                {raceWords}
                 {starting === 'refused'
                   ? ' The race could not be started from here: it may have been started already.'
                   : ''}

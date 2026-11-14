@@ -418,7 +418,7 @@ export interface GameState {
   readonly ridden: Seconds;
   /** The gradient at the rider's current position on the route. */
   readonly grade: GradePercent;
-  /** The last input the simulation was advanced with. @see RiderInput */
+  /** The last input the simulation was advanced or held with (#2546). @see RiderInput */
   readonly input: RiderInput;
   /**
    * The bot pacer's own ride, when the rider chose one — #237.
@@ -604,9 +604,14 @@ export class GameSimulation {
    * power and put them metres up the road at "Go". So the origin moves up with
    * the wait, and a held ride owes no step — the same rider, the same state,
    * the same clocks.
+   *
+   * #2546: `input`, when given, is the rider's reading as it stands, kept as
+   * {@link GameState.input} for the HUD and nothing else: a rider warming up
+   * on the line sees their power, and no step is run with it.
    */
-  holdAt(nowMs: number): void {
+  holdAt(nowMs: number, input?: RiderInput): void {
     this.#originMs = nowMs - this.#stepsCredited * SIMULATION_STEP_SECONDS * 1000;
+    if (input !== undefined) this.#state = { ...this.#state, input };
   }
 
   /**
