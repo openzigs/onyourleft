@@ -3042,6 +3042,40 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       belt.dispose();
     });
 
+    it('marks no rider buffer for upload on a frame where no fade and no steer changed', () => {
+      // Review of #2620: three uploads a whole buffer whenever it is marked,
+      // so an unchanged frame must mark none. `version` counts the marks.
+      const belt = new RiderBelt();
+      const steering = (marker: RiderMarker, steer: number): RiderMarker => ({ ...marker, steer });
+      const markers = [
+        steering(riderAt(), 0.2),
+        riderAt({ z: -2.05 }, {}, undefined, 'bot'),
+        steering(riderAt({ x: 1.2, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        riderAt({ z: 6 }, {}, undefined, 'bot'),
+      ];
+      const line = riderFadeLine(POSE, markers, emptyRiderFadeLine());
+      belt.place(markers, line);
+      const versions = (): number[] =>
+        Object.values(belt.meshes).map(
+          (mesh) =>
+            (mesh.geometry.getAttribute('oylRiderInstance') as unknown as { version: number })
+              .version,
+        );
+      const first = versions();
+      belt.place(markers, line);
+      expect(versions()).toEqual(first);
+      // The control: a bot coming nearer the line marks its buffers again.
+      const nearer = [
+        ...markers.slice(0, 2),
+        steering(riderAt({ x: 1, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        markers[3] as RiderMarker,
+      ];
+      belt.place(nearer, line);
+      const after = versions();
+      expect(after.every((version, index) => version > (first[index] as number))).toBe(true);
+      belt.dispose();
+    });
+
     it('draws every rider whole when handed no line — the control', () => {
       const belt = new RiderBelt();
       belt.place([riderAt(), riderAt({ z: -2.05 }, {}, undefined, 'bot')]);

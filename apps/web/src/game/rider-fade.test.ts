@@ -11,7 +11,7 @@
 import { metres } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { CAMERA_BEHIND_METRES } from './camera';
+import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
 import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from './lap-race/pack-layout';
 import type { CameraPose, RiderMarker } from './port';
 import {
@@ -153,6 +153,35 @@ describe('riderFaded — the rule (#2596)', () => {
       CAMERA_BEHIND_METRES - RIDER_FADE_METRES.clear,
       9,
     );
+  });
+
+  it('measures from the eye `cameraRig` places, through bends and on climbs', () => {
+    // Review of #2620: the line's eye is the camera's own, so a later change
+    // to where `cameraRig` stands the camera moves the fade with it.
+    for (const degrees of [0, 17, 90, 143, -60, 180]) {
+      for (const [eyeRoadY, targetRoadY] of [
+        [0, 0],
+        [-1.2, 3.5],
+        [4, -2],
+      ] as const) {
+        const radians = (degrees * Math.PI) / 180;
+        const pose: CameraPose = {
+          ...POSE,
+          x: 12.5,
+          y: eyeRoadY + 0.3,
+          z: -40,
+          headingX: Math.sin(radians),
+          headingZ: Math.cos(radians),
+          eyeRoadY,
+          targetRoadY,
+        };
+        const rider = marker('rider', pose.x + 0.4, pose.z - 0.2);
+        const line = riderFadeLine(pose, [rider], emptyRiderFadeLine());
+        const { eye } = cameraRig(pose);
+        expect(line.eyeX).toBe(eye.x);
+        expect(line.eyeZ).toBe(eye.z);
+      }
+    }
   });
 
   it('leaves the line its eye alone when the rider stands nearer the eye than `clear`', () => {

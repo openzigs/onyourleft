@@ -207,7 +207,6 @@ import {
   RGBA_S3TC_DXT1_Format,
   RGBA_S3TC_DXT5_Format,
   RGB_PVRTC_4BPPV1_Format,
-  RGBADepthPacking,
   RGBAFormat,
   RGFormat,
   SRGBColorSpace,
@@ -3262,14 +3261,15 @@ export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
   /**
-   * What the riders are drawn with into the sun's shadow map — #2596: three's
-   * own depth material, as before, taught the rider fade, so a rider faded out
-   * casts as little as it is drawn.
+   * What the riders are drawn with into the sun's shadow map — #2596: a
+   * depth material made as three 0.185's `WebGLShadowMap` makes its own
+   * default (`new MeshDepthMaterial()`, basic depth packing: the directional
+   * light's shadow map is a depth texture, so no packed colour is read),
+   * taught the rider fade, so a rider faded out casts as little as it is
+   * drawn. It is one more program, compiled in `prepare()`'s warm-up, and no
+   * new pass: the riders were already drawn into that pass with three's.
    */
-  readonly #depth = withRiderInstance(
-    new MeshDepthMaterial({ depthPacking: RGBADepthPacking }),
-    false,
-  );
+  readonly #depth = withRiderInstance(new MeshDepthMaterial(), false);
   readonly #bodies: InstancedMesh;
   /** The upper bodies, rolled against the bicycle about the hips — #546. */
   readonly #torsos: InstancedMesh;
@@ -4508,8 +4508,12 @@ const RIDER_FADE_TAUGHT = new WeakSet<Material>();
 /**
  * Whether a material fades a rider out by its instance — #2596.
  *
- * @test-facing held by `three-renderer.test.ts` §"#2596", which asserts every
- * material every rider mesh wears in both worlds is taught it
+ * @test-facing held by `three-renderer.test.ts` §"#2596", which asserts it of
+ * the stylised belt's two materials (lit and flat), and by
+ * `contact-shadow.test.ts`, which asserts it of the riders' shadow-map depth
+ * material. The realistic world's materials (frame, rubber, metal, helmet and
+ * each body) are held only by the nightly browser spec
+ * (`game.browser.spec.ts` §"#2596", the realistic world).
  */
 export function fadesRiders(material: Material): boolean {
   return RIDER_FADE_TAUGHT.has(material);
@@ -4615,18 +4619,29 @@ function riderInstanceChannels(mesh: InstancedMesh, capacity: number): Instanced
   return mesh;
 }
 
-/** Sets one instance's steer, where the mesh has one. @see riderInstanceChannels */
+/**
+ * Sets one instance's steer, where the mesh has one. @see riderInstanceChannels
+ *
+ * ⚠️ **Marks the buffer for upload only when the value changed** — review of
+ * #2620. Three uploads the whole buffer, not one slot, whenever it is marked,
+ * so a frame in which no rider turned its bars and none came nearer the
+ * camera's line uploads nothing. Compared as the `Float32Array` holds it.
+ */
 function steerInstance(mesh: InstancedMesh, slot: number, steer: number): void {
   const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as
     InstancedBufferAttribute | undefined;
-  if (held === undefined) return;
+  if (held === undefined || held.getX(slot) === Math.fround(steer)) return;
   held.setX(slot, steer);
   held.needsUpdate = true;
 }
 
-/** Sets how much of one instance is faded out — #2596. @see riderInstanceChannels */
+/**
+ * Sets how much of one instance is faded out — #2596; only a change marks the
+ * buffer for upload, as {@link steerInstance}. @see riderInstanceChannels
+ */
 function fadeInstance(mesh: InstancedMesh, slot: number, faded: number): void {
   const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as InstancedBufferAttribute;
+  if (held.getY(slot) === Math.fround(faded)) return;
   held.setY(slot, faded);
   held.needsUpdate = true;
 }

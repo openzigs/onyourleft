@@ -67,7 +67,7 @@
  * Pure, and naming no rendering library — `three-seam.test.ts`.
  */
 
-import { CAMERA_BEHIND_METRES } from './camera';
+import { cameraRig } from './camera';
 import type { CameraPose, RiderMarker } from './port';
 
 /** Where a rider is gone, where it is whole, and how far short of the rider the line stops. */
@@ -95,18 +95,21 @@ export function emptyRiderFadeLine(): RiderFadeLine {
 
 /**
  * The line for a frame drawn from `pose`, written into `into`: from the eye
- * `CAMERA_BEHIND_METRES` behind the pose along its heading — as
- * `camera.ts` §`cameraRig` places it — toward the frame's own rider, or the
- * pose's point when the frame carries none, stopping `clear` short. A rider
- * nearer the eye than `clear` leaves the line its eye alone.
+ * `camera.ts` §`cameraRig` places for that pose — taken from it, not
+ * restated, so the fade measures from wherever the camera really stands —
+ * toward the frame's own rider, or the pose's point when the frame carries
+ * none, stopping `clear` short. A rider nearer the eye than `clear` leaves
+ * the line its eye alone.
+ *
+ * Once a frame, so the rig it builds is the one allocation here;
+ * {@link riderFaded}, asked of every rider, allocates nothing.
  */
 export function riderFadeLine(
   pose: CameraPose,
   markers: readonly RiderMarker[],
   into: RiderFadeLine,
 ): RiderFadeLine {
-  const eyeX = pose.x - pose.headingX * CAMERA_BEHIND_METRES;
-  const eyeZ = pose.z - pose.headingZ * CAMERA_BEHIND_METRES;
+  const { x: eyeX, z: eyeZ } = cameraRig(pose).eye;
   const rider = markers.find((marker) => marker.kind === 'rider');
   const toX = (rider?.x ?? pose.x) - eyeX;
   const toZ = (rider?.z ?? pose.z) - eyeZ;

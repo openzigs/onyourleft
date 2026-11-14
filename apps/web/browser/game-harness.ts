@@ -12632,37 +12632,54 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
-  // #621, on the same view and the level road. #2596: these three draw a bot
-  // and the ghost in the rider's own place under a camera brought close, which
-  // is the space a rider other than the rider's own fades out of; they read
-  // each rider's colours, so they read them with the fade off.
+  // #2596: the fade is off from the tint probe (#621) to the kit probe (#623),
+  // and for every probe between them: the tints (#621), pavement (#1535), the
+  // mapped side's pavement (#1551), people (#1541), levelling (#1547), the
+  // tread (#624) and the kit (#623). #621 and #623 draw a bot and the ghost in
+  // the rider's own place under a camera brought close, which is the space a
+  // rider other than the rider's own fades out of, and they read each rider's
+  // colours, so they read them with the fade off; the five between draw no
+  // rider but the rider's own, which never fades, so it changes nothing for
+  // them. In a `finally`, so a throw cannot leave every later probe unfaded.
+  // A probe added inside this window runs with the fade off: name it here.
   riderFadeOf(view, 'off');
-  const tint = tintProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: seeded tints');
+  let tint: ReturnType<typeof tintProbe>;
+  let pavement: ReturnType<typeof pavementProbe>;
+  let mappedPavement: ReturnType<typeof mappedPavementProbe>;
+  let people: ReturnType<typeof peopleProbe>;
+  let levelling: ReturnType<typeof levellingProbe>;
+  let tread: ReturnType<typeof treadProbe>;
+  let kit: ReturnType<typeof kitProbe>;
+  try {
+    // #621, on the same view and the level road.
+    tint = tintProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: seeded tints');
 
-  // #1535, on the same view: a village's pavement, in ambientCG's paving.
-  const pavement = pavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement — #1535');
+    // #1535, on the same view: a village's pavement, in ambientCG's paving.
+    pavement = pavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement — #1535');
 
-  // #1551, on the same view and #1535's village: the pavement on the mapped side.
-  const mappedPavement = mappedPavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement on the mapped side — #1551');
+    // #1551, on the same view and #1535's village: the pavement on the mapped side.
+    mappedPavement = mappedPavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement on the mapped side — #1551');
 
-  // #1541, on the same view and #1535's village: people, never on the carriageway.
-  const people = peopleProbe(view, gl, canvas);
-  phaseEnds('realistic: people — #1541');
+    // #1541, on the same view and #1535's village: people, never on the carriageway.
+    people = peopleProbe(view, gl, canvas);
+    phaseEnds('realistic: people — #1541');
 
-  // #1547, on the same view: the ground under a mapped town, levelled.
-  const levelling = levellingProbe(view);
-  phaseEnds('realistic: a town on the flat — #1547');
+    // #1547, on the same view: the ground under a mapped town, levelled.
+    levelling = levellingProbe(view);
+    phaseEnds('realistic: a town on the flat — #1547');
 
-  // #624, on the same view and the same road.
-  const tread = treadProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: the tread — #624');
+    // #624, on the same view and the same road.
+    tread = treadProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: the tread — #624');
 
-  // #623, on the same view and the same road.
-  const kit = kitProbe(view, gl, canvas, riding(level, 400));
-  riderFadeOf(view, 'fade');
+    // #623, on the same view and the same road.
+    kit = kitProbe(view, gl, canvas, riding(level, 400));
+  } finally {
+    riderFadeOf(view, 'fade');
+  }
   phaseEnds('realistic: the kit — #623');
 
   // #620, on the same view and the same road; then what a whole wooded frame
