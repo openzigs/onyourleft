@@ -950,3 +950,85 @@ describe('each bot its own pace (#2455)', () => {
     expect(new Set(last.racers.map((entry) => entry.racer.finishedAtMs)).size).toBe(1);
   });
 });
+
+describe('each bot its archetype, a power profile within its tier (#2459)', () => {
+  /** A pace of `style`, at the ability the seed's field of two deals seat `seat`. */
+  function dealtPace(seed: number, seat: number, style: BotPace['style']): BotPace {
+    return { style, ability: (botFieldPaces(seed, 2)[seat] as BotPace).ability };
+  }
+
+  /** Whoever `standings` puts first in a race. */
+  function winner(state: ItemRaceState): string | undefined {
+    return standings(state.racers.map((entry) => entry.racer))[0];
+  }
+
+  it('lets a sprinter beat a rouleur of the same tier in a flat final 200 m from level, more often than not over 100 seeds', () => {
+    // No timeout of its own (#1688's ruling): each 0.1 s tick is one physics
+    // sub-step, not ten. Who wins is the archetypes' power, which the plan
+    // sets per tick; the sub-step only moves the bots, and the sprinter took
+    // all 100 at a 10 ms sub-step and all 100 at 0.1 s. Apple M-series,
+    // Node 26, this file, three runs each: 529 to 638 ms, and 707 to 760 ms
+    // under --coverage, at 10 ms; 173 to 230 ms, and 312 to 520 ms, now.
+    const course = raceCourse(FLAT.totalDistance, 3);
+    const from = course.lapLengthMetres * course.laps - 200;
+    // Level, at a race pace, and fresh: what is left is the archetypes' finish.
+    const level = (bot: LapRaceBot): LapRaceBot => ({
+      ...bot,
+      ride: { speed: metresPerSecond(9), distance: metres(from) },
+    });
+    let sprinterWins = 0;
+    for (let seed = 1; seed <= 100; seed += 1) {
+      let bots: readonly LapRaceBot[] = [
+        level(lapRaceBot('sprinter', 'brisk', STRATEGY, dealtPace(seed, 0, 'sprinter'))),
+        level(lapRaceBot('rouleur', 'brisk', STRATEGY, dealtPace(seed, 1, 'even'))),
+      ];
+      let state = createItemRace({
+        course,
+        seed,
+        itemsOn: false,
+        racerIds: ['sprinter', 'rouleur'],
+        startMs: 0,
+      });
+      for (let tick = 0; tick < 1_000; tick += 1) {
+        if (state.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
+        const next = stepBotRace(state, bots, {
+          elapsed: seconds(0.1),
+          conditions: conditions(FLAT, 0.1),
+          seed,
+        });
+        state = next.race;
+        bots = next.bots;
+        vi.mocked(advance).mockClear();
+      }
+      expect(state.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+      if (winner(state) === 'sprinter') sprinterWins += 1;
+    }
+    expect(sprinterWins).toBeGreaterThan(50);
+  });
+
+  it('lets a climber beat a sprinter of the same tier on a seeded hilly loop, more often than not over 100 seeds', () => {
+    // No timeout of its own (#1688's ruling): each one-second tick is one
+    // physics sub-step, not a hundred. The climber took all 100 at a 10 ms
+    // sub-step and all 100 at 1 s. Apple M-series, Node 26, this file, three
+    // runs each: 3.7 to 5.2 s, and 4.5 to 6.3 s under --coverage, at 10 ms
+    // (over Vitest's 5 s default); 154 to 212 ms, and 333 to 346 ms, now.
+    let climberWins = 0;
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const run = race(
+        HILLY,
+        [
+          { id: 'climber', tier: 'brisk', pace: dealtPace(seed, 0, 'climber') },
+          { id: 'sprinter', tier: 'brisk', pace: dealtPace(seed, 1, 'sprinter') },
+        ],
+        seed,
+        false,
+        undefined,
+        1,
+      );
+      if (winner(run.races[run.races.length - 1] as ItemRaceState) === 'climber') {
+        climberWins += 1;
+      }
+    }
+    expect(climberWins).toBeGreaterThan(50);
+  });
+});

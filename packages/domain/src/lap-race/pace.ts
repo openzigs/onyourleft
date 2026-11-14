@@ -36,11 +36,17 @@
  *
  * | Style | What the plan does with it |
  * |---|---|
- * | `even` | as #1960's plan: holds its own power, surges up climbs, sprints the close |
+ * | `even` | as a rouleur's plan (#1960's, shaped by #2459): holds its own power, surges up climbs, sprints the close |
  * | `fast-start` | its own power on the first lap, then {@link BOT_STYLE_EASING} under it: it fades |
  * | `negative-split` | {@link BOT_STYLE_EASING} under its own power until the last lap, then all of it |
- * | `climber` | asks a full surge from {@link BOT_CLIMBER_GRADE_PERCENT}, and holds a larger W′ |
- * | `sprinter` | asks half a climb's surge, holds a larger W′, and opens a longer kick |
+ * | `climber` | as `even`; its archetype climbs hard (#2459) |
+ * | `sprinter` | as `even`; its archetype saves on climbs and opens a long kick (#2459) |
+ *
+ * Since #2459 each style also carries a rider archetype, `archetype.ts`
+ * §`BOT_STYLE_ARCHETYPE`: the power profile within the tier that a style's
+ * bot rides with. What a climber's or a sprinter's style did to its capacity
+ * before (a larger W′, its own climb grade, a longer kick) is its archetype's
+ * row now, so there is one table for it rather than two.
  *
  * A race of one lap has no first or last lap to speak of: there the first and
  * the last third stand in for them. The plan reads which part of the race the
@@ -75,7 +81,7 @@ export interface BotPace {
   readonly ability: number;
 }
 
-/** The pace of a bot nothing has dealt one: #1960's plan, at its tier's full power. */
+/** The pace of a bot nothing has dealt one: a rouleur's plan (#2459), at its tier's full power. */
 export const BOT_EVEN_PACE: BotPace = Object.freeze({ style: 'even', ability: 1 });
 
 /**
@@ -93,18 +99,6 @@ export const BOT_ABILITY_SPREAD = 0.06;
  * owner's approval (#2455).
  */
 export const BOT_STYLE_EASING = 0.04;
-
-/** The grade at which a `climber` asks its full surge: **4 %**, half #92's 8 %. */
-export const BOT_CLIMBER_GRADE_PERCENT = 4;
-
-/** The grade at which a `sprinter` asks its full surge: **16 %**, so half a climb's ask at 8 %. */
-export const BOT_SPRINTER_GRADE_PERCENT = 16;
-
-/** How much larger a `climber`'s or a `sprinter`'s W′ is than its tier's: **1.5 times** (#2458). */
-export const BOT_STYLE_BUDGET_FACTOR = 1.5;
-
-/** How much further out a `sprinter` opens its closing sprint: **1.5 times**, 300 m to 450 m. */
-export const BOT_SPRINTER_SPRINT_FACTOR = 1.5;
 
 /** Keys the field's deal apart from the race's item draws and the personalities' deal. */
 const PACE_SALT = 0x2455_b07e;

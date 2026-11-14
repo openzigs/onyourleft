@@ -222,6 +222,11 @@ describe('it refuses what is not a balance', () => {
     expect(codeOf(() => stepWbal({ ...CAPACITY, cpWatts: Number.NaN }, full, CP, 1))).toBe(
       'capacity-out-of-range',
     );
+    for (const recoveryFactor of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(codeOf(() => stepWbal({ ...CAPACITY, recoveryFactor }, full, CP, 1))).toBe(
+        'capacity-out-of-range',
+      );
+    }
     expect(codeOf(() => spendableWatts(CAPACITY, full, Number.NaN, 1))).toBe('power-not-finite');
     expect(codeOf(() => spendableWatts({ ...CAPACITY, peakWatts: Number.NaN }, full, CP, 1))).toBe(
       'capacity-out-of-range',
