@@ -167,9 +167,11 @@ function OperatorLog({
 
   useEffect(() => {
     const from = askedAt.current;
-    if (from === null || log.kind !== 'page' || log.next !== null) return;
+    if (from === null || log.kind !== 'page') return;
     askedAt.current = null;
-    // Only when focus was left with nowhere to be: a rider who moved on keeps it.
+    // Only when focus was left with nowhere to be — the button went with the
+    // last page. While there is more it stays, and keeps focus; a rider who
+    // moved on keeps theirs.
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
     const at = Math.min(from, log.entries.length - 1);
@@ -216,6 +218,7 @@ function OperatorLog({
                 const cursor = log.next;
                 if (busy || cursor === null || log.kind !== 'page') return;
                 askedAt.current = log.entries.length;
+                
                 setBusy(true);
                 void onMore(cursor).finally(() => {
                   setBusy(false);

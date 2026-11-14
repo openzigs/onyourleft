@@ -209,6 +209,29 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(entries[2]?.getAttribute('tabindex')).toBe('-1');
   });
 
+  it('moves focus to the last entry shown when the last page brought none', async () => {
+    const scripted = scriptedOperate({ pageSize: 2 });
+    const port = {
+      ...scripted.port,
+      log: async (cursor?: string) => {
+        const read = await scripted.port.log(cursor);
+        if (read.kind !== 'page') return read;
+        // A full first page with a cursor, then an empty last one.
+        return cursor === undefined ? read : { kind: 'page' as const, entries: [], next: null };
+      },
+    };
+    mounted = await mount(<OperateView port={port} />);
+    await settle();
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    await settle();
+    expect(showOlder()).toBeUndefined();
+    const entries = mounted.container.querySelectorAll('.oyl-operate__log > li');
+    expect(entries).toHaveLength(2);
+    expect(document.activeElement).toBe(entries[1]);
+  });
+
   it('leaves focus alone when the rider moved it while the last page was coming', async () => {
     const scripted = scriptedOperate({ pageSize: 2 });
     let arrive: () => void = () => undefined;
