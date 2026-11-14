@@ -32,13 +32,18 @@ import {
   BOT_TIER_WATTS_PER_KILOGRAM,
   botPlanStep,
   botRacePlan,
+  botTierPlan,
   botWPrimeJoules,
   createItemRace,
+  fullBotEnergy,
+  gradePercent,
+  kilograms,
+  RACE_OFFSET_BOUND_METRES,
+  stepWbal,
   degreesCelsius,
   degreesLatitude,
   degreesLongitude,
   distanceOnRoute,
-  fullBotEnergy,
   geographicPosition,
   gradeAt,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -53,19 +58,29 @@ import {
 } from '@onyourleft/domain';
 
 import { airDensityKilogramsPerCubicMetre } from './air';
+import { withDefaultCoefficients, withDragArea } from './coefficients';
+import { DRAFT_REACH_METRES, fieldDraftFactors } from './draft';
 import lapRaceBotSource from './lap-race-bot.ts?raw';
 import {
   lapRaceBot,
+  lapRaceDraftFactors,
   stepBotRace,
   type BotRaceStep,
   type LapRaceBot,
   type LapRaceBotConditions,
 } from './lap-race-bot';
+import { powerRequired } from './power';
 import { advance, type RideState } from './simulate';
 
 vi.mock('./simulate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./simulate')>();
   return { ...actual, advance: vi.fn(actual.advance) };
+});
+
+// #2460: counted, so a test can hold the field's draft to one call a tick.
+vi.mock('./draft', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./draft')>();
+  return { ...actual, fieldDraftFactors: vi.fn(actual.fieldDraftFactors) };
 });
 
 const AIR = airDensityKilogramsPerCubicMetre(altitudeMetres(0), degreesCelsius(15));
@@ -261,7 +276,11 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     expectTypeOf(stepBotRace).parameters.toEqualTypeOf<
       [race: ItemRaceState, bots: readonly LapRaceBot[], step: BotRaceStep]
     >();
-    expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<'elapsed' | 'conditions' | 'seed' | 'rider'>();
+    // #2460: `draft` is ADR 0066 D-6's switch, a boolean: nowhere for a recorded ride.
+    expectTypeOf<keyof BotRaceStep>().toEqualTypeOf<
+      'elapsed' | 'conditions' | 'seed' | 'rider' | 'draft'
+    >();
+    expectTypeOf<BotRaceStep['draft']>().toEqualTypeOf<boolean | undefined>();
     expectTypeOf<keyof LapRaceBot>().toEqualTypeOf<
       'id' | 'tier' | 'strategy' | 'pace' | 'memory' | 'energy' | 'ride' | 'power'
     >();
@@ -288,8 +307,9 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
     const specifiers = [...lapRaceBotSource.matchAll(/\b(?:from|import)\s*\(?\s*'([^']+)'/g)].map(
       (match) => match[1] ?? '',
     );
-    // The whole of what it reaches: the domain barrel, and two modules of its own package.
+    // The whole of what it reaches: the domain barrel, and three modules of its own package.
     expect([...new Set(specifiers)].sort()).toEqual([
+      './draft',
       './pacer',
       './simulate',
       '@onyourleft/domain',
@@ -1030,5 +1050,200 @@ describe('each bot its archetype, a power profile within its tier (#2459)', () =
       }
     }
     expect(climberWins).toBeGreaterThan(50);
+  });
+});
+
+describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () => {
+  /** A race of `ids`, each at its effort distance and race offset, with items off. */
+  function placed(
+    entries: readonly (readonly [id: string, effort: number, offset?: number])[],
+  ): ItemRaceState {
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: entries.map(([id]) => id),
+      startMs: 0,
+    });
+    return {
+      ...start,
+      // By id: the race holds its racers in an order of its own.
+      racers: start.racers.map((entry) => {
+        const [, effort, offset] = entries.find(([id]) => id === entry.racer.id) as readonly [
+          string,
+          number,
+          number?,
+        ];
+        return {
+          ...entry,
+          racer: { ...entry.racer, effortDistance: effort, raceOffset: offset ?? 0 },
+        };
+      }),
+    };
+  }
+
+  it('saves a follower 2 m behind its W′ at the leader’s speed: after 60 s it holds more than the leader', () => {
+    // Two bots of one capacity, one 2 m behind the other on effort distance,
+    // both holding the leader's speed: the power each needs, under the draft
+    // the field gives it, spent from each one's own balance.
+    const race = placed([
+      ['leader', 102],
+      ['follower', 100],
+    ]);
+    const factors = lapRaceDraftFactors(race);
+    const plan = botRacePlan('brisk', race.course, 1);
+    const tier = botTierPlan('brisk');
+    const base = withDefaultCoefficients(undefined);
+    const area = base.dragCoefficient * base.frontalAreaSquareMetres;
+    const needed = (k: number): number =>
+      powerRequired({
+        groundSpeed: metresPerSecond(12),
+        totalMass: kilograms(tier.massKilograms),
+        grade: gradePercent(0),
+        airDensityKilogramsPerCubicMetre: AIR,
+        coefficients: withDragArea(k * area),
+      }).totalWatts;
+    let leader = fullBotEnergy(plan.capacity);
+    let follower = fullBotEnergy(plan.capacity);
+    for (let second = 0; second < 60; second += 1) {
+      leader = stepWbal(plan.capacity, leader, needed(factors.leader ?? 1), 1);
+      follower = stepWbal(plan.capacity, follower, needed(factors.follower ?? 1), 1);
+    }
+    // The leader rides over its CP at that speed and spends; the follower spends less.
+    expect(needed(factors.leader ?? 1)).toBeGreaterThan(plan.capacity.cpWatts);
+    expect(leader.wbalJoules).toBeLessThan(plan.wPrimeJoules);
+    expect(follower.wbalJoules).toBeGreaterThan(leader.wbalJoules);
+    expect(factors.follower).toBeLessThan(0.8);
+  });
+
+  it('carries a follower 2 m behind further than the leader at one power, through the one advance', () => {
+    const race = placed([
+      ['leader', 102],
+      ['follower', 100],
+    ]);
+    const at = (bot: LapRaceBot, distance: number): LapRaceBot => ({
+      ...bot,
+      ride: { speed: metresPerSecond(10), distance: metres(distance) },
+    });
+    const field = [
+      at(lapRaceBot('leader', 'brisk', STRATEGY), 102),
+      at(lapRaceBot('follower', 'brisk', STRATEGY), 100),
+    ];
+    const tick = (draft: boolean) =>
+      stepBotRace(race, field, {
+        elapsed: seconds(1),
+        conditions: conditions(FLAT),
+        seed: 1,
+        draft,
+      }).bots;
+    const drafted = tick(true);
+    const alone = tick(false);
+    const gained = (bots: readonly LapRaceBot[], id: string): number =>
+      (bots.find((bot) => bot.id === id) as LapRaceBot).ride.distance;
+    // One power, the plan's, in both: the draft moves the follower further, and only it.
+    expect(drafted.map((bot) => bot.power)).toEqual(alone.map((bot) => bot.power));
+    expect(gained(drafted, 'follower')).toBeGreaterThan(gained(alone, 'follower'));
+    // The leader gets ADR 0038's small lead effect, never more than the follower's shelter.
+    expect(gained(drafted, 'leader') - gained(alone, 'leader')).toBeLessThan(
+      gained(drafted, 'follower') - gained(alone, 'follower'),
+    );
+    // With the switch off, today's race to the bit (ADR 0067 D-3.4).
+    expect(alone).toEqual(
+      stepBotRace(race, field, { elapsed: seconds(1), conditions: conditions(FLAT), seed: 1 }).bots,
+    );
+  });
+
+  it('reads the draft on effort distance: items moving every racer’s offset by the whole of ±B change no factor', () => {
+    const effort = [
+      ['a', 300],
+      ['b', 298],
+      ['c', 296.5],
+      ['d', 260],
+      ['rider', 297],
+    ] as const;
+    const level = lapRaceDraftFactors(placed(effort));
+    for (const sign of [1, -1]) {
+      const knocked = placed(
+        effort.map(([id, distance], index) => [
+          id,
+          distance,
+          (index % 2 === 0 ? sign : -sign) * RACE_OFFSET_BOUND_METRES,
+        ]),
+      );
+      expect(lapRaceDraftFactors(knocked)).toEqual(level);
+    }
+    // Not vacuous: the chain does shelter someone, and a racer out of reach is alone.
+    expect(level.b).toBeLessThan(1);
+    expect(level.d).toBe(1);
+    expect(300 - 260).toBeGreaterThan(DRAFT_REACH_METRES);
+  });
+
+  it('calls fieldDraftFactors once a tick for the whole field, rider included, and never with the draft off', () => {
+    let bots: readonly LapRaceBot[] = dealtField('brisk', 3).map(({ id, tier, pace }) =>
+      lapRaceBot(id, tier, STRATEGY, pace),
+    );
+    let race = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 3,
+      itemsOn: true,
+      racerIds: [...bots.map((bot) => bot.id), 'rider'],
+      startMs: 0,
+    });
+    const counted = vi.mocked(fieldDraftFactors);
+    counted.mockClear();
+    for (let tick = 0; tick < 20; tick += 1) {
+      const next = stepBotRace(race, bots, {
+        elapsed: seconds(0.05),
+        conditions: conditions(FLAT),
+        seed: 3,
+        draft: true,
+        rider: { effortDistances: { rider: tick * 0.5 } },
+      });
+      race = next.race;
+      bots = next.bots;
+      vi.mocked(advance).mockClear();
+    }
+    expect(counted).toHaveBeenCalledTimes(20);
+    // One array a call, the whole field's: seven bots and the rider.
+    for (const [distances] of counted.mock.calls) expect(distances).toHaveLength(8);
+    counted.mockClear();
+    stepBotRace(race, bots, { elapsed: seconds(0.05), conditions: conditions(FLAT), seed: 3 });
+    expect(counted).not.toHaveBeenCalled();
+  });
+
+  it('keeps every bot’s W′ balance in [0, W′] and its power inside its bounds with the field drafting, and replays byte for byte', () => {
+    const run = (): readonly LapRaceBot[] => {
+      let bots: readonly LapRaceBot[] = dealtField('hard', 5).map(({ id, tier, pace }) =>
+        lapRaceBot(id, tier, STRATEGY, pace),
+      );
+      let race = createItemRace({
+        course: raceCourse(HILLY.totalDistance, 3),
+        seed: 5,
+        itemsOn: true,
+        racerIds: bots.map((bot) => bot.id),
+        startMs: 0,
+      });
+      for (let tick = 0; tick < 2_000; tick += 1) {
+        if (race.racers.every((entry) => entry.racer.finishedAtMs !== null)) break;
+        const next = stepBotRace(race, bots, {
+          elapsed: seconds(1),
+          conditions: conditions(HILLY),
+          seed: 5,
+          draft: true,
+        });
+        race = next.race;
+        bots = next.bots;
+        vi.mocked(advance).mockClear();
+        for (const bot of bots) {
+          const plan = botRacePlan(bot.tier, race.course, 5, bot.pace);
+          expect(bot.energy.wbalJoules).toBeGreaterThanOrEqual(0);
+          expect(bot.energy.wbalJoules).toBeLessThanOrEqual(plan.wPrimeJoules);
+          expect(bot.power).toBeLessThanOrEqual(plan.surgeWatts + 1e-9);
+        }
+      }
+      expect(race.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+      return bots;
+    };
+    expect(JSON.stringify(run())).toBe(JSON.stringify(run()));
   });
 });
