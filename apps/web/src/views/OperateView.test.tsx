@@ -29,6 +29,7 @@ import {
   OPERATOR_LOG_MORE_UNREADABLE_TEXT,
   OPERATOR_LOG_UNREADABLE_TEXT,
   OperateView,
+  operatorActionLabel,
 } from './OperateView';
 
 let mounted: Mounted | undefined;
@@ -159,6 +160,115 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()).toEqual([
       'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
     ]);
+  });
+
+  it.each([
+    ['constructor', 'constructor'],
+    ['__proto__', '  proto  '],
+    ['toString', 'toString'],
+  ])(
+    'labels an action named like a property every object inherits, %s, by its own name',
+    (action, label) => {
+      expect(operatorActionLabel(action)).toBe(label);
+    },
+  );
+
+  it('draws an action named `constructor` by its own name, not as an empty label', async () => {
+    const scripted = scriptedOperate({
+      entries: [
+        {
+          id: 1,
+          at: '2026-11-14T09:00:00.000Z',
+          source: 'app',
+          action: 'constructor',
+          detail: null,
+          outcome: 'done',
+        },
+      ],
+    });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect(mounted.container.querySelector('.oyl-operate__log strong')?.textContent).toBe(
+      'constructor',
+    );
+  });
+
+  it('moves focus to the first entry the last page brought, as Show older entries goes', async () => {
+    const scripted = scriptedOperate({ pageSize: 2 });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    await settle();
+    expect(showOlder()).toBeUndefined();
+    const entries = mounted.container.querySelectorAll('.oyl-operate__log > li');
+    expect(entries).toHaveLength(3);
+    expect(document.activeElement).toBe(entries[2]);
+    // Reachable by script only: it does not join the tab order.
+    expect(entries[2]?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('leaves focus alone when the rider moved it while the last page was coming', async () => {
+    const scripted = scriptedOperate({ pageSize: 2 });
+    let arrive: () => void = () => undefined;
+    const port = {
+      ...scripted.port,
+      log: async (cursor?: string) => {
+        if (cursor !== undefined) {
+          await new Promise<void>((resolve) => {
+            arrive = resolve;
+          });
+        }
+        return scripted.port.log(cursor);
+      },
+    };
+    mounted = await mount(
+      <>
+        <a href="#elsewhere">Elsewhere</a>
+        <OperateView port={port} />
+      </>,
+    );
+    await settle();
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    const elsewhere = mounted.container.querySelector<HTMLAnchorElement>('a[href="#elsewhere"]');
+    elsewhere?.focus();
+    arrive();
+    await settle();
+    expect(logLines()).toHaveLength(3);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('leaves focus where it is while there is still an older page to show', async () => {
+    const scripted = scriptedOperate({ pageSize: 1 });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    const button = showOlder();
+    if (button === undefined) throw new Error('no Show older entries');
+    await activateWithKeyboard(button);
+    await settle();
+    expect(logLines()).toHaveLength(2);
+    expect(document.activeElement?.textContent).toBe('Show older entries');
+    expect(mounted.container.querySelector('.oyl-operate__log > li[tabindex]')).toBeNull();
+  });
+
+  it('announces how the read ended — the not-the-owner sentence and the unreadable log are polite live regions', async () => {
+    const refused = scriptedOperate({ standing: 'not-owner' });
+    mounted = await mount(<OperateView port={refused.port} />);
+    await settle();
+    expect(mounted.container.querySelector('[role="status"]')?.textContent).toContain(
+      OPERATE_STANDING_TEXT['not-owner'],
+    );
+    mounted.unmount();
+    const unread = scriptedOperate();
+    unread.held.logReadable = false;
+    mounted = await mount(<OperateView port={unread.port} />);
+    await settle();
+    expect(mounted.container.querySelector('[role="status"]')?.textContent).toContain(
+      OPERATOR_LOG_UNREADABLE_TEXT,
+    );
   });
 
   it.each(['not-owner', 'signed-out', 'unreachable', 'no-keys'] as const)(

@@ -387,6 +387,32 @@ describe('the link to Operate, for the instance’s owner only — #2603', () =>
     },
   );
 
+  it('is asked at the same time as the Moderation standing, not after it', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    let answerModeration: (standing: 'moderator') => void = () => undefined;
+    const held = {
+      ...moderation.port,
+      standing: () =>
+        new Promise<'moderator'>((resolve) => {
+          answerModeration = resolve;
+        }),
+    };
+    const operate = scriptedOperate({ standing: 'owner' });
+    mounted = await mount(
+      <InstanceView port={scripted.port} moderation={held} operate={operate.port} />,
+    );
+    await settle();
+    // Moderation has not answered, and Operate has already been asked.
+    expect(operate.calls).toEqual(['standing']);
+    expect(operateLink()).toBeUndefined();
+    answerModeration('moderator');
+    await settle();
+    expect(operateLink()?.getAttribute('href')).toBe('#/settings/instance/operate');
+    expect(text()).toContain(MODERATE_LINK_TEXT);
+    expect(operate.calls).toEqual(['standing']);
+  });
+
   it('is not asked for, or drawn, before this device connects', async () => {
     const scripted = scriptedInstance({ connected: false });
     const operate = scriptedOperate({ standing: 'owner' });

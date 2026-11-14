@@ -251,9 +251,12 @@ export function InstanceView({
       setDevices(await port.devices());
       // #1208: every notice, at each sealed read of this screen.
       setChanges(await port.accountChanges());
-      if (moderation !== undefined) setStanding(await moderation.standing());
-      // #2603: only the instance's owner is offered Operate.
-      if (operate !== undefined) setOwnership(await operate.standing());
+      // Both read `GET /v1/auth/account`, so they are asked together rather
+      // than one after the other (#2617's review). #2603: only the instance's
+      // owner is offered Operate.
+      const [moderating, owning] = await Promise.all([moderation?.standing(), operate?.standing()]);
+      if (moderating !== undefined) setStanding(moderating);
+      if (owning !== undefined) setOwnership(owning);
     }
   }, [port, moderation, operate]);
 

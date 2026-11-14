@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX, type Ref } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -80,25 +80,30 @@ export const OPERATOR_LOG_MORE_UNREADABLE_TEXT =
   'The next page of the log could not be read from the instance. Try again.';
 
 /** The instance's names for its actions, in words (`apps/instance` §`OPERATOR_ACTIONS`). */
-const ACTION_LABEL: Readonly<Record<string, string>> = {
-  migrate: 'Database migrated',
-  backup: 'Backup taken',
-  restore: 'Restored from a backup',
-  room_open: 'Room opened',
-  model_key_set: 'Hosted model key set',
-  model_key_clear: 'Hosted model key cleared',
-  instance_key_init: 'Instance keys made',
-  instance_key_rotate: 'Encryption key rotated',
-  instance_key_rotate_identity: 'Identity key rotated',
-  instance_key_reset: 'Instance keys reset',
-  load_accounts_add: 'Load-test accounts added',
-  load_accounts_erase: 'Load-test accounts erased',
-  account_erase: 'Account erased',
-};
+/**
+ * A `Map`, not an object literal: an object's lookup reads up its prototype,
+ * so `constructor` or `__proto__` would answer with a function or an object
+ * rather than a label (#2617's review).
+ */
+const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
+  ['migrate', 'Database migrated'],
+  ['backup', 'Backup taken'],
+  ['restore', 'Restored from a backup'],
+  ['room_open', 'Room opened'],
+  ['model_key_set', 'Hosted model key set'],
+  ['model_key_clear', 'Hosted model key cleared'],
+  ['instance_key_init', 'Instance keys made'],
+  ['instance_key_rotate', 'Encryption key rotated'],
+  ['instance_key_rotate_identity', 'Identity key rotated'],
+  ['instance_key_reset', 'Instance keys reset'],
+  ['load_accounts_add', 'Load-test accounts added'],
+  ['load_accounts_erase', 'Load-test accounts erased'],
+  ['account_erase', 'Account erased'],
+]);
 
-/** An action in words; one a newer instance added is shown by its own name. */
+/** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
 export function operatorActionLabel(action: string): string {
-  return ACTION_LABEL[action] ?? action.replaceAll('_', ' ');
+  return ACTION_LABEL.get(action) ?? action.replaceAll('_', ' ');
 }
 
 const SOURCE_TEXT = {
@@ -117,9 +122,16 @@ type Shown =
   | { readonly kind: 'not-shown'; readonly standing: Exclude<OperateStanding, 'owner'> }
   | { readonly kind: 'owner'; readonly log: OperatorLogRead };
 
-function LogEntry({ entry }: { readonly entry: OperatorLogEntry }): JSX.Element {
+function LogEntry({
+  entry,
+  landing,
+}: {
+  readonly entry: OperatorLogEntry;
+  /** Where focus lands when the last page arrives and *Show older entries* goes. */
+  readonly landing?: Ref<HTMLLIElement> | undefined;
+}): JSX.Element {
   return (
-    <li>
+    <li {...(landing === undefined ? {} : { ref: landing, tabIndex: -1 })}>
       <strong>{operatorActionLabel(entry.action)}</strong>, {when(entry.at)},{' '}
       {SOURCE_TEXT[entry.source]}: {entry.outcome}
       {entry.detail === null ? null : (
@@ -143,20 +155,49 @@ function OperatorLog({
   readonly onMore: (cursor: string) => Promise<void>;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
+  /**
+   * How many entries were shown when *Show older entries* was pressed, or
+   * `null`. When the page that comes is the last, the focused button goes,
+   * and focus would fall to the document (WCAG 2.4.3): it moves instead to the
+   * first entry that page brought.
+   */
+  const askedAt = useRef<number | null>(null);
+  const [landingAt, setLandingAt] = useState<number | null>(null);
+  const landing = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    const from = askedAt.current;
+    if (from === null || log.kind !== 'page' || log.next !== null) return;
+    askedAt.current = null;
+    // Only when focus was left with nowhere to be: a rider who moved on keeps it.
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const at = Math.min(from, log.entries.length - 1);
+    if (at >= 0) setLandingAt(at);
+  }, [log]);
+
+  useEffect(() => {
+    if (landingAt !== null) landing.current?.focus();
+  }, [landingAt]);
+
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-log">
       <h2 id="oyl-operate-log">Operator log</h2>
       <p>Every operator action, from this app or the host’s command line, newest first.</p>
       {log.kind !== 'page' ? (
-        <StatusMessage tone="warning" label="Not read">
+        <StatusMessage tone="warning" label="Not read" live>
           {OPERATOR_LOG_UNREADABLE_TEXT}
         </StatusMessage>
       ) : log.entries.length === 0 ? (
         <p className="oyl-muted">Nothing has been logged yet.</p>
       ) : (
         <ol className="oyl-operate__log">
-          {log.entries.map((entry) => (
-            <LogEntry key={entry.id} entry={entry} />
+          {log.entries.map((entry, index) => (
+            <LogEntry
+              key={entry.id}
+              entry={entry}
+              landing={index === landingAt ? landing : undefined}
+            />
           ))}
         </ol>
       )}
@@ -173,7 +214,8 @@ function OperatorLog({
               unavailable={busy}
               onClick={() => {
                 const cursor = log.next;
-                if (busy || cursor === null) return;
+                if (busy || cursor === null || log.kind !== 'page') return;
+                askedAt.current = log.entries.length;
                 setBusy(true);
                 void onMore(cursor).finally(() => {
                   setBusy(false);
@@ -246,11 +288,15 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       </StatusMessage>
     );
   }
+  // Not a live region: it is drawn as the page opens, and a live region drawn
+  // at load is announced twice (`StatusMessage` §`live`). What replaces it —
+  // the not-the-owner sentence or the unreadable log — is live, so the end of
+  // the read is announced.
   if (shown.kind === 'reading') return <p className="oyl-muted">Reading the instance…</p>;
   if (shown.kind === 'not-shown') {
     return (
       <>
-        <StatusMessage tone="info" label="Not available">
+        <StatusMessage tone="info" label="Not available" live>
           {OPERATE_STANDING_TEXT[shown.standing]}
         </StatusMessage>
         <p>
