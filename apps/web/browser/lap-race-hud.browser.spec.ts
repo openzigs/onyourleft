@@ -42,7 +42,16 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { OVERLAY_VIEWPORTS, inside, overlap, riderBox, type Viewport } from './ride-stage';
+import {
+  OVERLAY_VIEWPORTS,
+  TABLET_VIEWPORTS,
+  inside,
+  overlap,
+  riderBox,
+  type Viewport,
+} from './ride-stage';
+
+import { STANDINGS_RETURN_MS } from '../src/game/hud/standings-follow';
 
 import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
@@ -72,7 +81,10 @@ const STANDINGS_SHOWN = `
     margin: 0 !important; overflow: visible !important; clip-path: none !important;
     white-space: normal !important; grid-area: notices !important;
     align-self: start !important; justify-self: end !important;
-  }`;
+  }
+  /* #2599: and at its full height, as it would be drawn there with no room
+     rule: the list's height is the room's on a stage where it is shown. */
+  .oyl-game--riding .oyl-hud .oyl-hud__standings-scroll { max-height: none !important; }`;
 
 function sized(viewport: Viewport): string {
   return `${String(viewport.width)}×${String(viewport.height)}`;
@@ -86,9 +98,13 @@ function laidOut(box: Box): boolean {
   return box.width > 1 && box.height > 1;
 }
 
-async function open(page: Page, viewport: Viewport): Promise<readonly LapRaceStageMeasurement[]> {
+async function open(
+  page: Page,
+  viewport: Viewport,
+  query = '',
+): Promise<readonly LapRaceStageMeasurement[]> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
-  const response = await page.goto('/lap-race-hud.html');
+  const response = await page.goto(`/lap-race-hud.html${query}`);
   expect(
     response?.status(),
     'lap-race-hud.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
@@ -275,4 +291,373 @@ test.describe('#1904 — the lap race measurement can fail', () => {
     console.log(`#1904 control, 736×360 with the standings shown: ${faults.join('; ')}`);
     expect(faults).not.toEqual([]);
   });
+});
+
+/*
+ * #2599 — the standings never over the actions panel.
+ *
+ * On the owner's tablet check of 2026-11-14 a solo lap race's standings, eight
+ * lines with *Show laps* on their first row, ran down over the actions panel
+ * at the bottom right, hiding all of the trainer's line but "Tra". The stages
+ * above have neither *Use item* nor the swap, and fitted. `?corner=race`
+ * draws the corner as the tablet did (`lap-race-hud-harness.tsx` §`CORNER`),
+ * at every overlay viewport at the normal text and at the tablets at the
+ * large and extra large, and holds:
+ *
+ * - the standings' box and the actions panel's never overlap, and on a
+ *   tablet are the owner's 16 px apart (#2034);
+ * - the trainer's line is inside the actions panel, on the stage, and the
+ *   topmost thing at each of its corners, hit-tested;
+ * - *Pause* and *End ride* are on the stage at 48 px or more (#669), and
+ *   *Show laps* 44 px or more;
+ * - on a tablet every line is in the document, the rider's own line is in
+ *   view, and where the list is shorter than its lines it is a named,
+ *   focusable region that scrolls inside itself (the owner's ruling on PR
+ *   #2621: scroll with a finger rather than hide lines);
+ * - at 1280×800 and upright, where there is room, every line is in view
+ *   without scrolling (§`ROOMY` says at which text sizes);
+ * - and the FIRST frame drawn already has them off the actions panel (PR
+ *   #2621's review): the room is measured before paint, not a frame later.
+ *
+ * Then, at 1024×768, a rider scrolls it: by a finger's gesture, which never
+ * presses *Use item*, and by a wheel, after which the list eases back to the
+ * rider's own line {@link STANDINGS_RETURN_MS} after the last scroll —
+ * Playwright's clock, not a real wait.
+ *
+ * The control lets the list run its full height, and the standings are then
+ * over the actions panel at 1024×768.
+ */
+
+const CORNER_STAGES = ['corner-back', 'corner-middle'] as const;
+
+/** The owner's least clearance between the standings and the actions panel (2026-11-06, #2034). */
+const CLEARANCE_PIXELS = 16;
+
+/**
+ * Where every line is in view without scrolling, by text size: the owner's
+ * landscape tablet and the upright one at the normal text, and the upright
+ * one at every size. ⚠️ **Not 1280×800 at the large sizes**, measured: on the
+ * CI runner's fonts the room there is a line short of the eighth for the
+ * rider-4th stage at large and extra large text, where a Mac holds all 8.
+ */
+const ROOMY: Readonly<Record<string, ReadonlySet<string>>> = {
+  normal: new Set(['1280×800', '800×1280']),
+  large: new Set(['800×1280']),
+  'extra-large': new Set(['800×1280']),
+};
+
+const LIST_HEIGHT_UNDONE = `
+  .oyl-hud .oyl-hud__standings-scroll { max-height: none !important; }`;
+
+const CORNER_CASES = [
+  ...OVERLAY_VIEWPORTS.map((viewport) => ({ viewport, text: 'normal' })),
+  ...(['large', 'extra-large'] as const).flatMap((text) =>
+    TABLET_VIEWPORTS.map((viewport) => ({ viewport, text })),
+  ),
+];
+
+/** What is wrong with the corner of one stage, as sentences. */
+function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: string): string[] {
+  const faults: string[] = [];
+  const say = (box: Box): string =>
+    `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
+  const { standings, actions, trainer } = stage;
+  if (actions === undefined) return ['no actions panel'];
+  if (standings !== undefined && laidOut(standings)) {
+    if (overlap(standings, actions)) {
+      faults.push(`the standings ${say(standings)} over the actions panel ${say(actions)}`);
+    }
+    const sideBySide = standings.right <= actions.left || actions.right <= standings.left;
+    if (!sideBySide && actions.top - standings.bottom < CLEARANCE_PIXELS) {
+      faults.push(
+        `the standings ${(actions.top - standings.bottom).toFixed(0)} px above the actions panel`,
+      );
+    }
+  }
+  if (trainer === undefined) {
+    faults.push('no trainer line');
+  } else {
+    if (!within(trainer.box, actions))
+      faults.push(`the trainer line ${say(trainer.box)} out of its panel`);
+    if (!inside(trainer.box, viewport))
+      faults.push(`the trainer line ${say(trainer.box)} off the stage`);
+    if (!trainer.topmost) faults.push(`the trainer line ${say(trainer.box)} covered`);
+  }
+  for (const label of ['Pause', 'End ride']) {
+    const control = stage.controls.find((each) => each.label === label);
+    if (control === undefined) {
+      faults.push(`no ${label}`);
+      continue;
+    }
+    if (!inside(control.box, viewport)) faults.push(`${label} ${say(control.box)} off the stage`);
+    if (control.box.width < 48 || control.box.height < 48) {
+      faults.push(`${label} ${control.box.width.toFixed(0)}×${control.box.height.toFixed(0)}`);
+    }
+  }
+  if (isTablet(viewport)) {
+    const inView = stage.standingsLines.filter((line) => line.inView);
+    if (!stage.standingsLines.some((line) => line.you && line.inView)) {
+      faults.push('the rider’s own line out of view');
+    }
+    if (ROOMY[text]?.has(sized(viewport)) === true && inView.length !== 8) {
+      faults.push(`${String(inView.length)} of 8 lines in view where there is room for all`);
+    }
+    const swap = stage.swap;
+    if (swap !== undefined && laidOut(swap) && swap.height < 44) {
+      faults.push(`Show laps ${swap.height.toFixed(0)} px tall`);
+    }
+    const list = stage.standingsList;
+    if (list === undefined) {
+      faults.push('no standings list');
+    } else if (list.scrollHeight > list.clientHeight + 1) {
+      // Shorter than its lines: it must scroll, inside itself, and be reachable.
+      if (!list.scrolls || list.overflowY !== 'auto') faults.push('the list does not scroll');
+      if (list.overscroll !== 'contain') faults.push(`the list's overscroll is ${list.overscroll}`);
+      if (list.role !== 'region' || list.label === null || list.tabIndex !== 0) {
+        faults.push('the list is not a named, focusable region');
+      }
+    }
+  }
+  return faults;
+}
+
+/** The list's box and whether the rider's own line is in it, in the viewport, for a stage. */
+async function ownLine(
+  page: Page,
+  stage: string,
+): Promise<{
+  inView: boolean;
+  scrollTop: number;
+  more: string | null;
+  x: number;
+  y: number;
+  left: number;
+  right: number;
+}> {
+  return page.evaluate((name) => {
+    const list = document.querySelector<HTMLElement>(
+      `[data-oyl-lap-race-stage="${name}"] .oyl-hud__standings-scroll`,
+    );
+    const own = list?.querySelector('.oyl-hud__standings-line--you');
+    if (list === null || list === undefined || own === null || own === undefined) {
+      throw new Error(`no list or own line on ${name}`);
+    }
+    const view = list.getBoundingClientRect();
+    const box = own.getBoundingClientRect();
+    return {
+      inView: box.top >= view.top - 1 && box.bottom <= view.bottom + 1,
+      scrollTop: list.scrollTop,
+      more: list.getAttribute('data-oyl-more'),
+      x: view.left + view.width / 2,
+      y: view.top + view.height / 2,
+      left: view.left,
+      right: view.right,
+    };
+  }, stage);
+}
+
+for (const { viewport, text } of CORNER_CASES) {
+  test(`#2599 a lap race's standings stay off the actions panel at ${text} text — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const measured = await open(page, viewport, `?corner=race&text=${text}`);
+    expect(measured.map((each) => each.stage)).toEqual([...CORNER_STAGES]);
+    const first = await page.evaluate(() => window.__oylLapRaceHudFirstFrame);
+    expect(
+      first?.map((each) => each.stage),
+      'the first frame was read',
+    ).toEqual([...CORNER_STAGES]);
+    for (const frame of first ?? []) {
+      // PR #2621's second review: the list opens on the own line before paint.
+      if (isTablet(viewport)) {
+        expect(
+          frame.ownInView,
+          `${viewport.name}, ${frame.stage}: the own line in the first frame`,
+        ).toBe(true);
+      }
+      const { standings, actions } = frame;
+      if (standings === undefined || actions === undefined) continue;
+      expect(
+        overlap(standings, actions),
+        `${viewport.name}, ${frame.stage}: the first frame drew the standings ` +
+          `[${standings.top.toFixed(0)} → ${standings.bottom.toFixed(0)}] over the actions panel ` +
+          `from ${actions.top.toFixed(0)}`,
+      ).toBe(false);
+    }
+    for (const stage of measured) {
+      expect(stage.standingsLines.length, stage.stage).toBe(8);
+      const inView = stage.standingsLines.filter((line) => line.inView).length;
+      console.log(
+        `#2599 ${viewport.name}, ${text} text, ${stage.stage}: ${String(inView)} of 8 lines in view`,
+      );
+      expect(cornerFaults(stage, viewport, text), `${viewport.name}, ${stage.stage}`).toEqual([]);
+    }
+  });
+}
+
+test.describe('#2599 the standings scroll at 1024×768', () => {
+  const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
+  if (fourByThree === undefined) throw new Error('no 4:3 tablet');
+
+  test('scroll, hold every racer, and open on the rider’s own line', async ({ page }) => {
+    const measured = await open(page, fourByThree, '?corner=race&text=normal');
+    for (const stage of measured) {
+      const list = stage.standingsList;
+      expect(list?.scrolls, stage.stage).toBe(true);
+      expect(list?.scrollHeight ?? 0, stage.stage).toBeGreaterThan((list?.clientHeight ?? 0) + 1);
+      expect(stage.standingsLines.length, stage.stage).toBe(8);
+      expect(
+        stage.standingsLines.some((line) => line.you && line.inView),
+        `${stage.stage}: the own line in view on open`,
+      ).toBe(true);
+    }
+    // The rider last of eight: the list opens scrolled to its foot, more above.
+    expect(stageOf(measured, 'corner-back').standingsList?.more).toBe('above');
+  });
+
+  test.describe('on a touch screen', () => {
+    // A synthesized touch gesture needs a page that takes touch input: on
+    // the CI runner's Linux Chromium without it the gesture moved nothing.
+    test.use({ hasTouch: true });
+
+    /** A finger down at `x, from`, drawn to `to` in twelve steps, and lifted: raw touch input. */
+    async function swipe(page: Page, x: number, from: number, to: number): Promise<void> {
+      const cdp = await page.context().newCDPSession(page);
+      const at = async (
+        type: 'touchStart' | 'touchMove' | 'touchEnd',
+        y: number | undefined,
+      ): Promise<void> => {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type,
+          touchPoints: y === undefined ? [] : [{ x: Math.round(x), y: Math.round(y) }],
+        });
+      };
+      await at('touchStart', from);
+      for (let step = 1; step <= 12; step += 1)
+        await at('touchMove', from + ((to - from) * step) / 12);
+      await at('touchEnd', undefined);
+    }
+
+    /** Two frames, so a scroll the gesture started has been drawn. */
+    async function frames(page: Page): Promise<void> {
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          }),
+      );
+    }
+
+    test('a finger drawn down scrolls the list up', async ({ page }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const before = await ownLine(page, 'corner-back');
+      await swipe(page, before.x, before.y - 40, before.y + 80);
+      await expect
+        .poll(async () => (await ownLine(page, 'corner-back')).scrollTop, {
+          message: 'the list scrolled up under the finger',
+        })
+        .toBeLessThan(before.scrollTop);
+    });
+
+    test('a finger drawn up on a list at its foot never moves the page', async ({ page }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      // The rider last of eight: the list opens at its foot, so a finger
+      // drawn up has nothing left to scroll there, and the pan would chain.
+      const before = await ownLine(page, 'corner-back');
+      expect(before.more, 'the list opens at its foot').toBe('above');
+      await swipe(page, before.x, before.y + 40, before.y - 80);
+      await frames(page);
+      expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(0);
+    });
+
+    test('a swipe that starts on the list and lifts over Use item never presses it', async ({
+      page,
+    }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const list = await ownLine(page, 'corner-back');
+      const item = await page.evaluate(() => {
+        const button = [
+          ...document.querySelectorAll(
+            '[data-oyl-lap-race-stage="corner-back"] .oyl-hud__actions button',
+          ),
+        ].find((each) => each.textContent?.trim() === 'Use item');
+        const box = button?.getBoundingClientRect();
+        return box === undefined
+          ? undefined
+          : { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      });
+      if (item === undefined) throw new Error('no Use item');
+      // Down the one column both share, from the list's middle to Use item's.
+      const x = Math.min(Math.max(item.x, list.left + 8), list.right - 8);
+      const lifted = await page.evaluate(
+        ([px, py]) => document.elementFromPoint(px ?? 0, py ?? 0)?.closest('button')?.textContent,
+        [x, item.y],
+      );
+      expect(lifted?.trim(), 'the finger lifts over Use item').toBe('Use item');
+      // And it goes down on the list, not on a control: touch events go to
+      // the element the finger went down on, so this is what keeps a swipe
+      // that ends over Use item from ever being Use item's.
+      const downOn = await page.evaluate(
+        ([px, py]) =>
+          document.elementFromPoint(px ?? 0, py ?? 0)?.closest('.oyl-hud__standings-scroll') !==
+          null,
+        [x, list.y],
+      );
+      expect(downOn, 'the finger goes down on the list').toBe(true);
+      await swipe(page, x, list.y, item.y);
+      await frames(page);
+      expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
+    });
+  });
+
+  for (const motion of ['no-preference', 'reduce'] as const) {
+    test(`eases back to the own line ${String(STANDINGS_RETURN_MS)} ms after the last scroll — motion ${motion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion: motion });
+      await page.clock.install();
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const opened = await ownLine(page, 'corner-back');
+      expect(opened.inView).toBe(true);
+      await page.mouse.move(opened.x, opened.y);
+      await page.mouse.wheel(0, -1_000);
+      await expect.poll(async () => (await ownLine(page, 'corner-back')).scrollTop).toBe(0);
+      expect((await ownLine(page, 'corner-back')).inView, 'scrolled away from the own line').toBe(
+        false,
+      );
+      await page.clock.runFor(STANDINGS_RETURN_MS - 500);
+      const early = await ownLine(page, 'corner-back');
+      expect(early.inView, 'still the rider’s, before the time').toBe(false);
+      // The cue is written for the return's target at once, so an early
+      // return shows here even while a smooth scroll is still on its way.
+      expect(early.more, 'no return begun before the time').toBe('below');
+      await page.clock.runFor(1_000);
+      await expect.poll(async () => (await ownLine(page, 'corner-back')).inView).toBe(true);
+    });
+  }
+});
+
+test('#2599 the corner measurement can fail: the list at its full height is on the actions panel at 1024×768', async ({
+  page,
+}) => {
+  const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
+  if (fourByThree === undefined) throw new Error('no 4:3 tablet to control at');
+  await open(page, fourByThree, '?corner=race&text=normal');
+  await page.addStyleTag({ content: LIST_HEIGHT_UNDONE });
+  const undone = await remeasure(page);
+  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
+  console.log(`#2599 control, 1024×768 with the list at its full height: ${faults.join('; ')}`);
+  expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
 });
