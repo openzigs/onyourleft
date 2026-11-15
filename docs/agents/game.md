@@ -1691,7 +1691,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         counts why each kind is not drawn) — ≤ 36 (ADR 0054
                         D-5.6's cap, the owner's ruling), ranked by distance
                         with the frame's procedural
-                        structures inside the 23 040-triangle term (#1586), the far
+                        structures inside the 23 040-triangle term (#1586) —
+                        since #2655 not its walls, hedges and fences, which
+                        take only what the buildings leave — the far
                         level past 150 m, in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
                         group a surface** (`three-renderer.ts`
