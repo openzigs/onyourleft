@@ -1,6 +1,6 @@
 # ADR 0069: The instance's own admin pages — a browser sign-in for the owner and a TLS-only admin channel
 
-- **Status**: **Proposed**, 2026-11-15. It decides what the owner's rulings of 2026-11-15 leave open
+- **Status**: **Accepted**, 2026-11-15, by the owner on #2654, with the D-11 answers recorded there. Proposed the same day. It decides what the owner's rulings of 2026-11-15 leave open
   and records those rulings. It becomes **Accepted** only when the owner approves it, in words, on
   its pull request; until then every other sub-issue of the epic
   [#2639](https://github.com/openzigs/onyourleft/issues/2639) stays blocked. Nothing is built by this
@@ -646,6 +646,16 @@ the pull request decides it.
   cannot do. The first is cheap and the second closes the hole for changes, at the cost of a host
   step per enrolment. The full answer is to enrol no passkey through the tunnel, which leaves the
   tunnel read-only; that is the alternative if the owner accepts none of these.
+
+### The owner's answers, 2026-11-15
+
+- **Q-A: no.** Every change needs a fresh passkey assertion, on the loopback listener as through the
+  tunnel. A code session on either listener can only read and enrol one passkey (D-1 as written).
+- **Q-B: the CLI only, for now.** The app's Operate area mints no admin code; adding one later is a
+  new decision.
+- **Q-C: limit (2).** A passkey enrolled through the tunnel can read but not change until
+  `operator admin-passkeys confirm` is run on the host; a passkey enrolled on the loopback listener
+  needs no confirmation. #2642 builds the confirmation, and its operator-log entry.
 
 ## Consequences
 
