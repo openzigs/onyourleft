@@ -1592,3 +1592,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   unsealed (D-7, D-13).
   Each route is reached only by the athlete holding `OYL_INSTANCE_OWNER_KEY` — not the deputy — and
   is listed in `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#2602)
+- **2026-11-15** — **ADR 0069 supersedes, in part, D-7's Operate row of the entry above, D-7's two
+  phase-1 moderator rows, D-8 and D-11, for the instance's own admin pages** (#2640, the owner's
+  rulings of 2026-11-15 on #2601, #2639 and #2646). The instance may serve owner-only admin pages
+  over a TLS-only channel, through the tunnel and on a loopback-only listener, signed in with a
+  passkey or a one-time code from the CLI. They reach the handlers of the `/v1/operate/*` routes a
+  route marks `admin: 'read'` or `'change'`, and of `GET /v1/moderation/registrations` and its
+  approve and refuse routes, **in-process, as the owner**, with a fresh passkey assertion for every
+  change. Every one of those routes stays `sealed: 'only'` for every HTTP client. What Cloudflare's
+  edge sees and can do on that channel is ADR 0069 D-3. D-6, D-11's web-build rule and D-13 stand:
+  the instance card is never shown through the tunnel, and no admin page accepts a pasted key. See
+  [ADR 0069](0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md). The body above is
+  not edited. (#2640)
