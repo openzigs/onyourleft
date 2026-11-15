@@ -2807,7 +2807,8 @@ ul.oyl-sections.oyl-game-courses__list {
 .oyl-announce input[type='checkbox'],
 .oyl-delivery-assist input[type='checkbox'],
 .oyl-lap-race-assist input[type='checkbox'],
-.oyl-music input[type='checkbox'] {
+.oyl-music input[type='checkbox'],
+.oyl-operate__offers input[type='checkbox'] {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
@@ -14032,4 +14033,21 @@ select.oyl-input {
 
 .oyl-operate__status dd {
   margin: 0;
+}
+
+/*
+ * #2611: the AI backend's switches and the local server's models — one row
+ * each and no bullet, because the row IS the control: its label is the
+ * target (§"A checkbox or radio ROW"). The model's line wraps beside its
+ * radio as one sentence.
+ */
+.oyl-operate__offers,
+.oyl-operate__models ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-operate__models label {
+  gap: var(--oyl-space-sm);
 }

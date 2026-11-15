@@ -67,6 +67,7 @@ describe('the Operate area — #2603', () => {
       'Status',
       'Accounts',
       'Backups',
+      'AI backend',
       'Operator log',
       'Still to come',
     ]);
@@ -85,6 +86,12 @@ describe('the Operate area — #2603', () => {
       'Go to approvals',
       'Go to suspended accounts',
       'Back up now',
+      // #2611: the AI backend's, which stay with the log at its end.
+      'Check it calls tools',
+      'Save this model',
+      'Read the list again',
+      'Set, replace or remove it on the Instance screen',
+      'Return to .env',
     ]);
   });
 
