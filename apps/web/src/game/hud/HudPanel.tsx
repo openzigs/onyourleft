@@ -315,6 +315,14 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    */
   readonly lapNotice?: ReactNode;
   /**
+   * Whether the climb callout's sentence is a live region — #2593: `true`
+   * only where the HUD's one region does NOT say climbs, so the climb is
+   * never announced twice (`ClimbCallout.tsx`, `announce-preference.ts`
+   * §`climbsSpoken`). `GameView` hands it in on every ride; absent (the demo,
+   * whose region says nothing) the callout is drawn and is silent.
+   */
+  readonly climbCalloutLive?: boolean;
+  /**
    * A race's standings — #1347, ADR 0051 — while the room sends them: the
    * riders around this one, the room's gap to each and their live W/kg.
    * `undefined` on every other ride, in a group ride, and while the room's

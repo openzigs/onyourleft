@@ -96,6 +96,9 @@ function route(): ReturnType<typeof routeProfile> {
   return routeProfile(points);
 }
 
+/** #2593: the default layout with the climb callout turned off. */
+const NO_CALLOUT = { hidden: [], textSize: 'normal', climbCallout: false } as const;
+
 /** The gap handed in throughout: the attempt ten seconds up the road. */
 const GAP = pacerGap({
   botDistance: metres(200),
@@ -380,7 +383,10 @@ describe('the HUD is four panels (#423)', () => {
     // to say" arrives as `[undefined, undefined]`. An empty grid item across
     // the middle of the stage is the one part of the screen the layout exists
     // to keep clear.
-    mounted = await mount(<HudPanel {...base} notices={notices} />);
+    // #2593: this route starts ON a climb, whose callout stands in the cell
+    // of its own accord (`climb-callout.test.tsx`); turned off, the cell is
+    // the notices' alone.
+    mounted = await mount(<HudPanel {...base} notices={notices} layout={NO_CALLOUT} />);
 
     expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
     expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
@@ -437,7 +443,7 @@ describe('the HUD is four panels (#423)', () => {
     });
 
     it('renders no slot when there is no lap to show', async () => {
-      mounted = await mount(<HudPanel {...base} lapNotice={undefined} />);
+      mounted = await mount(<HudPanel {...base} lapNotice={undefined} layout={NO_CALLOUT} />);
 
       expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
     });

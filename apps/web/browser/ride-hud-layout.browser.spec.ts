@@ -34,6 +34,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  HUD_SURFACE,
   OVERLAY_VIEWPORTS,
   STACKED_VIEWPORTS,
   TABLET_VIEWPORTS,
@@ -45,6 +46,7 @@ import {
   openRide,
   overlap,
   rideTotalsDrawn,
+  riderBox,
   roomGivesWay,
   sharedRide,
   type Viewport,
@@ -210,8 +212,8 @@ for (const viewport of [
     );
     // Four panels, three sizes, the two arrangements (#2383), the two route
     // panels (#2385), the totals strip (#2387), the two ways to show power
-    // (#2420) and the two Delivery layouts (#2514).
-    expect(choices).toHaveLength(16);
+    // (#2420), the two Delivery layouts (#2514) and the climb callout (#2593).
+    expect(choices).toHaveLength(17);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);
@@ -767,5 +769,158 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         expect(layoutFaults(seen, viewport), how).toEqual([]);
       }
     }
+  });
+}
+
+/**
+ * #2593 — the climb callout on the stage, and the road ahead's title.
+ *
+ * The callout stands in the HUD's notice cell (`ClimbCallout.tsx`), and the
+ * issue's constraint is that it covers neither the rider nor the road ahead:
+ * #2513's lesson, a house marker hidden behind the HUD. `?climb=ahead` puts
+ * an 800 m climb at 6 % 300 m up the road, so the callout says how far it is;
+ * `?climb=on` starts the ride on it, so it counts down to the top. Each is
+ * held to the layout's own invariants at every overlay viewport, both ways
+ * (#1120) — every panel whole, none over another, none over the leaning
+ * rider — with the callout among them, drawn and uncovered; and at the
+ * tablets' large text sizes, where the 4:3 tablet's middle row is shortest.
+ * Each on a plain ride and on a mapped one (`?corridor=archive`), whose map
+ * credit hangs at the foot of the same notice row on a tablet: as a panel of
+ * the stage it is held clear of the callout by the same invariants. The
+ * control lays the same notice cell across the middle of the road, where a
+ * callout centred over the road would stand, and the same measure must find
+ * it over the rider.
+ *
+ * A Delivery round draws no callout (`climb-callout.test.tsx`), so its
+ * throws' roadsides are as `ride-delivery.browser.spec.ts` holds them.
+ */
+const CLIMB_RIDES = [
+  ['a plain ride', ''],
+  ['a mapped ride', 'corridor=archive&'],
+] as const;
+
+const CLIMB_PHASES = [
+  ['ahead', 'climb=ahead', /^Climb in \d+0 m · 6 % avg · 0\.8 km$/],
+  ['on', 'climb=on', /^Top in \d+0 m · 6 %$/],
+] as const;
+
+const CALLOUT = 'the climb callout';
+
+async function calloutText(page: Page): Promise<string | undefined> {
+  return page.evaluate(
+    () => document.querySelector('.oyl-hud__climb-callout-text')?.textContent ?? undefined,
+  );
+}
+
+/** The callout drawn, whole and uncovered, off the rider, and the layout's own faults. */
+function calloutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const { faults } = sizeFaults(seen, viewport);
+  const callout = named(seen.items, CALLOUT);
+  if (!inside(callout.box, viewport) || !callout.onTop) faults.push(`lost: ${CALLOUT}`);
+  if (overlap(callout.box, riderBox(viewport))) faults.push(`${CALLOUT} over the rider`);
+  return faults;
+}
+
+for (const [ride, mapped] of CLIMB_RIDES) {
+  for (const [phase, query, said] of CLIMB_PHASES) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`#2593 the climb callout holds the layout — ${phase} — ${ride} — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, `?${mapped}${query}`);
+        expect(await calloutText(page)).toMatch(said);
+        for (const [how, seen] of await bothWays(page)) {
+          const callout = named(seen.items, CALLOUT);
+          console.log(
+            `#2593 ${phase} ${viewport.name} ${how}: ${CALLOUT} ${callout.box.width.toFixed(0)}×${callout.box.height.toFixed(0)} at ${callout.box.left.toFixed(0)},${callout.box.top.toFixed(0)}`,
+          );
+          expect(calloutFaults(seen, viewport), how).toEqual([]);
+          if (mapped !== '') expect(named(seen.items, 'the map credit').onTop, how).toBe(true);
+        }
+      });
+    }
+  }
+}
+
+for (const [ride, mapped] of CLIMB_RIDES) {
+  for (const size of ['large', 'extra-large'] as const) {
+    for (const viewport of TABLET_VIEWPORTS) {
+      test(`#2593 the climb callout at ${size} text holds the layout — ${ride} — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, `?${mapped}climb=on&text=${size}`);
+        expect(await calloutText(page)).toMatch(/^Top in /);
+        for (const [how, seen] of await bothWays(page)) {
+          expect(calloutFaults(seen, viewport), how).toEqual([]);
+          expect(seen.primaryValuePixels, how).toBe(PRIMARY_PIXELS[size]);
+        }
+      });
+    }
+  }
+}
+
+test('#2593 the control — the callout across the middle of the road is over the rider', async ({
+  page,
+}) => {
+  const owners = OVERLAY_VIEWPORTS[0];
+  if (owners === undefined) throw new Error('no 1280×800 viewport');
+  await openRide(page, owners, '?climb=on');
+  await page.addStyleTag({
+    content:
+      '.oyl-game--riding .oyl-hud__notices { justify-self: center !important; align-self: end !important; }',
+  });
+  const seen = await measure(page);
+  const faults = calloutFaults(seen, owners);
+  console.log(`#2593 control at ${owners.name}: ${JSON.stringify(faults)}`);
+  expect(faults).toContain(`${CALLOUT} over the rider`);
+});
+
+test('#2593 the control — turned off in Settings, there is no callout on the climb', async ({
+  browser,
+}) => {
+  const owners = OVERLAY_VIEWPORTS[0];
+  if (owners === undefined) throw new Error('no 1280×800 viewport');
+  const page = await sharedRide(browser, owners, '?climb=on&callout=off');
+  expect(await calloutText(page)).toBeUndefined();
+  // The strip's caption still names the climb.
+  expect(
+    await page.evaluate(
+      () => document.querySelector('[data-testid="oyl-hud-next-climb"]')?.textContent,
+    ),
+  ).toMatch(/^Top in /);
+});
+
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#2593 the road ahead's title is on the strip, on the panel's surface — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const found = await page.evaluate(() => {
+      const title = document.querySelector('[data-testid="oyl-hud-ahead-title"]');
+      const strip = document.querySelector('.oyl-hud__ahead-svg');
+      if (title === null || strip === null) return undefined;
+      const a = title.getBoundingClientRect();
+      const b = strip.getBoundingClientRect();
+      const style = window.getComputedStyle(title);
+      return {
+        text: title.textContent,
+        within:
+          a.width > 0 &&
+          a.height > 0 &&
+          a.left >= b.left - 1 &&
+          a.right <= b.right + 1 &&
+          a.top >= b.top - 1 &&
+          a.bottom <= b.bottom + 1,
+        // At the strip's far end: the rider is its near edge.
+        atTheFarEnd: a.right >= b.right - 1 && a.top <= b.top + 1,
+        background: style.backgroundColor,
+        share: (a.width * a.height) / (b.width * b.height),
+      };
+    });
+    console.log(`#2593 title ${viewport.name}: ${JSON.stringify(found)}`);
+    expect(found?.text).toBe('Next 2 km');
+    expect(found?.within).toBe(true);
+    expect(found?.atTheFarEnd).toBe(true);
+    expect(found?.background).toBe(HUD_SURFACE);
   });
 }

@@ -98,7 +98,9 @@ describe('the look-ahead strip on the HUD (#2075)', () => {
     const hud = await hudAt(profile, 600);
     const strip = hud.querySelector('.oyl-hud__route [data-testid="oyl-hud-look-ahead"]');
     expect(strip).not.toBeNull();
-    expect(strip?.parentElement?.querySelector('.oyl-hud__profile-svg')).not.toBeNull();
+    expect(
+      strip?.closest('.oyl-hud__strips')?.querySelector('.oyl-hud__profile-svg'),
+    ).not.toBeNull();
     expect(strip?.getAttribute('viewBox')).toBe(
       `0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`,
     );
