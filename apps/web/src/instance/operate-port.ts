@@ -344,9 +344,9 @@ export type OperateBackUpNow =
  * `@onyourleft/operate-text`: this directory reaches no other package
  * (`instance-transport.test.ts`).
  */
-export const ROOM_END_REASONS = ['abuse', 'stuck', 'maintenance', 'other'] as const;
+export const OPERATE_ROOM_END_REASONS = ['abuse', 'stuck', 'maintenance', 'other'] as const;
 
-export type OperateRoomEndReason = (typeof ROOM_END_REASONS)[number];
+export type OperateRoomEndReason = (typeof OPERATE_ROOM_END_REASONS)[number];
 
 /** A room's kind, as the route writes it. */
 export type OperateRoomKind = 'group' | 'race' | 'lap-race';
@@ -1154,7 +1154,7 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
       // A room the instance could not have named, or a reason it does not take, is sent nowhere.
       if (
         !ROOM_ID.test(roomId) ||
-        !(ROOM_END_REASONS as readonly string[]).includes(reason) ||
+        !(OPERATE_ROOM_END_REASONS as readonly string[]).includes(reason) ||
         confirm.length > 64
       ) {
         return { kind: 'not-ended' };
