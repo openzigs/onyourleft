@@ -13,14 +13,16 @@
  *
  * ## The decision ({@link answerBack})
  *
- * 1. **A ride is on: nothing happens.** A recording or a paused one
- *    (`ride/controller.ts` §`rideInProgress`), or the trainer game's stage
- *    with the screen (`AppShell`'s `immersive`). Back must never end, pause or
- *    leave a ride, and what it SHOULD do there is rider-facing behaviour the
- *    owner has not ruled on yet (#1512's lane scope, 2026-10-21) — so until
- *    then the press is consumed and nothing else. ⚠️ On every screen, not only
+ * 1. **A ride is on: the press is consumed, and handed to the ride.** A
+ *    recording or a paused one (`ride/controller.ts` §`rideInProgress`), or
+ *    the trainer game's stage with the screen (`AppShell`'s `immersive`).
+ *    Back must never end, pause or leave a ride. ⚠️ On every screen, not only
  *    the ride's: back from another screen mid-ride could otherwise reach Home
- *    and then leave, and leaving finishes the activity that holds the recorder.
+ *    and then leave, and leaving finishes the activity that holds the
+ *    recorder. Since #2349 the owner has ruled what it does on the screen the
+ *    ride is on: it opens the end-of-ride question, or is *Keep riding* when
+ *    the question is open (`ride-back.ts`). That is the `onStay` a caller of
+ *    {@link pressBack} passes; with none, the press does nothing else.
  * 2. **Home is the top level: the app leaves.** Android's own default
  *    (the launcher), as on any other app.
  * 3. **Anywhere else, back goes back** through the WebView's history, which is
@@ -81,10 +83,11 @@ export interface BackWindow {
  * Carry out one press. @returns whether it was handled — `false` only for
  * {@link BackAnswer} `'leave'`, which is the one answer `MainActivity` acts on.
  */
-export function pressBack(state: BackState, target: BackWindow): boolean {
+export function pressBack(state: BackState, target: BackWindow, onStay?: () => void): boolean {
   const answer = answerBack(state);
   switch (answer) {
     case 'stay':
+      onStay?.();
       return true;
     case 'back':
       target.history.back();
@@ -105,10 +108,15 @@ type BackGlobal = Record<typeof ANDROID_BACK_GLOBAL, ((canGoBack: unknown) => bo
  * nothing would call this. `read` is asked at each press, never captured, so a
  * ride started after mounting is seen at the next press.
  */
-export function useAndroidBack(enabled: boolean, read: () => Omit<BackState, 'canGoBack'>): void {
+export function useAndroidBack(
+  enabled: boolean,
+  read: () => Omit<BackState, 'canGoBack'>,
+  /** #2349: a press consumed because a ride is on, handed to the ride. @see pressBack */
+  onStay?: () => void,
+): void {
   const answer = useEffectEvent((canGoBack: unknown): boolean =>
     // Only a literal `true` from the activity counts: anything else is "no history".
-    pressBack({ ...read(), canGoBack: canGoBack === true }, globalThis),
+    pressBack({ ...read(), canGoBack: canGoBack === true }, globalThis, onStay),
   );
   useEffect(() => {
     if (!enabled) {

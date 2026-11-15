@@ -35,6 +35,11 @@ import {
 
 import type { Box, StageMeasurement } from './ride-harness';
 import { longestReplanSentence } from './replan-longest';
+import {
+  RIDE_TIME_CONTROLS,
+  RIDE_TIME_TARGET_PIXELS,
+  namesControl,
+} from '../src/design/ride-time-controls';
 
 /**
  * #1307 — the running workout drawn on the HUD, `ride-harness.tsx` §`GRAPH`.
@@ -1132,5 +1137,421 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
         });
       }
     });
+  }
+});
+
+/**
+ * #2271 — the actions row at a short laptop window, in a workout with a
+ * trainer (`?trainer=workout&graph=plain`): *Pause*, *End ride*, the lock and
+ * *Trainer notice*, the row's four.
+ *
+ * At 1024×600 on `main` the four shared one line at 77 px each, because a
+ * line is chosen by the controls' 72 px floors and not by their words: *End
+ * ride*'s words ran out of its box under the lock, and *Trainer notice* ran
+ * off the panel's edge. Every box was inside the viewport and over no other
+ * box, so a check of boxes alone passed it. So what is held here is the WORDS
+ * as well as the box, for each control in the row:
+ *
+ * - its box at least #669's 48 px (`RIDE_TIME_TARGET_PIXELS`) both ways;
+ * - its visible words inside its own box (`theme.css` §"#2271");
+ * - its box inside the actions panel and over no other control's box, and
+ *   inside the viewport — every control on a corners layout, and the
+ *   ride-time ones (`design/ride-time-controls.ts`) on the stacked layout,
+ *   whose stage scrolls (#419): at 320×256 *Trainer notice* is partly under
+ *   the fold there (its box ends at 271 px on a Mac) and reached by
+ *   scrolling, as it was before #2271. The topmost-thing checks below still
+ *   hold its centre, which is inside the viewport;
+ * - the topmost thing at its centre and at the four corners of its words, so
+ *   a control drawn over another's label is a red case;
+ * - and Pause, End ride and the lock on one line in that order, which this
+ *   change must not move (the issue's lane scope), with *Trainer notice* on a
+ *   line below them on a landscape corners layout (736 px and wider).
+ *
+ * The viewports are the short laptop windows, down to the corners layout's
+ * smallest and the stacked layout's two landscape ones under it: 1024×600 is
+ * the issue's, 1280×720 and 1366×657 (a 1366×768 laptop under its browser's
+ * chrome) are #875's, 960×540 a 16:9 window, 802×600 the middle corners
+ * layout, 736×480 and 736×360 the short corners layout's edges, and 640×360
+ * and 320×256 the stacked layout's (SC 1.4.10's viewport is the app's least).
+ *
+ * Not the upright tablet (800×1280) or an upright phone, which `theme.css`
+ * §"#2271" leaves out and says why: §"#2281" below holds those.
+ *
+ * The control: `theme.css` §"#2271" deleted, which puts the four back on one
+ * line in the 20 rem panel and turns 1024×600, 1280×720, 1366×657 and 960×540
+ * red on *End ride*'s and *Trainer notice*'s words.
+ */
+const SHORT_LAPTOPS: readonly (Viewport & { readonly scrolls?: true })[] = [
+  { name: 'the narrowest wide screen — 1024×600', width: 1024, height: 600, unstagedFails: true },
+  { name: 'a laptop — 1280×720', width: 1280, height: 720, unstagedFails: true },
+  {
+    name: 'a 1366×768 laptop under its browser’s chrome — 1366×657',
+    width: 1366,
+    height: 657,
+    unstagedFails: true,
+  },
+  { name: 'a 16:9 window — 960×540', width: 960, height: 540, unstagedFails: true },
+  { name: 'the middle corners layout — 802×600', width: 802, height: 600, unstagedFails: true },
+  {
+    name: 'the tallest short corners layout — 736×480',
+    width: 736,
+    height: 480,
+    unstagedFails: true,
+  },
+  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
+  {
+    name: 'a small window on its side — 640×360',
+    width: 640,
+    height: 360,
+    unstagedFails: true,
+    scrolls: true,
+  },
+  { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true, scrolls: true },
+];
+
+/** `theme.css` §"#2271"'s `min-width: 46rem`, in px: the corners layout begins here. */
+const CORNERS_LAYOUT_MIN_WIDTH = 736;
+
+/** The row's controls, in document order, as `HudCore.tsx` renders them. */
+const ACTIONS_ROW = ['Pause', 'End ride', 'Lock', 'Trainer notice'] as const;
+
+interface RowControl {
+  /** The visible words, whitespace collapsed. */
+  readonly words: string;
+  readonly box: Box;
+  /** The visible words' own box: every text node not visually hidden. */
+  readonly ink: Box | undefined;
+  /** Whether the control is the topmost thing at its centre. */
+  readonly onTop: boolean;
+  /** The corners of its words, 1 px in, that something else is drawn over. */
+  readonly inkCovered: readonly string[];
+}
+
+async function actionsRow(
+  page: Page,
+): Promise<{ readonly panel: Box; readonly controls: readonly RowControl[] }> {
+  return page.evaluate(() => {
+    const boxOf = (rect: DOMRect): Box => ({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
+    const panel = document.querySelector('.oyl-hud__actions');
+    if (panel === null) throw new Error('no actions panel on the HUD');
+    const owns = (control: Element, x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return hit !== null && (hit === control || control.contains(hit));
+    };
+    const controls = [...panel.querySelectorAll('.oyl-hud__controls > button')].map((control) => {
+      const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
+      const rects: DOMRect[] = [];
+      const words: string[] = [];
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        if (node.parentElement?.closest('.oyl-visually-hidden') !== null) continue;
+        if ((node.textContent ?? '').trim() === '') continue;
+        words.push(node.textContent ?? '');
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...range.getClientRects());
+      }
+      const ink =
+        rects.length === 0
+          ? undefined
+          : boxOf(
+              new DOMRect(
+                Math.min(...rects.map((each) => each.left)),
+                Math.min(...rects.map((each) => each.top)),
+                Math.max(...rects.map((each) => each.right)) -
+                  Math.min(...rects.map((each) => each.left)),
+                Math.max(...rects.map((each) => each.bottom)) -
+                  Math.min(...rects.map((each) => each.top)),
+              ),
+            );
+      const box = boxOf(control.getBoundingClientRect());
+      const corners =
+        ink === undefined
+          ? []
+          : ([
+              ['top left', ink.left + 1, ink.top + 1],
+              ['top right', ink.right - 1, ink.top + 1],
+              ['bottom left', ink.left + 1, ink.bottom - 1],
+              ['bottom right', ink.right - 1, ink.bottom - 1],
+            ] as const);
+      return {
+        words: words.join(' ').replace(/\s+/g, ' ').trim(),
+        box,
+        ink,
+        onTop: owns(control, (box.left + box.right) / 2, (box.top + box.bottom) / 2),
+        inkCovered: corners.filter(([, x, y]) => !owns(control, x, y)).map(([where]) => where),
+      };
+    });
+    return { panel: boxOf(panel.getBoundingClientRect()), controls };
+  });
+}
+
+function within(inner: Box, outer: Box): boolean {
+  return (
+    inner.left >= outer.left - SUBPIXEL_TOLERANCE &&
+    inner.top >= outer.top - SUBPIXEL_TOLERANCE &&
+    inner.right <= outer.right + SUBPIXEL_TOLERANCE &&
+    inner.bottom <= outer.bottom + SUBPIXEL_TOLERANCE
+  );
+}
+
+/** Every way the row's controls fail #2271, as sentences; empty when none does. */
+function actionsRowFailures(
+  row: { readonly panel: Box; readonly controls: readonly RowControl[] },
+  viewport: (typeof SHORT_LAPTOPS)[number],
+): string[] {
+  const found: string[] = [];
+  const at = (box: Box) =>
+    `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
+  const minimum = RIDE_TIME_TARGET_PIXELS - SUBPIXEL_TOLERANCE;
+  for (const control of row.controls) {
+    const { box, ink, words } = control;
+    if (box.width < minimum || box.height < minimum) {
+      found.push(`${words} ${at(box)} is under ${String(RIDE_TIME_TARGET_PIXELS)} px`);
+    }
+    if (ink === undefined) found.push(`${words} has no visible words`);
+    else if (!within(ink, box))
+      found.push(`${words}'s words ${at(ink)} run out of its box ${at(box)}`);
+    if (!within(box, row.panel))
+      found.push(`${words} ${at(box)} is outside its panel ${at(row.panel)}`);
+    const rideTime = RIDE_TIME_CONTROLS.some(
+      (entry) => entry.surface === 'game-hud' && namesControl(entry, words),
+    );
+    if ((rideTime || viewport.scrolls !== true) && !inside(box, viewport)) {
+      found.push(`${words} ${at(box)} is off the stage`);
+    }
+    if (!control.onTop) found.push(`${words} is covered at its centre`);
+    if (control.inkCovered.length > 0) {
+      found.push(`${words}'s words are covered at ${control.inkCovered.join(', ')}`);
+    }
+  }
+  for (const [index, a] of row.controls.entries()) {
+    for (const b of row.controls.slice(index + 1)) {
+      if (overlap(a.box, b.box))
+        found.push(`${a.words} ${at(a.box)} is over ${b.words} ${at(b.box)}`);
+    }
+  }
+  return found;
+}
+
+test.describe('the actions row at a short laptop window, in a workout with a trainer — #2271', () => {
+  for (const viewport of SHORT_LAPTOPS) {
+    test(`every control’s words in its box, on top, on the stage — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?trainer=workout&graph=plain');
+      const row = await actionsRow(page);
+      console.log(
+        `#2271 the actions row — ${viewport.name}: panel ${row.panel.width.toFixed(0)} × ` +
+          `${row.panel.height.toFixed(0)} px; ` +
+          row.controls
+            .map(
+              (each) =>
+                `${each.words} ${each.box.width.toFixed(0)} × ${each.box.height.toFixed(0)}` +
+                ` (words ${(each.ink?.width ?? 0).toFixed(0)})`,
+            )
+            .join(', '),
+      );
+
+      // All four are in the row, in their order: the fixture is the one the
+      // issue was found on, and a row missing *Trainer notice* proves nothing.
+      expect(row.controls.map((each) => each.words)).toEqual([...ACTIONS_ROW]);
+      expect(actionsRowFailures(row, viewport)).toEqual([]);
+
+      // Pause, End ride and the lock keep their places: one line, in order.
+      const [pause, end, lock] = row.controls;
+      if (pause === undefined || end === undefined || lock === undefined) {
+        throw new Error('the row lost a control');
+      }
+      expect(end.box.left).toBeGreaterThanOrEqual(pause.box.right);
+      expect(lock.box.left).toBeGreaterThanOrEqual(end.box.right);
+      expect(end.box.top).toBeLessThan(pause.box.bottom);
+      expect(lock.box.top).toBeLessThan(pause.box.bottom);
+
+      // The notice has the line of its own the rule gives it: below the three,
+      // not before them, which `order: -1` would draw while the three stayed
+      // in order one line lower.
+      const notice = row.controls[3];
+      if (notice === undefined) throw new Error('the row lost Trainer notice');
+      if (viewport.width >= CORNERS_LAYOUT_MIN_WIDTH) {
+        expect(notice.box.top).toBeGreaterThanOrEqual(pause.box.bottom - SUBPIXEL_TOLERANCE);
+      }
+    });
+  }
+});
+
+/**
+ * #2281 — the same row UPRIGHT, which #2271 left out: the upright tablet,
+ * the column layout of an upright phone, and two upright phones on the
+ * stacked layout (390×664 a phone in a browser with its bars showing, 320×704
+ * a very narrow one). On a workout with a trainer (the row's four) and on a
+ * ride with no notice (*Pause*, *End ride* and the lock, with the moving time
+ * beside them on the column layout), each running and then paused, which puts
+ * *Resume*, the row's longest word but one, where *Pause* was.
+ *
+ * On `main` (Mac fonts, whose widths for this row are the CI runner's too):
+ * at 800×1280 the four were 77 px each, *End ride*'s words ran 6 px out of
+ * its box and *Trainer notice*'s 53; upright at 360 wide *End ride* was 74 px
+ * beside the moving time, 9 px out; in a workout *Trainer notice* ran 45 px
+ * out at 360 wide and 35 at 390.
+ *
+ * Held here: `actionsRowFailures` above for every control, and
+ *
+ * - running and paused, every control's words inside its border as well as its
+ *   box, and `CONTROL_WORDS_CLEARANCE_PIXELS` clear of it;
+ * - *Pause* (or *Resume*), *End ride* and the lock on one line, in order;
+ * - on the two overlay layouts *Trainer notice* on that line too (its own
+ *   line is the 80 px of panel `theme.css` §"#2281" exists not to spend),
+ *   and every control the same width with anchor positioning and without
+ *   (#1120), so the words measured are the words of both;
+ * - and there no laid-out panel, and not the moving time, over the leaning
+ *   rider, and the moving time over no control.
+ *
+ * The control: `theme.css` §"#2281" deleted, with §"THE MOVING TIME ON AN
+ * UPRIGHT PHONE"'s gap back at 16 px, which is `main`: red at 800×1280,
+ * 390×844 and 390×664 in a workout and at 360×800 and 360×752 on both rides.
+ */
+const UPRIGHT: readonly (Viewport & { readonly scrolls?: true })[] = [
+  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
+  { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
+  {
+    name: 'a narrow Android phone upright, in the app — 360×800',
+    width: 360,
+    height: 800,
+    unstagedFails: false,
+  },
+  { name: 'the smallest column layout — 360×752', width: 360, height: 752, unstagedFails: false },
+  {
+    name: 'a phone upright in a browser — 390×664',
+    width: 390,
+    height: 664,
+    unstagedFails: false,
+    scrolls: true,
+  },
+  {
+    name: 'a very narrow phone upright — 320×704',
+    width: 320,
+    height: 704,
+    unstagedFails: true,
+    scrolls: true,
+  },
+];
+
+/** `theme.css` `.oyl-hud__control`'s border, each side. */
+const CONTROL_BORDER_PIXELS = 2;
+
+/**
+ * The air held between a control's words and its border, each side: a
+ * border's width, so the words do not touch it. Running on `main` *End ride*
+ * had 3 px at 800×1280 and 2.5 at 360 wide, the least on the row.
+ */
+const CONTROL_WORDS_CLEARANCE_PIXELS = 2;
+
+const UPRIGHT_RIDES = [
+  { name: 'a workout with a trainer', query: '?trainer=workout&graph=plain', notice: true },
+  { name: 'a ride with no notice', query: '', notice: false },
+] as const;
+
+test.describe('the actions row upright, running and paused — #2281', () => {
+  for (const viewport of UPRIGHT) {
+    for (const ride of UPRIGHT_RIDES) {
+      test(`every control’s words in its box, one line, clear of the rider — ${ride.name} — ${viewport.name}`, async ({
+        page,
+      }) => {
+        await openRide(page, viewport, ride.query);
+        for (const paused of [false, true]) {
+          if (paused) await page.getByRole('button', { name: 'Pause' }).click();
+          await test.step(paused ? 'paused' : 'running', async () => {
+            const row = await actionsRow(page);
+            console.log(
+              `#2281 the actions row — ${ride.name}${paused ? ', paused' : ''} — ${viewport.name}: ` +
+                `panel ${row.panel.width.toFixed(0)} × ${row.panel.height.toFixed(0)} px; ` +
+                row.controls
+                  .map(
+                    (each) =>
+                      `${each.words} ${each.box.width.toFixed(0)} × ${each.box.height.toFixed(0)}` +
+                      ` (words ${(each.ink?.width ?? 0).toFixed(0)})`,
+                  )
+                  .join(', '),
+            );
+            const first = paused ? 'Resume' : 'Pause';
+            expect(row.controls.map((each) => each.words)).toEqual(
+              ride.notice
+                ? [first, 'End ride', 'Lock', 'Trainer notice']
+                : [first, 'End ride', 'Lock'],
+            );
+            expect(actionsRowFailures(row, viewport)).toEqual([]);
+            // Running and paused, the words are clear of the border too, by
+            // `CONTROL_WORDS_CLEARANCE_PIXELS`, and not drawn over it or
+            // touching it: shared out equally (`flex: 1`) *End ride* is 77 px
+            // at 800×1280 and its words cross both borders, inside its box by
+            // the measure above, and paused (the owner's ruling of 2026-11-12)
+            // *Resume* and *End ride* were 78–79 px around 74–75 px of words.
+            const edge = CONTROL_BORDER_PIXELS + CONTROL_WORDS_CLEARANCE_PIXELS;
+            expect(
+              row.controls
+                .filter(
+                  ({ box, ink }) =>
+                    ink !== undefined &&
+                    (ink.left < box.left + edge - SUBPIXEL_TOLERANCE ||
+                      ink.right > box.right - edge + SUBPIXEL_TOLERANCE),
+                )
+                .map(
+                  ({ words, box, ink }) =>
+                    `${words}'s words (${(ink?.width ?? 0).toFixed(1)} px) are within ` +
+                    `${String(CONTROL_WORDS_CLEARANCE_PIXELS)} px of its border ` +
+                    `(box ${box.width.toFixed(1)} px)`,
+                ),
+            ).toEqual([]);
+
+            const [pause, end, lock, notice] = row.controls;
+            if (pause === undefined || end === undefined || lock === undefined) {
+              throw new Error('the row lost a control');
+            }
+            expect(end.box.left).toBeGreaterThanOrEqual(pause.box.right);
+            expect(lock.box.left).toBeGreaterThanOrEqual(end.box.right);
+            expect(end.box.top).toBeLessThan(pause.box.bottom);
+            expect(lock.box.top).toBeLessThan(pause.box.bottom);
+            if (viewport.scrolls === true) return;
+
+            if (notice !== undefined) {
+              expect(notice.box.left).toBeGreaterThanOrEqual(lock.box.right);
+              expect(notice.box.top, 'Trainer notice took a line of its own').toBeLessThan(
+                pause.box.bottom,
+              );
+            }
+            const rider = riderBox(viewport);
+            for (const [how, seen] of await bothWays(page)) {
+              const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+              for (const control of row.controls) {
+                const same = controls.find((each) => each.name === `control: ${control.words}`);
+                expect(same?.box.width, `${control.words} ${how}`).toBeCloseTo(
+                  control.box.width,
+                  0,
+                );
+              }
+              const moving = seen.items.find((each) => each.name === 'reading: Moving');
+              if (moving === undefined) throw new Error(`no moving time ${how}`);
+              expect(
+                [...seen.panels.filter((each) => each.box.height > 0), moving]
+                  .filter((each) => overlap(each.box, rider))
+                  .map(describeItem),
+                `over the leaning rider ${how}`,
+              ).toEqual([]);
+              expect(
+                controls.filter((each) => overlap(each.box, moving.box)).map(describeItem),
+                `under the moving time ${how}`,
+              ).toEqual([]);
+            }
+          });
+        }
+      });
+    }
   }
 });

@@ -83,6 +83,7 @@ import type {
   WorkoutId,
   SegmentId,
 } from './ids';
+import { isCircuitRouteId, isLevelRouteId } from './ids';
 import {
   fromPersistedActivityRecord,
   fromPersistedDeviceKey,
@@ -140,6 +141,7 @@ import type {
   ActivitySummary,
   RideFacts,
   AthleteRecord,
+  CalorieSex,
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
@@ -165,7 +167,7 @@ import type {
   WorkoutRecord,
   WorldCorridorRecord,
 } from './records';
-import { WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
+import { isBirthYear, parseCalorieSex, WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
 import { parseMaskedWords } from '@onyourleft/analysis';
 import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
@@ -919,6 +921,55 @@ export class ActivityStore {
       const updated: AthleteRecord = {
         ...withoutMass(fromPersistedAthlete(row)),
         ...(mass === undefined ? {} : { mass }),
+      };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the two inputs a heart-rate calorie estimate needs beyond the
+   * mass — the sex and the year of birth — leaving every other field alone
+   * (#2432).
+   *
+   * Shaped like {@link setAthleteMass}, and for its reason: **`undefined`
+   * clears a field**, because *Not set* is the only way back for a rider who
+   * no longer wants a heart-rate estimate, so it has to be a write rather than
+   * a refusal. Both fields are given on every call; the screen saves them
+   * together.
+   *
+   * @throws {RangeError} for a birth year that is not a whole number, before
+   *   anything is written: {@link fromPersistedAthlete} would read such a row
+   *   back as unset, which is a write that reports success while the read
+   *   cannot see it. The plausible range is the screen's to check, because it
+   *   needs today's date.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteCalorieInputs(
+    id: AthleteId,
+    inputs: {
+      readonly calorieSex: CalorieSex | undefined;
+      readonly birthYear: number | undefined;
+    },
+  ): Promise<AthleteRecord | undefined> {
+    const { calorieSex, birthYear } = inputs;
+    if (birthYear !== undefined && !isBirthYear(birthYear)) {
+      throw new RangeError('athlete.birthYear: must be a whole year');
+    }
+    const sex = parseCalorieSex(calorieSex);
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = {
+        ...withoutCalorieInputs(fromPersistedAthlete(row)),
+        ...(sex === undefined ? {} : { calorieSex: sex }),
+        ...(birthYear === undefined ? {} : { birthYear }),
       };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
@@ -2477,6 +2528,50 @@ export class ActivityStore {
     );
   }
 
+  /**
+   * Deletes the pictures this athlete KEPT between two instants — #2349's
+   * *Discard ride*.
+   *
+   * ⚠️ **Why a capture window rather than a ride.** A kept frame (#384) names
+   * no ride: its `activityId` is `null`, because a frame is taken while the
+   * ride is still being recorded and an `ActivityRecord` exists only once it
+   * is saved (`records.ts` §`CameraFrameRecord`). A rider who discards a ride
+   * asked for it to go, and the pictures they kept of it with it. The ride's
+   * own time — from its start to the discard — is the only thing that links
+   * them, and one device records one ride at a time.
+   *
+   * ⚠️ **Kept frames only, and this athlete's only.** The rows are found
+   * through `[athleteId+capturedAt]`, so another athlete's picture in the same
+   * window is not reached, and a side-camera snapshot (#1063) names its ride
+   * and is never taken here: it follows that ride.
+   *
+   * ⚠️ **One condition, `source`, and not `activityId === null` beside it**
+   * (#2356). `putCameraFrame` refuses a kept frame that names a ride and a
+   * snapshot that names none, so the two conditions select the same rows and
+   * no test could tell them apart: dropping either alone stayed green.
+   * `source` is the one that says what is meant, and the snapshot in
+   * `camera-frame-store.test.ts` §"#2349" is what goes red without it.
+   *
+   * @returns how many were removed. Zero for a window that kept none, and for
+   * a window that ends before it starts.
+   */
+  async deleteKeptCameraFramesCapturedBetween(
+    owner: AthleteId,
+    from: UnixSeconds,
+    to: UnixSeconds,
+  ): Promise<number> {
+    if (!(from <= to)) {
+      return 0;
+    }
+    return this.#db.transaction('rw', [this.#cameraFrames], async () =>
+      this.#cameraFrames
+        .where(INDEX.cameraFrameByAthleteAndCapturedAt)
+        .between([owner, from], [owner, to], true, true)
+        .filter((row) => row.source === 'kept')
+        .delete(),
+    );
+  }
+
   // --- The side camera's framing reference (#528) ---------------------------
 
   /**
@@ -2992,6 +3087,10 @@ export class ActivityStore {
    * Refuses a corridor for a route that is not this owner's, inside the same
    * transaction as the write, so a read that finishes after the rider deleted
    * the route cannot leave a corridor that no route deletion will reach.
+   * A built-in circuit's `circuit:` key (ADR 0064 D-2.2) is the exception: it
+   * has no route to own it, so it is admitted without one and its corridor
+   * stays until the athlete is deleted. A built-in Delivery level's `level:`
+   * key (ADR 0065 D-2.4) is refused outright: a level keeps no corridor.
    *
    * @throws {WorldCorridorTooLargeError} if `features` is over
    * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.
@@ -3011,7 +3110,22 @@ export class ActivityStore {
         record.features.size,
       );
     }
+    // #2361, ADR 0065 D-2.4: a built-in level's buildings are in its own file,
+    // and nothing of a level is kept here, for any owner.
+    if (isLevelRouteId(record.routeId)) {
+      throw new StoreValidationError(
+        'worldCorridors.routeId: a built-in Delivery level keeps no corridor',
+      );
+    }
     await this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
+      // #2293, ADR 0064 D-2.2: a built-in circuit has no route record to
+      // refer to; its key is in the namespace no route id may carry
+      // (`ids.ts` §`routeId`), so the two can never share one. The owner is
+      // still half of the key, and the read below still takes it.
+      if (isCircuitRouteId(record.routeId)) {
+        await this.#worldCorridors.put(record);
+        return;
+      }
       const route = await this.#routes
         .where(INDEX.routeByOwnerAndId)
         .equals([record.owner, record.routeId])
@@ -4262,6 +4376,7 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     hasPosition,
     routeId,
     averagePower,
+    calories,
     effortWeightedPower,
     effortWeightedHeartRate,
     loadCoveredTime,
@@ -4284,6 +4399,8 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     // list row; dropped here, it offered "A free ride" to every rider.
     ...(routeId === undefined ? {} : { routeId }),
     ...(averagePower === undefined ? {} : { averagePower }),
+    // #2433: the ride's calorie estimate, on the list row as `averagePower` is.
+    ...(calories === undefined ? {} : { calories }),
     // The load summary #77's list readers are built on — see the ⚠️ above.
     ...(effortWeightedPower === undefined ? {} : { effortWeightedPower }),
     ...(effortWeightedHeartRate === undefined ? {} : { effortWeightedHeartRate }),
@@ -4371,6 +4488,18 @@ function withoutThresholds(record: AthleteRecord): AthleteRecord {
 function withoutMass(record: AthleteRecord): AthleteRecord {
   const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
   delete copy.mass;
+  return copy as AthleteRecord;
+}
+
+/**
+ * The athlete row with the sex and the year of birth removed, for
+ * {@link ActivityStore.setAthleteCalorieInputs} — {@link withoutMass}' shape and
+ * its reason.
+ */
+function withoutCalorieInputs(record: AthleteRecord): AthleteRecord {
+  const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
+  delete copy.calorieSex;
+  delete copy.birthYear;
   return copy as AthleteRecord;
 }
 

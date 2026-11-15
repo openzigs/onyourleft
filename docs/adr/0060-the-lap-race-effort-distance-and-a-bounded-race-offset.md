@@ -432,3 +432,44 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   answer are unchanged, and nothing else in this ADR changes. Recorded on the owner's
   [ruling of 2026-11-01](https://github.com/openzigs/onyourleft/pull/1984#issuecomment-6557317199)
   (Q5).
+- **2026-11-11** — **Once [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
+  is Accepted, D-9 is superseded by it for lap-race bots in a solo race**: D-9.1, what ADR 0061
+  left of D-9.2, and D-9.3. **D-2.1's words *"or when"* are narrowed by it** (its D-3.3 and D-6.1,
+  under its D-3 answer (b), which keeps drafting in the lap race): where a bot rides decides the rider's draft factor
+  and so when a grade is sent, never what is sent. All of it on the owner's
+  [ruling of 2026-11-10](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845)
+  that there can be no rule on racing strategy. Read ADR 0067 D-0 and D-1 for what replaces them;
+  D-14 Q4's *"No"* is kept as ADR 0067 D-1 reads it (no bot's capacity changes with its place). This
+  entry only points there; nothing else in this ADR changes.
+- **2026-11-12** — **D-2.4 is read as the recorded ride after Go**, on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/issues/2546#issuecomment-6833555799)
+  on #2546 (its option (a)). A solo lap race now holds the rider on its line for a 10 s countdown
+  before Go, as a room's race has held its riders since #785 and #1911, so the same power trace
+  ridden as an ordinary ride is no longer the same ride on the game's odometer. The recording is
+  unchanged by the mode: it starts at the press as before, the countdown's seconds are in it as the
+  trainer reported them, and from Go on it is what the same ride without the mode records. The race
+  result (its clock, laps, place and finish time) starts at Go. D-2.1's behavioural half is held the
+  same way: the race is compared with an ordinary ride whose rider stood still on the line for the
+  countdown's seconds and then rode the same trace (`lap-race-wiring.test.tsx`). The countdown
+  itself sends the trainer nothing but the line's grade and has no path to a trainer command.
+  Nothing else in this ADR changes.
+- **2026-11-12** — **D-2.4 with the rider's draft** (ADR 0066 D-6's draft switch,
+  [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md) D-3's answer (b)): **whether
+  the switch is on or off, a lap race's saved ride is the trainer's measured speed and distance.** The
+  draft is a multiplier on the rider's `C_D·A` in the game's simulation only (ADR 0067 D-3.3), so it
+  carries the rider further in the game, but the saved speed channel is what the trainer measured and
+  the saved distance is that channel integrated (`recording/totals.ts` §`rideDistance`). **The draft
+  reaches the saved ride only through its lap times**, because the rider reaches the lap line sooner.
+  A draft decides only when a grade is sent to the trainer, never what grade is sent (D-2.1 as the
+  2026-11-11 entry narrows it). With the switch off no racer drafts, and D-2.4 stands as written. No
+  recording behaviour changes.
+  `apps/web/src/game/lap-race-draft-wiring.test.tsx` › `the rider takes a draft from a bot, through
+  the simulation only — #2461 (ADR 0067 D-3)` › `saves the trainer’s measured speed and distance with
+  the switch on, and the draft only moves the lap times (ADR 0060 D-2.4, 2026-11-12)` reads the saved
+  activity back from the store with the switch on and off, and
+  `apps/web/src/game/lap-race-wiring.test.tsx` › `the recorded ride is unchanged by a lap race — #1906
+  (D-2.4)` holds the switch-off case (#2461). Recorded on the owner's
+  [ruling of 2026-11-12](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6833584017),
+  which replaces the switch-on half of the
+  [earlier ruling that day](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6829334664).
+  This entry only clarifies D-2.4; nothing else in this ADR changes.

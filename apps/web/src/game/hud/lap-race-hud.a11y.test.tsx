@@ -164,7 +164,8 @@ describe('a lap race on the HUD — #1904', () => {
       effortDistances: { [RIDER]: 120, 'bot-1': 130, 'bot-2': 110, 'bot-3': 100 },
     });
     mounted = await mount(panel(race, ''));
-    expect(field('Place')).toBe('Place 2 of 4 Lap 1 of 3');
+    // #2455 AC2: bot-2 rides a second behind, so the lap line names it.
+    expect(field('Place')).toBe('Place 2 of 4 Lap 1 of 3 · Steady bot 2 +1 s');
     expect(field('Item')).toBe('Item None');
     const standings = document.querySelector('[aria-label="Race standings"]');
     expect(text(standings?.querySelector('p'))).toBe('You are 2 of 4.');
@@ -226,7 +227,8 @@ describe('a lap race on the HUD — #1904', () => {
     expect(ride.heard.indexOf('Hit by a crosswind gust.')).toBeLessThan(
       ride.heard.indexOf('Lap 1 of 3 done. You are 1 of 4.'),
     );
-    expect(field('Place')).toBe('Place 1 of 4 Lap 2 of 3');
+    // #2455 AC2: bot-1 rides three seconds behind, so the lap line names it.
+    expect(field('Place')).toBe('Place 1 of 4 Lap 2 of 3 · Brisk bot 1 +3 s');
     expect(document.querySelectorAll('[role="status"], [aria-live]')).toHaveLength(1);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });

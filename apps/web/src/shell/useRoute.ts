@@ -48,6 +48,7 @@
 
 import { addTransitionType, startTransition, useEffect, useEffectEvent, useState } from 'react';
 
+import type { RideLeave } from './ride-leave';
 import { NAVIGATION_TRANSITION_TYPE, navigationKind } from './route-motion';
 import { matchHash, type RouteMatch } from './routes';
 
@@ -103,13 +104,35 @@ function endRunningFade(): void {
  * `mayAnimate` decides, per navigation, whether the change is applied inside
  * `startTransition` (#945). Absent, nothing is: a caller that has not said a
  * navigation may animate gets none.
+ *
+ * `leave` is asked before a change of route is applied (#2349's review, B2):
+ * a ride on the game's stage takes it, and the address is put back.
  */
 export function useRoute(
   mayAnimate?: MayAnimate,
   updates: RouteUpdates = 'transition',
+  leave?: RideLeave,
 ): RouteMatch {
   const [hash, setHash] = useState(currentHash);
   const apply = useEffectEvent((next: string) => {
+    // #2349's review, B2: a change of ROUTE under a ride on the game's stage —
+    // the browser's Back, or an address typed into the bar — is asked about
+    // first (`ride-leave.ts`). When the stage takes it, the address goes back
+    // to the stage's own, with no `hashchange`, and nothing here changes.
+    if (
+      leave !== undefined &&
+      next !== hash &&
+      matchHash(next).route.id !== matchHash(hash).route.id &&
+      leave.attempt()
+    ) {
+      const location = globalThis.location;
+      globalThis.history.pushState(
+        globalThis.history.state,
+        '',
+        hash === '' ? `${location.pathname}${location.search}` : hash,
+      );
+      return;
+    }
     // ⚠️ No early return when `next` equals the rendered fragment: a
     // navigation still in its transition has not rendered yet, and going back
     // to where the screen already is must still be applied, or the pending one

@@ -26,13 +26,17 @@
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
 #   owner's ruling of 2026-10-03: the opt-in realistic world, #866's class.
-#   Since #2268 it also selects apps/web/tools/demo/preset-bake-archive.test.ts,
-#   which bakes each preset demo route from the PUBLISHED archive -- and
-#   SKIPS here: it runs only with OYL_DEMO_BAKE_ARCHIVE_CHECK=1, which this
-#   workflow does not set, because tiles.openzigs.com answers a GitHub
-#   runner with HTTP 403 for a range (run 42269980561) while it answers a
-#   rider with 206. It is in this run so that no required run selects it.
-#   The record's offline half (archive URL, reader version, GPX digest) is
+#   Since #2268 it also runs apps/web/tools/demo/preset-bake-archive.test.ts,
+#   which bakes each preset demo route from the PUBLISHED archive and fails
+#   when the result drifts from its committed `.bake.json` record. It is the
+#   one Vitest file that reaches the network, so it is in this run, and it
+#   runs only with OYL_DEMO_BAKE_ARCHIVE_CHECK=1. Since #2275 that is set on
+#   `main` only, with the read-only R2 token of the `basemap-archive`
+#   environment: tiles.openzigs.com answers a GitHub runner with HTTP 403 for
+#   a range (run 42269980561, Bot Fight Mode), so the runner reads the same
+#   object through R2's S3 API (apps/web/tools/demo/r2-archive.ts). On a pull
+#   request the environment and the check are both off, and it skips. The
+#   record's offline half (archive URL, reader version, GPX digest) is
 #   required, in bake-route.test.ts.
 #
 #   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
@@ -122,6 +126,12 @@ jobs:
     # measured, and nightly-split.test.ts holds every nightly job's slowest
     # measured run inside 60 % of its stop.
     timeout-minutes: 30
+    # The basemap archive's read token (#2275) is the `basemap-archive`
+    # environment's, and that environment deploys from `main` alone, so a pull
+    # request's run -- or a branch's -- never holds it. Off `main` the job
+    # takes no environment (an empty name) and the archive check skips.
+    # docs/agents/ci.md section 4c "The basemap archive's read token -- #2275".
+    environment: ${{ github.ref == 'refs/heads/main' && 'basemap-archive' || '' }}
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, as in rules.yml:
@@ -165,7 +175,19 @@ jobs:
       - name: Install the pinned Chromium
         run: pnpm --filter @onyourleft/web exec playwright install --only-shell chromium
 
+      # OYL_DEMO_BAKE_ARCHIVE_CHECK: preset-bake-archive.test.ts reads the
+      # published archive only when it is set (#2268), and it is set on `main`
+      # alone (#2275). The OYL_BASEMAP_R2_* four are the read-only R2 token's,
+      # in this step and no other, so nothing else in the job's processes sees
+      # them; the install above ran without them. A runner without them reads
+      # the public URL and is answered 403, which the failure names.
       - name: Tests outside coverage
+        env:
+          OYL_DEMO_BAKE_ARCHIVE_CHECK: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
+          OYL_BASEMAP_R2_ACCOUNT_ID: ${{ secrets.OYL_BASEMAP_R2_ACCOUNT_ID }}
+          OYL_BASEMAP_R2_BUCKET: ${{ secrets.OYL_BASEMAP_R2_BUCKET }}
+          OYL_BASEMAP_R2_ACCESS_KEY_ID: ${{ secrets.OYL_BASEMAP_R2_ACCESS_KEY_ID }}
+          OYL_BASEMAP_R2_SECRET_ACCESS_KEY: ${{ secrets.OYL_BASEMAP_R2_SECRET_ACCESS_KEY }}
         run: pnpm run test:uninstrumented
 
       # One worker: the realistic loads draw on the CPU through SwiftShader,

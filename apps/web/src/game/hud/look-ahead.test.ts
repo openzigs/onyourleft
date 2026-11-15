@@ -25,11 +25,15 @@ import { slopeAhead, slopesOf } from './climb-ahead';
 import {
   GRADE_BANDS,
   LOOK_AHEAD_METRES,
+  MINIMUM_BAND_METRES,
   LOOK_AHEAD_RISE_METRES,
+  climbAhead,
   gradeBand,
   lookAhead,
   nextClimbLabel,
   nextClimbText,
+  routeBands,
+  withoutSlivers,
 } from './look-ahead';
 
 const STEP = 10;
@@ -173,23 +177,24 @@ describe('the next kilometre of a synthetic climb (#2075)', () => {
     expect(ahead.nextClimb).toEqual(announced);
     expect(ahead.nextClimb?.slope.grade).toBeGreaterThan(5);
     expect(ahead.nextClimb?.slope.grade).toBeLessThan(7);
-    expect(nextClimbText(ahead.nextClimb, 'metric')).toMatch(/^Climb in \d+0 m · 6 %$/);
-    expect(nextClimbLabel(ahead.nextClimb, 'metric')).toMatch(
-      /^next climb in \d+0 metres, 6 per cent average$/,
+    expect(nextClimbText(ahead.climb, 'metric')).toMatch(/^Climb in \d+0 m · 6 %$/);
+    expect(nextClimbLabel(ahead.climb, 'metric')).toMatch(
+      /^next climb in \d+0 metres, 6 per cent average, top in \d+0 metres$/,
     );
   });
 
   it('says it in the rider’s own unit', () => {
     const ahead = lookAhead(profile, 600);
-    expect(nextClimbText(ahead.nextClimb, 'imperial')).toMatch(/^Climb in \d+ ft · 6 %$/);
+    expect(nextClimbText(ahead.climb, 'imperial')).toMatch(/^Climb in \d+ ft · 6 %$/);
   });
 
   it('names no climb when none starts within the window, and says so', () => {
     // At 1.7 km the climb is behind and 1.3 km of flat is all that is left.
     const ahead = lookAhead(profile, 1700);
     expect(ahead.nextClimb).toBeUndefined();
-    expect(nextClimbText(ahead.nextClimb, 'metric')).toBeUndefined();
-    expect(nextClimbLabel(ahead.nextClimb, 'metric')).toBe('no climb in the next kilometre');
+    expect(ahead.climb).toBeUndefined();
+    expect(nextClimbText(ahead.climb, 'metric')).toBeUndefined();
+    expect(nextClimbLabel(ahead.climb, 'metric')).toBe('no climb in the next 2 kilometres');
   });
 
   it('names the next CLIMB, not a nearer descent', () => {
@@ -212,6 +217,277 @@ describe('the next kilometre of a synthetic climb (#2075)', () => {
 
   it('names no climb the rider is already on', () => {
     expect(lookAhead(profile, 1200).nextClimb).toBeUndefined();
+  });
+});
+
+/**
+ * #2291's climb view: 2 km of road, and the top of the climb the rider is on
+ * or of the next one, with its average grade — the announcer's own slopes.
+ */
+describe('the climb view (#2291)', () => {
+  const profile = route(CLIMB);
+  const climbs = slopesOf(profile).filter((slope) => slope.kind === 'climb');
+
+  it('is 2 km of road at a tenth of that in height, so a grade keeps its angle', () => {
+    expect(LOOK_AHEAD_METRES).toBe(2000);
+    expect(LOOK_AHEAD_RISE_METRES).toBe(LOOK_AHEAD_METRES / 10);
+    // From the start the window reaches past the climb's top at about 1.6 km.
+    const ahead = lookAhead(profile, 0);
+    expect(ahead.length).toBe(2000);
+    expect(ahead.runs.map((run) => run.band).at(-1)).toBe('flat');
+  });
+
+  it('names the top of the next climb: where it starts and how long it is', () => {
+    const ahead = lookAhead(profile, 600);
+    const next = ahead.nextClimb;
+    expect(ahead.climb?.where).toBe('ahead');
+    expect(ahead.climb?.slope).toBe(next?.slope);
+    expect(ahead.climb?.startsIn).toBe(next?.metresAhead);
+    expect(ahead.climb?.topIn).toBeCloseTo((next?.metresAhead ?? 0) + (next?.slope.length ?? 0), 6);
+    // The top is about 1.6 km along: a kilometre ahead of a rider at 600 m.
+    expect(ahead.climb?.topIn).toBeGreaterThan(950);
+    expect(ahead.climb?.topIn).toBeLessThan(1050);
+  });
+
+  it('names the climb the rider is ON, and how far it is to its top', () => {
+    const ahead = lookAhead(profile, 1200);
+    expect(ahead.climb?.where).toBe('on');
+    expect(ahead.climb?.slope).toEqual(climbs[0]);
+    expect(ahead.climb?.startsIn).toBe(0);
+    // About 400 m of the 600 m climb is left.
+    expect(ahead.climb?.topIn).toBeGreaterThan(350);
+    expect(ahead.climb?.topIn).toBeLessThan(450);
+    const nearer = lookAhead(profile, 1300).climb?.topIn ?? Number.NaN;
+    expect((ahead.climb?.topIn ?? Number.NaN) - nearer).toBeCloseTo(100, 6);
+    expect(nextClimbText(ahead.climb, 'metric')).toMatch(/^Top in \d+0 m · 6 %$/);
+    expect(nextClimbLabel(ahead.climb, 'metric')).toMatch(
+      /^on a climb, top in \d+0 metres, 6 per cent average$/,
+    );
+  });
+
+  it('gives the climb’s average, as the announcer does, not the grade underfoot', () => {
+    const ahead = lookAhead(profile, 1200);
+    expect(ahead.climb?.slope.grade).toBe(climbs[0]?.grade);
+  });
+
+  it('names the climb on from its first metre until its top', () => {
+    const climb = climbs[0];
+    if (climb === undefined) throw new Error('no climb on the synthetic route');
+    expect(climbAhead(profile, climb.start, undefined)?.where).toBe('on');
+    expect(climbAhead(profile, climb.start - 1, undefined)).toBeUndefined();
+    expect(climbAhead(profile, climb.start + climb.length - 1, undefined)?.where).toBe('on');
+    expect(climbAhead(profile, climb.start + climb.length, undefined)).toBeUndefined();
+  });
+
+  it('names nothing on a route with nothing to draw', () => {
+    expect(climbAhead(route([100, 100]), Number.NaN, undefined)).toBeUndefined();
+  });
+
+  /**
+   * A 2 km loop whose one climb runs across the line: 200 m at 6 % to the
+   * line, then 300 m more at 6 % into the next lap, 500 m flat, 500 m down at
+   * −6 % and 500 m flat. `slopesOf` joins the two halves into one climb.
+   */
+  const ACROSS = [
+    112,
+    ...rise(112, 300, 6),
+    ...rise(130, 500, 0),
+    ...rise(130, 500, -6),
+    ...rise(100, 500, 0),
+    ...rise(100, 200, 6),
+  ];
+
+  it('on a loop, names a climb across the line as one, with its top in the next lap', () => {
+    const loop = loopRoute(ACROSS);
+    const total = loop.totalDistance as number;
+    const joined = slopesOf(loop).filter((slope) => slope.kind === 'climb');
+    expect(joined).toHaveLength(1);
+    // 100 m before the line: about 100 m to it and 300 m past it to the top.
+    const before = lookAhead(loop, total - 100).climb;
+    expect(before?.where).toBe('on');
+    expect(before?.topIn).toBeGreaterThan(350);
+    expect(before?.topIn).toBeLessThan(450);
+    // 100 m past it, on lap two: the same climb, 200 m from its top.
+    const after = lookAhead(loop, total + 100).climb;
+    expect(after?.where).toBe('on');
+    expect(after?.slope).toBe(before?.slope);
+    expect((before?.topIn ?? Number.NaN) - (after?.topIn ?? Number.NaN)).toBeCloseTo(200, 6);
+  });
+});
+
+/** #2291's third part: the whole route's strip, shaded by the same bands. */
+describe('the whole route in grade bands (#2291)', () => {
+  const profile = route(CLIMB);
+
+  it('covers the route from 0 to 1, each run beginning where the last ends', () => {
+    const runs = routeBands(profile);
+    expect(runs[0]?.from).toBe(0);
+    expect(runs.at(-1)?.to).toBe(1);
+    runs.slice(1).forEach((run, index) => {
+      expect(run.from).toBe(runs[index]?.to);
+      expect(run.band).not.toBe(runs[index]?.band);
+    });
+  });
+
+  it('bands the flat as flat and the 6 % climb as steep, where it is on the route', () => {
+    const runs = routeBands(profile);
+    expect(runs.map((run) => run.band)).toContain('steep');
+    expect(runs[0]?.band).toBe('flat');
+    expect(runs.at(-1)?.band).toBe('flat');
+    // The climb is 1.0 to 1.6 km of 3 km: a third to a little over a half.
+    const steep = runs.find((run) => run.band === 'steep');
+    expect(steep?.from).toBeGreaterThan(0.3);
+    expect(steep?.from).toBeLessThan(0.37);
+    expect(steep?.to).toBeGreaterThan(0.5);
+    expect(steep?.to).toBeLessThan(0.56);
+  });
+
+  it('bands by the grade the trainer would be sent, as the road ahead does', () => {
+    const total = profile.totalDistance as number;
+    const ahead = lookAhead(profile, 0);
+    const steepAhead = ahead.runs.find((run) => run.band === 'steep');
+    const steepRoute = routeBands(profile).find((run) => run.band === 'steep');
+    expect((steepRoute?.from ?? Number.NaN) * total).toBeCloseTo(steepAhead?.start ?? -1, -1);
+  });
+
+  it('is worked out once per route', () => {
+    expect(routeBands(profile)).toBe(routeBands(profile));
+  });
+
+  it('is nothing on a route with one cell or none', () => {
+    expect(routeBands(route([100, 100])).length).toBeLessThanOrEqual(1);
+  });
+});
+
+/**
+ * #2291, the owner's screenshots of 2026-11-06: the caption's average read
+ * low (a 10 % climb "9 %", a 4.5 % one "4 %"), and a thin extra band showed
+ * at the change of slope before the top marker. Synthetic climbs at 4.5, 7
+ * and 10 %, through the real `routeProfile`.
+ */
+describe('a steady climb, as the owner’s screenshots asked — #2291', () => {
+  /** 1 km flat, 600 m at `grade` %, 1.4 km flat. */
+  const climbAt = (grade: number): RouteProfile =>
+    route([
+      100,
+      ...rise(100, 1000, 0),
+      ...rise(100, 600, grade),
+      ...rise(100 + 6 * grade, 1400, 0),
+    ]);
+  const CASES = [
+    [4.5, '5 %', 'climb'],
+    [7, '7 %', 'steep'],
+    [10, '10 %', 'wall'],
+  ] as const;
+
+  it.each(CASES)('says a %s per cent climb is "%s", before it and on it', (grade, said) => {
+    const profile = climbAt(grade);
+    const before = nextClimbText(lookAhead(profile, 900).climb, 'metric');
+    expect(before?.startsWith('Climb in ')).toBe(true);
+    expect(before?.endsWith(` · ${said}`)).toBe(true);
+    const on = lookAhead(profile, 1300).climb;
+    expect(nextClimbText(on, 'metric')?.endsWith(` · ${said}`)).toBe(true);
+    expect(nextClimbLabel(on, 'metric')).toContain(`, ${said.replace(' %', '')} per cent average`);
+  });
+
+  it.each(CASES)(
+    'draws a %s per cent climb as one band, with no sliver at its foot or its crest',
+    (grade, _said, band) => {
+      const profile = climbAt(grade);
+      expect(lookAhead(profile, 900).runs.map((run) => run.band)).toEqual(['flat', band, 'flat']);
+      for (const at of [1300, 1560]) {
+        const ahead = lookAhead(profile, at);
+        expect(ahead.runs.map((run) => run.band)).toEqual([band, 'flat']);
+        // The band ends at the top marker, to within a sample.
+        expect(
+          Math.abs((ahead.runs[0]?.end ?? 0) - (ahead.climb?.topIn ?? -99)),
+        ).toBeLessThanOrEqual(10);
+      }
+      const total = profile.totalDistance as number;
+      const route = routeBands(profile);
+      expect(route.map((run) => run.band)).toEqual(['flat', band, 'flat']);
+      const slope = slopesOf(profile)[0];
+      const top = (slope?.start ?? 0) + (slope?.length ?? 0);
+      expect(Math.abs((route[1]?.to ?? 0) * total - top)).toBeLessThanOrEqual(10);
+    },
+  );
+
+  it('says a short real climb at its own grade: 8 % over 100 m, 12 % over 110 m', () => {
+    for (const [metres, grade, said] of [
+      [100, 8, '8 %'],
+      [110, 12, '12 %'],
+    ] as const) {
+      const profile = route([
+        100,
+        ...rise(100, 1000, 0),
+        ...rise(100, metres, grade),
+        ...rise(100 + (metres * grade) / 100, 1000, 0),
+      ]);
+      expect(nextClimbText(lookAhead(profile, 900).climb, 'metric')?.endsWith(` · ${said}`)).toBe(
+        true,
+      );
+    }
+  });
+
+  it('still draws a real change of band: 300 m at 6 % then 300 m at 10 %', () => {
+    const profile = route([
+      100,
+      ...rise(100, 1000, 0),
+      ...rise(100, 300, 6),
+      ...rise(118, 300, 10),
+      ...rise(148, 1400, 0),
+    ]);
+    expect(lookAhead(profile, 900).runs.map((run) => run.band)).toEqual([
+      'flat',
+      'steep',
+      'wall',
+      'flat',
+    ]);
+    expect(routeBands(profile).map((run) => run.band)).toEqual(['flat', 'steep', 'wall', 'flat']);
+  });
+});
+
+describe('a band too short to be road — #2291', () => {
+  const span = (band: (typeof GRADE_BANDS)[number]['key'], from: number, to: number) => ({
+    band,
+    from,
+    to,
+  });
+
+  it('merges a sliver into the neighbour further from flat, the shortest first', () => {
+    expect(
+      withoutSlivers(
+        [
+          span('flat', 0, 100),
+          span('climb', 100, 130),
+          span('steep', 130, 150),
+          span('wall', 150, 600),
+          span('steep', 600, 620),
+          span('climb', 620, 640),
+          span('flat', 640, 1000),
+        ],
+        MINIMUM_BAND_METRES,
+      ),
+    ).toEqual([span('flat', 0, 100), span('wall', 100, 640), span('flat', 640, 1000)]);
+  });
+
+  it('merges into the longer neighbour when both are as far from flat', () => {
+    expect(
+      withoutSlivers(
+        [span('descent', 0, 100), span('flat', 100, 120), span('climb', 120, 400)],
+        MINIMUM_BAND_METRES,
+      ),
+    ).toEqual([span('descent', 0, 100), span('climb', 100, 400)]);
+  });
+
+  it('keeps a band at least the minimum long, and the first and last whatever their length', () => {
+    const kept = [
+      span('climb', 0, 20),
+      span('flat', 20, 20 + MINIMUM_BAND_METRES),
+      span('wall', 20 + MINIMUM_BAND_METRES, 900),
+      span('steep', 900, 910),
+    ];
+    expect(withoutSlivers(kept, MINIMUM_BAND_METRES)).toEqual(kept);
   });
 });
 
@@ -275,6 +551,7 @@ describe('a route with nothing to draw (#2075)', () => {
       riderHeight: 0,
       runs: [],
       nextClimb: undefined,
+      climb: undefined,
     });
   });
 });

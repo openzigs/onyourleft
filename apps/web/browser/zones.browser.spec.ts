@@ -146,14 +146,34 @@ for (const theme of THEMES) {
       await page.waitForFunction(() => window.__oylReflow?.ready === true);
       await page.evaluate(async () => window.__oylReflow?.visit('#/workouts'));
       expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      // The rider's own list: the built-ins after it (#2304) draw cards too.
       const seen = await zonesIn(
         page,
-        '[data-oyl-pane="list"] .oyl-shape-card svg.oyl-block-chart',
-        '[data-oyl-pane="list"]',
+        '[data-oyl-list="saved"] .oyl-shape-card svg.oyl-block-chart',
+        '[data-oyl-list="saved"]',
       );
       console.log(`#2125 ${theme} saved workout card: ${JSON.stringify(seen)}`);
       // The populated workout is 60 % and 90 % of threshold: zones 2 and 3.
       expect(seen.bands.map((band) => band.zone).sort()).toEqual([2, 3]);
+      expect(zoneFaults(theme, seen)).toEqual([]);
+    });
+
+    // #2304: a built-in's card is drawn as a saved one is, and its list names
+    // the zones its cards paint once, in its own key.
+    test('a built-in workout’s card on Workouts', async ({ page }) => {
+      await page.goto('/reflow.html?data=populated');
+      await page.waitForFunction(() => window.__oylReflow?.ready === true);
+      await page.evaluate(async () => window.__oylReflow?.visit('#/workouts?list=built-in'));
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      const seen = await zonesIn(
+        page,
+        '[data-oyl-built-in="threshold-2x20"] svg.oyl-block-chart',
+        '[data-oyl-built-ins]',
+      );
+      console.log(`#2304 ${theme} built-in card: ${JSON.stringify(seen)}`);
+      // A warm-up from 45 % to 70 %, openers at 105 %, efforts at 95 % and
+      // easy riding at 55 %: zones 1, 2 and 4.
+      expect([...new Set(seen.bands.map((band) => band.zone))].sort()).toEqual([1, 2, 4]);
       expect(zoneFaults(theme, seen)).toEqual([]);
     });
 

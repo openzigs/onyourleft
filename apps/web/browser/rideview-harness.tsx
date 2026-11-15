@@ -72,6 +72,7 @@ import {
   beatsPerMinute,
   CADENCE_WORKOUTS,
   expandWorkout,
+  kilocalories,
   metres,
   seconds,
   tailorWorkout,
@@ -539,8 +540,8 @@ const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepa
  * #1430: a paused ride with no stop armed, for the row Lap, Resume, Stop). The ride-time controls
  * that the fullest state does not render: *Start recording* and *Ask the
  * trainer for control* before a ride (a trainer paired, control not yet
- * granted), and *Resume*, *Yes, stop the ride* and *Keep riding* on a paused
- * ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
+ * granted), and *Resume* and the end-of-ride question's *Keep riding*, *Save
+ * ride* and *Discard ride* (#2349) on a paused ride with its stop armed. `ride-targets.browser.spec.ts` measures them; the
  * geometry cases in `rideview.browser.spec.ts` never ask for either.
  */
 const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
@@ -642,6 +643,9 @@ const SAVED_RIDE = {
   distance: metres(123_456),
   averagePower: watts(1_234),
   averageHeartRate: beatsPerMinute(188),
+  // #2433: a five-digit estimate, at its fullest. A ten-hour ride at 1234 W
+  // is about 46 MJ of work, which at the assumed efficiency is 55 000 kcal.
+  calories: { energy: kilocalories(55_123), basis: 'power' as const },
   gameOutcome: 'not-beaten' as const,
 };
 
@@ -676,6 +680,28 @@ function cadenceWorkout(): NonNullable<RideSnapshot['workout']> {
     trace: graphTrace(213),
   };
 }
+
+/**
+ * `rideview.html?ride=saved&test=ramp` — #2307: the saved ride was a ramp
+ * test, so the result card is followed by `ride/ThresholdOffer.tsx` with an
+ * estimate to answer. The owner's ruling of 2026-11-07 (f) is measured on it:
+ * its two answers, *Set* and *Keep*, the same width on a phone.
+ */
+const SAVED_TEST =
+  QUERY.get('test') === 'ramp'
+    ? {
+        thresholdTest: {
+          test: 'ramp' as const,
+          estimate: {
+            kind: 'estimate' as const,
+            thresholdPower: watts(269),
+            basis: watts(359),
+            windowSeconds: 60,
+            multiplier: 0.75,
+          },
+        },
+      }
+    : {};
 
 function snapshot(): RideSnapshot {
   const riding = {
@@ -741,7 +767,7 @@ function snapshot(): RideSnapshot {
       phase: 'stopped',
       saveState: 'saved',
       savedActivityId: SAVED_RIDE.activityId,
-      savedRide: SAVED_RIDE,
+      savedRide: { ...SAVED_RIDE, ...SAVED_TEST },
     };
   }
   if (RIDE_STATE === 'armed') {

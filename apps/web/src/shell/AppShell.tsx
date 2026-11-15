@@ -59,6 +59,7 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { OperatePort } from '../instance/operate-port';
 import type { SyncPort } from '../instance/sync-port';
 import type { StatementsPort } from '../instance/statements-port';
 import type { BlocksPort } from '../instance/blocks-port';
@@ -66,6 +67,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
@@ -96,7 +98,6 @@ import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
-import type { ThermalPort } from '../game/thermal-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
 import type { BatteryLevelPort } from '../ride/battery-port';
 import type { SteeringController } from '../ride/steering-controller';
@@ -110,17 +111,23 @@ import { NavIcon } from './NavIcon';
 import {
   groupDestination,
   hrefFor,
+  LEVEL_GAME_SUMMARY,
+  moderationSectionFromQuery,
   NAV_GROUPS,
+  navGroupOf,
   routesInGroup,
+  type NavGroupId,
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
 import { HeaderMute } from './HeaderMute';
-import type { MenuMusic } from './menu-music';
+import { workoutRunning, type MenuMusic } from './menu-music';
 import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
+import { rideBack, RideBackContext } from './ride-back';
+import { rideLeave, RideLeaveContext } from './ride-leave';
 import {
   isRideRoute,
   mayAnimateBetween,
@@ -142,6 +149,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * not be reachable from the entry chunk.
  */
 const RIDE_GROUP = viewGroup(async () => import('./lazy/ride'));
+const GAMES_GROUP = viewGroup(async () => import('./lazy/games'));
 const HISTORY_GROUP = viewGroup(async () => import('./lazy/history'));
 const ROUTES_GROUP = viewGroup(async () => import('./lazy/routes'));
 const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
@@ -149,6 +157,7 @@ const MORE_GROUP = viewGroup(async () => import('./lazy/more'));
 /** Every lazily loaded group, for `main.tsx` to preload once Home has painted. */
 export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
   RIDE_GROUP,
+  GAMES_GROUP,
   HISTORY_GROUP,
   ROUTES_GROUP,
   MORE_GROUP,
@@ -157,6 +166,8 @@ export const VIEW_GROUPS: readonly ViewGroup<unknown>[] = [
 const RideView = lazyView(RIDE_GROUP, (group) => group.RideView);
 const GameView = lazyView(RIDE_GROUP, (group) => group.GameView);
 const WorkoutsView = lazyView(RIDE_GROUP, (group) => group.WorkoutsView);
+const GamesView = lazyView(GAMES_GROUP, (group) => group.GamesView);
+const GameCoursesView = lazyView(GAMES_GROUP, (group) => group.GameCoursesView);
 const ActivitiesView = lazyView(HISTORY_GROUP, (group) => group.ActivitiesView);
 const ActivityDetailView = lazyView(HISTORY_GROUP, (group) => group.ActivityDetailView);
 const AnalysisView = lazyView(HISTORY_GROUP, (group) => group.AnalysisView);
@@ -174,6 +185,7 @@ const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
 const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 const InstanceView = lazyView(MORE_GROUP, (group) => group.InstanceView);
 const ModerationView = lazyView(MORE_GROUP, (group) => group.ModerationView);
+const OperateView = lazyView(MORE_GROUP, (group) => group.OperateView);
 const MoreView = lazyView(MORE_GROUP, (group) => group.MoreView);
 
 /** The id `main` carries, and the only place it is written. */
@@ -332,11 +344,6 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
-  /**
-   * Android's thermal forecast, for the game's quality ladder (#247). Absent
-   * in a browser. @see game/thermal-port.ts
-   */
-  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -567,6 +574,12 @@ export interface AppShellProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The settings screen's read and write of the rider's sex and year of
+   * birth, for a heart-rate calorie estimate (#2432). Optional like every
+   * other port here.
+   */
+  readonly calorieInputs?: CalorieInputsPort | undefined;
+  /**
    * The rider's goals, ride notes and documents for the ride analysis (#836)
    * — `rider-text/rider-text-port.ts`. Optional like every other port here;
    * without one each box says there is no store to keep it in.
@@ -601,6 +614,12 @@ export interface AppShellProps {
    * Instance screen asks it whether to link to Moderation at all.
    */
   readonly moderation?: ModerationPort | undefined;
+  /**
+   * The Operate area's port (#2603) — `instance/operate-port.ts`
+   * §`createOperatePort`, built in `main.tsx` and nowhere else. The Instance
+   * screen asks it whether to link to Operate at all.
+   */
+  readonly operate?: OperatePort | undefined;
   /**
    * Sync with the instance (#1195) — `instance/sync-port.ts`
    * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
@@ -652,6 +671,7 @@ function viewFor(
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
   },
+  onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -670,6 +690,8 @@ function viewFor(
           controller={props.rideController}
           workouts={props.workouts}
           analysis={props.analysis}
+          // #2306: a tailored built-in to ride, from the address.
+          query={match.query}
           // #551: the side camera's line, its Stop, and its link going said.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
         />
@@ -750,6 +772,10 @@ function viewFor(
           port={props.workouts}
           save={props.transfer?.save}
           selected={match.parameter}
+          // #2304: the built-in list's filter, from the address.
+          query={match.query}
+          // #2305: the rider's thresholds, for a tailored built-in in watts.
+          analysis={props.analysis}
         />
       );
     case 'game':
@@ -768,11 +794,11 @@ function viewFor(
           kitColour={kit.colour}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
+          // #2362: a built-in level's card chosen, for the line under the title.
+          onLevelChosen={onLevelChosen}
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
-          // #247. The forecast half of the ladder; only the shell supplies one.
-          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
           // #1827. The steering controller paired on Devices; a Delivery
           // round's HUD reads it, through the game's controller port.
           {...(props.steering === undefined ? {} : { controller: props.steering })}
@@ -786,6 +812,13 @@ function viewFor(
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
         />
       );
+    case 'games':
+      // #2292: a card for each game, the lap race's reading the rider's loops.
+      return <GamesView port={props.game} />;
+    case 'delivery-courses':
+      return <GameCoursesView mode="delivery" port={props.game} />;
+    case 'lap-race-courses':
+      return <GameCoursesView mode="lap-race" port={props.game} />;
     case 'segment-detail':
       return (
         <SegmentDetailView port={props.efforts} segment={match.parameter} boards={props.boards} />
@@ -870,6 +903,7 @@ function viewFor(
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
           maskedWords={props.maskedWords}
+          calorieInputs={props.calorieInputs}
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
           soundOutput={props.soundOutput}
@@ -882,6 +916,7 @@ function viewFor(
         <InstanceView
           port={props.instance}
           moderation={props.moderation}
+          operate={props.operate}
           sync={props.sync}
           hostedSettings={props.hostedSettings}
           statements={props.statements}
@@ -889,7 +924,15 @@ function viewFor(
         />
       );
     case 'moderation':
-      return <ModerationView port={props.moderation} />;
+      return (
+        <ModerationView
+          port={props.moderation}
+          // #2605: the section Operate's Accounts opened it at, from the address.
+          section={moderationSectionFromQuery(match.query)}
+        />
+      );
+    case 'operate':
+      return <OperateView port={props.operate} />;
     case 'more':
       return <MoreView />;
     case 'credits':
@@ -906,7 +949,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #423, and described at length below. Declared before the router because
   // #945 asks it, per navigation, whether the navigation may animate.
   const [immersive, setImmersive] = useState(false);
-  const match = useRoute((from, to) => mayAnimateBetween(from, to, immersive), props.routeUpdates);
+  /**
+   * Whether the trainer game's setup has a built-in Delivery level's card
+   * chosen — #2362, round 4 of PR #2378's review: the line under the title
+   * follows the chosen card, never the address, which stays on the level
+   * when the rider picks a saved route. Told by `GameViewProps.onLevelChosen`.
+   */
+  const [levelChosen, setLevelChosen] = useState(false);
+  // #2349's review, B2: a browser Back or a typed address under a ride on the
+  // game's stage is asked about first (`ride-leave.ts`).
+  const [rideLeaves] = useState(rideLeave);
+  const match = useRoute(
+    (from, to) => mayAnimateBetween(from, to, immersive),
+    props.routeUpdates,
+    rideLeaves,
+  );
   const route = match.route;
   // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
   const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
@@ -953,13 +1010,22 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   // #1512: Android's back, inside the shell. Read at each press: a ride on —
   // recording, paused, or the game's stage with the screen — consumes it.
-  useAndroidBack(props.nativeShell === true, () => {
-    const phase = props.rideController?.getSnapshot().phase;
-    return {
-      routeId: route.id,
-      rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
-    };
-  });
+  // #2349: and hands it to the ride screen on show, whose end-of-ride
+  // question it opens or answers with *Keep riding* (`ride-back.ts`).
+  const [rideBackPresses] = useState(rideBack);
+  useAndroidBack(
+    props.nativeShell === true,
+    () => {
+      const phase = props.rideController?.getSnapshot().phase;
+      return {
+        routeId: route.id,
+        rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
+      };
+    },
+    () => {
+      rideBackPresses.press();
+    },
+  );
 
   // #2073: the header asks whether the rider's own player is playing only
   // where its controls may show, so never on a ride route or while a ride has
@@ -1021,10 +1087,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * here. The phase is read at the press, not subscribed to.
    */
   function pressed(event: MouseEvent<HTMLDivElement>): void {
+    const snapshot = props.rideController?.getSnapshot();
     const context = {
       immersive,
       routeId: route.id,
-      ridePhase: props.rideController?.getSnapshot().phase,
+      ridePhase: snapshot?.phase,
+      workoutRunning: workoutRunning(snapshot?.workout),
     };
     props.menuSounds?.press(event.target, context);
     // #2058: the same press, and the only thing that can start the music.
@@ -1036,17 +1104,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * new route, the stage taking or giving back the screen, the ride
    * controller's phase moving, the page hidden or shown. None of these is a
    * press, so none can start it (`menu-music.ts` §"Only from the rider's first
-   * press").
+   * press"), except in the Android app, whose shell lets the first visible
+   * menu route start it (#2357). That runs here, after the header — and its
+   * mute — has rendered.
    */
   const menuMusic = props.menuMusic;
   const rideController = props.rideController;
   useEffect(() => {
     if (menuMusic === undefined) return undefined;
     const tell = (): void => {
+      const snapshot = rideController?.getSnapshot();
       menuMusic.update({
         immersive,
         routeId: route.id,
-        ridePhase: rideController?.getSnapshot().phase,
+        ridePhase: snapshot?.phase,
+        workoutRunning: workoutRunning(snapshot?.workout),
       });
     };
     tell();
@@ -1062,14 +1134,28 @@ export function AppShell(props: AppShellProps): JSX.Element {
     // #1072's review (N5): a view deciding about motion of its own reads
     // whether a ride has the screen here (`route-motion.ts` §`mayCarryOn`).
     <RideHasTheScreen value={immersive}>
-      <ViewBoundary key={route.id}>
-        <Suspense fallback={<ViewLoading />}>
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-            colour: kitColour,
-            onChange: setKitColour,
-          })}
-        </Suspense>
-      </ViewBoundary>
+      <RideBackContext value={rideBackPresses}>
+        <RideLeaveContext value={rideLeaves}>
+          <ViewBoundary key={route.id}>
+            <Suspense fallback={<ViewLoading />}>
+              {viewFor(
+                match,
+                props,
+                units,
+                setUnits,
+                riderMass,
+                setRiderMass,
+                setImmersive,
+                {
+                  colour: kitColour,
+                  onChange: setKitColour,
+                },
+                setLevelChosen,
+              )}
+            </Suspense>
+          </ViewBoundary>
+        </RideLeaveContext>
+      </RideBackContext>
     </RideHasTheScreen>
   );
 
@@ -1161,9 +1247,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
           </header>
         )}
 
-        {immersive ? null : <PrimaryNav route={route} />}
+        {immersive ? null : <PrimaryNav route={route} group={navGroupOf(match)} />}
 
-        {immersive ? null : <SectionNav route={route} />}
+        {immersive ? null : <SectionNav route={route} group={navGroupOf(match)} />}
 
         <main
           id={MAIN_ID}
@@ -1188,7 +1274,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
             <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
               {route.title}
             </h1>
-            {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+            {immersive ? null : (
+              <p className="oyl-muted">
+                {/* #2362: a built-in level's card chosen in the setup is a Delivery round's, not a saved route's. */}
+                {route.id === 'game' && levelChosen ? LEVEL_GAME_SUMMARY : route.summary}
+              </p>
+            )}
             {/*
               #993: one line under the title, and the rest one press away.
               AFTER the line rather than inside the heading, so the `h1` is
@@ -1291,7 +1382,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * §"THE MARK" draws it only on a rail with the height to spare; whether a
  * phone's bar carries one is the owner's open question on #2030.
  */
-function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
+function PrimaryNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /** The group the rider is under: {@link navGroupOf}, not always the route's own. */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element {
   return (
     <nav aria-label="Primary" className="oyl-nav">
       <img
@@ -1307,7 +1405,7 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
         {NAV_GROUPS.map((group) => {
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
-          const here = route.group === group.id;
+          const here = under === group.id;
           // `page` where no section row will say which page this is: a group
           // of one, or the group's own menu page (#1429), which has none.
           const current = !here
@@ -1338,15 +1436,25 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
  * list tells it apart from the primary one (`audit.ts`'s
  * `landmarks-are-distinguishable`).
  */
-function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element | null {
-  if (route.group === undefined) {
+function SectionNav({
+  route,
+  group: under,
+}: {
+  readonly route: RouteDefinition;
+  /**
+   * The group the rider is under ({@link navGroupOf}). #2292: a setup opened
+   * from Games is under Games, a group of one page, so it has no Ride row.
+   */
+  readonly group: NavGroupId | undefined;
+}): JSX.Element | null {
+  if (under === undefined) {
     return null;
   }
-  const group = NAV_GROUPS.find((each) => each.id === route.group);
-  const pages = routesInGroup(route.group);
+  const group = NAV_GROUPS.find((each) => each.id === under);
+  const pages = routesInGroup(under);
   // #1429: the group's menu page lists the same pages itself, with a line
   // each, so a row of them above it would be the list twice.
-  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  const menu = route.id === groupDestination(under).id && !pages.includes(route);
   if (group === undefined || pages.length < 2 || menu) {
     return null;
   }

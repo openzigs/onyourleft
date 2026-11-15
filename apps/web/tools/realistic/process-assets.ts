@@ -46,6 +46,19 @@
  * PNG (a recipe's `mark`). `--only <file>` makes one output and whatever its
  * run also writes, for working on one asset; a pull request quotes a full run.
  *
+ * ## The pack's rider is posed from `bicycle.ts` — #2485
+ *
+ * Its run is handed the joints `rider-pack.ts` §`packPose` reads off
+ * `src/game/bicycle.ts` at each crank angle, as a JSON file (a recipe's
+ * `pose`), and writes the vertex-animation texture beside the GLB — a second
+ * file with no KTX2 step, copied as it was written.
+ *
+ * ## The rider's crash clip is posed from `bicycle.ts` too — #2493
+ *
+ * The rider's run is handed the riding joints and #2475's timeline
+ * (`rider-crash.ts` §`riderCrashPose`, a recipe's `crash`), and writes the
+ * clip into the GLB it made.
+ *
  * ## Some trees are generated, not scanned — #1283
  *
  * ADR 0049 D-1. `ez-tree.ts` loads the pinned generator — a tool, like the two
@@ -91,6 +104,8 @@ import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { loadEzTree, stageGeneratedLevel, type EzTreeModule } from './ez-tree';
 import { LOCK, RAW } from './fetch-assets';
+import { packPose } from './rider-pack';
+import { riderCrashPose } from './rider-crash';
 import {
   GENERATED_TREES,
   geometryDigest,
@@ -102,6 +117,7 @@ import {
 import {
   alsoWritten,
   assetRecord,
+  DELIVERY_CAR_SOURCE,
   formatRecord,
   GENERATED_TREE_SCRIPT,
   generatedTreeMaps,
@@ -114,6 +130,7 @@ import {
   reportFaults,
   shippedFiles,
   TEXTURE_SCRIPT,
+  VEHICLE_SCRIPT,
   type InputLock,
   type OutputSpec,
 } from './sources';
@@ -148,9 +165,12 @@ function blender(script: string, args: readonly string[]): string {
   return output;
 }
 
-/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, or a texture's (#475). */
+/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), or the car kit's sedan (#2540). */
 function inputFor(output: OutputSpec): string {
   if (output.from.startsWith('makehuman')) return join(RAW, output.from);
+  if (output.recipe.how === 'blender' && output.recipe.script === VEHICLE_SCRIPT) {
+    return join(RAW, output.from, DELIVERY_CAR_SOURCE.model);
+  }
   if (
     output.recipe.how === 'blender' &&
     (output.recipe.script === TEXTURE_SCRIPT || output.recipe.script === HOUSE_SCRIPT)
@@ -199,7 +219,7 @@ function make(
     } else {
       copyFileSync(join(stage, output.file), join(into, output.file));
     }
-    for (const also of alsoWritten(recipe)) {
+    for (const also of recipe.alsoWrites ?? []) {
       encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
     }
     return {
@@ -243,6 +263,18 @@ function make(
     writeFileSync(mark, encodePng(recipe.mark, drawMark(recipe.mark)));
     extra.push(mark);
   }
+  // #2485: the joints the pack's rider is posed onto, from `bicycle.ts`.
+  if (recipe.pose !== undefined) {
+    const pose = join(stage, `${output.file}.pose.json`);
+    writeFileSync(pose, JSON.stringify(packPose(recipe.pose)));
+    extra.push(pose);
+  }
+  // #2493: the riding pose and the timeline the rider's crash clip is made on.
+  if (recipe.crash === true) {
+    const crash = join(stage, `${output.file}.crash.json`);
+    writeFileSync(crash, JSON.stringify(riderCrashPose()));
+    extra.push(crash);
+  }
   blender(recipe.script, [inputFor(output), join(stage, made), report, ...recipe.args, ...extra]);
   if (recipe.ktx2 !== undefined) {
     encodeKtx2(recipe.ktx2, join(stage, made), join(into, output.file));
@@ -255,7 +287,9 @@ function make(
     copyFileSync(join(stage, made), join(into, output.file));
   }
   for (const also of recipe.alsoWrites ?? []) {
-    encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
+    // #2485: a second file with no encoding ships as the run wrote it.
+    if (also.ktx2 === undefined) copyFileSync(join(stage, also.made), join(into, also.file));
+    else encodeKtx2(also.ktx2, join(stage, also.made), join(into, also.file));
   }
   return JSON.parse(readFileSync(report, 'utf8')) as unknown;
 }

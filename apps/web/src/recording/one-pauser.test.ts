@@ -132,9 +132,10 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   [join('shell', 'menu-sounds.ts')]: { pause: 0, resume: 1 },
   // The menus' music (#2058): its `<audio>` element paused, after a fade or
   // at once when the page is hidden, in one helper that also starts #2253's
-  // wait before the rider's player is asked again; and the context resumed
-  // inside the press that starts it. Not a ride.
-  [join('shell', 'menu-music.ts')]: { pause: 1, resume: 1 },
+  // wait before the rider's player is asked again; the context resumed
+  // inside the press that starts it, and since #2357 again as the loop plays,
+  // waking a context suspended behind a hidden menu route. Not a ride.
+  [join('shell', 'menu-music.ts')]: { pause: 1, resume: 2 },
   // The recorder delegating the rider's pause to the engine.
   [join('recording', 'recorder.ts')]: { pause: 1, resume: 1 },
   // The controller's own pause() delegating to the recorder, and `tick`

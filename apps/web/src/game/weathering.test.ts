@@ -981,7 +981,8 @@ describe('the owner’s lever — #1661', () => {
     weatheringOf({} as never, false);
     const off = compiled();
     for (const source of [off.fragment, off.vertex]) {
-      expect(source).not.toContain('oylWeather');
+      // Not PR #2522's `oylWeatherShade`, the dusk's shade, which is not weathering.
+      expect(source).not.toMatch(/oylWeather(?!Shade\b)/);
       expect(source).not.toContain('vOylWorld');
       expect(source).not.toContain('oylPhoto');
     }

@@ -55,6 +55,9 @@ import * as noticeErasure from './0036-notice-erasure.ts';
 import * as roomLapRace from './0037-room-lap-race.ts';
 import * as segmentLeaderboards from './0038-segment-leaderboards.ts';
 import * as leaderboardIntegrity from './0039-leaderboard-integrity.ts';
+import * as operatorLog from './0040-operator-log.ts';
+import * as openRoomsIndex from './0041-open-rooms-index.ts';
+import * as backupRecords from './0042-backup-records.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -102,4 +105,7 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0037-room-lap-race': roomLapRace,
   '0038-segment-leaderboards': segmentLeaderboards,
   '0039-leaderboard-integrity': leaderboardIntegrity,
+  '0040-operator-log': operatorLog,
+  '0041-open-rooms-index': openRoomsIndex,
+  '0042-backup-records': backupRecords,
 };

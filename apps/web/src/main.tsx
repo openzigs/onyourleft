@@ -73,7 +73,7 @@ import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
-import type { GhostTrack } from '@onyourleft/domain';
+import type { GhostTrack, UnixSeconds } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
@@ -100,6 +100,7 @@ import { jobSessionOf } from './ride-analysis/instance-job';
 import { createReplanPort, type ReplanPort } from './workout/replan-port';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
+import { discardKeptFramesWithTheRide } from './camera/kept-frame-discard';
 import {
   deviceRetiredKeyStorage,
   retireDeviceHostedKey,
@@ -127,14 +128,12 @@ import type { SideSnapshotPort } from './camera/side-snapshot-port';
 import type { RideSnapshotsPort } from './detail/ride-snapshots-port';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
-import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
 import type { BatteryLevelPort } from './ride/battery-port';
 import { deviceBluetoothAsk } from './support/bluetooth-ask';
 import type { BluetoothAskPort } from './support/bluetooth-ask-port';
 import type { SystemSettingsPort } from './support/system-settings-port';
-import { THERMAL_FORECAST_SECONDS } from './game/thermal';
-import { OtherPlayer, otherPlayerOffered } from './shell/other-player';
+import { BROWSER_OTHER_PLAYER_CLOCK, OtherPlayer, otherPlayerOffered } from './shell/other-player';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -164,6 +163,8 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
+import { calorieRiderFor } from './athlete/calorie-inputs';
 import type { WorkoutGoalsPort } from './workout-goals/workout-goals-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import {
@@ -176,6 +177,7 @@ import {
 import type { LoadedFrom } from './instance/instance-pin';
 import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
+import { createOperatePort, type OperatePort } from './instance/operate-port';
 import { createStatementsPort, type StatementsPort } from './instance/statements-port';
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
@@ -288,12 +290,6 @@ interface ClientPlatform {
   /** `undefined` in a browser, where `DevicesView` reads {@link capabilities}. */
   readonly shell: ShellSupportPort | undefined;
   /**
-   * Android's thermal forecast for the game's ladder (#247). `undefined` in a
-   * browser, where `GameView` falls back to `BROWSER_THERMAL`'s honest
-   * `undefined`.
-   */
-  readonly thermal: ThermalPort | undefined;
-  /**
    * Each connected device's signal strength, for the Devices screen (#1435).
    * `undefined` in a browser: Web Bluetooth gives none for a connected device.
    */
@@ -321,6 +317,12 @@ interface ClientPlatform {
    * cannot reach another app's player, so it gets none and no control.
    */
   readonly otherPlayer: OtherPlayer | undefined;
+  /**
+   * Whether the menus' music may start with no press — #2357: the Android
+   * shell's WebView's own answer (`AutoplayPlugin.java`). `undefined` in a
+   * browser and the demo, which keep the first-press rule.
+   */
+  readonly menuMusicAutoplay: Promise<boolean> | undefined;
   /**
    * Each connected sensor's battery, for Home's sensors module — #2047. A
    * browser's, from the Web Bluetooth transport; `undefined` in the shell,
@@ -400,6 +402,10 @@ async function buildPlatform(
       // Stored on the activity so the fitness chart can aggregate to the day
       // the rider actually rode rather than to the day the reader is in.
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // #2433: the rider's calorie inputs, read from the athlete row as the
+      // ride is saved, so the figure is frozen with what they were then.
+      calorieRider: async (startedAt: UnixSeconds) =>
+        calorieRiderFor(await localStore().getAthlete(LOCAL_ATHLETE), startedAt),
     },
   };
 
@@ -445,14 +451,6 @@ async function buildPlatform(
         resolvedUuids: async (deviceId) => mobile.readCapacitorResolvedUuids(plugin, deviceId),
       }),
     });
-    // #247. Its own plugin, not the BLE one: the forecast has nothing to do
-    // with a link, and `ThermalPlugin.java` is registered beside the recording
-    // service in `MainActivity`.
-    const thermalPlugin = mobile.capacitorThermalPlugin();
-    const thermal: ThermalPort = {
-      readThermalHeadroom: async () =>
-        mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
-    };
     // #1435. The same `plugin`, for the reason `openTrainer` above gives: the
     // link whose signal is read is the one this object holds.
     const signal: SignalStrengthPort = {
@@ -476,19 +474,28 @@ async function buildPlatform(
     );
     // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
     // others in `MainActivity`: media keys have nothing to do with a link.
+    // #2253: over the app's one audio output, so a reading of our own open
+    // stream is never believed as the rider's player.
     const otherPlayer = otherPlayerOffered(platformCapacitor())
-      ? new OtherPlayer(mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()))
+      ? new OtherPlayer(
+          mobile.capacitorOtherPlayer(mobile.capacitorOtherPlayerPlugin()),
+          BROWSER_OTHER_PLAYER_CLOCK,
+          sharedCueOutput(),
+        )
       : undefined;
     return {
       rideController,
       shell,
-      thermal,
       signal,
       bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
       systemSettings,
       launch,
       steering,
       otherPlayer,
+      // #2357. Its own plugin, `AutoplayPlugin.java`: the WebView's setting,
+      // read back, so the menus' music starts with no tap only where the
+      // platform lets it. Asked once, and not awaited: the shell does not wait for it.
+      menuMusicAutoplay: mobile.capacitorAutoplayAllowed(mobile.capacitorAutoplayPlugin()),
       // #2047: the plugin reads no Battery Service, so the shell shows no level.
       battery: undefined,
     };
@@ -498,13 +505,13 @@ async function buildPlatform(
     return {
       rideController: undefined,
       shell: undefined,
-      thermal: undefined,
       signal: undefined,
       bluetoothAsk: undefined,
       systemSettings: undefined,
       launch: NO_LAUNCH,
       steering: undefined,
       otherPlayer: undefined,
+      menuMusicAutoplay: undefined,
       battery: undefined,
     };
   }
@@ -529,12 +536,12 @@ async function buildPlatform(
     // absence is the decision, taken here, in the one file that may read a
     // global.
     shell: undefined,
-    thermal: undefined,
     signal: undefined,
     bluetoothAsk: undefined,
     systemSettings: undefined,
     launch: NO_LAUNCH,
     otherPlayer: undefined,
+    menuMusicAutoplay: undefined,
     // #1826. Its own client on the same `navigator.bluetooth`: each pairing
     // is the rider's press, as every device's is in a browser.
     steering: createSteeringController(
@@ -818,6 +825,21 @@ function buildGamePort(
         return { kind: 'none' };
       }
     },
+    // #2293, ADR 0064: the built-in lap-race circuits, from the bundle — no
+    // store, no instance, no request. Imported when the game asks, so the
+    // files are chunks of their own. ⚠️ An optional member, so dropping this
+    // line is green in `check:wiring`; `game/circuits/circuits-wiring.test.tsx`
+    // is what goes red.
+    listCircuits: async (): Promise<readonly RidableRoute[]> =>
+      (await import('./game/circuits/circuits')).loadBuiltInCircuits(),
+    // #2362, ADR 0065: the built-in Delivery levels, from the bundle — no
+    // store, no instance, no request. The list is the catalogue's and reads
+    // no level file; a level's own file is read only when it is chosen
+    // (D-2.5). ⚠️ Optional members, as `listCircuits` is;
+    // `game/delivery/levels/levels-wiring.test.tsx` is what goes red.
+    listDeliveryLevels: async () => (await import('./game/shipped-levels')).SHIPPED_LEVELS.list(),
+    loadDeliveryLevel: async (id: string) =>
+      (await import('./game/shipped-levels')).SHIPPED_LEVELS.load(id),
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];
@@ -828,6 +850,9 @@ function buildGamePort(
           name: route.name,
           profile: route.profile,
           attempts: attempts.length,
+          bestSeconds: fastestAttempt(
+            attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
+          )?.movingSeconds,
         });
       }
       return rows;
@@ -1041,6 +1066,11 @@ function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/** The rider's sex and year of birth (#2432), over the same connection. */
+function buildCalorieInputsPort(): CalorieInputsPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
 /**
  * The rider's goals, ride notes and documents (#836), over the same
  * connection: kept on this device first, and synced by `instance/sync.ts`
@@ -1203,6 +1233,26 @@ function buildModerationPort(): ModerationPort | undefined {
   }
   // Every moderator route is sealed and signed by this device's key (#1192).
   return createModerationPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The Operate area's port (#2603): the ONE production place an operate port
+ * is built, so `check:wiring` reports `createOperatePort` if this goes. Over
+ * the session the Connect screen keeps, sealed, through the one instance
+ * module (ADR 0036 D-3 (a)); a device signed in to nothing sends nothing.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildOperatePort(): OperatePort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  // Every Operate route is sealed and signed by this device's key (#2602).
+  return createOperatePort({
     storage: localStorage,
     loadedFrom: loadedFrom(),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
@@ -1650,6 +1700,18 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #2349. A ride the rider discarded takes the pictures they kept during it
+  // (#384's "Keep the pictures from this ride"), which name no ride and are
+  // already on the device. Like the keepers, it watches the ride controller,
+  // so with none there is nothing to discard and none is made.
+  if (rideController !== undefined) {
+    discardKeptFramesWithTheRide({
+      rides: rideController,
+      store: localStore(),
+      athleteId: LOCAL_ATHLETE,
+      now: browserClock,
+    });
+  }
   // #1063. Each side-camera snapshot, held in this tab's memory and written
   // with the ride it joins, after that ride's save (ADR 0044 D-3) — so, like
   // the report, it needs the ride controller, and with none there is no ride
@@ -1712,6 +1774,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #955: built once, for the Connect screen's reason above.
   const moderation = buildModerationPort();
+  // #2603: built once, for the Connect screen's reason above.
+  const operate = buildOperatePort();
   // #910: what a moderator decided about this rider's account, and why.
   const statements = buildStatementsPort();
   // #1529: the riders this rider blocked, to undo a block by.
@@ -1731,7 +1795,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     readMenuSoundPreference(deviceStorage()),
   );
   // #2058: the menus' music, over the same one output — its bus, its fade,
-  // its mute. Silent until #2057 commits the loop (`MENU_MUSIC_TRACK`).
+  // its mute. #2057's loop (`MENU_MUSIC_TRACK`).
   const menuMusic = createMenuMusic({
     output: sharedCueOutput(),
     track: MENU_MUSIC_TRACK,
@@ -1747,6 +1811,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     // #2253: the rider's own player, which the loop yields to — #2073's
     // `OtherPlayer`, in the Android shell only; none in a browser.
     riderPlayer: platform.otherPlayer,
+    // #2357: in the Android shell only, its WebView's answer; none in a browser.
+    autoplay: platform.menuMusicAutoplay,
   });
   // #2051: the Android launch splash is released two frames after the first
   // route commits, or at once if the first render throws (`shell/launch.tsx`).
@@ -1790,7 +1856,6 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
           rideSnapshots={buildRideSnapshotsPort(secureWindow)}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
-          {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           otherPlayer={platform.otherPlayer}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
@@ -1800,10 +1865,12 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
+          calorieInputs={buildCalorieInputsPort()}
           riderText={buildRiderTextPort()}
           workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
+          {...(operate === undefined ? {} : { operate })}
           {...(statements === undefined ? {} : { statements })}
           {...(blocks === undefined ? {} : { blocks })}
           {...(sync === undefined ? {} : { sync })}

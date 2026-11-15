@@ -759,8 +759,35 @@ apps/                 AGPL-3.0-or-later, without exception
                         press starts it (never the header's mute, never at
                         load), the same `quiet` rule as the sounds stops it with
                         a fade, a hidden page pauses it; an `<audio>` element
-                        made at that press, routed into the music bus. ⚠️ Silent
-                        until #2057 sets `MENU_MUSIC_TRACK`.
+                        made at that press, routed into the music bus. Since
+                        #2357 the Android app also starts it with no press,
+                        `AUTOPLAY_WAIT_MS` (3 s) after the launch and after
+                        each return to the app on a menu route. Since
+                        #2253 our own open stream never reads as the rider's
+                        player: `OtherPlayer` believes a reading only when
+                        `CueOutput.quietToken()` held from ask to answer, and
+                        in the Android shell `menu-music.ts` suspends the
+                        context 1 s after our last sound on a quiet menu route
+                        (never over a ride, a workout or the loop). Since
+                        #2057 the loop is `public/audio/`'s one Ogg Opus file
+                        (`MENU_MUSIC_FILE`), made by
+                        `tools/audio/encode-menu-music.sh`;
+                        `tools/audio/menu-music.test.ts` holds its seam, its
+                        3 MB budget and its `ASSETS.toml` row.
+                        ⚠️ Since #2292 the navigation is SIX destinations, the
+                        owner's ruling that added Games: `theme.css` §"SIX IN A
+                        ROW" keeps them one row at 320 px (no gap, a 2.75rem
+                        pill floor), and `shell.browser.spec.ts`
+                        §`MOST_DESTINATIONS` is 6. Its group is `lazy/games.ts`:
+                        `views/GamesView.tsx` (a card per game, Delivery's week
+                        from `delivery-progress.ts`, the lap race's loops) and
+                        `views/GameCoursesView.tsx`, each game's course picker
+                        at `#/games/delivery` and `#/games/lap-race`. What it
+                        lists is `game/courses.ts` §`coursesFor`, the seam #2293
+                        and #2294 fill; a course opens the trainer game with
+                        `?play=<game>` (`routes.ts` §`hrefForGamePlay`), which
+                        sets the setup's switch on mount and nothing more —
+                        unlike `?delivery=on`, read at the press
                         ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
                         detail with Motion (ADR 0041), reached only through
                         that lazily loaded chunk

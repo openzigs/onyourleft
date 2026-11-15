@@ -6,6 +6,7 @@
  */
 
 import {
+  BOT_PACING_STYLES,
   BOT_TIERS,
   GUST_REACH_METRES,
   ITEM_KINDS,
@@ -21,15 +22,20 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
+import { LAP_RACE_MOST_BOTS } from '../lap-race/choice';
 import { atStartLine } from '../simulation';
 
 import { NO_READING, hudReadings } from './fields';
 import {
+  BOT_STYLE_TEXT,
   BOT_TIER_TEXT,
   ITEM_TEXT,
   LAP_RACE_ITEM_KEY,
   LAP_RACE_PLACE_KEY,
+  LAP_RACE_STANDINGS_LINES,
+  BEHIND_CUE_SECONDS,
   PUDDLE_WARNING_METRES,
+  behindCue,
   botName,
   incomingHit,
   lapRaceReadings,
@@ -95,7 +101,8 @@ describe('the lap race’s fields (#1904)', () => {
       ['Place', '2', 'of 4'],
       ['Item', 'None', ''],
     ]);
-    expect(field(readings, LAP_RACE_PLACE_KEY)?.detail).toBe('Lap 1 of 3');
+    // bot-2 is a second behind, so the lap line names it (#2455 AC2).
+    expect(field(readings, LAP_RACE_PLACE_KEY)?.detail).toBe('Lap 1 of 3 · Steady bot 2 +1 s');
     // Through the HUD's own reading list, after every other field.
     const all = hudReadings({
       ...BASE_INPUT,
@@ -211,8 +218,103 @@ describe('the lap race’s fields (#1904)', () => {
       expect(ITEM_TEXT[kind].said.toLowerCase()).toContain(ITEM_TEXT[kind].name.toLowerCase());
     }
     for (const tier of BOT_TIERS) {
-      expect(botName(tier, 2)).toBe(`${BOT_TIER_TEXT[tier]} bot 2`);
+      expect(BOT_TIER_TEXT[tier]).not.toBe(tier);
     }
+  });
+
+  it('names a bot by its pacing style and its number, never by the tier the whole field shares (#2455)', () => {
+    const words = BOT_PACING_STYLES.map((style) => BOT_STYLE_TEXT[style]);
+    // Five different words, one word each, none of them a key or a tier's word.
+    expect(new Set(words).size).toBe(BOT_PACING_STYLES.length);
+    for (const style of BOT_PACING_STYLES) {
+      expect(BOT_STYLE_TEXT[style]).toMatch(/^\S+$/u);
+      expect(BOT_STYLE_TEXT[style]).not.toBe(style);
+      expect(Object.values(BOT_TIER_TEXT)).not.toContain(BOT_STYLE_TEXT[style]);
+      expect(botName(style, 2)).toBe(`${BOT_STYLE_TEXT[style]} 2`);
+    }
+    // No longer than the longest name before #2455, so the standings' line still fits.
+    const longest = Math.max(...BOT_PACING_STYLES.map((style) => botName(style, 7).length));
+    expect(longest).toBeLessThanOrEqual('Fierce bot 7'.length);
+  });
+});
+
+describe('the “behind you” cue on the Place field’s lap line (#2455 AC2)', () => {
+  /** The Place field's lap line, the rider at 100 m and the bots where `others` puts them. */
+  function lapLineAt(others: readonly number[], speed = 10): string | undefined {
+    const race = tick(startRace({ laps: 3 }), {
+      atMs: 1_000,
+      effortDistances: efforts(100, others),
+    });
+    return field(lapRaceReadings(hudOf(race, speed)), LAP_RACE_PLACE_KEY)?.detail;
+  }
+
+  it('names the next racer back and its gap while it is within the window', () => {
+    // bot-1 is 5 s ahead, bot-2 2 s behind, bot-3 9 s behind: the cue is bot-2's.
+    expect(lapLineAt([150, 80, 10])).toBe('Lap 1 of 3 · Steady bot 2 +2 s');
+    // With bot-2 dropped back past bot-3, the next racer back is bot-3.
+    expect(lapLineAt([150, 10, 80])).toBe('Lap 1 of 3 · Fierce bot 3 +2 s');
+    // A racer level with the rider but placed ahead of it by id is not behind it.
+    expect(lapLineAt([150, 10, 100])).toBe('Lap 1 of 3');
+  });
+
+  it('holds to the window in whole seconds, as the standings round the gap', () => {
+    expect(BEHIND_CUE_SECONDS).toBe(5);
+    expect(lapLineAt([150, 50, 10])).toBe('Lap 1 of 3 · Steady bot 2 +5 s');
+    // 5.4 s is +5 s on the standings, so it is inside the window.
+    expect(lapLineAt([150, 46, 10])).toBe('Lap 1 of 3 · Steady bot 2 +5 s');
+    // 5.6 s is +6 s on the standings: outside, so the lap line is the lap alone.
+    expect(lapLineAt([150, 44, 10])).toBe('Lap 1 of 3');
+  });
+
+  it('drops the cue when no one is in the window, the rider is last, or is at a standstill', () => {
+    expect(lapLineAt([150, 20, 10])).toBe('Lap 1 of 3');
+    expect(lapLineAt([150, 120, 110])).toBe('Lap 1 of 3');
+    expect(lapLineAt([150, 80, 10], 0)).toBe('Lap 1 of 3');
+  });
+
+  it('names no racer it was not told the name of, as a room’s lap race tells it none', () => {
+    const race = tick(startRace({ laps: 3 }), {
+      atMs: 1_000,
+      effortDistances: efforts(100, [150, 80, 10]),
+    });
+    expect(behindCue({ ...hudOf(race), entrants: {} })).toBeUndefined();
+    expect(
+      field(lapRaceReadings({ ...hudOf(race), entrants: {} }), LAP_RACE_PLACE_KEY)?.detail,
+    ).toBe('Lap 1 of 3');
+  });
+
+  it('gives a rider over the line Finished, never a cue', () => {
+    let race = startRace({ laps: 1, lap: 500 });
+    race = tick(race, { atMs: 60_000, effortDistances: efforts(505, [500, 300, 200]) });
+    expect(behindCue(hudOf(race))).toBeUndefined();
+    expect(field(lapRaceReadings(hudOf(race)), LAP_RACE_PLACE_KEY)?.detail).toBe('Finished');
+  });
+
+  it('reads the gap the standings write on the named racer’s line, across a field closing in', () => {
+    let shown = 0;
+    for (let back = 0; back <= 100; back += 1.5) {
+      for (const speed of [7, 10, 13.5]) {
+        const race = tick(startRace({ laps: 3 }), {
+          atMs: 1_000,
+          effortDistances: efforts(100, [150, 100 - back, 0]),
+        });
+        const hud = hudOf(race, speed);
+        const lines = lapRaceStandings(hud).lines;
+        const mine = lines.findIndex((line) => line.you);
+        const next = lines[mine + 1];
+        const cue = behindCue(hud);
+        const whole = next === undefined ? undefined : Number(next.gap.replace(/[^0-9]/gu, ''));
+        if (next === undefined || whole === undefined || whole > BEHIND_CUE_SECONDS) {
+          expect(cue, `${String(back)} m back at ${String(speed)} m/s`).toBeUndefined();
+        } else {
+          shown += 1;
+          expect(cue, `${String(back)} m back at ${String(speed)} m/s`).toBe(
+            `${next.who} ${next.gap}`,
+          );
+        }
+      }
+    }
+    expect(shown).toBeGreaterThan(10);
   });
 });
 
@@ -285,19 +387,18 @@ describe('the lap race’s standings, as a room’s (#1904, ADR 0051)', () => {
     ]);
   });
 
-  describe('always shows the leader (#1967, the owner’s ruling of 2026-10-31)', () => {
-    const FIELD = ['bot-1', 'bot-2', 'bot-3', 'bot-4', 'bot-5', 'bot-6', 'bot-7'] as const;
-
-    /** Eight racers, the rider in `place`, each bot 10 m apart. */
-    function eightWithRiderIn(place: number): ReturnType<typeof lapRaceStandings> {
+  describe('every racer of a solo field, the leader always first past it (#2328, #1967)', () => {
+    /** `bots` bots and the rider, the rider in `place`, each racer 10 m apart. */
+    function fieldWithRiderIn(bots: number, place: number): ReturnType<typeof lapRaceStandings> {
+      const field = Array.from({ length: bots }, (_, index) => `bot-${String(index + 1)}`);
       const race = createItemRace({
         course: raceCourse(1_000, 3),
         seed: 1,
         itemsOn: false,
-        racerIds: [RIDER, ...FIELD],
+        racerIds: [RIDER, ...field],
         startMs: 0,
       });
-      const ahead = FIELD.map((id, index) => [id, 200 - index * 10] as const);
+      const ahead = field.map((id, index) => [id, 200 - index * 10] as const);
       const all: Record<string, number> = Object.fromEntries(ahead);
       // Between the bot in `place - 1` and the one in `place`.
       all[RIDER] = 200 - (place - 1) * 10 + 5;
@@ -305,29 +406,41 @@ describe('the lap race’s standings, as a room’s (#1904, ADR 0051)', () => {
       return lapRaceStandings({ ...hudOf(moved, 10), entrants: {} });
     }
 
-    it('with eight racers and the rider last: place 1 first, then the riders around the rider', () => {
-      const view = eightWithRiderIn(8);
-      expect(view.place).toBe(8);
-      expect(view.of).toBe(8);
-      expect(view.lines.map((line) => line.place)).toEqual([1, 3, 4, 5, 6, 7, 8]);
-      expect(view.lines.find((line) => line.you)?.place).toBe(8);
+    it(`holds the largest field a solo race starts: ${String(LAP_RACE_STANDINGS_LINES)} lines`, () => {
+      expect(LAP_RACE_STANDINGS_LINES).toBe(LAP_RACE_MOST_BOTS + 1);
     });
 
-    it('keeps three ahead of the rider and two behind, after the leader', () => {
-      expect(eightWithRiderIn(5).lines.map((line) => line.place)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-      expect(eightWithRiderIn(6).lines.map((line) => line.place)).toEqual([1, 3, 4, 5, 6, 7, 8]);
+    it('with the largest field, shows every place wherever the rider is, place 2 included', () => {
+      const of = LAP_RACE_STANDINGS_LINES;
+      const every = Array.from({ length: of }, (_, index) => index + 1);
+      for (let place = 1; place <= of; place += 1) {
+        const view = fieldWithRiderIn(LAP_RACE_MOST_BOTS, place);
+        expect(view.of, `rider in ${String(place)}`).toBe(of);
+        expect(view.place, `rider in ${String(place)}`).toBe(place);
+        expect(
+          view.lines.map((line) => line.place),
+          `rider in ${String(place)}`,
+        ).toEqual(every);
+        expect(view.lines.find((line) => line.you)?.place).toBe(place);
+      }
     });
 
-    it('with the rider leading, the window is the front, as before', () => {
-      const view = eightWithRiderIn(1);
-      expect(view.lines.map((line) => line.place)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    it('past the largest field, the leader first, then the riders around the rider', () => {
+      // Eleven bots: a field no solo race starts, which only the harness and a test build.
+      const view = fieldWithRiderIn(11, 12);
+      expect(view.of).toBe(12);
+      expect(view.lines.map((line) => line.place)).toEqual([1, 6, 7, 8, 9, 10, 11, 12]);
+      expect(fieldWithRiderIn(11, 1).lines.map((line) => line.place)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8,
+      ]);
     });
 
-    it('never shows the leader twice when the window already starts at the front', () => {
-      for (let place = 1; place <= 8; place += 1) {
-        const places = eightWithRiderIn(place).lines.map((line) => line.place);
+    it('never shows the leader twice, nor more lines than a solo field, however long the field', () => {
+      for (let place = 1; place <= 12; place += 1) {
+        const places = fieldWithRiderIn(11, place).lines.map((line) => line.place);
         expect(places[0], `rider in ${String(place)}`).toBe(1);
         expect(new Set(places).size, `rider in ${String(place)}`).toBe(places.length);
+        expect(places, `rider in ${String(place)}`).toHaveLength(LAP_RACE_STANDINGS_LINES);
         expect(places, `rider in ${String(place)}`).toContain(place);
       }
     });

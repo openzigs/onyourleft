@@ -261,6 +261,8 @@ const FORCED_TILES = [
   '.oyl-settings-card',
   '.oyl-ride-card',
   '.oyl-pairing__row',
+  // #2358: Devices' Controllers section, on the portless route, with its empty row.
+  '.oyl-gamepads__row',
   '.oyl-chooser__loadout',
 ];
 
@@ -312,6 +314,7 @@ test.describe('#996 — forced colours', () => {
       '.oyl-settings-card',
       '.oyl-ride-card',
       '.oyl-pairing__row',
+      '.oyl-gamepads__row',
       '.oyl-chooser__loadout',
     ]) {
       expect(seen.has(kind), `${kind} never rendered`).toBe(true);

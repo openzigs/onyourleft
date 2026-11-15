@@ -2,7 +2,17 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  statfs,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
@@ -29,8 +39,10 @@ import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
-import { integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
+import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
+import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
+import type { BackupRun, OperatorAction, SqlStore } from '../store/sql-store.ts';
 import { createSync } from '../sync/sync.ts';
 
 /**
@@ -40,7 +52,8 @@ import { createSync } from '../sync/sync.ts';
  * | Command | Does |
  * |---|---|
  * | `migrate` | the deploy's migrate step: every migration not applied, with the marker a starting instance waits on (`store/serving.ts`) |
- * | `backup <directory> [--keep N] [--copy-to <directory>]` | an online snapshot — `VACUUM INTO` and the blob directory — into a new timestamped directory, with a manifest of what it holds; the oldest beyond `--keep` removed; and the snapshot copied to a second place (a USB drive, a share) |
+ * | `backup <directory> [--keep N] [--copy-to <directory>]` | an online snapshot — `VACUUM INTO` and the blob directory — into a new timestamped directory, with a manifest of what it holds; the oldest beyond `--keep` removed; and the snapshot copied to a second place (a USB drive, a share). Each run is recorded in the database (#2606), a failed one by its error's name |
+ * | `backup-loop <directory> --interval <seconds> [--keep N] [--copy-to <directory>]` | the home deployment's `backup` service (#2606): `backup` every `--interval` seconds, and within 30 s of the owner's "back up now", until it is stopped |
  * | `restore <snapshot directory> [--force]` | the snapshot back into place, checked: SQLite's integrity check, every row count and blob count against the manifest, every blob's content against its name |
  * | `verify` | the row counts and the blob count of the data in place — what a restore on another machine is compared with |
  * | `room-open <roomId> --kind ride\|race --length <metres> [--grade <percent>] [--position hoods\|drops\|upright] [--countdown <ms>]` | a room and its course, until #784 and #785 let a rider make one |
@@ -63,6 +76,31 @@ import { createSync } from '../sync/sync.ts';
  *
  * Every command prints ONE JSON object, so a scheduled run's log is a record,
  * and names no row's contents — counts and times only.
+ *
+ * ## The operator log (#2602)
+ *
+ * Every command that changes the instance's state writes an entry to the
+ * operator log (migration 0040) — the owner's ruling of 2026-11-14 on #2601:
+ * the log is the whole record, the CLI's and the app's. Its actor is
+ * `{ source: 'cli' }` and NO athlete: the CLI runs on the host as whoever can
+ * reach the data, which is not an athlete, so it names none rather than
+ * borrowing the owner's. `verify`, `model-key status`, `instance-key show`
+ * and `account-erase` without `--confirm` change nothing and log nothing.
+ *
+ * - **A change to rows** (`room-open`, `model-key set|clear`, the
+ *   `instance-key` changes, `load-accounts`, `account-erase --confirm`) runs
+ *   inside `SqlStore.recordOperatorAction`, so the change and its entry
+ *   commit together or not at all; a refusal found there is logged
+ *   `refused`, and a failure `failed`, with the change rolled back.
+ * - **A change to files** (`migrate`, `backup`, `restore`) cannot share a
+ *   transaction with a row: its entry is written once the work has ended,
+ *   through the same function, and its report says `logged`. The command
+ *   succeeds when its work did: an entry that cannot be written is
+ *   `logged: false` and a line on standard error, never a failed command, so
+ *   a log write cannot stop a deploy whose migrations applied. A restore's
+ *   entry goes into the database it restored — what the replaced one
+ *   recorded since the snapshot goes with it — and a snapshot from before
+ *   the operator log has none until `migrate` (`logged: false`).
  */
 
 export interface DataPaths {
@@ -109,68 +147,756 @@ function stamp(at: Date): string {
   return at.toISOString().replace(/[:.]/g, '-');
 }
 
+/** The CLI's actor in the operator log (#2602): the host, and no athlete. */
+const FROM_THE_CLI = { source: 'cli' } as const;
+
+/** Unix seconds, from the command's clock. */
+function secondsOf(now: (() => Date) | undefined): number {
+  return Math.floor((now ?? (() => new Date()))().getTime() / 1000);
+}
+
+/** A refusal found inside an operator action: logged `refused`, then thrown as the command's error. */
+class Refused {
+  readonly message: string;
+  constructor(message: string) {
+    this.message = message;
+  }
+}
+
+/**
+ * Run `change` on `store` as a CLI operator action (#2602): the change and
+ * its entry in ONE transaction. A {@link Refused} value is logged `refused`
+ * and thrown as a {@link CommandError}; anything thrown is logged `failed`
+ * and thrown on, the change rolled back.
+ */
+async function asOperatorAction<T>(
+  store: SqlStore,
+  action: OperatorAction,
+  change: (inside: SqlStore) => Promise<T | Refused>,
+  detail: (value: T) => string | null = () => null,
+  now?: () => Date,
+): Promise<T> {
+  const { value } = await store.recordOperatorAction<T | Refused>(
+    { actor: FROM_THE_CLI, action, at: secondsOf(now) },
+    async (inside) => {
+      const changed = await change(inside);
+      return changed instanceof Refused
+        ? { outcome: 'refused', value: changed }
+        : { outcome: 'done', detail: detail(changed), value: changed };
+    },
+  );
+  if (value instanceof Refused) throw new CommandError(value.message);
+  return value;
+}
+
+/**
+ * What a file command writes to standard error when its work is done and its
+ * entry could not be written (#2602): a fixed sentence and the action's name,
+ * no value.
+ */
+export function unloggedSentence(action: OperatorAction): string {
+  return `operator: ${action} is done, but its entry could not be written to the operator log.\n`;
+}
+
+/**
+ * Log a command whose change is FILES once it has ended (#2602): `done` with
+ * `detail`, or — when `work` threw — `failed`, and the error thrown on. Answers
+ * whether the entry was written. The command's outcome is its WORK's: a log
+ * that cannot be written — a database with no operator log yet (one not
+ * migrated, or restored from before it), a full disk, a lock still held after
+ * the retries — leaves the work done and `logged: false`, and anything but a
+ * missing table says so on standard error. A deploy whose migrations applied
+ * is never stopped by its log entry.
+ */
+async function loggedAfter<T>(
+  database: string,
+  action: OperatorAction,
+  work: () => Promise<T>,
+  detail: (value: T) => string | null,
+): Promise<{ readonly value: T; readonly logged: boolean }> {
+  let failure: { readonly error: unknown } | undefined;
+  let value: T | undefined;
+  try {
+    value = await work();
+  } catch (error) {
+    failure = { error };
+  }
+  let logged = false;
+  if (existsSync(database)) {
+    const store = openServingStore(database);
+    try {
+      await store.recordOperatorAction(
+        { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
+        () => {
+          // Keep this guard: it is what logs a failed run `failed` and never
+          // `done`, whatever a future `detail` does with an undefined value.
+          if (failure !== undefined) throw failure.error;
+          return { outcome: 'done', detail: detail(value as T), value: undefined };
+        },
+      );
+      logged = true;
+    } catch (error) {
+      // The work's own error is the one an operator needs, and work that
+      // succeeded stays a success: a log that could not be written leaves
+      // `logged` false.
+      if (
+        failure === undefined &&
+        !(error instanceof Error && /no such table/.test(error.message))
+      ) {
+        process.stderr.write(unloggedSentence(action));
+      }
+    } finally {
+      await store.close();
+    }
+  }
+  if (failure !== undefined) throw failure.error;
+  return { value: value as T, logged };
+}
+
 export async function migrate(paths: DataPaths) {
   await mkdir(dirname(paths.database), { recursive: true });
   const started = performance.now();
-  const report = await migrateForDeploy(paths.database);
-  return { command: 'migrate', ...report, ms: Math.round(performance.now() - started) };
+  const { value: report, logged } = await loggedAfter(
+    paths.database,
+    'migrate',
+    () => migrateForDeploy(paths.database),
+    (done) => `applied=${String(done.changed)}`,
+  );
+  return { command: 'migrate', ...report, ms: Math.round(performance.now() - started), logged };
 }
 
-export async function backup(
-  paths: DataPaths,
-  destination: string,
-  options: { readonly keep?: number; readonly copyTo?: string; readonly now?: () => Date } = {},
-) {
+/** What `backup` and `backup-loop` are told, beyond where the snapshots go. */
+export interface BackupOptions {
+  readonly keep?: number;
+  readonly copyTo?: string;
+  readonly now?: () => Date;
+  /** The backup service's interval, written into the record: `backup-loop`'s runs only (#2606). */
+  readonly intervalSeconds?: number;
+  /** The owner's waiting request this run serves (#2606). */
+  readonly requestId?: number;
+  /** The folder leases' clock and heartbeat (`backup-lease.ts`): a test's. */
+  readonly lease?: LeaseOptions;
+}
+
+/**
+ * What an error is recorded as (#2606): its code when it is one of Node's
+ * (`ENOSPC`, `EACCES`), or its name — never its message, which may hold a
+ * path (`log.ts`'s rule).
+ */
+export function errorName(error: unknown): string {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /^E[A-Z0-9]{1,30}$/.test(code)) return code;
+  const name = error instanceof Error ? error.name : '';
+  return /^[A-Za-z0-9_]{1,64}$/.test(name) ? name : 'Error';
+}
+
+/**
+ * The sentence `backup` writes to standard error when the snapshot was taken
+ * and recorded but its off-box copy was not (#2606). It names no path.
+ */
+export const OFF_BOX_FAILED =
+  'operator: the snapshot was taken and recorded, but its off-box copy (--copy-to) failed.\n';
+
+/**
+ * How many snapshots beyond `--keep` a place may hold because their runs
+ * could not be recorded (#2606, second review M1). Such a run removes no
+ * recorded snapshot. Past `--keep` + this many, it removes the OLDEST
+ * snapshot no record names that is newer than every recorded one there —
+ * so the newest is kept (third review F7) — and never a recorded snapshot,
+ * nor one older than them (a snapshot from before #2606, which no record
+ * names either).
+ */
+export const UNRECORDED_ALLOWANCE = 2;
+
+export async function backup(paths: DataPaths, destination: string, options: BackupOptions = {}) {
   if (!existsSync(paths.database)) throw new CommandError('There is no database to back up.');
   if (options.keep !== undefined && (!Number.isInteger(options.keep) || options.keep < 1)) {
     throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
   }
-  const started = performance.now();
   const at = (options.now ?? (() => new Date()))();
-  const snapshot = join(destination, `snapshot-${stamp(at)}`);
-  await mkdir(snapshot, { recursive: true });
-  const database = join(snapshot, DATABASE_FILE);
-  vacuumInto(paths.database, database);
-  const blobs = await blobFiles(paths.blobs);
-  if (blobs.length > 0) {
-    await cp(join(paths.blobs, 'objects'), join(snapshot, BLOBS_DIRECTORY, 'objects'), {
-      recursive: true,
+  // One run at a time in a folder, for the whole run (`backup-lease.ts`): a
+  // run that cannot take the folder's lease is refused, and recorded
+  // `failed` by name. The lease's connection stays open for its heartbeat.
+  const leases = openServingStore(paths.database);
+  let here: Lease | undefined;
+  try {
+    await mkdir(destination, { recursive: true });
+    here = await takeLease(leases, destination, options.lease);
+  } catch (error) {
+    await leases.close();
+    await recordFailedBackup(paths.database, at, error, options);
+    throw error;
+  }
+  let there: Lease | undefined;
+  try {
+    // The off-box place is leased too; one whose lease cannot be taken is a
+    // copy that failed, and is neither written nor pruned.
+    let offBoxHeld = false;
+    if (options.copyTo !== undefined) {
+      try {
+        await mkdir(options.copyTo, { recursive: true });
+        there = await takeLease(leases, options.copyTo, options.lease);
+        offBoxHeld = true;
+      } catch {
+        offBoxHeld = false;
+      }
+    }
+    return await takeAndRecord(paths, destination, at, options, offBoxHeld, async () => {
+      await here?.confirm();
+      await there?.confirm();
     });
+  } finally {
+    await there?.release();
+    await here?.release();
+    await leases.close();
   }
-  const manifest: Manifest = {
-    takenAt: at.toISOString(),
-    rows: rowCounts(database),
-    blobs: blobs.length,
-    databaseSha256: await sha256Of(database),
-  };
-  await writeFile(join(snapshot, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+}
 
-  let copiedTo: string | null = null;
-  if (options.copyTo !== undefined) {
-    copiedTo = join(options.copyTo, `snapshot-${stamp(at)}`);
-    await cp(snapshot, copiedTo, { recursive: true });
+/** Every `snapshot-…` name in `place`, oldest first. */
+async function snapshotsIn(place: string): Promise<string[]> {
+  return (await readdir(place)).filter((name) => name.startsWith('snapshot-')).sort();
+}
+
+/**
+ * Past `--keep` + {@link UNRECORDED_ALLOWANCE}, removes from the place
+ * `made` is in the oldest snapshots no record names that are newer than every
+ * recorded one there (third review F7). Answers whether `made` itself went.
+ * A record that cannot be READ either removes `made` alone, as the safe way.
+ */
+async function capUnrecorded(database: string, made: string, limit: number): Promise<boolean> {
+  const place = dirname(made);
+  const names = await snapshotsIn(place);
+  if (names.length <= limit) return false;
+  const madeName = made.slice(place.length + 1);
+  let droppable: string[];
+  const store = openServingStore(database);
+  try {
+    const recorded: boolean[] = [];
+    for (const name of names) recorded.push(await store.hasBackupRecord(name));
+    const newestRecorded = recorded.lastIndexOf(true);
+    // With no recorded snapshot here, every other one may be from before
+    // #2606: only this run's own may go.
+    droppable =
+      newestRecorded < 0
+        ? [madeName]
+        : names.slice(newestRecorded + 1).filter((each) => {
+            return !recorded[names.indexOf(each)];
+          });
+  } catch {
+    droppable = [madeName];
+  } finally {
+    await store.close();
   }
-  const removed: string[] = [];
-  if (options.keep !== undefined) {
-    for (const place of [destination, ...(options.copyTo === undefined ? [] : [options.copyTo])]) {
-      const snapshots = (await readdir(place))
-        .filter((name) => name.startsWith('snapshot-'))
-        .sort();
-      for (const old of snapshots.slice(0, Math.max(0, snapshots.length - options.keep))) {
-        await rm(join(place, old), { recursive: true, force: true });
-        removed.push(old);
+  // Oldest first: the newest is the last to go.
+  let removedMade = false;
+  for (const name of droppable.slice(0, names.length - limit)) {
+    await rm(join(place, name), { recursive: true, force: true });
+    if (name === madeName) removedMade = true;
+  }
+  return removedMade;
+}
+
+async function takeAndRecord(
+  paths: DataPaths,
+  destination: string,
+  at: Date,
+  options: BackupOptions,
+  offBoxHeld: boolean,
+  confirm: () => Promise<void>,
+) {
+  let taken: Awaited<ReturnType<typeof takeBackup>>;
+  try {
+    taken = await takeBackup(paths, destination, at, options, offBoxHeld);
+    // Still this run's folders, or nothing is recorded or pruned (third
+    // review): a heartbeat that failed, or a lease another run took.
+    await confirm();
+  } catch (error) {
+    await recordFailedBackup(paths.database, at, error, options);
+    throw error;
+  }
+  const { recorded, logged, prune } = await recordTakenBackup(paths.database, at, taken, options);
+  // Pruned only once the run is recorded (#2606 review H1): a run whose
+  // record cannot be written removes no recorded snapshot.
+  let removed = 0;
+  let kept = true;
+  if (prune) {
+    for (const old of taken.prune) {
+      await rm(old, { recursive: true, force: true });
+      removed += 1;
+    }
+  } else if (options.keep !== undefined) {
+    const limit = options.keep + UNRECORDED_ALLOWANCE;
+    for (const made of [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])]) {
+      if ((await capUnrecorded(paths.database, made, limit)) && made === taken.snapshot) {
+        kept = false;
       }
     }
   }
+  return {
+    command: taken.command,
+    snapshot: taken.snapshot,
+    copiedTo: taken.copiedTo,
+    rows: taken.rows,
+    blobs: taken.blobs,
+    removed,
+    ms: taken.ms,
+    offBox: taken.run.offBox,
+    recorded,
+    logged,
+    kept,
+  };
+}
+
+/**
+ * The prefix a snapshot is written under until it is complete (#2606): a
+ * run cut short — a stop past the grace period, a crash, a full disk —
+ * leaves a `.partial-snapshot-…` directory, which `--keep` never counts and
+ * a later run removes. Only a complete snapshot is renamed `snapshot-…`.
+ */
+export const PARTIAL = '.partial-';
+
+/**
+ * A partial snapshot last changed longer ago than this was left by a run
+ * that died: a second guard behind the folder's lease.
+ */
+export const PARTIAL_AGE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Removes the partial snapshots a run that died left in `place`. Called only
+ * while holding `place`'s lease (`backup-lease.ts`); never removes `mine`,
+ * this run's own; and — a second guard — removes only a partial last changed
+ * more than {@link PARTIAL_AGE_MS} ago.
+ */
+async function removePartials(place: string, mine: string): Promise<void> {
+  for (const name of await readdir(place)) {
+    if (!name.startsWith(`${PARTIAL}snapshot-`) || name === mine) continue;
+    const path = join(place, name);
+    const changed = await stat(path).then(
+      (found) => found.mtimeMs,
+      () => undefined,
+    );
+    if (changed !== undefined && Date.now() - changed > PARTIAL_AGE_MS) {
+      await rm(path, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * `rename`, tried again a few times when Windows answers `EACCES` or `EPERM`
+ * because a scanner holds a handle in the folder for a moment (second review).
+ */
+export async function renameRetrying(
+  from: string,
+  to: string,
+  move: (from: string, to: string) => Promise<void> = rename,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await move(from, to);
+      return;
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (attempt >= 4 || (code !== 'EACCES' && code !== 'EPERM')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+    }
+  }
+}
+
+/** Free bytes an unprivileged process may write at `path`, or `null` when it cannot be read. */
+async function freeBytesAt(path: string): Promise<number | null> {
+  try {
+    const space = await statfs(path);
+    return space.bavail * space.bsize;
+  } catch {
+    return null;
+  }
+}
+
+async function bytesUnder(root: string): Promise<number> {
+  let total = 0;
+  for (const file of await filesUnder(root)) total += (await stat(file)).size;
+  return total;
+}
+
+/**
+ * Takes the snapshot, and copies it off the box. Removes NOTHING: it answers
+ * the old snapshots `--keep` would remove, and `backup` removes them once the
+ * run is recorded.
+ *
+ * ⚠️ The off-box copy has no time limit. A share that stops answering blocks
+ * the copy inside a file-system call, which Node cannot cancel, and the loop
+ * waits with it; the snapshot on the box is already complete. Watch
+ * `docker compose logs backup` and the age of the last backup in Status;
+ * #2626 is the child-process watchdog that would stop it.
+ */
+async function takeBackup(
+  paths: DataPaths,
+  destination: string,
+  at: Date,
+  options: BackupOptions,
+  offBoxHeld: boolean,
+) {
+  const started = performance.now();
+  const name = `snapshot-${stamp(at)}`;
+  const snapshot = join(destination, name);
+  await removePartials(destination, `${PARTIAL}${name}`);
+  const partial = join(destination, `${PARTIAL}${name}`);
+  let manifest: Manifest;
+  let blobs: string[];
+  try {
+    await mkdir(partial, { recursive: true });
+    const database = join(partial, DATABASE_FILE);
+    vacuumInto(paths.database, database);
+    // The snapshot does not hold a "back up now" as waiting (#2606 review
+    // L1): this run serves it, so restoring the snapshot would ask again.
+    forgetWaitingRequests(database);
+    blobs = await blobFiles(paths.blobs);
+    if (blobs.length > 0) {
+      await cp(join(paths.blobs, 'objects'), join(partial, BLOBS_DIRECTORY, 'objects'), {
+        recursive: true,
+      });
+    }
+    manifest = {
+      takenAt: at.toISOString(),
+      rows: rowCounts(database),
+      blobs: blobs.length,
+      databaseSha256: await sha256Of(database),
+    };
+    await writeFile(join(partial, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+    await renameRetrying(partial, snapshot);
+  } catch (error) {
+    await rm(partial, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+
+  // A copy that fails leaves the snapshot taken and recorded (#2606): the
+  // record says `failed`, and the off-box place's older copies are not
+  // pruned, so a drive that is full or gone keeps what it had.
+  let copiedTo: string | null = null;
+  let offBox: 'copied' | 'failed' | 'not-configured' = 'not-configured';
+  if (options.copyTo !== undefined) {
+    const copy = join(options.copyTo, name);
+    const partialCopy = join(options.copyTo, `${PARTIAL}${name}`);
+    try {
+      if (!offBoxHeld) throw new Error('the off-box place is not this run’s');
+      await removePartials(options.copyTo, `${PARTIAL}${name}`);
+      await cp(snapshot, partialCopy, { recursive: true });
+      await renameRetrying(partialCopy, copy);
+      copiedTo = copy;
+      offBox = 'copied';
+    } catch {
+      offBox = 'failed';
+      await rm(partialCopy, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+  const prune: string[] = [];
+  if (options.keep !== undefined) {
+    // By COUNT, the newest `--keep` of each place: the names sort by time.
+    const places = [
+      destination,
+      ...(offBox === 'copied' && options.copyTo !== undefined ? [options.copyTo] : []),
+    ];
+    for (const place of places) {
+      const snapshots = (await readdir(place))
+        .filter((each) => each.startsWith('snapshot-'))
+        .sort();
+      for (const old of snapshots.slice(0, Math.max(0, snapshots.length - options.keep))) {
+        prune.push(join(place, old));
+      }
+    }
+  }
+  const run: BackupRun = {
+    outcome: 'done',
+    at: Math.floor(at.getTime() / 1000),
+    snapshot: name,
+    rows: Object.values(manifest.rows).reduce((sum, n) => sum + n, 0),
+    blobs: manifest.blobs,
+    databaseSha256: manifest.databaseSha256,
+    sizeBytes: await bytesUnder(snapshot),
+    offBox,
+    removed: prune.length,
+    backupsFreeBytes: await freeBytesAt(destination),
+    offBoxFreeBytes: options.copyTo === undefined ? null : await freeBytesAt(options.copyTo),
+    intervalSeconds: options.intervalSeconds ?? null,
+  };
   return {
     command: 'backup',
     snapshot,
     copiedTo,
     rows: manifest.rows,
     blobs: manifest.blobs,
-    removed: removed.length,
     ms: Math.round(performance.now() - started),
+    run,
+    prune,
   };
+}
+
+/**
+ * A taken snapshot's record and its operator log entry, in ONE transaction
+ * (#2606, #2602): the record, the 30-day pruning of old records, the owner's
+ * request marked served, and the entry commit together or not at all. As
+ * for any file command, a record that cannot be written leaves the snapshot
+ * taken: `recorded` and `logged` are false, and anything but a database from
+ * before these tables says so on standard error.
+ *
+ * `prune` says whether the old snapshots may be removed: when the run is
+ * recorded, or the database has no record tables to write (one from before
+ * migration 0042, which pruned as it always had). A record that FAILED to be
+ * written prunes nothing (#2606 review H1).
+ */
+async function recordTakenBackup(
+  database: string,
+  at: Date,
+  taken: { readonly run: BackupRun & { readonly outcome: 'done' } },
+  options: BackupOptions,
+): Promise<{ readonly recorded: boolean; readonly logged: boolean; readonly prune: boolean }> {
+  const store = openServingStore(database);
+  try {
+    await store.recordOperatorAction(
+      { actor: FROM_THE_CLI, action: 'backup', at: secondsOf(() => at) },
+      async (inside) => {
+        const { served } = await inside.recordBackup(taken.run, options.requestId);
+        const detail = [
+          `blobs=${String(taken.run.blobs)}`,
+          `removed=${String(taken.run.removed)}`,
+          ...(taken.run.offBox === 'failed' ? ['offbox_failed'] : []),
+          ...(served ? ['requested'] : []),
+        ].join(',');
+        return { outcome: 'done', detail, value: undefined };
+      },
+    );
+    return { recorded: true, logged: true, prune: true };
+  } catch (error) {
+    const noTables = error instanceof Error && /no such table/.test(error.message);
+    if (!noTables) process.stderr.write(unloggedSentence('backup'));
+    return { recorded: false, logged: false, prune: noTables };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * A failed run's record — by its error's name — and its `failed` entry
+ * (#2606). The record is its own transaction: an operator action that throws
+ * keeps nothing it wrote. A request it was serving is marked served by it,
+ * so a run that fails is not retried every 30 s; the owner sees it failed and
+ * asks again. When even that record cannot be written, `backup-loop` holds
+ * the request back for an interval itself (#2606 review H1).
+ */
+async function recordFailedBackup(
+  database: string,
+  at: Date,
+  error: unknown,
+  options: BackupOptions,
+): Promise<void> {
+  if (!existsSync(database)) return;
+  const store = openServingStore(database);
+  try {
+    await store
+      .recordBackup(
+        {
+          outcome: 'failed',
+          at: Math.floor(at.getTime() / 1000),
+          error: errorName(error),
+          intervalSeconds: options.intervalSeconds ?? null,
+        },
+        options.requestId,
+      )
+      .catch(() => undefined);
+    await store
+      .recordOperatorAction(
+        { actor: FROM_THE_CLI, action: 'backup', at: secondsOf(() => at) },
+        () => {
+          throw error;
+        },
+      )
+      .catch(() => undefined);
+  } finally {
+    await store.close();
+  }
+}
+
+/** A snapshot directory's name, and the time it names, Unix ms. */
+function snapshotTime(name: string): number | undefined {
+  const parts = /^snapshot-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(name);
+  if (parts === null) return undefined;
+  const [, day, hours, minutes, seconds, ms] = parts;
+  const at = Date.parse(
+    `${day ?? ''}T${hours ?? ''}:${minutes ?? ''}:${seconds ?? ''}.${ms ?? ''}Z`,
+  );
+  return Number.isNaN(at) ? undefined : at;
+}
+
+/**
+ * The newest complete snapshot in `folder` by the time its name holds, or
+ * `undefined` — ignoring any named after `now`, which a wrong clock made and
+ * which would otherwise hold off every run after each restart (third review F6).
+ */
+async function newestSnapshotIn(
+  folder: string,
+  now: number,
+): Promise<{ readonly name: string; readonly at: number } | undefined> {
+  let names: string[];
+  try {
+    names = await readdir(folder);
+  } catch {
+    return undefined;
+  }
+  let newest: { readonly name: string; readonly at: number } | undefined;
+  for (const name of names) {
+    const at = snapshotTime(name);
+    if (at !== undefined && at <= now && (newest === undefined || at > newest.at)) {
+      newest = { name, at };
+    }
+  }
+  return newest;
+}
+
+/** How often `backup-loop` looks for the owner's "back up now" (#2606): within 30 s. */
+export const BACKUP_POLL_SECONDS = 30;
+
+/** What `backup-loop` writes to standard error when it cannot read the database: no path, no value. */
+export const LOOP_CANNOT_READ =
+  'operator: backup-loop could not read the database for a waiting request; it tries again shortly.\n';
+
+/** `ms`, or less when `signal` is aborted first. */
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+/**
+ * The home deployment's `backup` service (#2606): `backup` every
+ * `intervalSeconds`, and within {@link BACKUP_POLL_SECONDS} of the owner's
+ * "back up now" — until `signal` is aborted.
+ *
+ * - **On the interval, as the shell loop it replaces did**: a run, then the
+ *   interval, then a run. The first is due an interval after the service's
+ *   newest recorded run, so a restart does not take an extra snapshot (and
+ *   prune an older one); with none recorded, at once.
+ * - **A request is served once.** The run that serves it marks it served in
+ *   the same transaction as its record (`SqlStore.recordBackup`), and a
+ *   request waits in the database, so a restart serves it after. Every run
+ *   restarts the interval.
+ * - **A failure never makes it run more often than its interval** (#2606
+ *   review H1). A request it tried and that is still waiting — its record
+ *   could not be written — is not tried again until an interval has passed,
+ *   remembered here and not in the database, which is what failed. Across a
+ *   restart the folder remembers: the newest snapshot no record names holds
+ *   off every run for an interval after it (second review M1). And a run
+ *   whose record failed removes no older snapshot, and keeps at most
+ *   `--keep` + {@link UNRECORDED_ALLOWANCE} in a place (`backup`).
+ * - **It keeps going.** A failed run is recorded by its error's name and the
+ *   loop carries on; a database it cannot read is tried again at the next poll.
+ *
+ * It opens the database only for a moment at each poll and run, never
+ * holding a connection between them.
+ */
+export async function backupLoop(
+  paths: DataPaths,
+  destination: string,
+  options: Omit<BackupOptions, 'requestId'> & {
+    readonly intervalSeconds: number;
+    readonly signal?: AbortSignal;
+    /** How the loop waits: a test's moves its clock. */
+    readonly wait?: (ms: number) => Promise<void>;
+    /** Each run's report, or a failed run's error name. */
+    readonly report?: (line: unknown) => void;
+  },
+) {
+  if (!Number.isInteger(options.intervalSeconds) || options.intervalSeconds < 1) {
+    throw new CommandError('--interval is a whole number of seconds, 1 or more.');
+  }
+  if (options.keep !== undefined && (!Number.isInteger(options.keep) || options.keep < 1)) {
+    throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
+  }
+  const clock = options.now ?? (() => new Date());
+  const wait = options.wait ?? ((ms: number) => waitFor(ms, options.signal));
+  const report =
+    options.report ?? ((line: unknown) => process.stdout.write(`${JSON.stringify(line)}\n`));
+  const intervalMs = options.intervalSeconds * 1000;
+  // A function, so each check reads the signal as it is then.
+  const stopped = (): boolean => options.signal?.aborted === true;
+  let nextDue: number | undefined;
+  let runs = 0;
+  /** When each request was last tried, Unix ms: in memory, as the database is what may be failing. */
+  const attempted = new Map<number, number>();
+  /**
+   * Until when no run starts at all, Unix ms (second review M1): an interval
+   * after the newest snapshot in the folder that no record names — a run
+   * whose record failed, before a restart, or the shell loop's before
+   * #2606 — so neither a restart nor a waiting request takes another early.
+   */
+  let quietUntil = Number.NEGATIVE_INFINITY;
+  while (!stopped()) {
+    let pending: { readonly id: number } | undefined;
+    try {
+      const store = openServingStore(paths.database);
+      try {
+        if (nextDue === undefined) {
+          const last = await store.newestServiceBackup(false);
+          // Never later than an interval from now, whatever the clock said
+          // when that record was written (#2606 review).
+          const now = clock().getTime();
+          nextDue =
+            last === undefined ? now : Math.min(last.at * 1000 + intervalMs, now + intervalMs);
+          const onDisk = await newestSnapshotIn(destination, now);
+          // Against every record, not only the newest (third review F6).
+          if (onDisk !== undefined && !(await store.hasBackupRecord(onDisk.name))) {
+            quietUntil = Math.min(onDisk.at + intervalMs, now + intervalMs);
+            nextDue = Math.max(nextDue, quietUntil);
+          }
+        }
+        pending = await store.pendingBackupRequest();
+      } finally {
+        await store.close();
+      }
+    } catch {
+      process.stderr.write(LOOP_CANNOT_READ);
+      await wait(BACKUP_POLL_SECONDS * 1000);
+      continue;
+    }
+    const now = clock().getTime();
+    const tried = pending === undefined ? undefined : attempted.get(pending.id);
+    const served =
+      pending !== undefined &&
+      now >= quietUntil &&
+      (tried === undefined || now - tried >= intervalMs)
+        ? pending.id
+        : undefined;
+    if (served !== undefined || now >= nextDue) {
+      if (served !== undefined) attempted.set(served, now);
+      try {
+        report(
+          await backup(paths, destination, {
+            ...(options.keep === undefined ? {} : { keep: options.keep }),
+            ...(options.copyTo === undefined ? {} : { copyTo: options.copyTo }),
+            now: clock,
+            intervalSeconds: options.intervalSeconds,
+            ...(served === undefined ? {} : { requestId: served }),
+          }),
+        );
+      } catch (error) {
+        report({ command: 'backup', failed: errorName(error) });
+      }
+      runs += 1;
+      nextDue = clock().getTime() + intervalMs;
+    }
+    if (stopped()) break;
+    await wait(Math.min(BACKUP_POLL_SECONDS * 1000, Math.max(0, nextDue - clock().getTime())));
+  }
+  return { command: 'backup-loop', runs };
 }
 
 export async function verify(paths: DataPaths) {
@@ -191,6 +917,22 @@ export async function restore(
     /** `OYL_INSTANCE_SECRET_KEY` and `OYL_INSTANCE_ORIGIN`, for the rotation it ends with (#1189). */
     readonly keys?: KeyEnvironment;
   } = {},
+) {
+  // Logged into the database it RESTORED, once the data is in place and checked.
+  const { value, logged } = await loggedAfter(
+    paths.database,
+    'restore',
+    () => placeRestore(paths, snapshot, options),
+    (done) =>
+      `blobs=${String(done.blobs)},${done.keys.rotated ? 'keys_rotated' : 'keys_not_rotated'}`,
+  );
+  return { ...value, logged };
+}
+
+async function placeRestore(
+  paths: DataPaths,
+  snapshot: string,
+  options: { readonly force?: boolean; readonly keys?: KeyEnvironment },
 ) {
   const started = performance.now();
   const manifestPath = join(snapshot, MANIFEST);
@@ -281,22 +1023,46 @@ function keyEnvironment(environment: KeyEnvironment): {
   return { secret: read.kind === 'ok' ? read.bytes : undefined, origin: config.config.origin };
 }
 
+/**
+ * `operation` over the instance's keys — as an operator action when `action`
+ * is named (#2602): the keys over the action's store, so what it writes and
+ * its log entry commit together. `show` and the rotation inside `restore`
+ * (logged as the restore) name none.
+ */
 async function withInstanceKeys<T>(
   paths: DataPaths,
   environment: KeyEnvironment,
   operation: (keys: InstanceKeys) => Promise<T>,
+  action?: OperatorAction,
 ): Promise<T> {
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const { secret, origin } = keyEnvironment(environment);
   const store = openServingStore(paths.database);
+  const now = environment.now ?? (() => Math.floor(Date.now() / 1000));
+  const keysOver = (over: SqlStore): InstanceKeys =>
+    createInstanceKeys({ store: over, secret, origin, now });
   try {
-    const keys = createInstanceKeys({
+    if (action === undefined) return await operation(keysOver(store));
+    return await asOperatorAction(
       store,
-      secret,
-      origin,
-      now: environment.now ?? (() => Math.floor(Date.now() / 1000)),
-    });
-    return await operation(keys);
+      action,
+      async (inside) => {
+        try {
+          return await operation(keysOver(inside));
+        } catch (error) {
+          // A missing secret or origin is a refusal, logged `refused`, not a failure.
+          if (
+            error instanceof InstanceKeysUnavailable &&
+            (error.code === 'no-secret' || error.code === 'no-origin')
+          ) {
+            return new Refused(error.message);
+          }
+          throw error;
+        }
+      },
+      undefined,
+      () => new Date(now() * 1000),
+    );
   } catch (error) {
     // A fixed sentence naming the variable; never a key.
     if (error instanceof InstanceKeysUnavailable) throw new CommandError(error.message);
@@ -352,38 +1118,50 @@ export async function instanceKey(
   ) {
     throw new CommandError('--serial-above is a whole number: the serial a device names.');
   }
-  return withInstanceKeys(paths, environment, async (keys) => {
-    const command = `instance-key ${action.action}`;
-    switch (action.action) {
-      case 'init': {
-        const done = await keys.maintain();
-        return { command, made: done.made, ...(await keys.show()) };
+  const logged: Readonly<Record<InstanceKeyAction['action'], OperatorAction | undefined>> = {
+    init: 'instance_key_init',
+    show: undefined,
+    rotate: 'instance_key_rotate',
+    'rotate-identity': 'instance_key_rotate_identity',
+    reset: 'instance_key_reset',
+  };
+  return withInstanceKeys(
+    paths,
+    environment,
+    async (keys) => {
+      const command = `instance-key ${action.action}`;
+      switch (action.action) {
+        case 'init': {
+          const done = await keys.maintain();
+          return { command, made: done.made, ...(await keys.show()) };
+        }
+        case 'show':
+          return { command, ...(await keys.show()) };
+        case 'rotate':
+          return {
+            command,
+            ...(await keys.rotate({
+              dropOld: action.dropOld,
+              ...(action.serialAbove === undefined ? {} : { serialAbove: action.serialAbove }),
+            })),
+          };
+        case 'rotate-identity':
+          return {
+            command,
+            endorsed: !action.compromised,
+            repin: 'every device pins again from the new card',
+            ...(await keys.rotateIdentity({ compromised: action.compromised })),
+          };
+        case 'reset':
+          return {
+            command,
+            repin: 'every device pins again from the new card',
+            ...(await keys.reset()),
+          };
       }
-      case 'show':
-        return { command, ...(await keys.show()) };
-      case 'rotate':
-        return {
-          command,
-          ...(await keys.rotate({
-            dropOld: action.dropOld,
-            ...(action.serialAbove === undefined ? {} : { serialAbove: action.serialAbove }),
-          })),
-        };
-      case 'rotate-identity':
-        return {
-          command,
-          endorsed: !action.compromised,
-          repin: 'every device pins again from the new card',
-          ...(await keys.rotateIdentity({ compromised: action.compromised })),
-        };
-      case 'reset':
-        return {
-          command,
-          repin: 'every device pins again from the new card',
-          ...(await keys.reset()),
-        };
-    }
-  });
+    },
+    logged[action.action],
+  );
 }
 
 /** The operator's secret, imported, or a refusal naming the variable and never its value. */
@@ -449,29 +1227,38 @@ export async function modelKeySet(
   }
   const store = openServingStore(paths.database);
   try {
-    const device = await store.findDeviceKey(ownerKey);
-    if (device === undefined || device.revokedAt !== null) {
-      throw new CommandError(
-        'OYL_INSTANCE_OWNER_KEY is not a device key of any athlete on this instance: the operator signs in first. Nothing was written.',
-      );
-    }
-    const sealed = await sealHostedKey(secret, {
-      athleteId: device.athleteId,
-      url: url.url.href,
-      model,
-      key,
-    });
-    const put = await store.putHostedModelKey(device.athleteId, {
-      url: url.url.href,
-      model,
-      ...sealed,
-      setAt: Math.floor((options.now ?? (() => new Date()))().getTime() / 1000),
-    });
-    if (put.outcome === 'no-athlete') {
-      throw new CommandError(
-        'The operator’s athlete is not on this instance. Nothing was written.',
-      );
-    }
+    await asOperatorAction(
+      store,
+      'model_key_set',
+      async (inside) => {
+        const device = await inside.findDeviceKey(ownerKey);
+        if (device === undefined || device.revokedAt !== null) {
+          return new Refused(
+            'OYL_INSTANCE_OWNER_KEY is not a device key of any athlete on this instance: the operator signs in first. Nothing was written.',
+          );
+        }
+        const sealed = await sealHostedKey(secret, {
+          athleteId: device.athleteId,
+          url: url.url.href,
+          model,
+          key,
+        });
+        const put = await inside.putHostedModelKey(device.athleteId, {
+          url: url.url.href,
+          model,
+          ...sealed,
+          setAt: secondsOf(options.now),
+        });
+        if (put.outcome === 'no-athlete') {
+          return new Refused(
+            'The operator’s athlete is not on this instance. Nothing was written.',
+          );
+        }
+        return put.outcome;
+      },
+      () => null,
+      options.now,
+    );
   } finally {
     await store.close();
   }
@@ -505,7 +1292,13 @@ export async function modelKeyStatus(paths: DataPaths, secretText: string | unde
 export async function modelKeyClear(paths: DataPaths) {
   const store = openServingStore(paths.database);
   try {
-    return { command: 'model-key clear', cleared: await store.clearHostedModelKey() };
+    const cleared = await asOperatorAction(
+      store,
+      'model_key_clear',
+      (inside) => inside.clearHostedModelKey(),
+      (held) => (held ? 'cleared' : 'none_held'),
+    );
+    return { command: 'model-key clear', cleared };
   } finally {
     await store.close();
   }
@@ -548,23 +1341,32 @@ export async function roomOpen(
     throw new CommandError('--route is a lower-case SHA-256.');
   const store = openServingStore(paths.database);
   try {
-    await store.putRoom({
-      id: roomId,
-      kind: options.kind === 'ride' ? 'group' : 'race',
-      visibility: 'private',
-      routeSha256,
-      physicsVersion: PHYSICS_VERSION,
-    });
-    await store.putRoomCourse({
-      roomId,
-      lengthMetres: options.lengthMetres,
-      grades: [[0, options.gradePercent ?? 0]],
-      ridingPosition: position,
-      capacity: null,
-      countdownMs: options.countdownMs ?? null,
-      rejoinWindowMs: null,
-      raceStartedAt: null,
-    });
+    // The room and its course, and the entry, together (#2602).
+    await asOperatorAction(
+      store,
+      'room_open',
+      async (inside) => {
+        await inside.putRoom({
+          id: roomId,
+          kind: options.kind === 'ride' ? 'group' : 'race',
+          visibility: 'private',
+          routeSha256,
+          physicsVersion: PHYSICS_VERSION,
+        });
+        await inside.putRoomCourse({
+          roomId,
+          lengthMetres: options.lengthMetres,
+          grades: [[0, options.gradePercent ?? 0]],
+          ridingPosition: position,
+          capacity: null,
+          countdownMs: options.countdownMs ?? null,
+          rejoinWindowMs: null,
+          raceStartedAt: null,
+        });
+        return options.kind;
+      },
+      (kind) => kind,
+    );
   } finally {
     await store.close();
   }
@@ -614,28 +1416,38 @@ export async function loadAccountsAdd(
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const store = openServingStore(paths.database);
   try {
-    let held = 0;
-    for (const key of keys) if ((await store.findDeviceKey(key)) !== undefined) held += 1;
-    if (held > 0) {
-      throw new CommandError(
-        `${String(held)} of these keys already belong to an account on this instance, and this command adds only accounts it makes. Nothing was written.`,
-      );
-    }
-    const at = Math.floor((options.now ?? (() => new Date()))().getTime() / 1000);
-    for (const [index, publicKey] of keys.entries()) {
-      const athleteId = randomHex(16);
-      await store.registerAthlete({
-        athlete: {
-          id: athleteId,
-          displayName: `Load ${String(index + 1)}`,
-          createdAt: at,
-          registrationState: 'active',
-        },
-        key: { publicKey, athleteId, addedAt: at, revokedAt: null },
-        recoveryCodeSha256s: [],
-        loadRunAt: at,
-      });
-    }
+    // Every account and the entry together (#2602): a run that fails part way adds none.
+    await asOperatorAction(
+      store,
+      'load_accounts_add',
+      async (inside) => {
+        let held = 0;
+        for (const key of keys) if ((await inside.findDeviceKey(key)) !== undefined) held += 1;
+        if (held > 0) {
+          return new Refused(
+            `${String(held)} of these keys already belong to an account on this instance, and this command adds only accounts it makes. Nothing was written.`,
+          );
+        }
+        const at = secondsOf(options.now);
+        for (const [index, publicKey] of keys.entries()) {
+          const athleteId = randomHex(16);
+          await inside.registerAthlete({
+            athlete: {
+              id: athleteId,
+              displayName: `Load ${String(index + 1)}`,
+              createdAt: at,
+              registrationState: 'active',
+            },
+            key: { publicKey, athleteId, addedAt: at, revokedAt: null },
+            recoveryCodeSha256s: [],
+            loadRunAt: at,
+          });
+        }
+        return keys.length;
+      },
+      (added) => `added=${String(added)}`,
+      options.now,
+    );
     return {
       command: 'load-accounts add',
       added: keys.length,
@@ -644,6 +1456,32 @@ export async function loadAccountsAdd(
   } finally {
     await store.close();
   }
+}
+
+/**
+ * Erase each account `which` names the way a rider's own erasure does it
+ * (`sync/routes.ts` §`eraseAccount`): any room it made closed first, then its
+ * files and every row it owns — all through `store`, an operator action's.
+ * Answers how many.
+ */
+async function eraseAccounts(
+  paths: DataPaths,
+  store: SqlStore,
+  which: () => Promise<readonly string[]>,
+): Promise<number> {
+  const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
+  const rooms = createRooms({
+    store,
+    routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
+    nameFor: () => Promise.resolve(undefined),
+    now: () => Date.now(),
+  });
+  const athletes = await which();
+  for (const athleteId of athletes) {
+    await rooms.closeRoomsMadeBy(athleteId);
+    await sync.eraseAccount(athleteId);
+  }
+  return athletes.length;
 }
 
 /**
@@ -657,21 +1495,17 @@ export async function loadAccountsErase(paths: DataPaths) {
   if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
   const store = openServingStore(paths.database);
   try {
-    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
-    const rooms = createRooms({
+    // The erasures and the entry together (#2602). A file removed before a
+    // rollback is gone; its rows are not, and a retry finds them again.
+    const erased = await asOperatorAction(
       store,
-      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
-      nameFor: () => Promise.resolve(undefined),
-      now: () => Date.now(),
-    });
-    const athletes = await store.listLoadAthletes();
-    for (const athleteId of athletes) {
-      await rooms.closeRoomsMadeBy(athleteId);
-      await sync.eraseAccount(athleteId);
-    }
+      'load_accounts_erase',
+      (inside) => eraseAccounts(paths, inside, () => inside.listLoadAthletes()),
+      (count) => `erased=${String(count)}`,
+    );
     return {
       command: 'load-accounts erase',
-      erased: athletes.length,
+      erased,
       remaining: (await store.listLoadAthletes()).length,
     };
   } finally {
@@ -735,15 +1569,13 @@ export async function accountErase(
         next: 'Nothing was erased. Run it again with --confirm, the same code on standard input, to erase this account.',
       };
     }
-    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
-    const rooms = createRooms({
+    // The erasure and the entry together (#2602); the entry names no athlete.
+    await asOperatorAction(
       store,
-      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
-      nameFor: () => Promise.resolve(undefined),
-      now: () => Date.now(),
-    });
-    await rooms.closeRoomsMadeBy(athleteId);
-    await sync.eraseAccount(athleteId);
+      'account_erase',
+      (inside) => eraseAccounts(paths, inside, () => Promise.resolve([athleteId])),
+      () => null,
+    );
     if ((await store.getAthlete(athleteId)) !== undefined) {
       throw new CommandError('The account is still here after its erasure: run it again.');
     }

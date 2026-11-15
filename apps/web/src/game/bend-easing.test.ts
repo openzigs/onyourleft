@@ -4,7 +4,9 @@
  * The drawn rider eases off for a sharp bend — #1998: the lean it is drawn at,
  * the place it is drawn at and the speed lost and given back, read through
  * the frame a renderer is handed, and that nothing a ride records or a
- * trainer is sent moves.
+ * trainer is sent moves. And #2422: a corner an imported course draws at one
+ * sample, with the samples either side wandering, is eased as the corner it
+ * is rather than as the spike the line makes of it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +23,8 @@ import {
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
+import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics';
+
 import {
   BRAKING_METRES_PER_SECOND_SQUARED,
   EASED_LEAN_RADIANS,
@@ -33,6 +37,14 @@ import {
 } from './bend-easing';
 import { combinedLean } from './bicycle';
 import { CAMERA_BEHIND_METRES } from './camera';
+import {
+  GAME_TRAINER_MODULES,
+  WIRING_SOURCE,
+  plantedOver,
+  seamViolations,
+  trainerCommandSeam,
+} from './cannot-reach-trainer-testing';
+import { drawnLine, drawnLineAt } from './drawn-line';
 import { createGradientSession } from './gradient';
 import type { RiderMarker, SceneFrame } from './port';
 import { lineOffsetAt, racingLine, type RacingLine } from './racing-line';
@@ -40,10 +52,19 @@ import {
   circuitRoute,
   cornerRoute,
   hairpinRoute,
+  jitteredJunctionRoute,
   levelHairpinRoute,
   northRoute,
+  plannerCornerRoute,
 } from './route-fixtures-testing';
-import { cameraPose, chaseRider, drawnRiderDistance, placedRiders, sceneFrame } from './scene';
+import {
+  cameraPose,
+  chaseRider,
+  drawnPathOf,
+  drawnRiderDistance,
+  placedRiders,
+  sceneFrame,
+} from './scene';
 import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
 
@@ -172,13 +193,19 @@ describe('the lean stays natural — #1998', () => {
     },
   );
 
-  it('leaves a bend that asks for less than 25° exactly as it was', () => {
-    // A 60 m circuit at 30 km/h leans about 7°: nothing to ease.
+  it('leaves a bend that asks for less than 25° unslowed: on the drawn path at the odometer itself', () => {
+    // A 60 m circuit at 30 km/h leans about 7°: nothing to ease. Since #2422's
+    // rework the rider is drawn ON the drawn path (`drawn-line.ts`), so
+    // "unslowed" is the path's own place for the odometer, to the bit.
     const circuit = circuitRoute(60);
+    const line = drawnLine(circuit);
     for (let at = 0; at < 377; at += 7) {
-      expect(riderAt(circuit, at, 30 / 3.6)).toEqual(
-        riderAt(circuit, at, 30 / 3.6, { uneased: true }),
-      );
+      const rider = riderAt(circuit, at, 30 / 3.6);
+      const on = drawnLineAt(line, at);
+      expect(easedPlace(line, at, 30 / 3.6)).toEqual({ distance: at, speed: 30 / 3.6 });
+      expect(rider.x).toBeCloseTo(on.x, 9);
+      expect(rider.z).toBeCloseTo(on.z, 9);
+      expect(Math.abs(combinedLean(rider.lean, rider.bodyLean))).toBeLessThan(10 * DEGREES);
     }
   });
 });
@@ -265,44 +292,46 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
 
   it('draws the rider at the eased place, with the camera on them', () => {
     const speed = 14;
-    const line = racingLine(hairpin);
+    // #2422's rework: eased on the drawn path's line, and drawn ON that path.
+    const line = drawnLine(hairpin);
     const place = easedPlace(line, APEX, speed);
     expect(place.distance).toBeLessThan(APEX - 1);
     const frame = frameOf(hairpin, stateAt(hairpin, APEX, speed));
     const rider = markerOf(frame, 'rider');
-    // Read back through the frame: the rider is at the EASED place along the
-    // road, not at the odometer…
-    expect(alongFrom(frame, rider, place.distance)).toBeCloseTo(0, 6);
-    expect(Math.abs(alongFrom(frame, rider, APEX))).toBeGreaterThan(1);
-    // …on the line THERE, which is not where it is at the odometer…
-    expect(offsetFrom(frame, rider, place.distance).across).toBeCloseTo(
-      lineOffsetAt(line, place.distance),
-      6,
-    );
-    expect(lineOffsetAt(line, place.distance)).not.toBeCloseTo(lineOffsetAt(line, APEX), 2);
+    // Read back through the frame: the rider is at the path's place for the
+    // EASED odometer, not for the odometer…
+    const eased = drawnLineAt(line, place.distance);
+    const unEased = drawnLineAt(line, APEX);
+    expect(rider.x).toBeCloseTo(eased.x, 6);
+    expect(rider.z).toBeCloseTo(eased.z, 6);
+    expect(Math.hypot(rider.x - unEased.x, rider.z - unEased.z)).toBeGreaterThan(1);
+    // …facing along the path there…
+    expect(rider.headingX).toBeCloseTo(eased.headingX, 6);
+    expect(rider.headingZ).toBeCloseTo(eased.headingZ, 6);
     // …leaning at the eased speed…
     expect(Math.abs(combinedLean(rider.lean, rider.bodyLean))).toBeLessThanOrEqual(
       EASED_LEAN_RADIANS + 1e-9,
     );
-    // …and the camera stands on them: its eye is the chase distance straight
-    // back from the drawn rider along the road there. ⚠️ Not the pose's own
-    // `x`/`z` since #1994: in a bend that is the point the eye looks through,
-    // 4.5 m toward the road ahead, which is the rider only on a straight.
+    // …and the camera stands on them: its eye is ON the path, about the chase
+    // distance behind the drawn rider, held no more than half a metre in from
+    // the kerb (`scene.ts` §`eyeOnDrawnPath`), and it looks past them. ⚠️ Not
+    // the pose's own `x`/`z` since #1994: in a bend that is the point the eye
+    // looks through, 4.5 m toward the road ahead.
     const chase = chaseRider(
       frame.corridor,
       place.distance,
-      offsetFrom(frame, rider, place.distance).across,
+      lineOffsetAt(line, place.distance),
+      line,
     );
     expect(chase.x).toBeCloseTo(rider.x, 6);
     expect(chase.z).toBeCloseTo(rider.z, 6);
-    expect(frame.camera.x - frame.camera.headingX * CAMERA_BEHIND_METRES).toBeCloseTo(
-      rider.x - chase.tangent.headingX * CAMERA_BEHIND_METRES,
-      6,
-    );
-    expect(frame.camera.z - frame.camera.headingZ * CAMERA_BEHIND_METRES).toBeCloseTo(
-      rider.z - chase.tangent.headingZ * CAMERA_BEHIND_METRES,
-      6,
-    );
+    const eyeX = frame.camera.x - frame.camera.headingX * CAMERA_BEHIND_METRES;
+    const eyeZ = frame.camera.z - frame.camera.headingZ * CAMERA_BEHIND_METRES;
+    const behind = drawnLineAt(line, place.distance - CAMERA_BEHIND_METRES);
+    expect(Math.hypot(eyeX - behind.x, eyeZ - behind.z)).toBeLessThanOrEqual(0.5);
+    const toRider = Math.hypot(rider.x - eyeX, rider.z - eyeZ);
+    expect(toRider).toBeGreaterThan(CAMERA_BEHIND_METRES - 1);
+    expect(toRider).toBeLessThan(CAMERA_BEHIND_METRES + 0.5);
   });
 
   it('tells a caller with a camera of its own where the frame drew the rider — the demo’s tour', () => {
@@ -314,17 +343,20 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
     };
     const frame = sceneFrame(input);
     const drawn = drawnRiderDistance(input);
-    expect(drawn).toBe(easedPlace(racingLine(hairpin), APEX, speed).distance);
+    expect(drawn).toBe(easedPlace(drawnLine(hairpin), APEX, speed).distance);
     expect(drawn).toBeLessThan(APEX - 1);
-    // A camera stood on it is the frame's own chase camera, to the bit.
+    // A camera stood on it, on the path the frame drew the rider along, is
+    // the frame's own chase camera, to the bit.
     const lateral = (placedRiders(input, frame.corridor)[0] as { lateral: number }).lateral;
-    expect(cameraPose(frame.corridor, drawn, lateral)).toEqual(frame.camera);
+    expect(cameraPose(frame.corridor, drawn, lateral, lateral, drawnPathOf(input))).toEqual(
+      frame.camera,
+    );
   });
 
   it('draws a pacer, a ghost and a room’s rider level with the rider exactly where the rider is drawn', () => {
     // Comparable: one rule, so the same odometer and speed ease to the same place.
     const route = hairpinRoute(10);
-    const line: RacingLine = racingLine(route);
+    const line: RacingLine = drawnLine(route);
     const speed = 14;
     const at = 420;
     const ghost = buildGhostTrack({ elapsedSeconds: [0, 1_000], distanceMetres: [0, 14_000] });
@@ -335,8 +367,13 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
     });
     const place = easedPlace(line, at, speed);
     expect(place.distance).toBeLessThan(at - 1);
+    // Level on the drawn path at the eased place: each one's distance from
+    // the rider is across the path only, the side-by-side spacing (#499).
+    const on = drawnLineAt(drawnLine(route), place.distance);
     for (const kind of ['rider', 'bot', 'ghost', 'remote'] as const) {
-      expect(alongFrom(frame, markerOf(frame, kind), place.distance)).toBeCloseTo(0, 6);
+      const marker = markerOf(frame, kind);
+      const along = (marker.x - on.x) * on.headingX + (marker.z - on.z) * on.headingZ;
+      expect(along).toBeCloseTo(0, 6);
     }
   });
 
@@ -349,12 +386,15 @@ describe('the speed lost in a bend is drawn position only, and given back — #1
     const bare = frameOf(route, stateAt(route, at, 0));
     const far = (bare.corridor.centre[bare.corridor.centre.length - 1] as { along: number }).along;
     const odometer = far + 2;
-    const place = easedPlace(racingLine(route), odometer, 25);
+    const place = easedPlace(drawnLine(route), odometer, 25);
     expect(place.distance).toBeLessThan(far - 5);
     const frame = frameOf(route, stateAt(route, at, 0), {
       remoteRiders: [{ riderId: 3, distanceMetres: odometer, speedMetresPerSecond: 25 }],
     });
-    expect(alongFrom(frame, markerOf(frame, 'remote'), place.distance)).toBeCloseTo(0, 6);
+    const on = drawnLineAt(drawnLine(route), place.distance);
+    const remote = markerOf(frame, 'remote');
+    expect(remote.x).toBeCloseTo(on.x, 6);
+    expect(remote.z).toBeCloseTo(on.z, 6);
   });
 
   it('never eases a Delivery round’s rider or a lap race’s, whose drawn place is where the game meets them', () => {
@@ -424,4 +464,223 @@ describe('nothing a ride records or a trainer is sent moves — #1998', () => {
     // Non-vacuity: the two rides were DRAWN differently, so the easing ran.
     expect(eased.drawn).not.toEqual(before.drawn);
   }, 30_000);
+});
+
+/**
+ * One power trace, 400 W, ridden through the simulation and the gradient
+ * session with a frame drawn every 200 ms in the order `GameView`'s loop does
+ * it — #2422. `route` is called once per ride, so each ride has a fresh line.
+ */
+async function rideThrough(
+  route: () => RouteProfile,
+  uneased: boolean,
+  untilMs: number,
+): Promise<{
+  trace: number[];
+  written: SimulationParameters[];
+  writtenAt: number[];
+  drawn: number[];
+  distance: number;
+}> {
+  const profile = route();
+  const written: SimulationParameters[] = [];
+  const writtenAt: number[] = [];
+  let now = 0;
+  const session = createGradientSession({
+    profile,
+    control: {
+      setSimulationParameters: async (parameters) => {
+        written.push(parameters);
+        writtenAt.push(now);
+        return Promise.resolve();
+      },
+      letGo: async () => Promise.resolve({ kind: 'stopped' }),
+    },
+  });
+  const simulation = new GameSimulation({
+    profile,
+    conditions: { totalMass: kilograms(80), airDensityKilogramsPerCubicMetre: 1.2 },
+  });
+  const origin = corridorOrigin(profile);
+  const trace: number[] = [];
+  const drawn: number[] = [];
+  for (; now <= untilMs; now += 200) {
+    simulation.advanceTo(now, { power: watts(400), live: true });
+    session.sample(simulation.state.elapsed, simulation.state.ride.distance);
+    const frame = sceneFrame({ profile, origin, state: simulation.state, uneased });
+    drawn.push(frame.camera.x, frame.camera.z);
+    // The recorded distance, the HUD's speed and the clock.
+    trace.push(
+      simulation.state.ride.distance,
+      simulation.state.ride.speed,
+      simulation.state.elapsed,
+    );
+    await session.settled();
+  }
+  session.stop();
+  return { trace, written, writtenAt, drawn, distance: simulation.state.ride.distance };
+}
+
+/** `v` in km/h as metres a second. */
+const KMH = 1 / 3.6;
+
+/** The steady-turn speed at {@link EASED_LEAN_RADIANS} on a radius: `√(g·tan 25°·R)`. */
+function steadyTurnSpeed(radius: number): number {
+  return Math.sqrt(
+    STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED * Math.tan(EASED_LEAN_RADIANS) * radius,
+  );
+}
+
+/**
+ * A line's tightest radius between two distances, from its own samples: the
+ * line the scene eases on (`drawn-line.ts`, #2422's rework) unless `solved`
+ * asks for `racingLine`'s.
+ */
+function tightestRadius(route: RouteProfile, from: number, to: number, solved = false): number {
+  const line = solved ? racingLine(route) : drawnLine(route);
+  let peak = 0;
+  line.curvatures.forEach((curvature, index) => {
+    const at = index * route.resolution;
+    if (at >= from && at <= to) peak = Math.max(peak, Math.abs(curvature));
+  });
+  return 1 / peak;
+}
+
+/** The slowest a rider holding `speed` is drawn between two odometer readings, on the line the scene eases on. */
+function slowestDrawn(route: RouteProfile, speed: number, from: number, to: number): number {
+  const line = drawnLine(route);
+  let slowest = Number.POSITIVE_INFINITY;
+  for (let at = from; at <= to; at += 0.5) {
+    slowest = Math.min(slowest, easedPlace(line, at, speed).speed);
+  }
+  return slowest;
+}
+
+/**
+ * The corners #2422 is about: each, the stretch of odometer that rides
+ * through it, and the same corner un-jittered, whose line's radius is the bound.
+ */
+const JUNCTIONS: readonly (readonly [string, RouteProfile, number, number, RouteProfile])[] = [
+  [
+    'a 90° junction drawn at one sample, the samples either side wandering 3 m',
+    jitteredJunctionRoute(),
+    1_200,
+    1_900,
+    jitteredJunctionRoute(90, 'right', 0),
+  ],
+  [
+    'plannerCornerRoute(90), a 90° turn at one sample of a 25 m course',
+    plannerCornerRoute(90),
+    1_200,
+    1_900,
+    plannerCornerRoute(90),
+  ],
+];
+
+describe('a corner an imported course draws at one sample — #2422', () => {
+  it('is the case: the wandering samples pin the line solved on the route, and it turns the whole corner at one sample', () => {
+    // Non-vacuity for everything below: `racingLine`'s line through the
+    // jittered junction is far tighter than the same junction un-jittered —
+    // the spike #1998 slowed for.
+    expect(tightestRadius(jitteredJunctionRoute(), 1_400, 1_600, true)).toBeLessThan(7);
+    expect(
+      tightestRadius(jitteredJunctionRoute(90, 'right', 0), 1_400, 1_600, true),
+    ).toBeGreaterThan(17);
+    // The line the scene eases on, solved on the road as it is drawn and
+    // paced by its own length, is not.
+    expect(tightestRadius(jitteredJunctionRoute(), 1_400, 1_600)).toBeGreaterThan(15);
+  });
+
+  it.each(JUNCTIONS)(
+    'draws a rider at 30–45 km/h through %s no slower than 90 % of the un-jittered line’s steady-turn speed at 25°',
+    (_, route, from, to, clean) => {
+      const floor = steadyTurnSpeed(tightestRadius(clean, 1_400, 1_600));
+      for (const kmh of [30, 35, 40, 45]) {
+        const speed = kmh * KMH;
+        // Jitter may not deepen the slow-down by more than a tenth.
+        expect(slowestDrawn(route, speed, from, to)).toBeGreaterThanOrEqual(
+          0.9 * Math.min(speed, floor),
+        );
+      }
+    },
+  );
+
+  it('still eases the junction itself: a rider faster than its steady-turn speed is drawn slower', () => {
+    const floor = steadyTurnSpeed(
+      tightestRadius(jitteredJunctionRoute(90, 'right', 0), 1_400, 1_600),
+    );
+    const slowest = slowestDrawn(jitteredJunctionRoute(), 45 * KMH, 1_200, 1_900);
+    expect(slowest).toBeLessThan(45 * KMH - 1);
+    expect(slowest).toBeLessThan(1.2 * floor);
+  });
+
+  it.each([
+    ...JUNCTIONS,
+    ...BENDS.map(([name, route, from, to]) => [name, route, from, to, route] as const),
+  ])(
+    'never surges through %s: no faster than the give-back, and never backwards between frames 50 ms apart',
+    (_, route, from, to) => {
+      const line = drawnLine(route);
+      for (const kmh of [30, 35, 40, 45]) {
+        const speed = kmh * KMH;
+        // A frame every 50 ms at a held speed: the odometer moves speed × 0.05.
+        const step = speed * 0.05;
+        let previous = easedPlace(line, from, speed);
+        for (let at = from + step; at <= to + 300; at += step) {
+          const place = easedPlace(line, at, speed);
+          expect(place.speed).toBeLessThanOrEqual(speed * (1 + GIVE_BACK_SHARE) + 1e-9);
+          expect(place.distance).toBeGreaterThanOrEqual(previous.distance);
+          previous = place;
+        }
+      }
+    },
+  );
+
+  // Each DESCENDS 4 % to the corner and is level after it, so the grade a
+  // trainer is sent changes at the corner: a write read at any place but the
+  // odometer — the eased place is metres behind it there — is a different one.
+  it.each([
+    ['the jittered junction', () => jitteredJunctionRoute(90, 'right', 3, 12_345, -0.04)],
+    ['plannerCornerRoute(90)', () => plannerCornerRoute(90, 'right', -0.04, 0)],
+  ] as const)(
+    'sends the same simulation-parameter writes at the same times through %s, and records the same ride, eased or not',
+    async (_, route) => {
+      const eased = await rideThrough(route, false, 150_000);
+      const before = await rideThrough(route, true, 150_000);
+      // Through the corner and well out of it.
+      expect(eased.distance).toBeGreaterThan(1_700);
+      expect(eased.written.length).toBeGreaterThan(0);
+      expect(eased.written).toEqual(before.written);
+      expect(eased.writtenAt).toEqual(before.writtenAt);
+      expect(eased.trace).toEqual(before.trace);
+      // Non-vacuity: the two rides were DRAWN differently, so the easing ran.
+      expect(eased.drawn).not.toEqual(before.drawn);
+    },
+    60_000,
+  );
+});
+
+describe('no trainer-path module can see the easing — #2422', () => {
+  const easing = 'apps/web/src/game/bend-easing.ts';
+  // #2422's rework: and the drawn path the easing reads.
+  const path = 'apps/web/src/game/drawn-line.ts';
+  const trainerPath = [...trainerCommandSeam(WIRING_SOURCE), ...GAME_TRAINER_MODULES];
+
+  it('reaches bend-easing.ts from none of the trainer-command seam, gradient.ts, trainer-port.ts or ride/trainer.ts', () => {
+    expect(trainerPath).toEqual(expect.arrayContaining([...GAME_TRAINER_MODULES]));
+    expect(trainerPath.length).toBeGreaterThan(GAME_TRAINER_MODULES.length);
+    expect(seamViolations(trainerPath, [easing, path])).toEqual([]);
+  });
+
+  it('is a walk that can fail: a planted import of the easing in gradient.ts is caught', () => {
+    const gradient = 'apps/web/src/game/gradient.ts';
+    const found = seamViolations(
+      [gradient],
+      [easing],
+      plantedOver({
+        [gradient]: "import { easedPlace } from './bend-easing';\nvoid easedPlace;\n",
+      }),
+    );
+    expect(found).not.toEqual([]);
+  });
 });

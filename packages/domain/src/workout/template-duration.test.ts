@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
+import { BUILT_IN_WORKOUTS } from './library';
 import {
   LENGTH_TOLERANCE_SECONDS,
   LENGTH_TOLERANCE_SHARE,
@@ -13,10 +14,11 @@ import {
   tailorWorkout,
   TEMPLATE_LENGTHS_MINUTES,
   type TailorChoices,
+  type TemplateBlock,
   type WorkoutTemplate,
 } from './template';
 import { expandWorkout, type WorkoutTimeline } from './timeline';
-import { thresholdShare, type ThresholdShare, type Workout, type WorkoutBlock } from './workout';
+import { thresholdShare, type ThresholdShare, type Workout } from './workout';
 
 const share = thresholdShare;
 
@@ -153,11 +155,10 @@ const rampTest: WorkoutTemplate = {
 };
 
 /**
- * The templates the duration rule is proven on.
- *
- * ⚠️ #2300 replaces this list with the shipped library (`BUILT_IN_WORKOUTS`),
- * so that a template added to the library is enumerated here and cannot be
- * added untested. Until then these fixtures cover each strategy.
+ * The templates the duration rule is proven on: the shipped library
+ * (`BUILT_IN_WORKOUTS`, #2300), so that a template added to it is enumerated
+ * here and cannot be added untested, and these fixtures, which cover each
+ * strategy at its edges — a test ridden as written among them.
  */
 const LIBRARY: readonly WorkoutTemplate[] = [
   vo2,
@@ -167,6 +168,7 @@ const LIBRARY: readonly WorkoutTemplate[] = [
   endurance,
   tempo,
   rampTest,
+  ...BUILT_IN_WORKOUTS,
 ];
 
 function tolerance(minutes: number): number {
@@ -487,7 +489,7 @@ describe('length and intensity compose', () => {
   const offset = (value: ThresholdShare, percent: number): ThresholdShare =>
     ((value * (100 + percent)) / 100) as ThresholdShare;
 
-  function offsetBlock(block: WorkoutBlock, percent: number): WorkoutBlock {
+  function offsetBlock(block: TemplateBlock, percent: number): TemplateBlock {
     switch (block.kind) {
       case 'steady':
         return { ...block, target: offset(block.target, percent) };

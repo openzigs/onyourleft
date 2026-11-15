@@ -24,7 +24,10 @@
  *   more call counted inside {@link MAPPED_BUILDING_DRAW_CALLS}.
  * - {@link clearOfMappedBuildings}: no tree, shrub or rock inside a mapped
  *   footprint or within #1534's margin of it. That is #1534's rule, extended
- *   from a settlement's ground to a mapped one.
+ *   from a settlement's ground to a mapped one. Since #2428 none within its
+ *   own drawn reach of a driveway either.
+ * - {@link clearOfDriveways}: no wall, hedge, fence, signpost or building
+ *   across a driveway, or within 0.5 m of it — #2428.
  *
  * ⚠️ **The clearing takes every planned footprint, not only the drawn ones.**
  * The drawn set changes at a refill, and a wood that came back when a house
@@ -51,8 +54,14 @@ import {
   MAPPED_CHUNK_METRES,
 } from './realistic-budget';
 import type { StructureSurface } from './realistic-assets';
+import { footprintSamples, SIDE_ROAD_STRUCTURE_MARGIN_METRES } from './cross-streets';
 import type { ScatterItem } from './scatter';
-import { SETTLEMENT_CLEARED_KINDS, SETTLEMENT_MARGIN_METRES } from './settlements';
+import {
+  SETTLEMENT_CLEARED_KINDS,
+  SETTLEMENT_MARGIN_METRES,
+  STRUCTURE_FOOTPRINTS,
+  type Footprint,
+} from './settlements';
 
 /** The side of a cell of {@link MappedBuildings}' clearing grid, metres. */
 const CELL_METRES = 32;
@@ -89,6 +98,42 @@ export interface MappedBuildingsInView {
   /** Where the rider is drawn, local metres. */
   readonly x: number;
   readonly z: number;
+  /**
+   * The route from the rider `realistic-budget.ts` §`MAPPED_RANKED_AHEAD_METRES` on, `x, z`
+   * every {@link MAPPED_AHEAD_STEP_METRES} — #2429: what a refill ranks the
+   * buildings by ({@link rankFrom}). Absent, they are ranked by `x`, `z`.
+   */
+  readonly ahead?: Float32Array;
+}
+
+/** How far apart {@link MappedBuildingsInView.ahead}'s points are, metres: **25**. */
+export const MAPPED_AHEAD_STEP_METRES = 25;
+
+/**
+ * How far `(x, z)` is from the road a refill ranks by — #2429: from the
+ * nearest point of `ahead` (`x, z` pairs, a polyline), or from `(fromX,
+ * fromZ)` where `ahead` is absent or a single point.
+ */
+export function rankFrom(
+  ahead: Float32Array | undefined,
+  fromX: number,
+  fromZ: number,
+  x: number,
+  z: number,
+): number {
+  if (ahead === undefined || ahead.length < 4) return Math.hypot(x - fromX, z - fromZ);
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let at = 0; at + 3 < ahead.length; at += 2) {
+    const ax = ahead[at] as number;
+    const az = ahead[at + 1] as number;
+    const dx = (ahead[at + 2] as number) - ax;
+    const dz = (ahead[at + 3] as number) - az;
+    const span = dx * dx + dz * dz;
+    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+    const off = Math.hypot(x - ax - dx * t, z - az - dz * t);
+    if (off < nearest) nearest = off;
+  }
+  return nearest;
 }
 
 /** Indexes a ride's plans — once, at the press. */
@@ -306,7 +351,15 @@ function landmarksAhead(
  *
  * Every plan within {@link MAPPED_BUILDING_REACH_METRES} of `(x, z)` by its
  * centroid, **nearest first**; each beyond {@link MAPPED_BUILDING_NEAR_METRES}
- * at its far level. Taken in that order until the next would pass
+ * at its far level.
+ *
+ * ⚠️ **Nearest to the road ahead, since #2429**, where `ahead` is given
+ * ({@link MappedBuildingsInView.ahead}): each plan, and each rival, is
+ * ranked by its distance from that stretch of route ({@link rankFrom}), and
+ * reach and level are still measured from `(x, z)`. Ranked from `(x, z)`, the
+ * nearest {@link MAPPED_BUILDING_MAX} of a dense town stood as much behind the
+ * rider as ahead, and the set was held for a chunk, so a house drew when the
+ * rider was beside it. Taken in that order until the next would pass
  * `triangleBudget` or {@link MAPPED_BUILDING_MAX} are taken — so the drawn set
  * is the nearest, and a far building never takes a near one's place but for
  * the landmarks below.
@@ -359,6 +412,7 @@ export function selectMappedBuildings(
   surfaceSlots: number = MAPPED_BUILDING_DRAW_CALLS,
   rivals: RivalStructures = NO_RIVALS,
   models?: readonly number[],
+  ahead?: Float32Array,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -378,7 +432,9 @@ export function selectMappedBuildings(
     const plan = plans[index] as FootprintPlan;
     const apart = Math.hypot(plan.centroid.x - x, plan.centroid.z - z);
     if (apart > MAPPED_BUILDING_REACH_METRES) continue;
-    distances[index] = apart;
+    // #2429: ranked by the road ahead, where there is one.
+    distances[index] =
+      ahead === undefined ? apart : rankFrom(ahead, x, z, plan.centroid.x, plan.centroid.z);
     order[inReach] = index;
     inReach += 1;
   }
@@ -386,13 +442,13 @@ export function selectMappedBuildings(
   order
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
-  const ahead = landmarksAhead(plans, order, inReach);
+  const landmarks = landmarksAhead(plans, order, inReach);
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   let stopped = false;
   for (let at = 0; at < inReach && into.count < MAPPED_BUILDING_MAX; at += 1) {
     const index = order[at] as number;
     const plan = plans[index] as FootprintPlan;
-    const apart = distances[index] as number;
+    const rank = distances[index] as number;
     // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
     // nearer than a house the walk has not reached yet. Two costs it does
     // accept, by design (ADR 0054's 2026-11-03 amendment): its triangles come
@@ -400,11 +456,11 @@ export function selectMappedBuildings(
     // can drop a structure nearer the rider than the church; and it opens its
     // wall and roof slots before the nearest houses, so the slot check below
     // can pass over a near house that would need a 7th surface.
-    if (at >= ahead && !rivalsWithin(apart)) {
+    if (at >= landmarks && !rivalsWithin(rank)) {
       stopped = true;
       break;
     }
-    const far = apart > MAPPED_BUILDING_NEAR_METRES;
+    const far = Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES;
     // #1585: near, with a model that fits, and the models loaded. With no
     // slot left for the models' group the plan is drawn as its extrusion,
     // whose surfaces may already be open, rather than passed over.
@@ -418,7 +474,7 @@ export function selectMappedBuildings(
     const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
       // A landmark taken ahead that does not fit leaves the nearest to their own walk.
-      if (at < ahead) continue;
+      if (at < landmarks) continue;
       stopped = true;
       break;
     }
@@ -509,25 +565,44 @@ export const DRIVEWAY_MARGIN_METRES = 1;
 /**
  * Whether `(x, z)` stands on a mapped building's ground: inside a planned
  * footprint, or within #1534's {@link SETTLEMENT_MARGIN_METRES} of one, or
- * since #1588 on its driveway or within {@link DRIVEWAY_MARGIN_METRES} of it.
+ * since #1588 on its driveway or within `drivewayMargin` of it —
+ * {@link DRIVEWAY_MARGIN_METRES} unless the caller says more.
+ *
+ * Where `drivewayMargin` is wider than {@link SETTLEMENT_MARGIN_METRES} —
+ * a broadleaf at the top of its scale reaches 6.06 m (`scene.ts`
+ * §`sideRoadNaturalMargin`) — the cells that much further round `(x, z)` are
+ * looked up too: a plan is only listed in the cells its reach and that
+ * margin touch. Otherwise it is the one cell `(x, z)` is in, as before.
  */
-export function onMappedGround(buildings: MappedBuildings, x: number, z: number): boolean {
-  const list = buildings.cells.get(
-    cellKey(Math.floor(x / CELL_METRES), Math.floor(z / CELL_METRES)),
-  );
-  if (list === undefined) return false;
+export function onMappedGround(
+  buildings: MappedBuildings,
+  x: number,
+  z: number,
+  drivewayMargin: number = DRIVEWAY_MARGIN_METRES,
+): boolean {
   const margin = SETTLEMENT_MARGIN_METRES;
-  for (const index of list) {
-    const plan = buildings.plans[index] as FootprintPlan;
-    const reach = (buildings.radii[index] as number) + margin;
-    const dx = x - plan.centroid.x;
-    const dz = z - plan.centroid.z;
-    if (dx * dx + dz * dz > reach * reach) continue;
-    if (insideRing(plan.footprint, x, z)) return true;
-    if (squaredToRing(plan.footprint, x, z) <= margin * margin) return true;
-    if (plan.driveway.length > 0) {
-      if (insideRing(plan.driveway, x, z)) return true;
-      if (squaredToRing(plan.driveway, x, z) <= DRIVEWAY_MARGIN_METRES ** 2) return true;
+  const beyond = Math.max(0, drivewayMargin - margin);
+  const fromX = Math.floor((x - beyond) / CELL_METRES);
+  const toX = Math.floor((x + beyond) / CELL_METRES);
+  const fromZ = Math.floor((z - beyond) / CELL_METRES);
+  const toZ = Math.floor((z + beyond) / CELL_METRES);
+  for (let ix = fromX; ix <= toX; ix += 1) {
+    for (let iz = fromZ; iz <= toZ; iz += 1) {
+      const list = buildings.cells.get(cellKey(ix, iz));
+      if (list === undefined) continue;
+      for (const index of list) {
+        const plan = buildings.plans[index] as FootprintPlan;
+        const reach = (buildings.radii[index] as number) + margin + beyond;
+        const dx = x - plan.centroid.x;
+        const dz = z - plan.centroid.z;
+        if (dx * dx + dz * dz > reach * reach) continue;
+        if (insideRing(plan.footprint, x, z)) return true;
+        if (squaredToRing(plan.footprint, x, z) <= margin * margin) return true;
+        if (plan.driveway.length > 0) {
+          if (insideRing(plan.driveway, x, z)) return true;
+          if (squaredToRing(plan.driveway, x, z) <= drivewayMargin ** 2) return true;
+        }
+      }
     }
   }
   return false;
@@ -537,14 +612,100 @@ export function onMappedGround(buildings: MappedBuildings, x: number, z: number)
  * The natural scenery, less every tree, shrub and rock on a mapped building's
  * ground — #1549, #1534's rule extended to data. Pure, and a function of
  * positions only; `undefined` (a ride with no plans) returns `natural` itself.
+ *
+ * `drivewayMargin` is how far off a driveway each item stands — #2428:
+ * `scene.ts` hands in `sideRoadNaturalMargin`, the item's own drawn reach,
+ * so a fir's branches do not lie across the paving as they did at the old
+ * 1 m. It is never taken below {@link DRIVEWAY_MARGIN_METRES}, and it is
+ * handed in because `near-field.ts`, where the reach is, imports this file.
  */
 export function clearOfMappedBuildings(
   natural: readonly ScatterItem[],
   buildings: MappedBuildings | undefined,
+  drivewayMargin?: (item: ScatterItem) => number,
 ): readonly ScatterItem[] {
   if (buildings === undefined || buildings.plans.length === 0) return natural;
   return natural.filter(
     (item) =>
-      !SETTLEMENT_CLEARED_KINDS.has(item.kind) || !onMappedGround(buildings, item.x, item.z),
+      !SETTLEMENT_CLEARED_KINDS.has(item.kind) ||
+      !onMappedGround(
+        buildings,
+        item.x,
+        item.z,
+        drivewayMargin === undefined
+          ? DRIVEWAY_MARGIN_METRES
+          : Math.max(DRIVEWAY_MARGIN_METRES, drivewayMargin(item)),
+      ),
   );
+}
+
+/**
+ * Whether a structure's footprint standing at `at` comes within `margin` of
+ * any mapped building's driveway — #2428: its footprint sampled as
+ * `cross-streets.ts` §`onSideRoad` samples it, each sample measured against
+ * the driveway's outline, which is its drawn paving in plan.
+ *
+ * Only the cells the footprint's reach touches are looked up, and only a
+ * plan within that reach of its centroid is sampled at all, so a frame's few
+ * hundred structures cost a few lookups each and the samples only beside a
+ * driveway.
+ */
+export function onDriveway(
+  buildings: MappedBuildings,
+  at: { readonly x: number; readonly z: number; readonly rotation: number },
+  footprint: Footprint,
+  margin: number,
+): boolean {
+  const reach = Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + margin;
+  const fromX = Math.floor((at.x - reach) / CELL_METRES);
+  const toX = Math.floor((at.x + reach) / CELL_METRES);
+  const fromZ = Math.floor((at.z - reach) / CELL_METRES);
+  const toZ = Math.floor((at.z + reach) / CELL_METRES);
+  let samples: number[] | undefined;
+  for (let ix = fromX; ix <= toX; ix += 1) {
+    for (let iz = fromZ; iz <= toZ; iz += 1) {
+      const list = buildings.cells.get(cellKey(ix, iz));
+      if (list === undefined) continue;
+      for (const index of list) {
+        const plan = buildings.plans[index] as FootprintPlan;
+        if (plan.driveway.length === 0) continue;
+        const near = (buildings.radii[index] as number) + reach;
+        const dx = at.x - plan.centroid.x;
+        const dz = at.z - plan.centroid.z;
+        if (dx * dx + dz * dz > near * near) continue;
+        samples ??= footprintSamples(at, footprint);
+        for (let p = 0; p + 1 < samples.length; p += 2) {
+          const x = samples[p] as number;
+          const z = samples[p + 1] as number;
+          if (insideRing(plan.driveway, x, z)) return true;
+          if (squaredToRing(plan.driveway, x, z) < margin * margin) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * `items`, less every structure whose footprint (`settlements.ts`
+ * §`STRUCTURE_FOOTPRINTS`) comes within `cross-streets.ts`
+ * §`SIDE_ROAD_STRUCTURE_MARGIN_METRES` of a mapped building's driveway —
+ * #2428, the side roads' rule for a structure, held for a driveway. A
+ * roadside hedge row stands on the verge a driveway crosses, so the piece
+ * across its end is left out and the row stops short of it each side.
+ * Anything with no footprint is kept: {@link clearOfMappedBuildings} clears
+ * the natural scenery. The same array where there are no plans.
+ */
+export function clearOfDriveways(
+  items: readonly ScatterItem[],
+  buildings: MappedBuildings | undefined,
+): readonly ScatterItem[] {
+  if (buildings === undefined || buildings.plans.length === 0) return items;
+  return items.filter((item) => {
+    const footprint = (STRUCTURE_FOOTPRINTS as Readonly<Record<string, Footprint>>)[item.kind];
+    return (
+      footprint === undefined ||
+      !onDriveway(buildings, item, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES)
+    );
+  });
 }

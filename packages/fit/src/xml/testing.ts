@@ -24,6 +24,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilocalories,
   metres,
   metresPerSecond,
   revolutionsPerMinute,
@@ -79,6 +80,8 @@ export function samplePoint(index: number): TrackPoint {
 /**
  * A lap of `count` samples, starting from sample `from`, with the figures
  * #1321 carries: its points' mean and highest, in the whole units TCX writes.
+ * And since #2435 its calories, a closed form of its own that differs between
+ * the two laps of {@link sampleActivity}.
  */
 export function sampleLap(from: number, count: number): TrackLap {
   const points = Array.from({ length: count }, (_, index) => samplePoint(from + index));
@@ -96,6 +99,7 @@ export function sampleLap(from: number, count: number): TrackLap {
     averageCadence: revolutionsPerMinute(mean(points.map((point) => point.cadence ?? 0))),
     averagePower: watts(mean(powers)),
     maxPower: watts(Math.max(...powers)),
+    calories: kilocalories(count * 3 + from),
     intensity: 'Active',
     triggerMethod: 'Manual',
   };

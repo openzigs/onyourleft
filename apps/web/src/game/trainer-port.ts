@@ -87,6 +87,7 @@ import type { RideTotals } from '../recording/totals';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
+import type { SoloDraftState } from './solo-draft';
 import type { WorkoutHold } from '../workout/hold-text';
 import { planChangeMayBeSpoken, type WaitingReplan } from '../workout/replan-text';
 import type { WorkoutGraphInput } from '../workout/workout-graph';
@@ -354,8 +355,21 @@ export interface GameTrainerPort {
    * write. Named so nothing else in production calls a method of that name —
    * the controller's is `noteGameRideEnded` — so `WIRE003` goes red if
    * `GameView` stops calling it.
+   *
+   * `drafted` (#2425, ADR 0066 D-5.1): that the attempt the outcome settles
+   * was ridden in the pacer's or the ghost's draft, latched with it.
    */
-  gameRideEnded(outcome: GhostOutcome | undefined): void;
+  gameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
+  /**
+   * The simulation stepped a solo ride with a draft to give — #2451, ADR 0066
+   * D-5.3: its in-draft state and the metres behind it, on every frame, kept
+   * by the ride controller (`noteSoloDraft`) so the saved ride says whether it
+   * was drafted, and when. ⚠️ Not about the trainer, which never feels a draft
+   * (D-7): on this port for {@link gameRideEnded}'s reason, and named so
+   * nothing else in production calls a method of that name. Optional, as
+   * {@link recordRoomRide} is; `gameTrainerPortOver` always supplies it.
+   */
+  soloDraftStepped?(draft: SoloDraftState): void;
   /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
@@ -368,24 +382,36 @@ export interface GameTrainerPort {
    */
   recordRoomRide?(): Promise<boolean>;
   /**
-   * The rider pressed *Record this ride* on the game's chooser — #1221. A
-   * game ride is recorded only by the Ride screen's recording (`RideSession`,
-   * above the router), so a rider who rode the game with none running lost
-   * the ride with only a dash to show for it; the chooser now says so under
-   * *Ride* and offers this. The ride controller's own `recordForRoom` — the
-   * one way a game starts a recording, so the two cannot drift apart: a
-   * recording or paused ride carries on, an idle controller starts one, and a
-   * stopped ride whose save is done is put away first. Answers whether a
-   * recording is now running.
+   * The rider pressed *Ride* on the game's chooser, for a ride in no room —
+   * #2381, the owner's ruling of 2026-11-08: a game ride is recorded by
+   * default (#1221 offered *Record this ride* instead). A game ride is
+   * recorded only by the Ride screen's recording (`RideSession`, above the
+   * router), so a rider who rode the game with none running lost the ride
+   * with only a dash to show for it. The ride controller's own
+   * `recordForRoom` — the one way a game starts a recording, so the two
+   * cannot drift apart: a recording or paused ride carries on, an idle
+   * controller starts one, and a stopped ride whose save is done is put away
+   * first. Answers whether a recording is now running. *End ride* asks
+   * whether to save it or discard it (#2349).
    *
    * ⚠️ **Absent where there is no ride controller** (Safari, Firefox, plain
    * HTTP: `main.tsx` §`buildGameTrainerPort`), and that absence is what the
-   * chooser reads to say this browser cannot record rather than offer a
-   * control that would do nothing. Not about the trainer: on this port for
+   * chooser reads to say this browser cannot record. A simulated ride and a
+   * preview are handed no port at all (`GameView.tsx` §`useSimulatedRide`),
+   * so they never reach this. Not about the trainer: on this port for
    * {@link gameRideEnded}'s reason, and named so nothing else in production
    * calls a method of that name. Writes nothing to the trainer.
    */
   recordGameRide?(): Promise<boolean>;
+  /**
+   * Why {@link recordGameRide} answered `false`, read from the ride
+   * controller at that moment — #2381's review (round 3). The controller's
+   * `recordForRoom` refuses whenever `canStartNewRide` does, and that is more
+   * than one cause; the HUD says the true one (`GameView.tsx`
+   * §`RIDE_NOT_RECORDED_TEXT`). `undefined` where the controller states none
+   * of them, and the HUD then claims no reason. @see notRecordedReason
+   */
+  whyNotRecording?(): GameNotRecordedReason | undefined;
   /**
    * A ride in a private race ended, and this is what its room said of the
    * race — #785: kept with the recording and saved with the ride
@@ -506,6 +532,35 @@ export interface GameTrainerPort {
    * {@link courseLine}'s reason.
    */
   rideLapSeconds?(): number | undefined;
+  /**
+   * The recording under this game ride, as the end-of-ride question needs it
+   * — #2349: `undefined` when nothing is being recorded, and otherwise
+   * whether it holds anything to save (`recording/finish.ts`: one sample).
+   * The question offers *Save ride* only when it does. A snapshot read.
+   *
+   * ⚠️ Not about the trainer: on this port for {@link gameRideEnded}'s
+   * reason, and named so nothing else in production calls a method of that
+   * name. Optional, as {@link rideLapSeconds} is; `gameTrainerPortOver`
+   * always supplies the three of #2349.
+   */
+  rideRecording?(): { readonly savable: boolean } | undefined;
+  /**
+   * *Save ride*, answered in the game — #2349. The ride controller's own Stop,
+   * `armStop` then `confirmStop`: the same release of the trainer, the same
+   * save and the same result card on the Ride screen as a Stop pressed there.
+   * Nothing when nothing is being recorded. `GameView` calls it AFTER its own
+   * `teardown`, so the outcome of the ride's race is noted first
+   * ({@link gameRideEnded}) and saved with it.
+   */
+  saveRideRecording?(): Promise<void>;
+  /**
+   * *Discard ride*, answered twice in the game — #2349. The ride controller's
+   * own discard (`armStop`, `armDiscard`, `confirmDiscard`): the trainer
+   * released as a Stop releases it, and the recording deleted from this device
+   * instead of saved. Answers whether it is gone; `true` also when nothing was
+   * being recorded, so there was nothing to delete.
+   */
+  discardRideRecording?(): Promise<boolean>;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -552,6 +607,8 @@ interface GameTrainerSource {
      * moving time to show.
      */
     readonly phase?: RidePhase;
+    /** #2349. @see GameTrainerPort.rideRecording */
+    readonly sampleCount?: number;
     readonly movingSeconds?: number;
     /** #2072. @see GameTrainerPort.rideElapsedSeconds */
     readonly elapsedSeconds?: number;
@@ -559,6 +616,10 @@ interface GameTrainerSource {
     readonly courseLapSeconds?: number | undefined;
     /** #2076. @see GameTrainerPort.rideTotals */
     readonly totals?: RideTotals | undefined;
+    /** #2381, round 3. @see notRecordedReason. Optional for {@link keepAliveFailed}'s reason. */
+    readonly storage?: string;
+    readonly stopping?: boolean;
+    readonly saveState?: string;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -567,7 +628,9 @@ interface GameTrainerSource {
   /** #2077. @see GameTrainerPort.ridePowerZoneTime. Optional for a source with no recording. */
   powerZoneTime?(threshold: Watts): TimeInZones | undefined;
   /** #1042. @see GameTrainerPort.gameRideEnded */
-  noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
+  /** #2451. @see GameTrainerPort.soloDraftStepped. Optional for a source with no recording. */
+  noteSoloDraft?(reading: SoloDraftState): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -588,6 +651,52 @@ interface GameTrainerSource {
   keepThePlan?(): void;
   /** #1329. @see GameTrainerPort.switchReplansOff. Optional for {@link keepThePlan}'s reason. */
   switchReplansOff?(): void;
+  /**
+   * #2349. @see GameTrainerPort.saveRideRecording, GameTrainerPort.discardRideRecording.
+   * Optional for {@link keepThePlan}'s reason; the ride controller has all four.
+   */
+  armStop?(): void;
+  confirmStop?(): Promise<void>;
+  armDiscard?(): void;
+  confirmDiscard?(): Promise<boolean>;
+}
+
+/**
+ * Why the ride controller refused to start a recording for a game ride — #2381,
+ * round 3. Each is a cause `canStartNewRide` refuses on (`ride/controller.ts`),
+ * and each has the Ride screen's own sentence for the same state
+ * (`views/RideView.tsx` §`StoppedNotice`, §`StorageNotice`).
+ */
+export type GameNotRecordedReason =
+  /** The ride before is stopping, or its save is still running. */
+  | 'still-saving'
+  /** The ride before could not be added to the activities (`saveState` `failed`). */
+  | 'not-saved'
+  /** The device has no room left (`storage` `quota-exceeded`). */
+  | 'device-full'
+  /** The ride before's last checkpoint did not save (`storage` `failed`). */
+  | 'checkpoint-failed';
+
+/**
+ * {@link GameNotRecordedReason} from a ride controller's snapshot — #2381,
+ * round 3. In the Ride screen's own order (`StoppedNotice`): the storage
+ * first, because a ride whose last seconds are only in this tab is the case a
+ * rider must not misread as "wait"; then a save still running; then a save
+ * that failed. `undefined` unless the ride before is stopped — nothing else
+ * makes `recordForRoom` refuse — or where the snapshot says none of these.
+ */
+export function notRecordedReason(snapshot: {
+  readonly phase?: RidePhase;
+  readonly storage?: string;
+  readonly stopping?: boolean;
+  readonly saveState?: string;
+}): GameNotRecordedReason | undefined {
+  if (snapshot.phase !== 'stopped') return undefined;
+  if (snapshot.storage === 'quota-exceeded') return 'device-full';
+  if (snapshot.storage !== undefined && snapshot.storage !== 'ok') return 'checkpoint-failed';
+  if (snapshot.stopping === true || snapshot.saveState === 'saving') return 'still-saving';
+  if (snapshot.saveState === 'failed') return 'not-saved';
+  return undefined;
 }
 
 /** Whether a source's workout says enough to draw — the ride controller's always does. */
@@ -679,12 +788,20 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       return isDrawable(workout) ? workout : undefined;
     },
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
-    gameRideEnded: (outcome) => {
-      controller?.noteGameRideEnded(outcome);
+    gameRideEnded: (outcome, drafted) => {
+      controller?.noteGameRideEnded(outcome, drafted);
+    },
+    soloDraftStepped: (draft) => {
+      controller?.noteSoloDraft?.(draft);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
-    // #1221: offered only where something can record. @see GameTrainerPort.recordGameRide
+    // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide
     ...(recordFor === undefined ? {} : { recordGameRide: () => recordFor() }),
+    // #2381, round 3: why it refused, from the same controller.
+    whyNotRecording: () => {
+      const snapshot = controller?.getSnapshot();
+      return snapshot === undefined ? undefined : notRecordedReason(snapshot);
+    },
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
     },
@@ -719,6 +836,32 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? controller?.powerZoneTime?.(threshold)
         : undefined;
+    },
+    rideRecording: () => {
+      // #2349: the phase and the count from one snapshot.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? { savable: (snapshot.sampleCount ?? 0) > 0 }
+        : undefined;
+    },
+    saveRideRecording: async () => {
+      const phase = controller?.getSnapshot().phase;
+      if (controller === undefined || phase === undefined || !rideInProgress(phase)) {
+        return;
+      }
+      // The game's question was the two presses; these are the controller's
+      // own two steps, so its guard and its order of release still hold.
+      controller.armStop?.();
+      await controller.confirmStop?.();
+    },
+    discardRideRecording: async () => {
+      const phase = controller?.getSnapshot().phase;
+      if (controller === undefined || phase === undefined || !rideInProgress(phase)) {
+        return true;
+      }
+      controller.armStop?.();
+      controller.armDiscard?.();
+      return (await controller.confirmDiscard?.()) ?? false;
     },
     rideTotals: () => {
       // #2076: the phase and the totals from one snapshot. The same object

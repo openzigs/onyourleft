@@ -253,6 +253,16 @@ export function sceneryReach(kind: SceneryKind, world: DrawnWorld): Reach {
   };
 }
 
+/**
+ * How far from its pivot, in plan, an item of a kind can reach at a scale of
+ * 1: the corner of its {@link sceneryReach} box, which a model's foliage at a
+ * diagonal can stand at. {@link intrudes} lets go on the same figure.
+ */
+export function sceneryPlanRadius(kind: SceneryKind, world: DrawnWorld): number {
+  const reach = sceneryReach(kind, world);
+  return Math.hypot(reach.x, Math.max(-reach.back, reach.front));
+}
+
 /** The solid between the eye and a near plane. @see nearPyramid */
 export interface NearPyramid {
   /** The eye first, then the near rectangle's four corners. */

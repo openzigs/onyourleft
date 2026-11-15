@@ -65,6 +65,7 @@ import type { GameRenderer } from './port';
 import { SoundControls } from './SoundControls';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { deviceAudioMix, webAudioOutput } from './web-audio';
+import { endRideAnswer } from './end-ride-testing';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -365,6 +366,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await press(button('Ride '));
     expect(output.count('suspend')).toBe(0);
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
 
     // The next ride's gesture is untouched: its press resumes, first thing.
@@ -398,6 +400,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await openGame(workoutOwnsIt);
     await press(button('Ride '));
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.count('suspend')).toBe(0);
   });
 
@@ -435,6 +438,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await press(button('Ride '));
     workoutNow = 'finished';
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
   });
 
@@ -445,6 +449,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await press(button('Ride '));
     workoutNow = 'none';
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
   });
 
@@ -454,6 +459,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await openGame(liveWorkout);
     await press(button('Ride '));
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.count('suspend')).toBe(0);
   });
 
@@ -461,6 +467,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     await openGame();
     await press(button('Ride '));
     await press(button('End ride'));
+    await press(endRideAnswer(document, 'End ride'));
     expect(output.calls).toEqual([]);
   });
 });
@@ -493,6 +500,7 @@ describe('a workout — #400', () => {
     lost: undefined,
     refusal: undefined,
     releaseFault: undefined,
+    easedOffTo: undefined,
     ergRescue: undefined,
     ergHeld: undefined,
   };

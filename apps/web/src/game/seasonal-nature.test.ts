@@ -16,6 +16,9 @@
  * renders a frame — the realistic browser spec draws the dates.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -28,19 +31,27 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { glslFunction, type GlslValue } from './glsl-testing';
 import { qualitySettings } from './quality';
 import { seasonOn, type CalendarDay } from './season';
 import {
   AUTUMN_HUE_DEGREES,
   prepareRealisticShape,
+  MappedBuildingBelt,
+  RealisticStructureBelts,
   RealisticVegetationBelt,
   ScatterBelt,
+  shadedByWeather,
   threeGameRenderer,
   turnsInAutumn,
+  VillageHouseBelt,
   type RealisticShape,
 } from './three-renderer';
-import { routeHemisphere, routeLatitudeMagnitude } from './world';
+import { mappedBuildingsOf } from './mapped-buildings';
+import type { StructureSurface } from './realistic-assets';
+import { WeatherShading } from './weather-look';
+import { routeHemisphere, routeLatitudeMagnitude, type WorldStyle } from './world';
 
 /** A geometry three built, taken off a belt so this file names no `three` type. */
 function aGeometry(): NonNullable<ReturnType<ScatterBelt['meshesOf']>[number]>['geometry'] {
@@ -135,6 +146,64 @@ function compiled(material: unknown): {
       '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
     fragmentShader:
       '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+  };
+  (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
+    shader,
+    undefined,
+  );
+  return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+}
+
+/** Every surface a realistic structure wears. */
+const STRUCTURE_SURFACES: readonly StructureSurface[] = [
+  'brick',
+  'roof-tiles',
+  'slate',
+  'stone',
+  'planks',
+  'corrugated',
+  'hedge',
+  'paving',
+  'render',
+  'concrete',
+  'flat-roof',
+  'painted',
+  'glass',
+];
+
+/** A route's world in daylight, its ground green. */
+const GREEN_WORLD: WorldStyle = {
+  skyColour: 0x6fa8dc,
+  groundColour: 0x6a8f4a,
+  horizonColour: 0xc9dbe8,
+  fogDensity: 0.002,
+  sun: { x: -0.5, y: 0.64, z: 0.58, ambient: 0.55, direct: 1.1 },
+  snow: { bareColour: 0x6a8f4a, aboveSnowMetres: -2000, winterLoweringMetres: 0 },
+};
+
+/** One of three's own lit program stages, includes unresolved, read as text (the seam admits one importer of three). */
+function threeStage(which: 'vertex' | 'fragment'): string {
+  const source = readFileSync(
+    join(
+      import.meta.dirname,
+      '../../node_modules/three/src/renderers/shaders/ShaderLib/meshphysical.glsl.js',
+    ),
+    'utf8',
+  );
+  const found = new RegExp(`export const ${which} = /\\* glsl \\*/\`([\\s\\S]*?)\`;`).exec(source);
+  if (found?.[1] === undefined) throw new Error(`three’s meshphysical has no ${which} stage`);
+  return found[1];
+}
+
+/** A lit material's whole program after its `onBeforeCompile`, and the uniforms it binds. */
+function compiledProgram(material: unknown): {
+  readonly fragment: string;
+  readonly uniforms: Record<string, unknown>;
+} {
+  const shader = {
+    uniforms: {} as Record<string, unknown>,
+    vertexShader: threeStage('vertex'),
+    fragmentShader: threeStage('fragment'),
   };
   (material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }).onBeforeCompile(
     shader,
@@ -286,5 +355,114 @@ describe('autumn turns the broadleaves and leaves the firs green — #1623', () 
       expect(autumn(BARK, 1)).toEqual(BARK);
       expect(autumn(GREY, 1)).toEqual(GREY);
     });
+  });
+});
+
+describe('the realistic plants, hedges and houses go down at dusk with the ground — PR #2522', () => {
+  const SHADE = 'diffuseColor.rgb *= oylWeatherShade;';
+
+  it('shades every plant’s surface after its tint and its autumn, and before its light', () => {
+    const wood = aWood();
+    const bound = new Set<unknown>();
+    for (const shape of [wood.broadleaf, wood.conifer, wood.shrub, wood.rock]) {
+      for (const part of shape.parts) {
+        expect(shadedByWeather(part.material)).toBe(true);
+        const { fragment, uniforms } = compiled(part.material);
+        expect(fragment).toContain('uniform vec3 oylWeatherShade;');
+        const tint = fragment.indexOf('oylTinted(diffuseColor.rgb, vOylTint)');
+        const autumn = fragment.indexOf('oylAutumnOf(diffuseColor.rgb, oylAutumn)');
+        const shade = fragment.indexOf(SHADE);
+        expect(shade).toBeGreaterThan(tint);
+        expect(shade).toBeGreaterThan(autumn);
+        // Once, on the surface's colour: the light, which three's chunks add later, multiplies it.
+        expect(fragment.split(SHADE)).toHaveLength(2);
+        bound.add(uniforms['oylWeatherShade']);
+      }
+    }
+    // One uniform every plant reads, which the view writes once a frame.
+    expect(bound.size).toBe(1);
+    // The impostors read that same uniform, and the sun's share the ratio takes out.
+    for (const shape of [wood.broadleaf, wood.conifer]) {
+      const impostor = impostorOf(shape);
+      expect(impostor.fragmentShader).toContain(
+        'gl_FragColor.rgb *= oylWeatherShade * oylImpostorSun;',
+      );
+      expect(impostor.fragmentShader.indexOf('oylWeatherShade * oylImpostorSun')).toBeLessThan(
+        impostor.fragmentShader.indexOf('#include <tonemapping_fragment>'),
+      );
+      expect(bound.has(impostor.uniforms['oylWeatherShade'])).toBe(true);
+      expect(impostor.uniforms['oylImpostorSun']?.value).toBeDefined();
+    }
+  });
+
+  it('shades the hedge and every house, procedural, mapped and modelled, through the plants’ one uniform', () => {
+    // The plants' uniform, the one the view writes once a frame.
+    const plants = compiledProgram(aWood().broadleaf.parts[0]?.material).uniforms[
+      'oylWeatherShade'
+    ];
+    expect(plants).toBeDefined();
+    const structures = new RealisticStructureBelts(new Map());
+    const mapped = new MappedBuildingBelt(mappedBuildingsOf([]), new Map());
+    const village = new VillageHouseBelt(undefined);
+    try {
+      structures.update([{ kind: 'hedge', x: 0, y: 0, z: 20, rotation: 0, scale: 1, variant: 0 }], {
+        x: 0,
+        y: 0,
+        z: 0,
+        headingX: 0,
+        headingZ: 1,
+        eyeRoadY: 0,
+        targetRoadY: 0,
+        targetAheadMetres: CAMERA_TARGET_AHEAD_METRES,
+      });
+      const materials: [string, unknown][] = [
+        ['hedge', structures.beltOf('hedge')?.meshesOf('hedge')[0]?.material],
+        ['the village houses’ models', village.mesh.material],
+        ['the mapped buildings’ models', mapped.modelMesh.material],
+      ];
+      for (const surface of STRUCTURE_SURFACES) {
+        const house = structures.beltOf(surface)?.meshesOf('building')[0]?.material;
+        if (house !== undefined) materials.push([`a ${surface} house`, house]);
+        const footprint = mapped.materialOf(surface);
+        if (footprint !== undefined) materials.push([`a mapped ${surface} building`, footprint]);
+      }
+      // Non-vacuity: the walls, the roofs and the glass of both kinds of house.
+      expect(materials.length).toBeGreaterThan(12);
+      for (const [name, material] of materials) {
+        expect(material, name).toBeDefined();
+        expect(shadedByWeather(material as never), name).toBe(true);
+        const { fragment, uniforms } = compiledProgram(material);
+        const shade = fragment.indexOf(SHADE);
+        // After the house's own tint, and once: the light, added later, multiplies it.
+        expect(shade, name).toBeGreaterThan(
+          fragment.indexOf('oylTinted(diffuseColor.rgb, vOylTint)'),
+        );
+        expect(fragment.split(SHADE), name).toHaveLength(2);
+        expect(fragment.indexOf(SHADE), name).toBeLessThan(
+          fragment.indexOf('#include <lights_fragment_begin>'),
+        );
+        expect(uniforms['oylWeatherShade'], name).toBe(plants);
+      }
+    } finally {
+      structures.dispose();
+      mapped.dispose();
+      village.dispose();
+    }
+  });
+
+  it('writes into that uniform a shade at dusk and none in clear weather', () => {
+    // What the view writes into the one uniform every frame. @see WeatherShading
+    const shading = new WeatherShading();
+    for (const weather of [undefined, { dusk: false, rain: false }, { dusk: false, rain: true }]) {
+      shading.update(GREEN_WORLD, weather);
+      expect(shading.shade).toEqual([1, 1, 1]);
+    }
+    for (const weather of [
+      { dusk: true, rain: false },
+      { dusk: true, rain: true },
+    ]) {
+      shading.update(GREEN_WORLD, weather);
+      for (const channel of shading.shade) expect(channel).toBeLessThan(0.7);
+    }
   });
 });

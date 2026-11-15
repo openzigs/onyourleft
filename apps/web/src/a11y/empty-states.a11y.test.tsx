@@ -58,7 +58,17 @@ describe('#943 — every empty state renders through design/EmptyState.tsx', () 
   it('declares at least the seven screens #943 names', () => {
     const declared = ALL_ROUTES.filter((route) => EMPTY_STATES[route.id].kind === 'empty-state');
     expect(declared.map((route) => route.id).sort()).toEqual(
-      ['activities', 'analysis', 'devices', 'game', 'routes', 'segments', 'workouts'].sort(),
+      [
+        'activities',
+        'analysis',
+        'devices',
+        'game',
+        // #2292: the lap race's course picker, with no saved route to race on.
+        'lap-race-courses',
+        'routes',
+        'segments',
+        'workouts',
+      ].sort(),
     );
   });
 

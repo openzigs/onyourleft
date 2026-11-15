@@ -60,8 +60,8 @@ function ridable(id: string, name: string, attempts: number, rise: number): Rida
 }
 
 const ROUTES: readonly RidableRoute[] = [
-  ridable('a', 'Box Hill', 0, 40),
-  ridable('b', 'Ditchling', 3, 120),
+  ridable('a', 'Quarry climb', 0, 40),
+  ridable('b', 'Reservoir road', 3, 120),
 ];
 
 const NOTICES = {
@@ -207,7 +207,7 @@ describe('#940 — the order of the notices and Ride', () => {
     const asking = text.indexOf('Asking your trainer for control');
     expect(asking).toBeGreaterThanOrEqual(0);
     expect(text).not.toContain(NOTICES.trainerPromise);
-    expect(asking).toBeLessThan(text.indexOf('Ride Box Hill'));
+    expect(asking).toBeLessThan(text.indexOf('Ride Quarry climb'));
     expect(rideButton(tree.container).getAttribute('aria-disabled')).toBe('true');
   });
 
@@ -249,12 +249,12 @@ describe('#940 — the route cards', () => {
     expect(group).toHaveLength(ROUTES.length);
     expect(new Set(group.map((radio) => radio.name)).size).toBe(1);
     expect(group.map((radio) => radio.checked)).toEqual([true, false]);
-    expect(rideButton(tree.container).textContent).toBe('Ride Box Hill');
+    expect(rideButton(tree.container).textContent).toBe('Ride Quarry climb');
 
     await activateWithKeyboard(group[1] as HTMLInputElement);
     await settle();
     expect(radios(tree.container).map((radio) => radio.checked)).toEqual([false, true]);
-    expect(rideButton(tree.container).textContent).toBe('Ride Ditchling');
+    expect(rideButton(tree.container).textContent).toBe('Ride Reservoir road');
   });
 
   it('starts the CHOSEN route, with the ghost only where there is an attempt', async () => {

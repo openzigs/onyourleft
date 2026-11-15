@@ -36,10 +36,12 @@
  */
 
 import {
+  kilocalories,
   metres,
   seconds,
   unixSeconds,
   watts,
+  type Kilocalories,
   type Metres,
   type Seconds,
   type UnixSeconds,
@@ -188,6 +190,13 @@ export interface ImportedRide {
   readonly distance: Metres;
   readonly hasPosition: boolean;
   readonly averagePower: Watts | undefined;
+  /**
+   * The energy the file says the rider spent — #2435: a TCX whose every lap
+   * carries `Calories`, their sum. `undefined` for any other file, which then
+   * gets the estimate a recorded ride gets (`import-batch.ts` §`storeRide`).
+   * @see statedCaloriesOf
+   */
+  readonly statedCalories: Kilocalories | undefined;
   readonly sampleInterval: Seconds;
   readonly sampleCount: number;
   readonly channels: StreamChannels;
@@ -258,6 +267,8 @@ function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
     statedElapsedTime: session?.totalElapsedTime,
     statedMovingTime: session?.totalTimerTime,
     statedDistance: session?.totalDistance,
+    // #2436 reads FIT's `total_calories`, once a lawfully held file shows it.
+    statedCalories: undefined,
     statedLaps: result.activity.laps.map((lap, ordinal) =>
       statedLapOfFit(lap, kinds?.[ordinal] ?? 'lap'),
     ),
@@ -354,6 +365,7 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
     statedElapsedTime: undefined,
     statedMovingTime: statedMovingTimeOf(result.activity),
     statedDistance: statedDistanceOf(result.activity),
+    statedCalories: statedCaloriesOf(result.activity),
     statedLaps: result.activity.laps.map((lap) => ({
       startedAt: lap.startTime ?? lap.points[0]?.timestamp,
       // ⚠️ **A TCX lap's one time is its MOVING time, and its end is where
@@ -472,6 +484,26 @@ function statedDistanceOf(activity: TrackActivity): Metres | undefined {
 }
 
 /**
+ * The ride's calories, as a TCX file states them: its laps' `Calories` added
+ * up — #2435. GPX has no element for them, so a GPX file states none.
+ *
+ * ⚠️ **Only when EVERY lap states one.** The schema makes the element
+ * required, so a lap without it is one whose figure was dropped — a value the
+ * reader refused (`Lap/Calories`'s fault) or a writer that left it out, as
+ * this client does for a ride with no estimate. A sum that skipped it would
+ * be a figure short by a lap, shown as the file's; with none the ride gets
+ * the estimate a ride with no stated figure gets. A `0` is a figure, and
+ * counts.
+ */
+function statedCaloriesOf(activity: TrackActivity): Kilocalories | undefined {
+  const { laps } = activity;
+  if (laps.length === 0 || laps.some((lap) => lap.calories === undefined)) {
+    return undefined;
+  }
+  return kilocalories(laps.reduce((sum, lap) => sum + (lap.calories ?? 0), 0));
+}
+
+/**
  * What a split of a file is — #1320, from #1321's mark. Every lap of a file
  * that carries no mark is a `lap`.
  */
@@ -494,6 +526,7 @@ interface RideInput {
   readonly statedElapsedTime: Seconds | undefined;
   readonly statedMovingTime: Seconds | undefined;
   readonly statedDistance: Metres | undefined;
+  readonly statedCalories: Kilocalories | undefined;
   readonly statedLaps: readonly StatedLap[];
   /** Whether this file's laps are listed at all. @see lapsWithin */
   readonly listsLaps: boolean;
@@ -656,6 +689,7 @@ function rideOf(input: RideInput): ImportedRide {
     distance,
     hasPosition,
     averagePower: powerSamples === 0 ? undefined : watts(Math.round(powerTotal / powerSamples)),
+    statedCalories: input.statedCalories,
     sampleInterval: IMPORT_SAMPLE_INTERVAL,
     sampleCount,
     // The one cast, and it relates nothing: every entry was written by `put`

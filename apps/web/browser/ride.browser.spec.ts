@@ -97,7 +97,16 @@
  *   (#789), a room ride's HUD (#1356), a rider near (#1358), a room ride with
  *   sounds on (#1398), #1407, and sounds beside a side camera (#1409);
  * - **`ride-delivery.browser.spec.ts`**: a Delivery round's HUD and throw
- *   control at its start and nearly over (#1816), a sixth file since.
+ *   control at its start and nearly over (#1816), a sixth file since;
+ * - **`ride-conditions.browser.spec.ts`**, a seventh since #2376 and the
+ *   second half of what was here: a workout eased (#585), sounds on, a side
+ *   camera paired (#551), a standing notice once it is put away (#437), the
+ *   cull, safe areas, #439's insets, #1441's gesture bar, a laptop's window
+ *   and the end of a ride's steps. This file had grown back to 372 cases and
+ *   598 to 637 s in one worker on the slower runners, most of a browser
+ *   shard's 720 s stop on its own (docs/agents/ci.md §4c "Five browser shards
+ *   — #2376"); a `§"…"` reference elsewhere to one of those sections under
+ *   this file's name now names that one.
  *
  * What more than one of them reads — the viewports, `openRide`, the
  * measuring and both-ways helpers — is `ride-stage.ts`, unchanged but for
@@ -107,7 +116,6 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
 import {
   SUBPIXEL_TOLERANCE,
   MINIMUM_TIER_RATIO,
@@ -115,6 +123,7 @@ import {
   type Viewport,
   OVERLAY_VIEWPORTS,
   STACKED_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
   openRide,
   sharedRide,
   measure,
@@ -129,26 +138,145 @@ import {
   ANCHORED,
   bothWays,
   MOVING_TIME_SPARE_PIXELS,
-  easedCollisions,
-  EASED_RIDER_CLEARANCE_PIXELS,
-  noticeText,
   CLOCK_READING,
   clockInTheClockRow,
   gradientInPrimary,
   RIDE_TOTAL_READINGS,
   rideTotalsDrawn,
-  LAPTOP_VIEWPORTS,
-  roomGivesWay,
+  soloDraftDrawn,
+  windGivesWayToTheDraft,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 import { PLAN_SMALLEST_PIXELS } from '../src/game/hud/plan';
-import { workoutRescueText } from '../src/workout/rescue-text';
 
-import type { Box, StageItem, StageMeasurement } from './ride-harness';
+import type { Box, StageMeasurement } from './ride-harness';
 
 /** The route panel's gap on an upright phone, `--oyl-space-sm` (#2075). */
 const ROUTE_PANEL_GAP_PIXELS = 8;
+
+/**
+ * SC 1.4.3's large text, in CSS pixels: 18 pt. #2291's band colours are 3:1
+ * pairs on the HUD's surface, which carry text only this size or larger.
+ */
+const LARGE_TEXT_PIXELS = 24;
+
+/**
+ * What Chromium paints the gradient's digits and sign in — #2291 — and what
+ * its band's token resolves to, read off the custom property rather than
+ * typed here, so the assertion is "the digits are THEIR band's colour".
+ */
+async function gradientPaint(page: Page): Promise<{
+  band: string;
+  digits: { colour: string; size: number } | undefined;
+  sign: string | undefined;
+  ink: string;
+  token: string;
+}> {
+  return page.evaluate(() => {
+    const field = document.querySelector('.oyl-hud__fields--primary [data-grade-band]');
+    if (field === null) throw new Error('no banded gradient on the stage');
+    const band = field.getAttribute('data-grade-band') ?? '';
+    // A custom property resolves to its hex; a probe's `color` is how Chromium spells it.
+    const probe = document.createElement('span');
+    probe.style.color = `var(--oyl-color-hud-grade-${band})`;
+    field.append(probe);
+    const token = window.getComputedStyle(probe).color;
+    probe.style.color = 'var(--oyl-color-hud-ink)';
+    const ink = window.getComputedStyle(probe).color;
+    probe.remove();
+    const digits = field.querySelector('.oyl-hud__digits');
+    const sign = field.querySelector('.oyl-hud__sign');
+    return {
+      band,
+      digits:
+        digits === null
+          ? undefined
+          : {
+              colour: window.getComputedStyle(digits).color,
+              size: Number.parseFloat(window.getComputedStyle(digits).fontSize),
+            },
+      sign: sign === null ? undefined : window.getComputedStyle(sign).color,
+      ink,
+      token,
+    };
+  });
+}
+
+/** The #2291 case, shared by the overlay and the stacked layouts. */
+async function expectGradientInItsBand(page: Page): Promise<void> {
+  const paint = await gradientPaint(page);
+  const how = JSON.stringify(paint);
+  expect(paint.digits, how).toBeDefined();
+  expect(paint.digits?.colour, how).toBe(paint.token);
+  // Large text wherever it is drawn, so the band's 3:1 is the pair it needs.
+  expect(paint.digits?.size ?? 0, how).toBeGreaterThanOrEqual(
+    LARGE_TEXT_PIXELS - SUBPIXEL_TOLERANCE,
+  );
+  // The sign, small text, keeps the ink.
+  if (paint.sign !== undefined) expect(paint.sign, how).toBe(paint.ink);
+}
+
+/**
+ * The #2075 case, shared by the overlay viewports and #2259's laptop windows:
+ * the road ahead the route panel's full width and taller than the whole
+ * route's strip, on its own row under it — or, on a phone, upright or on its
+ * side, beside the strip at its height (`theme.css` §"THE ROAD AHEAD"); and
+ * upright the plan view a column beside the two strips, exactly the route
+ * panel's gap from the road ahead. Both ways (#1120).
+ */
+async function expectRoadAheadInPlace(page: Page, viewport: Viewport): Promise<void> {
+  // A phone, upright or on its side, has no row to give (`theme.css`
+  // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
+  const beside = Math.min(viewport.width, viewport.height) <= 480;
+  const upright = viewport.width < 736 && viewport.height >= 752;
+  for (const [how, seen] of await bothWays(page)) {
+    const whole = named(seen.items, 'the elevation strip');
+    const ahead = named(seen.items, 'the road ahead');
+    const plan = named(seen.items, 'the plan view');
+    const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+    if (route === undefined) throw new Error(`${how}: no route panel`);
+    expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
+    expect(
+      ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+        ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+      `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
+    ).toBe(true);
+    if (beside) {
+      expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
+      expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
+    }
+    if (beside && upright) {
+      // The phone's width: the strips run from the whole route's strip's
+      // start to the plan view's column, and the plan view is no wider
+      // than the box its rider's mark is sized for.
+      expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
+        PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
+      );
+      // #2259: the panel's gap, bounded both ways. Bounded from above only,
+      // a road ahead running under the plan view (a negative gap) passed.
+      const gap = plan.box.left - ahead.box.right;
+      expect(
+        Math.abs(gap - ROUTE_PANEL_GAP_PIXELS),
+        `${how}: ${describeItem(ahead)} ${gap.toFixed(1)} px beside ${describeItem(plan)}`,
+      ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    }
+    if (!beside) {
+      expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
+      expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
+        SUBPIXEL_TOLERANCE,
+      );
+      expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
+    }
+  }
+}
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -175,7 +303,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // #2071: the gradient is the fourth primary reading.
-      expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+      expect(seen.primary).toEqual(['Power (3 s)', 'Cadence', 'Heart rate', 'Gradient']);
       // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
       // and since #1111 the moving time, beside the distance to go; and since
       // #2072 the elapsed time and the clock, beside the moving time.
@@ -189,19 +317,30 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Distance',
         'Climbed',
         'Avg power',
+        // #2434: and the calorie estimate.
+        'Calories',
         // #2077: the rider's effort, after the ride so far.
         'W/kg',
         'Zone',
         'Pacer',
         'Your best',
+        // #2425: the pacer's and the ghost's draft (ADR 0066), on by default.
+        'Draft',
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
       // Twelve readings, the strip, the plan view, the trainer line, two
       // controls and, since #1482, the touch lock — since #2075 the road ahead
       // beside the strip, and since #2076 and #2077 the ride so far and the
-      // rider's effort, where they are drawn.
-      expect(seen.items).toHaveLength(rideTotalsDrawn(viewport) ? 24 : 19);
+      // rider's effort, where they are drawn. And since #2078 the recent
+      // graph, where it is drawn.
+      // And since #2434 the calorie estimate. And since #2425 a solo ride's
+      // draft, drawn on a tablet only (`theme.css` §"A SOLO RIDE'S DRAFT, ON A
+      // TABLET ONLY"), so a phone draws as many as before, and a tablet from
+      // 50 rem tall draws it in the wind's place (§"the wind gives way to it").
+      expect(seen.items).toHaveLength(
+        rideTotalsDrawn(viewport) ? (windGivesWayToTheDraft(viewport) ? 26 : 27) : 19,
+      );
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -416,7 +555,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
           how,
         ).toEqual([]);
         // In the primary list in the document, wherever it is drawn.
-        expect(seen.primary, how).toEqual(['Power', 'Cadence', 'Heart rate', 'Gradient']);
+        expect(seen.primary, how).toEqual(['Power (3 s)', 'Cadence', 'Heart rate', 'Gradient']);
       }
     });
 
@@ -433,57 +572,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
     test('the road ahead is the route panel’s width and taller, or beside the strip on a phone — #2075', async ({
       browser,
     }) => {
-      const page = await sharedRide(browser, viewport);
-      // A phone, upright or on its side, has no row to give (`theme.css`
-      // §"THE ROAD AHEAD"); upright, the plan view is a column beside them.
-      const beside = Math.min(viewport.width, viewport.height) <= 480;
-      const upright = viewport.width < 736 && viewport.height >= 752;
-      for (const [how, seen] of await bothWays(page)) {
-        const whole = named(seen.items, 'the elevation strip');
-        const ahead = named(seen.items, 'the road ahead');
-        const plan = named(seen.items, 'the plan view');
-        const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
-        if (route === undefined) throw new Error(`${how}: no route panel`);
-        expect(ahead.onTop, `${how}: ${describeItem(ahead)}`).toBe(true);
-        expect(
-          ahead.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
-            ahead.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
-          `${how}: ${describeItem(ahead)} in ${describeItem(route)}`,
-        ).toBe(true);
-        if (beside) {
-          expect(Math.abs(ahead.box.top - whole.box.top), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.height - whole.box.height), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.left, how).toBeGreaterThan(whole.box.right - SUBPIXEL_TOLERANCE);
-          expect(ahead.box.width, how).toBeGreaterThan(whole.box.width);
-        }
-        if (beside && upright) {
-          // The phone's width: the strips run from the whole route's strip's
-          // start to the plan view's column, and the plan view is no wider
-          // than the box its rider's mark is sized for.
-          expect(plan.box.width, `${how}: ${describeItem(plan)}`).toBeLessThanOrEqual(
-            PLAN_SMALLEST_PIXELS + SUBPIXEL_TOLERANCE,
-          );
-          const gap = plan.box.left - ahead.box.right;
-          expect(
-            gap,
-            `${how}: ${describeItem(ahead)} beside ${describeItem(plan)}`,
-          ).toBeLessThanOrEqual(ROUTE_PANEL_GAP_PIXELS + SUBPIXEL_TOLERANCE);
-        }
-        if (!beside) {
-          expect(ahead.box.top, how).toBeGreaterThan(whole.box.bottom - SUBPIXEL_TOLERANCE);
-          expect(Math.abs(ahead.box.left - whole.box.left), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(Math.abs(ahead.box.width - whole.box.width), how).toBeLessThanOrEqual(
-            SUBPIXEL_TOLERANCE,
-          );
-          expect(ahead.box.height, how).toBeGreaterThan(whole.box.height);
-        }
-      }
+      await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
     });
 
     /**
@@ -491,6 +580,34 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * height as the engine draws it, so a descent or a flat stretch is as
      * readable as a climb. Read off each band's own box.
      */
+    test('the gradient’s digits are its band’s colour, at a large-text size — #2291', async ({
+      browser,
+    }) => {
+      await expectGradientInItsBand(await sharedRide(browser, viewport));
+    });
+
+    /**
+     * #2291: the whole route's strip is shaded by its grade bands, each a
+     * column clipped to the route's shape — so each band's box is inside the
+     * strip's, and the bands together span it.
+     */
+    test('the whole route’s strip is drawn in its grade bands — #2291', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
+      const read = await page.evaluate(() => {
+        const strip = document.querySelector('.oyl-hud__profile-svg');
+        if (strip === null) throw new Error('no elevation strip on the stage');
+        const box = strip.getBoundingClientRect();
+        const runs = [...strip.querySelectorAll('.oyl-hud__profile-run')].map((run) => {
+          const each = run.getBoundingClientRect();
+          return { band: run.getAttribute('data-band') ?? '', left: each.left, right: each.right };
+        });
+        return { left: box.left, right: box.right, runs };
+      });
+      expect(read.runs.length).toBeGreaterThan(0);
+      expect(read.runs[0]?.left ?? Number.NaN).toBeCloseTo(read.left, 0);
+      expect(read.runs.at(-1)?.right ?? Number.NaN).toBeCloseTo(read.right, 0);
+    });
+
     test('every band on the road ahead is the strip’s full height — #2075', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
       const read = await page.evaluate(() => {
@@ -853,12 +970,69 @@ for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
 }
 
 /**
+ * #2259 (the review of #2216) — THE ROAD AHEAD ON A SCREEN 30 TO 47 REM TALL.
+ * Its own row under the whole route's strip is the default outside a phone's
+ * two layouts (`theme.css` §"THE ROAD AHEAD"), so a laptop's window and the
+ * middle corners layout draw it too, and none of the overlay viewports above
+ * is that tall. The #2075 case, at #2034's three laptop windows and #1169's
+ * three, which share #1169's page; ride-conditions.browser.spec.ts §"#2034"
+ * holds every panel there clear of the leaning rider and of each other.
+ */
+for (const viewport of [...LAPTOP_VIEWPORTS, ...MIDDLE_CORNERS_VIEWPORTS]) {
+  test(`#2259 the road ahead is the route panel’s width and taller, on its own row — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    await expectRoadAheadInPlace(await sharedRide(browser, viewport), viewport);
+  });
+}
+
+/**
  * #2076 — the ride so far, and since #2077 the rider's W/kg and zone after it:
  * DRAWN on a tablet and where the HUD stacks, inside
  * the secondary panel, uncovered and over no other reading; GIVEN WAY by clip
  * on a phone's overlay, and still in the secondary list in #94's order, where
  * a screen reader meets it (`theme.css` §"THE RIDE SO FAR"). Both ways (#1120).
  */
+/**
+ * #2078 — the last ten minutes of power and heart rate: in the route panel at
+ * its full width, uncovered and on the stage on a tablet, drawn where the HUD
+ * stacks, and not drawn on a phone's overlay (`theme.css` §"THE LAST TEN
+ * MINUTES"). Both ways (#1120). Every other case here holds the route panel
+ * clear of the leaning rider and of every other panel with the graph in it.
+ */
+for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+  test(`#2078 the recent graph is in the route panel where there is room for it — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    for (const [how, seen] of await bothWays(page)) {
+      if (!rideTotalsDrawn(viewport)) {
+        expect(seen.givenWay, how).toContain('the recent graph');
+        expect(
+          seen.items.map((each) => each.name),
+          how,
+        ).not.toContain('the recent graph');
+        continue;
+      }
+      const graph = named(seen.items, 'the recent graph');
+      const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
+      if (route === undefined) throw new Error(`${how}: no route panel`);
+      expect(graph.box.height, `${how}: ${describeItem(graph)}`).toBeGreaterThan(40);
+      expect(
+        graph.box.left >= route.box.left - SUBPIXEL_TOLERANCE &&
+          graph.box.right <= route.box.right + SUBPIXEL_TOLERANCE &&
+          graph.box.bottom <= route.box.bottom + SUBPIXEL_TOLERANCE,
+        `${how}: ${describeItem(graph)} in ${describeItem(route)}`,
+      ).toBe(true);
+      if (!STACKED_VIEWPORTS.includes(viewport)) {
+        expect(inside(graph.box, viewport) && graph.onTop, `${how}: ${describeItem(graph)}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+}
+
 for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
   test(`#2076 the ride so far is drawn where there is a row for it — ${viewport.name}`, async ({
     browser,
@@ -872,7 +1046,8 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         (each.textContent ?? '').replace(/\s+/g, ' ').trim(),
       ),
     );
-    expect(values).toEqual(['199.9 km', '4850 m', '425 W']);
+    // #2434: and the calorie estimate, with its basis on the line under it.
+    expect(values).toEqual(['199.9 km', '4850 m', '425 W', '≈ 9999 kcal estimate from power']);
     // #2077: the zone of the harness's 342 W over the rider's own 250 W
     // threshold, its number and name, and this ride's time in all seven zones.
     const zone = await page.evaluate(() => {
@@ -881,18 +1056,69 @@ for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
         reads: (field?.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
         swatch: field?.querySelector('.oyl-hud__zone-swatch--6') !== null,
         parts: field?.querySelectorAll('.oyl-hud__zone-bar-part').length ?? 0,
+        // #2384: and the zone strip, zone 6 lit and named in words.
+        lit: field?.querySelector('.oyl-hud__zone-strip')?.getAttribute('data-oyl-zone-lit'),
+        named: field?.querySelector('.oyl-hud__zone-strip')?.getAttribute('aria-label'),
       };
     });
-    expect(zone).toEqual({ reads: '6 Anaerobic', swatch: true, parts: 7 });
+    // #2384: and drawn, not merely present: the attributes above are React's
+    // whatever the CSS does, so read the boxes. A strip `display: none`, or
+    // squeezed to nothing by the row's flex, has no width; the lit segment is
+    // taller than an unlit one.
+    const boxes = await page.evaluate(() => {
+      const strip = document.querySelector('.oyl-hud__field--effort .oyl-hud__zone-strip');
+      const lit = strip
+        ?.querySelector('.oyl-hud__zone-strip-segment--lit')
+        ?.getBoundingClientRect();
+      const unlit = strip
+        ?.querySelector('.oyl-hud__zone-strip-segment:not(.oyl-hud__zone-strip-segment--lit)')
+        ?.getBoundingClientRect();
+      return {
+        width: strip?.getBoundingClientRect().width ?? 0,
+        lit: lit?.height ?? 0,
+        unlit: unlit?.height ?? 0,
+      };
+    });
+    // The effort field is clipped away with the totals on a phone's corners
+    // layout, so the boxes are read where the totals are drawn.
+    if (rideTotalsDrawn(viewport)) {
+      expect(boxes.width, 'the strip is drawn at a width').toBeGreaterThan(30);
+      expect(boxes.unlit, 'an unlit segment is drawn').toBeGreaterThan(0);
+      expect(boxes.lit, 'the lit segment stands taller').toBeGreaterThan(boxes.unlit);
+    }
+    expect(zone).toEqual({
+      reads: '6 Anaerobic',
+      swatch: true,
+      parts: 7,
+      lit: '6',
+      named: 'Zone 6 of 7: Anaerobic',
+    });
     for (const [how, seen] of await bothWays(page)) {
       expect(seen.secondary, how).toEqual(
-        expect.arrayContaining(['Distance', 'Climbed', 'Avg power']),
+        expect.arrayContaining(['Distance', 'Climbed', 'Avg power', 'Calories']),
       );
       if (!rideTotalsDrawn(viewport)) {
-        expect(seen.givenWay, how).toEqual([...RIDE_TOTAL_READINGS]);
+        // #2078: and the recent graph, not drawn on a phone's overlay either;
+        // and since #2425 a solo ride's draft, drawn on a tablet only.
+        expect(seen.givenWay, how).toEqual([
+          ...RIDE_TOTAL_READINGS,
+          'reading: Draft',
+          'the recent graph',
+        ]);
         continue;
       }
-      expect(seen.givenWay, how).toEqual([]);
+      // #2425: a solo ride's draft is drawn on a tablet only (`theme.css`
+      // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY"): 50 rem wide, 47 rem tall.
+      const draftDrawn = soloDraftDrawn(viewport);
+      // And from 50 rem tall the wind gives way to it (§"the wind gives way to
+      // it"), beside the pacer and the ghost.
+      expect(seen.givenWay, how).toEqual(
+        draftDrawn
+          ? windGivesWayToTheDraft(viewport)
+            ? ['reading: Wind']
+            : []
+          : ['reading: Draft'],
+      );
       const panel = seen.panels.find((each) => each.name.includes('oyl-hud__fields--secondary'));
       if (panel === undefined) throw new Error(`${how}: no secondary panel`);
       // Stacked, the readings scroll: drawn, in their panel and over no other
@@ -941,8 +1167,11 @@ for (const viewport of STACKED_VIEWPORTS) {
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Twelve readings since #2072's elapsed time and clock, and the rest as
-      // above — and the ride so far (#2076), drawn where the HUD stacks.
-      expect(seen.items).toHaveLength(24);
+      // above — the ride so far and the rider's effort (#2076, #2077), the
+      // road ahead (#2075) and the recent graph (#2078), drawn where the HUD
+      // stacks. And since #2434 the calorie estimate. A solo ride's draft
+      // (#2425) is drawn on a tablet only.
+      expect(seen.items).toHaveLength(26);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -971,6 +1200,12 @@ for (const viewport of STACKED_VIEWPORTS) {
         expect(inside(item.box, viewport), describeItem(item)).toBe(true);
         expect(item.onTop, describeItem(item)).toBe(true);
       }
+    });
+
+    test('the gradient’s digits are its band’s colour, at a large-text size — #2291', async ({
+      browser,
+    }) => {
+      await expectGradientInItsBand(await sharedRide(browser, viewport));
     });
 
     test('nothing is wider than the viewport', async ({ browser }) => {
@@ -1279,979 +1514,94 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
   return found;
 }
 
-/** The sentence the ride harness's rescue has, whole — as #585 put it on the HUD. */
-const WHOLE_EASED_SENTENCE = workoutRescueText(
-  {
-    kind: 'floor',
-    reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
-  },
-  'game',
-);
-
-/**
- * Put the whole sentence back in the Eased notice on the live page — the HUD
- * as #585 shipped it, before #605 cut it to its headline. Same element, same
- * surface, same cell: only the words change.
+/*
+ * #2425: the solo Draft field is the same height at any draft. Its number is
+ * one or two digits (0 to the gauge's 59), and on the CI runner a two-digit
+ * one put its unit and its number on two lines, so the tier grew a row
+ * between two loads of the same ride (`theme.css` §"its unit is a line of its
+ * own" until its unit became the `%` alone, so #2130's rule that a unit
+ * stays on its number's line holds). Read on the widest HUD at every viewport
+ * that DRAWS the field (a tablet, `soloDraftDrawn`): the number set to 0 and
+ * then to 59, whatever the live draft is, the field's height and the tier's
+ * must not change, and the unit is on the number's line at both. #2472: and
+ * where the field should be drawn and is not, it fails rather than passes.
  */
-async function restoreWholeEasedSentence(page: Page): Promise<void> {
-  await page.evaluate((whole) => {
-    const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
-      (each) => each.textContent?.startsWith('Eased'),
-    );
-    const body = label?.parentElement;
-    if (label === undefined || body === null || body === undefined) {
-      throw new Error('no Eased notice to restore');
-    }
-    body.replaceChildren(label, whole);
-  }, WHOLE_EASED_SENTENCE);
-}
-
-test.describe('a ride with a workout eased — #585', () => {
-  const QUERY = '?rescue=floor';
-
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`the Eased notice, whole and over nothing — ${viewport.name}`, async ({ page }) => {
-      await openRide(page, viewport, QUERY);
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, async () => {
-          // The apparatus: the Eased notice was laid out, with the floor's
-          // sentence in it. Without this every assertion below is true of a ride
-          // with no rescue at all.
-          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-          expect(notice?.box.height ?? 0).toBeGreaterThan(40);
-          const text = await noticeText(page);
-          expect(text).toContain('Eased');
-          expect(text).toContain('Pedalling has stopped');
-          // The road notice gives way to it, control and all — `GameView`
-          // §`roadNotice`.
-          expect(text).not.toContain('workout is driving your trainer');
-          expect(seen.items.some((each) => each.name === 'control: Trainer notice')).toBe(false);
-
-          // On a phone the notice takes the route panel's cell (declared in
-          // `theme.css` §"WHERE THERE IS NO FREE CELL"); on a tablet nothing
-          // gives way. Both are asserted, so neither is true by accident.
-          const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-          const laidOut = seen.panels.filter((each) => each.box.height > 1);
-          expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
-          const plan = named(seen.items, 'the plan view');
-          expect(inside(plan.box, viewport) && plan.onTop).toBe(!onAPhone);
-
-          // Published rather than bounded, for #512's reason: the runner's fonts
-          // are not a Mac's, and these are the margins a longer line eats first.
-          const above = laidOut
-            .filter((each) => each !== notice && each.box.bottom <= (notice?.box.top ?? 0) + 1)
-            .map((each) => (notice?.box.top ?? 0) - each.box.bottom);
-          const rider = riderBox(viewport);
-          console.log(
-            `workout eased — ${viewport.name} — ${how} — notice ${(notice?.box.height ?? 0).toFixed(0)} px ` +
-              `tall; ${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
-              (viewport.height > viewport.width
-                ? `; ${(rider.top - (notice?.box.bottom ?? 0)).toFixed(0)} px above the rider's box`
-                : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
-          );
-
-          expect(easedCollisions(seen, viewport)).toEqual([]);
-          // #605: the ONE sentence, and upright a margin above the rider rather
-          // than a pass. @see EASED_RIDER_CLEARANCE_PIXELS
-          expect(text).not.toContain('comes back by itself');
-          if (viewport.height > viewport.width) {
-            expect(rider.top - (notice?.box.bottom ?? Infinity)).toBeGreaterThanOrEqual(
-              EASED_RIDER_CLEARANCE_PIXELS,
-            );
-          }
-        });
-      }
-    });
-  }
-
-  // #605's control: the whole sentence back in the same notice, at the
-  // viewport #605 was about. It must fall under the clearance again, or the
-  // floor above is being held over a notice that could never have been near
-  // the rider.
-  //
-  // ⚠️ What it models, and how closely (#605's review). It rewrites the live
-  // notice's words and nothing else — same `<p>`, same glyph, same label, same
-  // cell — so it is the HUD as #585 shipped it only if `StatusMessage`'s
-  // plain (no-`more`) markup is what `GameView` still renders, which the
-  // exact-text assertion below and the a11y suite hold. The figure it prints
-  // VARIES BY MACHINE, because the fonts do: 20 px on one Mac, 6 px on the
-  // reviewer's, 2 px on the CI runner. What was measured is that on a given
-  // machine it prints the same figure as the defect itself — this rewrite and
-  // `GameView` rendering the whole sentence (mutation M5) both printed 20 px
-  // at 360×752 on a Mac, with byte-identical notice markup, three runs each.
-  // It is not asserted to match any other machine's figure.
-  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 752)) {
-    test(`the control — the whole sentence comes within ${String(EASED_RIDER_CLEARANCE_PIXELS)} px of the rider — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, QUERY);
-      await restoreWholeEasedSentence(page);
-      const seen = await measure(page);
-      // The whole cell is the one notice, glyph and label and the whole
-      // sentence — nothing added and nothing left over from the headline.
-      expect(await noticeText(page)).toBe(`!Eased: ${WHOLE_EASED_SENTENCE}`);
-      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-      const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
-      console.log(
-        `workout eased, the whole sentence — ${viewport.name} — ${clearance.toFixed(0)} px above the rider's box`,
-      );
-      expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
-    });
-  }
-
-  // The control: the road notice put back beside the Eased one, which is the
-  // HUD as PR #599 first shipped it. On a phone on its side that put *Pause*
-  // and *End ride* below the stage, and upright the cell ran over the rider —
-  // so the same measurement must fail at both. Without it, every case above is
-  // as true of a notice cell the measurement never looked at.
-  for (const viewport of OVERLAY_VIEWPORTS.filter(
-    (each) => each.height === 360 || each.height === 390 || each.height === 752,
-  )) {
-    test(`the control — the road notice beside it does not fit — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, QUERY);
-      // As PR #599 shipped it: the WHOLE Eased sentence, which #605 cut to its
-      // headline — with the headline alone the two notices together fit a
-      // phone on its side, so this would be a control that could not fail.
-      await restoreWholeEasedSentence(page);
-      await page.evaluate(() => {
-        const eased = document.querySelector('.oyl-hud__notices .oyl-status');
-        if (eased === null) throw new Error('no Eased notice to put the road notice beside');
-        const road = eased.cloneNode(true) as HTMLElement;
-        road.textContent =
-          'The road is not reaching your trainer: A workout is driving your trainer, so the ' +
-          'hills on this route are not being sent to it — two things cannot set the ' +
-          'resistance at once. End the workout on the Ride screen to feel the road instead.';
-        eased.before(road);
-      });
-      const seen = await measure(page);
-      expect(await noticeText(page)).toContain('workout is driving your trainer');
-      expect(easedCollisions(seen, viewport)).not.toEqual([]);
-    });
-  }
-});
-
-/**
- * #400 — a ride with sounds on puts *Mute sounds* and *Sound volume* in the
- * actions panel, which makes it taller. WCAG 2.2 SC 1.4.2 needs both reachable
- * DURING a ride, so they must be on screen, uncovered, at every overlay
- * viewport — and the taller panel must still land on no other panel and not
- * on the rider.
- */
-test.describe('a ride with sounds on', () => {
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`puts the mute and the volume on screen, over nothing — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, '?sounds=on');
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, () => {
-          const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
-          // The apparatus: both controls were rendered. Without this every
-          // assertion below is true of a ride where sounds stayed off.
-          expect(sound.map((each) => each.name)).toEqual([
-            'sound: Mute sounds',
-            'sound: Sound volume',
-          ]);
-          // #512: the mute is ONE line tall, and the room the actions panel has
-          // above it is published — because the first CI run of the 16 rem panel
-          // found the label wrapped on the runner's fonts, the panel taller than
-          // its row, and its bottom 10 px past a 736×360 stage, green on a Mac.
-          // The panel is anchored to the stage's bottom, so what a taller panel
-          // eats is the gap to whatever is above it. Read it off the run rather
-          // than assuming a desktop's fonts are the runner's.
-          const mute = named(seen.items, 'sound: Mute sounds').box;
-          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
-          const above = seen.panels
-            .filter((each) => each.box !== actions && each.box.bottom <= (actions?.top ?? 0) + 1)
-            .map((each) => (actions?.top ?? 0) - each.box.bottom);
-          const headroom = above.length === 0 ? Number.NaN : Math.min(...above);
-          console.log(
-            `sounds on — ${viewport.name} — ${how} — mute ${mute.height.toFixed(0)} px tall; actions panel ` +
-              `${(actions?.height ?? 0).toFixed(0)} px tall with ${Number.isNaN(headroom) ? 'nothing above it' : `${headroom.toFixed(0)} px to the panel above`}`,
-          );
-          expect(mute.height).toBeLessThan(60);
-          const lost = [
-            ...sound,
-            named(seen.items, 'control: Pause'),
-            named(seen.items, 'control: End ride'),
-          ].filter((each) => !inside(each.box, viewport) || !each.onTop);
-          expect(lost.map(describeItem)).toEqual([]);
-
-          const laidOut = seen.panels.filter((each) => each.box.height > 0);
-          expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
-            [],
-          );
-          const collisions: string[] = [];
-          laidOut.forEach((a, index) => {
-            for (const b of laidOut.slice(index + 1)) {
-              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
-            }
-          });
-          expect(collisions).toEqual([]);
-          expect(
-            laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-          ).toEqual([]);
-        });
-      }
-    });
-  }
-});
-
-/**
- * #551 — a ride with a tripod phone paired. `?side=filming` puts the side
- * camera's line and *Stop side camera* in the actions panel, which makes it
- * taller; `?side=lost` puts the lost link in the notice slot, the HUD's
- * exception, and keeps the stop. At every overlay viewport: the line, the
- * stop and the ride's own controls are on screen and uncovered, and no panel
- * lands on another or on the rider.
- */
-function sideCameraCollisions(seen: StageMeasurement, viewport: Viewport): string[] {
-  const laidOut = seen.panels.filter((each) => each.box.height > 1);
-  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
-  laidOut.forEach((a, index) => {
-    for (const b of laidOut.slice(index + 1)) {
-      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
-    }
-  });
-  found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
-  const pressed = ['control: Pause', 'control: End ride', 'control: Lock', 'the side camera stop'];
-  found.push(
-    ...pressed
-      .map((name) => named(seen.items, name))
-      .filter((each) => !inside(each.box, viewport) || !each.onTop)
-      .map(describeItem),
-  );
-  // The stop is the mute's size (`HudPanel.tsx` says why), so it is held to
-  // the mute's floor: SC 2.5.5's 44 × 44.
-  const stop = named(seen.items, 'the side camera stop');
-  if (stop.box.width < 44 - SUBPIXEL_TOLERANCE || stop.box.height < 44 - SUBPIXEL_TOLERANCE) {
-    found.push(`${describeItem(stop)} is smaller than 44 × 44`);
-  }
-  return found;
-}
-
-test.describe('a ride with a side camera paired — #551', () => {
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`filming: the line and its stop fit the actions panel — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, '?side=filming');
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, () => {
-          // The apparatus: the line was rendered, in the actions panel, and has a
-          // box. Without this every assertion below is true of a ride with no
-          // pairing at all.
-          const line = named(seen.items, 'the side camera line');
-          expect(line.box.height, describeItem(line)).toBeGreaterThan(0);
-          expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
-          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-          expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
-          // Published rather than bounded, for #512's reason (§"a ride with sounds
-          // on"): the runner's fonts are not a Mac's, and the room above the
-          // panel is what a taller line would eat first.
-          const above = seen.panels
-            .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
-            .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
-          const rider = riderBox(viewport);
-          console.log(
-            `side camera filming — ${viewport.name} — ${how} — actions panel ` +
-              `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
-              `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}; ` +
-              `rider box ends at y = ${rider.bottom.toFixed(0)}, x ${rider.left.toFixed(0)}–${rider.right.toFixed(0)}; ` +
-              `panel from x = ${(actions?.box.left ?? 0).toFixed(0)}, y = ${(actions?.box.top ?? 0).toFixed(0)}`,
-          );
-
-          expect(sideCameraCollisions(seen, viewport)).toEqual([]);
-        });
-      }
-    });
-
-    test(`lost: the notice and the stop, over nothing — ${viewport.name}`, async ({ page }) => {
-      await openRide(page, viewport, '?side=lost');
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, async () => {
-          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-          expect(notice?.box.height ?? 0).toBeGreaterThan(20);
-          const text = await page.evaluate(
-            () => document.querySelector('.oyl-hud__notices')?.textContent ?? '',
-          );
-          expect(text).toContain('link lost');
-
-          expect(sideCameraCollisions(seen, viewport)).toEqual([]);
-        });
-      }
-    });
-  }
-
-  /**
-   * #576 — sounds on AND a side camera paired. Each passed alone and the two
-   * together did not fit a phone: the actions panel was 228 px on a Mac, ran
-   * off a 736×360 stage and landed on the rider upright. The stage has no
-   * navigation, so a Pause or End ride pushed off it is a ride the rider
-   * cannot leave. Every control is held on screen and uncovered, the mute
-   * and the volume included (WCAG 2.2 SC 1.4.2).
-   */
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    for (const side of ['filming', 'lost'] as const) {
-      test(`with sounds on, ${side}: every control is reachable — ${viewport.name}`, async ({
-        page,
-      }) => {
-        await openRide(page, viewport, `?side=${side}&sounds=on`);
-        for (const [how, seen] of await bothWays(page)) {
-          await test.step(how, () => {
-            const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
-            // The apparatus: both halves were rendered.
-            expect(sound.map((each) => each.name)).toEqual([
-              'sound: Mute sounds',
-              'sound: Sound volume',
-            ]);
-            named(seen.items, 'the side camera stop');
-            const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-            const above = seen.panels
-              .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
-              .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
-            // Published rather than bounded, for #512's reason: the runner's fonts
-            // are not a Mac's. Upright, the room that runs out is the room above
-            // the rider's box, so that margin is printed too.
-            const rider = riderBox(viewport);
-            console.log(
-              `side camera ${side} + sounds on — ${viewport.name} — ${how} — actions panel ` +
-                `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
-                `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
-                (viewport.height > viewport.width
-                  ? `; ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box`
-                  : ''),
-            );
-            // #576, and #1120's fallback for it: on a phone on its side the
-            // row is a panel of its own in the left column, between the top
-            // panels and the bottom-start cell. The room either side of it,
-            // published, because that strip is all the room there is.
-            const row = seen.panels.find((each) => each.name.includes('side-camera-row'));
-            if (row !== undefined) {
-              const column = seen.panels.filter(
-                (each) =>
-                  each !== row && each.box.left < row.box.right && row.box.left < each.box.right,
-              );
-              const over = column
-                .filter((each) => each.box.bottom <= row.box.top + 1)
-                .map((each) => row.box.top - each.box.bottom);
-              const under = column
-                .filter((each) => each.box.top >= row.box.bottom - 1)
-                .map((each) => each.box.top - row.box.bottom);
-              console.log(
-                `side camera ${side} + sounds on — ${viewport.name} — ${how} — the side ` +
-                  `camera's row ${describeItem(row)}; ` +
-                  `${over.length === 0 ? 'nothing above it' : `${Math.min(...over).toFixed(0)} px under the panel above`}; ` +
-                  `${under.length === 0 ? 'nothing below it' : `${Math.min(...under).toFixed(0)} px above the panel below`}`,
-              );
-            }
-            expect([
-              ...sideCameraCollisions(seen, viewport),
-              ...sound
-                .filter((each) => !inside(each.box, viewport) || !each.onTop)
-                .map(describeItem),
-            ]).toEqual([]);
-          });
-        }
-      });
-    }
-  }
-
-  /**
-   * #576's control — put back what the actions panel did before: the side
-   * camera's row stacked inside it, under Pause and End ride and over the
-   * sound row. The same measurement must then fail on a short landscape phone
-   * AND upright, which is #576 reproduced; without this, every case above is
-   * as true of a harness where sounds never came on.
-   */
-  for (const viewport of OVERLAY_VIEWPORTS.filter(
-    (each) => each.height === 360 || each.height === 752,
-  )) {
-    test(`the control — the rows stacked as before #576 do not fit — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, '?side=filming&sounds=on');
-      await page.addStyleTag({
-        content:
-          '.oyl-game--riding .oyl-hud .oyl-hud__actions { flex-flow: column nowrap !important; }' +
-          '.oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__side-camera-row {' +
-          ' position: static !important; margin: 0 !important; padding: 0 !important;' +
-          ' border: 0 !important; width: auto !important; }' +
-          '.oyl-game--riding .oyl-hud .oyl-sound__mute-more { position: static !important;' +
-          ' width: auto !important; height: auto !important; margin: 0 !important;' +
-          ' clip-path: none !important; }',
-      });
-      const seen = await measure(page);
-      // The apparatus: the row really is back inside the panel.
-      expect(seen.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
-      expect(sideCameraCollisions(seen, viewport)).not.toEqual([]);
-    });
-  }
-
-  /**
-   * #1120's control for #576's fallback. On a phone on its side the row is
-   * lifted out of the actions panel by anchor positioning, or — without it —
-   * by grid placement (`theme.css` §"#576 WITHOUT ANCHOR POSITIONING"). With
-   * neither, as `main` had it, the actions panel holds both rows and runs off
-   * the stage: the same measurement must fail at 736×360 and at 844×390 —
-   * where the moving time is not lifted at all, so it is this fallback and no
-   * other that the cases above hold there. Not at 736×480, where `main`'s
-   * panels ended within a pixel of the stage's edge: a control that passes or
-   * fails on a sub-pixel is no control.
-   *
-   * ⚠️ **At 844×390 the ride is a WORKOUT since #2071.** The gradient left the
-   * secondary panel for the primary one, the secondary panel lost a row, and
-   * the actions panel holding both rows ended 5 px inside the stage on the
-   * plain widest ride (it ended 61 px past it on `main`). A running workout
-   * adds the trainer notice's row to the same panel, so without the fallback
-   * it runs 42 px off the stage there, and with it the panel ends inside the
-   * stage. The anchored and the fallback layouts of that same page are
-   * measured first, so the pair still says it is the fallback that holds it.
-   */
-  for (const viewport of OVERLAY_VIEWPORTS.filter(
-    (each) => each.width >= 736 && each.height <= 390,
-  )) {
-    test(`the control — without anchors and without the fallback, the rows do not fit — ${viewport.name}`, async ({
-      page,
-    }) => {
-      const workout = viewport.height === 390;
-      await openRide(page, viewport, `?side=filming&sounds=on${workout ? '&trainer=workout' : ''}`);
-      if (workout) {
-        // The same page fits as it ships, both ways (#1120): the overflow
-        // below is the fallback's to prevent, not the workout's own.
-        for (const [how, seen] of await bothWays(page)) {
-          expect(sideCameraCollisions(seen, viewport), how).toEqual([]);
-        }
-      }
-      const before = await withoutAnchors(page, 'none');
-      // The apparatus: the row is back inside the panel, not a panel of its own.
-      expect(before.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
-      const found = sideCameraCollisions(before, viewport);
-      console.log(
-        `#1120 control, #576 — ${viewport.name} — as main laid it out without anchors: ` +
-          `${found.length === 0 ? 'nothing' : found.join('; ')}`,
-      );
-      expect(found).not.toEqual([]);
-    });
-  }
-
-  /**
-   * #577's review, finding 1 — a lost link that ENDED the pairing. It is
-   * terminal, so it is the actions panel's line and the notice slot is left
-   * free: on a phone that slot is the route panel's cell (#437), and a notice
-   * nothing could act on or retire would have held it for the rest of the
-   * ride. At every overlay viewport: no notice, the route panel's strip and
-   * plan view on screen, the line in the actions panel, and nothing over
-   * anything else.
-   */
-  for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`ended: the line, and the route panel back — ${viewport.name}`, async ({ page }) => {
-      await openRide(page, viewport, '?side=ended');
-      for (const [how, seen] of await bothWays(page)) {
-        await test.step(how, () => {
-          const line = named(seen.items, 'the side camera line');
-          expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
-          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-          expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
-          expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
-          expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
-          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
-            const item = named(seen.items, name);
-            expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
-          }
-
-          const laidOut = seen.panels.filter((each) => each.box.height > 1);
-          const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
-          laidOut.forEach((a, index) => {
-            for (const b of laidOut.slice(index + 1)) {
-              if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
-            }
-          });
-          found.push(
-            ...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-          );
-          expect(found).toEqual([]);
-        });
-      }
-    });
-  }
-
-  // The control for the case above: the same page with the pairing still
-  // OPEN puts the lost link in the notice slot, and on a phone that slot is
-  // the route panel's cell — so the same "the plan view is on screen" must
-  // fail there. Without it, an ended case whose notice rendered somewhere the
-  // measurement never looked would pass as readily as one with no notice.
-  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height === 360)) {
-    test(`the control — an OPEN lost link takes the route cell — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, '?side=lost');
-      const seen = await measure(page);
-      expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(true);
-      const plan = named(seen.items, 'the plan view');
-      expect(inside(plan.box, viewport) && plan.onTop).toBe(false);
-    });
-  }
-
-  // The control: the same measurement over a line made taller than the room
-  // a short landscape phone has for it must fail. Without this, a line the
-  // measurement never looked at would pass as readily as one that fits.
-  test('the control — a line taller than the room there is fails the same measurement', async ({
-    page,
+for (const viewport of OVERLAY_VIEWPORTS.filter(soloDraftDrawn)) {
+  test(`#2425 the solo Draft field keeps its height from one digit to two — ${viewport.name}`, async ({
+    browser,
   }) => {
-    const shortest = OVERLAY_VIEWPORTS.find((each) => each.height === 360) as Viewport;
-    await openRide(page, shortest, '?side=filming');
-    await page.addStyleTag({ content: '.oyl-hud__side-camera { min-height: 12rem; }' });
-    const seen = await measure(page);
-    expect(sideCameraCollisions(seen, shortest)).not.toEqual([]);
-  });
-});
-
-/**
- * #437 — once the notice is put away, the route panel is back.
- *
- * On a phone the open notice takes the route panel's cell (above), which used
- * to be for the whole ride. The rider's *Trainer notice* control puts it away
- * — so does the ride's clock, which the fast suite covers — and then the
- * elevation strip and the plan view must be on screen, whole, over no other
- * panel and not over the rider, with the sentence still in the document.
- */
-test.describe('a ride with a standing notice, once it is put away — #437', () => {
-  const QUERY = '?trainer=workout';
-  // `<= 480`: the short corners layout's `max-height: 30rem` is inclusive.
-  const PHONES = OVERLAY_VIEWPORTS.filter(
-    (each) => Math.min(each.width, each.height) <= 480 && each.height !== 752,
-  );
-
-  for (const viewport of PHONES) {
-    test(`shows the strip and the plan view again — ${viewport.name}`, async ({ page }) => {
-      await openRide(page, viewport, QUERY);
-      const open = await measure(page);
-      // The apparatus: while the notice stands open the route panel is gone —
-      // the state #437 started from — so "it is back" below is a change.
-      expect(open.items.some((each) => each.name === 'the plan view' && each.box.height > 0)).toBe(
-        false,
+    const page = await sharedRide(browser, viewport);
+    const read = await page.evaluate(() => {
+      const field = document.querySelector<HTMLElement>(
+        '.oyl-hud__fields--secondary > .oyl-hud__field--solo-draft',
       );
-
-      await page.getByRole('button', { name: 'Trainer notice' }).click();
-      for (const [how, put] of await bothWays(page)) {
-        await test.step(how, async () => {
-          for (const name of ['the elevation strip', 'the road ahead', 'the plan view']) {
-            const item = named(put.items, name);
-            expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
-            expect(inside(item.box, viewport), describeItem(item)).toBe(true);
-          }
-          const laidOut = put.panels.filter((each) => each.box.height > 1);
-          expect(laidOut).toHaveLength(4);
-          const collisions: string[] = [];
-          laidOut.forEach((a, index) => {
-            for (const b of laidOut.slice(index + 1)) {
-              if (overlap(a.box, b.box)) {
-                collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
-              }
-            }
-          });
-          expect(collisions).toEqual([]);
-          expect(
-            laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-          ).toEqual([]);
-          // The sentence is still there for a screen reader, clipped rather than
-          // removed — `display: none` would take it out of the accessibility tree.
-          const hidden = await page.evaluate(() => {
-            const wrapper = document.querySelector('.oyl-hud__notices');
-            return {
-              text: wrapper?.textContent ?? '',
-              display: wrapper === null ? '' : window.getComputedStyle(wrapper).display,
-              visibility: wrapper === null ? '' : window.getComputedStyle(wrapper).visibility,
-            };
-          });
-          expect(hidden.text).toContain('workout is driving your trainer');
-          expect(hidden.display).not.toBe('none');
-          expect(hidden.visibility).not.toBe('hidden');
-        });
+      const panel = document.querySelector<HTMLElement>('.oyl-hud__fields--secondary');
+      const number = field?.querySelector('dd')?.firstChild;
+      const unit = field?.querySelector('.oyl-hud__unit');
+      if (field == null || panel == null || !(number instanceof Text) || unit == null) {
+        return undefined;
       }
+      const was = number.data;
+      const at = (digits: string) => {
+        number.data = digits;
+        const range = document.createRange();
+        range.selectNodeContents(number);
+        const unitBox = unit.getBoundingClientRect();
+        return {
+          width: field.getBoundingClientRect().width,
+          field: field.getBoundingClientRect().height,
+          panel: panel.getBoundingClientRect().height,
+          numberTop: range.getBoundingClientRect().top,
+          numberBottom: range.getBoundingClientRect().bottom,
+          unitMiddle: (unitBox.top + unitBox.bottom) / 2,
+        };
+      };
+      const one = at('0');
+      const two = at('59');
+      number.data = was;
+      return { one, two };
     });
-
-    test(`the control — the old rule hides the route even when the notice is put away — ${viewport.name}`, async ({
-      page,
-    }) => {
-      await openRide(page, viewport, QUERY);
-      await page.getByRole('button', { name: 'Trainer notice' }).click();
-      await page.evaluate(() => {
-        window.__oylRide?.restoreNoticeTakesTheRoute();
-      });
-      const seen = await measure(page);
-      expect(seen.items.some((each) => each.name === 'the plan view' && each.box.height > 0)).toBe(
-        false,
-      );
-    });
-  }
-});
-
-/**
- * `game/camera.ts` §`WORST_CASE_ASPECT` — the scenery cull is safe up to a
- * frame 6 : 1 and drops visible scenery on a hairpin from 8 : 1. Until #423 that
- * was an argument about how short a window anybody would make; the world is
- * full-bleed now, so it is a `max-width` instead, and this measures it.
- */
-test.describe('the world is never wider than the cull allows', () => {
-  test('pillarboxes a 6.5 : 1 window at 6 : 1', async ({ page }) => {
-    const wide: Viewport = { name: '2600×400', width: 2600, height: 400, unstagedFails: true };
-    await openRide(page, wide);
-    const seen = await measure(page);
-
-    expect(seen.stage?.width).toBe(wide.width);
-    expect(seen.world?.height).toBe(wide.height);
-    expect(seen.world?.width).toBe(6 * wide.height);
-    // Centred, so the pillars are equal.
-    expect(seen.world?.left).toBe((wide.width - 6 * wide.height) / 2);
-  });
-
-  test('the control — an ordinary window is not pillarboxed', async ({ page }) => {
-    const tablet = OVERLAY_VIEWPORTS[0] as Viewport;
-    await openRide(page, tablet);
-    const seen = await measure(page);
-
-    expect(seen.world?.width).toBe(tablet.width);
-    expect(seen.world?.left).toBe(0);
-  });
-});
-
-/**
- * Safe areas — a notch, a gesture bar, a status bar.
- *
- * ⚠️ A headless Chromium reports zero for every `env(safe-area-inset-*)`, so
- * this sets the custom properties Capacitor's Android shell injects
- * (`theme.css` §`--oyl-safe-top` is the chain) and measures the panels moving.
- * It proves the stylesheet honours an inset it is given. It does **not** prove
- * the owner's tablet gives it one — `docs/validation/0002-android-shell-and-
- * game.md` is where that is recorded, by somebody holding the tablet.
- */
-test.describe('safe areas', () => {
-  const TABLET = OVERLAY_VIEWPORTS[0] as Viewport;
-  const INSET = 48;
-
-  test('holds every panel clear of an inset, and runs the world under it', async ({ page }) => {
-    await openRide(page, TABLET);
-    const before = await measure(page);
-    await page.evaluate((pixels) => {
-      window.__oylRide?.setSafeArea(pixels);
-    }, INSET);
-    const after = await measure(page);
-
-    // The control: without an inset the panels sit on the stage's own 8 px
-    // padding, so "clear of 48 px" below is a thing that changed.
-    expect(Math.min(...before.panels.map((each) => each.box.top))).toBeLessThan(INSET);
-
-    for (const panel of after.panels) {
-      expect(panel.box.left, describeItem(panel)).toBeGreaterThanOrEqual(INSET);
-      expect(panel.box.top, describeItem(panel)).toBeGreaterThanOrEqual(INSET);
-      expect(panel.box.right, describeItem(panel)).toBeLessThanOrEqual(TABLET.width - INSET);
-      expect(panel.box.bottom, describeItem(panel)).toBeLessThanOrEqual(TABLET.height - INSET);
-    }
-    // Full-bleed means under the bars: the world is decorative and a world with
-    // a bar cut out of it is not full-bleed.
-    expect(after.world?.width).toBe(TABLET.width);
-    expect(after.world?.height).toBe(TABLET.height);
-  });
-});
-
-/**
- * #439 — the full-bleed ride must not scroll, with edge-to-edge insets applied
- * to the ENGINE (`insets.ts`), not to the page.
- *
- * Measured on the owner's tablet: `scrollHeight` 868 in an 800 px WebView,
- * insets 36 + 32. The stage is `position: fixed`, so a rider did not see the
- * page move — but a drag that missed a control scrolled the document under the
- * HUD. Every viewport the ride is laid out at, with the tablet's own insets:
- * a phone's are different numbers, and the arithmetic that failed is the same.
- */
-test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => {
-  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
-    test(`scrollHeight === innerHeight — ${viewport.name}`, async ({ page }) => {
-      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
-      await openRide(page, viewport);
-      // The apparatus: the insets are really there, or "does not scroll" is a
-      // statement about a desktop browser.
-      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
-
-      const seen = await measure(page);
-      expect(seen.pageOverflow).toBe(0);
-
-      // ⚠️ The control: the shell's old `min-height: 100vh`. The same page must
-      // scroll again, by exactly the two insets — which is #439's 68 px.
-      await page.evaluate(() => {
-        window.__oylRide?.restoreFullHeightShell();
-      });
-      const reverted = await measure(page);
-      expect(reverted.pageOverflow).toBe(
-        PIXEL_TABLET_LANDSCAPE_INSETS.top + PIXEL_TABLET_LANDSCAPE_INSETS.bottom,
-      );
-    });
-  }
-});
-
-/**
- * #1441 — the ride's controls are never under the gesture bar, with the
- * tablet's insets applied to the ENGINE (`insets.ts`) and read back, at every
- * viewport the ride is laid out at: phone and tablet, upright and on its side.
- *
- * `.oyl-hud`'s padding is what holds them clear (`theme.css` §"Safe areas"),
- * and §"safe areas" above proves it moves the panels at one tablet through the
- * custom property. This is the gesture bar's half, through `env()`, at all of
- * them: the bottom of every control is at or above the inset's top edge.
- *
- * ⚠️ The control puts the padding back to the stage's own 8 px, and the
- * actions' sticky edge with it, and a control must then sit inside the inset
- * — or "clear of it" was a layout that never reached the bottom. Measured,
- * the controls end 9 px above the inset at every viewport with the padding and
- * 15 px inside it without.
- *
- * ⚠️ **320×256 too**, the stacked layout at its shortest. Its actions panel
- * is pinned by `position: sticky`, which cannot lift it above the top of
- * `.oyl-hud`, so with the tablet's 68 px of insets and the world at its old
- * 40vh the panel ran out of room: *Pause* and *End ride* ended at 252 of 224.
- * `theme.css` §"The STACKED layout's world gives up what the insets take" is
- * the fix, and the panel that holds the controls is asserted as well as the
- * controls: with the world short of only the bottom inset the controls
- * scraped clear by 4 px while their panel ended 5 px inside the inset.
- * Measured, the controls end 9 px above the inset at every viewport with the
- * fix, and the actions panel exactly at it.
- */
-const WITHOUT_BOTTOM_INSET = `
-  .oyl-game--riding .oyl-hud { padding-bottom: var(--oyl-space-sm) !important; }
-  .oyl-game--riding .oyl-hud__actions { bottom: var(--oyl-space-sm) !important; }
-`;
-
-test.describe('#1441 — the ride’s controls are clear of the gesture bar', () => {
-  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
-    test(`every control ends above the bottom inset — ${viewport.name}`, async ({ page }) => {
-      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
-      await openRide(page, viewport);
-      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
-      const fold = viewport.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
-      const lowestOf = (items: readonly StageItem[]): number =>
-        Math.max(...items.map((each) => each.box.bottom));
-
-      const seen = await measure(page);
-      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
-      expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
-      const lowest = lowestOf(controls);
-      expect(
-        controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
-        'a ride control is under the gesture bar',
-      ).toEqual([]);
-      const actions = seen.panels.filter((each) =>
-        each.name.split(' ').includes('oyl-hud__actions'),
-      );
-      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
-      expect(
-        actions.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
-        'the panel holding the ride controls is under the gesture bar',
-      ).toEqual([]);
-
-      await page.addStyleTag({ content: WITHOUT_BOTTOM_INSET });
-      const reverted = (await measure(page)).items.filter((each) =>
-        each.name.startsWith('control: '),
-      );
-      const revertedLowest = lowestOf(reverted);
-      console.log(
-        `#1441 ${viewport.name}: lowest control ends at ${lowest.toFixed(1)} of ` +
-          `${String(fold)}; without the padding ${revertedLowest.toFixed(1)}`,
-      );
-      expect(
-        revertedLowest,
-        'without the padding the controls stay clear, so the assertion above cannot fail here',
-      ).toBeGreaterThan(fold + 0.5);
-    });
-  }
-
-  /*
-   * The trainer line on TWO lines, whatever the fonts. On the CI runner's
-   * wider glyphs it takes two in the short corners layout's 16 rem actions
-   * panel, and on a Mac one, so the case above passed on a Mac while run
-   * 39323488405 found the panel at [472,181 → 728,329] against a gesture bar
-   * from 328 at 736×360. `min-height: 2lh` is the runner's wrap, set here so a
-   * Mac measures what the runner does: it reproduced that box exactly.
-   *
-   * ⚠️ The control puts back the body's 1.55 leading `theme.css` §"#1441 — the
-   * trainer line at the short corners layout" takes away, and the panel must
-   * then be under the gesture bar again — so the rule is what holds it clear.
-   * Measured on a Mac: the panel ends at 328.0 of 328 with the rule — on the
-   * gesture bar's edge, where `align-self: end` puts it when the column fits —
-   * and at 329.0 without. A pixel is the whole of the fault CI found, so the
-   * control's margin is that pixel and no more; Chromium lays it out the same
-   * on both, which is why the forced wrap reproduced CI's box to the pixel.
-   */
-  const SHORT_CORNERS = OVERLAY_VIEWPORTS.find(
-    (each) => each.width === 736 && each.height === 360,
-  ) as Viewport;
-  const TRAINER_ON_TWO_LINES = `
-    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { min-height: 2lh !important; }
-  `;
-  const BODY_LEADING = `
-    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { line-height: 1.55 !important; }
-  `;
-
-  test(`the actions panel stays clear with the trainer line on two lines — ${SHORT_CORNERS.name}`, async ({
-    page,
-  }) => {
-    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
-    await openRide(page, SHORT_CORNERS);
-    expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
-    await page.addStyleTag({ content: TRAINER_ON_TWO_LINES });
-    const fold = SHORT_CORNERS.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
-    const actionsOf = (seen: StageMeasurement): StageItem => {
-      const actions = seen.panels.filter((each) =>
-        each.name.split(' ').includes('oyl-hud__actions'),
-      );
-      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
-      return actions[0] as StageItem;
-    };
-
-    const seen = await measure(page);
-    const line = named(seen.items, 'the trainer line');
-    // The apparatus: two lines of the leading this case is about, so a
-    // trainer line that went away cannot pass it.
-    expect(line.box.height, 'the trainer line, on two lines').toBeGreaterThan(40);
-    const controls = seen.items.filter((each) => each.name.startsWith('control: '));
-    expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
-    expect(
-      controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
-      'a ride control is under the gesture bar',
-    ).toEqual([]);
-    const panel = actionsOf(seen);
-    expect(
-      panel.box.bottom,
-      `the panel holding the ride controls is under the gesture bar: ${describeItem(panel)}`,
-    ).toBeLessThanOrEqual(fold + 0.5);
-
-    await page.addStyleTag({ content: BODY_LEADING });
-    const reverted = actionsOf(await measure(page));
+    expect(read, 'the solo Draft field is in the document').toBeDefined();
+    if (read === undefined) throw new Error('no solo Draft field');
+    // Drawn here, not given way by clip: a field squeezed to a pixel would
+    // keep its height at any number and prove nothing.
+    expect(read.one.width, 'the solo Draft field is drawn on a tablet').toBeGreaterThan(1);
     console.log(
-      `#1441 ${SHORT_CORNERS.name}, the trainer line on two lines: the actions panel ends at ` +
-        `${panel.box.bottom.toFixed(1)} of ${String(fold)}; at the body's leading ` +
-        `${reverted.box.bottom.toFixed(1)}`,
+      `#2425 the solo Draft field — ${viewport.name}: ${read.one.field.toFixed(1)} px at 0, ${read.two.field.toFixed(1)} px at 59; the tier ${read.one.panel.toFixed(1)} → ${read.two.panel.toFixed(1)} px`,
     );
-    expect(
-      reverted.box.bottom,
-      'at the body’s leading the panel stays clear, so the assertion above cannot fail here',
-    ).toBeGreaterThan(fold + 0.5);
+    expect(read.two.field).toBeCloseTo(read.one.field, 1);
+    expect(read.two.panel).toBeCloseTo(read.one.panel, 1);
+    // On the number's line (#2130) at both: the unit's middle is within the
+    // number's line box, which a unit wrapped under the number is not.
+    for (const each of [read.one, read.two]) {
+      expect(each.unitMiddle).toBeGreaterThan(each.numberTop);
+      expect(each.unitMiddle).toBeLessThan(each.numberBottom);
+    }
   });
-});
-
-/**
- * The owner's ruling of 2026-11-06 (#2034): what a phone's overlay gives way
- * — the ride so far among it — is tied to PHONES, so a laptop's or a
- * desktop's window under 47 rem tall draws it, on a plain ride and in a
- * room, and its layout holds the ride's own invariants there: every reading
- * and control on the stage and uncovered, every panel whole, none over
- * another or over the leaning rider. In a room the pacer, the ghost and the
- * wind give way first under 45 rem tall, and stay in a 1280×720 window; and under 40 rem tall (1024×600), while
- * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
- * FAR AT ARM'S LENGTH").
- */
-/** A room with *Report*'s reasons open, sounds on and a side camera filming. */
-const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
-
-/** Two notices drawn: *Keep the screen on* and the road notice. */
-const TWO_NOTICES = '?keepalive=failed&trainer=workout';
-
-/** #2076's three, which a laptop's window under 40 rem tall gives way to two notices. */
-const RIDE_SO_FAR: readonly string[] = [
-  'reading: Distance',
-  'reading: Climbed',
-  'reading: Avg power',
-];
-
-for (const viewport of LAPTOP_VIEWPORTS) {
-  for (const query of [
-    '',
-    '?room=following',
-    TWO_NOTICES,
-    // A room at its fullest with a side camera's row: `main` itself runs it
-    // off a 1024×600 stage, so it is held where `main` holds it.
-    ...(viewport.height >= 640 ? [SIDE_CAMERA_ROOM] : []),
-  ]) {
-    const state =
-      query === ''
-        ? ''
-        : query === TWO_NOTICES
-          ? ', with two notices drawn'
-          : query === SIDE_CAMERA_ROOM
-            ? ', in a room with Report open and a side camera'
-            : ', in a room';
-    test(`#2034 a laptop's window draws the ride so far${state} — ${viewport.name}`, async ({
-      browser,
-    }) => {
-      const page = await sharedRide(browser, viewport, query);
-      for (const [how, seen] of await bothWays(page)) {
-        const rideSoFarGivesWay = query === TWO_NOTICES && viewport.height < 640;
-        for (const name of RIDE_TOTAL_READINGS) {
-          if (rideSoFarGivesWay && RIDE_SO_FAR.includes(name)) {
-            expect(seen.givenWay, how).toContain(name);
-            continue;
-          }
-          const reading = named(seen.items, name);
-          expect(
-            inside(reading.box, viewport) && reading.onTop,
-            `${how}: ${describeItem(reading)}`,
-          ).toBe(true);
-        }
-        const clipped = seen.items
-          .filter((each) => each.box.width * each.box.height <= 1)
-          .map((each) => each.name);
-        // In a room the pacer, the ghost and the wind give way only where
-        // they do not fit: under 40 rem tall, and under 45 rem with a side
-        // camera's row (1366×657).
-        const givesWay =
-          (query === '?room=following' && roomGivesWay(viewport)) ||
-          (query === SIDE_CAMERA_ROOM && viewport.height < 720);
-        expect(clipped, how).toEqual(
-          givesWay ? ['reading: Pacer', 'reading: Your best', 'reading: Wind'] : [],
-        );
-        const lost = seen.items
-          .filter((each) => !clipped.includes(each.name))
-          .filter((each) => !inside(each.box, viewport) || !each.onTop)
-          .map(describeItem);
-        expect(lost, how).toEqual([]);
-        const rider = riderBox(viewport);
-        const faults: string[] = [];
-        seen.panels.forEach((a, index) => {
-          if (!inside(a.box, viewport)) faults.push(`not whole: ${describeItem(a)}`);
-          if (overlap(a.box, rider)) faults.push(`over the rider: ${describeItem(a)}`);
-          for (const b of seen.panels.slice(index + 1)) {
-            if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
-          }
-        });
-        expect(faults, how).toEqual([]);
-      }
-    });
-  }
 }
 
-/**
- * PR #2220's review: the 1024×600 rule counts only DRAWN notices. Folding the
- * road notice away leaves its wrapper in the cell, visually hidden; with only
- * *Keep the screen on* drawn, the ride so far is drawn again.
+/*
+ * #2472: the wind gives way to a solo ride's draft on a tablet from 50 rem
+ * tall only beside BOTH the pacer and the ghost (`theme.css` §"the wind gives
+ * way to it"), where the row runs out of tracks. With the pacer and the wind
+ * and no ghost the row has room, and the wind is drawn beside the draft.
+ * Pinned, because widening that rule's `:has` broke no other test.
  */
-test('#2034 the folded road notice does not count — the ride so far comes back — a small laptop window — 1024×600', async ({
-  page,
-}) => {
-  const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
-  await openRide(page, viewport, TWO_NOTICES);
-  await expect.poll(async () => (await measure(page)).givenWay).toContain('reading: Distance');
-  await page.getByRole('button', { name: 'Trainer notice' }).click();
-  await expect.poll(async () => (await measure(page)).givenWay).not.toContain('reading: Distance');
-  for (const [how, seen] of await bothWays(page)) {
-    for (const name of RIDE_SO_FAR) {
-      const reading = named(seen.items, name);
-      expect(
-        inside(reading.box, viewport) && reading.onTop,
-        `${how}: ${describeItem(reading)}`,
-      ).toBe(true);
-    }
-  }
-});
+for (const viewport of OVERLAY_VIEWPORTS.filter(windGivesWayToTheDraft)) {
+  test(`#2472 a solo ride with the pacer and no ghost keeps its wind beside the draft — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport, '?ghost=none');
+    const seen = await measure(page);
+    const names = seen.items.map((each) => each.name);
+    // The ride it says it is: the pacer and the draft drawn, and no ghost's gap.
+    expect(names).toEqual(expect.arrayContaining(['reading: Pacer', 'reading: Draft']));
+    expect(
+      names.filter((name) => name.startsWith('reading: Your')),
+      'no ghost',
+    ).toEqual([]);
+    expect(seen.givenWay).not.toContain('reading: Wind');
+    const wind = named(seen.items, 'reading: Wind');
+    expect(wind.box.width * wind.box.height, 'the wind is drawn').toBeGreaterThan(1);
+  });
+}

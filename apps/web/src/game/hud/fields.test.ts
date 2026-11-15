@@ -12,13 +12,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CALORIES_KEY,
   CLOCK_KEY,
+  CRASHED_TEXT,
   DELIVERY_HOUSES_KEY,
+  DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
   ELAPSED_TIME_KEY,
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  POWER_QUALIFIERS,
+  RIDE_CLOCK_LABEL,
   RIDE_TOTAL_KEYS,
   WATTS_PER_KILOGRAM_KEY,
   ZONE_KEY,
@@ -32,6 +37,7 @@ import {
   profileReading,
   readingTier,
   trainerLine,
+  type DeliveryHud,
   type HudInput,
 } from './fields';
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
@@ -45,6 +51,8 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  joules,
+  kilocalories,
   kilograms,
   metres,
   metresPerSecond,
@@ -612,6 +620,31 @@ describe('the gap to whatever the rider is chasing', () => {
       expect(field.value).not.toBe(NO_READING);
     });
 
+    it.each([
+      ['beaten', 'Beaten', 'by you, with its draft'],
+      ['level', 'Matched', 'by you, with its draft'],
+      ['not-beaten', 'Finished', 'ahead of you, with its draft'],
+    ] as const)(
+      'says “with its draft” in words after a drafted %s attempt — #2425, ADR 0066 D-5.1',
+      (outcome, value, detail) => {
+        const field = fieldNamed(
+          {
+            ...baseInput(),
+            chases: [{ to: 'ghost', gap: stillAhead, outcome, drafted: true }],
+          },
+          'gap-ghost',
+        );
+        expect(field.value).toBe(value);
+        expect(field.detail).toBe(detail);
+        // Not drafted reads exactly as before.
+        const undrafted = fieldNamed(
+          { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome, drafted: false }] },
+          'gap-ghost',
+        );
+        expect(undrafted.detail).toBe(detail.replace(', with its draft', ''));
+      },
+    );
+
     it('leaves a live gap alone', () => {
       const field = fieldNamed(
         { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead }] },
@@ -1044,6 +1077,8 @@ describe('which readings are drawn large (#423)', () => {
       'distance',
       'climbed',
       'averagePower',
+      // #2434: and the calorie estimate, the ride so far's last.
+      'calories',
       // #2077: the rider's W/kg (this ride has no threshold, so no zone).
       'wattsPerKilogram',
       'gap-bot',
@@ -1160,6 +1195,25 @@ describe('the room on the HUD — #783', () => {
     expect(keys(true)).toContain('room-draft');
     // The room's other fields are there either way, at the same indexes.
     expect(keys(false)).toEqual(keys(true).filter((key) => key !== 'room-draft'));
+  });
+
+  it('shows a solo ride’s draft as a room’s is drawn, rounded, where the room’s fields would be — #2425', () => {
+    const solo = (percent: number) =>
+      hudReadings({ ...baseInput(), soloDraft: percent }).find((r) => r.key === 'solo-draft');
+    // #2425, #2130: the solo field's unit is the `%` alone, so it stays on
+    // its number's line in the tier's narrowest track.
+    expect(solo(33.6)).toMatchObject({ label: 'Draft', value: '34', unit: '%' });
+    // #2472: and a screen reader hears what it is a share of; a room's field draws it.
+    expect(solo(33.6)?.unitSaid).toBe('of drag');
+    expect(solo(33.6)?.detail).toBe('at most 59 %');
+    expect(solo(33.6)?.gauge).toBeCloseTo(34 / 59, 12);
+    expect(solo(0)).toMatchObject({ value: '0' });
+    // Absent with no solo draft handed in, and every other field where it was.
+    const without = hudReadings(baseInput()).map((r) => r.key);
+    const withIt = hudReadings({ ...baseInput(), soloDraft: 12 }).map((r) => r.key);
+    expect(without).not.toContain('solo-draft');
+    expect(withIt).not.toContain('room-draft');
+    expect(withIt.filter((key) => key !== 'solo-draft')).toEqual(without);
   });
 
   it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {
@@ -1280,14 +1334,44 @@ describe('the ride’s elapsed time and the time of day — #2072', () => {
     expect(field(input, ELAPSED_TIME_KEY)?.value).toBe('0:02:05');
   });
 
-  it('shows a dash with nothing recorded, and the word size past ten hours', () => {
-    for (const elapsedSeconds of [undefined, Number.NaN]) {
-      expect(field({ ...baseInput(), elapsedSeconds }, ELAPSED_TIME_KEY)?.value).toBe(NO_READING);
-    }
+  it('shows a dash for a figure that is not a number, and the word size past ten hours', () => {
+    expect(field({ ...baseInput(), elapsedSeconds: Number.NaN }, ELAPSED_TIME_KEY)?.value).toBe(
+      NO_READING,
+    );
     expect(field({ ...baseInput(), elapsedSeconds: 35_999 }, ELAPSED_TIME_KEY)?.word).toBe(
       undefined,
     );
     expect(field({ ...baseInput(), elapsedSeconds: 36_000 }, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  // #2382: where nothing records, the ride's own clock — never a dash, and
+  // never under the recorder's label.
+  it('shows the ride’s own clock, labelled Ride, where nothing is recorded — #2382', () => {
+    const base = baseInput();
+    const ride: HudInput = { ...base, state: { ...base.state, elapsed: seconds(1) } };
+    expect(field(ride, ELAPSED_TIME_KEY)).toEqual({
+      key: ELAPSED_TIME_KEY,
+      label: RIDE_CLOCK_LABEL,
+      value: '0:00:01',
+      unit: '',
+      stale: false,
+    });
+    expect(RIDE_CLOCK_LABEL).not.toBe('Elapsed');
+    // The moving time is never given the fallback: the recorder's, or a dash.
+    expect(field(ride, MOVING_TIME_KEY)?.value).toBe(NO_READING);
+    // Past ten hours, the word size, as the recorder's figure is.
+    const long: HudInput = { ...base, state: { ...base.state, elapsed: seconds(36_000) } };
+    expect(field(long, ELAPSED_TIME_KEY)?.word).toBe(true);
+  });
+
+  it('shows the recorder’s figure, labelled Elapsed, the moment a recording runs — #2382', () => {
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      elapsedSeconds: 0,
+    };
+    expect(field(input, ELAPSED_TIME_KEY)).toMatchObject({ label: 'Elapsed', value: '0:00:00' });
   });
 
   it('shows the time of day it is handed as HH:MM, labelled Clock, after the elapsed time', () => {
@@ -1427,7 +1511,12 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
 describe('a Delivery round on the HUD — #1812', () => {
   const base = baseInput();
   const round = recordMiss(recordDelivery(recordDelivery(startRound(8), 0), 1), 2);
-  const delivery = { round, week: { day: 3, houses: 8, score: 11 }, score: 2 };
+  const delivery: DeliveryHud = {
+    round,
+    week: { day: 3, houses: 8, score: 11 },
+    score: 2,
+    next: { side: 'right', metres: 84.6 },
+  };
 
   it('shows the houses left, with the delivered and missed counts, and the round’s score with its day', () => {
     const shown = hudReadings({ ...base, delivery }).filter(isDeliveryReading);
@@ -1441,6 +1530,14 @@ describe('a Delivery round on the HUD — #1812', () => {
         detail: '2\u00a0delivered, 1\u00a0missed',
       },
       {
+        key: DELIVERY_NEXT_KEY,
+        label: 'Next house',
+        value: '85',
+        unit: 'm',
+        stale: false,
+        detail: 'on the right',
+      },
+      {
         key: DELIVERY_SCORE_KEY,
         label: 'Score',
         value: '2',
@@ -1449,6 +1546,17 @@ describe('a Delivery round on the HUD — #1812', () => {
         detail: 'Day 3 of 7',
       },
     ]);
+  });
+
+  it('says “Crashed” under the score while a crash is drawn, and the day again after — #2454', () => {
+    const detail = (crashed: boolean | undefined): string | undefined =>
+      hudReadings({ ...base, delivery: { ...delivery, crashed } }).find(
+        (each) => each.key === DELIVERY_SCORE_KEY,
+      )?.detail;
+    expect(detail(true)).toBe(CRASHED_TEXT);
+    expect(CRASHED_TEXT).toBe('Crashed');
+    expect(detail(false)).toBe('Day 3 of 7');
+    expect(detail(undefined)).toBe('Day 3 of 7');
   });
 
   it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {
@@ -1481,7 +1589,7 @@ describe('a Delivery round on the HUD — #1812', () => {
     const ordinary = hudReadings(windy).map((each) => each.key);
     expect(ordinary.at(-1)).toBe('wind');
     const keys = hudReadings({ ...windy, delivery }).map((each) => each.key);
-    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_NEXT_KEY, DELIVERY_SCORE_KEY]);
     for (const each of hudReadings({ ...base, delivery }).filter(isDeliveryReading)) {
       expect(readingTier(each)).toBe('secondary');
     }
@@ -1495,10 +1603,16 @@ describe('a Delivery round on the HUD — #1812', () => {
   it('shows a fresh round on day one as nothing delivered yet', () => {
     const fresh = hudReadings({
       ...base,
-      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK, score: 0 },
+      delivery: {
+        round: startRound(FRESH_WEEK.houses),
+        week: FRESH_WEEK,
+        score: 0,
+        next: { side: 'left', metres: 310 },
+      },
     }).filter(isDeliveryReading);
     expect(fresh.map((each) => [each.value, each.detail])).toEqual([
       ['8', '0\u00a0delivered, 0\u00a0missed'],
+      ['310', 'on the left'],
       ['0', 'Day 1 of 7'],
     ]);
   });
@@ -1512,7 +1626,65 @@ describe('a Delivery round on the HUD — #1812', () => {
     // #2071: the gradient is primary; on the phones that draw it in this
     // panel it takes the first cell, which `theme.css` holds for it, so the
     // panel has as many cells as before (§"THE GRADIENT, PRIMARY").
-    expect(shown).toEqual(['speed', 'remaining', DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    expect(shown).toEqual([
+      'speed',
+      'remaining',
+      DELIVERY_HOUSES_KEY,
+      DELIVERY_NEXT_KEY,
+      DELIVERY_SCORE_KEY,
+    ]);
+  });
+
+  it('says how far the next house is in the rider’s units and which side it stands, and a dash once none is left — #2453', () => {
+    const next = (hud: DeliveryHud, units?: 'metric' | 'imperial') =>
+      hudReadings({ ...base, delivery: hud, ...(units === undefined ? {} : { units }) }).find(
+        (each) => each.key === DELIVERY_NEXT_KEY,
+      );
+    expect(next(delivery)).toMatchObject({ label: 'Next house', value: '85', unit: 'm' });
+    // #2513: nought is inside the house's window, so a word, never "0 m".
+    expect(next({ ...delivery, next: { side: 'left', metres: 0 } })).toMatchObject({
+      value: 'Throw now,',
+      detail: 'on the left',
+    });
+    // 84.6 m is 277.6 ft: the rider's units, through `units/format.ts`.
+    expect(next(delivery, 'imperial')).toMatchObject({ value: '278', unit: 'ft' });
+    const none = next({ ...delivery, next: undefined });
+    expect(none).toEqual({
+      key: DELIVERY_NEXT_KEY,
+      label: 'Next house',
+      value: NO_READING,
+      unit: 'm',
+      stale: false,
+    });
+  });
+
+  it('says “Throw now, on the right” inside the house’s window rather than counting to nought — #2513', () => {
+    const next = (hud: DeliveryHud, units?: 'metric' | 'imperial') =>
+      hudReadings({ ...base, delivery: hud, ...(units === undefined ? {} : { units }) }).find(
+        (each) => each.key === DELIVERY_NEXT_KEY,
+      );
+    for (const units of ['metric', 'imperial'] as const) {
+      // Inside the window: a word, set as one, with the side under it and no unit.
+      expect(next({ ...delivery, next: { side: 'right', metres: 0 } }, units)).toEqual({
+        key: DELIVERY_NEXT_KEY,
+        label: 'Next house',
+        value: 'Throw now,',
+        unit: '',
+        stale: false,
+        word: true,
+        detail: 'on the right',
+      });
+      expect(next({ ...delivery, next: { side: 'left', metres: 0 } }, units)?.detail).toBe(
+        'on the left',
+      );
+    }
+    // Short of the window, however near, it is still a distance to the throw point.
+    expect(next({ ...delivery, next: { side: 'right', metres: 2 } })).toMatchObject({
+      value: '2',
+      unit: 'm',
+      detail: 'on the right',
+    });
+    expect(next({ ...delivery, next: { side: 'right', metres: 2 } })?.word).toBeUndefined();
   });
 });
 
@@ -1537,6 +1709,7 @@ describe('the gradient, signed and primary — #2071', () => {
       unit: '%',
       stale: false,
       slope: 'up',
+      grade: 4.5,
     });
     expect(at(-2)).toMatchObject({ value: '-2.0', unit: '%', slope: 'down' });
     expect(at(12.46)?.value).toBe('+12.5');
@@ -1551,6 +1724,19 @@ describe('the gradient, signed and primary — #2071', () => {
     expect(at(-0.05)).toMatchObject({ value: '-0.1', slope: 'down' });
     expect(at(2.25)?.value).toBe('+2.3');
     expect(at(-2.25)?.value).toBe('-2.3');
+  });
+
+  /**
+   * #2291: the number `HudCore` bands the digits' colour by is the number the
+   * digits SHOW, so the colour never disagrees with what a rider reads: 2.96
+   * shows `+3.0`, a climb's first tenth, and is coloured as one.
+   */
+  it('carries the grade it shows, rounded as the digits are', () => {
+    expect(at(2.96)).toMatchObject({ value: '+3.0', grade: 3 });
+    expect(at(-2.96)).toMatchObject({ value: '-3.0', grade: -3 });
+    expect(at(12.46)?.grade).toBe(12.5);
+    // What shows as `0.0` is nought, not a negative zero.
+    expect(Object.is(at(-0.04)?.grade, 0)).toBe(true);
   });
 
   it('is the fourth primary reading, after heart rate and before speed', () => {
@@ -1590,14 +1776,15 @@ describe('the ride so far — #2076', () => {
   const shown = (input: Partial<HudInput>) =>
     hudReadings({ ...baseInput(), ...input }).filter(isRideTotalReading);
 
-  it('shows the three after the times and before every gap, in this order', () => {
+  it('shows the three, and since #2434 Calories, after the times and before every gap, in this order', () => {
     const keys = hudReadings({ ...baseInput(), rideTotals: totals }).map((each) => each.key);
     const at = keys.indexOf('distance');
-    expect(keys.slice(at, at + 3)).toEqual(['distance', 'climbed', 'averagePower']);
+    expect(keys.slice(at, at + 4)).toEqual(['distance', 'climbed', 'averagePower', 'calories']);
     expect(keys[at - 1]).toBe(ELAPSED_TIME_KEY);
-    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower']);
+    expect([...RIDE_TOTAL_KEYS]).toEqual(['distance', 'climbed', 'averagePower', 'calories']);
     // Secondary, every one: a reading added here lands in the cheaper tier.
     expect(shown({ rideTotals: totals }).map(readingTier)).toEqual([
+      'secondary',
       'secondary',
       'secondary',
       'secondary',
@@ -1609,6 +1796,15 @@ describe('the ride so far — #2076', () => {
       { key: 'distance', label: 'Distance', value: '12.3', unit: 'km', stale: false },
       { key: 'climbed', label: 'Climbed', value: '213', unit: 'm', stale: false },
       { key: 'averagePower', label: 'Avg power', value: '187', unit: 'W', stale: false },
+      // #2434: these totals carry no estimate, and no work or heart rate.
+      {
+        key: 'calories',
+        label: 'Calories',
+        value: NO_READING,
+        unit: 'kcal',
+        detail: 'no power or heart rate',
+        stale: false,
+      },
     ]);
     expect(
       shown({ rideTotals: totals, units: 'imperial' }).map((each) => [each.value, each.unit]),
@@ -1616,11 +1812,13 @@ describe('the ride so far — #2076', () => {
       ['7.7', 'mi'],
       ['698', 'ft'],
       ['187', 'W'],
+      [NO_READING, 'kcal'],
     ]);
   });
 
   it('shows a dash for each with nothing recorded, and never a zero', () => {
     expect(shown({}).map((each) => [each.value, each.stale])).toEqual([
+      [NO_READING, false],
       [NO_READING, false],
       [NO_READING, false],
       [NO_READING, false],
@@ -1633,6 +1831,7 @@ describe('the ride so far — #2076', () => {
       '5.0',
       NO_READING,
       NO_READING,
+      NO_READING,
     ]);
   });
 
@@ -1640,6 +1839,88 @@ describe('the ride so far — #2076', () => {
     for (const reading of shown({ rideTotals: totals })) {
       expect(reading.label).not.toMatch(/\b(NP|TSS|IF|CTL|ATL|TSB)\b/);
     }
+  });
+});
+
+/**
+ * #2434: *Calories* in the ride so far — the owner's ruling of 2026-11-10: the
+ * always-shown tier, so it is on the default HUD. The figure is the
+ * recorder's (`recording/totals.ts` §`recordedRideCalories`), and that it
+ * equals the saved ride's is `ride/controller.test.ts` §"#2434"; this is the
+ * format, in the ride result card's words (`detail/CaloriesFact.tsx`).
+ */
+describe('the calorie estimate in the ride so far — #2434', () => {
+  const calories = (rideTotals: HudInput['rideTotals']) =>
+    hudReadings({ ...baseInput(), rideTotals }).find((each) => each.key === CALORIES_KEY);
+  const ridden = { distance: metres(6000), climbed: undefined, averagePower: undefined };
+
+  it('is drawn on the default HUD, in the ride so far, secondary, never stale', () => {
+    const reading = calories(undefined);
+    expect(reading).toBeDefined();
+    expect(reading && isRideTotalReading(reading)).toBe(true);
+    expect(reading && readingTier(reading)).toBe('secondary');
+    expect(reading?.stale).toBe(false);
+  });
+
+  it('shows ≈ and whole kilocalories, with the basis as its phrase', () => {
+    expect(
+      calories({
+        ...ridden,
+        energy: joules(120_000),
+        calories: { energy: kilocalories(143.4), basis: 'power' },
+      }),
+    ).toEqual({
+      key: 'calories',
+      label: 'Calories',
+      value: '≈ 143',
+      unit: 'kcal',
+      detail: 'estimate from power',
+      stale: false,
+    });
+    expect(
+      calories({ ...ridden, calories: { energy: kilocalories(612.6), basis: 'heart-rate' } }),
+    ).toMatchObject({ value: '≈ 613', detail: 'estimate from heart rate' });
+  });
+
+  it('is a dash and the card’s reason with no estimate, never 0 kcal', () => {
+    // Nothing recorded yet, or a ride with neither channel.
+    expect(calories(undefined)).toMatchObject({
+      value: NO_READING,
+      detail: 'no power or heart rate',
+    });
+    expect(calories({ ...ridden, recordedHeartRate: false })).toMatchObject({
+      value: NO_READING,
+      detail: 'no power or heart rate',
+    });
+    // A recording with heart rate and no estimate: the rider's details are not set.
+    expect(calories({ ...ridden, recordedHeartRate: true })).toMatchObject({
+      value: NO_READING,
+      detail: 'set your details in Settings',
+    });
+    for (const each of [undefined, ridden, { ...ridden, recordedHeartRate: true }]) {
+      expect(calories(each)?.value).not.toMatch(/\b0\b/);
+    }
+  });
+
+  it('takes the reason from the recording, not the live strap', () => {
+    // A strap that dropped: no live heart rate, a recording that has it.
+    const dropped = {
+      ...baseInput(),
+      heartRate: { value: undefined, live: false, paired: true },
+      rideTotals: { ...ridden, recordedHeartRate: true },
+    };
+    expect(hudReadings(dropped).find((each) => each.key === CALORIES_KEY)?.detail).toBe(
+      'set your details in Settings',
+    );
+    // A strap live now, on a recording that has none yet.
+    const live = {
+      ...baseInput(),
+      heartRate: { value: 140, live: true },
+      rideTotals: { ...ridden, recordedHeartRate: false },
+    };
+    expect(hudReadings(live).find((each) => each.key === CALORIES_KEY)?.detail).toBe(
+      'no power or heart rate',
+    );
   });
 });
 
@@ -1665,7 +1946,8 @@ describe('the rider’s W/kg and power zone — #2077', () => {
       riderMass: kilograms(75),
       thresholdPower: watts(250),
     }).map((each) => each.key);
-    const at = keys.indexOf('averagePower');
+    const at = keys.indexOf(CALORIES_KEY);
+    expect(keys[at - 1]).toBe('averagePower');
     expect(keys.slice(at + 1, at + 3)).toEqual([WATTS_PER_KILOGRAM_KEY, ZONE_KEY]);
     expect(
       effort({ ...riding(300), riderMass: kilograms(75), thresholdPower: watts(250) }).map(
@@ -1733,5 +2015,87 @@ describe('the rider’s W/kg and power zone — #2077', () => {
     expect(zone?.value).toBe(NO_READING);
     expect(zone?.detail).toBeUndefined();
     expect(zone?.zone).toEqual({ current: undefined, shares: [] });
+  });
+});
+
+/**
+ * #2420: the power the rider chose to see — the 3 s average or the reading as
+ * it arrives — on the power field, W/kg and the zone. `power-average.ts` makes
+ * the average; `power-shown-wiring.test.tsx` holds the wiring, and that the
+ * ride itself reads the raw reading in both.
+ */
+describe('power as a 3 s average or instant — #2420', () => {
+  const riding = (power: number, live = true, paired = true): HudInput => {
+    const base = baseInput();
+    return { ...base, state: { ...base.state, input: { power: watts(power), live, paired } } };
+  };
+  const field = (input: HudInput, key: string) =>
+    hudReadings(input).find((each) => each.key === key);
+
+  it('shows the 3 s average, rounded, and says so after the label', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: '3 s', value: '252', unit: 'W' });
+    expect(power?.stale).toBe(false);
+  });
+
+  it('shows the reading as it arrives in the instant view, and says so', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'instant', average: 251.6 } },
+      'power',
+    );
+    expect(power).toMatchObject({ label: 'Power', qualifier: 'instant', value: '312' });
+  });
+
+  it('is the raw reading under its plain label where no choice is handed in (the demo)', () => {
+    const power = field(riding(312), 'power');
+    expect(power?.value).toBe('312');
+    expect(power?.qualifier).toBeUndefined();
+  });
+
+  it('names each view in words', () => {
+    expect(POWER_QUALIFIERS).toEqual({ average: '3 s', instant: 'instant' });
+  });
+
+  it('is a dash, marked lost, when the meter drops in either view — never the average', () => {
+    for (const view of ['average', 'instant'] as const) {
+      const power = field({ ...riding(0, false), shownPower: { view, average: 240 } }, 'power');
+      expect([power?.value, power?.stale]).toEqual([NO_READING, true]);
+    }
+  });
+
+  it('is a bare dash with nothing paired, in either view', () => {
+    const power = field(
+      { ...riding(0, false, false), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect([power?.value, power?.stale]).toEqual([NO_READING, false]);
+  });
+
+  it('is the raw reading where the average has nothing yet', () => {
+    const power = field(
+      { ...riding(312), shownPower: { view: 'average', average: undefined } },
+      'power',
+    );
+    expect(power?.value).toBe('312');
+  });
+
+  it('takes W/kg and the zone from the same power the field shows', () => {
+    const effort = (view: 'average' | 'instant') =>
+      hudReadings({
+        ...riding(342),
+        riderMass: kilograms(72),
+        thresholdPower: watts(250),
+        shownPower: { view, average: 200 },
+      });
+    const pick = (readings: ReturnType<typeof hudReadings>, key: string) =>
+      readings.find((each) => each.key === key)?.value;
+    // 200 W over 72 kg is 2.8 and zone 3 of 250 W; 342 W is 4.8 and zone 6.
+    expect(pick(effort('average'), WATTS_PER_KILOGRAM_KEY)).toBe('2.8');
+    expect(pick(effort('average'), ZONE_KEY)).toBe('3');
+    expect(pick(effort('instant'), WATTS_PER_KILOGRAM_KEY)).toBe('4.8');
+    expect(pick(effort('instant'), ZONE_KEY)).toBe('6');
   });
 });

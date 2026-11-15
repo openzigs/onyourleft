@@ -275,6 +275,16 @@ describe('#1042 — announced politely, once', () => {
     expect(regions.filter((node) => node.textContent?.includes('saved'))).toEqual([]);
   });
 
+  it('says “with its draft” on the card and in its region after a drafted attempt — #2425, ADR 0066 D-5.1', async () => {
+    await show(savedSnapshot({ ...SAVED, gameOutcome: 'beaten', gameOutcomeDrafted: true }));
+    const words =
+      'In your last trainer game ride, you beat your best on that route, with its draft.';
+    expect(card()!.querySelector('.oyl-result__outcome')?.textContent).toBe(words);
+    expect(region()!.textContent).toBe(
+      `Ride saved: moving time 1:02:05, 32.4 kilometres. ${words}`,
+    );
+  });
+
   it('says the game’s outcome after the facts, once', async () => {
     await show(savedSnapshot({ ...SAVED, gameOutcome: 'beaten' }));
     expect(region()!.textContent).toBe(

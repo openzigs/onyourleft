@@ -646,7 +646,7 @@ In the P9 record, a move dropped by the press is followed by `not-applied` with 
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B5.1 | Re-plans on. Ride to the 5:00 boundary. **Within about 3 s after it**, while the request's job is still running, press ***Stop***, then ***Yes, stop the ride*** | **Exactly one `0x08`**, and **no `0x05` after it** for 60 s. Nothing about a re-plan is shown afterwards | — step off if the load stays (Safety item 7) |
+| B5.1 | Re-plans on. Ride to the 5:00 boundary. **Within about 3 s after it**, while the request's job is still running, press ***Stop***, then ***Save ride*** (#2349: the end-of-ride question took the place of *Yes, stop the ride*) | **Exactly one `0x08`**, and **no `0x05` after it** for 60 s. Nothing about a re-plan is shown afterwards | — step off if the load stays (Safety item 7) |
 | B5.2 | Read the job table's newest re-plan row | The job in flight is **`cancelled`**, not left `running`. If *Stop* landed before the start returned, **no new row** is also valid: no job was made | |
 
 **Fails D-8 if:** any `0x05` is timestamped after the `0x08`; or a re-plan sentence appears after

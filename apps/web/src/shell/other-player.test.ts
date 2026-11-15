@@ -240,6 +240,97 @@ describe('what the menu music may ask — owner ruling 3 of 2026-11-05', () => {
   });
 });
 
+/**
+ * #2253: `isMusicActive()` counts our own open output stream (measured on the
+ * tablet), so a reading is believed only when our output held none open from
+ * the ask to the answer. `quiet` stands for `CueOutput.quietToken`.
+ */
+describe('a reading that may be our own stream is not believed — #2253', () => {
+  function ownOutput(): { open: boolean; opens: number; quietToken: () => number | undefined } {
+    const own = {
+      open: false,
+      opens: 0,
+      quietToken: () => (own.open ? undefined : own.opens),
+    };
+    return own;
+  }
+
+  it('while our stream is open, two readings in a row show nothing, and no listener hears them', async () => {
+    const scripted = scriptedOtherPlayerPort(true);
+    const own = ownOutput();
+    own.open = true;
+    const player = new OtherPlayer(scripted.port, manualOtherPlayerClock().clock, own);
+    let heard = 0;
+    player.onReading(() => {
+      heard += 1;
+    });
+    await player.poll();
+    await player.poll();
+    expect(scripted.readings(), 'non-vacuity: both were asked').toBe(2);
+    expect(player.getSnapshot()).toStrictEqual({ seen: false, playing: false });
+    expect(player.riderPlayerInUse()).toBe(false);
+    expect(heard).toBe(0);
+  });
+
+  it('with our stream shut, the rider’s player is believed both ways, and each reading is heard', async () => {
+    const scripted = scriptedOtherPlayerPort(true);
+    const own = ownOutput();
+    const player = new OtherPlayer(scripted.port, manualOtherPlayerClock().clock, own);
+    let heard = 0;
+    const stop = player.onReading(() => {
+      heard += 1;
+    });
+    await player.poll();
+    await player.poll();
+    expect(player.getSnapshot()).toStrictEqual({ seen: true, playing: true });
+    expect(heard).toBe(2);
+    scripted.setActive(false);
+    await player.poll();
+    expect(player.riderPlayerInUse()).toBe(false);
+    expect(heard).toBe(3);
+    stop();
+    await player.poll();
+    expect(heard, 'heard after the unsubscribe').toBe(3);
+  });
+
+  it('a stream that opened between the ask and the answer is not believed', async () => {
+    const own = ownOutput();
+    let answer: (active: boolean) => void = () => undefined;
+    const port: OtherPlayerPort = {
+      sendKey: () => Promise.resolve(),
+      otherAudioActive: () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve;
+        }),
+    };
+    const player = new OtherPlayer(port, manualOtherPlayerClock().clock, own);
+    const reading = player.poll();
+    // A menu sound opens and shuts our stream while the plugin answers.
+    own.opens += 1;
+    answer(true);
+    await reading;
+    expect(player.riderPlayerInUse(), 'a reading that spanned our own sound was believed').toBe(
+      false,
+    );
+  });
+
+  it('a reading of ours breaks the run of two: a sighting needs two believed in a row', async () => {
+    const scripted = scriptedOtherPlayerPort(true);
+    const own = ownOutput();
+    const player = new OtherPlayer(scripted.port, manualOtherPlayerClock().clock, own);
+    await player.poll();
+    own.open = true;
+    await player.poll();
+    own.open = false;
+    await player.poll();
+    expect(player.getSnapshot().seen, 'two readings around one of ours made a sighting').toBe(
+      false,
+    );
+    await player.poll();
+    expect(player.getSnapshot().seen).toBe(true);
+  });
+});
+
 describe('what it holds — spike 0034 §4', () => {
   it('holds two booleans and nothing else', async () => {
     const { player } = await seenPlayer();
@@ -260,7 +351,13 @@ describe('main.tsx composes the player inside the Android shell — #2073', () =
 
   it('makes it from the plugin only where it is offered', () => {
     expect(main).toMatch(
-      /otherPlayerOffered\(platformCapacitor\(\)\)\s*\?\s*new OtherPlayer\(mobile\.capacitorOtherPlayer\(mobile\.capacitorOtherPlayerPlugin\(\)\)\)\s*:\s*undefined/,
+      /otherPlayerOffered\(platformCapacitor\(\)\)\s*\?\s*new OtherPlayer\(\s*mobile\.capacitorOtherPlayer\(mobile\.capacitorOtherPlayerPlugin\(\)\),/,
+    );
+  });
+
+  it('makes it over the app’s one audio output, so our own stream is never the rider’s — #2253', () => {
+    expect(main).toMatch(
+      /new OtherPlayer\(\s*mobile\.capacitorOtherPlayer\(mobile\.capacitorOtherPlayerPlugin\(\)\),\s*BROWSER_OTHER_PLAYER_CLOCK,\s*sharedCueOutput\(\),\s*\)\s*:\s*undefined/,
     );
   });
 

@@ -43,8 +43,16 @@ export interface RiderPlayerInUse {
   /**
    * Whether the rider's own player is in use now, so that our menu music
    * stays silent (ruling 3 of 2026-11-05 on #2073). `menu-music.ts` asks it
-   * before the loop starts (#2253), and keeps our own loop from counting as
-   * the rider's player (spike 0034 §1.3, isMusicActive counts it).
+   * before the loop starts (#2253). It goes by the latest reading that cannot
+   * have been our own sound: `isMusicActive()` counts our open output stream
+   * too (spike 0034 §1.3, measured on the tablet in #2357), so a reading
+   * taken while it may be open is not believed (`CueOutput.quietToken`).
    */
   riderPlayerInUse(): boolean;
+  /**
+   * Call `listener` after each reading that is believed — one that cannot
+   * have been our own sound (#2253). `menu-music.ts` waits on it for a
+   * reading taken after our loop fell silent. @returns the unsubscribe.
+   */
+  onReading(listener: () => void): () => void;
 }

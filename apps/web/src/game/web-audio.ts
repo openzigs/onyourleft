@@ -262,6 +262,12 @@ export function webAudioOutput(
    * flight and the first to land must not clear the second.
    */
   let waking = 0;
+  /**
+   * How many times the context has been made or asked to resume — #2253's
+   * {@link CueOutput.quietToken}: each may have opened the platform's output
+   * stream, so a reading of the rider's player that spans one is not believed.
+   */
+  let opened = 0;
 
   /**
    * The graph over `into`: made the first time, and set from the rider's mix
@@ -308,12 +314,16 @@ export function webAudioOutput(
   return {
     resume() {
       if (create === undefined) return;
-      context ??= create();
+      if (context === undefined) {
+        context = create();
+        opened += 1;
+      }
       // Inside the press: a choice made since the last sound is applied now.
       buses(context);
       if (context.state === 'suspended' || asleep) {
         asleep = false;
         waking += 1;
+        opened += 1;
         // Refused outside a gesture, or by the platform; either way there is
         // nothing a rider can be told that the next press will not fix.
         context
@@ -354,6 +364,13 @@ export function webAudioOutput(
       asleep = true;
       // Refused by nothing a rider can act on; the next press resumes it anyway.
       context.suspend().catch(() => undefined);
+    },
+    quietToken() {
+      // ⚠️ `state` moves only once the platform has acted: a suspend asked for
+      // still reads `running` until it has landed, which is right here — the
+      // stream is open until then — and a resume in flight is `waking`.
+      if (context !== undefined && (context.state === 'running' || waking > 0)) return undefined;
+      return opened;
     },
     startTone(frequencyHz, level) {
       if (context === undefined) return;

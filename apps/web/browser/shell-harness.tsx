@@ -205,7 +205,7 @@ function TouchTargets(): JSX.Element {
       <Button variant="secondary">Pause</Button>
       <Button>Resume</Button>
       <Button variant="secondary">Stop</Button>
-      <Button>Yes, stop the ride</Button>
+      <Button variant="secondary">Save ride</Button>
       <Button variant="secondary">Keep riding</Button>
     </section>
   );
@@ -910,6 +910,8 @@ function main(): void {
       ? new OtherPlayer(
           { sendKey: () => Promise.resolve(), otherAudioActive: () => Promise.resolve(true) },
           { now: () => 0, every: () => () => undefined },
+          // #2253: over the one output, as `main.tsx` composes it.
+          sharedCueOutput(),
         )
       : undefined;
 
@@ -941,6 +943,8 @@ function main(): void {
                   hidden: () => document.hidden,
                   // #2253: with `?own-player=heard`, the rider's player is in use.
                   riderPlayer: otherPlayer,
+                  // #2357: a browser, so the first press starts it, as in the app's browser build.
+                  autoplay: undefined,
                 }),
               }
             : {})}

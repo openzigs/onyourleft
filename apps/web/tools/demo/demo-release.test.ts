@@ -11,8 +11,9 @@
  *   real bake (never OpenStreetMap data, ADR 0056 D-9). Every check reads the
  *   staged files back from disk.
  * - **The workflow, read as text**: its only trigger, its runners, its pins,
- *   its permissions and its one token, and that it bakes and stages through
- *   the scripts this file tests.
+ *   its permissions, its one token and its one secret (the archive's R2 read
+ *   token, #2275), and that it bakes and stages through the scripts this file
+ *   tests.
  *
  * ⚠️ What this file does NOT claim: that the release is published. That is
  * settled by running the workflow from `main`, and never by a pull request.
@@ -43,6 +44,7 @@ import {
   stageRelease,
 } from './demo-release';
 import { ODBL_NOTICE_FILE, ROUTE_MANIFEST_FILE } from './demo-routes';
+import { R2_ARCHIVE_VARIABLES } from './r2-archive';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROOT = join(WEB, '..', '..');
@@ -52,6 +54,15 @@ const scratch = mkdtempSync(join(tmpdir(), 'oyl-demo-release-'));
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
+
+/** The lines of one of demo-release.yml's jobs, from its key to the next job's. */
+function job(name: string): string {
+  const lines = WORKFLOW.split('\n');
+  const start = lines.indexOf(`  ${name}:`);
+  expect(start, `demo-release.yml has no job ${name}`).toBeGreaterThanOrEqual(0);
+  const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
+  return lines.slice(start, end === -1 ? lines.length : end).join('\n');
+}
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -252,15 +263,6 @@ describe('demo:release’s tag, presets and arguments — #1932', () => {
 });
 
 describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
-  /** The lines of one job, from its key to the next job's. */
-  function job(name: string): string {
-    const lines = WORKFLOW.split('\n');
-    const start = lines.indexOf(`  ${name}:`);
-    expect(start, `demo-release.yml has no job ${name}`).toBeGreaterThanOrEqual(0);
-    const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
-    return lines.slice(start, end === -1 ? lines.length : end).join('\n');
-  }
-
   it('runs by hand only: no pull request, push or schedule can bake real map data', () => {
     const on = /^on:\n((?:[ \t]+[^\n]*\n)+)/m.exec(WORKFLOW)?.[1] ?? '';
     const triggers = [...on.matchAll(/^ {2}(\w+):/gm)].map((match) => match[1]);
@@ -270,7 +272,7 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
 
   it('runs on the standard runner only, which is free on a public repository', () => {
     const runners = [...WORKFLOW.matchAll(/^\s*runs-on:\s*(\S+)/gm)].map((match) => match[1]);
-    expect(runners).toStrictEqual(['ubuntu-latest', 'ubuntu-latest']);
+    expect(runners).toStrictEqual(['ubuntu-latest', 'ubuntu-latest', 'ubuntu-latest']);
   });
 
   it('pins every action to a full commit SHA rather than a tag', () => {
@@ -279,8 +281,22 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
     for (const reference of uses) expect(reference).toMatch(/@[0-9a-f]{40}$/);
   });
 
-  it('reads no secret, and writes only from the job that runs no repository code', () => {
-    expect(WORKFLOW).not.toMatch(/secrets\./);
+  it('reads one secret, the archive’s R2 read token, in the bake step alone — #2275', () => {
+    // The public host answers a runner 403, so the bake reads the archive
+    // through R2 (`r2-archive.ts`); the token is the four variables that
+    // module reads, from an environment that deploys from `main`.
+    const bake = job('bake');
+    expect(bake).toMatch(/^ {4}environment: basemap-archive$/m);
+    const step = /- name: Bake the preset routes\n((?: {8}.*\n)+)/.exec(bake)?.[1] ?? '';
+    const secrets = Object.values(R2_ARCHIVE_VARIABLES).map(
+      (name) => `          ${name}: \${{ secrets.${name} }}\n`,
+    );
+    expect(step.startsWith(`        env:\n${secrets.join('')}        run: |\n`)).toBe(true);
+    const code = WORKFLOW.split('\n').filter((line) => !line.trimStart().startsWith('#'));
+    expect(code.join('\n').match(/secrets\./g)).toHaveLength(secrets.length);
+  });
+
+  it('writes only from the job that runs no repository code', () => {
     expect(/^permissions:\n {2}contents: read\n/m.test(WORKFLOW)).toBe(true);
     expect(job('bake')).not.toMatch(/permissions:/);
     const publish = job('publish');
@@ -317,5 +333,33 @@ describe('demo-release.yml — #1932, ADR 0056 D-4.2 and D-9', () => {
     expect(publish).toMatch(/--notes-file notes\.md/);
     expect(publish).toMatch(/--latest=false/);
     expect(publish).toMatch(/--target "\$TARGET"/);
+  });
+});
+
+describe('demo-release.yml deploys the demo to GitHub Pages — #2264', () => {
+  it('uploads the whole demo output as the Pages artefact, after the build reads the routes back', () => {
+    const bake = job('bake');
+    const build = bake.indexOf('run build:demo');
+    const upload = bake.search(/uses: actions\/upload-pages-artifact@[0-9a-f]{40}/);
+    expect(build).toBeGreaterThan(0);
+    expect(upload).toBeGreaterThan(build);
+    expect(bake.slice(upload)).toMatch(/^\s+path: apps\/web\/demo\/dist\/$/m);
+  });
+
+  it('deploys only after the release is published, so the hosted routes are on a release too', () => {
+    const pages = job('pages');
+    expect(pages).toMatch(/^ {4}needs: \[bake, publish\]$/m);
+    expect(pages).toMatch(/uses: actions\/deploy-pages@[0-9a-f]{40}/);
+    expect(pages).toMatch(/^ {6}name: github-pages$/m);
+  });
+
+  it('holds pages: write and id-token: write in the deploy job alone, which runs no repository code', () => {
+    const pages = job('pages');
+    expect(pages).toMatch(/^ {4}permissions:\n {6}pages: write\n {6}id-token: write\n {4}\S/m);
+    expect(pages).not.toMatch(/actions\/checkout|pnpm|node |run:/);
+    const elsewhere = WORKFLOW.replace(pages, '')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'));
+    expect(elsewhere.join('\n')).not.toMatch(/pages: write|id-token:/);
   });
 });

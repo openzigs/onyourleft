@@ -135,6 +135,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
+    setAthleteCalorieInputs: async (id, inputs) => real.setAthleteCalorieInputs(id, inputs),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
     setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
@@ -213,6 +214,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     countCameraFrames: async (owner) => real.countCameraFrames(owner),
     countExportableCameraFrames: async (owner) => real.countExportableCameraFrames(owner),
     deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
+    deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+      real.deleteKeptCameraFramesCapturedBetween(owner, from, to),
     listRideSnapshots: async (owner, activity) => real.listRideSnapshots(owner, activity),
     countRideSnapshots: async (owner, activity) => real.countRideSnapshots(owner, activity),
     countSnapshots: async (owner) => real.countSnapshots(owner),
@@ -1126,6 +1129,40 @@ export function lastWordDroppedStoreFactory(): StoreFactory {
         setAthleteMaskedWords: async (id: AthleteId, words: readonly string[]) => {
           const written = await real.setAthleteMaskedWords(id, words.slice(0, -1));
           return written === undefined ? undefined : { ...written, maskedWords: [...words] };
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose calorie-input write **keeps the sex and drops the year of
+ * birth** — for #2432.
+ *
+ * *Wrong layer*: the write is real and commits, and the call answers with both
+ * fields as asked, so the screen says "Saved" and shows the year. A fresh
+ * connection reads a row with a sex and no year, which is a rider whose
+ * heart-rate rides quietly show no calorie figure. A round trip that checked
+ * only the sex passes against this; the red/green pair is in
+ * `activity-store.calorie-inputs.test.ts`.
+ */
+export function droppedBirthYearStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteCalorieInputs: async (id, inputs) => {
+          const written = await real.setAthleteCalorieInputs(id, {
+            calorieSex: inputs.calorieSex,
+            birthYear: undefined,
+          });
+          return written === undefined || inputs.birthYear === undefined
+            ? written
+            : { ...written, birthYear: inputs.birthYear };
         },
       };
     },

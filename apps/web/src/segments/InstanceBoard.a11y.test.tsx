@@ -68,7 +68,7 @@ const SEGMENT: SegmentRecord = (() => {
   const made = createSegment({
     id: 'local-1',
     createdBy: LOCAL,
-    name: 'Box Hill',
+    name: 'Quarry climb',
     sport: 'ride',
     geometry: Array.from({ length: 6 }, (_, index) =>
       geographicPosition((51.5 + index * 0.001) as DegreesLatitude, -0.12 as DegreesLongitude),
@@ -197,7 +197,7 @@ function onAPage(section: ReactElement, level: 2 | 3 = 3): ReactElement {
       <h1>Segments</h1>
       {level === 3 ? (
         <section aria-labelledby="the-segment">
-          <h2 id="the-segment">Box Hill</h2>
+          <h2 id="the-segment">Quarry climb</h2>
           {section}
         </section>
       ) : (
@@ -477,7 +477,7 @@ describe('the segments on the instance (#68)', () => {
   const listed: InstanceSegment[] = [
     {
       segmentId: 'b'.repeat(32),
-      name: 'Leith Hill',
+      name: 'Ridge climb',
       sport: 'ride',
       distanceMetres: 1200,
       yours: false,
@@ -514,13 +514,13 @@ describe('the segments on the instance (#68)', () => {
     expect(text()).toContain('Mine (yours)');
     // Only the one not on this device is offered.
     expect(queryAll(document, 'button').map((each) => each.textContent)).toEqual([
-      'Add “Leith Hill”',
+      'Add “Ridge climb”',
     ]);
     clean();
-    button(/^Add “Leith Hill”/).click();
+    button(/^Add “Ridge climb”/).click();
     await settle();
     expect(calls.added).toEqual(['b'.repeat(32)]);
     expect(added).toBe(1);
-    expect(text()).toContain('Added “Leith Hill”. Match your rides to find your efforts on it.');
+    expect(text()).toContain('Added “Ridge climb”. Match your rides to find your efforts on it.');
   });
 });

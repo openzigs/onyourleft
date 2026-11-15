@@ -51,6 +51,13 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
+import {
+  CALORIES_BASIS_TEXT,
+  CALORIES_LABEL,
+  CALORIES_UNIT,
+  caloriesValue,
+  noCaloriesReason,
+} from '../../detail/CaloriesFact';
 import { formatDuration, formatTimeOfDay } from '../../format';
 import type { RideTotals } from '../../recording/totals';
 import {
@@ -66,6 +73,7 @@ import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
+import type { HudPowerView } from './hud-layout-preference';
 import { lapRaceReadings, type LapRaceHud } from './lap-race-hud';
 import { planLap, planProgress } from './plan';
 
@@ -174,6 +182,14 @@ export interface HudReading {
    */
   readonly slope?: 'up' | 'down' | 'level' | undefined;
   /**
+   * The grade the value SHOWS, as a number — #2291, the gradient's alone:
+   * `HudCore.tsx` colours the digits and the slope glyph by its band
+   * (`look-ahead.ts` §`gradeBand`), so the colour is the band of the number a
+   * rider reads, never of a grade the rounding hid. ⚠️ **Never the only
+   * carrier**: the number is the reading. Absent on every other field.
+   */
+  readonly grade?: number | undefined;
+  /**
    * The power zone, drawn — #2077, the zone indicator's alone. `current` is
    * the zone the rider is in now, 1 to 7, and draws {@link value}'s number on
    * that zone's colour; `undefined` with no live power. `shares` is this
@@ -184,6 +200,44 @@ export interface HudReading {
    */
   readonly zone?:
     { readonly current: number | undefined; readonly shares: readonly number[] } | undefined;
+  /**
+   * Which way the value is taken — #2420, the power field's alone: `3 s` for
+   * the 3-second average and `instant` for the reading as it arrives, drawn
+   * after the label and inside its `dt`, so the term a screen reader
+   * announces is *Power (3 s)* as the eye reads it. Its own element because
+   * `theme.css` sets a label in capitals, and `3 S` is not a unit.
+   * Absent on every other field, and on the power field where no choice was
+   * handed in (the demo).
+   */
+  readonly qualifier?: string | undefined;
+  /**
+   * That the rider is IN the draft — #2426, the Draft field's alone, by
+   * `room-ride.ts` §`draftEvent`'s one 10 % / 5 % state (the same state that
+   * gives the room's spoken cue, so what is seen and what is heard never
+   * disagree). `HudCore.tsx` draws the shelter mark (§`ShelterMark`, an arch
+   * over a filled pocket) beside the label and a heavier outline round the
+   * field; {@link detail} says *"In the draft"*. ⚠️ **Never colour alone**
+   * (SC 1.4.1): the glyph, the outline and the words each say it. Absent on
+   * every other field, and on the Draft field out of the draft.
+   */
+  readonly sheltered?: boolean | undefined;
+  /**
+   * Words a screen reader hears after {@link detail} and nobody sees — #2426:
+   * the gauge's full scale (*"at most 59 %"*) while {@link detail} says the
+   * rider is in the draft, so the scale is never lost to a rider who cannot
+   * see the gauge. Drawn visually hidden inside the same `dd`. Absent on every
+   * other field.
+   */
+  readonly said?: string | undefined;
+  /**
+   * Words a screen reader hears after {@link unit} and nobody sees — #2472:
+   * a SOLO ride's Draft field draws its unit as the `%` alone, to keep it on
+   * its number's line in the tablet's narrowest track (#2425, #2130), and
+   * this gives a screen reader back what it is a share of: *"34 % of drag"*,
+   * as a room's field draws it. Drawn visually hidden inside the unit, so
+   * what is drawn does not change. Absent on every other field.
+   */
+  readonly unitSaid?: string | undefined;
 }
 
 /**
@@ -287,6 +341,13 @@ export interface ChasedGap {
    * from an intensity and a route and rides for as long as the rider does.
    */
   readonly outcome?: GhostOutcome | undefined;
+  /**
+   * That the attempt {@link outcome} settles was ridden in a draft — #2425,
+   * ADR 0066 D-5.1, by D-5.6's definition (`solo-draft.ts` §`draftedRide`),
+   * latched with the outcome. The settled field then says *"with its draft"*
+   * in words. Absent, or `false`, reads exactly as before.
+   */
+  readonly drafted?: boolean | undefined;
 }
 
 /**
@@ -318,6 +379,12 @@ export interface RoomHud {
    * and the rider is drafted exactly the same.
    */
   readonly draftShown?: boolean | undefined;
+  /**
+   * Whether the rider is in the room's draft — #2426: `GameView`'s
+   * `inDraftRef`, `room-ride.ts` §`draftEvent`'s 10 % / 5 % state, the one the
+   * spoken cue follows. Drawn as the shelter mark ({@link HudReading.sheltered}).
+   */
+  readonly inDraft?: boolean | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
@@ -341,6 +408,25 @@ export interface ChosenRider {
 }
 
 /**
+ * Where the next house on a Delivery round is from the rider — #2453, as
+ * `delivery/ride-round.ts` §`nextHouse` works it out: which side of the road,
+ * and how far ahead along it. Stated here rather than imported, so that the
+ * HUD, which the stage chooser reaches, reaches none of the round's modules
+ * (`stage-chooser-imports.test.ts`); `GameView` hands one to the other, so a
+ * shape that drifted would not typecheck.
+ */
+export interface NextHouseHud {
+  readonly side: 'left' | 'right';
+  /**
+   * Metres along the road to where the house's throw window opens; nought
+   * once the rider is inside the window — #2513. Not to the house: level with
+   * it, the house is out of frame and the throw is late. At nought the field
+   * says to throw ({@link NEXT_HOUSE_TEXT}).
+   */
+  readonly metres: number;
+}
+
+/**
  * A Delivery round, on the HUD — #1812 (epic #1803, the owner's rulings DL2
  * and DL10 of 2026-10-27). The round as `delivery/round.ts` holds it and the
  * week it is ridden in: **counts only**, because a house is a position on the
@@ -359,6 +445,19 @@ export interface DeliveryHud {
    * ruling of 2026-10-28 on #1811 takes a crash off the round's score.
    */
   readonly score: number;
+  /**
+   * The next house still expecting a parcel — #2453, from
+   * `delivery/ride-round.ts` §`nextHouse`: which side of the road and how far
+   * ahead, from the rider, never where. `undefined` once none is expecting one.
+   */
+  readonly next: NextHouseHud | undefined;
+  /**
+   * Whether a crash is being drawn — #2454, `delivery/crash-look.ts`: the
+   * Score field says "Crashed" under it for as long as the rider is drawn
+   * down, once per crash. The live region's sentence is `delivery-announce.ts`
+   * §`deliveryEvents`', as before. Absent is not crashed.
+   */
+  readonly crashed?: boolean | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -386,6 +485,23 @@ export interface HudInput {
    * held for it, so its fields never appear or vanish mid-ride.
    */
   readonly room?: RoomHud | undefined;
+  /**
+   * The rider's draft on a SOLO ride — #2425, ADR 0066: the share of their
+   * aerodynamic drag the pacer's and their own ghost's draft removed on the
+   * last step, `(1 − k) × 100` from the simulation's own `k`
+   * (`simulation.ts` §`GameState.soloDraft`). Drawn as a room's Draft field
+   * is ({@link draftField}). Absent — and no field — on a ride with no solo
+   * draft, with the solo draft switched off, and with the rider's display
+   * preference off (D-6, R-13). Never on a ride in a room, which has its own.
+   */
+  readonly soloDraft?: number | undefined;
+  /**
+   * Whether the rider is in the solo draft — #2426: the simulation's own
+   * `draftEvent` state (`simulation.ts` §`GameState.soloDraft.inDraft`), drawn
+   * as the shelter mark ({@link HudReading.sheltered}). Read only beside
+   * {@link soloDraft}.
+   */
+  readonly soloInDraft?: boolean | undefined;
   /**
    * The Delivery round, on a Delivery ride — #1812. Absent on every other
    * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
@@ -426,6 +542,10 @@ export interface HudInput {
    * does not count, and an hour in the HUD and the saved ride would disagree
    * about how long the rider rode.
    *
+   * The one place the simulation's clock is shown is a ride with NO recorder
+   * figure, under its own label, where there is no saved ride to disagree
+   * with — #2382, `elapsedTimeReading` — and never as a moving time.
+   *
    * `undefined` where nothing is being recorded — no ride controller, or no
    * ride started on the Ride screen — and then the field shows
    * {@link NO_READING}: there is no moving time to quote, and a zero would say
@@ -447,8 +567,10 @@ export interface HudInput {
    * the two differ by exactly the time paused, which is the whole of what a
    * rider reading both is told.
    *
-   * `undefined` where nothing is being recorded, and then the field shows
-   * {@link NO_READING}, as the moving time does.
+   * `undefined` where nothing is being recorded, and then — since #2382 —
+   * the field is not a dash: it shows the RIDE's own clock instead, under
+   * another label ({@link elapsedTimeReading} says which, and why it is not
+   * a second clock beside this one).
    */
   readonly elapsedSeconds?: number | undefined;
   /**
@@ -505,6 +627,56 @@ export interface HudInput {
    * it is shown, and says why it is not a field of its own.
    */
   readonly lapSeconds?: number | undefined;
+  /**
+   * How the rider chose to see power, and the 3 s average — #2420. `GameView`
+   * hands it in on every ride; absent (the demo), the power field is the raw
+   * reading under its plain label, as it was before #2420.
+   */
+  readonly shownPower?: ShownPower | undefined;
+}
+
+/**
+ * How the HUD shows power on this ride — #2420.
+ *
+ * ⚠️ **What the HUD shows, and only that.** The average is
+ * `power-average.ts`'s, taken from the readings the simulation was already
+ * advanced with; {@link GameState.input} stays the raw reading, and everything
+ * else the ride does reads that.
+ */
+export interface ShownPower {
+  readonly view: HudPowerView;
+  /**
+   * The 3 s average as of this frame, `undefined` while power is not live.
+   * Read only in the `average` view.
+   */
+  readonly average: number | undefined;
+}
+
+/** What the power field says of its view, after its label — #2420. */
+export const POWER_QUALIFIERS: Readonly<Record<HudPowerView, string>> = {
+  average: '3 s',
+  instant: 'instant',
+};
+
+/** The power a rider's effort fields show: the live flags are the sensor's own. */
+interface EffortPower {
+  readonly value: number | undefined;
+  readonly live: boolean;
+  readonly paired: boolean | undefined;
+}
+
+/**
+ * The power the HUD shows — #2420: the 3 s average in that view while power is
+ * live, and otherwise the raw reading. Live, stale and unpaired are the
+ * sensor's own in both, so a dropped meter is a dash whichever is chosen.
+ */
+function effortPower(state: GameState, shown: ShownPower | undefined): EffortPower {
+  const raw = state.input.power;
+  const averaged =
+    shown?.view === 'average' && state.input.live && shown.average !== undefined
+      ? shown.average
+      : raw;
+  return { value: averaged, live: state.input.live, paired: state.input.paired };
 }
 
 /**
@@ -571,8 +743,15 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   // appears or disappears mid-ride: `simulation.ts` §`SimulationSetup.wind`
   // records that the wind cannot be changed once the ride has started.
   const wind = windReading(state, units);
+  // #2420: the power the rider chose to see, for the field, W/kg and the zone.
+  const power = effortPower(state, input.shownPower);
   return [
-    reading('power', 'Power', state.input.power, 'W', state.input.live, 0, state.input.paired),
+    {
+      ...reading('power', 'Power', power.value, 'W', power.live, 0, power.paired),
+      ...(input.shownPower === undefined
+        ? {}
+        : { qualifier: POWER_QUALIFIERS[input.shownPower.view] }),
+    },
     reading(
       'cadence',
       'Cadence',
@@ -608,7 +787,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // beside both. Each is present on every ride (the clock on every ride's
     // HUD), so their indices are the same on every ride; they moved every
     // gap, room and wind field two places along, once.
-    elapsedTimeReading(input.elapsedSeconds),
+    elapsedTimeReading(input.elapsedSeconds, state.elapsed),
     ...clockReading(input.timeOfDay),
     // #2076: the ride so far, after the clock and before every gap. Present
     // on every ride (a dash with nothing recorded), so their indices are the
@@ -621,14 +800,18 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     // gap: W/kg on every ride, the zone only where a threshold is set (its
     // presence is a choice made off the ride, never changed mid-ride, so a
     // ride with one and a ride without agree about every other field's place).
-    wattsPerKilogramReading(state, input.riderMass),
-    ...zoneReading(state, input.thresholdPower, input.powerZoneTime),
+    wattsPerKilogramReading(power, input.riderMass),
+    ...zoneReading(power, input.thresholdPower, input.powerZoneTime),
     ...gapReadings(input),
     ...roomReadings(input.room),
+    // #2425: a solo ride's draft, where a room's would be; a ride runs one.
+    ...(input.soloDraft === undefined
+      ? []
+      : [draftField(input.soloDraft, SOLO_DRAFT_KEY, input.soloInDraft === true)]),
     ...wind,
     // #1812: after the wind, so a Delivery ride agrees with every other ride
     // about where each field is, and an ordinary ride has none of these.
-    ...deliveryReadings(input.delivery),
+    ...deliveryReadings(input.delivery, units),
     // #1904: a lap race's, last for the same reason. A ride runs one mode.
     ...lapRaceReadings(input.lapRace),
   ];
@@ -658,7 +841,16 @@ function gradientReading(grade: number): HudReading {
   const slope = shown > 0 ? 'up' : shown < 0 ? 'down' : 'level';
   const magnitude = Math.abs(shown).toFixed(1);
   const value = slope === 'up' ? `+${magnitude}` : slope === 'down' ? `-${magnitude}` : magnitude;
-  return { key: GRADIENT_KEY, label: 'Gradient', value, unit: '%', stale: false, slope };
+  return {
+    key: GRADIENT_KEY,
+    label: 'Gradient',
+    value,
+    unit: '%',
+    stale: false,
+    slope,
+    // `+ 0` so a rounded -0.04 is 0, not -0, for a reader comparing it.
+    grade: shown + 0,
+  };
 }
 
 /** The key of the W/kg field — #2077. @see wattsPerKilogramReading */
@@ -679,10 +871,10 @@ export function isEffortReading(reading: HudReading): boolean {
  * the physics falls back to (`athlete/mass.ts` §`riderMassFor`) — and a dash,
  * stale, where the power reading is, so a dropped meter is never a W/kg.
  */
-function wattsPerKilogramReading(state: GameState, mass: Kilograms | undefined): HudReading {
-  const power = state.input.power;
-  const live = state.input.live && power !== undefined && Number.isFinite(power);
-  const stale = state.input.paired !== false && !state.input.live;
+function wattsPerKilogramReading(effort: EffortPower, mass: Kilograms | undefined): HudReading {
+  const power = effort.value;
+  const live = effort.live && power !== undefined && Number.isFinite(power);
+  const stale = effort.paired !== false && !effort.live;
   if (mass === undefined || !(mass > 0) || !live) {
     return { key: WATTS_PER_KILOGRAM_KEY, label: 'W/kg', value: NO_READING, unit: '', stale };
   }
@@ -703,15 +895,15 @@ function wattsPerKilogramReading(state: GameState, mass: Kilograms | undefined):
  * `@onyourleft/domain` §`powerZones`, the seven the Analysis screen draws.
  */
 function zoneReading(
-  state: GameState,
+  effort: EffortPower,
   threshold: Watts | undefined,
   time: TimeInZones | undefined,
 ): readonly HudReading[] {
   if (threshold === undefined || !(threshold > 0)) {
     return [];
   }
-  const power = state.input.power;
-  const live = state.input.live && power !== undefined;
+  const power = effort.value;
+  const live = effort.live && power !== undefined;
   const zone = live ? zoneOf(powerZones(threshold), power) : undefined;
   const covered = time === undefined ? 0 : (time.covered as number);
   const shares =
@@ -724,18 +916,22 @@ function zoneReading(
       label: 'Zone',
       value: zone === undefined ? NO_READING : String(zone.index),
       unit: '',
-      stale: state.input.paired !== false && !state.input.live,
+      stale: effort.paired !== false && !effort.live,
       ...(zone === undefined ? {} : { detail: zone.name }),
       zone: { current: zone?.index, shares },
     },
   ];
 }
 
-/** The keys of the ride-so-far fields — #2076. @see rideTotalReadings */
+/** The key of the calorie estimate's field — #2434. @see caloriesReading */
+export const CALORIES_KEY = 'calories';
+
+/** The keys of the ride-so-far fields — #2076, and #2434's *Calories*. @see rideTotalReadings */
 export const RIDE_TOTAL_KEYS: ReadonlySet<string> = new Set([
   'distance',
   'climbed',
   'averagePower',
+  CALORIES_KEY,
 ]);
 
 /** Whether a reading is one of the ride-so-far fields — #2076. */
@@ -744,7 +940,8 @@ export function isRideTotalReading(reading: HudReading): boolean {
 }
 
 /**
- * *Distance*, *Climbed* and *Avg power* — the ride so far, #2076.
+ * *Distance*, *Climbed*, *Avg power* and *Calories* — the ride so far, #2076,
+ * and since #2434 the calorie estimate ({@link caloriesReading}).
  *
  * Formats of the recorder's figures ({@link HudInput.rideTotals}) and nothing
  * else: the distance to one decimal in the rider's unit as a ride's distance
@@ -783,7 +980,51 @@ function rideTotalReadings(
           unit: 'W',
           stale: false,
         };
-  return [distance, climbed, power];
+  return [distance, climbed, power, caloriesReading(totals)];
+}
+
+/**
+ * *Calories* — #2434, the owner's ruling of 2026-11-10: in the ride so far,
+ * the always-shown tier, so a rider sees it on the default HUD without
+ * changing a setting (and not in the optional totals strip).
+ *
+ * The recorder's estimate ({@link RideTotals.calories}, `recording/totals.ts`
+ * §`recordedRideCalories`): the function and the series the saved ride's
+ * figure is worked out from, so the HUD's last figure is the one the ride is
+ * saved with (#2076's rule). In the words of the ride's result card and page
+ * (`detail/CaloriesFact.tsx`): `≈` and whole kilocalories, so it looks like
+ * the estimate it is, with the basis — *estimate from power* or *from heart
+ * rate* — as its phrase. A dash with nothing to estimate from, never
+ * `0 kcal`, and the card's reason for it as the phrase, worked out from what
+ * the RECORDING holds (`RideTotals.recordedHeartRate`), not from the live
+ * strap. Never stale: it is not a sensor's, so no *Sensor lost* is said. Not
+ * spoken: `announce.ts` names what it says, and this is not among them.
+ */
+function caloriesReading(totals: RideTotals | undefined): HudReading {
+  const calories = totals?.calories;
+  return calories === undefined
+    ? {
+        key: CALORIES_KEY,
+        label: CALORIES_LABEL,
+        value: NO_READING,
+        unit: CALORIES_UNIT,
+        detail: noCaloriesReason(
+          {
+            hasPower: totals?.energy !== undefined,
+            hasHeartRate: totals?.recordedHeartRate === true,
+          },
+          true,
+        ),
+        stale: false,
+      }
+    : {
+        key: CALORIES_KEY,
+        label: CALORIES_LABEL,
+        value: caloriesValue(calories),
+        unit: CALORIES_UNIT,
+        detail: CALORIES_BASIS_TEXT[calories.basis],
+        stale: false,
+      };
 }
 
 /** The key of the moving-time field — #1111. @see movingTimeReading */
@@ -799,10 +1040,16 @@ export function isRoomReading(reading: HudReading): boolean {
  * gap, the ghost's gap (and the dashed field that stands in for both) and the
  * wind. `theme.css` §"A ROOM RIDE ON A PHONE" hides them while a room's
  * readings are on the HUD, and says what that costs. Since #1812 they give way
- * to a Delivery round's readings the same way.
+ * to a Delivery round's readings the same way. Since #2425 a solo ride's
+ * draft does too: it is the pacer's and the ghost's, and goes with them.
  */
 export function givesWayToTheRoom(reading: HudReading): boolean {
-  return reading.key === 'gap' || reading.key.startsWith('gap-') || reading.key === 'wind';
+  return (
+    reading.key === 'gap' ||
+    reading.key.startsWith('gap-') ||
+    reading.key === 'wind' ||
+    reading.key === SOLO_DRAFT_KEY
+  );
 }
 
 /**
@@ -836,6 +1083,12 @@ function movingTimeReading(movingSeconds: number | undefined): HudReading {
 export const ELAPSED_TIME_KEY = 'elapsedTime';
 
 /**
+ * The label of the ride's own clock, where nothing records — #2382.
+ * @see elapsedTimeReading
+ */
+export const RIDE_CLOCK_LABEL = 'Ride';
+
+/**
  * The elapsed-time field — #2072: the ride's time with its pauses, beside
  * {@link movingTimeReading}'s without them, in the same `h:mm:ss`, never
  * stale, and set at the word size past ten hours for the same reason.
@@ -845,8 +1098,47 @@ export const ELAPSED_TIME_KEY = 'elapsedTime';
  * HUD are told apart by their labels, and `Moving` is not `Moving time` for
  * {@link movingTimeReading}'s reason. Where each is drawn is `theme.css`
  * §"THE CLOCK ROW".
+ *
+ * ## Where nothing records — #2382
+ *
+ * A simulated ride, an unrecorded one, or a browser that cannot record has no
+ * recorder figure, and until #2382 this field was a dash for the whole ride.
+ * There it shows the ride's own clock instead — the simulation's
+ * `GameState.elapsed`, which counts from the ride's first step on the wall
+ * clock, stall included — under the label
+ * {@link RIDE_CLOCK_LABEL}, never `Elapsed`.
+ *
+ * ⚠️ **One figure or the other, never both, and the label says which.** Both
+ * count a pause, but they are not the same clock: the recorder's starts when
+ * the recording does and moves only on the instants the recording is told
+ * about, while the ride's starts at the ride's first step and moves on the
+ * wall clock, so the two would disagree. A rider who reads `Elapsed` reads
+ * what the saved activity will say, and `Ride` is only ever on a ride that
+ * saves nothing to disagree with.
+ *
+ * ⚠️ **The ride's clock freezes on screen while the game is paused (no frame
+ * runs) and then jumps by the whole pause on resume**: nothing calls
+ * `holdAt` on resume, so `advanceTo` credits every step owed since the origin
+ * (`simulation.ts`). Whether it should hold instead is the owner's call
+ * (#2404's review); `GameView.test.tsx` pins what it does today.
+ *
+ * The moment a recording runs its figure
+ * replaces this one ({@link HudInput.elapsedSeconds} is defined), and
+ * {@link movingTimeReading} is never given this fallback: a moving time is
+ * the recorder's or a dash.
+ *
+ * ⚠️ **Same key, same place.** The field keeps {@link ELAPSED_TIME_KEY}, so it
+ * is drawn where *Elapsed* is (`theme.css` §"THE CLOCK ROW") and #94's order
+ * is unchanged; only its label and its figure differ. `Ride` is shorter than
+ * `Elapsed`, so the row it was measured at still holds it.
  */
-function elapsedTimeReading(elapsedSeconds: number | undefined): HudReading {
+function elapsedTimeReading(
+  elapsedSeconds: number | undefined,
+  rideClockSeconds: number,
+): HudReading {
+  if (elapsedSeconds === undefined) {
+    return rideTimeReading(ELAPSED_TIME_KEY, RIDE_CLOCK_LABEL, rideClockSeconds);
+  }
   return rideTimeReading(ELAPSED_TIME_KEY, 'Elapsed', elapsedSeconds);
 }
 
@@ -908,7 +1200,9 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
-    ...(room.draftShown === true ? [draftField(room.draft)] : []),
+    ...(room.draftShown === true
+      ? [draftField(room.draft, 'room-draft', room.inDraft === true)]
+      : []),
   ];
 }
 
@@ -918,23 +1212,46 @@ export const DELIVERY_HOUSES_KEY = 'delivery-houses';
 /** The key of the Delivery round's score field — #1812. @see deliveryReadings */
 export const DELIVERY_SCORE_KEY = 'delivery-score';
 
+/** The key of the Delivery round's next-house field — #2453. @see deliveryReadings */
+export const DELIVERY_NEXT_KEY = 'delivery-next';
+
+/**
+ * The words of the next-house field — #2453; this project's own (DL1), naming
+ * no place. Since #2513 the field counts down to the throw point, and inside
+ * the house's window its value is {@link NEXT_HOUSE_TEXT}`.throwNow` over the
+ * side, read as "Throw now, on the right": the owner's approved wording of
+ * 2026-11-12, in place of a count that reached nought beside the house.
+ */
+export const NEXT_HOUSE_TEXT = {
+  label: 'Next house',
+  left: 'on the left',
+  right: 'on the right',
+  throwNow: 'Throw now,',
+} as const;
+
 /** Whether a reading is one of a Delivery round's — #1812. */
 export function isDeliveryReading(reading: HudReading): boolean {
   return reading.key.startsWith('delivery-');
 }
 
 /**
- * The Delivery round's two fields — #1812: the houses still to deliver, with
+ * The Delivery round's fields — #1812: the houses still to deliver, with
  * the round's delivered and missed counts under them, and the round's score,
- * with the day of the week under it. Two fields rather than five, because on
- * a phone the secondary tier has height for two rows, and `theme.css`
- * §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind give way to
- * these as they do to a room's. Words are this project's own (DL1): a house
- * is counted, never named, and nothing here names a place (DL11, ADR 0055).
+ * with the day of the week under it; since #2453, between them, how far the
+ * next house is and which side of the road it stands on. Three fields rather
+ * than five, because on a phone the secondary tier has height for two rows,
+ * and `theme.css` §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind
+ * give way to these as they do to a room's. Words are this project's own
+ * (DL1): a house is counted, never named, and nothing here names a place
+ * (DL11, ADR 0055) — the next house is a side and a distance from the rider.
  */
-function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReading[] {
+function deliveryReadings(
+  delivery: DeliveryHud | undefined,
+  units: UnitSystem,
+): readonly HudReading[] {
   if (delivery === undefined) return [];
   const tally = roundTally(delivery.round);
+  const next = delivery.next;
   return [
     {
       key: DELIVERY_HOUSES_KEY,
@@ -946,48 +1263,116 @@ function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReadin
       // breaks the phrase after the comma and never between "2" and "missed".
       detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
     },
+    next === undefined
+      ? {
+          key: DELIVERY_NEXT_KEY,
+          label: NEXT_HOUSE_TEXT.label,
+          value: NO_READING,
+          unit: smallDistanceUnit(units),
+          stale: false,
+        }
+      : next.metres > 0
+        ? {
+            ...measured(
+              DELIVERY_NEXT_KEY,
+              NEXT_HOUSE_TEXT.label,
+              formatSmallDistance(next.metres, units),
+            ),
+            detail: NEXT_HOUSE_TEXT[next.side],
+          }
+        : {
+            // #2513: inside the house's window, a word and the side, never "0 ft".
+            key: DELIVERY_NEXT_KEY,
+            label: NEXT_HOUSE_TEXT.label,
+            value: NEXT_HOUSE_TEXT.throwNow,
+            unit: '',
+            stale: false,
+            word: true,
+            detail: NEXT_HOUSE_TEXT[next.side],
+          },
     {
       key: DELIVERY_SCORE_KEY,
       label: 'Score',
       value: String(delivery.score),
       unit: '',
       stale: false,
-      detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+      detail:
+        delivery.crashed === true
+          ? CRASHED_TEXT
+          : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
     },
   ];
 }
+
+/**
+ * What the Score field says under the score while a crash is drawn — #2454,
+ * new rider-facing wording for the owner's approval.
+ */
+export const CRASHED_TEXT = 'Crashed';
 
 /** What the draft field is called (#787). */
 export const DRAFT_LABEL = 'Draft';
 
 /**
+ * The key of a SOLO ride's draft field — #2425. Not `room-draft`: a key
+ * beginning `room-` is a room's reading ({@link isRoomReading}), and on a
+ * phone a room's readings take the places of the pacer's, the ghost's and the
+ * wind's (`theme.css` §"A ROOM RIDE ON A PHONE"), which a solo ride keeps.
+ */
+export const SOLO_DRAFT_KEY = 'solo-draft';
+
+/**
  * The room's draft on this rider, as a share of aerodynamic drag — #787,
- * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
- * climb, where there is little air to push, reads as a fact and not a fault
- * (#327's indicator criteria). Only on a ride in a room, like every room
- * field: absent everywhere else, on the `NO_READING` precedent — and only
- * when the rider's setting shows it ({@link RoomHud.draftShown}).
+ * ADR 0038 D-5 — and since #2425 a solo ride's ({@link HudInput.soloDraft}).
+ * The unit says what it is a share of, so a small number on a climb, where
+ * there is little air to push, reads as a fact and not a fault (#327's
+ * indicator criteria). On a ride in a room, or a solo ride that is drafted
+ * (behind the pacer or the rider's own ghost): absent everywhere else, on the
+ * `NO_READING` precedent — and only when the rider's setting shows it
+ * ({@link RoomHud.draftShown}).
  *
  * A number carries a gauge toward {@link DRAFT_FULL_SCALE_PERCENT}, and the
  * phrase under it says what that full scale is (#327: *"the full-scale mark is
  * drawn … If the scale is instead the theoretical maximum, the gauge says
  * so"*). `'Off'` and the dash carry none: there is nothing to measure.
+ *
+ * #2426: `inDraft` is `room-ride.ts` §`draftEvent`'s state. In the draft, a
+ * number is {@link HudReading.sheltered} and the line under it says
+ * {@link IN_THE_DRAFT}, with the scale moved to {@link HudReading.said} for a
+ * screen reader. `'Off'` and the dash are never sheltered: there is no draft.
  */
-function draftField(draft: RoomHud['draft']): HudReading {
-  const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
+function draftField(draft: RoomHud['draft'], key: string, inDraft: boolean): HudReading {
+  const base = { key, label: DRAFT_LABEL, stale: false } as const;
   if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
   if (draft === undefined || !Number.isFinite(draft)) {
     return { ...base, value: NO_READING, unit: '' };
   }
   const percent = Math.max(0, Math.min(100, Math.round(draft)));
+  // #2425: the solo field is the tablet tier's narrowest track, where
+  // `59 % of drag` does not fit beside its number on the CI runner's
+  // rendering, and #2130 keeps every unit on its number's line. A longer line
+  // under it wraps at 1024×768 and pushes the notices under the map credit
+  // (`ride-attribution.browser.spec.ts` §"#1552"). So a solo draft's unit is
+  // the `%` alone, and the line under it is the gauge's scale as a room's is.
+  // #2472: and a screen reader still hears "of drag" after it.
+  const solo = key === SOLO_DRAFT_KEY;
+  const scale = draftScaleText(DRAFT_FULL_SCALE_PERCENT);
   return {
     ...base,
     value: String(percent),
-    unit: '% of drag',
-    detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
+    unit: solo ? '%' : '% of drag',
+    ...(solo ? { unitSaid: 'of drag' } : {}),
+    ...(inDraft ? { detail: IN_THE_DRAFT, said: scale, sheltered: true } : { detail: scale }),
     gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
   };
 }
+
+/**
+ * What the Draft field's line says while the rider is in the draft — #2426,
+ * approved by the owner on #2421 (2026-11-09, item 4). Seen, and never spoken
+ * as an announcement (item 3): a screen reader reads it as part of the field.
+ */
+export const IN_THE_DRAFT = 'In the draft';
 
 /** What the gauge's full scale is, in words under the number (#787). ⚠️ Draft wording for the owner. */
 function draftScaleText(fullScalePercent: number): string {
@@ -1065,15 +1450,28 @@ function gapReading(chase: ChasedGap): HudReading {
   // speed and pretending it is unknown would hide something that is known.
   return chase.outcome === undefined
     ? timeGap(key, label, chase.gap)
-    : settledGap(key, label, chase.outcome);
+    : settledGap(key, label, chase.outcome, chase.drafted === true);
 }
 
+/**
+ * What a settled field adds when the attempt was ridden in a draft — #2425,
+ * ADR 0066 D-5.1's words. ⚠️ Draft wording for the owner.
+ */
+export const WITH_ITS_DRAFT = 'with its draft';
+
 /** A settled race's word where the number was — #259. @see SETTLED */
-function settledGap(key: string, label: string, outcome: GhostOutcome): HudReading {
+function settledGap(
+  key: string,
+  label: string,
+  outcome: GhostOutcome,
+  drafted: boolean,
+): HudReading {
   // `word` because all three of these are — see {@link HudReading.word} for
   // what a word does to a 7 rem grid track at 2.5 rem.
   const { value, detail } = SETTLED[outcome];
-  return { key, label, value, unit: '', detail, stale: false, word: true };
+  // #2425: in words beside the result, never by colour alone (D-5.1).
+  const said = drafted ? `${detail}, ${WITH_ITS_DRAFT}` : detail;
+  return { key, label, value, unit: '', detail: said, stale: false, word: true };
 }
 
 /**

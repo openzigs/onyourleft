@@ -56,6 +56,7 @@ import {
   type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
+import type { OperatePort, OperateStanding, OperateStatus, OperatorLogEntry } from './operate-port';
 
 export interface ScriptedInstance {
   readonly port: InstancePort;
@@ -189,7 +190,7 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
     held: {
       connected: options.connected ?? false,
       origin: 'https://ride.example',
-      instanceName: 'Lanes of the Weald',
+      instanceName: 'Lanes by the old quarry',
       displayName: 'Rider',
       sourceUrl:
         'https://github.com/openzigs/onyourleft/tree/0123456789abcdef0123456789abcdef01234567',
@@ -835,6 +836,142 @@ export function scriptedModeration(
         inviteCode,
         expiresAt: 1_790_604_800,
       } as const);
+    },
+  };
+  return { port, calls, held };
+}
+
+/**
+ * A stand-in {@link OperatePort} (#2603) for the Operate area, the Instance
+ * screen's link to it, the accessibility walk and the browser harnesses. It
+ * keeps what the instance's operator log would — entries, oldest first as the
+ * instance writes them — and pages them NEWEST first, as `GET /v1/operate/log`
+ * does. Anybody it does not hold as the owner reads no log, as the instance
+ * answers them `not_found`.
+ */
+export interface ScriptedOperate {
+  readonly port: OperatePort;
+  /** Every method called, in order: `standing`, `status`, `log`, `log <cursor>`. */
+  readonly calls: string[];
+  held: {
+    standing: OperateStanding;
+    /** Oldest first, as the instance writes them. */
+    entries: OperatorLogEntry[];
+    /** How many entries one page holds. */
+    pageSize: number;
+    /** `false` to answer every read of the log as one that could not be read. */
+    logReadable: boolean;
+    /** What the instance's status says (#2604), or `null` to answer it as one that could not be read. */
+    status: OperateStatus | null;
+  };
+}
+
+/**
+ * An instance's status (#2604) with something in every field to draw: a
+ * ready instance on this repository's source, the blobs on a disk of their
+ * own that is nearly full, a tunnel with four connections, and no backup
+ * recorded yet.
+ */
+export const SCRIPTED_STATUS: OperateStatus = {
+  kind: 'status',
+  ready: true,
+  checks: { database: true, migrations: 'at-head', rooms: true },
+  version: '0.0.0',
+  commit: '0123456789abcdef0123456789abcdef01234567',
+  upstream: true,
+  registration: 'approval',
+  uptimeSeconds: (3 * 24 + 4) * 3600 + 17 * 60,
+  disk: [
+    {
+      holds: 'database',
+      freeBytes: 412_000_000_000,
+      totalBytes: 500_000_000_000,
+      low: false,
+    },
+    { holds: 'blobs', freeBytes: 20_000_000_000, totalBytes: 1_000_000_000_000, low: true },
+  ],
+  lastBackup: null,
+  tunnel: { state: 'ready', connections: 4 },
+  counts: {
+    athletes: { active: 3, pending: 1, suspended: 1 },
+    roomsOpen: 2,
+    analysis: { queued: 2, running: 1 },
+  },
+  keys: 'ready',
+};
+
+/**
+ * Three operator log entries, oldest first: a migration from the CLI, a room
+ * opened from the app, and a failed restore whose detail is the longest its
+ * action's vocabulary admits (`apps/instance` §`OPERATOR_DETAILS`) — one
+ * unbroken word a 320 px page must break.
+ */
+export const SCRIPTED_OPERATOR_LOG: readonly OperatorLogEntry[] = [
+  {
+    id: 1,
+    at: '2026-11-14T09:00:00.000Z',
+    source: 'cli',
+    action: 'migrate',
+    detail: 'applied=40',
+    outcome: 'done',
+  },
+  {
+    id: 2,
+    at: '2026-11-14T09:30:00.000Z',
+    source: 'app',
+    action: 'room_open',
+    detail: 'ride',
+    outcome: 'done',
+  },
+  {
+    id: 3,
+    at: '2026-11-14T10:00:00.000Z',
+    source: 'cli',
+    action: 'restore',
+    detail: 'keys_not_rotated,blobs=999999999',
+    outcome: 'failed',
+  },
+];
+
+export function scriptedOperate(
+  options: {
+    readonly standing?: OperateStanding;
+    readonly entries?: readonly OperatorLogEntry[];
+    readonly pageSize?: number;
+    readonly status?: OperateStatus | null;
+  } = {},
+): ScriptedOperate {
+  const calls: string[] = [];
+  const held: ScriptedOperate['held'] = {
+    standing: options.standing ?? 'owner',
+    entries: [...(options.entries ?? SCRIPTED_OPERATOR_LOG)],
+    pageSize: options.pageSize ?? 25,
+    logReadable: true,
+    status: options.status === undefined ? SCRIPTED_STATUS : options.status,
+  };
+  const port: OperatePort = {
+    status: () => {
+      calls.push('status');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      return Promise.resolve(held.status ?? { kind: 'unreachable' });
+    },
+    standing: () => {
+      calls.push('standing');
+      return Promise.resolve(held.standing);
+    },
+    log: (cursor) => {
+      calls.push(cursor === undefined ? 'log' : `log ${cursor}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (!held.logReadable) return Promise.resolve({ kind: 'unreachable' });
+      // The cursor is an offset as text — opaque to the screen.
+      const newestFirst = [...held.entries].reverse();
+      const start = cursor === undefined ? 0 : Number(cursor);
+      const end = start + held.pageSize;
+      return Promise.resolve({
+        kind: 'page',
+        entries: newestFirst.slice(start, end),
+        next: end < newestFirst.length ? String(end) : null,
+      });
     },
   };
   return { port, calls, held };

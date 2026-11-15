@@ -34,6 +34,7 @@ export type {
   DegreesLongitude,
   GeographicPosition,
   GradePercent,
+  Kilocalories,
   Kilograms,
   KilometresPerHour,
   Metres,
@@ -58,6 +59,7 @@ export {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilocalories,
   kilograms,
   kilometresPerHour,
   metres,
@@ -447,6 +449,32 @@ export {
   predictedPower,
 } from './analysis/critical-power';
 
+// A threshold estimate from a ramp or a 20-minute test (#2303). The two
+// multipliers are conventions from the literature, stated once in
+// `analysis/threshold-estimate.ts`; an unfinished test is refused, not guessed.
+
+export type {
+  ThresholdEstimate,
+  ThresholdTestKind,
+  ThresholdTestRecording,
+  ThresholdTestRule,
+} from './analysis/threshold-estimate';
+export { estimateThreshold, THRESHOLD_TEST_RULES } from './analysis/threshold-estimate';
+
+// A ride's calorie estimate (#2431, epic #2430): from its work at an assumed
+// gross efficiency, else from its heart rate by Keytel 2005, else none. The
+// sources, the efficiency ruling and the per-sample rules are in
+// `analysis/calories.ts`.
+
+export type { CalorieEstimate, CalorieRider, CaloriesBasis } from './analysis/calories';
+export {
+  ASSUMED_GROSS_EFFICIENCY,
+  caloriesFromHeartRate,
+  caloriesFromWork,
+  JOULES_PER_KILOCALORIE,
+  rideCalories,
+} from './analysis/calories';
+
 // --- Training zones (#78) ----------------------------------------------------
 //
 // Here rather than in `apps/web` for the reason above, and one more: the
@@ -465,6 +493,7 @@ export {
   POWER_ZONE_LOWER_FRACTIONS,
   POWER_ZONE_NAMES,
   powerZones,
+  SWEET_SPOT_FRACTIONS,
   timeInZones,
   zoneOf,
 } from './analysis/zones';
@@ -713,6 +742,7 @@ export {
   SIMILARITY_METRES,
 } from './segment/match';
 export type {
+  DraftedSpan,
   EffortContext,
   EffortVisibility,
   FrozenAttributes,
@@ -723,6 +753,7 @@ export {
   countsOnSharedBoard,
   countsTowardPersonalBest,
   createEffort,
+  draftedDistanceShare,
   effortId,
   effortVisibility,
   personalBest,

@@ -36,6 +36,7 @@ import {
   MODERATION_IS_LOGGED,
   MODERATION_LOG_UNREADABLE_TEXT,
   MODERATION_NO_PORT,
+  MODERATION_SECTION_HEADING,
   MODERATION_STANDING_TEXT,
   ModerationView,
   MORE_UNREADABLE_TEXT,
@@ -1176,5 +1177,37 @@ describe('an item — #913', () => {
       expect.objectContaining({ facts: FACTS, termsGround: TERMS, decidedOn: 'notice' }),
     ]);
     expect(text(section('Moderation log'))).toContain('Hid an item');
+  });
+});
+
+describe('opened at a section, from Operate’s Accounts — #2605', () => {
+  it.each([
+    ['approvals', 'Waiting for approval'],
+    ['suspended', 'Suspended accounts'],
+    ['invite', 'Invite a rider'],
+  ] as const)('focuses the %s heading once the queues are drawn', async (at, heading) => {
+    mounted = await mount(<ModerationView port={scriptedModeration().port} section={at} />);
+    await settle();
+    const focused = document.activeElement;
+    expect(focused?.id).toBe(MODERATION_SECTION_HEADING[at]);
+    expect(focused?.textContent).toBe(heading);
+    // Focusable by the screen, never a stop in the tab order.
+    expect(focused?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('moves focus nowhere when opened at no section', async () => {
+    await open(scriptedModeration());
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('does not pull focus back to the heading when an action reads the queues again', async () => {
+    const scripted = scriptedModeration();
+    mounted = await mount(<ModerationView port={scripted.port} section="suspended" />);
+    await settle();
+    expect(document.activeElement?.id).toBe(MODERATION_SECTION_HEADING.suspended);
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    expect(scripted.calls).toContain('approve pending-anna');
+    expect(text()).toContain(ACTION_DONE_TEXT);
+    expect(document.activeElement?.id).not.toBe(MODERATION_SECTION_HEADING.suspended);
   });
 });

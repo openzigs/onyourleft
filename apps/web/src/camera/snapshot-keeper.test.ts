@@ -70,6 +70,11 @@ function scriptedRides(initial: Partial<RideProgress> = {}) {
       set({ saveState: 'saving' });
       set({ saveState: outcome, savedActivityId: outcome === 'saved' ? id : undefined });
     },
+    /** #2349 `confirmDiscard`: stopped, then discarded — never saving. */
+    discard: () => {
+      set({ phase: 'stopped' });
+      set({ saveState: 'discarded' });
+    },
     /** `startNewRide`: back to idle with nothing saved. */
     reset: () => {
       set({ phase: 'idle', saveState: 'unavailable', savedActivityId: undefined });
@@ -224,6 +229,43 @@ describe('a snapshot taken during a ride (D-3 rule 1)', () => {
       expect(await snapshotsOf(later.id)).toStrictEqual([]);
     }
     expect(await cameraFramesOnDevice()).toBe(0);
+  });
+});
+
+describe('a ride the rider discards — #2349', () => {
+  it('drops the snapshots taken during it AND the setup ones it claimed, and writes none of them', async () => {
+    const rides = scriptedRides();
+    const keeper = keeperOver(rides);
+    // One taken in setup, which the ride started next claims (rule 2)…
+    keeper.holdSideSnapshot(taken(5));
+    rides.start();
+    // …and one taken during it.
+    keeper.holdSideSnapshot(taken(6));
+    rides.discard();
+    rides.reset();
+    // The next ride is saved, and is handed neither: the discarded ride's
+    // setup snapshot is not given back to wait, as a failed save's is.
+    const next = await seedRide(harness, ATHLETE_A);
+    rides.start();
+    rides.stopAndSave(next.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await snapshotsOf(next.id)).toStrictEqual([]);
+    expect(await cameraFramesOnDevice()).toBe(0);
+  });
+
+  it('leaves a snapshot taken after the discard for the next ride, as any setup snapshot', async () => {
+    const rides = scriptedRides();
+    const keeper = keeperOver(rides);
+    rides.start();
+    rides.discard();
+    rides.reset();
+    keeper.holdSideSnapshot(taken(8));
+    const next = await seedRide(harness, ATHLETE_A);
+    rides.start();
+    rides.stopAndSave(next.id);
+    await vi.waitFor(async () => {
+      expect(await snapshotsOf(next.id)).toHaveLength(1);
+    });
   });
 });
 

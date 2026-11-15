@@ -61,6 +61,7 @@
 
 import {
   localDay,
+  type CalorieRider,
   type RecordedSeries,
   type ReplanRecord,
   type Seconds,
@@ -75,6 +76,7 @@ import type {
   RecordedCourseLap,
   RecordedWorkoutBlock,
   RecordingSessionId,
+  RideFacts,
   RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
@@ -83,7 +85,7 @@ import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
 import { lapsToSave } from './laps';
-import { rideAveragePower, rideDistance } from './totals';
+import { recordedRideCalories, rideAveragePower, rideDistance } from './totals';
 import { workoutBlocksToSave } from './workout-blocks';
 
 /**
@@ -151,6 +153,20 @@ export interface RideToSaveInput {
    * cannot leave the ride offered for saving a second time.
    */
   readonly recordingSession?: RecordingSessionId | undefined;
+  /**
+   * What the heart-rate calorie estimate needs to know about the rider, as
+   * `athlete/calorie-inputs.ts` §`calorieRiderFor` makes it from the athlete
+   * row at the ride's start — #2433. Absent or empty, a ride with power still
+   * gets its figure and a heart-rate ride gets none.
+   */
+  readonly rider?: CalorieRider | undefined;
+  /**
+   * Whether this ride was drafted, and when the rider was in the draft —
+   * #2451, ADR 0066 D-5.3: known only while riding, like
+   * {@link workoutFinished} (`ride/solo-draft-record.ts`). Absent for a ride
+   * with no draft, and for one recovered after a crash.
+   */
+  readonly draft?: Pick<RideFacts, 'drafted' | 'draftSpans'> | undefined;
 }
 
 /**
@@ -185,6 +201,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
   const startedAt = series.startedAt;
   const power = series.channels.power;
   const average = rideAveragePower(power);
+  const calories = recordedRideCalories(series, input.rider ?? {});
 
   const activity: NewActivity = {
     id: input.id,
@@ -197,6 +214,10 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     distance: rideDistance(series),
     hasPosition: series.channels.latitude !== undefined,
     ...(average === undefined ? {} : { averagePower: average }),
+    // #2433: worked out once, here, while the samples are in hand — and frozen,
+    // so a later change of weight or age in Settings does not rewrite it. No
+    // figure is no key, never `0 kcal`.
+    ...(calories === undefined ? {} : { calories }),
     // Computed here because the samples are in hand, which is the importer's
     // reason too: the fitness chart's own criterion forbids decoding streams to
     // draw it, so the threshold-independent half has to be stored at write
@@ -229,6 +250,11 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         : {
             workoutBlocks: workoutBlocksToSave(input.workoutBlocks, series, input.movingTime),
           }),
+      // #2451: known only to the ride that rode it, like the blocks above.
+      ...(input.draft?.drafted === true ? { drafted: true } : {}),
+      ...(input.draft?.draftSpans === undefined || input.draft.draftSpans.length === 0
+        ? {}
+        : { draftSpans: input.draft.draftSpans }),
     },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

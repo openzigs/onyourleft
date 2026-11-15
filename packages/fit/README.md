@@ -538,6 +538,7 @@ line rather than only describing it.
 | lap `totalElapsedTime`, `totalDistance` | **lost** — GPX has no lap | native |
 | lap average and highest heart rate, average cadence (#1321) | **lost** — GPX has no lap | native |
 | lap average and highest power (#1321) | **lost** | `ns3:LX/AvgWatts`, `MaxWatts` |
+| lap `calories` (#2435) | **lost** | `Calories`, in whole kcal; **an absent one is omitted**, though the schema requires the element, rather than written as a false `0` |
 | lap `intensity`, `triggerMethod` (#1321) | **lost** | native; **an absent one is written `Active` / `Manual`**, because both elements are required |
 | activity name | `<trk><name>` | **lost** — `<Notes>` is a rider's note, not a title |
 | lap boundaries | one `<trkseg>` per lap; the count survives | native |

@@ -13,7 +13,8 @@
  *
  * Since #1285 the required check is one job over several shards (five since
  * #1720, which split the browser gate in three by spec file; six since #2154,
- * which split the Vitest suite in two by project), and the same
+ * which split the Vitest suite in two by project; eight since #2376, which
+ * split the browser gate in five), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -36,6 +37,8 @@ import config, {
   GATE_BUDGET_MS,
   GATE_STEP_MS,
 } from '../playwright.config';
+
+import { R2_ARCHIVE_VARIABLES } from '../tools/demo/r2-archive';
 
 import { NIGHTLY, NIGHTLY_CHECKS } from './nightly';
 
@@ -590,7 +593,9 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // longer decides its shard and this list does. `browser-3` is the
     // lightest of the three (§4c §"Three browser shards — #1720": 3.1 to
     // 4.6 m of its 720 s on #1720's runs, against 6.1 to 6.5 m for
-    // `browser-1`), so the demo spec is named there.
+    // `browser-1`), so the demo spec is named there. Since #2376 the five
+    // lists are drawn on measured time (§4c §"Five browser shards"), and
+    // the demo spec's list is still `browser-3`'s.
     const demo = SPECS.filter(
       (name) => /demo\.browser\.spec\.ts$/.test(name) && !name.startsWith('demo-'),
     );
@@ -599,6 +604,31 @@ describe('the browser gate is split into a required run and a nightly one — #8
       .filter(([, script]) => script.includes(' /shell-demo.browser.spec.ts'))
       .map(([name]) => name);
     expect(homes).toEqual(['test:browser:shard-3']);
+  });
+
+  it('keeps the demo’s realistic world out of every shard that opens the ride harness — #2376', () => {
+    // The two demo specs draw the realistic world on the CPU. Beside one, a
+    // ride harness case waiting its 10 s for the race standings ran out of
+    // it on an EPYC 7763 twice while #2376 was measured: `ride-laps` (18.8 s)
+    // and `ride-room` (16.4 s), each in the demo's shard (§4c §"Five browser
+    // shards — #2376"). So the shard that holds them names no spec that
+    // drives `ride.html`, read from the spec's own code rather than a list.
+    const demos = ['shell-demo.browser.spec.ts', 'demo-world.browser.spec.ts'];
+    const RIDE_HARNESS = /ride\.html|\bopenRide\b|\bsharedRide\b|from '\.\/ride-stage'/;
+    expect(SPECS.filter((spec) => RIDE_HARNESS.test(codeOf(spec))).length).toBeGreaterThan(0);
+    for (const demo of demos) {
+      const homes = shardScripts().filter(([, script]) => script.includes(` /${demo}`));
+      expect(homes, demo).toHaveLength(1);
+      const [, script = ''] = homes[0] ?? [];
+      const filters = (playwrightRuns(script)[0] ?? '')
+        .split(/\s+/)
+        .filter((one) => one.startsWith('/'));
+      const riders = SPECS.filter(
+        (spec) =>
+          filters.some((filter) => selects(filter, spec)) && RIDE_HARNESS.test(codeOf(spec)),
+      );
+      expect(riders, demo).toEqual([]);
+    }
   });
 
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
@@ -654,6 +684,31 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   const nightly = read(ROOT, '.github', 'workflows', 'nightly.yml');
   const runCommands = (workflow: string): string[] =>
     [...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => String(match[1]).trim());
+
+  it('runs the uninstrumented Vitest files with the preset-route archive check on, on main — #2268, #2275', () => {
+    // Unset, `preset-bake-archive.test.ts` skips and the step is green over a
+    // check that never ran. On `main` only: the R2 token's environment
+    // deploys from `main`, and a pull request's run without it would read the
+    // public URL and be answered 403.
+    const onMain = (value: string): string =>
+      `\${{ github.ref == 'refs/heads/main' && '${value}' || '' }}`;
+    const step = /- name: Tests outside coverage\n((?: {8}.*\n)+)/.exec(uncommented(nightly))?.[1];
+    const secrets = Object.values(R2_ARCHIVE_VARIABLES).map(
+      (name) => `          ${name}: \${{ secrets.${name} }}\n`,
+    );
+    expect(step).toBe(
+      '        env:\n' +
+        `          OYL_DEMO_BAKE_ARCHIVE_CHECK: ${onMain('1')}\n` +
+        secrets.join('') +
+        '        run: pnpm run test:uninstrumented\n',
+    );
+    // The job takes the token's environment on `main` alone.
+    expect(jobField(jobsOf(nightly).get('heavy') ?? '', 'environment')).toBe(
+      onMain('basemap-archive'),
+    );
+    // And no other step or job is handed a secret.
+    expect(uncommented(nightly).match(/secrets\./g)).toHaveLength(secrets.length);
+  });
 
   it('runs the uninstrumented Vitest files, and each half of the nightly browser checks in a job of its own — #1675', () => {
     const commands = runCommands(nightly);
@@ -795,9 +850,9 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(commands).toEqual(
       expect.arrayContaining([
         ...requiredShardScripts().map((name) => `pnpm run ${name}`),
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3',
+        // Every browser shard's gate, read from the scripts so a fourth or a
+        // fifth (#2376) cannot be left out of the required run unnoticed.
+        ...shardScripts().map(([name]) => gateCommand(name)),
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');

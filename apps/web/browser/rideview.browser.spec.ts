@@ -3287,26 +3287,31 @@ for (const viewport of READING_VIEWPORTS) {
     await open(page, viewport, '?ride=paused');
     const stop = (await liveRow(page)).find((each) => each.name === 'Stop');
     await open(page, viewport, '?ride=armed');
-    const yes = await page.evaluate(() => {
-      const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
-        (each) => (each.textContent ?? '').trim() === 'Yes, stop the ride',
-      );
-      if (button === undefined) return undefined;
-      const box = button.getBoundingClientRect();
-      return {
-        left: box.left,
-        right: box.right,
-        top: box.top + window.scrollY,
-        bottom: box.bottom + window.scrollY,
-      };
-    });
-    if (stop === undefined || yes === undefined) {
-      throw new Error('no Stop on the paused ride, or no Yes, stop the ride once armed');
+    // #2349: the question's two answers that END the ride. *Keep riding*
+    // under a second tap would be harmless, and is not asked about.
+    const enders = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-oyl-end-ride] button')]
+        .filter((each) => ['Save ride', 'Discard ride'].includes((each.textContent ?? '').trim()))
+        .map((button) => {
+          const box = button.getBoundingClientRect();
+          return {
+            name: (button.textContent ?? '').trim(),
+            left: box.left,
+            right: box.right,
+            top: box.top + window.scrollY,
+            bottom: box.bottom + window.scrollY,
+          };
+        }),
+    );
+    if (stop === undefined || enders.length !== 2) {
+      throw new Error('no Stop on the paused ride, or no Save ride and Discard ride once armed');
     }
     const x = (stop.left + stop.right) / 2;
     const y = (stop.top + stop.bottom) / 2;
-    const under = x >= yes.left && x <= yes.right && y >= yes.top && y <= yes.bottom;
-    expect(under, 'a second tap on Stop would land on Yes, stop the ride').toBe(false);
+    const under = enders
+      .filter((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)
+      .map((box) => box.name);
+    expect(under, 'a second tap on Stop would land on an answer that ends the ride').toEqual([]);
   });
 }
 
@@ -3461,3 +3466,33 @@ for (const viewport of CADENCE_VIEWPORTS) {
     });
   }
 }
+
+/*
+ * #2307, the owner's ruling of 2026-11-07 (f): after a ramp test the offer's
+ * two answers, *Set my threshold to 269 W* and *Keep my threshold as it is*,
+ * wrapped unevenly on a phone, one long and one short. They are the same
+ * width now: stacked, each the offer's full width, where two do not fit.
+ */
+test('#2307 — the threshold offer’s two answers are the same width on a phone, 412×915', async ({
+  page,
+}) => {
+  await open(page, { name: 'a phone — 412×915', width: 412, height: 915 }, '?ride=saved&test=ramp');
+  const offer = page.locator('[data-oyl-threshold-offer]');
+  await expect(offer).toBeVisible();
+  const seen = await offer.evaluate((section) => {
+    const width = (element: Element | null): number => element?.getBoundingClientRect().width ?? 0;
+    const buttons = [...section.querySelectorAll('button')];
+    return {
+      names: buttons.map((each) => each.textContent),
+      widths: buttons.map(width),
+      tops: buttons.map((each) => each.getBoundingClientRect().top),
+      row: width(buttons[0]?.parentElement ?? null),
+    };
+  });
+  expect(seen.names).toEqual(['Set my threshold to 269 W', 'Keep my threshold as it is']);
+  const [set = 0, keep = 0] = seen.widths;
+  expect(Math.abs(set - keep)).toBeLessThanOrEqual(1);
+  // Stacked on a phone, each the row's full width.
+  expect(seen.tops[1] ?? 0).toBeGreaterThan(seen.tops[0] ?? 0);
+  expect(set).toBeGreaterThanOrEqual(seen.row - 1);
+});

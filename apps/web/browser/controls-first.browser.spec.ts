@@ -99,6 +99,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { THEMES } from '../src/design/tokens';
+import { SCRIPTED_STATUS } from '../src/instance/testing';
 import {
   ALL_ROUTES,
   hrefFor,
@@ -281,6 +282,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   settings: [
     'Units',
     'Your weight',
+    // #2432: what the heart-rate estimate is fitted on, and that a ride with
+    // power needs neither input; where they are kept stays above the form.
+    'Calorie estimate from heart rate',
     // #1813: what Delivery is and what each of its assists changes.
     'Delivery',
     // #1905: and the lap race's, the same way.
@@ -291,12 +295,16 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Appearance',
     'Announcements',
     'Sounds',
+    // #2079: which panels the ride HUD shows, and that a larger size is drawn on a tablet.
+    'Ride HUD',
     // #1433: what the order is for — the zoom keeps the top two.
     'Ride screen readings',
     'Game world',
     // #787: what the draft indicator shows and says, and that it is not the
     // room's own switch.
     'Draft',
+    // #2425: what drafting on your own does, and that it is not a room's.
+    'Draft on your own',
     'Words to mask',
     'Documents for the analysis',
     // #1237: what the typed goals are not, and why thresholds are checked
@@ -319,6 +327,12 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // only over the populated ports. Notices and Appeals tuck nothing: each item
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
+  // #2604: Status tucks what Docker Desktop's disk figures are (#2622's review),
+  // and is drawn only for the owner, whom only the populated ports are. #2605:
+  // what Accounts is for, and what every registration mode shares, are behind
+  // each heading's ⓘ. The mode heading names the populated instance's mode,
+  // read from its fixture so the two cannot drift.
+  operate: ['Status', 'Accounts', `Registration mode: ${SCRIPTED_STATUS.registration}`],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.

@@ -28,7 +28,14 @@
  * not Vitest, which does not check types. Both run in CI.
  */
 
-import { metres, seconds, unixSeconds, watts, beatsPerMinute } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  kilocalories,
+  metres,
+  seconds,
+  unixSeconds,
+  watts,
+} from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { activityId, routeId } from './ids';
@@ -73,6 +80,8 @@ const EVERY_FIELD: Required<ActivityRecord> = {
   hasPosition: true,
   routeId: routeId('route-x'),
   averagePower: watts(201),
+  // #2433: a heart-rate basis, not power, so a reader that defaulted the basis is caught.
+  calories: { energy: kilocalories(612.4), basis: 'heart-rate' },
   effortWeightedPower: watts(223),
   effortWeightedHeartRate: beatsPerMinute(151),
   loadCoveredTime: seconds(3_500),

@@ -399,3 +399,20 @@ it. Each answer is the recommendation.
 | ODbL 1.0 §1.0, §4.2, §4.3, §4.4 and §4.6, verbatim | ADR 0056's Context, read first-hand from <https://opendatacommons.org/licenses/odbl/1-0/> | 2026-10-24 |
 | The OSMF *Substantial* guideline: its endorsement date, its thresholds, and *"repeated small extractions as one big extraction"* | <https://osmfoundation.org/wiki/Licence/Community_Guidelines/Substantial_-_Guideline> | 2026-11-06 |
 | Copernicus GLO-30 *"Bespoke, not OSI and not CC"*; SRTM, NASADEM and USGS 3DEP *"Public domain / CC0"* | ADR 0032 D-1's table, read first-hand there | as ADR 0032 records |
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-08** — **D-1, D-6.2, D-7.2 and D-8.1 are superseded in part by
+  [ADR 0065](0065-built-in-delivery-levels-shipped-in-the-app-under-odbl.md)**, accepted that day ([#2360](https://github.com/openzigs/onyourleft/issues/2360), on the owner's rulings of that day on the
+  epic [#2359](https://github.com/openzigs/onyourleft/issues/2359)), for the built-in Delivery
+  levels only. The levels are a second committed dataset derived from OpenStreetMap, so D-1's
+  *"the circuit files of D-2 only"* and *"Nothing else … is committed"* stop being the whole
+  exception; `ODbL-1.0` is admitted at a second directory, the levels', beside this one (D-6.2);
+  USGS 3DEP is also the levels' height source (D-7.2); and the levels are offered in the Delivery
+  picker (D-8.1). Every decision here still holds for the circuits, D-2.3 included: a circuit ships
+  no corridor, and is offered only in the lap race's course picker. This entry is a pointer; the
+  supersession is ADR 0065's.

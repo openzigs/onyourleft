@@ -61,7 +61,7 @@
  *
  * - **Ride numbers.** They are already free of coordinates, dates and
  *   identifiers (#809), and the patterns are drawn so that ordinary cycling
- *   text — `Box Hill`, `20 km`, `4x8 min`, `Zone 2`, a run of heart rates —
+ *   text — `Quarry climb`, `20 km`, `4x8 min`, `Zone 2`, a run of heart rates —
  *   matches none of them. `hosted-mask.test.ts` holds those negatives.
  * - **Names.** Nothing here can tell a person's or a place's name from any
  *   other capitalised word. A name is masked **only** when it is on the

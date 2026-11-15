@@ -243,10 +243,10 @@ describe('a rider’s app on another origin — #777', () => {
 
 describe('GET /instance — #777', () => {
   it('answers the name the operator configured', async () => {
-    const instance = await start({ config: { name: 'Lanes of the Weald' } });
+    const instance = await start({ config: { name: 'Lanes by the old quarry' } });
     const response = await fetch(`${instance.url}/instance`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ name: 'Lanes of the Weald', termsVersion: null });
+    expect(await response.json()).toEqual({ name: 'Lanes by the old quarry', termsVersion: null });
   });
 
   it('answers null, never an invented name, when none is configured', async () => {

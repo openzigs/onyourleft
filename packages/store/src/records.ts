@@ -31,6 +31,7 @@ import type {
   RouteProfile,
   ElevationSource,
   GradePercent,
+  Kilocalories,
   Kilograms,
   Metres,
   ReplanRecord,
@@ -85,6 +86,55 @@ const visibilitiesAgree: VisibilitiesAgree = [true, true];
 void visibilitiesAgree;
 
 /**
+ * What a stored calorie estimate was worked out from (#2433). `'power'` and
+ * `'heart-rate'` are `@onyourleft/domain`'s `CaloriesBasis`; `'file'` is
+ * reserved for a figure an imported file states itself (#2435, #2436).
+ */
+export type ActivityCaloriesBasis = 'power' | 'heart-rate' | 'file';
+
+/** Every {@link ActivityCaloriesBasis}, for the decoder. */
+export const ACTIVITY_CALORIES_BASES: readonly ActivityCaloriesBasis[] = [
+  'power',
+  'heart-rate',
+  'file',
+];
+
+/** @see ActivityRecord.calories */
+export interface ActivityCalories {
+  readonly energy: Kilocalories;
+  readonly basis: ActivityCaloriesBasis;
+}
+
+/**
+ * The sex whose coefficients a heart-rate calorie estimate uses — #2432. Two
+ * words because Keytel et al. 2005 fits two equations; *Not set* is the field
+ * being absent, never a third value.
+ */
+export type CalorieSex = 'female' | 'male';
+
+/**
+ * The stored sex, or `undefined` for anything else (#2432).
+ *
+ * An unrecognised value on disk reads as unset rather than a
+ * `StoreDecodeError`, for `unit-system.ts`' reason: a hand-edited row decides
+ * only whether a heart-rate ride shows a calorie figure, which is not worth
+ * taking a rider's library away over, and unset shows none.
+ */
+export function parseCalorieSex(value: unknown): CalorieSex | undefined {
+  return value === 'female' || value === 'male' ? value : undefined;
+}
+
+/**
+ * Whether a value can be a stored {@link AthleteRecord.birthYear}: a whole
+ * number (#2432). The plausible range — not in the future, not more than 120
+ * years back — needs today's date, which this package does not read, so the
+ * screen that takes the entry checks it.
+ */
+export function isBirthYear(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+/**
  * The owner of the data on this device.
  *
  * Not an account: Phase 1 has no accounts and no server (owner decision D6).
@@ -137,6 +187,31 @@ export interface AthleteRecord {
    * ever the *source* of that copy.
    */
   readonly mass?: Kilograms;
+
+  /**
+   * The sex whose coefficients the heart-rate calorie estimate uses (#2432):
+   * Keytel et al. 2005 fits one equation for men and one for women, and with
+   * neither chosen a ride with heart rate and no power has no calorie figure.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #2432 reads back with
+   * none, which is a rider who has not said, and nothing substitutes a default.
+   *
+   * ⚠️ **On this device only.** Nothing that is sent to an instance or a model
+   * reads it; the one place it leaves is the rider's own account export.
+   */
+  readonly calorieSex?: CalorieSex;
+
+  /**
+   * The year the rider was born, for the heart-rate calorie estimate's age
+   * (#2432): the age for a ride is the ride's start year minus this. A year
+   * rather than an age, which goes stale, or a date of birth, which identifies
+   * a person far better than an estimate needs.
+   *
+   * Optional for the reason `thresholdPower` gives above, and on this device
+   * only, as {@link AthleteRecord.calorieSex} is.
+   */
+  readonly birthYear?: number;
 
   /**
    * Which units this athlete reads their numbers in (#238).
@@ -276,6 +351,23 @@ export interface ActivityRecord {
    */
   readonly routeId?: RouteId;
   readonly averagePower?: Watts;
+
+  /**
+   * The ride's calorie estimate, worked out **once, when it was saved or
+   * imported** (#2433), and the basis it rests on.
+   *
+   * Stored rather than worked out on read for `averagePower`'s reason: the
+   * samples are in hand at save, and a list must not decode streams. Stored
+   * also **freezes** the rider's weight and age at the ride, so a later change
+   * in Settings does not rewrite last year's rides — the same rule
+   * `FrozenEffortAttributes` keeps for a segment board.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `AthleteRecord.thresholdPower` gives: a ride saved before #2433, and a ride
+   * with neither power nor a heart-rate estimate, has none — a dash on screen,
+   * never `0 kcal`.
+   */
+  readonly calories?: ActivityCalories;
 
   /**
    * The **threshold-independent** half of this ride's load (#77).
@@ -481,6 +573,34 @@ export interface RideFacts {
    * @see WorkoutBlockFact
    */
   readonly workoutBlocks?: readonly WorkoutBlockFact[];
+  /**
+   * `true` when the rider rode at least the drafted share of this ride's
+   * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066
+   * D-5.3 and D-5.6. Known only while riding, like {@link workoutFinished};
+   * absent for a ride that was not drafted, and for one brought in from a file.
+   */
+  readonly drafted?: boolean;
+  /**
+   * When, on the recording's own clock, the rider was in that draft — #2451,
+   * ADR 0066 D-5.2: what marks a segment effort found in this ride, by the
+   * share of the effort's own distance ridden inside these spans. Oldest
+   * first. Absent for a ride with none.
+   *
+   * ⚠️ **A list that does not read is dropped whole, never the ride**, as
+   * {@link workoutBlocks} is. @see DraftSpan
+   */
+  readonly draftSpans?: readonly DraftSpan[];
+}
+
+/**
+ * One stretch of a ride the rider spent in the draft — #2451. Two instants on
+ * the recording's clock, the clock its samples are stamped by: the span
+ * begins when the in-draft state of ADR 0066 D-5.6 begins, and ends when it
+ * ends. `to` is never before `from`.
+ */
+export interface DraftSpan {
+  readonly from: UnixSeconds;
+  readonly to: UnixSeconds;
 }
 
 /**
@@ -922,6 +1042,15 @@ export interface SegmentEffortRecord {
    * their profile, and no test of a single ranking catches it.
    */
   readonly attributes: FrozenEffortAttributes;
+
+  /**
+   * `true` when the rider rode at least the drafted share of this effort's
+   * distance in a pacer's or their own ghost's draft — #2451, ADR 0066 D-5.2.
+   * Kept in the rider's own history and shown with its mark; never offered to
+   * an instance's board. Absent for an effort that was not drafted. Optional,
+   * so no migration.
+   */
+  readonly drafted?: boolean;
 }
 
 /** The frozen copy. Mirrors `@onyourleft/domain`'s `FrozenAttributes`. */

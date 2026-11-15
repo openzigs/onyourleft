@@ -15,6 +15,7 @@
  * | `requested` set | "Asked for 250 W — waiting for the trainer to confirm" |
  * | `target.kind === 'confirmed'` | "Holding 250 W" |
  * | `target.kind === 'unknown'` | "The trainer may still be holding 250 W — this app can no longer tell" |
+ * | `unknown`, after a workout's confirmed step-down and Stop (#2348) | "The trainer was eased off to its lowest setting, 0 W, and released." |
  * | `target.kind === 'none'` | "No target set" |
  *
  * `RideView.test.tsx` asserts the word **Holding** never appears while a
@@ -480,6 +481,14 @@ export function targetSentence(trainer: TrainerSnapshot): string {
     case 'confirmed':
       return `Holding ${String(trainer.target.target)} W.`;
     case 'unknown':
+      // #2348, the owner's ruling of 2026-11-07: after the end of a workout
+      // the trainer CONFIRMED both its step-down to the floor and the Stop,
+      // so "may still be holding 0 W" would be doubt about a known thing.
+      // Only while the number the client remembers is that floor: anything
+      // written since is said as before.
+      if (trainer.easedOffTo !== undefined && trainer.target.attempted === trainer.easedOffTo) {
+        return `The trainer was eased off to its lowest setting, ${String(trainer.easedOffTo)} W, and released.`;
+      }
       return `The trainer may still be holding ${String(trainer.target.attempted)} W — this app can no longer tell.`;
     case 'none':
       // #503: control has its own sentence now (`controlSentence`), so this

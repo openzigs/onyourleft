@@ -85,6 +85,11 @@ export interface LibraryRow {
    * arrives with #63, and this is the bit it will switch on.
    */
   readonly hasPosition: boolean;
+  /**
+   * Whether the ride was drafted — #2451, ADR 0066 D-5.3: kept with the ride
+   * on this device (`RideFacts.drafted`), and said in words on its card.
+   */
+  readonly drafted: boolean;
 }
 
 export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow {
@@ -99,6 +104,7 @@ export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow 
     distance: distance === undefined ? undefined : formatDistance(distance, units).value,
     averagePower: averagePower === undefined ? undefined : formatPowerValue(averagePower),
     hasPosition: summary.hasPosition,
+    drafted: summary.rideFacts?.drafted === true,
   };
 }
 

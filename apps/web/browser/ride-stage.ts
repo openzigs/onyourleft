@@ -207,6 +207,38 @@ export function describeItem(item: StageItem): string {
 }
 
 /**
+ * The layout's own invariants, as the ride's specs hold them, as failure lines
+ * — #2079, and #2080's lap splits: everything on the stage, uncovered and
+ * unscrolled; every panel whole, over no other and not over the leaning
+ * rider; and the primary tier visibly larger than the secondary.
+ */
+export function layoutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  if (seen.scrollY !== 0 || seen.stageScrollTop !== 0) faults.push('the stage scrolled');
+  for (const item of seen.items) {
+    if (!inside(item.box, viewport) || !item.onTop) faults.push(`lost: ${describeItem(item)}`);
+  }
+  for (const panel of seen.panels) {
+    if (!inside(panel.box, viewport)) faults.push(`not whole: ${describeItem(panel)}`);
+  }
+  seen.panels.forEach((a, index) => {
+    for (const b of seen.panels.slice(index + 1)) {
+      if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  const rider = riderBox(viewport);
+  for (const panel of seen.panels) {
+    if (overlap(panel.box, rider)) faults.push(`over the rider: ${describeItem(panel)}`);
+  }
+  if (seen.primaryValuePixels / seen.secondaryValuePixels < MINIMUM_TIER_RATIO) {
+    faults.push(
+      `primary ${String(seen.primaryValuePixels)} px over secondary ${String(seen.secondaryValuePixels)} px`,
+    );
+  }
+  return faults;
+}
+
+/**
  * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels, for a rider
  * leaning as far as one is ever drawn (#499).
  *
@@ -271,9 +303,32 @@ export const RIDE_TOTAL_READINGS = [
   'reading: Distance',
   'reading: Climbed',
   'reading: Avg power',
+  // #2434: the calorie estimate, the ride so far's last.
+  'reading: Calories',
   'reading: W/kg',
   'reading: Zone',
 ] as const;
+
+/**
+ * #2425 — whether a solo ride's Draft field is DRAWN at this viewport: on a
+ * tablet only, 50 rem wide and 47 rem tall (`theme.css` §"A SOLO RIDE'S
+ * DRAFT, ON A TABLET ONLY"); everywhere else it gives way by clip.
+ */
+export function soloDraftDrawn(viewport: Viewport): boolean {
+  return viewport.width >= 800 && viewport.height >= 752;
+}
+
+/**
+ * #2425 — whether the wind gives way to a solo ride's draft at this viewport,
+ * on the widest ride (a pacer, a ghost and the wind): on a tablet from 50 rem
+ * wide and 50 rem tall (`theme.css` §"the wind gives way to it"), where
+ * #2434's *Calories* leaves the tier's second row no seventh track. ⚠️ Only
+ * beside BOTH the pacer and the ghost: with one of them the row has room and
+ * the wind is drawn (#2472, `ride.browser.spec.ts` §"#2472").
+ */
+export function windGivesWayToTheDraft(viewport: Viewport): boolean {
+  return viewport.width >= 800 && viewport.height >= 800;
+}
 
 /**
  * #2076 — whether the ride so far is DRAWN at this viewport: everywhere but a

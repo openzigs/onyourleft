@@ -103,6 +103,8 @@ function busyRide(): StubDetail {
         hasPosition: true,
         averagePower: watts(212),
         rideFacts: {
+          // #2451: and a drafted ride's Draft row, its value and its smaller line.
+          drafted: true,
           workoutBlocks: [
             {
               outcome: 'ridden',
@@ -231,6 +233,18 @@ describe('the ride detail view passes the audit in every state it renders', () =
     await settle();
     expect(distance?.checked).toBe(true);
     expectClean('the detail view with its power curve, drawn against distance');
+  });
+
+  it('with a drafted ride, its Draft row a value and a smaller muted line — #2451', async () => {
+    await openDetail(busyRide());
+    const row = queryAll(document, '.oyl-ride-summary > div').find(
+      (each) => each.querySelector('dt')?.textContent === 'Draft',
+    );
+    const note = row?.querySelector('dd > .oyl-ride-summary__note');
+    expect(note?.textContent).toBe('10 %+ behind the pacer or your ghost');
+    // `.oyl-muted`: inkMuted on the page, the declared pair the Calories basis uses.
+    expect(note?.classList.contains('oyl-muted')).toBe(true);
+    expectClean('the detail view with a drafted ride');
   });
 
   it('with no local store, which is what a private window gets', async () => {

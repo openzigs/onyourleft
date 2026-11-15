@@ -13,6 +13,12 @@ import { candidatesFor } from './node-imports.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const HOOK = new URL('./node-imports.ts', import.meta.url).href;
+/**
+ * The longest the child Node may take (#2568, #1688). Vitest cannot interrupt
+ * a synchronous child, so this is what stops a hung one, and it is below the
+ * case's 5 s default. It takes about 0.1 s locally and 0.2 s under coverage on CI.
+ */
+const CHILD_WAIT_MS = 4_000;
 
 function load(register: boolean): { status: number | null; output: string } {
   const code = [
@@ -33,7 +39,7 @@ function load(register: boolean): { status: number | null; output: string } {
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
     cwd: INSTANCE,
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   return { status: run.status, output: `${run.stdout}${run.stderr}` };
 }

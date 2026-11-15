@@ -39,6 +39,7 @@ import {
   deepNestingGpx,
   deepNestingTcx,
   lapFiguresTcx,
+  malformedLapCaloriesTcx,
   nominalGpx,
   nominalTcx,
   truncatedGpx,
@@ -304,6 +305,16 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the ' +
         'last Value it saw reads the wrong figure.',
       lapFiguresTcx(NULL_ISLAND_TRACK, 30),
+    ),
+    xml(
+      'lap-calories-malformed.tcx',
+      'tcx',
+      'Three laps whose Calories TCX v2’s unsignedShort does not admit — -5, 12.5 and 70000, one ' +
+        'a lap (#2435) — each beside a sound average heart rate, cadence and average power. Each ' +
+        'bad value must be dropped with a fault naming Lap/Calories, and the lap’s other figures ' +
+        'must still read: a reader that rejects the lap, or keeps a rounded or wrapped figure, is ' +
+        'caught here.',
+      malformedLapCaloriesTcx(),
     ),
     xml(
       'xxe-external-entity.tcx',

@@ -113,6 +113,7 @@ import {
 import { curveRows, onRideDurations } from '../detail/curve';
 import type { PickKind } from '../detail/TraceChart';
 import type { SharedTrack } from '../detail/privacy';
+import { CaloriesFact } from '../detail/CaloriesFact';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
@@ -143,6 +144,7 @@ import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
+import { DRAFTED_RIDE_NOTE, DRAFTED_RIDE_TEXT } from '../game/solo-draft';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { raceFactTerm, raceFactText } from '../rooms/race-result';
@@ -344,6 +346,9 @@ export function ActivityDetailView({
   // The channels a read has been started for, and which units' reads count.
   const requested = useRef(new Set<TraceChannel>());
   const generation = useRef(0);
+  // #2373: set once the page has unmounted, for the read that is not a reaction
+  // to an effect and so has no cleanup of its own (`revealShared`).
+  const gone = useRef(false);
   // #2069: the ride's time in zone, read once its section is in view.
   const zonesSlot = useRef<HTMLDivElement | null>(null);
   // Held with the ride they belong to: a page that moves to another ride must
@@ -453,6 +458,23 @@ export function ActivityDetailView({
   }, [units]);
 
   /**
+   * #2373: a read that settles after the page has gone reaches no setter.
+   *
+   * Unmounting does not change `generation` by itself, so a channel read still
+   * in flight when the rider leaves would, on settling, pass its
+   * `generation.current === asked` check and call `setTraces` on a page that is
+   * not there — in a test, after the environment has torn `window` down, which
+   * made that an unhandled rejection that dropped a merge-queue entry.
+   */
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      gone.current = true;
+      generation.current += 1;
+    };
+  }, []);
+
+  /**
    * Watch every chart's slot, and note each channel once it is in view — #2068.
    *
    * The slots are drawn as soon as the overview is ready, one per chartable
@@ -497,6 +519,11 @@ export function ActivityDetailView({
     const asked = generation.current;
     void (async () => {
       for (const channel of wanted) {
+        // #2373: a page that has gone, or reads in other units now, wants none
+        // of the channels still to come.
+        if (generation.current !== asked) {
+          return;
+        }
         let trace: Trace | undefined;
         try {
           trace = await loadTrace(
@@ -662,7 +689,10 @@ export function ActivityDetailView({
     }
     setShowShared(true);
     if (shared === undefined) {
-      setShared(await loadSharedTrack(port, id));
+      const track = await loadSharedTrack(port, id);
+      if (!gone.current) {
+        setShared(track);
+      }
     }
   }, [port, id, shared]);
 
@@ -836,6 +866,17 @@ export function ActivityDetailView({
                 ))}
               </div>
             )}
+            {/* #2451, ADR 0066 D-5.3: a drafted ride says so, kept with the
+            ride on this device. No row for a ride that was not. */}
+            {activity.rideFacts?.drafted === true ? (
+              <div>
+                <dt>Draft</dt>
+                <dd>
+                  {DRAFTED_RIDE_TEXT}{' '}
+                  <span className="oyl-ride-summary__note oyl-muted">{DRAFTED_RIDE_NOTE}</span>
+                </dd>
+              </div>
+            ) : null}
           </dl>
 
           <h3>Traces</h3>
@@ -987,6 +1028,24 @@ export function ActivityDetailView({
         </div>
 
         <div>
+          {/*
+        #2433: the estimate stored when the ride was saved, as the result card
+        shows it, read off the record so a later change of weight or age in
+        Settings does not move it. At the head of the second group rather than
+        in the figures above, which is the top of the second column on a
+        tablet: on a phone the figures already end 33 px above the fold on the
+        CI runner's font (`controls-first.browser.spec.ts`, populated
+        390×844), and any row added to them put the page's first control under
+        it. `CaloriesFact.tsx` §`CaloriesFact` has the measurements.
+      */}
+          <dl className="oyl-ride-summary">
+            <CaloriesFact
+              calories={activity.calories}
+              hasPower={activity.averagePower !== undefined}
+              hasHeartRate={available.includes('heartRate')}
+            />
+          </dl>
+
           {/*
         #1319: a ride with a workout lists its blocks, under their own
         heading after the laps — two tables, never one (WorkoutBlocksTable).

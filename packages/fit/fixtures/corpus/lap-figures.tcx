@@ -287,7 +287,7 @@
         <TotalTimeSeconds>14.0</TotalTimeSeconds>
         <DistanceMeters>100.0</DistanceMeters>
         <MaximumSpeed>9.9</MaximumSpeed>
-        <Calories>12</Calories>
+        <Calories>7</Calories>
         <AverageHeartRateBpm>
           <Value>141</Value>
         </AverageHeartRateBpm>

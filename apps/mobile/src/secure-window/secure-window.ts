@@ -8,7 +8,7 @@
  *
  * `apps/web/src/camera/secure-window-port.ts` declares what the client asks;
  * this is the Android answer. It does not implement that interface by name,
- * for `thermal/thermal.ts`' reason: `apps/web` already depends on this package
+ * for `camera/camera.ts`' reason: `apps/web` already depends on this package
  * and an import back would be a workspace cycle. `main.tsx` composes the port
  * from {@link setCapacitorSecureWindow} behind `isNativeShell`.
  *

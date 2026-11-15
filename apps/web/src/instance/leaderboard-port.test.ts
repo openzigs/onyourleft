@@ -355,6 +355,47 @@ describe('a board across two riders, through the instance (#68)', () => {
   }, 30_000);
 });
 
+describe('a drafted effort is not offered to an instance’s board (#2451, ADR 0066 D-5.2)', () => {
+  it('sends none, and makes no ride public for one', async () => {
+    const { w, send } = await world();
+    const bea = await connected(send, w, 'Bea');
+    const ride = await syncedRide(bea);
+    const segment = await withSegment(bea, ownSegment());
+    expect(await bea.boards.publish(segment)).toBe('published');
+    const segmentId = await publishedSegmentId(publishedDefinitionOf(segment), webCryptoSha256);
+    const before = (await bea.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride.id)))
+      ?.visibility;
+    expect(before).not.toBe('public');
+    await bea.reopen();
+    const drafted = { ...effortOn(segment, ride, 80), drafted: true };
+
+    // A ride whose only effort here was drafted: nothing is sent, nothing made public.
+    expect(await bea.boards.share(segment, [drafted])).toEqual({
+      rides: 0,
+      notSynced: 0,
+      failed: 0,
+    });
+    expect(
+      (await bea.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride.id)))?.visibility,
+    ).toBe(before);
+    await bea.reopen();
+
+    // Beside an undrafted one, only the undrafted is on either board.
+    expect(await bea.boards.share(segment, [drafted, effortOn(segment, ride, 95)])).toEqual({
+      rides: 1,
+      notSynced: 0,
+      failed: 0,
+    });
+    expect((await bea.boards.board(segmentId, 'personal', 'all-time'))?.rows).toEqual([
+      expect.objectContaining({ rank: 1, rider: 'Bea', yours: true, elapsedSeconds: 95 }),
+    ]);
+    const anna = await connected(send, w, 'Anna');
+    expect((await anna.boards.board(segmentId, 'instance', 'all-time'))?.rows).toEqual([
+      expect.objectContaining({ rank: 1, rider: 'Bea', elapsedSeconds: 95 }),
+    ]);
+  }, 30_000);
+});
+
 describe('integrity, through the instance (#69)', () => {
   it('flags another rider’s time off the board, and a segment as hazardous, from the device', async () => {
     const { w, send } = await world();

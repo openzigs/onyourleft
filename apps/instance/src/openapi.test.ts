@@ -502,6 +502,60 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
+  // #2602: the owner's, with an entry of each source to shape-check.
+  getOperatorLog: async (world) => {
+    const token = await moderatorToken(world);
+    const owner = (await world.call('GET', '/v1/auth/session', { token })).body as {
+      athleteId: string;
+    };
+    await world.freshRead(async (store) => {
+      await store.recordOperatorAction(
+        { actor: { source: 'cli' }, action: 'migrate', at: 1_790_000_000 },
+        () => ({ outcome: 'done', detail: 'applied=1', value: undefined }),
+      );
+      await store.recordOperatorAction(
+        {
+          actor: { source: 'app', athleteId: owner.athleteId },
+          action: 'room_open',
+          at: 1_790_000_001,
+        },
+        () => ({ outcome: 'refused', value: undefined }),
+      );
+    });
+    return send(world, 'GET', '/v1/operate/log', token);
+  },
+  // #2604: the owner's Status, counts and states only.
+  getOperateStatus: async (world) =>
+    send(world, 'GET', '/v1/operate/status', await moderatorToken(world)),
+  // #2606: a snapshot, a failed run and a waiting request, to shape-check each.
+  getOperateBackups: async (world) => {
+    await world.freshRead(async (store) => {
+      await store.recordBackup({
+        outcome: 'done',
+        at: 1_790_000_000,
+        snapshot: 'snapshot-2026-09-21T00-00-00-000Z',
+        rows: 12,
+        blobs: 2,
+        databaseSha256: 'e'.repeat(64),
+        sizeBytes: 4096,
+        offBox: 'copied',
+        removed: 1,
+        backupsFreeBytes: 1_000_000,
+        offBoxFreeBytes: null,
+        intervalSeconds: 21_600,
+      });
+      await store.recordBackup({
+        outcome: 'failed',
+        at: 1_790_000_100,
+        error: 'ENOSPC',
+        intervalSeconds: null,
+      });
+      await store.requestBackup(1_790_000_200);
+    });
+    return send(world, 'GET', '/v1/operate/backups', await moderatorToken(world));
+  },
+  requestOperateBackup: async (world) =>
+    send(world, 'POST', '/v1/operate/backups', await moderatorToken(world)),
 
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {

@@ -45,6 +45,9 @@ export type RouteId =
   | 'route-editor'
   | 'workouts'
   | 'game'
+  | 'games'
+  | 'delivery-courses'
+  | 'lap-race-courses'
   | 'camera'
   | 'side-camera'
   | 'devices'
@@ -54,6 +57,7 @@ export type RouteId =
   | 'credits'
   | 'instance'
   | 'moderation'
+  | 'operate'
   | 'more'
   | 'not-found';
 
@@ -138,6 +142,7 @@ export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail' 
  * | group | holds |
  * |---|---|
  * | **Ride** | Ride, Trainer game, Workouts |
+ * | **Games** | Games (since #2292: Delivery and the lap race) |
  * | **History** | Activities, Analysis, Segments |
  * | **Routes** | Routes (and the builder) |
  * | **More** | Devices, Files, Settings, About |
@@ -161,11 +166,20 @@ export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail' 
  * a group of one page, first. Five is Material 3's ceiling for a bar, and the
  * reason Home is not folded into Ride is that it is not about riding — it is
  * the rider's own state and where to start.
+ *
+ * ⚠️ **Games is a sixth since #2292**, the owner's ruling of 2026-11-06:
+ * Delivery and the lap race were each a switch at the bottom of a game ride's
+ * setup, and hard to find. Six is one over Material 3's ceiling for a bar, and
+ * that was the owner's call to make, not this table's; what holds the bar to
+ * one row at 320 px is `theme.css` §"SIX IN A ROW", measured by `shell.browser.spec.ts`
+ * against the chrome area and the navigation box from before. Games is a
+ * group of one page, its menu (`views/GamesView.tsx`), with each game's course
+ * picker under it ({@link DELIVERY_COURSES_ROUTE}, {@link LAP_RACE_COURSES_ROUTE}).
  */
-export type NavGroupId = 'home' | 'ride' | 'history' | 'routes' | 'more';
+export type NavGroupId = 'home' | 'ride' | 'games' | 'history' | 'routes' | 'more';
 
 /** The icons the navigation draws — Lucide's, named in `NavIcon.tsx` (ADR 0034). */
-export type NavIconName = 'home' | 'ride' | 'history' | 'routes' | 'more';
+export type NavIconName = 'home' | 'ride' | 'games' | 'history' | 'routes' | 'more';
 
 export interface NavGroup {
   readonly id: NavGroupId;
@@ -178,6 +192,7 @@ export interface NavGroup {
 export const NAV_GROUPS: readonly NavGroup[] = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'ride', label: 'Ride', icon: 'ride' },
+  { id: 'games', label: 'Games', icon: 'games' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'routes', label: 'Routes', icon: 'routes' },
   { id: 'more', label: 'More', icon: 'more' },
@@ -319,6 +334,20 @@ export const ROUTES: readonly RouteDefinition[] = [
     help: [
       'Targets are a share of your own threshold, so the same workout works whatever shape you ' +
         'are in.',
+    ],
+  },
+  {
+    // #2292: the Games tab's page, a card for each game.
+    id: 'games',
+    group: 'games',
+    layout: 'sections',
+    path: '/games',
+    navLabel: 'Games',
+    title: 'Games',
+    summary: 'Ride a Delivery round or a lap race, on a course you choose.',
+    help: [
+      'Each game is ridden on one of your saved routes. Both are also switches in the trainer ' +
+        'game, for a ride you start from a route.',
     ],
   },
   {
@@ -511,6 +540,43 @@ export const MORE_ROUTE: RouteDefinition = {
 };
 
 /**
+ * A game's course picker — #2292: the Games tab's *Play* leads here, and a
+ * course chosen here opens the trainer game's setup on it with the game
+ * switched on ({@link hrefForGamePlay}).
+ *
+ * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: each is
+ * reached from its card on the Games page, and a top-level link beside Games
+ * would read as a second, different feature. In {@link ALL_ROUTES}, so the
+ * accessibility gate and the reflow walk audit them unasked. Two literal
+ * paths rather than one with a parameter, so each page's `h1` names its game
+ * and an address naming no game is the not-found page.
+ *
+ * What each lists is `game/courses.ts` §`coursesFor`'s, the seam #2293 (the
+ * lap race's built-in circuits) and #2294 (Delivery's routes with enough
+ * mapped houses) fill in.
+ */
+export const DELIVERY_COURSES_ROUTE: RouteDefinition = {
+  id: 'delivery-courses',
+  group: 'games',
+  layout: 'sections',
+  path: '/games/delivery',
+  navLabel: 'Delivery',
+  title: 'Delivery: choose a course',
+  summary: 'Choose a route for your Delivery round, then set up the ride.',
+};
+
+/** The lap race's course picker — #2292. @see DELIVERY_COURSES_ROUTE */
+export const LAP_RACE_COURSES_ROUTE: RouteDefinition = {
+  id: 'lap-race-courses',
+  group: 'games',
+  layout: 'sections',
+  path: '/games/lap-race',
+  navLabel: 'Lap race',
+  title: 'Lap race: choose a course',
+  summary: 'Choose a loop to race laps of against bots, then set up the ride.',
+};
+
+/**
  * Who made the artwork this app ships (#358).
  *
  * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
@@ -582,6 +648,34 @@ export const MODERATION_ROUTE: RouteDefinition = {
   help: [
     'Approve and refuse new accounts, decide reports, suspend accounts and hide names on the ' +
       'instance you moderate.',
+  ],
+};
+
+/**
+ * Operating the instance this device's account OWNS (#2603, epic #2601): the
+ * operator log today, and the instance's status, accounts, backups, AI
+ * backend, rooms and keys as later sub-issues fill it.
+ *
+ * **Not in {@link ROUTES}**, for {@link MODERATION_ROUTE}'s reason: only the
+ * instance's owner has any use for it. The Instance screen links to it when
+ * `instance/operate-port.ts` §`OperatePort.standing` says this device's account
+ * is the owner — never the deputy (ADR 0046 D-9 Q9) — and anybody else who
+ * opens its address is told only that their own account is not the owner,
+ * which the instance's own `not_found` already told them. In
+ * {@link ALL_ROUTES}, so the accessibility gate and the reflow walk audit it
+ * unasked.
+ */
+export const OPERATE_ROUTE: RouteDefinition = {
+  id: 'operate',
+  group: 'more',
+  layout: 'prose',
+  path: '/settings/instance/operate',
+  navLabel: 'Operate',
+  title: 'Operate',
+  summary: 'Run the instance you own, from this app.',
+  help: [
+    'Run the instance you own from this app: what was done to it, and by what. Only its owner ' +
+      'sees this page.',
   ],
 };
 
@@ -691,7 +785,10 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
   MODERATION_ROUTE,
+  OPERATE_ROUTE,
   MORE_ROUTE,
+  DELIVERY_COURSES_ROUTE,
+  LAP_RACE_COURSES_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ROUTE_EDITOR_ROUTE,
@@ -732,6 +829,23 @@ export interface RouteMatch {
    * not, rather than opening a detail view for a ride with no id.
    */
   readonly parameter?: string;
+  /**
+   * The game a course picker switched on — #2292, {@link gamePlayFromHash} on
+   * the trainer game's route and on no other. Set, the setup was opened from
+   * the Games tab and the navigation marks Games ({@link navGroupOf}).
+   */
+  readonly play?: GameMode;
+  /**
+   * The hash's query on the Workouts, Ride and Moderation routes, and on no
+   * other. On Workouts (#2304) the built-in list's filter
+   * (`workouts/built-in.ts` §`builtInFilterFromQuery`); on Ride (#2306) a
+   * tailored built-in to ride (`workouts/built-in-ride.ts`
+   * §`builtInRideFromQuery`); on Moderation (#2605) the section Operate's
+   * Accounts opened it at ({@link moderationSectionFromQuery}). Kept in the
+   * address so a reload, a shared link and Back all show the same. Absent
+   * where there is no query.
+   */
+  readonly query?: string;
 }
 
 /**
@@ -762,7 +876,33 @@ export interface RouteMatch {
  * and a way out.
  */
 export function matchHash(hash: string): RouteMatch {
-  return matchHashAmong(MATCHABLE_ROUTES, hash);
+  const match = matchHashAmong(MATCHABLE_ROUTES, hash);
+  if (
+    match.route.id === 'workouts' ||
+    match.route.id === 'ride' ||
+    match.route.id === 'moderation'
+  ) {
+    const query = hashQuery(hash);
+    return query === undefined || query === '' ? match : { ...match, query };
+  }
+  const play = match.route.id === 'game' ? gamePlayFromHash(hash) : undefined;
+  return play === undefined ? match : { ...match, play };
+}
+
+/** The part of a hash between its `?` and any nested `#`, or `undefined` with no `?`. */
+function hashQuery(hash: string): string | undefined {
+  return /^[^?]*\?([^#]*)/.exec(hash)?.[1];
+}
+
+/**
+ * The navigation group a match is under — its route's, except the trainer
+ * game's setup opened from a course picker (`play=`, #2292): that setup lives
+ * in the Ride group and is still reached from Games, so Games stays the tab
+ * the rider is under (the owner's ruling of 2026-11-06). An ordinary ride's
+ * setup, with no `play=`, is Ride's as before.
+ */
+export function navGroupOf(match: RouteMatch): NavGroupId | undefined {
+  return match.play === undefined ? match.route.group : 'games';
 }
 
 /**
@@ -843,9 +983,11 @@ export function routeForHash(hash: string): RouteDefinition {
  *
  * The query and any nested fragment are dropped: no route is chosen by its
  * query, and silently matching `'/activities?x=1'` against nothing would
- * send a perfectly good deep link to the not-found page. (One query is READ,
- * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010, and
- * {@link gameDeliveryFromHash}, #1816.) A **path** parameter
+ * send a perfectly good deep link to the not-found page. (Two routes READ a
+ * query: the trainer game — {@link gameRouteFromHash}, #1010,
+ * {@link gameDeliveryFromHash}, #1816, and {@link gamePlayFromHash}, #2292 —
+ * and Workouts and Ride, whose query is {@link RouteMatch.query}, #2304 and
+ * #2306.) A **path** parameter
  * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {
@@ -908,6 +1050,34 @@ export function hrefForActivity(id: string): string {
 }
 
 /**
+ * The sections of the Moderation screen that Operate's Accounts (#2605) opens
+ * it at: the approval queue, the suspended accounts and the invitation.
+ */
+export const MODERATION_SECTIONS = ['approvals', 'suspended', 'invite'] as const;
+export type ModerationSection = (typeof MODERATION_SECTIONS)[number];
+
+/**
+ * The Moderation screen opened at one of its sections — #2605. A QUERY, for
+ * {@link hrefForGameRoute}'s reason: it is still the Moderation route, which
+ * shows a moderator every section as before; the screen only moves focus to
+ * the named section's heading once it has drawn it. A nested `#id` would not
+ * do: the hash is the route, so a second fragment is not an anchor the browser
+ * scrolls to.
+ */
+export function hrefForModerationSection(section: ModerationSection): string {
+  return `${hrefFor(MODERATION_ROUTE)}?section=${section}`;
+}
+
+/** The section {@link hrefForModerationSection} named, or `undefined` for none this screen has. */
+export function moderationSectionFromQuery(
+  query: string | undefined,
+): ModerationSection | undefined {
+  if (query === undefined) return undefined;
+  const asked = new URLSearchParams(query).get('section');
+  return MODERATION_SECTIONS.find((section) => section === asked);
+}
+
+/**
  * The trainer game with one saved route already chosen — #1010, Home's
  * "next up" Ride.
  *
@@ -920,6 +1090,14 @@ export function hrefForActivity(id: string): string {
 export function hrefForGameRoute(id: string): string {
   return `${hrefFor(routeById('game'))}?route=${encodeURIComponent(id)}`;
 }
+
+/**
+ * The line under the trainer game's title on a setup opened on a built-in
+ * Delivery level — #2362, round 3 of PR #2378's review, for the owner's
+ * approval: the route's own summary is about saved routes, pacers and ghosts,
+ * none of which a level has.
+ */
+export const LEVEL_GAME_SUMMARY = 'Ride a built-in Delivery round.';
 
 /**
  * The route {@link hrefForGameRoute} chose, or `undefined`. Total, for
@@ -947,6 +1125,43 @@ export function gameRouteFromHash(hash: string): string | undefined {
 export function gameDeliveryFromHash(hash: string): boolean {
   const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
   return query !== undefined && new URLSearchParams(query).get('delivery') === 'on';
+}
+
+/** A game the Games tab offers — #2292. */
+export type GameMode = 'delivery' | 'lap-race';
+
+/** The games, in the order the Games page draws their cards. */
+export const GAME_MODES: readonly GameMode[] = ['delivery', 'lap-race'];
+
+/** Each game's course picker. @see DELIVERY_COURSES_ROUTE */
+export function coursesRouteFor(mode: GameMode): RouteDefinition {
+  return mode === 'delivery' ? DELIVERY_COURSES_ROUTE : LAP_RACE_COURSES_ROUTE;
+}
+
+/**
+ * The trainer game's setup on one course with a game switched on — #2292, a
+ * course chosen on a game's course picker. {@link hrefForGameRoute}'s link
+ * with `play=<game>` beside `route`: a QUERY, for that one's reason. It sets
+ * the setup's switch as it opens (`GameView` reads {@link gamePlayFromHash}
+ * once, on mount) and nothing more — the rider can switch it off again, and
+ * still presses Ride there. ⚠️ Not {@link gameDeliveryFromHash}'s
+ * `delivery=on`, which is read at the press whatever the switch says.
+ */
+export function hrefForGamePlay(mode: GameMode, routeId: string): string {
+  return `${hrefForGameRoute(routeId)}&play=${mode}`;
+}
+
+/**
+ * The game {@link hrefForGamePlay} switched on, or `undefined`. Only the two
+ * games' own names are one; anything else, or nothing, is an ordinary setup.
+ */
+export function gamePlayFromHash(hash: string): GameMode | undefined {
+  const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
+  if (query === undefined) {
+    return undefined;
+  }
+  const asked = new URLSearchParams(query).get('play');
+  return GAME_MODES.find((mode) => mode === asked);
 }
 
 /** The link to one segment's effort history (#67). */

@@ -179,6 +179,52 @@ async function historyOf(open: StoreHarness, segment: SegmentRecord, owner = ATH
   return open.read(async (store) => loadHistory({ athleteId: owner, store }, segment.id));
 }
 
+describe('a drafted effort — #2451, ADR 0066 D-5.2, D-5.6', () => {
+  /** A ride over the segment, in the draft from sample `from` up to sample `to`. */
+  async function draftedRide(open: StoreHarness, from: number, to: number): Promise<NewActivity> {
+    const startedAt = unixSeconds(1_770_000_000);
+    return seedTraversingRide(open, ATHLETE_A, {
+      startedAt,
+      rideFacts: {
+        drafted: true,
+        draftSpans: [{ from: unixSeconds(startedAt + from), to: unixSeconds(startedAt + to) }],
+      },
+    });
+  }
+
+  it('marks an effort with at least DRAFTED_SHARE of its own distance in the draft, read back as the screen reads it', async () => {
+    const open = await openSeeded();
+    const segment = theSegment();
+    await open.write(async (store) => store.putSegment(segment));
+    // Ten of the effort's 25 steps: 40 % of its distance.
+    await draftedRide(open, 4, 14);
+    await sweep(open);
+    const history = await historyOf(open, segment);
+    expect(history?.rows).toHaveLength(1);
+    expect(history?.rows[0]?.effort.drafted).toBe(true);
+  });
+
+  it('leaves an effort unmarked below the share, or drafted only outside it, whatever the ride says', async () => {
+    for (const [from, to] of [
+      // One step of 25: 4 %.
+      [10, 11],
+      // The lead-in only, before the segment begins.
+      [0, 3],
+    ] as const) {
+      const open = await openSeeded();
+      const segment = theSegment();
+      await open.write(async (store) => store.putSegment(segment));
+      await draftedRide(open, from, to);
+      await sweep(open);
+      const history = await historyOf(open, segment);
+      expect(history?.rows, `${String(from)}–${String(to)}`).toHaveLength(1);
+      expect(history?.rows[0]?.effort.drafted, `${String(from)}–${String(to)}`).toBeUndefined();
+      await open.destroy();
+      harness = undefined;
+    }
+  });
+});
+
 describe('criterion 1 — a ride over a segment produces an effort a rider can see', () => {
   it('shows it through the same read path SegmentDetailView uses', async () => {
     const open = await openSeeded();

@@ -15,7 +15,7 @@ It has the same authority as the root file. Where the text below says "this file
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
 shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
 shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
-the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
+the browser gate in five parts, `browser-1` to `browser-5` (§"Five browser shards — #2376"; three since #1720) — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
@@ -1810,19 +1810,17 @@ minutes clear of its slowest measured run.
 [41920250892](https://github.com/openzigs/onyourleft/actions/runs/41920250892), attempts 4 to 6, and
 run [41934894471](https://github.com/openzigs/onyourleft/actions/runs/41934894471), the first with
 every shard green.
-Columns as in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**:
-a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
+Columns as in §"Three browser shards — #1720". This was the table `nightly-split.test.ts` reads
+until #2376 added two browser shards: the table it reads is §"Five browser shards — #2376"'s now,
+in the same shape, and this one is the record. ⚠️ The first three rows are from runs whose `tests-1` shard was red on
 the one case that reads this table, before it had their columns; every other case passed.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
 | 41920250892 attempt 4 | 553 | EPYC 9V45 | 314 | Xeon 8573C | 536 | EPYC 9V74 | 389 | EPYC 9V74 | 433 | EPYC 9V74 | 415 | EPYC 9V74 | 415 | 41 | 394 | 371 | 374 |
 | attempt 5 | 843 | Xeon 6975P-C | 258 | **EPYC 7763** | 567 | Xeon 8370C | 384 | EPYC 9V45 | 334 | EPYC 9V45 | 387 | EPYC 9V74 | 825 | 430 | 300 | 344 | 392 |
 | attempt 6 | 716 | **EPYC 7763** | 379 | EPYC 9V74 | 547 | EPYC 9V45 | 279 | EPYC 9V74 | 563 | **EPYC 7763** | 481 | EPYC 9V45 | 346 | 236 | 323 | 439 | 315 |
 | 41934894471 attempt 1 | 769 | **EPYC 7763** | 373 | Xeon 8370C | 586 | **EPYC 7763** | 411 | EPYC 9V45 | 283 | Xeon 6975P-C | 384 | **EPYC 7763** | 508 | 48 | 250 | 332 | 466 |
-<!-- shard-measurements:end -->
 
 - **`tests-1` took 536 to 586 s, 374 s inside its 960 s stop at the slowest (a Xeon 8370C; 567 s
   on the EPYC 7763), and `tests-2` 279 to 411 s (the slowest on the 7763)**, against the one job's
@@ -2228,9 +2226,16 @@ publishes a GitHub release of each route's `.bin`, `routes.json` and `LICENCE-OD
 (`tools/demo/demo-release.ts`). ⚠️ **It has no pull-request trigger, on purpose**: it bakes
 OpenStreetMap data, which a pull request's checks never do (ADR 0056 D-9). The `bake` job holds
 `contents: read`; only `publish`, which checks out nothing, holds `contents: write`, with the run's
-`GITHUB_TOKEN` and no other secret. It is not a required check; `tools/demo/demo-release.test.ts`
-holds its trigger, runners, pins and permissions in the required suite.
-[`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs.
+`GITHUB_TOKEN`. Since [#2275](https://github.com/openzigs/onyourleft/issues/2275) `bake`'s bake step
+also holds the archive's read-only R2 token, from the Environment `basemap-archive` (§"The basemap
+archive's read token — #2275" below); no other step and no other job holds a secret. It is not a
+required check; `tools/demo/demo-release.test.ts` holds its trigger, runners, pins, permissions and
+that one secret in the required suite.
+Since [#2264](https://github.com/openzigs/onyourleft/issues/2264) a third job, `pages`, deploys the
+demo output `bake` built to GitHub Pages after `publish`; it alone holds `pages: write` and
+`id-token: write`, checks out nothing, and fails until the owner enables Pages with _GitHub Actions_
+as its source. [`docs/demo-embedding.md`](../demo-embedding.md) gives the release URLs and the
+Pages URL.
 
 [`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
 ([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs
@@ -2247,3 +2252,211 @@ needs. Until `ROADMAP_APP_CLIENT_ID` is set the job skips, green, with a notice.
 writes, the App's setup and the views are in [`docs/roadmap-board.md`](../roadmap-board.md).
 [#1201](https://github.com/openzigs/onyourleft/issues/1201) stays the written plan; the board
 mirrors it.
+
+#### The instance's tests write to memory — #2398
+
+⚠️ **`tests-2` went red on cases of the `instance` project that take about 0.1 s alone**, past
+Vitest's 5 s timeout, on `main` (run 42540622721) and on pull requests that did not touch
+`apps/instance` (run 42551494214, seven files at once inside 40 s). **The cause was the disk, not
+the CPU.** Every instance test that opens a store writes a real SQLite file under `os.tmpdir()`,
+in WAL mode at SQLite's default `synchronous = FULL`, so every commit is an `fsync`; on the runner
+that reaches the disk, and a slow moment of the disk stalls every worker at once. In that window
+the three workers held three ordinary instance files and nothing else — no file that forks a
+process, no other project — on four vCPUs, and cases that take about 0.1 s alone took over 5 s;
+the `main` failure (`notice-retention.test.ts`, on a 9V45) had the same shape. Measured on #2398:
+macOS with every `fsync` forced to the drive (`PRAGMA fullfsync`) took the eight files that timed
+out from 6 s to 145 s of wall time while user CPU went from 17.5 s to 21.8 s; in a Linux container
+on four CPUs the same files took 161.5 s of summed case time with `/tmp` on disk and 39.0 s on
+tmpfs, and the whole of `test:required:shard-2` 434 s with 15 failed cases (1 141 s of `instance`
+case time) against 182 s with none (316 s). On the runners themselves (a throwaway workflow on a
+branch that was then deleted, run 42555647120 and 42556608805), `test:required:shard-2` passed
+**20 times in a row** with the change: five jobs of four runs, on two EPYC 7763s, two Xeon 8573Cs
+and a Xeon 8370C, with `instance` case time 403 to 537 s a run (512 to 537 s on the 7763s). Two
+control jobs of two runs without it took 637 to 640 s on an EPYC 7763 and 458 to 464 s on a 9V45. The control's four runs had no timeout: a quiet disk costs about a fifth, and it is the
+disk's slow moments, which no runner can be picked for, that turned it into a red check.
+
+**So the `instance` project's `setupFiles` give each test file a directory of its own on
+`/dev/shm`**, which Node's `os.tmpdir()` then answers, and remove it after the file
+(`apps/instance/src/testing/temporary-directory.ts`). **No timeout moved and the store did not
+change**: its pragmas are the ones a running instance has; an `fsync` on tmpfs simply returns.
+Only a tmpfs with at least 1 GiB free on which a file may be run qualifies — Docker mounts a
+container's `/dev/shm` `noexec` and 64 MiB, and `home-deploy.test.ts` runs scripts it writes there
+— and anything else, macOS included, stays on disk as before. On a GitHub-hosted Linux runner
+`temporary-directory.test.ts` fails if `/dev/shm` stops qualifying, so the fix cannot switch itself
+off with every test green.
+
+#### The basemap archive's read token — #2275
+
+`tiles.openzigs.com` answers a GitHub-hosted runner's range request with **HTTP 403**
+(run 42269980561): the zone's firewall events show Cloudflare **Bot Fight Mode** challenging the
+runners' network, and on the Free plan it is zone-wide and cannot be skipped for one path. Two
+things read the archive from a runner: the `Demo route release` bake and the nightly drift check
+(`apps/web/tools/demo/preset-bake-archive.test.ts`, [#2268](https://github.com/openzigs/onyourleft/issues/2268)).
+On the owner's ruling of 2026-11-07 they read the **same object** through R2's S3 API instead, with a
+signed, ranged `GetObject` (`apps/web/tools/demo/r2-archive.ts`, signed by the instance's own SigV4,
+`apps/instance/src/blob/s3-signature.ts`). The zone keeps Bot Fight Mode, the records keep naming the
+public URL, and a run with none of the four variables set — every local run — reads the public URL
+as before.
+
+| Secret (and the variable `demo:bake` reads) | What it is |
+|---|---|
+| `OYL_BASEMAP_R2_ACCOUNT_ID` | the Cloudflare account id, 32 hex digits: the endpoint is `https://<id>.r2.cloudflarestorage.com` |
+| `OYL_BASEMAP_R2_BUCKET` | the bucket behind `tiles.openzigs.com`; the object key is the archive URL's path |
+| `OYL_BASEMAP_R2_ACCESS_KEY_ID` | the R2 API token's access key id |
+| `OYL_BASEMAP_R2_SECRET_ACCESS_KEY` | the R2 API token's secret access key |
+
+- **The token** is an R2 API token with **Object Read only**, scoped to the basemap bucket alone. It
+  cannot write, list another bucket or reach the zone. The owner creates it and sets the four values;
+  the maintainer never handles them.
+- **Where they live**: as secrets of the Environment **`basemap-archive`**, whose deployment branches
+  are **`main` only** — the `roadmap` Environment's shape. **Not as repository secrets**: a
+  repository secret is readable by a workflow on any branch of this repository, an Environment's only
+  by a job that may deploy to it.
+- **Who gets them**: `demo-release.yml`'s `bake` job, which takes the Environment, and only in its
+  `Bake the preset routes` step; and `nightly.yml`'s `heavy` job, which takes it on `main` alone
+  (`environment: ${{ github.ref == 'refs/heads/main' && 'basemap-archive' || '' }}`), and only in its
+  `Tests outside coverage` step, which sets `OYL_DEMO_BAKE_ARCHIVE_CHECK` on `main` alone too. The
+  installs run before, without them. A pull request's run of the nightly — a fork's or not — takes no
+  Environment, so it holds no token and the check skips, as it did before #2275.
+  `nightly-split.test.ts` and `demo-release.test.ts` fail a workflow that hands a secret to any other
+  step.
+- **No value reaches a log**: Actions masks each secret, and the code never prints one. A missing or
+  half-set group is refused by the variable's name (`r2-archive.ts` §`r2ArchiveAccess`), and a read's
+  failure is a status or a kind with no URL in it, since the account id is in the endpoint's host.
+- ⚠️ **Until the four are set the nightly is red** at the archive check: the bake falls back to the
+  public URL and is answered 403, and the run's failure says `read through https`.
+
+#### Five browser shards — #2376
+
+⚠️ **The browser gate is five jobs since [#2376](https://github.com/openzigs/onyourleft/issues/2376),
+`browser-1` to `browser-5`, and a reviewer who remembers three is reading the old file.** On
+2026-11-08 `browser-2`'s `chromium` part reached its 720 s stop twice ("Timed out waiting 720s for
+the test suite to run"), once on #2374's pull request and once in merge-queue run
+[42511044605](https://github.com/openzigs/onyourleft/actions/runs/42511044605), which took #2353 out
+of the queue. Over the ten green runs read for this change (`main` and the merge queue, that day)
+`browser-1`'s part took 654 to 690 s on the slower runners, `browser-2`'s 708 to 714 s and
+`browser-3`'s up to 672 s, each against the same 720 s. **No stop moved**: each part keeps 720 s and
+three workers, the game run 85 s, the wrapper 825 s and its 14 minutes, each job its 25 minutes and
+the browser install its ten. Nothing left the gate, moved to nightly, or is retried.
+
+**How it was divided.** Each spec file's time in its worker was read from those ten runs' logs (the
+first case's start to the last case's end, as the list reporter prints them), and a simulation of
+Playwright's queue over them — files in path order, each to the first of three workers to come free —
+came within 2 % of every run's own `passed (…)` figure, about 6 to 14 s under it. Taking every file
+at the SLOWEST time measured for it, the `chromium` project is about 5 500 s of worker time:
+
+- **Three shards cannot hold it** under 70 % of 720 s (504 s): a ninth of it is over 600 s. And one
+  file, `ride.browser.spec.ts`, took 598 to 637 s in its one worker on the EPYC 7763, a 9V74 and a
+  Xeon 8573C, most of a stop on its own in any shard. **So it is two files**, divided by section
+  with nothing changed inside a case (#1414's way): the overlay and stacked stage, the moving time
+  and a standing notice stay, and `ride-conditions.browser.spec.ts` takes the rest — a workout eased
+  (#585), sounds on, a side camera (#551), a notice put away (#437), the cull, safe areas, #439's
+  insets, #1441's gesture bar, a laptop's window and the end steps (356 and 334 s at the slowest,
+  estimated from the cases' own times). `playwright test --list --project chromium` gives the same
+  2 397 titles before and after, compared sorted as `file › describe › title` with the second
+  file's name read as the first's.
+- **Four shards were tried first, and were not enough.** Drawn to finish together they simulated
+  at 455 to 459 s, and on this change's first run (run
+  [42520003996](https://github.com/openzigs/onyourleft/actions/runs/42520003996) attempt 1)
+  `browser-1`'s part took **486 s on the EPYC 7763**, 67.5 % of its stop, because
+  `ride-laps.browser.spec.ts` took 359 s against the 341 s it had before. A Xeon 8573C runs these
+  files about 4 % slower than the 7763 and the Xeon 8370C about 15 %, so that part would pass 504 s
+  on either. Twelve workers cannot beat a twelfth of 5 500 s, 458 s; fifteen can come down to a
+  fifteenth, 367 s.
+- **Five shards**, the lists drawn by a search over assignments that makes the slowest simulated
+  part as short as it can be at the slowest figures, then the next slowest, and so on:
+
+| Script | Job | Spec files (of them nightly-only) | Cases | Slowest files (s, slowest measured) | Simulated part, slowest / median figures |
+|---|---|--:|--:|---|--:|
+| `test:browser:shard-1` | `browser-1` | 6 | 513 | `ride-room` 448, `ride-conditions` 334, `controls-first` 217 | 448 / 349 s |
+| `test:browser:shard-2` | `browser-2` | 18 (1) | 458 | `pre-ride` 197, `links` 169, `ride-notices` 111 | 369 / 283 s |
+| `test:browser:shard-3` | `browser-3` | 16 (1), then the `game` run | 252 | `list-detail` 210, `shell-demo` 181, `corridor` 122 | 369 / 258 s |
+| `test:browser:shard-4` | `browser-4` | 15 | 557 | `shell` 276, `ride-hud-layout` 261, `ride-workout` 240 | 367 / 308 s |
+| `test:browser:shard-5` | `browser-5` | 8 (3) | 617 | `ride-laps` 370, `ride` 356, `rideview` 297 | 370 / 316 s |
+
+`browser-1`'s 448 s is `ride-room.browser.spec.ts` in one worker, the slowest it was measured (on
+an EPYC 7763 beside `ride` and `rideview`). The nightly-only files are the five realistic specs that
+hold only `@nightly` describes, in the lists so that every spec is in exactly one.
+
+⚠️ **The demo's two specs are in a shard with no spec that opens the ride harness**, and that is a
+constraint on the search, not its outcome. `shell-demo.browser.spec.ts` and
+`demo-world.browser.spec.ts` draw the realistic world on the CPU, and beside one a ride-harness case
+waiting its 10 s for the race standings (`ride-harness.tsx` §`PATIENCE_MS`) ran out of it twice while
+this was measured, each on an EPYC 7763 in the demo's shard: `ride-laps.browser.spec.ts` §"#2080 …
+at large text — a landscape tablet" (18.8 s, run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), the mutation probe
+below) and, with `ride-room` moved there instead, `ride-room.browser.spec.ts` §"#1356 … the control
+— the smallest corners layout" (16.4 s, run
+[42532792084](https://github.com/openzigs/onyourleft/actions/runs/42532792084) attempt 3). Before
+#2376 `ride-room` and the demo shared `browser-3` on every run read and it did not happen, which is
+what order in a list can hide. `nightly-split.test.ts` holds the constraint from each spec's code
+(`ride.html`, `openRide`, `sharedRide`, `./ride-stage`), so a NEW spec that rides goes red in the
+demo's list. `shell-demo.browser.spec.ts` is still in `browser-3`'s list and the `game` run still
+after its part. The cases are 513 + 458 + 252 + 557 + 617 = 2 397, the whole `chromium` project
+(`playwright test --list` over each script's file filters). ⚠️ **A NEW spec file goes into the list of the shard whose
+newest row below is furthest inside 504 s**, in the same pull request, or `nightly-split.test.ts`
+is red.
+
+**Measured** on this change's own pull request, run
+[42536504988](https://github.com/openzigs/onyourleft/actions/runs/42536504988), attempts 1 to 3 on
+the lists above: each part's `chromium` run against its 720 s stop (Playwright's own `passed (…)`
+figure; the `game` run after `browser-3`'s part against its 85 s):
+
+| Attempt | `browser-1` | `browser-2` | `browser-3` | `browser-4` | `browser-5` | `game` run |
+|---|--:|--:|--:|--:|--:|--:|
+| 1 | 438 s on the EPYC 7763, 61 % | 366 s on the EPYC 7763, 51 % | 270 s on an EPYC 9V74, 38 % | 366 s on the EPYC 7763, 51 % | 366 s on the EPYC 7763, 51 % | 56 s |
+| 2 | 438 s on the EPYC 7763, 61 % | 354 s on the EPYC 7763, 49 % | 270 s on an EPYC 9V74, 38 % | 264 s on an EPYC 9V45, 37 % | 228 s on an EPYC 9V45, 32 % | 58 s |
+| 3 | 456 s on the EPYC 7763, 63 % | 252 s on an EPYC 9V45, 35 % | 210 s on an EPYC 9V45, 29 % | 354 s on a Xeon 8573C, 49 % | 282 s on an EPYC 9V74, 39 % | 39 s |
+
+**Every part of every attempt is under 70 % of its stop: the slowest is 456 s, 63 %**, `browser-1`,
+whose one worker runs `ride-room.browser.spec.ts`. Every other part took 210 to 366 s, 29 to 51 %.
+Against the three-shard gate on the same CPUs that day (§ above): `browser-1` 654 to 690 s,
+`browser-2` 708 to 714 s. ⚠️ Attempt 3's `browser-4` was red on one case,
+`motion.browser.spec.ts` §"#945 … ends the fade, so Ride is pressed as itself" (436 ms against
+200), which is not this change's: it failed the same way on `main` and in the merge queue in runs
+[42380224256](https://github.com/openzigs/onyourleft/actions/runs/42380224256),
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723),
+[42396964437](https://github.com/openzigs/onyourleft/actions/runs/42396964437) and
+[42416283406](https://github.com/openzigs/onyourleft/actions/runs/42416283406). Its part still ran
+whole, so its times are in the table.
+
+**This is the table `nightly-split.test.ts` reads**: columns as in §"Three browser shards — #1720",
+a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
+with no column fails it too.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
+| 42536504988 attempt 1 | 821 | **EPYC 7763** | 400 | EPYC 9V74 | 495 | **EPYC 7763** | 474 | **EPYC 7763** | 475 | **EPYC 7763** | 404 | EPYC 9V74 | 365 | **EPYC 7763** | 403 | **EPYC 7763** | 406 | 25 | 447 | 376 | 337 | 375 | 377 |
+| attempt 2 | 616 | **EPYC 7763** | 409 | **EPYC 7763** | 600 | Xeon 8573C | 406 | **EPYC 7763** | 471 | **EPYC 7763** | 388 | EPYC 9V74 | 358 | EPYC 9V45 | 291 | EPYC 9V45 | 255 | 23 | 445 | 364 | 335 | 270 | 233 |
+| attempt 3 | 503 | EPYC 9V45 | 288 | EPYC 9V74 | 487 | EPYC 9V74 | 377 | **EPYC 7763** | 487 | EPYC 9V45 | 283 | EPYC 9V45 | 276 | Xeon 8573C | 390 | EPYC 9V74 | 314 | 26 | 463 | 259 | 257 | 360 | 290 |
+<!-- shard-measurements:end -->
+
+**The lists before these, as the record.** Each was measured on this pull request and changed for
+the reason given above: the four shards (run 42520003996 attempt 1: `browser-1` 486 s on the EPYC
+7763, 67.5 %); the first five lists, with `ride-room` alone in `browser-1` and `ride-laps` beside the
+demo (run [42522620509](https://github.com/openzigs/onyourleft/actions/runs/42522620509) attempts 1
+to 5 and run 42530045200: every part under 70 %, the slowest 480 s, 67 %, `browser-1` on the 7763);
+and those with the two swapped (run 42532792084 attempts 1 to 3: the slowest 456 s, 63 %, and
+`ride-room` red beside the demo in attempt 3). ⚠️ The demo and a ride-harness case are not a new
+pairing: on `main` before this change `browser-3` held both, and in merge-queue run
+[42384528723](https://github.com/openzigs/onyourleft/actions/runs/42384528723) the same
+`ride-room` case went red on an EPYC 7763 while the demo's climb ran beside it (15:14:17 to
+15:15:08, the red case at 15:14:43). Attempts whose runs waited for runners (`Wall` 1 562, 1 651 and
+1 121 s, the longest wait between a job being created and starting up to 1 138 s, beside the
+nightly workflow's own jobs for the same push) are left out of every figure here but the parts'
+own times, as #2154 left out its queued attempts.
+
+**The required check goes red when any browser shard does.** Run
+[42531749107](https://github.com/openzigs/onyourleft/actions/runs/42531749107), on a commit since
+dropped from the branch, added one case `expect(1, 'deliberately broken').toBe(2)` to one spec in
+each shard's list (`capture`, `logo`, `moderation`, `frame`, `bend`, on the first five lists):
+each of `browser-1` to `browser-5` reported that case `✘` and went red, `checks`, `tests-1` and
+`tests-2` stayed green, and `Repository rules` failed with one line a shard,
+`SHARD001: the shard 'browser-N' ended as 'failure', not 'success'`, for N = 1 to 5. The jobs and
+`needs:` it ran under are the ones on this branch; only the lists moved since.
+
+⚠️ **When a row of this table brings a part past 504 s**, re-read the per-file times from that
+run's log and draw the lists again the same way, divide the file that is the floor (one file is
+one worker: `ride-room.browser.spec.ts`, 448 s at its slowest, is the largest now), or add a sixth
+shard (a script, a job, a column here, the job in `needs:`). Not a longer stop.

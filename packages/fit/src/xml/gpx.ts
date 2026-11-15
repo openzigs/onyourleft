@@ -419,7 +419,7 @@ function writeTrackPoint(writer: XmlWriter, point: TrackPoint): void {
  * writes, and `lap.totalElapsedTime` / `lap.totalDistance` have nowhere to go
  * because GPX has no lap. `seconds` and `metres` are named to make it obvious
  * which quantities are meant. Nor, for the same reason, do a lap's figures and
- * its kind (#1321), which TCX carries.
+ * its kind (#1321), or its calories (#2435), which TCX carries.
  */
 export const GPX_LOSSY_CHANNELS = [
   'point.distance',
@@ -430,6 +430,7 @@ export const GPX_LOSSY_CHANNELS = [
   'lap.averageCadence',
   'lap.averagePower',
   'lap.maxPower',
+  'lap.calories',
   'lap.intensity',
   'lap.triggerMethod',
 ];

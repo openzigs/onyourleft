@@ -191,8 +191,8 @@ describe('#669 — the ride-time size is on the controls the ruling names', () =
       });
     }
     const route: RidableRoute = {
-      id: 'box-hill',
-      name: 'Box Hill',
+      id: 'quarry-climb',
+      name: 'Quarry climb',
       profile: routeProfile(points),
       attempts: 1,
     };

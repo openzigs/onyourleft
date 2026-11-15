@@ -16,6 +16,7 @@
  * `/\\d+\\s*W/` would pass against every one of the four states.
  */
 
+import { act } from 'react';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 
 import {
@@ -65,7 +66,9 @@ import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
 import { workoutGraphText } from '../workout/workout-graph';
 import { RIDE_WITH_REPLANS } from '../workout/replan-text';
-import { RideView } from './RideView';
+import { DISCARDED_TEXT, RideView } from './RideView';
+import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
+import { rideBack, RideBackContext } from '../shell/ride-back';
 
 let mounted: Mounted | undefined;
 
@@ -372,8 +375,8 @@ describe('criterion 6 — one click cannot end a ride', () => {
     stub.set({ stopArmed: true });
     await show(stub);
 
-    expect(document.body.textContent).toContain('Stopping ends this ride');
-    await activateWithKeyboard(buttonNamed('Yes, stop the ride'));
+    expect(document.body.textContent).toContain('Save it to your activities, or discard it');
+    await activateWithKeyboard(buttonNamed('Save ride'));
     expect(stub.calls.confirmStop).toBe(1);
   });
 
@@ -558,7 +561,7 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     expect(controller.getSnapshot().stopArmed).toBe(true);
     expect(document.activeElement).toBe(buttonNamed('Keep riding'));
     // The confirmation is reached from there by keyboard too.
-    expect(buttonNamed('Yes, stop the ride').tabIndex).toBe(0);
+    expect(buttonNamed('Save ride').tabIndex).toBe(0);
 
     await activateWithKeyboard(buttonNamed('Keep riding'));
     await settle();
@@ -568,13 +571,42 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     controller.dispose();
   });
 
+  it('#2349: Discard ride, asked twice, deletes the ride from this device — read back, nothing is left to offer', async () => {
+    const { controller } = await riding(false);
+    await activateWithKeyboard(buttonNamed('Stop'));
+    await settle();
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    await settle();
+    // Asked once more, and focus is on the answer that does NOT delete.
+    expect(document.body.textContent).toContain(END_RIDE_TEXT.discardWarning);
+    expect(document.activeElement).toBe(buttonNamed('Keep riding'));
+    expect(controller.getSnapshot().phase).toBe('recording');
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    await until(
+      () => controller.getSnapshot().saveState === 'discarded',
+      'the ride discarded after the second Discard ride',
+    );
+    await settle();
+    expect(document.body.textContent).toContain(DISCARDED_TEXT.gone);
+    // Read back on a fresh connection: the recording is not on the device.
+    const found = await harness?.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, recordingSessionId('ride-1430')),
+    );
+    expect(found).toBeUndefined();
+    // And a new ride may start, with nothing offered back.
+    await activateWithKeyboard(buttonNamed('Start a new ride'));
+    await until(() => names().includes('Start recording'), 'Start recording after a new ride');
+    expect(controller.getSnapshot().recoverable).toEqual([]);
+    await putAway(controller);
+  });
+
   it('announces the confirmation once: one live region, kept across the ride’s ticks', async () => {
     const { controller, bench } = await riding(false);
     await activateWithKeyboard(buttonNamed('Stop'));
     await settle();
     const live = (): Element[] =>
       queryAll(document, '[role="status"], [role="alert"], [aria-live]').filter((each) =>
-        (each.textContent ?? '').includes('Stopping ends this ride'),
+        (each.textContent ?? '').includes('Save it to your activities, or discard it'),
       );
     expect(live()).toHaveLength(1);
     const region = live()[0];
@@ -590,6 +622,164 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
     expect(live()).toHaveLength(1);
     expect(live()[0]).toBe(region);
     controller.dispose();
+  });
+});
+
+describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding', () => {
+  const answers = (): string[] =>
+    queryAll<HTMLButtonElement>(document, '[data-oyl-end-ride] button').map((button) =>
+      (button.textContent ?? '').trim(),
+    );
+
+  it('offers Keep riding first, then Save ride and Discard ride, and Save ride is the save', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true });
+    await show(stub);
+    expect(answers()).toEqual(['Keep riding', 'Save ride', 'Discard ride']);
+    expect(document.body.textContent).toContain(END_RIDE_TEXT.ask);
+    await activateWithKeyboard(buttonNamed('Save ride'));
+    expect(stub.calls.confirmStop).toBe(1);
+    expect(stub.calls.armDiscard).toBe(0);
+    expect(stub.calls.confirmDiscard).toBe(0);
+  });
+
+  it('offers no Save ride for a ride with nothing recorded, only Discard and Keep riding', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true, sampleCount: 0 });
+    await show(stub);
+    expect(answers()).toEqual(['Keep riding', 'Discard ride']);
+    expect(document.body.textContent).toContain(END_RIDE_TEXT.askNothingRecorded);
+  });
+
+  it('asks once more on Discard ride, and only the second Discard ride discards', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true });
+    await show(stub);
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    expect(stub.calls.armDiscard).toBe(1);
+    expect(stub.calls.confirmDiscard).toBe(0);
+
+    stub.set({ discardArmed: true });
+    await settle();
+    // The confirmation is FIRST, so it never stands where the first Discard did.
+    expect(answers()).toEqual(['Discard ride', 'Keep riding']);
+    expect(document.body.textContent).toContain(END_RIDE_TEXT.discardWarning);
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    expect(stub.calls.confirmDiscard).toBe(1);
+    expect(stub.calls.confirmStop).toBe(0);
+  });
+
+  it('says “Not deleted”, never a failed save, when the discard throws (#2349’s review)', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true, discardArmed: true });
+    // The controller fails closed and rethrows: its snapshot says a discard
+    // that did not go through, and the screen must say that, and catch.
+    stub.controller.confirmDiscard = async () => {
+      stub.set({
+        phase: 'stopped',
+        stopArmed: false,
+        discardArmed: false,
+        saveState: 'discarded',
+        leftover: true,
+      });
+      return Promise.reject(new Error('the device is unwell'));
+    };
+    await show(stub);
+    await activateWithKeyboard(buttonNamed('Discard ride'));
+    await settle();
+    expect(document.body.textContent).toContain('Not deleted');
+    expect(document.body.textContent).toContain(DISCARDED_TEXT.leftover);
+    expect(document.body.textContent).not.toContain('could not be added to your activities');
+  });
+
+  it('is said through one live region when it opens', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true });
+    await show(stub);
+    const live = queryAll(document, '[role="status"]').filter((each) =>
+      (each.textContent ?? '').includes(END_RIDE_TEXT.ask),
+    );
+    expect(live).toHaveLength(1);
+  });
+
+  it('keeps riding on Escape, from anywhere on the page', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ stopArmed: true });
+    await show(stub);
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(stub.calls.cancelStop).toBe(1);
+    expect(stub.calls.confirmStop).toBe(0);
+    expect(stub.calls.confirmDiscard).toBe(0);
+  });
+
+  it('hears nothing on Escape while the question is closed', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    await show(stub);
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(stub.calls.cancelStop).toBe(0);
+  });
+
+  it('takes Android’s back while a ride is on: it opens the question, and is Keep riding once it is open', async () => {
+    const back = rideBack();
+    const stub = stubRideController(ridingSnapshot());
+    mounted = await mount(
+      <RideBackContext value={back}>
+        <RideView controller={stub.controller} />
+      </RideBackContext>,
+    );
+    await settle();
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    expect(stub.calls.armStop).toBe(1);
+    stub.set({ stopArmed: true });
+    await settle();
+    await act(async () => {
+      expect(back.press()).toBe(true);
+      await Promise.resolve();
+    });
+    expect(stub.calls.cancelStop).toBe(1);
+    // Never an answer that ends the ride.
+    expect(stub.calls.confirmStop).toBe(0);
+    expect(stub.calls.confirmDiscard).toBe(0);
+  });
+
+  it('takes no back press with no ride on', async () => {
+    const back = rideBack();
+    const stub = stubRideController(idleSnapshot());
+    mounted = await mount(
+      <RideBackContext value={back}>
+        <RideView controller={stub.controller} />
+      </RideBackContext>,
+    );
+    await settle();
+    expect(back.press()).toBe(false);
+    expect(stub.calls.armStop).toBe(0);
+  });
+
+  it('says a discarded ride is gone, and offers the next ride', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'discarded' });
+    await show(stub);
+    expect(document.body.textContent).toContain(DISCARDED_TEXT.gone);
+    expect(buttonNamed('Start a new ride')).toBeDefined();
+  });
+
+  it('says a discard whose delete failed left the ride here, not that it is gone — whatever the storage says', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'discarded', leftover: true, storage: 'failed' });
+    await show(stub);
+    expect(document.body.textContent).toContain(DISCARDED_TEXT.leftover);
+    expect(document.body.textContent).not.toContain(DISCARDED_TEXT.gone);
+    expect(document.body.textContent).not.toContain('Do not close it yet');
+    expect(buttonNamed('Start a new ride')).toBeDefined();
   });
 });
 

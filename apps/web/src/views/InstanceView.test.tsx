@@ -28,7 +28,10 @@ import {
   SCRIPTED_FINGERPRINT,
   scriptedInstance,
   scriptedModeration,
+  scriptedOperate,
 } from '../instance/testing';
+import { createOperatePort } from '../instance/operate-port';
+import { closeOperateWorlds, operatedWorld } from '../testing/operate-instance-testing';
 import {
   activateWithKeyboard,
   mount,
@@ -47,6 +50,7 @@ import {
   INSTANCE_RECEIVES,
   InstanceView,
   MODERATE_LINK_TEXT,
+  OPERATE_LINK_TEXT,
   RECOVERY_CODES_LEAD,
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
@@ -184,7 +188,7 @@ describe('the Connect screen — #777, #778', () => {
     expect(scripted.calls).toContain('connect https://ride.example');
     expect(text()).toContain('Name from the instance');
     expect(text()).not.toContain('Anna');
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
     // #773: this athlete's devices, this one named.
     expect(text()).toContain('This device');
     expect(text()).toContain('Another device');
@@ -306,6 +310,116 @@ describe('the link to Moderation, for the instance’s moderator only — #955',
     await settle();
     expect(moderateLink()).toBeUndefined();
     expect(moderation.calls).toEqual([]);
+  });
+});
+
+describe('the link to Operate, for the instance’s owner only — #2603', () => {
+  afterEach(async () => {
+    await closeOperateWorlds();
+  });
+
+  function operateLink(): HTMLAnchorElement | undefined {
+    return [...(mounted?.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === OPERATE_LINK_TEXT,
+    );
+  }
+
+  // The session's `moderatorRole`, as the REAL instance gives it to each
+  // device: 'owner', 'deputy' and null.
+  it.each([
+    ['owner', 'owner', true],
+    ['deputy', 'deputy', false],
+    ['rider', null, false],
+  ] as const)('for the %s, whose moderatorRole is %s, is drawn: %s', async (who, _role, drawn) => {
+    const operated = await operatedWorld();
+    if (who === 'rider') await operated.approveRider();
+    const real = createOperatePort(operated[who].dependencies);
+    let answered = false;
+    const operate = {
+      ...real,
+      standing: async () => {
+        const standing = await real.standing();
+        answered = true;
+        return standing;
+      },
+    };
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} operate={operate} />);
+    for (let turn = 0; turn < 200 && !answered; turn += 1) await settle();
+    await settle();
+    expect(answered).toBe(true);
+    expect(operateLink() !== undefined).toBe(drawn);
+    if (drawn) {
+      expect(operateLink()?.getAttribute('href')).toBe('#/settings/instance/operate');
+    }
+  });
+
+  it('is drawn for the owner over the scripted port, as a button-sized link', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const operate = scriptedOperate({ standing: 'owner' });
+    mounted = await mount(<InstanceView port={scripted.port} operate={operate.port} />);
+    await settle();
+    expect(operateLink()?.getAttribute('href')).toBe('#/settings/instance/operate');
+    expect(operateLink()?.className).toBe('oyl-button oyl-button--secondary');
+    expect(operate.calls).toEqual(['standing']);
+  });
+
+  it('is not drawn for a moderator who is not the owner, who still gets the Moderation link', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    const operate = scriptedOperate({ standing: 'not-owner' });
+    mounted = await mount(
+      <InstanceView port={scripted.port} moderation={moderation.port} operate={operate.port} />,
+    );
+    await settle();
+    expect(operateLink()).toBeUndefined();
+    expect(text()).toContain(MODERATE_LINK_TEXT);
+  });
+
+  it.each(['signed-out', 'unreachable', 'no-keys'] as const)(
+    'is not drawn when the standing is %s',
+    async (standing) => {
+      const scripted = scriptedInstance({ connected: true });
+      const operate = scriptedOperate({ standing });
+      mounted = await mount(<InstanceView port={scripted.port} operate={operate.port} />);
+      await settle();
+      expect(operateLink()).toBeUndefined();
+    },
+  );
+
+  it('is asked at the same time as the Moderation standing, not after it', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    let answerModeration: (standing: 'moderator') => void = () => undefined;
+    const held = {
+      ...moderation.port,
+      standing: () =>
+        new Promise<'moderator'>((resolve) => {
+          answerModeration = resolve;
+        }),
+    };
+    const operate = scriptedOperate({ standing: 'owner' });
+    mounted = await mount(
+      <InstanceView port={scripted.port} moderation={held} operate={operate.port} />,
+    );
+    await settle();
+    // Moderation has not answered, and Operate has already been asked.
+    expect(operate.calls).toEqual(['standing']);
+    expect(operateLink()).toBeUndefined();
+    answerModeration('moderator');
+    await settle();
+    expect(operateLink()?.getAttribute('href')).toBe('#/settings/instance/operate');
+    expect(text()).toContain(MODERATE_LINK_TEXT);
+    expect(operate.calls).toEqual(['standing']);
+  });
+
+  it('is not asked for, or drawn, before this device connects', async () => {
+    const scripted = scriptedInstance({ connected: false });
+    const operate = scriptedOperate({ standing: 'owner' });
+    mounted = await mount(<InstanceView port={scripted.port} operate={operate.port} />);
+    await settle();
+    expect(operateLink()).toBeUndefined();
+    expect(operate.calls).toEqual([]);
   });
 });
 
@@ -657,7 +771,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     await settle();
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.confirm);
     expect(statements.asked()).toBe(0);
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
   });
 
   it('deletes it on confirmation, and the screen READ BACK shows this device disconnected', async () => {
@@ -673,7 +787,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     // What shows is what the port reads now, not what the press assumed.
     expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(1);
     expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
-    expect(text()).not.toContain('Lanes of the Weald');
+    expect(text()).not.toContain('Lanes by the old quarry');
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
     expect(button('Connect')).toBeDefined();
   });
@@ -690,7 +804,7 @@ describe('deleting the account on the instance from the Instance screen — #906
     expect(statements.asked()).toBe(1);
     expect(text()).toContain(ERASE_REFUSAL_TEXT);
     expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.erased);
-    expect(text()).toContain('Lanes of the Weald');
+    expect(text()).toContain('Lanes by the old quarry');
   });
 
   it('cannot be kept once the deletion is sent: the confirmation stays until the answer', async () => {

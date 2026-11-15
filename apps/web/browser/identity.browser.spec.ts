@@ -191,7 +191,7 @@ test.describe('the production transport, from the browser to the Node instance (
     // origin than the page's, so the instance's CORS answers are in the path.
     const own = await testing.startIdentityInstance({
       originIsTheListener: true,
-      config: { name: 'Lanes of the Weald' },
+      config: { name: 'Lanes by the old quarry' },
       // The page judges the instance's key statements by its own clock (#1190, #1192).
       startsAt: Date.now(),
     });
@@ -217,7 +217,7 @@ test.describe('the production transport, from the browser to the Node instance (
       expect(result.current).toMatchObject({
         kind: 'connected',
         origin: own.url,
-        instanceName: 'Lanes of the Weald',
+        instanceName: 'Lanes by the old quarry',
         displayName: 'Anna',
       });
       expect(result.devices).toMatchObject({ kind: 'listed' });
@@ -235,7 +235,7 @@ test.describe('the production transport, from the browser to the Node instance (
       );
       expect(reloaded).toMatchObject({
         kind: 'connected',
-        instanceName: 'Lanes of the Weald',
+        instanceName: 'Lanes by the old quarry',
         displayName: 'Anna',
       });
     } finally {

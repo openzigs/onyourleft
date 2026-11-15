@@ -12,6 +12,8 @@ import type { HeldItem } from '@onyourleft/protocol';
 
 import type { RoomLapFrame, RoomLapRace, RoomLapRider } from '../../net/room-session';
 
+import { SIDEWAYS_METRES_PER_SECOND } from '../lanes';
+
 import {
   askRoomItem,
   askRoomLane,
@@ -281,5 +283,15 @@ describe('the race the HUD reads, from the room’s frame — #1911', () => {
     expect(drawing.riderDistance).toBe(302.25);
     expect(drawing.offsetOf(4)).toBe(-6.5);
     expect(drawing.offsetOf(9)).toBe(0);
+  });
+
+  it('carries how fast the rider is steering across the road, toward the lane asked for, and 0 in a lane — #2456', () => {
+    const newest = frame(1_000, { 0: {} });
+    const inLane = roomLapRaceDrawing(start(newest), race(newest), 300);
+    expect(inLane.steeringSpeed).toBe(0);
+    const left = roomLapRaceDrawing(askRoomLane(start(newest), 'lane-left'), race(newest), 300);
+    expect(left.steeringSpeed).toBe(-SIDEWAYS_METRES_PER_SECOND);
+    const right = roomLapRaceDrawing(askRoomLane(start(newest), 'lane-right'), race(newest), 300);
+    expect(right.steeringSpeed).toBe(SIDEWAYS_METRES_PER_SECOND);
   });
 });

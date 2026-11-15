@@ -186,6 +186,73 @@ describe('the HUD passes the accessibility audit', () => {
 
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
+
+  // #2385: the compact route panel — the map alone as a tile, the gradient
+  // printed on it — beside the full readings and beside the focus readout,
+  // where the tile's gradient is the one a screen reader meets.
+  it('audits clean with the compact route panel, in both arrangements', async () => {
+    for (const arrangement of ['full', 'focus'] as const) {
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...props({ elapsedSeconds: 65 })}
+            layout={{ hidden: [], textSize: 'normal', arrangement, route: 'compact' }}
+          />,
+        ),
+      );
+      expect(document.querySelector('.oyl-hud__tile-grade')).not.toBeNull();
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+      mounted.unmount();
+      mounted = undefined;
+    }
+  });
+
+  // #2383: the focus readout is a different tree again — one panel, two
+  // named lists — and is audited as one, with its sensors live and dropped.
+  it('audits clean in the focus arrangement, live and with every sensor dropped', async () => {
+    const focus = { hidden: [], textSize: 'normal', arrangement: 'focus' } as const;
+    mounted = await mount(
+      inRideScreen(<HudPanel {...props({ elapsedSeconds: 65 })} layout={focus} />),
+    );
+    expect(document.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    mounted.unmount();
+
+    const base = props();
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          layout={focus}
+          state={{ ...base.state, input: { power: watts(0), live: false } }}
+          cadence={{ value: undefined, live: false }}
+          heartRate={{ value: undefined, live: false }}
+        />,
+      ),
+    );
+    expect(document.querySelector('.oyl-hud__focus')).not.toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    // And a dropped sensor is said in words there too, as in the full HUD.
+    expect(announced('Power')).toBe('Power, — W Sensor lost');
+  });
+
+  // #2387: the totals strip is one more named list, audited in both
+  // arrangements, with nothing recorded (its dashes) as well.
+  it('audits clean with the totals strip, in either arrangement', async () => {
+    for (const arrangement of ['full', 'focus'] as const) {
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...props({ elapsedSeconds: 65 })}
+            layout={{ hidden: [], textSize: 'normal', arrangement, totalsStrip: true }}
+          />,
+        ),
+      );
+      expect(document.querySelector('dl.oyl-hud__totals')).not.toBeNull();
+      expect(formatViolations(auditAccessibility(document)), arrangement).toBe('');
+      mounted.unmount();
+    }
+  });
 });
 
 describe('a rider can tell a lost sensor from a zero, on the screen', () => {
@@ -315,9 +382,10 @@ describe('the position marker tracks the physics', () => {
 
     it('draws the marker where the sentence says it is', async () => {
       // The picture and the words out of one value (#94's third criterion,
-      // widened by #287's third). The marker's `x` is the fraction as a
-      // percentage of the viewBox, so reading both off the DOM is what catches
-      // a second percentage computed in the component.
+      // widened by #287's third). The marker's place is the fraction as a
+      // percentage of the strip — its `transform` since #2419, where it was
+      // its `x1` — so reading both off the DOM is what catches a second
+      // percentage computed in the component.
       const profile = circuit();
       const total: number = profile.totalDistance;
       const base = props({ profile });
@@ -334,7 +402,8 @@ describe('the position marker tracks the physics', () => {
       );
 
       const marker = document.querySelector('[data-testid="oyl-hud-position"]');
-      const x = Number(marker?.getAttribute('x1'));
+      const moved = marker?.closest<SVGSVGElement>('.oyl-hud__profile-marker')?.style.transform;
+      const x = Number(/^translateX\((-?[\d.]+)%\)$/.exec(moved ?? '')?.[1]);
       const said = document.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
       expect(said).toBe(`${String(Math.round(x))}% of lap 3`);
       expect(Number(marker?.getAttribute('data-position')) * 100).toBeCloseTo(x, 6);

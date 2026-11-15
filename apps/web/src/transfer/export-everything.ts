@@ -578,6 +578,10 @@ export function accountManifest(input: {
         readonly thresholdPower?: number | undefined;
         readonly thresholdHeartRate?: number | undefined;
         readonly mass?: number | undefined;
+        /** #2432: the sex a heart-rate calorie estimate uses. The rider's own data. */
+        readonly calorieSex?: string | undefined;
+        /** #2432: the year of birth a heart-rate calorie estimate uses. */
+        readonly birthYear?: number | undefined;
         /** #238's display preference. ADR 0020 D-2 puts it on the athlete so it travels here. */
         readonly units?: string | undefined;
         /** #623's kit colour: a palette key, on the athlete for ADR 0020 D-2's reason. */
@@ -624,6 +628,10 @@ export function accountManifest(input: {
       thresholdPower: input.athlete?.thresholdPower,
       thresholdHeartRate: input.athlete?.thresholdHeartRate,
       mass: input.athlete?.mass,
+      // #2432. The rider's own data, carried as `mass` is: this file is the one
+      // place the two leave the device, and it is the rider's own copy.
+      calorieSex: input.athlete?.calorieSex,
+      birthYear: input.athlete?.birthYear,
       // ⚠️ A **display** preference, exported because ADR 0020 D-2 put it on
       // the athlete precisely so it travels with them and survives an
       // erase-and-reimport. It describes nothing else in this file: every

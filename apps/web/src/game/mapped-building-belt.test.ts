@@ -51,6 +51,7 @@ import {
   mappedBuildingsOf,
   mappedChunk,
   NEAR_ROLES,
+  rankFrom,
   type MappedBuildings,
   type MappedBuildingsInView,
 } from './mapped-buildings';
@@ -853,9 +854,18 @@ describe('the procedural structures and the mapped buildings, ranked together â€
       billboards,
       REALISTIC_STRUCTURE_ITEMS,
     );
-    // The town is drawn, its nearest building first, read back out of the belt.
+    // The town is drawn, its nearest building first, read back out of the belt:
+    // nearest, since #2429, to the road ahead the refill ranks by.
+    const ranked = (index: number): number => {
+      const { centroid } = plans[index] as FootprintPlan;
+      return rankFrom(view.ahead, view.x, view.z, centroid.x, centroid.z);
+    };
+    const nearestAhead = plans.reduce(
+      (best, _, index) => (ranked(index) < ranked(best) ? index : best),
+      0,
+    );
     expect(belt.stats.buildings).toBeGreaterThan(0);
-    expect(belt.drawnAt(0)?.plan).toBe(nearestPlan);
+    expect(belt.drawnAt(0)?.plan).toBe(nearestAhead);
     // The structure term still holds, the procedural structures within what is left.
     const structure = REALISTIC_TRIANGLES.structure;
     expect(cap).toBeGreaterThan(0);

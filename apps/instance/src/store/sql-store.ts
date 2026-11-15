@@ -50,6 +50,8 @@ import type {
   LinkCodeTable,
   ModerationLogTable,
   NoticeErasureTable,
+  OperatorLogTable,
+  BackupRecordTable,
   NoticeTable,
   StatementTable,
   AppealTable,
@@ -925,6 +927,222 @@ export type ModerationOutcome =
   | { readonly outcome: 'applied'; readonly logId: number }
   | { readonly outcome: 'not_found' }
   | { readonly outcome: 'not_applicable' };
+
+/**
+ * The operator's actions (#2602): the CLOSED list `operator_log.action` is
+ * written from. #2602 adds the operator CLI's commands that change state (the
+ * owner's ruling of 2026-11-14 on #2601); each Operate sub-issue adds its own.
+ * A name not on it is refused before anything is written.
+ */
+export const OPERATOR_ACTIONS = [
+  'migrate',
+  'backup',
+  'restore',
+  'room_open',
+  'model_key_set',
+  'model_key_clear',
+  'instance_key_init',
+  'instance_key_rotate',
+  'instance_key_rotate_identity',
+  'instance_key_reset',
+  'load_accounts_add',
+  'load_accounts_erase',
+  'account_erase',
+  'backup_requested',
+] as const;
+
+export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
+
+/** How an operator action ended. */
+export type OperatorOutcome = 'done' | 'refused' | 'failed';
+
+/**
+ * Who took an operator action: the owner's athlete, from the app's Operate
+ * area, or the operator's CLI on the host — which has no athlete, so names
+ * none rather than borrowing the owner's (migration 0040).
+ */
+export type OperatorActor =
+  { readonly source: 'app'; readonly athleteId: string } | { readonly source: 'cli' };
+
+/**
+ * An entry's `detail`: the CLOSED vocabulary each action may write (#2602).
+ * A detail is parts joined by commas, each one of the action's `words`, or
+ * one of its `counts` `=` a whole number of up to nine digits — `applied=2`,
+ * `ride`, `blobs=3,keys_rotated`. A word not listed for THAT action is
+ * refused, and so is a number under a key the action does not name, so a
+ * detail is never free text, a secret or a coordinate: `lat=51507400`, a
+ * hex key split into words and `password_hunter2` fit no action's list. Each
+ * Operate sub-issue lists what its own actions write.
+ */
+export const OPERATOR_DETAILS: {
+  readonly [action in OperatorAction]: {
+    readonly words: readonly string[];
+    readonly counts: readonly string[];
+  };
+} = {
+  migrate: { words: [], counts: ['applied'] },
+  backup: { words: ['offbox_failed', 'requested'], counts: ['blobs', 'removed'] },
+  restore: { words: ['keys_rotated', 'keys_not_rotated'], counts: ['blobs'] },
+  room_open: { words: ['ride', 'race'], counts: [] },
+  model_key_set: { words: [], counts: [] },
+  model_key_clear: { words: ['cleared', 'none_held'], counts: [] },
+  instance_key_init: { words: [], counts: [] },
+  instance_key_rotate: { words: [], counts: [] },
+  instance_key_rotate_identity: { words: [], counts: [] },
+  instance_key_reset: { words: [], counts: [] },
+  load_accounts_add: { words: [], counts: ['added'] },
+  load_accounts_erase: { words: [], counts: ['erased'] },
+  account_erase: { words: [], counts: [] },
+  // #2606: why "back up now" was refused — a request already waits, or a
+  // backup ran in the last 15 minutes.
+  backup_requested: { words: ['pending', 'too_soon'], counts: [] },
+};
+
+/** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
+export function operatorDetailFits(action: OperatorAction, detail: string): boolean {
+  const { words, counts } = OPERATOR_DETAILS[action];
+  const parts = detail.split(',');
+  if (new Set(parts.map((part) => part.split('=')[0])).size !== parts.length) return false;
+  return parts.every((part) => {
+    const [key = '', count, ...rest] = part.split('=');
+    if (count === undefined) return words.includes(key);
+    return rest.length === 0 && counts.includes(key) && /^[0-9]{1,9}$/.test(count);
+  });
+}
+
+/** One entry of the operator log, as it is read. */
+export interface OperatorLogEntry {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly source: 'app' | 'cli';
+  /** The owner's athlete for `app`; `null` for `cli`. */
+  readonly actorAthleteId: string | null;
+  readonly action: OperatorAction;
+  readonly detail: string | null;
+  readonly outcome: OperatorOutcome;
+}
+
+/**
+ * How many of each thing the instance holds, for the owner's Status (#2604).
+ * Counts only: no name, id or row of anybody.
+ */
+export interface OperateCounts {
+  readonly athletes: {
+    /** Registered or approved, and not suspended. */
+    readonly active: number;
+    /** Awaiting a moderator's approval, and not suspended. */
+    readonly pending: number;
+    /** Suspended, whether they had been approved or not. */
+    readonly suspended: number;
+  };
+  /** Rooms made over HTTP that are not over. */
+  readonly roomsOpen: number;
+  readonly analysis: { readonly queued: number; readonly running: number };
+}
+
+/**
+ * The three counts the owner's Status reads beside the athletes' (#2604), in
+ * order: rooms open, analysis jobs queued, analysis jobs running. Each one is
+ * written so SQLite answers it from an index, and `operate-counts.test.ts`
+ * holds each query plan to that.
+ */
+export const OPERATE_COUNT_QUERIES = [
+  'SELECT count(*) AS n FROM private_room WHERE closed_at IS NULL',
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'queued'",
+  "SELECT count(*) AS n FROM analysis_job WHERE status = 'running'",
+] as const;
+
+/**
+ * How long after a backup "back up now" is refused (#2606): each extra run
+ * with `--keep N` prunes an older snapshot, and shortens how far back the
+ * owner can restore.
+ */
+export const BACKUP_REQUEST_GAP_SECONDS = 15 * 60;
+
+/** How long a backup's record is kept (#2606): the 30-day backup limit (#1381). */
+export const BACKUP_RECORD_DAYS = 30;
+
+/** One run of `backup` or `backup-loop`, as it is written (#2606, migration 0042). */
+export type BackupRun =
+  | {
+      readonly outcome: 'done';
+      /** When the run started, Unix seconds. */
+      readonly at: number;
+      /** The snapshot directory's NAME, never its path. */
+      readonly snapshot: string;
+      readonly rows: number;
+      readonly blobs: number;
+      readonly databaseSha256: string;
+      readonly sizeBytes: number;
+      readonly offBox: 'copied' | 'failed' | 'not-configured';
+      readonly removed: number;
+      readonly backupsFreeBytes: number | null;
+      readonly offBoxFreeBytes: number | null;
+      /** The backup service's interval: `backup-loop`'s runs only. */
+      readonly intervalSeconds: number | null;
+    }
+  | {
+      readonly outcome: 'failed';
+      readonly at: number;
+      /** The error's NAME, never its message. */
+      readonly error: string;
+      readonly intervalSeconds: number | null;
+    };
+
+/** One backup's record, as it is read (#2606). */
+export interface BackupRecord {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly outcome: 'done' | 'failed';
+  readonly error: string | null;
+  readonly snapshot: string | null;
+  readonly rows: number | null;
+  readonly blobs: number | null;
+  readonly databaseSha256: string | null;
+  readonly sizeBytes: number | null;
+  readonly offBox: 'copied' | 'failed' | 'not-configured' | null;
+  readonly removed: number | null;
+  readonly backupsFreeBytes: number | null;
+  readonly offBoxFreeBytes: number | null;
+  readonly intervalSeconds: number | null;
+  /** It was run because the owner asked for it. */
+  readonly requested: boolean;
+}
+
+/** The owner's "back up now", waiting (#2606). */
+export interface BackupRequest {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly requestedAt: number;
+}
+
+/** What asking for a backup did (#2606). */
+export type BackupRequestOutcome =
+  | { readonly outcome: 'requested'; readonly request: BackupRequest }
+  | { readonly outcome: 'pending' }
+  | { readonly outcome: 'too_soon' };
+
+export interface OperatorChange<T> {
+  readonly outcome: Exclude<OperatorOutcome, 'failed'>;
+  /** Held to the action's vocabulary ({@link OPERATOR_DETAILS}), or `null`. */
+  readonly detail?: string | null;
+  readonly value: T;
+}
+
+/** An operator action's entry, before it is written. */
+export interface OperatorEntry {
+  readonly actor: OperatorActor;
+  readonly action: OperatorAction;
+  /** Unix seconds. */
+  readonly at: number;
+}
+
+/** What a detail or an action not on the closed lists is refused with. Names the field, never the value. */
+export class OperatorEntryError extends Error {
+  override readonly name = 'OperatorEntryError';
+}
 
 /** What revoking a device key did (#867). */
 export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
@@ -1896,6 +2114,36 @@ export interface SqlStore {
     limit: number,
   ): Promise<readonly ModerationLogEntry[]>;
   /**
+   * THE operator store function (#2602): run `change` and append its entry to
+   * the operator log in ONE transaction, so an action is applied and logged
+   * or neither. `change` is handed this store bound to that transaction —
+   * every write it makes through it commits or rolls back with the entry, a
+   * store call's own transaction becoming a savepoint inside it. When
+   * `change` or the entry's write throws, nothing it wrote is kept, a
+   * `failed` entry is appended on its own if it can be, and the error is
+   * thrown on. Answers `change`'s value and the entry's id.
+   *
+   * ⚠️ `change` uses the store it is HANDED, never this one: a call on this
+   * store waits for the action, which waits for `change` — they would wait
+   * for each other for ever.
+   *
+   * ⚠️ Only the database is in the transaction: a file `change` writes or
+   * removes (a blob, a snapshot) is not rolled back, so such a change does
+   * that work in an order a retry repairs, as `sync.eraseAccount` does.
+   */
+  recordOperatorAction<T>(
+    entry: OperatorEntry,
+    change: (store: SqlStore) => OperatorChange<T> | Promise<OperatorChange<T>>,
+  ): Promise<{ readonly value: T; readonly logId: number }>;
+  /**
+   * One page of the operator log, NEWEST first: at most `limit` entries whose
+   * id is below `beforeId`, or the newest when it is `undefined`.
+   */
+  listOperatorLogPage(
+    beforeId: number | undefined,
+    limit: number,
+  ): Promise<readonly OperatorLogEntry[]>;
+  /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
    * that order, or the first when it is `undefined`.
@@ -1909,6 +2157,55 @@ export interface SqlStore {
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
   /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** How many athletes are in each standing, rooms are open and jobs wait or run (#2604). Counts only. */
+  operateCounts(): Promise<OperateCounts>;
+  /**
+   * Write one backup run's record (#2606), and in the SAME transaction delete
+   * every record and served request more than {@link BACKUP_RECORD_DAYS} days
+   * older than it, and — `requestId` given and still waiting — mark that
+   * request served by it, so a request is served once. Answers the record's
+   * id and whether it served the request.
+   */
+  recordBackup(
+    run: BackupRun,
+    requestId?: number,
+  ): Promise<{ readonly id: number; readonly served: boolean }>;
+  /** The newest backup records, newest first, at most `limit` (#2606). */
+  listBackupRecords(limit: number): Promise<readonly BackupRecord[]>;
+  /**
+   * The newest record made by the backup service (`intervalSeconds` set), or
+   * `undefined` (#2606); `doneOnly` leaves out failed runs.
+   */
+  newestServiceBackup(doneOnly: boolean): Promise<BackupRecord | undefined>;
+  /** The oldest "back up now" still waiting, or `undefined` (#2606). */
+  pendingBackupRequest(): Promise<BackupRequest | undefined>;
+  /**
+   * Ask for a backup now (#2606), in ONE transaction with the checks:
+   * `pending` while a request already waits, `too_soon` when a backup was
+   * made within {@link BACKUP_REQUEST_GAP_SECONDS} of `at`; otherwise the
+   * request, written.
+   */
+  requestBackup(at: number): Promise<BackupRequestOutcome>;
+  /** Whether a backup record names the snapshot directory `snapshot` (#2606). */
+  hasBackupRecord(snapshot: string): Promise<boolean>;
+  /**
+   * Take the lease on one backup folder (#2606, third review), in ONE
+   * `BEGIN IMMEDIATE` transaction: `taken` when no run holds it, or when its
+   * holder's heartbeat is older than `staleBefore` — taken over by a
+   * conditional update on that holder's token, so of two takers one wins —
+   * and `busy` otherwise. Times are Unix ms.
+   */
+  takeBackupLease(lease: {
+    readonly place: string;
+    readonly token: string;
+    readonly holder: string;
+    readonly now: number;
+    readonly staleBefore: number;
+  }): Promise<'taken' | 'busy'>;
+  /** The holder's heartbeat: `false` when the lease is no longer `token`'s. */
+  heartbeatBackupLease(place: string, token: string, now: number): Promise<boolean>;
+  /** Give the lease up, if it is still `token`'s. */
+  releaseBackupLease(place: string, token: string): Promise<void>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
   listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
@@ -2338,6 +2635,122 @@ const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEn
   at: row.at,
   roomId: row.room_id,
 });
+
+const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry => ({
+  id: row.id,
+  at: row.at,
+  source: row.source,
+  actorAthleteId: row.actor_athlete_id,
+  action: row.action as OperatorAction,
+  detail: row.detail,
+  outcome: row.outcome,
+});
+
+/** Every column of a backup record, and whether a request was served by it (#2606). */
+function backupRecordQuery(executor: Kysely<InstanceDatabase>) {
+  return executor
+    .selectFrom('backup_record')
+    .selectAll('backup_record')
+    .select((eb) =>
+      eb
+        .exists(
+          eb
+            .selectFrom('backup_request')
+            .select('backup_request.id')
+            .whereRef('backup_request.record_id', '=', 'backup_record.id'),
+        )
+        .as('requested'),
+    );
+}
+
+const backupRecordFrom = (
+  row: Selectable<BackupRecordTable> & { readonly requested: unknown },
+): BackupRecord => ({
+  id: row.id,
+  at: row.at,
+  outcome: row.outcome,
+  error: row.error,
+  snapshot: row.snapshot,
+  rows: row.row_count,
+  blobs: row.blob_count,
+  databaseSha256: row.database_sha256,
+  sizeBytes: row.size_bytes,
+  offBox: row.off_box,
+  removed: row.removed,
+  backupsFreeBytes: row.backups_free_bytes,
+  offBoxFreeBytes: row.off_box_free_bytes,
+  intervalSeconds: row.interval_seconds,
+  requested: Number(row.requested) === 1,
+});
+
+/** Append one operator log entry through `executor`, answering its id (#2602). */
+/**
+ * What the store reports on the console's error stream when an operator
+ * action's scrub could not be checkpointed (#2602): a fixed sentence, naming
+ * no value. `console`, not `process`: this file names nothing of Node.
+ */
+export const SCRUB_CHECKPOINT_FAILED =
+  'instance: the write-ahead log could not be checkpointed after an operator action’s scrub; the action’s outcome stands, and old page images may remain in the log until the next truncating checkpoint.';
+
+async function appendOperatorLog(
+  executor: Kysely<InstanceDatabase>,
+  entry: OperatorEntry,
+  outcome: OperatorOutcome,
+  detail: string | null,
+): Promise<number> {
+  const row = await executor
+    .insertInto('operator_log')
+    .values({
+      at: entry.at,
+      source: entry.actor.source,
+      actor_athlete_id: entry.actor.source === 'app' ? entry.actor.athleteId : null,
+      action: entry.action,
+      detail,
+      outcome,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+/**
+ * `trx`, as a `Kysely` whose `transaction()` opens a SAVEPOINT inside it
+ * rather than a transaction of its own (#2602): what an operator action's
+ * change runs every store call on, so a call's own transaction keeps its
+ * meaning — what it rolls back is rolled back — while everything it commits
+ * waits on the operator action's one commit. Every other member is the
+ * transaction's own, bound to it (Kysely's private fields need it as `this`).
+ */
+function savepointsIn(trx: Transaction<InstanceDatabase>): Kysely<InstanceDatabase> {
+  let made = 0;
+  const flattened: Kysely<InstanceDatabase> = new Proxy(trx, {
+    get(target, key) {
+      if (key === 'transaction') {
+        return () => ({
+          execute: async <T>(work: (inner: Kysely<InstanceDatabase>) => Promise<T>) => {
+            made += 1;
+            const name = sql.raw(`operator_change_${String(made)}`);
+            await sql`savepoint ${name}`.execute(target);
+            try {
+              const result = await work(flattened);
+              await sql`release ${name}`.execute(target);
+              return result;
+            } catch (error) {
+              await sql`rollback to ${name}`.execute(target);
+              await sql`release ${name}`.execute(target);
+              throw error;
+            }
+          },
+        });
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+  return flattened;
+}
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
   publicKey: row.public_key,
@@ -3008,6 +3421,19 @@ function instanceKeyStatementValues(statement: InstanceKeyStatementRow) {
 }
 
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
+  return storeOver(db, undefined);
+}
+
+/**
+ * A store over `db`, or — `inside` given — over an operator action's
+ * transaction (#2602, {@link SqlStore.recordOperatorAction}): there a scrub's
+ * write-ahead-log checkpoint waits for the commit, which `inside.scrubbed`
+ * asks for, and the store cannot be closed.
+ */
+function storeOver(
+  db: Kysely<InstanceDatabase>,
+  inside: { readonly scrubbed: () => void } | undefined,
+): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const next = queue.then(operation, operation);
@@ -3035,7 +3461,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       return await operation();
     } finally {
       await sql`pragma secure_delete = off`.execute(db);
-      await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+      // Inside an operator action the old pages are still the transaction's:
+      // the checkpoint is taken after its commit (#2602).
+      if (inside === undefined) await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+      else inside.scrubbed();
     }
   }
 
@@ -5694,6 +6123,53 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return (await query.orderBy('id', 'desc').limit(limit).execute()).map(moderationLogFrom);
       }),
 
+    recordOperatorAction: (entry, change) =>
+      exclusive(async () => {
+        if (!(OPERATOR_ACTIONS as readonly string[]).includes(entry.action)) {
+          throw new OperatorEntryError('action must be one of the operator log’s actions.');
+        }
+        let scrubbed = false;
+        try {
+          return await db.transaction().execute(async (trx) => {
+            const changed = await change(
+              storeOver(savepointsIn(trx), {
+                scrubbed: () => {
+                  scrubbed = true;
+                },
+              }),
+            );
+            const detail = changed.detail ?? null;
+            if (detail !== null && !operatorDetailFits(entry.action, detail)) {
+              throw new OperatorEntryError(
+                'detail must be words and counts from its action’s closed vocabulary, each count a whole number.',
+              );
+            }
+            const logId = await appendOperatorLog(trx, entry, changed.outcome, detail);
+            return { value: changed.value, logId };
+          });
+        } catch (error) {
+          // Nothing the change wrote was kept; the attempt is, where it can be.
+          await appendOperatorLog(db, entry, 'failed', null).catch(() => undefined);
+          throw error;
+        } finally {
+          // The checkpoint never changes the action's outcome: a committed
+          // action stays `done`, and a failed one keeps its own error. The
+          // operator is told, naming nothing, that old pages may remain.
+          if (scrubbed) {
+            await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db).catch(() => {
+              console.error(SCRUB_CHECKPOINT_FAILED);
+            });
+          }
+        }
+      }),
+
+    listOperatorLogPage: (beforeId, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('operator_log').selectAll();
+        if (beforeId !== undefined) query = query.where('id', '<', beforeId);
+        return (await query.orderBy('id', 'desc').limit(limit).execute()).map(operatorLogFrom);
+      }),
+
     listSuspendedAthletes: (after, limit) =>
       exclusive(async () => {
         let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
@@ -5731,6 +6207,223 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute()
         ).map(athleteFrom),
       ),
+
+    operateCounts: () =>
+      exclusive(async () => {
+        const standing = await db
+          .selectFrom('athlete')
+          .select([
+            sql<number>`sum(case when suspended_at is null and registration_state = 'active' then 1 else 0 end)`.as(
+              'active',
+            ),
+            sql<number>`sum(case when suspended_at is null and registration_state = 'pending' then 1 else 0 end)`.as(
+              'pending',
+            ),
+            sql<number>`sum(case when suspended_at is not null and registration_state in ('active', 'pending') then 1 else 0 end)`.as(
+              'suspended',
+            ),
+          ])
+          .executeTakeFirstOrThrow();
+        // Each count is one the store can answer from an index (#2604's
+        // review): migration 0041's partial `private_room_open`, and
+        // `analysis_job_by_status` by its leading column. A `sum(case …)` over
+        // the jobs would scan them all. `operate-counts.test.ts` reads the plans.
+        const counted: number[] = [];
+        for (const query of OPERATE_COUNT_QUERIES) {
+          const read = await sql<{ n: number }>`${sql.raw(query)}`.execute(db);
+          counted.push(Number(read.rows[0]?.n ?? 0));
+        }
+        const [open = 0, queued = 0, running = 0] = counted;
+        // `sum` over no rows is NULL.
+        const count = (value: unknown): number => Number(value ?? 0);
+        return {
+          athletes: {
+            active: count(standing.active),
+            pending: count(standing.pending),
+            suspended: count(standing.suspended),
+          },
+          roomsOpen: open,
+          analysis: { queued, running },
+        };
+      }),
+
+    recordBackup: (run, requestId) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const done = run.outcome === 'done' ? run : undefined;
+          const row = await trx
+            .insertInto('backup_record')
+            .values({
+              at: run.at,
+              outcome: run.outcome,
+              error: run.outcome === 'failed' ? run.error : null,
+              snapshot: done?.snapshot ?? null,
+              row_count: done?.rows ?? null,
+              blob_count: done?.blobs ?? null,
+              database_sha256: done?.databaseSha256 ?? null,
+              size_bytes: done?.sizeBytes ?? null,
+              off_box: done?.offBox ?? null,
+              removed: done?.removed ?? null,
+              backups_free_bytes: done?.backupsFreeBytes ?? null,
+              off_box_free_bytes: done?.offBoxFreeBytes ?? null,
+              interval_seconds: run.intervalSeconds,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          // By AGE, not by count: the 30-day limit is a time (#1381).
+          const cutoff = run.at - BACKUP_RECORD_DAYS * 86_400;
+          // Requests first: each served one names its record. A request is
+          // never later than the run that served it, so every request whose
+          // record goes is among these.
+          // And every request a record that goes served, whatever time the
+          // request carries: a clock stepped back must not leave one naming
+          // a record that is gone (second review).
+          await trx
+            .deleteFrom('backup_request')
+            .where('record_id', 'is not', null)
+            .where((eb) =>
+              eb.or([
+                eb('requested_at', '<', cutoff),
+                eb(
+                  'record_id',
+                  'in',
+                  eb.selectFrom('backup_record').select('id').where('at', '<', cutoff),
+                ),
+              ]),
+            )
+            .execute();
+          await trx.deleteFrom('backup_record').where('at', '<', cutoff).execute();
+          let served = false;
+          if (requestId !== undefined) {
+            const updated = await trx
+              .updateTable('backup_request')
+              .set({ record_id: row.id })
+              .where('id', '=', requestId)
+              .where('record_id', 'is', null)
+              .executeTakeFirst();
+            served = updated.numUpdatedRows > 0n;
+          }
+          return { id: row.id, served };
+        }),
+      ),
+
+    listBackupRecords: (limit) =>
+      exclusive(async () =>
+        (
+          await backupRecordQuery(db).orderBy('backup_record.id', 'desc').limit(limit).execute()
+        ).map(backupRecordFrom),
+      ),
+
+    newestServiceBackup: (doneOnly) =>
+      exclusive(async () => {
+        let query = backupRecordQuery(db).where('backup_record.interval_seconds', 'is not', null);
+        if (doneOnly) query = query.where('backup_record.outcome', '=', 'done');
+        const row = await query.orderBy('backup_record.id', 'desc').limit(1).executeTakeFirst();
+        return row === undefined ? undefined : backupRecordFrom(row);
+      }),
+
+    pendingBackupRequest: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('backup_request')
+          .select(['id', 'requested_at'])
+          .where('record_id', 'is', null)
+          .orderBy('id')
+          .limit(1)
+          .executeTakeFirst();
+        return row === undefined ? undefined : { id: row.id, requestedAt: row.requested_at };
+      }),
+
+    requestBackup: (at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<BackupRequestOutcome> => {
+          const waiting = await trx
+            .selectFrom('backup_request')
+            .select('id')
+            .where('record_id', 'is', null)
+            .limit(1)
+            .executeTakeFirst();
+          if (waiting !== undefined) return { outcome: 'pending' };
+          const recent = await trx
+            .selectFrom('backup_record')
+            .select('id')
+            .where('outcome', '=', 'done')
+            .where('at', '>', at - BACKUP_REQUEST_GAP_SECONDS)
+            .limit(1)
+            .executeTakeFirst();
+          if (recent !== undefined) return { outcome: 'too_soon' };
+          const row = await trx
+            .insertInto('backup_request')
+            .values({ requested_at: at, record_id: null })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'requested', request: { id: row.id, requestedAt: at } };
+        }),
+      ),
+
+    hasBackupRecord: (snapshot) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('backup_record')
+          .select('id')
+          .where('snapshot', '=', snapshot)
+          .limit(1)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    takeBackupLease: (lease) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<'taken' | 'busy'> => {
+          const held = await trx
+            .selectFrom('backup_lease')
+            .select(['token', 'heartbeat_at'])
+            .where('place', '=', lease.place)
+            .executeTakeFirst();
+          if (held === undefined) {
+            await trx
+              .insertInto('backup_lease')
+              .values({
+                place: lease.place,
+                token: lease.token,
+                holder: lease.holder,
+                heartbeat_at: lease.now,
+              })
+              .execute();
+            return 'taken';
+          }
+          if (held.heartbeat_at >= lease.staleBefore) return 'busy';
+          // Only over the holder judged stale: a lease that changed hands
+          // meanwhile is not this taker's to take.
+          const taken = await trx
+            .updateTable('backup_lease')
+            .set({ token: lease.token, holder: lease.holder, heartbeat_at: lease.now })
+            .where('place', '=', lease.place)
+            .where('token', '=', held.token)
+            .executeTakeFirst();
+          return taken.numUpdatedRows > 0n ? 'taken' : 'busy';
+        }),
+      ),
+
+    heartbeatBackupLease: (place, token, now) =>
+      exclusive(async () => {
+        const beat = await db
+          .updateTable('backup_lease')
+          .set({ heartbeat_at: now })
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .executeTakeFirst();
+        return beat.numUpdatedRows > 0n;
+      }),
+
+    releaseBackupLease: (place, token) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('backup_lease')
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .execute();
+      }),
 
     listLoadAthletes: () =>
       exclusive(async () =>
@@ -6561,6 +7254,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .execute();
       }),
 
-    close: () => exclusive(() => db.destroy()),
+    close: () =>
+      inside === undefined
+        ? exclusive(() => db.destroy())
+        : Promise.reject(new Error('An operator action’s store is closed by its transaction.')),
   };
 }
