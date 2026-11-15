@@ -24,6 +24,9 @@ describe('the Recent problems section’s words — #2614', () => {
     expect(problemSentence({ event: 'instance-keys', state: 'unreadable' })).toBe(
       'The instance’s keys are not ready: the secret key set does not open them.',
     );
+    expect(problemSentence({ event: 'instance-keys', state: 'lease-not-released' })).toBe(
+      'The instance’s key lease could not be released.',
+    );
     expect(problemSentence({ event: 'hosted-model-key', state: 'no-secret' })).toContain(
       'OYL_INSTANCE_SECRET_KEY is not set',
     );

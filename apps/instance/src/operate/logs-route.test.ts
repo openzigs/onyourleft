@@ -244,10 +244,14 @@ describe('the problem lines are memory only — #2614', () => {
 
     const before = Date.now();
     running = await start(path, owner, sink);
+    const started = Date.now();
+    // The read comes later than the start, so `since` cannot be the read's clock.
+    await new Promise((resolve) => setTimeout(resolve, 25));
     const after = await ownerLogs(running, owner);
     expect(JSON.stringify(after)).not.toContain('MarkerError');
     // Standard output still has it: only the ring was the process's.
     expect(out.join('\n')).toContain('MarkerError');
-    expect(Date.parse(after.since)).toBeGreaterThanOrEqual(before - 1000);
+    expect(Date.parse(after.since)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(after.since)).toBeLessThanOrEqual(started);
   });
 });

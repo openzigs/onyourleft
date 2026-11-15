@@ -95,6 +95,9 @@ export function problemSentence(line: Readonly<Record<string, unknown>>): string
     case 'history-index':
       return `The history index is off${inBrackets(line.code)}.`;
     case 'instance-keys': {
+      // A pass that finished but could not give its lease back: the keys may be fine.
+      if (line.state === 'lease-not-released')
+        return 'The instance’s key lease could not be released.';
       const state = word(line.state);
       return `The instance’s keys are not ready: ${(state === undefined ? undefined : KEYS_STATE_TEXT[state]) ?? 'not known'}.`;
     }
