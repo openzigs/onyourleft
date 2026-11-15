@@ -224,7 +224,7 @@ admits, declares **`admin: 'read' | 'change' | 'never'`**; absent means `never`,
 dispatch refuses a `never` route before calling it. A route is `never` if **it carries a secret in**
 or **its answer is worth something only because the edge cannot write it**. A new Operate route
 therefore cannot be added without saying whether the browser reaches it, and
-`moderation/choke-point.test.ts` (or the shell's test, #2645) walks the table and holds every route
+`moderation/choke-point.test.ts` walks the table and holds every route
 to it.
 
 **`sealed: 'only'` stays true for every HTTP client.** The marker is set only by the admin layer's
@@ -252,7 +252,8 @@ which has no operator CLI to mint a code and no loopback listener.
 
 The sub-issues are checked against this list. "The edge" is Cloudflare's edge on the tunnel
 hostname, and anyone with control of the zone's Cloudflare account. None of it applies on the
-loopback listener, where there is no edge.
+loopback listener, where there is no edge; the loopback listener has its own, shorter threat list,
+below.
 
 **What the edge sees, through the tunnel:**
 
@@ -285,17 +286,34 @@ loopback listener, where there is no edge.
 4. ⚠️ **Enrol a passkey of its own**, by redeeming a code first (3) or by rewriting the enrolment
    page while the owner enrols, substituting its own credential for the owner's. **This is the one
    way the edge can gain the power to make changes while the owner is away**, until that passkey is
-   revoked. It is bounded, not prevented (D-11 Q-C asks the owner to accept it): one code enrols at
-   most one passkey and then ends, so a substitution leaves the owner's own authenticator holding a
-   credential the instance does not know, and the owner's next sign-in fails; every enrolment is an
-   `admin_passkey_enrolled` entry in the operator log, with its channel, which **the app's Operate
-   area reads sealed** where the edge cannot alter it; and `operator admin-passkeys list` on the
-   host shows every passkey.
+   revoked. It is bounded in two ways only, and **it is not detected**
+   (D-11 Q-C asks the owner to accept it): one code enrols at most one passkey and then ends, and the
+   edge must be active, rewriting pages, at the moment of enrolment. Three things that look like
+   detection are not, against an edge that does this: (a) *the owner's next sign-in fails* only if
+   the edge left the owner without a working credential, but it can sign in with its own passkey,
+   relay the real pages from that session and re-sign each step-up with its own key, so nothing
+   visibly fails; (b) the sealed operator log shows exactly one `admin_passkey_enrolled` entry, which
+   is the one the owner expects, and D-8 forbids naming the passkey's id, so the entry cannot tell
+   the edge's credential from the owner's; (c) `operator admin-passkeys list` shows one passkey, and
+   the owner has no credential id from the authenticator to compare it with. The log and the list
+   are for finding a *second*, unexpected enrolment, not a substituted one.
 5. **Make sign-in attempts and send forms of its own**, within the rate limits (D-4). A form with no
    valid session, CSRF token and fresh assertion changes nothing.
 6. **Change the WAF rule.** The rule is enforced by the edge, so it is no defence against the edge.
    The instance does not rely on it (D-5's optional allowlist is defence in depth against the rule
    being widened by mistake, not against Cloudflare).
+
+**What other software on the owner's machine can do, on the loopback listener** (no edge is
+involved): a `localhost` cookie is sent to every port, so any other local web server the owner's
+browser visits receives the admin session cookie and can replay it from a non-browser client, where
+`Origin` and `Host` can be forged and `Sec-Fetch-Site` is absent, which layer 3 allows. (1) With a
+**passkey session** it can read every page and cannot change anything, as it has no fresh assertion.
+(2) With a **code session** it can enrol its own software passkey (RP ID `localhost`) and so gain
+change power, which is why D-11 Q-A's "no" does not close this by itself: the code session's one
+enrolment is the opening. Limits: the code lives ten minutes and is single-use, and a code session cannot change
+anything but enrol once. A dedicated `*.localhost` host name would give host-only cookie isolation, but it
+needs a browser probe of the RP ID rules before it is adopted, so it is **deferred to #2643**, not
+decided here.
 
 **What the edge cannot do:**
 
@@ -355,7 +373,7 @@ A `GET` never changes anything.
 
 **`Host` is checked** on every `/admin` request (*the author's choice*), against DNS rebinding, not
 for locality: through the tunnel it must be the host of `OYL_INSTANCE_ORIGIN`, and on the loopback
-listener exactly `localhost:<port>`; anything else is a page that says which address to open, with
+listener exactly `localhost:<port>`, where `<port>` is the port the process listens on and **the published host port must equal it** (the container cannot see a remapped one; #2643 adds a variable if the mapping is to differ); anything else is a page that says which address to open, with
 no form and no session read.
 
 **Headers on every `/admin` response**, errors and the script and stylesheet included:
@@ -364,9 +382,12 @@ no form and no session read.
   connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'` — **no
   `'unsafe-inline'` of any kind**, so the admin frame links a served stylesheet instead of
   `html.ts`'s inline `<style>`;
-- `X-Frame-Options: DENY`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+- `X-Frame-Options: DENY`, `Cache-Control: no-store`, `Referrer-Policy: same-origin`,
   `X-Content-Type-Options: nosniff`, `Cross-Origin-Opener-Policy: same-origin`,
-  `Cross-Origin-Resource-Policy: same-origin`;
+  `Cross-Origin-Resource-Policy: same-origin`. **`same-origin`, not `no-referrer`**: a
+  non-CORS form `POST` under `no-referrer` can carry `Origin: null`, which layer 3 would refuse, so
+  every change and the scriptless code sign-in would fail; `same-origin` sends no referrer
+  cross-origin and keeps `Origin` exact;
 - **no** `Access-Control-Allow-Origin`.
 
 `PAGE_HEADERS` for `/legal`, `/terms` and `/report` are unchanged.
@@ -386,7 +407,7 @@ attempts (a code redeemed, a passkey assertion begun or finished) at most **10 a
 address** and **30 a minute instance-wide**; step-up challenges at most **30 a minute per session**.
 The client address is read from `cf-connecting-ip` only from a trusted proxy (`client-address.ts`),
 as today. At 30 guesses a minute for a code's 10 minutes, a guess at a live 79-bit code succeeds with
-a chance of about 5 × 10^-22.
+a chance of about 4 × 10^-22.
 
 **Logged and coalesced.** Every sign-in that succeeds is an `admin_sign_in` entry. Refusals — a
 code, a passkey assertion, a step-up, a CSRF or origin check, a rate limit — are counted in memory
@@ -486,7 +507,8 @@ as #2603 to #2607's panels say.
 
 **Who took it.** `operator_log.source` gains **`admin_tunnel`** and **`admin_loopback`**, each
 with `actor_athlete_id` the owner athlete (*the author's choice*: the channel is the fact an audit
-of this ADR needs). Every Operate write dispatched by the admin layer records the channel's source,
+of this ADR needs), **except `admin_refused`, whose actor is null**: those entries count attempts by
+unknown parties, often before any session exists, and naming the owner would mislead an audit. Every Operate write dispatched by the admin layer records the channel's source,
 not `app`: the route reads it from D-2's marker. The app's log panel and the admin log page name
 both.
 
@@ -505,8 +527,13 @@ No detail names an athlete, a passkey's id, a code or an address. A sign-out and
 out are not logged.
 
 **The migration** (#2641, the next free number when it lands; `0043-analysis-setting.ts` is the
-newest on 2026-11-15) adds three tables and widens `operator_log.source`'s check, with a working,
-tested `down`:
+newest on 2026-11-15) adds three tables and widens `operator_log`'s checks, with a working,
+tested `down`. **Migration 0040 has two constraints and a trigger to handle**, which #2641's reviewer
+checks: the `source` CHECK gains the two admin sources; the **`operator_log_actor` CHECK**, which
+pairs `app` with a non-null actor and `cli` with a null one, is widened so `admin_tunnel` and
+`admin_loopback` take an owner actor and may take a null one (for `admin_refused`); and the SQLite
+table rebuild drops the **`operator_log_no_update` append-only trigger**, which the migration
+recreates, with a test that an `UPDATE` is still refused:
 
 - **`admin_code`**: the code's SHA-256, when minted, when it expires, when used (or null).
 - **`admin_session`**: the token's SHA-256, the owner athlete and the owner key at sign-in, the
@@ -610,11 +637,15 @@ the pull request decides it.
   CLI, and whoever enrols a passkey for the tunnel has the host at hand to mint one. It can be added
   later as an Operate route marked `admin: 'never'`.
 - **Q-C — Is D-3's "can do 4" acceptable**: an edge that rewrites the enrolment page while the owner
-  enrols, or races a code, can enrol a passkey of its own? **Recommended: accept it**, with the
-  bounds D-3 lists (one passkey per code, the owner's own sign-in then failing, the enrolment in an
-  operator log the app reads sealed, and the CLI list). The only full answer is to enrol no passkey
-  through the tunnel, which leaves the tunnel read-only; that is the alternative if the owner does
-  not accept it.
+  enrols, or races a code, can enrol a passkey of its own? The only real bounds are the two D-3
+  states: one passkey per code, and the edge having to be active at the moment of enrolment. It is
+  not detected afterwards. **Recommended: accept it only with one of two further limits, and the
+  owner chooses**: (1) *tunnel-enrolled passkeys expire* (30 days, renewed by enrolling again), so a
+  substituted one does not outlive the next enrolment; or (2) *a passkey enrolled through the tunnel
+  can read but not change until `operator admin-passkeys confirm` is run on the host*, which an edge
+  cannot do. The first is cheap and the second closes the hole for changes, at the cost of a host
+  step per enrolment. The full answer is to enrol no passkey through the tunnel, which leaves the
+  tunnel read-only; that is the alternative if the owner accepts none of these.
 
 ## Consequences
 
