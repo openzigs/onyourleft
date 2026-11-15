@@ -104,9 +104,13 @@ describe('a room that is over deletes its voice channel (#874)', () => {
     const anna = await riderIn(w, await testDevice());
     const room = await madeRoom(w, anna.token);
     await voice.inviteFor(room.roomId, 8);
-    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(true);
+    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(
+      true,
+    );
     expect(discord.ourChannels()).toEqual([]);
-    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(false);
+    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(
+      false,
+    );
   });
 
   it('Discord refusing the delete never keeps a room open', async () => {
