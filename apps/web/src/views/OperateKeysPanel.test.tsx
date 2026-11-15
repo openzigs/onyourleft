@@ -77,7 +77,7 @@ describe('the Instance keys section over the scripted instance — #2613', () =>
     const card = mounted?.container.querySelector('code.oyl-instance__card');
     expect(card?.textContent).toBe(SCRIPTED_KEYS.card);
     expect(fact('Fingerprint')).toBe(
-      '01f8 572b a6c9 a2b8 d5ea 9887 cf14 06b1 f7db f5e3 18cd ef03 00c4 ee2f 6daa c53b',
+      'AH4F OKN2 ZGRQ XRVJ 4EHL 6FAG WH35 X5PD DFXX QMAE TY5Z PNNK YU5Q',
     );
     expect(fact('Encryption key')).toBe('1790000000, made 2026-10-22 08:00 UTC');
     expect(fact('Rotates by itself')).toBe('2026-11-21 08:00 UTC');

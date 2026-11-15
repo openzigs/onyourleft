@@ -611,8 +611,8 @@ function sentenceFrom(answer: InstanceAnswer): string | undefined {
   return message;
 }
 
-/** The identity key's fingerprint as the instance writes it: SHA-256, lower-case hex. */
-const FINGERPRINT = /^[0-9a-f]{64}$/;
+/** The identity key's fingerprint as a rider's device shows it: 52 base32 characters, the card's tail. */
+const FINGERPRINT = /^[A-Z2-7]{52}$/;
 
 /** An instance card, whole: `oyl-instance:`, an origin, `#`, and 52 base32 characters. */
 const CARD = /^oyl-instance:https?:\/\/[A-Za-z0-9.:[\]-]{1,260}#[A-Z2-7]{52}$/;

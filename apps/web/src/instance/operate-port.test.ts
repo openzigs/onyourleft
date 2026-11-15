@@ -769,7 +769,8 @@ describe('the instance’s keys, and the routine rotation — #2613', () => {
       kind: 'keys',
       state: 'ready',
       card: shown.card,
-      fingerprint: shown.fingerprint,
+      // The form a rider's device shows: the card's own last 52 characters.
+      fingerprint: shown.card.slice(-52),
       olderHeld: 0,
     });
   });
@@ -817,7 +818,7 @@ describe('the instance’s keys, and the routine rotation — #2613', () => {
   /** The keys as the instance writes them, every field well-formed. */
   const KEYS = {
     state: 'ready',
-    fingerprint: 'a'.repeat(64),
+    fingerprint: 'A'.repeat(52),
     card: `oyl-instance:https://ride.example#${'A'.repeat(52)}`,
     current: {
       serial: 7,
@@ -843,7 +844,7 @@ describe('the instance’s keys, and the routine rotation — #2613', () => {
   it.each([
     ['a card cut short', { card: `oyl-instance:https://ride.example#${'A'.repeat(51)}` }],
     ['a card with something after it', { card: `${KEYS.card} extra` }],
-    ['a fingerprint that is not 64 hex', { fingerprint: 'A'.repeat(64) }],
+    ['a fingerprint in hex, which no device shows', { fingerprint: 'a'.repeat(64) }],
     ['a state it does not know', { state: 'leaked' }],
     ['a serial that is not whole', { current: { ...KEYS.current, serial: 1.5 } }],
   ] as const)('shows no keys when the answer holds %s', async (_name, change) => {

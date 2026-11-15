@@ -79,13 +79,7 @@ import {
   InstanceKeysUnavailable,
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
-import {
-  keysState,
-  type DiskSpace,
-  type KeysState,
-  type StatusSources,
-  type TunnelState,
-} from './status.ts';
+import { type DiskSpace, type KeysState, type StatusSources, type TunnelState } from './status.ts';
 
 export type OperateResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -191,7 +185,7 @@ export interface JobsView {
 export interface KeysView {
   /** `ready`, or why the keys cannot be read now (`status.ts` §`KeysState`). */
   readonly state: KeysState;
-  /** The identity key's SHA-256 fingerprint, 64 lower-case hex; `null` unless `ready`. */
+  /** The identity key's SHA-256 fingerprint as a rider's device shows it, 52 base32 characters; `null` unless `ready`. */
   readonly fingerprint: string | null;
   /** `oyl-instance:<origin>#<52 characters>`, whole; `null` unless `ready`. */
   readonly card: string | null;
@@ -377,22 +371,26 @@ export function createOperate(options: {
   return {
     async keys() {
       if (keySources === undefined) return { ok: false, code: 'unavailable' };
-      const state = await keysState(keySources.keys)();
-      if (state !== 'ready') {
+      // One read: a second one could meet keys changed from the CLI in between.
+      let shown: Awaited<ReturnType<typeof keySources.keys.show>>;
+      try {
+        shown = await keySources.keys.show();
+      } catch (error) {
+        const state: KeysState =
+          error instanceof InstanceKeysUnavailable ? error.code : 'unreadable';
         return {
           ok: true,
           value: { state, fingerprint: null, card: null, current: null, olderHeld: 0 },
         };
       }
-      const shown = await keySources.keys.show();
       const current = shown.encryptionKeys
         .filter((key) => key.supersededAt === null)
         .sort((a, b) => b.serial - a.serial)[0];
       return {
         ok: true,
         value: {
-          state,
-          fingerprint: shown.fingerprint,
+          state: 'ready',
+          fingerprint: shown.fingerprintBase32,
           card: shown.card,
           current:
             current === undefined

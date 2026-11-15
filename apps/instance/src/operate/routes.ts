@@ -398,7 +398,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     // because the edge cannot write them (ADR 0047 D-6): never through the
     // tunnel's admin pages. #2650's loopback page formats its own.
     admin: 'never',
-    summary: `The instance’s keys (#2613), public material only — what \`instance-key show\` prints: their state (\`ready\`, or \`no-secret\`, \`no-origin\`, \`no-keys\`, \`unreadable\`, \`busy\`), the identity key’s full SHA-256 fingerprint, the instance card (\`oyl-instance:<origin>#<52 characters>\`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from \`OYL_INSTANCE_SECRET_KEY\`. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    summary: `The instance’s keys (#2613), public material only — what \`instance-key show\` prints: their state (\`ready\`, or \`no-secret\`, \`no-origin\`, \`no-keys\`, \`unreadable\`, \`busy\`), the identity key’s full SHA-256 fingerprint (52 base32 characters, as a rider’s device shows it), the instance card (\`oyl-instance:<origin>#<52 characters>\`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from \`OYL_INSTANCE_SECRET_KEY\`. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
     auth: 'session',

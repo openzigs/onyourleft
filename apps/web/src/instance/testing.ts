@@ -914,7 +914,7 @@ export interface ScriptedOperate {
 export const SCRIPTED_KEYS: OperateKeys = {
   kind: 'keys',
   state: 'ready',
-  fingerprint: '01f8572ba6c9a2b8d5ea9887cf1406b1f7dbf5e318cdef0300c4ee2f6daac53b',
+  fingerprint: 'AH4FOKN2ZGRQXRVJ4EHL6FAGWH35X5PDDFXXQMAETY5ZPNNKYU5Q',
   card: 'oyl-instance:https://ride.example.org#AH4FOKN2ZGRQXRVJ4EHL6FAGWH35X5PDDFXXQMAETY5ZPNNKYU5Q',
   current: {
     serial: 1_790_000_000,

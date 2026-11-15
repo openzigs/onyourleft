@@ -80,8 +80,9 @@ describe('GET /v1/operate/keys — the card and the fingerprint, whole (#2613)',
     const shown = await w.instanceKeys.show();
     const body = await keysOf(w);
     expect(body.state).toBe('ready');
-    expect(body.fingerprint).toBe(shown.fingerprint);
-    expect(body.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    // The form a rider's device shows and the card ends in: 52 base32 characters.
+    expect(body.fingerprint).toBe(shown.fingerprintBase32);
+    expect(body.fingerprint).toMatch(/^[A-Z2-7]{52}$/);
     // Never truncated: the card as the operator's CLI prints it, 52 characters after the #.
     expect(body.card).toBe(shown.card);
     expect(body.card).toMatch(new RegExp(`^oyl-instance:${TEST_ORIGIN}#[A-Z2-7]{52}$`));

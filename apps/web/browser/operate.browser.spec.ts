@@ -144,10 +144,13 @@ test.describe('the Operate area — #2603', () => {
       await expect(card).toHaveText(SCRIPTED_KEYS.card ?? '');
       const cardBox = await card.evaluate((element) => {
         const box = element.getBoundingClientRect();
+        // The card is inline, so its own scroll and client widths are both 0:
+        // what would clip it is the block that holds it.
+        const holder = element.parentElement ?? element;
         return {
           left: box.left,
           right: box.right,
-          clipped: element.scrollWidth > element.clientWidth + 1,
+          clipped: holder.scrollWidth > holder.clientWidth + 1,
           hidden: getComputedStyle(element).textOverflow === 'ellipsis',
         };
       });
