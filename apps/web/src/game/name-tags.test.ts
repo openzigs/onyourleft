@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { metres } from '@onyourleft/domain';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
+import { PACK_ABREAST_METRES } from './lap-race/pack-layout';
 import { REFERENCE_ASPECT, cameraRig, projectToFrame } from './camera';
 import {
   MAXIMUM_NAME_TAGS,
@@ -168,8 +169,9 @@ describe('other riders’ names on the road — #783', () => {
       kind: 'remote',
     });
     const under = remote(-2.05, 0, 'Under');
-    const fading = remote(-2.05, 1.2, 'Fading');
-    const beside = remote(-2.05, 2, 'Beside');
+    const fading = remote(-2.05, 0.25, 'Fading');
+    // One place across and a little behind: whole, the owner's ruling of 2026-11-15.
+    const beside = remote(-1, PACK_ABREAST_METRES, 'Beside');
     const ahead = remote(12, 0, 'Ahead');
     const line = riderFadeLine(frame.camera, frame.markers, emptyRiderFadeLine());
     // The renderer draws the first gone and the second part gone; the others whole.

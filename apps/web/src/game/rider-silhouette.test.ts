@@ -220,13 +220,14 @@ describe('the silhouette belt — one instanced transparent draw — #626', () =
       [rider],
       emptyRiderFadeLine(),
     );
-    const part = { ...at('bot', -2.05), x: 1.1 };
+    // A quarter metre off the camera's line: half way out of the rider's lane.
+    const part = { ...at('bot', -2.05), x: 0.25 };
     belt.place([rider, at('bot', -2.05), part], sun, line);
     expect(belt.mesh.count).toBe(2);
     const throws = belt.mesh.geometry.getAttribute('oylThrow');
     expect(throws.getZ(0)).toBe(0);
-    expect(throws.getZ(1)).toBeCloseTo(0.625, 6);
-    expect(belt.mesh.instanceMatrix.array[16 + 12]).toBeCloseTo(1.1, 5);
+    expect(throws.getZ(1)).toBeCloseTo(0.5, 6);
+    expect(belt.mesh.instanceMatrix.array[16 + 12]).toBeCloseTo(0.25, 5);
     // The shader takes that share off the darkness.
     const material = belt.mesh.material as unknown as { fragmentShader: string };
     expect(material.fragmentShader).toContain('oylDarkness * cover * (1.0 - vOylFaded)');

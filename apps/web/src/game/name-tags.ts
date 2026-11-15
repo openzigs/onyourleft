@@ -32,7 +32,7 @@
  * 2. **In front of the eye, inside the frame, and within**
  *    {@link NAME_TAG_METRES} of it.
  * 2a. **Not a rider the renderer is fading out** — #2596's review: a rider
- *    between the camera and the rider, or beside the eye, is drawn with only
+ *    behind the rider in their lane, between the camera and them, is drawn with only
  *    part of its pixels (`rider-fade.ts` §`riderFaded`), and its name would
  *    otherwise float whole over the road under the camera. A name is hidden
  *    as soon as its rider begins to fade, not dimmed: dimmed, it would no

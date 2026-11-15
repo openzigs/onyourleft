@@ -17,18 +17,23 @@
  *
  * ## The rule
  *
- * In plan, a line runs from the camera's EYE toward the rider and stops
- * {@link RIDER_FADE_METRES}' `clear` short of them. Another rider whose drawn
- * place is nearer that line — or its end at the eye — than `whole` is drawn
- * with only part of its pixels, falling evenly to none at `gone`:
+ * ⚠️ **Only a rider BEHIND the rider, in their lane — the owner's ruling of
+ * 2026-11-15** from the tablet: a bot riding one place across and a little
+ * behind showed the stipple, and *"fade when behind"*. A rider beside the
+ * rider is always drawn whole.
  *
- *     faded = clamp((whole − distance) / (whole − gone), 0, 1)
+ * In plan, a line runs from the camera's EYE through the rider. Another
+ * rider's drawn place is measured on it: how far behind the rider along it
+ * (`behind`), and how far off it to either side (`aside`). Each gives a share,
+ * falling evenly, and the rider is faded by the two multiplied:
  *
- * So one distance covers both halves of the issue: a rider between the camera
- * and the rider is near the line, and a rider beside or just behind the
- * camera is near its end. It moves continuously with the riders and the eye,
- * so a rider coming up the side fades back in over the metre it takes to
- * leave that space, never in one frame.
+ *     behindShare = clamp((behind − behind.whole) / (behind.gone − behind.whole), 0, 1)
+ *     asideShare  = clamp((aside.whole − aside) / (aside.whole − aside.gone), 0, 1)
+ *     faded       = behindShare × asideShare
+ *
+ * Both move continuously with the riders and the eye, so a rider dropping
+ * back into the lane, or moving out of it, fades over the distance it takes,
+ * never in one frame.
  *
  * `three-renderer.ts` draws `faded` as a screen-space dither, the one #545's
  * near trees and #617's tree levels already use: a fragment whose hash falls
@@ -38,21 +43,34 @@
  *
  * ## The distances
  *
- * - **`clear`, 2 m**: the line stops that short of the rider. The nearest a
- *   bot is drawn in line behind them is `lap-race/pack-layout.ts`
- *   §`BIKE_LENGTH_METRES` (1.75 m) and #2542's shortest wheel gap (0.3 m)
- *   back, 2.05 m, so that bot is still on the line; a bot level with the
- *   rider, or beside their back wheel, is far enough from its end to be drawn
- *   whole or nearly.
- * - **`gone`, 0.8 m**: wider than the pack's `PACK_ABREAST_METRES` (0.55 m),
- *   so the bot held behind the rider and the one beside it in the row behind
- *   are both gone; wider than the 0.78 m a solo pacer the rider has passed is
- *   drawn off their line on `rider-fade.test.ts`' fixture; and wider than the
- *   camera's near plane (`camera.ts` §`NEAR_PLANE_METRES`, 0.5 m), so no
- *   rider the near plane would cut is still drawn.
- * - **`whole`, 1.6 m**: three places across (1.65 m) is drawn whole. Two
- *   places across, 1.1 m, keeps 3/8 of itself: about two metres in front of
- *   the eye it fills a lower corner of the frame.
+ * - **`behind`: whole at 0.9 m, gone at 1.7 m** back along the line. 0.9 m
+ *   is the back of the rider's own bicycle: a marker stands midway between
+ *   its two contact patches (`bicycle.ts`), half `lap-race/pack-layout.ts`
+ *   §`BIKE_LENGTH_METRES` (1.75 m) in front of its tail. 1.7 m is short of
+ *   the nearest a bot is held in line behind them, that bike length and
+ *   #2542's shortest wheel gap (0.3 m), 2.05 m, so that bot is gone. 5 cm of
+ *   a bot dropping back over the 0.8 m ramp is a sixteenth of the fade.
+ * - **`aside`: gone at 0.1 m, whole at 0.4 m** off the line. Whole short of
+ *   `PACK_ABREAST_METRES` (0.55 m), so a bot one place across is never
+ *   faded wherever it is along the road, with 0.15 m to spare for the few
+ *   degrees the damped camera's line turns off the road through a bend
+ *   (about 4° at a bot two metres behind); the whole ramp is inside the
+ *   rider's lane. Gone within 0.1 m, so a rider squarely between the eye and
+ *   the rider is gone. The 0.3 m between is as wide as the lane allows, so a
+ *   rider moving into or out of the lane — the solo pacer drifts 0.9 m across
+ *   for each metre the rider drops it — fades over several frames.
+ *
+ * There is no end behind the eye: a rider in the lane behind the camera is
+ * faded too, which the camera does not see, so that one passing the eye is
+ * already faded when it comes into the frame.
+ *
+ * ⚠️ **Since the ruling, a rider passing BESIDE the eye is drawn whole.** A
+ * rider a place across that drops back past the camera stays whole as it
+ * passes it, and the near plane (`camera.ts` §`NEAR_PLANE_METRES`, 0.5 m) may
+ * cut its edge for the moment it is beside the eye. The ruling puts the
+ * stipple on a rider beside the rider first. The solo pacer is not such a
+ * rider: `scene.ts` brings it into the rider's lane as it is dropped, so it is
+ * gone before it reaches the eye (`rider-fade.test.ts`).
  *
  * ⚠️ **The rider's own avatar is never faded**: {@link riderFaded} returns 0
  * for `kind: 'rider'` before it measures anything.
@@ -70,8 +88,15 @@
 import { cameraRig } from './camera';
 import type { CameraPose, RiderMarker } from './port';
 
-/** Where a rider is gone, where it is whole, and how far short of the rider the line stops. */
-export const RIDER_FADE_METRES = { gone: 0.8, whole: 1.6, clear: 2 } as const;
+/**
+ * How far behind the rider along the camera's line a rider begins to fade
+ * (`behind.whole`) and is gone (`behind.gone`), and how far off that line it
+ * is gone (`aside.gone`) and whole (`aside.whole`), in metres. @see riderFaded
+ */
+export const RIDER_FADE_METRES = {
+  behind: { whole: 0.9, gone: 1.7 },
+  aside: { gone: 0.1, whole: 0.4 },
+} as const;
 
 /**
  * How another rider near the camera is drawn: `'fade'` is the product; `'off'`
@@ -80,26 +105,31 @@ export const RIDER_FADE_METRES = { gone: 0.8, whole: 1.6, clear: 2 } as const;
  */
 export type RiderFade = 'fade' | 'off';
 
-/** The line {@link riderFaded} measures from, in plan: the eye, and the end `clear` short of the rider. */
+/**
+ * The line {@link riderFaded} measures on, in plan: the eye, the rider, and
+ * the unit direction from the eye toward the rider.
+ */
 export interface RiderFadeLine {
   eyeX: number;
   eyeZ: number;
-  endX: number;
-  endZ: number;
+  riderX: number;
+  riderZ: number;
+  alongX: number;
+  alongZ: number;
 }
 
 /** A line to write into, so a frame allocates nothing. */
 export function emptyRiderFadeLine(): RiderFadeLine {
-  return { eyeX: 0, eyeZ: 0, endX: 0, endZ: 0 };
+  return { eyeX: 0, eyeZ: 0, riderX: 0, riderZ: 0, alongX: 0, alongZ: 1 };
 }
 
 /**
  * The line for a frame drawn from `pose`, written into `into`: from the eye
  * `camera.ts` §`cameraRig` places for that pose — taken from it, not
  * restated, so the fade measures from wherever the camera really stands —
- * toward the frame's own rider, or the pose's point when the frame carries
- * none, stopping `clear` short. A rider nearer the eye than `clear` leaves
- * the line its eye alone.
+ * through the frame's own rider, or the pose's point when the frame carries
+ * none. Where that point is the eye itself, the line runs along the pose's
+ * heading.
  *
  * Once a frame, so the rig it builds is the one allocation here;
  * {@link riderFaded}, asked of every rider, allocates nothing.
@@ -111,14 +141,17 @@ export function riderFadeLine(
 ): RiderFadeLine {
   const { x: eyeX, z: eyeZ } = cameraRig(pose).eye;
   const rider = markers.find((marker) => marker.kind === 'rider');
-  const toX = (rider?.x ?? pose.x) - eyeX;
-  const toZ = (rider?.z ?? pose.z) - eyeZ;
+  const riderX = rider?.x ?? pose.x;
+  const riderZ = rider?.z ?? pose.z;
+  const toX = riderX - eyeX;
+  const toZ = riderZ - eyeZ;
   const length = Math.hypot(toX, toZ);
-  const reach = Math.max(0, length - RIDER_FADE_METRES.clear) / (length > 0 ? length : 1);
   into.eyeX = eyeX;
   into.eyeZ = eyeZ;
-  into.endX = eyeX + toX * reach;
-  into.endZ = eyeZ + toZ * reach;
+  into.riderX = riderX;
+  into.riderZ = riderZ;
+  into.alongX = length > 0 ? toX / length : pose.headingX;
+  into.alongZ = length > 0 ? toZ / length : pose.headingZ;
   return into;
 }
 
@@ -130,13 +163,12 @@ export function riderFadeLine(
  */
 export function riderFaded(marker: RiderMarker, line: RiderFadeLine | undefined): number {
   if (line === undefined || marker.kind === 'rider') return 0;
-  const alongX = line.endX - line.eyeX;
-  const alongZ = line.endZ - line.eyeZ;
-  const span = alongX * alongX + alongZ * alongZ;
-  const offX = marker.x - line.eyeX;
-  const offZ = marker.z - line.eyeZ;
-  const share = span > 0 ? Math.min(1, Math.max(0, (offX * alongX + offZ * alongZ) / span)) : 0;
-  const distance = Math.hypot(offX - alongX * share, offZ - alongZ * share);
-  const { gone, whole } = RIDER_FADE_METRES;
-  return Math.min(1, Math.max(0, (whole - distance) / (whole - gone)));
+  const offX = marker.x - line.riderX;
+  const offZ = marker.z - line.riderZ;
+  const behind = -(offX * line.alongX + offZ * line.alongZ);
+  const aside = Math.abs(offX * line.alongZ - offZ * line.alongX);
+  const { behind: back, aside: side } = RIDER_FADE_METRES;
+  const behindShare = Math.min(1, Math.max(0, (behind - back.whole) / (back.gone - back.whole)));
+  const asideShare = Math.min(1, Math.max(0, (side.whole - aside) / (side.whole - side.gone)));
+  return behindShare * asideShare;
 }

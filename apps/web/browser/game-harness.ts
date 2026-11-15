@@ -11018,6 +11018,7 @@ const NO_REALISTIC: RealisticMeasurement = {
     bot: { faded: 0, whole: 0 },
     rider: { faded: 0, whole: 0 },
     aside: { faded: 0, whole: 0 },
+    beside: { faded: 0, whole: 0 },
     riderDrawn: 0,
     frame: { faded: 0, whole: 0 },
   },

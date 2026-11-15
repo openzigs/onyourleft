@@ -391,19 +391,19 @@ describe('a faded rider’s shadow fades with it — #2596', () => {
 
   it('draws no blob for a bot faded out, a lighter one for a bot part faded, and the rider’s whole', () => {
     const blobs = new ContactShadowBelt();
-    // In line behind the rider (gone), two places across behind them (part),
-    // and ahead (whole).
+    // In line behind the rider (gone), behind them a quarter metre off the
+    // camera's line, half way out of the lane (part), and ahead (whole).
     const markers = [
       marker('rider'),
       marker('bot', 0, -2.05),
-      marker('bot', 1.1, -2.05),
+      marker('bot', 0.25, -2.05),
       marker('bot', 0, 6),
     ];
     blobs.place(markers, sun, line);
     expect(blobs.mesh.count).toBe(3);
     const faded = blobs.mesh.geometry.getAttribute('oylFaded');
     expect(faded.getX(0)).toBe(0);
-    expect(faded.getX(1)).toBeCloseTo(0.625, 6);
+    expect(faded.getX(1)).toBeCloseTo(0.5, 6);
     expect(faded.getX(2)).toBe(0);
     // The faded bot's slot went to the next caster: the part-faded one is placed second.
     const into = blank();

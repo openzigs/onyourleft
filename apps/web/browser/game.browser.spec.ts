@@ -5279,11 +5279,14 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(seen.bot.faded).toBe(0);
     expect(seen.rider.faded).toBe(0);
     expect(seen.frame.faded).toBe(0);
-    // Two places across, part of it: the rule keeps 3/8 of its pixels
-    // (`rider-fade.ts`), every part of it alike, so the square on its
-    // back keeps about that share, not none and not all.
-    expect(seen.aside.faded).toBeGreaterThan(seen.aside.whole * 0.25);
-    expect(seen.aside.faded).toBeLessThan(seen.aside.whole * 0.5);
+    // Two places across: beside the rider, which the owner's ruling of
+    // 2026-11-15 keeps whole (`rider-fade.ts`), so its square keeps every
+    // pixel the bot drawn with the fade off does.
+    expect(seen.aside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.aside.faded).toBe(seen.aside.whole);
+    // One place across and a metre behind — the owner's tablet case: whole.
+    expect(seen.beside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.beside.faded).toBe(seen.beside.whole);
   });
 
   test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({

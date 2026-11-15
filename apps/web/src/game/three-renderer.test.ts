@@ -3050,7 +3050,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       const markers = [
         steering(riderAt(), 0.2),
         riderAt({ z: -2.05 }, {}, undefined, 'bot'),
-        steering(riderAt({ x: 1.2, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        steering(riderAt({ x: 0.25, z: -2.05 }, {}, undefined, 'bot'), -0.1),
         riderAt({ z: 6 }, {}, undefined, 'bot'),
       ];
       const line = riderFadeLine(POSE, markers, emptyRiderFadeLine());
@@ -3067,7 +3067,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       // The control: a bot coming nearer the line marks its buffers again.
       const nearer = [
         ...markers.slice(0, 2),
-        steering(riderAt({ x: 1, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        steering(riderAt({ x: 0.2, z: -2.05 }, {}, undefined, 'bot'), -0.1),
         markers[3] as RiderMarker,
       ];
       belt.place(nearer, line);

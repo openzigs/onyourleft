@@ -17,7 +17,8 @@
  * product's fade, adding the bot changes neither square: the bot is not drawn
  * and the rider is drawn exactly as before. With the fade off (the control),
  * both change, so the squares were the bot and something it hid. A bot two
- * places across is read too, for the partial fade between. The rider's square
+ * places across is read too: beside the rider, which the owner's ruling of
+ * 2026-11-15 keeps whole, so its square is drawn the same faded and not. The rider's square
  * read against an empty road says the square is the rider.
  *
  * And the whole frame: a bot faded out entirely changes not one pixel of it,
@@ -33,6 +34,9 @@ import { riderFadeOf } from '../src/game/three-renderer';
 /** How far behind the rider the bot is held, metres: a bike length and #2542's shortest wheel gap. */
 export const FADE_PROBE_BEHIND_METRES = BIKE_LENGTH_METRES + 0.3;
 
+/** How far behind the rider the bot one place across is read — a little behind, as on the owner's tablet. */
+export const FADE_PROBE_BESIDE_BACK_METRES = 1;
+
 /** Half a square's side, pixels. */
 const HALF = 10;
 
@@ -44,8 +48,13 @@ export interface RiderFadeReading {
   readonly bot: { readonly faded: number; readonly whole: number };
   /** The rider's back behind that bot, likewise. */
   readonly rider: { readonly faded: number; readonly whole: number };
-  /** A bot two places across, faded and whole: the fade between. */
+  /** A bot two places across, faded and whole: beside the rider, so drawn whole in both. */
   readonly aside: { readonly faded: number; readonly whole: number };
+  /**
+   * A bot one place across and {@link FADE_PROBE_BESIDE_BACK_METRES} behind,
+   * faded and whole — the owner's tablet case of 2026-11-15, drawn whole in both.
+   */
+  readonly beside: { readonly faded: number; readonly whole: number };
   /** The rider's square against an empty road: it is the rider. */
   readonly riderDrawn: number;
   /** The whole frame, the bot in line behind the rider and its shadow: faded and whole. */
@@ -149,6 +158,8 @@ export function riderFadeProbe(
   const aside = behind(rider, FADE_PROBE_BEHIND_METRES, 2 * PACK_ABREAST_METRES);
   const botSquare = pixelOf(alone, canvas, backOf(inLine));
   const asideSquare = pixelOf(alone, canvas, backOf(aside));
+  const beside = behind(rider, FADE_PROBE_BESIDE_BACK_METRES, PACK_ABREAST_METRES);
+  const besideSquare = pixelOf(alone, canvas, backOf(beside));
   const riderSquare = pixelOf(alone, canvas, backOf(rider));
   const read = (
     bot: RiderMarker | undefined,
@@ -161,6 +172,7 @@ export function riderFadeProbe(
       bot: changed(read(inLine, botSquare), read(undefined, botSquare)),
       rider: changed(read(inLine, riderSquare), read(undefined, riderSquare)),
       aside: changed(read(aside, asideSquare), read(undefined, asideSquare)),
+      beside: changed(read(beside, besideSquare), read(undefined, besideSquare)),
       frame: changed(read(inLine, 'whole'), read(undefined, 'whole')),
     };
   };
@@ -175,6 +187,7 @@ export function riderFadeProbe(
     bot: { faded: faded.bot, whole: whole.bot },
     rider: { faded: faded.rider, whole: whole.rider },
     aside: { faded: faded.aside, whole: whole.aside },
+    beside: { faded: faded.beside, whole: whole.beside },
     riderDrawn,
     frame: { faded: faded.frame, whole: whole.frame },
   };

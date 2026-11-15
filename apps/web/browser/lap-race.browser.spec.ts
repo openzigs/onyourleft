@@ -149,11 +149,14 @@ test.describe('a bot between the camera and the rider — #2596', () => {
       expect(seen.bot.faded).toBe(0);
       expect(seen.rider.faded).toBe(0);
       expect(seen.frame.faded).toBe(0);
-      // Two places across, part of it: the rule keeps 3/8 of its pixels
-      // (`rider-fade.ts`), every part of it alike, so the square on its
-      // back keeps about that share, not none and not all.
-      expect(seen.aside.faded).toBeGreaterThan(seen.aside.whole * 0.25);
-      expect(seen.aside.faded).toBeLessThan(seen.aside.whole * 0.5);
+      // Two places across: beside the rider, which the owner's ruling of
+      // 2026-11-15 keeps whole (`rider-fade.ts`), so its square keeps every
+      // pixel the bot drawn with the fade off does.
+      expect(seen.aside.whole).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.aside.faded).toBe(seen.aside.whole);
+      // One place across and a metre behind — the owner's tablet case: whole.
+      expect(seen.beside.whole).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.beside.faded).toBe(seen.beside.whole);
     });
   }
 
@@ -163,7 +166,8 @@ test.describe('a bot between the camera and the rider — #2596', () => {
     await open(page);
     // Held in line behind the rider (a bike length and a 0.3 m wheel gap),
     // whole as before #2596 and faded as now; then the same bot coming up the
-    // rider's side a place across, from behind to level.
+    // rider's side a place across, from behind to level, and one a place
+    // across a metre behind — each of them whole since the ruling of 2026-11-15.
     const shots = [
       ['before', 2.05, 0, 'off'],
       ['after', 2.05, 0, 'fade'],
@@ -171,6 +175,8 @@ test.describe('a bot between the camera and the rider — #2596', () => {
       ['leaving-2', 1.4, 0.55, 'fade'],
       ['leaving-3', 0.9, 0.55, 'fade'],
       ['leaving-4', 0.3, 0.55, 'fade'],
+      // The owner's tablet case of 2026-11-15: one place across, a little behind, whole.
+      ['beside', 1, 0.55, 'fade'],
     ] as const;
     for (const [name, back, across, fade] of shots) {
       const id = `rider-fade-${name}`;

@@ -63,18 +63,39 @@ function lineFor(pose: CameraPose = POSE, rider: RiderMarker = RIDER): RiderFade
 const HELD_BEHIND = BIKE_LENGTH_METRES + 0.3;
 
 describe('riderFaded — the rule (#2596)', () => {
-  it('fades out a bot held in line behind the rider, and the one beside it in the row behind', () => {
+  it('fades out a bot held in line behind the rider, and not the one beside it in the row behind', () => {
     const line = lineFor();
     expect(riderFaded(marker('bot', 0, -HELD_BEHIND), line)).toBe(1);
-    expect(riderFaded(marker('bot', PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(1);
-    expect(riderFaded(marker('bot', -PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(1);
+    expect(riderFaded(marker('bot', PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(0);
+    expect(riderFaded(marker('bot', -PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(0);
   });
 
-  it('fades out a rider beside the camera’s eye, which the near plane would cut', () => {
+  it('fades out a rider in the lane at the camera’s eye, and draws one beside the eye whole', () => {
     const eye = -CAMERA_BEHIND_METRES;
     const line = lineFor();
-    expect(riderFaded(marker('bot', 0.5, eye), line)).toBe(1);
-    expect(riderFaded(marker('remote', -0.3, eye - 0.3), line)).toBe(1);
+    expect(riderFaded(marker('bot', 0, eye), line)).toBe(1);
+    expect(riderFaded(marker('remote', -0.05, eye - 0.3), line)).toBe(1);
+    // The ruling: beside is whole, even beside the eye.
+    expect(riderFaded(marker('bot', PACK_ABREAST_METRES, eye), line)).toBe(0);
+  });
+
+  it('never fades a bot one place across, at any place from 3 m behind the rider to level — the owner’s ruling of 2026-11-15', () => {
+    const line = lineFor();
+    for (const side of [PACK_ABREAST_METRES, -PACK_ABREAST_METRES]) {
+      for (let back = 0; back <= 3 + 1e-9; back += 0.05) {
+        expect(
+          riderFaded(marker('bot', side, -back), line),
+          `${String(side)} across, ${String(back)} back`,
+        ).toBe(0);
+      }
+    }
+  });
+
+  it('still fades out a bot directly behind the rider in their lane, near the camera', () => {
+    const line = lineFor();
+    for (const back of [HELD_BEHIND, 2.5, 3, 3.5, 4]) {
+      expect(riderFaded(marker('bot', 0, -back), line), `${String(back)} back`).toBe(1);
+    }
   });
 
   it('never fades the rider’s own avatar, wherever it stands', () => {
@@ -92,47 +113,59 @@ describe('riderFaded — the rule (#2596)', () => {
     }
   });
 
-  it('draws whole a rider level with the rider, ahead, or two places across', () => {
+  it('draws whole a rider level with the rider, ahead, beside the rider’s back wheel, or two places across', () => {
     const line = lineFor();
+    const { behind, aside } = RIDER_FADE_METRES;
+    expect(riderFaded(marker('bot', 0, 0), line)).toBe(0);
     expect(riderFaded(marker('bot', PACK_ABREAST_METRES, 0), line)).toBe(0);
     expect(riderFaded(marker('bot', 0, 3), line)).toBe(0);
-    expect(riderFaded(marker('bot', RIDER_FADE_METRES.whole, -HELD_BEHIND), line)).toBe(0);
-    // Two places across keeps 3/8 of itself; three places across is whole.
-    expect(riderFaded(marker('bot', 2 * PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBeCloseTo(
-      5 / 8,
-      6,
-    );
-    expect(riderFaded(marker('bot', 3 * PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(0);
+    // Behind, but no further than the back of the rider's bicycle.
+    expect(riderFaded(marker('bot', 0, -behind.whole), line)).toBe(0);
+    expect(riderFaded(marker('bot', aside.whole, -HELD_BEHIND), line)).toBe(0);
+    expect(riderFaded(marker('bot', 2 * PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(0);
   });
 
-  it('falls evenly between `gone` and `whole`', () => {
+  it('falls evenly along each ramp, and by the two together', () => {
     const line = lineFor();
-    const { gone, whole } = RIDER_FADE_METRES;
-    expect(riderFaded(marker('bot', (gone + whole) / 2, -HELD_BEHIND), line)).toBeCloseTo(0.5, 9);
-    expect(riderFaded(marker('bot', gone + (whole - gone) / 4, -HELD_BEHIND), line)).toBeCloseTo(
-      0.75,
-      9,
-    );
+    const { behind, aside } = RIDER_FADE_METRES;
+    const middleBack = (behind.whole + behind.gone) / 2;
+    const middleAside = (aside.whole + aside.gone) / 2;
+    expect(riderFaded(marker('bot', 0, -middleBack), line)).toBeCloseTo(0.5, 9);
+    expect(riderFaded(marker('bot', middleAside, -HELD_BEHIND), line)).toBeCloseTo(0.5, 9);
+    expect(
+      riderFaded(marker('bot', aside.gone + (aside.whole - aside.gone) / 4, -HELD_BEHIND), line),
+    ).toBeCloseTo(0.75, 9);
+    expect(riderFaded(marker('bot', -middleAside, -middleBack), line)).toBeCloseTo(0.25, 9);
   });
 
-  it('fades back in as a bot comes up the side past the rider, with no step bigger than its 5 cm moves', () => {
+  it('fades back in as a bot comes up the lane behind the rider, and as it moves out of the lane, with no step bigger than its 5 cm moves', () => {
     const line = lineFor();
-    let before = riderFaded(marker('bot', PACK_ABREAST_METRES, -HELD_BEHIND), line);
+    const { behind, aside } = RIDER_FADE_METRES;
+    let before = riderFaded(marker('bot', 0, -HELD_BEHIND), line);
     expect(before).toBe(1);
     let largest = 0;
     for (let z = -HELD_BEHIND; z <= 0.5; z += 0.05) {
-      const now = riderFaded(marker('bot', PACK_ABREAST_METRES, z), line);
+      const now = riderFaded(marker('bot', 0, z), line);
       // Never darker again as it moves forward, and never a jump.
       expect(now).toBeLessThanOrEqual(before);
       largest = Math.max(largest, before - now);
       before = now;
     }
     expect(before).toBe(0);
-    // 5 cm over the 0.8 m between `whole` and `gone` is at most a sixteenth.
-    expect(largest).toBeLessThanOrEqual(
-      0.05 / (RIDER_FADE_METRES.whole - RIDER_FADE_METRES.gone) + 1e-9,
-    );
+    // 5 cm over the 0.8 m `behind` ramp is at most a sixteenth.
+    expect(largest).toBeLessThanOrEqual(0.05 / (behind.gone - behind.whole) + 1e-9);
     expect(largest).toBeGreaterThan(0);
+    // Out of the lane to one side, 5 cm at a time.
+    before = 1;
+    largest = 0;
+    for (let x = 0; x <= PACK_ABREAST_METRES + 1e-9; x += 0.05) {
+      const now = riderFaded(marker('bot', x, -HELD_BEHIND), line);
+      expect(now).toBeLessThanOrEqual(before);
+      largest = Math.max(largest, before - now);
+      before = now;
+    }
+    expect(before).toBe(0);
+    expect(largest).toBeLessThanOrEqual(0.05 / (aside.whole - aside.gone) + 1e-9);
   });
 
   it('measures toward the rider, not along the camera’s heading, in a bend', () => {
@@ -146,13 +179,22 @@ describe('riderFaded — the rule (#2596)', () => {
     // A bot half way from the eye to the rider is on the line to the rider.
     const half = marker('bot', (eyeX + rider.x) / 2, (eyeZ + rider.z) / 2);
     expect(riderFaded(half, line)).toBe(1);
+    // A bot one place across from that line, behind the rider, is whole.
+    const length = Math.hypot(rider.x - eyeX, rider.z - eyeZ);
+    const [alongX, alongZ] = [(rider.x - eyeX) / length, (rider.z - eyeZ) / length];
+    const across = marker(
+      'bot',
+      half.x + alongZ * PACK_ABREAST_METRES,
+      half.z - alongX * PACK_ABREAST_METRES,
+    );
+    expect(riderFaded(across, line)).toBe(0);
     // With no rider on the frame the line runs to the pose's own point.
     const none = riderFadeLine(turned, [], emptyRiderFadeLine());
     expect(none.eyeX).toBeCloseTo(eyeX, 9);
-    expect(Math.hypot(none.endX - eyeX, none.endZ - eyeZ)).toBeCloseTo(
-      CAMERA_BEHIND_METRES - RIDER_FADE_METRES.clear,
-      9,
-    );
+    expect(none.riderX).toBe(turned.x);
+    expect(none.riderZ).toBe(turned.z);
+    expect(none.alongX).toBeCloseTo(turned.headingX, 9);
+    expect(none.alongZ).toBeCloseTo(turned.headingZ, 9);
   });
 
   it('measures from the eye `cameraRig` places, through bends and on climbs', () => {
@@ -184,12 +226,11 @@ describe('riderFaded — the rule (#2596)', () => {
     }
   });
 
-  it('leaves the line its eye alone when the rider stands nearer the eye than `clear`', () => {
-    const near = marker('rider', 0, -CAMERA_BEHIND_METRES + 1);
-    const line = lineFor(POSE, near);
-    expect(line.endX).toBe(line.eyeX);
-    expect(line.endZ).toBe(line.eyeZ);
-    expect(riderFaded(marker('bot', 0, -CAMERA_BEHIND_METRES), line)).toBe(1);
+  it('runs the line along the pose’s heading when the rider stands at the eye', () => {
+    const eye = marker('rider', 0, -CAMERA_BEHIND_METRES);
+    const line = lineFor(POSE, eye);
+    expect([line.alongX, line.alongZ]).toEqual([POSE.headingX, POSE.headingZ]);
+    expect(riderFaded(marker('bot', 0, -CAMERA_BEHIND_METRES - 2), line)).toBe(1);
     expect(riderFaded(marker('bot', 0, -CAMERA_BEHIND_METRES + 2), line)).toBe(0);
   });
 
@@ -234,10 +275,10 @@ describe('a real frame — the bot the pack holds behind the rider is faded (#25
     expect(riderFaded(ahead as RiderMarker, line)).toBe(0);
   });
 
-  it('fades the solo pacer out as the rider drops it through the camera’s space, and never in one step', () => {
+  it('fades the solo pacer out only once the rider has dropped it into their lane behind them, and never in one step', () => {
     // The pacer as `scene.ts` draws it, from level with the rider to behind the
-    // camera: aside while level (#499), then onto the rider's line, through the
-    // space between the eye and the rider, and out behind the eye.
+    // camera: aside while level (#499) and while it drifts back across, then
+    // onto the rider's line, through the space between the eye and the rider.
     const fadedAt = (back: number): number => {
       const drawn = frame({ botDistance: RIDER_AT - back });
       const line = riderFadeLine(drawn.camera, drawn.markers, emptyRiderFadeLine());
@@ -246,9 +287,10 @@ describe('a real frame — the bot the pack holds behind the rider is faded (#25
       expect(riderFaded(drawn.markers[0] as RiderMarker, line)).toBe(0);
       return riderFaded(pacer, line);
     };
-    expect(fadedAt(0)).toBe(0);
-    for (const back of [3, 4, CAMERA_BEHIND_METRES]) expect(fadedAt(back)).toBe(1);
-    expect(fadedAt(8)).toBe(0);
+    // Level, and still beside the rider as it drifts back across: whole.
+    for (const back of [0, 1, 2, 3]) expect(fadedAt(back)).toBe(0);
+    // In the lane between the eye and the rider, and behind the eye: gone.
+    for (const back of [4, CAMERA_BEHIND_METRES, 8]) expect(fadedAt(back)).toBe(1);
     let before = fadedAt(0);
     let largest = 0;
     for (let back = 0.05; back <= 8; back += 0.05) {
@@ -256,6 +298,9 @@ describe('a real frame — the bot the pack holds behind the rider is faded (#25
       largest = Math.max(largest, Math.abs(now - before));
       before = now;
     }
-    expect(largest).toBeLessThan(0.1);
+    // It drifts 0.9 m across a metre it drops back, so 5 cm back is 4.5 cm
+    // across the 0.3 m `aside` ramp: under a fifth of the fade a step.
+    expect(largest).toBeLessThan(0.2);
+    expect(largest).toBeGreaterThan(0);
   });
 });
