@@ -254,6 +254,22 @@ describe(`what a cue may say: whole rpm, ${String(MINIMUM_CADENCE_CUE_RPM)}–${
     expect(refused.message).toContain('between 30 and 150');
   });
 
+  it('says what it received in a bounded sentence: each end as a number, or named', () => {
+    const tooLow = refusal(() => validateWorkout(steady({ low: 20, high: 60 })));
+    expect(tooLow.message).toMatch(/; received a low of 20 and a high of 60$/);
+    // A hand-edited row may carry anything: a huge string, or a BigInt that
+    // JSON.stringify throws a TypeError on rather than a WorkoutError.
+    const huge = 'x'.repeat(100_000);
+    for (const bad of [{ low: huge, high: 60 }, { low: 10n, high: 60 }, huge]) {
+      const refused = refusal(() => validateWorkout(steady(bad)));
+      expect(refused.code).toBe('invalid-cadence');
+      expect(refused.message).not.toContain('xxxx');
+      expect(refused.message.length).toBeLessThan(200);
+    }
+    const named = refusal(() => validateWorkout(steady({ low: 10n, high: 60 })));
+    expect(named.message).toMatch(/; received a low that is not a number and a high of 60$/);
+  });
+
   it('refuses a cue whose low is above its high, naming the field', () => {
     const refused = refusal(() => validateWorkout(steady({ low: 95, high: 85 })));
     expect(refused.code).toBe('invalid-cadence');

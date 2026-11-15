@@ -536,7 +536,7 @@ function assertCadence(cue: CadenceCue | undefined, where: string): void {
       'invalid-cadence',
       `${where} must be two whole numbers of revolutions per minute between ` +
         `${String(MINIMUM_CADENCE_CUE_RPM)} and ${String(MAXIMUM_CADENCE_CUE_RPM)}; received ` +
-        `${JSON.stringify(cue)}`,
+        `${cueEndText('low', low)} and ${cueEndText('high', high)}`,
     );
   }
   if (low > high) {
@@ -545,6 +545,18 @@ function assertCadence(cue: CadenceCue | undefined, where: string): void {
       `${where} runs from ${String(low)} to ${String(high)} rpm; its low must not be above its high`,
     );
   }
+}
+
+/**
+ * One end of a refused cue, for its message. A number is printed, which is
+ * short whatever it is; anything else is only named, because a cue can come
+ * from a hand-edited store row and its value may be any size (or a BigInt,
+ * which `JSON.stringify` throws on).
+ */
+function cueEndText(end: 'low' | 'high', value: unknown): string {
+  return typeof value === 'number'
+    ? `a ${end} of ${String(value)}`
+    : `a ${end} that is not a number`;
 }
 
 function assertDuration(value: Seconds, where: string): void {

@@ -343,6 +343,30 @@ describe('a cadence cue survives the disk, and a bad one is refused (#2302)', ()
     expect(() => fromPersistedWorkout(row)).toThrow(StoreDecodeError);
     expect(() => fromPersistedWorkout(row)).toThrow(/cadence cue/);
   });
+
+  it('refuses a row whose cue holds a huge string or a BigInt with a short StoreDecodeError', () => {
+    const huge = 'x'.repeat(100_000);
+    for (const cadence of [
+      { low: huge, high: 60 },
+      { low: 10n, high: 60 },
+    ]) {
+      const row = {
+        ...toPersistedWorkout(workoutFor(ATHLETE_A)),
+        blocks: [{ kind: 'steady', seconds: 600, target: 0.6, cadence }],
+      };
+      let thrown: unknown;
+      try {
+        fromPersistedWorkout(row);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(StoreDecodeError);
+      const message = thrown instanceof Error ? thrown.message : '';
+      expect(message).toMatch(/cadence cue/);
+      expect(message).not.toContain('xxxx');
+      expect(message.length).toBeLessThan(400);
+    }
+  });
 });
 
 describe("a workout's description survives the disk, and its absence does too", () => {
