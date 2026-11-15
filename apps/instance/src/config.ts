@@ -198,6 +198,12 @@ export type PictureModelSettings =
 /** Why no local model takes pictures. `no-server` carries the server's own refusal. */
 export type PictureModelOffCode = 'not-set' | 'no-server' | 'bad-model';
 
+/** The `.env` lines the analysis model is read from (#2609). */
+export type AnalysisModelEnv = Pick<
+  RawConfig,
+  'analysisModelUrl' | 'analysisModel' | 'analysisModelReasoningTokens'
+>;
+
 /** A configuration the instance can start with. */
 export interface Config {
   readonly host: string;
@@ -222,6 +228,12 @@ export interface Config {
   readonly history: HistorySettings;
   /** The analysis agent's model, or why there is none (#1096). */
   readonly analysis: AnalysisModelSettings;
+  /**
+   * The three `.env` lines {@link analysis} was read from, as they were
+   * written (#2609): what a field the operator's settings row leaves unset
+   * falls back to, one field at a time (`analysis/settings.ts`).
+   */
+  readonly analysisEnv: AnalysisModelEnv;
   /** The local model for the side camera's pictures, or why there is none (#1106). */
   readonly pictures: PictureModelSettings;
   /**
@@ -416,6 +428,11 @@ export function readConfig(raw: RawConfig): ConfigResult {
       trustedProxies,
       history,
       analysis,
+      analysisEnv: {
+        analysisModelUrl: raw.analysisModelUrl,
+        analysisModel: raw.analysisModel,
+        analysisModelReasoningTokens: raw.analysisModelReasoningTokens,
+      },
       pictures,
       name: instanceName,
       legal,
@@ -587,6 +604,22 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
     );
   }
   return { kind: 'on', baseUrl, model, reasoningTokens };
+}
+
+/**
+ * Why a local model address the operator's settings name is refused, or
+ * `undefined` (#2609): {@link readAnalysisModelSettings}'s own rules for
+ * `OYL_INSTANCE_ANALYSIS_MODEL_URL`, so the app's path refuses exactly what
+ * `.env` does, with the same code.
+ */
+export function analysisModelUrlProblem(url: string): AnalysisModelOffCode | undefined {
+  const server = localModelServer({ analysisModelUrl: url });
+  return 'baseUrl' in server ? undefined : server.code;
+}
+
+/** `bad-model` for a name {@link readAnalysisModelSettings} would refuse, or `undefined` (#2609). */
+export function analysisModelNameProblem(model: string): 'bad-model' | undefined {
+  return MODEL_NAME.test(model.trim()) ? undefined : 'bad-model';
 }
 
 /**

@@ -63,9 +63,35 @@ export type SourceFailure = 'local_unavailable' | 'hosted_unavailable';
 /** The held key, opened: what {@link SourceOptions.behindMasking} is handed. */
 export type OpenedHostedKey = Extract<HostedKeyState, { readonly kind: 'held' }>;
 
+/**
+ * What the operator's settings say for ONE job (#2609, `settings.ts`), read
+ * when the job starts: a job already running keeps the connection it began
+ * with, and the next one gets what the settings say then.
+ */
+export interface SourcesForJob {
+  /** The local model as the settings give it now, built only when asked for. */
+  readonly local: () => ModelConnection | undefined;
+  /**
+   * Whether this athlete may use the local model: offered by the instance,
+   * and — for anybody but the operator — the switch for other riders on.
+   */
+  readonly localOffered: boolean;
+  /** Whether the instance offers the hosted source. Off, no consent or key is read. */
+  readonly hostedOffered: boolean;
+}
+
 export interface SourceOptions {
-  /** The local model, or `undefined` when the instance has none configured. */
+  /**
+   * The local model, or `undefined` when the instance has none configured.
+   * Not read when {@link forJob} is given, which says it per job.
+   */
   readonly local: ModelConnection | undefined;
+  /**
+   * The operator's settings for `athleteId`'s job (#2609): a running instance
+   * hands this, so a change applies to the next job with no restart. Absent,
+   * {@link local} is the local model and both sources are offered.
+   */
+  readonly forJob?: (athleteId: string) => Promise<SourcesForJob>;
   /**
    * `athleteId`'s OWN key, opened with the instance's secret if it can be
    * (`hosted-key.ts` §`ownHostedKeyState`). Asked only after the consent.
@@ -131,11 +157,20 @@ export async function modelForSource(
   | { readonly ok: true; readonly model: ModelConnection }
   | { readonly ok: false; readonly failure: SourceFailure }
 > {
+  const settings: SourcesForJob =
+    options.forJob === undefined
+      ? { local: () => options.local, localOffered: true, hostedOffered: true }
+      : await options.forJob(athleteId);
   if (source === 'instance-local') {
-    return options.local === undefined
+    // #2609: not offered to this athlete, no model is called.
+    const local = settings.localOffered ? settings.local() : undefined;
+    return local === undefined
       ? { ok: false, failure: 'local_unavailable' }
-      : { ok: true, model: options.local };
+      : { ok: true, model: local };
   }
+  // #2609: hosted not offered — refused before a consent or a key is read,
+  // and nothing of the rider's is deleted.
+  if (!settings.hostedOffered) return { ok: false, failure: 'hosted_unavailable' };
   // Q10, before the key is read: no recorded consent, no key opened.
   const recorded =
     options.recordedConsent === undefined ? undefined : await options.recordedConsent(athleteId);

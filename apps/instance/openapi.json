@@ -1142,11 +1142,29 @@
                         "recordedAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "object",
+                      "description": "Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.",
+                      "properties": {
+                        "local": {
+                          "type": "boolean"
+                        },
+                        "hosted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "local",
+                        "hosted"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "key",
-                    "consent"
+                    "consent",
+                    "offered"
                   ],
                   "additionalProperties": false
                 }
@@ -1275,11 +1293,29 @@
                         "recordedAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "object",
+                      "description": "Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.",
+                      "properties": {
+                        "local": {
+                          "type": "boolean"
+                        },
+                        "hosted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "local",
+                        "hosted"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "key",
-                    "consent"
+                    "consent",
+                    "offered"
                   ],
                   "additionalProperties": false
                 }
@@ -1390,11 +1426,29 @@
                         "recordedAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "object",
+                      "description": "Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.",
+                      "properties": {
+                        "local": {
+                          "type": "boolean"
+                        },
+                        "hosted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "local",
+                        "hosted"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "key",
-                    "consent"
+                    "consent",
+                    "offered"
                   ],
                   "additionalProperties": false
                 }
@@ -1537,11 +1591,29 @@
                         "recordedAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "object",
+                      "description": "Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.",
+                      "properties": {
+                        "local": {
+                          "type": "boolean"
+                        },
+                        "hosted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "local",
+                        "hosted"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "key",
-                    "consent"
+                    "consent",
+                    "offered"
                   ],
                   "additionalProperties": false
                 }
@@ -1652,11 +1724,29 @@
                         "recordedAt"
                       ],
                       "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "object",
+                      "description": "Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.",
+                      "properties": {
+                        "local": {
+                          "type": "boolean"
+                        },
+                        "hosted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "local",
+                        "hosted"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "key",
-                    "consent"
+                    "consent",
+                    "offered"
                   ],
                   "additionalProperties": false
                 }
@@ -1745,6 +1835,9 @@
           "405": {
             "$ref": "#/components/responses/method_not_allowed"
           },
+          "409": {
+            "$ref": "#/components/responses/hosted_unavailable"
+          },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
           },
@@ -1763,7 +1856,7 @@
     "/v1/analysis/jobs": {
       "post": {
         "operationId": "startAnalysisJob",
-        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. `endpoint`, on a hosted job only and required there, is the service your device showed you beside its press, and `validation_failed` on `endpoint` unless it is the one your recorded consent names (#1796). Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. `endpoint`, on a hosted job only and required there, is the service your device showed you beside its press, and `validation_failed` on `endpoint` unless it is the one your recorded consent names (#1796). Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all. `local_unavailable` or `hosted_unavailable` (#2609) when its operator does not offer you that source now — the local model turned off, or not yet opened to riders other than the operator; hosted turned off — refused before any consent or key is read, and nothing is queued.",
         "security": [
           {
             "session": []
@@ -1844,7 +1937,14 @@
             "$ref": "#/components/responses/method_not_allowed"
           },
           "409": {
-            "$ref": "#/components/responses/job_running"
+            "description": "One of `job_running`, `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -2156,7 +2256,7 @@
     "/v1/analysis/replans": {
       "post": {
         "operationId": "startReplanJob",
-        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all. `local_unavailable` or `hosted_unavailable` (#2609) when its operator does not offer you that source now, and nothing is queued: the plan stays as it is.",
         "security": [
           {
             "session": []
@@ -2231,7 +2331,14 @@
             "$ref": "#/components/responses/method_not_allowed"
           },
           "409": {
-            "$ref": "#/components/responses/job_running"
+            "description": "One of `job_running`, `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -7338,6 +7445,487 @@
         }
       }
     },
+    "/v1/operate/analysis": {
+      "get": {
+        "operationId": "getOperateAnalysis",
+        "summary": "The operator’s analysis settings (#2609, ADR 0046’s 2026-11-14 amendment): the local model’s base URL, name and reasoning tokens, whether each is set in the app or in `.env`, and whether it is `on` or the code it is off for; whether the instance offers the local model and a hosted service; the switch that lets riders other than the operator use the local model (off by default); and whether the operator’s own hosted key is held, and for which origin — never the key. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "local": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "othersMayUse": {
+                          "type": "boolean"
+                        },
+                        "setIn": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "env",
+                            "none"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "not-set",
+                            "not-a-url",
+                            "not-base-url",
+                            "not-local",
+                            "tls-by-name",
+                            "no-model",
+                            "bad-model",
+                            "bad-reasoning"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "reasoningTokens",
+                        "offered",
+                        "othersMayUse",
+                        "setIn",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "hosted": {
+                      "type": "object",
+                      "properties": {
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "operatorKey": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "held",
+                            "held-unreadable"
+                          ]
+                        },
+                        "operatorKeyOrigin": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "offered",
+                        "operatorKey",
+                        "operatorKeyOrigin"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "local",
+                    "hosted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "setOperateAnalysis",
+        "summary": "Save the operator’s analysis settings (#2609): every field is optional, a field left out is unchanged, and `null` returns it to its fallback — a model field to its `.env` line, a source to offered, the switch to off. They apply from the next job, with no restart; a job already running keeps its own. `localUrl` is held to the rule `.env`’s address is, and a name must resolve, now, to local addresses only; a field that fails is `validation_failed` with its code (`not-a-url`, `not-base-url`, `not-local`, `tls-by-name`, `unresolved`, `bad-model`, `bad-reasoning`) as the problem, and nothing is saved. Logged `analysis_settings_set` in the operator log, naming the fields changed and never a value. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "localUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "localModel": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reasoningTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "offerLocal": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "offerHosted": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "othersLocal": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "local": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "othersMayUse": {
+                          "type": "boolean"
+                        },
+                        "setIn": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "env",
+                            "none"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "not-set",
+                            "not-a-url",
+                            "not-base-url",
+                            "not-local",
+                            "tls-by-name",
+                            "no-model",
+                            "bad-model",
+                            "bad-reasoning"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "reasoningTokens",
+                        "offered",
+                        "othersMayUse",
+                        "setIn",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "hosted": {
+                      "type": "object",
+                      "properties": {
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "operatorKey": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "held",
+                            "held-unreadable"
+                          ]
+                        },
+                        "operatorKeyOrigin": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "offered",
+                        "operatorKey",
+                        "operatorKeyOrigin"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "local",
+                    "hosted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearOperateAnalysis",
+        "summary": "Clear the operator’s analysis settings (#2609): every field falls back — the local model to `.env`, both sources to offered, the switch for other riders to off — from the next job. Logged `analysis_settings_cleared`. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "local": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "othersMayUse": {
+                          "type": "boolean"
+                        },
+                        "setIn": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "env",
+                            "none"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "on",
+                            "not-set",
+                            "not-a-url",
+                            "not-base-url",
+                            "not-local",
+                            "tls-by-name",
+                            "no-model",
+                            "bad-model",
+                            "bad-reasoning"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "reasoningTokens",
+                        "offered",
+                        "othersMayUse",
+                        "setIn",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "hosted": {
+                      "type": "object",
+                      "properties": {
+                        "offered": {
+                          "type": "boolean"
+                        },
+                        "operatorKey": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "held",
+                            "held-unreadable"
+                          ]
+                        },
+                        "operatorKeyOrigin": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "offered",
+                        "operatorKey",
+                        "operatorKeyOrigin"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "local",
+                    "hosted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/operate/backups": {
       "get": {
         "operationId": "getOperateBackups",
@@ -7643,7 +8231,9 @@
                               "load_accounts_add",
                               "load_accounts_erase",
                               "account_erase",
-                              "backup_requested"
+                              "backup_requested",
+                              "analysis_settings_set",
+                              "analysis_settings_cleared"
                             ]
                           },
                           "detail": {
@@ -11473,6 +12063,8 @@
                   "race_without_result",
                   "job_running",
                   "picture_source_unavailable",
+                  "hosted_unavailable",
+                  "local_unavailable",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -11891,6 +12483,26 @@
       },
       "picture_source_unavailable": {
         "description": "`picture_source_unavailable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "hosted_unavailable": {
+        "description": "`hosted_unavailable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "local_unavailable": {
+        "description": "`local_unavailable` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

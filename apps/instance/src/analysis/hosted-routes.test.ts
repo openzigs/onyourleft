@@ -34,6 +34,8 @@ afterEach(async () => {
   world = undefined;
 });
 
+/** What the test world offers every rider (#2609): no local model, and hosted. */
+const OFFERED = { local: false, hosted: true } as const;
 const KEY_BODY = { url: 'https://models.example/v1', model: 'a-model', key: MARKER_KEY };
 
 async function rider(w: IdentityInstance) {
@@ -64,6 +66,7 @@ describe('a rider’s own hosted key (#1199)', () => {
         setBy: 'app',
       },
       consent: null,
+      offered: OFFERED,
     };
     expect(set.body).toEqual(expected);
     expect(await world.call('GET', '/v1/analysis/hosted', { token })).toEqual({
@@ -129,10 +132,10 @@ describe('a rider’s own hosted key (#1199)', () => {
     await world.call('POST', '/v1/analysis/hosted/key', { token: a!.token, body: KEY_BODY });
     expect(await world.call('GET', '/v1/analysis/hosted', { token: b!.token })).toEqual({
       status: 200,
-      body: { key: null, consent: null },
+      body: { key: null, consent: null, offered: OFFERED },
     });
     const cleared = await world.call('DELETE', '/v1/analysis/hosted/key', { token: b!.token });
-    expect(cleared.body).toEqual({ key: null, consent: null });
+    expect(cleared.body).toEqual({ key: null, consent: null, offered: OFFERED });
     expect(
       ((await world.call('GET', '/v1/analysis/hosted', { token: a!.token })).body as HostedStatus)
         .key,
@@ -219,10 +222,14 @@ describe('a rider’s own hosted consent (#1199, ADR 0046 Q10)', () => {
     });
     expect(recorded).toEqual({
       status: 200,
-      body: { key: null, consent: { origin: 'https://models.example', recordedAt: 1_790_000_456 } },
+      body: {
+        key: null,
+        consent: { origin: 'https://models.example', recordedAt: 1_790_000_456 },
+        offered: OFFERED,
+      },
     });
     const withdrawn = await world.call('DELETE', '/v1/analysis/hosted/consent', { token });
-    expect(withdrawn.body).toEqual({ key: null, consent: null });
+    expect(withdrawn.body).toEqual({ key: null, consent: null, offered: OFFERED });
   });
 
   it('survives a key rotated at the same origin, and is withdrawn by a key at another', async () => {

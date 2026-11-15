@@ -120,6 +120,7 @@ export {
   cascadingSyncBaseStoreFactory,
   thinnedGeometryStoreFactory,
   truncatedWorkoutStoreFactory,
+  widenedCueWorkoutStoreFactory,
   unscopedAttemptStoreFactory,
   consentIgnoredStoreFactory,
   piecewiseRideStoreFactory,

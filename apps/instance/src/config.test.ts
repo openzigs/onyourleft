@@ -40,6 +40,11 @@ describe('readConfig', () => {
           code: 'not-set',
           reason: 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
         },
+        analysisEnv: {
+          analysisModelUrl: undefined,
+          analysisModel: undefined,
+          analysisModelReasoningTokens: undefined,
+        },
         pictures: {
           kind: 'off',
           code: 'not-set',

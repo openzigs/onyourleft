@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The built-in workout library — #2300 (recovery to over-unders) and #2301
- * (VO₂ to race simulation), under the library epic #2295.
+ * The built-in workout library — #2300 (recovery to over-unders), #2301
+ * (VO₂ to race simulation) and #2302 (cadence drills), under the library
+ * epic #2295.
  *
  * ## What this is
  *
@@ -34,6 +35,7 @@
 import type { WorkoutTemplate } from '../template';
 
 import { ANAEROBIC_WORKOUTS } from './anaerobic';
+import { CADENCE_WORKOUTS } from './cadence';
 import { ENDURANCE_WORKOUTS } from './endurance';
 import { OVER_UNDER_WORKOUTS } from './over-under';
 import { PYRAMID_WORKOUTS } from './pyramid';
@@ -45,6 +47,8 @@ import { TEMPO_WORKOUTS } from './tempo';
 import { THRESHOLD_TESTS } from './test';
 import { THRESHOLD_WORKOUTS } from './threshold';
 import { VO2_WORKOUTS } from './vo2';
+
+export { CADENCE_WORKOUTS } from './cadence';
 
 /**
  * Every built-in workout, easiest category first, and the two threshold tests
@@ -62,6 +66,7 @@ export const BUILT_IN_WORKOUTS: readonly WorkoutTemplate[] = [
   ...ANAEROBIC_WORKOUTS,
   ...SPRINT_WORKOUTS,
   ...PYRAMID_WORKOUTS,
+  ...CADENCE_WORKOUTS,
   ...RACE_SIMULATION_WORKOUTS,
   ...THRESHOLD_TESTS.map((test) => test.template),
 ];

@@ -77,6 +77,8 @@ export const ERROR_STATUS = {
   race_without_result: 409,
   job_running: 409,
   picture_source_unavailable: 409,
+  hosted_unavailable: 409,
+  local_unavailable: 409,
   payload_too_large: 413,
   file_type_unsupported: 415,
   file_undecodable: 422,
@@ -171,6 +173,10 @@ const MESSAGES: Record<ErrorCode, string> = {
     'This instance has no model that takes pictures. Its operator has not named one. The picture was not kept.',
   picture_source_unavailable:
     'No hosted service is set up for your pictures: you hold no key of your own here, or your consent names another service than the one your key is for. The picture was not sent on, and was not kept.',
+  hosted_unavailable:
+    'This instance does not offer a hosted model service now: its operator has turned it off. Nothing was read or sent.',
+  local_unavailable:
+    'This instance’s own model is not offered to you now: its operator has turned it off, or has not let riders other than themselves use it. Nothing was queued.',
   model_without_pictures:
     'The model answered that it does not take pictures, so it cannot look at the side camera’s. Choose a model that does. The picture was not kept.',
   picture_model_failed:

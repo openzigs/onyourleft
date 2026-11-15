@@ -556,6 +556,17 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   requestOperateBackup: async (world) =>
     send(world, 'POST', '/v1/operate/backups', await moderatorToken(world)),
+  // #2609: the operator's analysis settings, read, saved and cleared.
+  getOperateAnalysis: async (world) =>
+    send(world, 'GET', '/v1/operate/analysis', await moderatorToken(world)),
+  setOperateAnalysis: async (world) =>
+    send(world, 'POST', '/v1/operate/analysis', await moderatorToken(world), {
+      localUrl: 'http://127.0.0.1:11434/v1',
+      localModel: 'some-model',
+      othersLocal: true,
+    }),
+  clearOperateAnalysis: async (world) =>
+    send(world, 'DELETE', '/v1/operate/analysis', await moderatorToken(world)),
 
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {

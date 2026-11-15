@@ -549,15 +549,33 @@ export async function assertWorkoutRoundTrip(
     //
     // Still a structural walk rather than a deep-equality helper, so a failure
     // names the block and the field rather than printing two objects.
-    for (const key of Object.keys(expected)) {
-      requireEqual(
-        `${at}.${key}`,
-        (expected as unknown as Record<string, unknown>)[key],
-        (actual as unknown as Record<string, unknown>)[key],
-      );
-    }
+    requireFieldsEqual(at, expected, actual);
   }
   return read;
+}
+
+/**
+ * Every field the written value declares, compared with what was read — and,
+ * for a field that is itself a record (a hold's range, a cadence cue since
+ * #2302), each of ITS fields, so a nested value is compared by what it holds
+ * rather than by identity, which a read never preserves.
+ */
+function requireFieldsEqual(at: string, expected: object, actual: unknown): void {
+  for (const key of Object.keys(expected)) {
+    const wrote = (expected as Record<string, unknown>)[key];
+    const got =
+      typeof actual === 'object' && actual !== null
+        ? (actual as Record<string, unknown>)[key]
+        : undefined;
+    if (typeof wrote === 'object' && wrote !== null) {
+      if (typeof got !== 'object' || got === null) {
+        throw new RoundTripFailure(`${at}.${key}: wrote a record and read back ${String(got)}`);
+      }
+      requireFieldsEqual(`${at}.${key}`, wrote, got);
+    } else {
+      requireEqual(`${at}.${key}`, wrote, got);
+    }
+  }
 }
 
 /**

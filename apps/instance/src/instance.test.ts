@@ -187,6 +187,29 @@ function cli(databasePath: string, ...args: string[]) {
   });
 }
 
+/**
+ * The operator's switch for other riders on (#2609, ADR 0046 D-9): off by
+ * default, so a rider who is not the operator — every rider of an instance
+ * with no `OYL_INSTANCE_OWNER_KEY` — has no local model until it is.
+ */
+async function letOtherRidersUseTheLocalModel(databasePath: string): Promise<void> {
+  const write = openServingStore(databasePath);
+  try {
+    await write.putAnalysisSetting({
+      localUrl: null,
+      localModel: null,
+      reasoningTokens: null,
+      offerLocal: null,
+      offerHosted: null,
+      othersLocal: true,
+      updatedAt: 1,
+      updatedBy: 'cli',
+    });
+  } finally {
+    await write.close();
+  }
+}
+
 function wsUrl(url: string): string {
   return url.replace('http://', 'ws://');
 }
@@ -1110,6 +1133,7 @@ describe('analysis jobs on the running instance — #1095', () => {
     try {
       const path = join(await freshDirectory(), 'instance.sqlite');
       await migrateForDeploy(path);
+      await letOtherRidersUseTheLocalModel(path);
       const { instance, lines } = await start(
         path,
         {},
@@ -1182,6 +1206,7 @@ describe('the agent’s history tool on the running instance — #1229', () => {
     try {
       const path = join(await freshDirectory(), 'instance.sqlite');
       await migrateForDeploy(path);
+      await letOtherRidersUseTheLocalModel(path);
       const { instance } = await start(
         path,
         {},

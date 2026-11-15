@@ -66,6 +66,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     trustedProxies: [],
     history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
     analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
+    analysisEnv: {},
     pictures: { kind: 'off', code: 'not-set', reason: 'A test instance has no picture model.' },
     name: null,
     legal: NO_LEGAL_SETTINGS,

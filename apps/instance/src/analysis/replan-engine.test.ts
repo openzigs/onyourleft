@@ -148,3 +148,38 @@ describe('a re-plan’s model source (ADR 0048 D-11)', () => {
     expect(sent).not.toContain('Glenshee');
   });
 });
+
+describe('a re-plan under the operator’s settings (#2609, ADR 0046 2026-11-14 point 7)', () => {
+  it('is refused local_unavailable while the local model is not offered to the rider, and leaves the plan as it is', async () => {
+    const local = scriptedModel(text(ANSWER));
+    const hostedKey = vi.fn(() => Promise.resolve(held('rider')));
+    const sources: SourceOptions = {
+      local,
+      hostedKey,
+      forJob: () =>
+        Promise.resolve({ local: () => local, localOffered: false, hostedOffered: true }),
+    };
+    expect(await run(sources, job('instance-local'))).toStrictEqual({
+      kind: 'failed',
+      why: 'local_unavailable',
+    });
+  });
+
+  it('is refused hosted_unavailable while hosted is not offered, before the key is read', async () => {
+    const hostedKey = vi.fn(() => Promise.resolve(held('rider')));
+    const sources: SourceOptions = {
+      local: undefined,
+      hostedKey,
+      recordedConsent: () => Promise.resolve(ORIGIN),
+      guard: () => Promise.resolve(GUARD),
+      behindMasking: (_key, guard) => maskedConnection(scriptedModel(text(ANSWER)), guard),
+      forJob: () =>
+        Promise.resolve({ local: () => undefined, localOffered: true, hostedOffered: false }),
+    };
+    expect(await run(sources, job('instance-hosted'))).toStrictEqual({
+      kind: 'failed',
+      why: 'hosted_unavailable',
+    });
+    expect(hostedKey).not.toHaveBeenCalled();
+  });
+});
